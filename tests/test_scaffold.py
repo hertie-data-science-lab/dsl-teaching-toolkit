@@ -29,6 +29,7 @@ from dsl_course import (
     settings,
     workflows_place,
 )
+from tests.conftest import run_settings
 
 
 class FakeRepo:
@@ -112,12 +113,11 @@ def test_fresh_materials_repo_gets_the_full_skeleton(fake):
         # SYSTEM-owned like MAINTAINING.md, so a repo scaffolded before it existed picks it
         # up on the next Refresh.
         ".system/SYLLABUS.md.sample",
-        "lectures/01_session-1/.gitkeep",
-        # Readings get a stub rather than a .gitkeep: the folder's files are listed
-        # automatically, but an empty folder gave no sign of that, nor that this file is
-        # where an online reading goes.
-        "readings/01_session-1/READINGS.md",
-        "labs/01_session-1/.gitkeep",
+        # Empty folders named for nothing the toolkit reads (decision 0038): no `NN_`
+        # session folder, no READINGS.md stub (a reading list is `reading_list:`).
+        "lectures/.gitkeep",
+        "labs/.gitkeep",
+        "readings/.gitkeep",
         # Seeded inert, purely so faculty find out the withhold list exists.
         ".releaseignore",
     }
@@ -139,11 +139,11 @@ def test_rerun_never_overwrites_a_faculty_authored_readme(fake):
 def test_rerun_does_not_resurrect_a_deleted_section_directory(fake):
     # Faculty deleted labs/ (no labs this year). A re-run must not re-create its .gitkeep,
     # which would resurrect the directory. The other absent scaffolds are still seeded.
-    fake.files[("course-materials-f2026", "labs/01_session-1/.gitkeep")] = ""
+    fake.files[("course-materials-f2026", "labs/.gitkeep")] = ""
 
     scaffold.scaffold_materials("Org", "f2026")
-    assert "labs/01_session-1/.gitkeep" not in fake.written("course-materials-f2026")
-    assert "lectures/01_session-1/.gitkeep" in fake.written("course-materials-f2026")
+    assert "labs/.gitkeep" not in fake.written("course-materials-f2026")
+    assert "lectures/.gitkeep" in fake.written("course-materials-f2026")
 
 
 def test_maintaining_refreshes_on_rerun_while_readme_stays_create_only(fake):
@@ -663,9 +663,8 @@ def test_an_unasked_run_setting_leaves_the_semester_layer_to_answer(fake, monkey
     written = _solution_files(monkeypatch)
     assert scaffold.scaffold_assignment("Org", "Assignment 1", ["ipynb"], "group") == 0
     text = written["grading_config.yml"]
-    monkeypatch.setattr(
-        settings,
-        "_assignments_text",
+    run_settings(
+        monkeypatch,
         lambda org: (
             "defaults:\n  late_window_days: 3\n  late_penalty_per_day: 5%\n"
             "  visibility: public\n  team_formation: assigned\n  max_team_size: 2\n"
@@ -1519,3 +1518,54 @@ def test_a_fresh_materials_repo_has_no_publish_file(fake):
     # until a materials repo's publish.yml names it; the public website reads opencourse.yml.
     assert scaffold.scaffold_materials("Org", "f2026") == 0
     assert "publish.yml" not in fake.written("course-materials-f2026")
+
+
+# ------------------------------------------------- confirming the withheld patterns
+
+
+def _confirm(monkeypatch, text, *, ok=True):
+    written = []
+    monkeypatch.setattr(
+        scaffold,
+        "get_file_with_sha",
+        lambda org, repo, path: None if text is None else (text, "sha1"),
+    )
+    monkeypatch.setattr(
+        scaffold,
+        "put_file",
+        lambda org, repo, path, content, message, sha=None: (
+            written.append((path, content.decode(), sha)) or ok
+        ),
+    )
+    return scaffold.confirm_withheld("Org", "cm"), written
+
+
+def test_confirm_marks_the_seeded_list_reviewed_and_changes_nothing_else(monkeypatch):
+    # Plan 0.11.0 9b ruling 6: the checklist's Confirm writes the marker, no edit.
+    seeded = "# Withhold from students:\n# solutions/\n"
+    summary, written = _confirm(monkeypatch, seeded)
+    assert int(summary) == 0
+    assert written == [
+        (
+            releaseignore.RELEASEIGNORE,
+            f"{seeded}{releaseignore.REVIEWED_MARK}\n",
+            "sha1",
+        )
+    ]
+    assert releaseignore.reviewed(written[0][1])
+
+
+def test_confirm_on_a_reviewed_list_writes_nothing(monkeypatch):
+    summary, written = _confirm(monkeypatch, "solutions/\n")
+    assert int(summary) == 0 and written == []
+    assert "already reviewed" in summary.text
+
+
+def test_confirm_creates_an_absent_file(monkeypatch):
+    _, written = _confirm(monkeypatch, None)
+    assert written[0][1] == f"{releaseignore.REVIEWED_MARK}\n"
+
+
+def test_a_confirm_that_cannot_write_says_so(monkeypatch):
+    summary, _ = _confirm(monkeypatch, "", ok=False)
+    assert int(summary) == 1 and summary.reasons[0]["code"] == "WRITE_FAILED"

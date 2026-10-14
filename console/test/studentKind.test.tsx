@@ -31,20 +31,19 @@ function facts() {
 
 describe('a kind tab', () => {
   it('lists the dated rows by date, then the undated in the engine’s order, off-schedule ones too', () => {
-    expect(kindRows(facts(), 'lecture').rows.map((r) => r.id)).toEqual(['lecture_00', 'lecture_01', 'lecture-1-online', 'hidden', 'lecture_02', 'lecture_03', 'extra_b', 'extra_a']);
+    expect(kindRows(facts(), 'lecture').rows.map((r) => r.id)).toEqual(['lecture_00', 'lecture_01', 'lecture_01-2', 'hidden', 'lecture_02', 'lecture_03', 'extra_b', 'extra_a']);
   });
 
-  it('lists a session with nothing to ship as a row of its kind: no files, never "not released yet", never news', () => {
-    // `events: lecture-1-online` (kind lecture, number 1) in the engine's render.
+  it('lists a second slot of an entry as a row of its kind, with the entry’s files', () => {
+    // `lecture_01` given twice in the engine's render (decision 0038 rule 3): its second
+    // slot is the row `lecture_01-2`, "Lecture 1" with the entry's title and files.
     const f = facts();
-    const row = f.rows.find((r) => r.id === 'lecture-1-online')!;
-    expect(row.noMaterials).toBe(true);
+    const row = f.rows.find((r) => r.id === 'lecture_01-2')!;
+    expect(row.noMaterials).toBe(false);
     const tab = text(<KindView facts={f} kind="lecture" org={ORG} now={NOW} />);
     expect(tab).toMatch(/Lecture 1 : Intro The same lecture, online\./);
-    expect(tab).not.toMatch(/Lecture 1 : Intro not released yet The same/);
     const s = text(<ScheduleView facts={f} mine={null} now={NOW} org={ORG} />);
-    expect(s).toMatch(/Lecture Wed 9 Sep 18:00 Lecture 1 : Intro The same lecture, online\. (?!not released yet)/);
-    expect(text(<HomeView facts={f} now={NOW} org={ORG} />)).not.toContain('online');
+    expect(s).toMatch(/Lecture Wed 9 Sep 18:00 Lecture 1 : Intro The same lecture, online\./);
   });
 
   it('marks a row with no date yet TBC, after its kind’s last dated row, on its tab and the Schedule', () => {

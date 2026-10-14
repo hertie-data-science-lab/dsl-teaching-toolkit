@@ -47,7 +47,7 @@
             "type": "string"
           },
           "entry": {
-            "description": "The schedule.yml releases key",
+            "description": "The schedule.yml entry key",
             "pattern": "^(?!-)[A-Za-z0-9_.-]{1,100}$",
             "type": "string"
           },
@@ -455,6 +455,30 @@
       "doc": "docs/02-add-materials-to-course.md",
       "help": "Create a materials repo for a semester.",
       "name": "materials.create",
+      "preview": false,
+      "required_team": "instructors",
+      "scope": "course",
+      "via": "inline"
+    },
+    {
+      "args_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "repo": {
+            "description": "The materials repo",
+            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repo"
+        ],
+        "type": "object"
+      },
+      "counts_doc": "",
+      "doc": "docs/08-release-materials-to-cohort.md",
+      "help": "Confirm a materials repo's withheld patterns are reviewed, unchanged.",
+      "name": "materials.confirm_withheld",
       "preview": false,
       "required_team": "instructors",
       "scope": "course",

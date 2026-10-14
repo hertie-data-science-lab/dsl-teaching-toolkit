@@ -21,7 +21,6 @@ from dsl_course import (
     ghcli,
     grading_spec,
     materials,
-    schedule_plan,
     settings,
     site,
     site_repo,
@@ -37,10 +36,11 @@ from dsl_course.schedule import (
     Event,
     Release,
     Schedule,
+    Slot,
 )
 from dsl_course.setting_readers import read_settings
 from dsl_course.site_repo import Link
-from tests.conftest import BareOrigins, fake_config
+from tests.conftest import BareOrigins, fake_config, run_settings
 
 UTC = ZoneInfo("UTC")
 
@@ -308,6 +308,31 @@ def test_assignment_entry_falls_back_to_the_due_date_without_a_handout(monkeypat
     assert out.count("date: 2026-11-10T23:59:00") == 2  # both rows on the due date
 
 
+def test_an_assignment_with_no_due_date_is_two_tbc_rows_and_nothing_else(monkeypatch):
+    # Like an undated session: no `date:` on either row, sorted at the end of term, the
+    # not-yet-released sentence and no repo, link or team invitation to act on.
+    def _no_reads(*a, **k):
+        raise AssertionError("nothing is out, so the README must not be read")
+
+    monkeypatch.setattr(site, "get_file_content", _no_reads)
+    out = site._assignment_entry(
+        "Course",
+        "Semester-f2026",
+        "assignment-2",
+        None,
+        datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
+        undated_at=date(2026, 12, 18),
+        now=datetime(2026, 10, 1, tzinfo=BERLIN),
+    )
+    head, due = out.split("due_event:")
+    assert "date:" not in head.replace("sort_at:", "") and "    date:" not in due
+    assert out.count("dateless: true") == 2 and out.count("tbc: true") == 2
+    assert out.count("sort_at: 2026-12-18") == 2
+    assert "handout_pending: true" in head
+    assert "repo_name" not in out and "repo_url" not in out and "team_join" not in out
+    assert "its dates are still to be confirmed" in out
+
+
 def test_an_unhanded_out_assignment_is_a_placeholder(monkeypatch):
     # The template repo exists from the day faculty write the assignment; publishing its
     # README on sight put the whole brief on the PUBLIC semester site weeks before hand-out,
@@ -453,6 +478,7 @@ def test_the_templates_title_is_the_assignments_name_and_beats_the_readme(monkey
     sched = Schedule(
         assignments={
             "assignment-1": AssignmentEntry(
+                number=1,
                 course_source_repo="assignment-1-f2026",
                 due_datetime=datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
             )
@@ -547,6 +573,7 @@ def test_a_group_assignment_names_the_team_repo_shape(monkeypatch):
     sched = Schedule(
         assignments={
             "assignment-3": AssignmentEntry(
+                number=3,
                 course_source_repo="assignment-3-f2026",
                 due_datetime=datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
             )
@@ -591,18 +618,15 @@ def _team_entry(monkeypatch, config: str, *, now: datetime, teams_csv="", **kw) 
     sched = Schedule(
         assignments={
             "assignment-3": AssignmentEntry(
+                number=3,
                 course_source_repo="assignment-3-f2026",
                 handout_datetime=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
                 due_datetime=datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+                # The window shuts at the late cutoff: the due date plus its 7 days.
+                settings={"late_window_days": 7},
             )
         },
         org="Semester-f2026",
-    )
-    # The window shuts at the late cutoff: the due date plus this semester's 7 days.
-    monkeypatch.setattr(
-        settings,
-        "_assignments_text",
-        lambda org: "assignments:\n  assignment-3:\n    late_window_days: 7\n",
     )
     entry = sched.assignments["assignment-3"]
     return site._assignment_entry(
@@ -709,7 +733,7 @@ def test_a_sync_reads_teams_csv_once_for_every_forming_assignment(
     monkeypatch.setattr(
         site, "load_grading_spec", lambda *a, **k: _spec(SELF_SELECT_GROUP)
     )
-    monkeypatch.setattr(settings, "_assignments_text", lambda org: None)
+    run_settings(monkeypatch, lambda org: None)
     reads = []
     monkeypatch.setattr(
         site.teams,
@@ -723,6 +747,7 @@ def test_a_sync_reads_teams_csv_once_for_every_forming_assignment(
     sched = Schedule(
         assignments={
             f"assignment-{n}": AssignmentEntry(
+                number=n,
                 course_source_repo=f"assignment-{n}-f2026",
                 handout_datetime=now - timedelta(days=1),
                 due_datetime=now + timedelta(days=10 + n),
@@ -1209,6 +1234,7 @@ def test_handed_out_keys_on_the_semester_dest_repo_not_the_slug(monkeypatch):
     sched = Schedule(
         assignments={
             "assignment-1": AssignmentEntry(
+                number=1,
                 course_source_repo="assignment-1-f2026",
                 due_datetime=datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
                 semester_dest_repo="homework-1",
@@ -1234,6 +1260,7 @@ def test_assignment_dates_read_the_schedule():
     sched = Schedule(
         assignments={
             "assignment-1": AssignmentEntry(
+                number=1,
                 course_source_repo="assignment-1-f2026",
                 due_datetime=datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
                 handout_datetime=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
@@ -1241,14 +1268,9 @@ def test_assignment_dates_read_the_schedule():
         }
     )
     found = ("assignment-1", sched.assignments["assignment-1"])
-    due, handout = site._assignment_dates(found, date(2026, 1, 1))
+    due, handout = site._assignment_dates(found)
     assert due == datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN)
     assert handout == datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN)
-    # unscheduled: the synthesised fallback, and no handout row
-    assert site._assignment_dates(None, date(2026, 1, 1)) == (
-        date(2026, 1, 1),
-        None,
-    )
 
 
 def _plan(
@@ -1281,9 +1303,6 @@ def _plan(
             [{"name": n, "topics": []} for n in trees]
             + [{"name": n, "topics": ["assignment-template"]} for n in handed_out]
         ),
-    )
-    monkeypatch.setattr(
-        site, "discover_release_sources", lambda org, repos: list(sources)
     )
     monkeypatch.setattr(site, "yaml_file", yaml_file)
     fake_config(monkeypatch, site.yaml_file)
@@ -1328,10 +1347,11 @@ def test_the_build_lists_the_semester_once_for_both_of_its_questions(
         ),
     )
     seen_content: list[list[str]] = []
+    real = site.semester_content_repos
     monkeypatch.setattr(
         site,
-        "discover_release_sources",
-        lambda org, repos: seen_content.append(repos) or [],
+        "semester_content_repos",
+        lambda repos: seen_content.append(real(repos)) or seen_content[-1],
     )
     monkeypatch.setattr(site, "yaml_file", lambda *a: {})
     fake_config(monkeypatch, site.yaml_file)
@@ -1383,7 +1403,6 @@ def test_course_description_flows_from_course_metadata_into_config(
         lambda org, build: captured.update(plan=build(tmp_path)) or 0,
     )
     monkeypatch.setattr(site, "list_org_repos", lambda org: [])
-    monkeypatch.setattr(site, "discover_release_sources", lambda org, repos: [])
     monkeypatch.setattr(site.schedule, "load", lambda org: Schedule())
     monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
 
@@ -1419,7 +1438,6 @@ def test_the_exported_config_keys_are_the_ones_the_sync_writes_and_the_seed_keep
         lambda org, build: captured.update(plan=build(tmp_path)) or 0,
     )
     monkeypatch.setattr(site, "list_org_repos", lambda org: [])
-    monkeypatch.setattr(site, "discover_release_sources", lambda org, repos: [])
     monkeypatch.setattr(site.schedule, "load", lambda org: Schedule())
     monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
     meta = {"course_name": "Nets", "course_code": "E1", "course_description": "D."}
@@ -1465,7 +1483,6 @@ def test_site_still_builds_when_schedule_yml_does_not_parse(
         lambda org, build: captured.update(plan=build(tmp_path)) or 0,
     )
     monkeypatch.setattr(site, "list_org_repos", lambda org: [])
-    monkeypatch.setattr(site, "discover_release_sources", lambda org, repos: [])
     monkeypatch.setattr(site, "yaml_file", lambda *a: {"course_name": "Deep Learning"})
     fake_config(monkeypatch, site.yaml_file)
     monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
@@ -1479,8 +1496,8 @@ def test_site_still_builds_when_schedule_yml_does_not_parse(
     plan = captured["plan"]
     assert plan.config["course_name"] == "Deep Learning"
     assert plan.config["course_semester"] == "Fall 2026"
-    # no schedule data: the exam rows fall back to the synthesised mid/end-term stubs
-    assert {"midterm.md", "final.md"} <= set(plan.collections["_events"])
+    # No schedule data, and no exam made up for it (plan 0.11.0 9b ruling 3).
+    assert plan.collections["_events"] == {}
     assert "is NOT valid YAML" in capsys.readouterr().err
 
 
@@ -1497,23 +1514,25 @@ def test_an_undated_release_is_a_tbc_row(monkeypatch, tmp_path):
                     "lecture-9",
                     None,
                     deploy=[Deploy("cm", "lectures/09_week-9", "materials", None)],
+                    kind="lecture",
                     number=9,
                 ),
                 Release(
                     "lecture-8",
                     datetime(2026, 11, 2, 10, 0),
                     deploy=[Deploy("cm", "lectures/08_week-8", "materials", None)],
+                    kind="lecture",
                     number=8,
                 ),
             ]
         ),
     )
-    row = plan.collections["_lectures"]["session-09.md"]
+    row = plan.collections["_lectures"]["lecture-9.md"]
     assert "dateless: true\n" in row
     assert "unreleased: true\n" in row
     assert "undated: true" not in row
     assert "sort_at: 2026-11-02T10:01:00\n" in row and "\ndate:" not in row
-    assert "dateless" not in plan.collections["_lectures"]["session-08.md"]
+    assert "dateless" not in plan.collections["_lectures"]["lecture-8.md"]
 
 
 def test_events_render_as_their_declared_types(monkeypatch, tmp_path):
@@ -1534,7 +1553,8 @@ def test_events_render_as_their_declared_types(monkeypatch, tmp_path):
     assert "midterm.md" not in events and "final.md" not in events
 
 
-def test_synthesised_exams_appear_when_the_schedule_names_none(monkeypatch, tmp_path):
+def test_a_schedule_that_names_no_exam_gets_none_made_up(monkeypatch, tmp_path):
+    # Plan 0.11.0 9b ruling 3: the stub midterm and final are dropped.
     plan = _plan(
         monkeypatch,
         tmp_path,
@@ -1543,8 +1563,7 @@ def test_synthesised_exams_appear_when_the_schedule_names_none(monkeypatch, tmp_
         ),
     )
     events = plan.collections["_events"]
-    assert 'title: "MidTerm Exam"' in events["midterm.md"]
-    assert 'title: "Final Exam"' in events["final.md"]
+    assert set(events) == {"01-project-clinic.md"}
     assert "kind: special_event" in events["01-project-clinic.md"]
 
 
@@ -1590,7 +1609,8 @@ def test_marks_expected_shows_only_where_the_entry_says_show_on_site(
             {
                 "assignments": {
                     "assignment-1": {
-                        "course_source_repo": "assignment-1-f2026",
+                        "template": "assignment-1-f2026",
+                        "number": 1,
                         "due_datetime": "2026-10-13",
                         "marks_return_datetime": extra or "2026-10-27",
                     }
@@ -1632,6 +1652,7 @@ def test_assignment_entry_names_the_semester_dest_repo_not_the_course_repo(monke
     sched = Schedule(
         assignments={
             "assignment-1": AssignmentEntry(
+                number=1,
                 course_source_repo="assignment-1-f2026",
                 due_datetime=datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
                 semester_dest_repo="homework-1",
@@ -1659,6 +1680,7 @@ def test_the_site_build_gates_a_brief_on_what_the_semester_actually_holds(
     sched = Schedule(
         assignments={
             "assignment-1": AssignmentEntry(
+                number=1,
                 course_source_repo="assignment-1-f2026",
                 due_datetime=datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
             )
@@ -1683,6 +1705,7 @@ def test_a_pending_assignment_does_not_shift_a_later_ones_ordinal(
     sched = Schedule(
         assignments={
             f"assignment-{n}": AssignmentEntry(
+                number=n,
                 course_source_repo=f"template-{n}",
                 due_datetime=datetime(2026, 10, 6 * n, 23, 59, tzinfo=BERLIN),
             )
@@ -1713,6 +1736,7 @@ def test_an_assignment_in_the_plan_gets_rows_before_its_template_is_staged(
     sched = Schedule(
         assignments={
             f"assignment-{n}": AssignmentEntry(
+                number=n,
                 course_source_repo=f"assignment-{n}-f2026",
                 due_datetime=handout[n] + timedelta(days=9, hours=16, minutes=59),
                 handout_datetime=handout[n],
@@ -1741,10 +1765,12 @@ def test_two_plan_entries_citing_one_template_stay_two_assignments(
     sched = Schedule(
         assignments={
             "assignment-3": AssignmentEntry(
+                number=3,
                 course_source_repo="shared-f2026",
                 due_datetime=datetime(2026, 10, 18, 23, 59, tzinfo=BERLIN),
             ),
             "assignment-4": AssignmentEntry(
+                number=4,
                 course_source_repo="shared-f2026",
                 due_datetime=datetime(2026, 11, 8, 23, 59, tzinfo=BERLIN),
             ),
@@ -2254,9 +2280,8 @@ def test_an_event_kept_off_the_site_gets_no_row(monkeypatch, tmp_path):
     assert "Reserve slot" not in rendered
 
 
-def test_a_hidden_exam_still_answers_the_synthesised_exam_stubs(monkeypatch, tmp_path):
-    # A semester that wrote its exams and then took them off the site HAS said what its
-    # exams are; answering that with two invented ones would put back what it removed.
+def test_a_hidden_exam_is_no_row(monkeypatch, tmp_path):
+    # Nothing stands in for it either (plan 0.11.0 9b ruling 3: no stub exams).
     sched = Schedule(
         semester_end=END_OF_TERM,
         events=[
@@ -2352,11 +2377,13 @@ def test_an_assignment_kept_off_the_site_gets_no_page_and_no_rows(
     sched = Schedule(
         assignments={
             "assignment-1": AssignmentEntry(
+                number=1,
                 course_source_repo="assignment-1-f2026",
                 due_datetime=datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
                 show_on_site=False,
             ),
             "assignment-2": AssignmentEntry(
+                number=2,
                 course_source_repo="assignment-2-f2026",
                 due_datetime=datetime(2026, 10, 27, 23, 59, 59, tzinfo=BERLIN),
             ),
@@ -2443,154 +2470,6 @@ def _reaches(linked: set[str], org: str, repo: str, path: str) -> bool:
     return blob in linked or bool(folders & linked)
 
 
-# The three real layouts, as released by 25 Sep 2026: each semester's release plan and
-# its `materials` repo's tree (paths only), under tests/fixtures/layouts/.
-LAYOUTS = Path(__file__).parent / "fixtures" / "layouts"
-
-
-def _layout_schedule(name: str) -> schedule_mod.Schedule:
-    return schedule_mod.parse(
-        yaml.safe_load((LAYOUTS / f"{name}-schedule.yml").read_text()),
-        settings.Instance(),
-    )
-
-
-def _layout(
-    monkeypatch, name: str, aliases: dict[str, dict[str, str]] | None = None
-) -> tuple[dict[str, dict], tuple[str, ...]]:
-    """`{row file: front matter}` the sync writes for a real layout, and its tree.
-    `aliases` is each source repo's `materials.yml` `kinds:`."""
-    sched = _layout_schedule(name)
-    tree = tuple((LAYOUTS / f"{name}-tree.txt").read_text().split("\n")[:-1])
-    monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", tree))
-    monkeypatch.setattr(site, "read_materials", lambda o, r: materials.Declared())
-    monkeypatch.setattr(site, "get_file_content", lambda o, r, p: f"- from {p}")
-    kinds = lambda repo: (aliases or {}).get(repo, {})
-    out, _tabs = site._site_rows(
-        "S",
-        schedule_plan.planned_rows(sched, kinds),
-        frozenset(),
-        frozenset({"materials"}),
-        kinds,
-        {},
-    )
-    return {name: _front(text) for name, text in out.items()}, tree
-
-
-def _lost(rows: dict[str, dict], tree: tuple[str, ...]) -> list[str]:
-    """Released files of a kind-named section (lectures/, labs/, readings/) that no row
-    reaches; reading-list overlays are inlined, not linked."""
-    linked = {x["url"] for r in rows.values() for x in r.get("links") or []}
-    return [
-        path
-        for path in tree
-        if path.split("/")[0] in ("lectures", "labs", "readings")
-        and not path.endswith("READINGS.md")
-        and not _reaches(linked, "S", "materials", path)
-    ]
-
-
-def _live(name: str) -> set[str]:
-    """The row files the live site had before rows came from entries."""
-    return set((LAYOUTS / f"{name}-live-rows.txt").read_text().split())
-
-
-def test_the_demo_loses_the_lectures_that_land_in_a_kindless_folder(monkeypatch):
-    # Decision 0031 rule 10: lectures 9-11 land in `code/dldemo/...` and name no kind.
-    # `code/` is no kind's name, so they are supporting files now, no row, and the
-    # readings that joined them stand alone (`status_json.kindless_entry_problems` names
-    # each entry).
-    rows, _tree = _layout(monkeypatch, "demo")
-    lost = {"session-09.md", "session-10.md", "session-11.md"}
-    assert not lost & set(rows)
-    assert {"readings-readings-09.md", "readings-readings-11.md"} <= set(rows)
-
-
-def test_the_demo_keeps_its_rows_numbers_and_reading_lists(monkeypatch):
-    # With `code/` given the lecture kind, as the demo must before 0031 ships (or a
-    # `kind: lecture` on each of the three entries).
-    rows, tree = _layout(
-        monkeypatch, "demo", {"lecture-code-f2026": {"code": "lecture"}}
-    )
-    assert set(rows) == _live("demo")
-    # Numbered by the label, so lab-09 is still Lab 9 (decision 0013).
-    assert (rows["lab-09.md"]["title"], rows["lab-11.md"]["title"]) == (
-        "Lab 9",
-        "Lab 11",
-    )
-    # Each `readings-0N` sits on lecture N.
-    for n in (1, 2, 3, 4, 5, 8):
-        row = rows[f"session-0{n}.md"]
-        assert row["reading_list"].startswith("- from readings/0"), n
-        assert row["tabs"] == ["lecture", "readings"], n
-    # The code from the second repo is not released yet; its row says where it goes.
-    assert rows["session-10.md"]["unreleased"] is True
-    assert _lost(rows, tree) == []
-
-
-def test_maths_keeps_its_rows_and_lists_a_labs_solutions_once(monkeypatch):
-    rows, tree = _layout(monkeypatch, "maths")
-    # The silent setup and quiz entries are no rows; nothing is renumbered around them.
-    assert set(rows) == _live("maths")
-    assert [rows[f"session-{n:02d}.md"]["number"] for n in range(1, 13)] == list(
-        range(1, 13)
-    )
-    names = [x["name"] for x in rows["lab-01.md"]["links"]]
-    assert sum("solutions" in n for n in names) == 1, names
-    assert rows["session-06.md"]["readings_pending"] is True
-    assert _lost(rows, tree) == []
-
-
-def test_nlp_keeps_its_off_plan_folders_on_their_tabs(monkeypatch):
-    # No `releases:` at all: every folder was released by hand.
-    rows, tree = _layout(monkeypatch, "nlp")
-    assert len(rows) == len(_live("nlp")) == 10
-    assert all(
-        r.get("undated") and "date" not in r and "number" not in r
-        for r in rows.values()
-    )
-    assert sorted((r["kind"], r["subtitle"]) for r in rows.values()) == [
-        *(("lab", f"Session {n}") for n in range(1, 5)),
-        *(("lecture", f"Session {n}") for n in range(1, 5)),
-        ("readings", "Session 5"),
-        ("readings", "Session 6"),
-    ]
-    # Readings 1-4 still sit on lectures 1-4, as they always did.
-    lecture1 = next(
-        r
-        for r in rows.values()
-        if r["kind"] == "lecture" and r["subtitle"] == "Session 1"
-    )
-    assert ("reading", "s1-vajjala-2020.pdf") in [
-        (x["section"], x["name"]) for x in lecture1["links"]
-    ]
-    assert _lost(rows, tree) == []
-
-
-def test_a_repo_per_kind_layout_takes_its_kind_from_the_repo(monkeypatch, tmp_path):
-    trees = {
-        "lectures": ("01_intro/slides.pdf",),
-        "labs": ("01_intro/lab.ipynb",),
-        "readings": ("01_intro/READINGS.md", "01_intro/paper.pdf"),
-    }
-    sched = Schedule(
-        releases=[
-            Release(
-                f"{repo}-1",
-                _at(9, day),
-                [_copy("01_intro", repo=f"{repo}-f2026", dest_repo=repo)],
-            )
-            for day, repo in ((1, "lectures"), (2, "labs"), (3, "readings"))
-        ]
-    )
-    rows = _rows(_plan(monkeypatch, tmp_path, sched, trees=trees))
-    # `readings-1` is readings (its repo says so), so it joins lecture 1.
-    assert {r["title"]: [x["name"] for x in r["links"]] for r in rows.values()} == {
-        "Lecture 1": ["slides.pdf", "paper.pdf"],
-        "Lab 1": ["lab.ipynb"],
-    }
-
-
 def test_an_unusable_materials_yml_never_stops_the_site(monkeypatch, tmp_path, capsys):
     # Faculty edit materials.yml by hand. One that fails its schema raised out of the kind
     # inference and the syllabus lookup, so every semester's site froze and every release
@@ -2600,7 +2479,17 @@ def test_an_unusable_materials_yml_never_stops_the_site(monkeypatch, tmp_path, c
         def get(self, repo, default=None):
             raise Unusable(f"{repo}/materials.yml.kinds: must be object")
 
-    sched = Schedule(releases=[Release("week-3", _at(9, 15), [_copy("lectures/03")])])
+    sched = Schedule(
+        releases=[
+            Release(
+                "lecture-3",
+                _at(9, 15),
+                [_copy("lectures/03")],
+                kind="lecture",
+                number=3,
+            )
+        ]
+    )
     trees = {"materials": ("lectures/03/a.pdf",)}
     plan = _plan(monkeypatch, tmp_path, sched, trees=trees, declared=Unusable_(x=None))
     (row,) = _rows(plan).values()
@@ -2626,21 +2515,24 @@ def test_several_copies_are_one_row_linking_everything_that_landed(
     sched = Schedule(
         releases=[
             Release(
-                "week-3",
+                "lecture-3",
                 _at(9, 15),
                 [
                     _copy("lectures/03"),
                     _copy("datasets/week3.csv"),
                     _copy("lectures/03_extra"),  # not landed yet
                 ],
+                kind="lecture",
+                number=3,
             )
         ]
     )
     trees = {"materials": ("lectures/03/a.pdf", "datasets/week3.csv")}
     (row,) = _rows(_plan(monkeypatch, tmp_path, sched, trees=trees)).values()
+    # Filed by the entry's kind, never by the folder a copy lands in (decision 0038).
     assert [(x["section"], x["name"]) for x in row["links"]] == [
         ("lecture", "a.pdf"),
-        ("dataset", "week3.csv"),
+        ("lecture", "week3.csv"),
     ]
     assert "unreleased" not in row
 
@@ -2652,13 +2544,15 @@ def test_an_unreleased_row_names_where_its_copies_will_land(monkeypatch, tmp_pat
                 "lecture-3",
                 _at(9, 15),
                 [_copy("lectures/03_week-3", dest_repo="lecture-materials")],
+                kind="lecture",
+                number=3,
                 title="Expectation",
                 details="Linearity of expectation.",
                 tbc=True,
             )
         ]
     )
-    text = _plan(monkeypatch, tmp_path, sched).collections["_lectures"]["session-03.md"]
+    text = _plan(monkeypatch, tmp_path, sched).collections["_lectures"]["lecture-3.md"]
     row = _front(text)
     assert (row["unreleased"], row["tbc"], row["links"]) == (True, True, [])
     # What the session is about is published from the day it is written.
@@ -2675,17 +2569,25 @@ def test_an_unreleased_row_names_where_its_copies_will_land(monkeypatch, tmp_pat
 def test_an_unreleased_row_names_where_its_pending_readings_will_land(
     monkeypatch, tmp_path
 ):
-    # Readings attached to the lecture (decision 0013 rule 3), neither landed: the one
-    # sentence on the row names the readings' folder beside the lecture's.
+    # Readings attached to the lecture by `session:` (decision 0038 rule 5), neither
+    # landed: the one sentence on the row names the readings' folder beside the lecture's.
     sched = Schedule(
         releases=[
             Release(
-                "readings-8",
+                "readings-week-8",
                 _at(10, 26),
                 [_copy("readings/08_week-8")],
-                show_on_site=False,
+                kind="readings",
+                session="8",
             ),
-            Release("lecture-8", _at(11, 2), [_copy("lectures/08_lecture")]),
+            Release(
+                "lecture-8",
+                _at(11, 2),
+                [_copy("lectures/08_lecture")],
+                kind="lecture",
+                number=8,
+                session="8",
+            ),
         ]
     )
     (text,) = _plan(monkeypatch, tmp_path, sched).collections["_lectures"].values()
@@ -2705,6 +2607,7 @@ def test_an_unreleased_row_names_a_nested_copy_once(monkeypatch, tmp_path):
                 _at(9, 15),
                 [_copy("labs/03_lab"), _copy("labs/03_lab/solutions")],
                 kind="lab",
+                number=3,
             )
         ]
     )
@@ -2717,14 +2620,14 @@ def test_a_declared_title_that_repeats_the_rows_name_is_not_said_twice(
     monkeypatch, tmp_path
 ):
     sched = Schedule(
-        releases=[Release("lab-1", _at(9, 3), [], kind="lab", title="Lab 1")]
+        releases=[Release("lab-1", _at(9, 3), [], kind="lab", number=1, title="Lab 1")]
     )
     (row,) = _rows(_plan(monkeypatch, tmp_path, sched)).values()
     assert row["title"] == "Lab 1" and "subtitle" not in row
 
 
 def test_supporting_files_get_no_row_and_no_tab(monkeypatch, tmp_path):
-    # Decision 0026 rule 3: a data/ folder is released (planned or by hand), never shown.
+    # Decision 0026 rule 3: an `assets:` entry is released, never shown.
     trees = {
         "materials": (
             "lectures/01_intro/slides.pdf",
@@ -2734,8 +2637,14 @@ def test_supporting_files_get_no_row_and_no_tab(monkeypatch, tmp_path):
     }
     sched = Schedule(
         releases=[
-            Release("lecture-1", _at(9, 1), [_copy("lectures/01_intro")]),
-            Release("data-1", _at(9, 1), [_copy("data/01_intro")]),
+            Release(
+                "lecture-1",
+                _at(9, 1),
+                [_copy("lectures/01_intro")],
+                kind="lecture",
+                number=1,
+            ),
+            Release("assets-data", _at(9, 1), [_copy("data/01_intro")], kind="assets"),
         ]
     )
     plan = _plan(monkeypatch, tmp_path, sched, trees=trees)
@@ -3262,78 +3171,89 @@ def test_a_repo_no_longer_released_into_loses_its_copies(
 # ---------------------------------------------------- sessions with nothing to ship
 
 
-def test_a_whole_day_session_hides_its_time(monkeypatch, tmp_path):
-    # A session dated with no time is a whole day: no fabricated 09:00 on the site.
-    sched = Schedule(
-        releases=[],
-        sessions=[
-            Event("field-trip", "Field trip", date(2026, 9, 7), "lab", number=1),
-            Event("lab-2", "Timed", _at(9, 8), "lab", number=2),
-        ],
-        events=[],
-    )
-    rows = _rows(_plan(monkeypatch, tmp_path, sched))
-    assert rows["lab-01.md"]["hide_time"] is True
-    assert "hide_time" not in rows["lab-02.md"]
-
-
-def test_an_earlier_session_never_takes_its_releases_row_file(monkeypatch, tmp_path):
-    # Rows are in date order, sessions among releases; the file names are not: the
-    # release keeps lab-01.md even when its second group meets first.
-    sched = Schedule(
-        releases=[Release("lab-1", _at(9, 5), [_copy("labs/01_intro")])],
-        sessions=[Event("lab-1-group-2", "", _at(9, 3), "lab", number=1)],
-        events=[],
-    )
-    rows = _rows(_plan(monkeypatch, tmp_path, sched))
-    assert "unreleased" in rows["lab-01.md"]
-    assert rows["lab-01-lab-1-group-2.md"]["no_materials"] is True
-
-
-def test_a_session_event_is_a_row_of_its_kind_with_no_files(monkeypatch, tmp_path):
-    # Two lab groups, one handout: the release is group 1, an `events:` lab is group 2.
-    # It is "Lab 1" with the release's title, on the Labs tab, never "not yet released"
-    # and never news; an undated one is a TBC row; a lecture with no release still gets
-    # its Lectures tab. Exams stay `_events`.
+def test_a_whole_day_slot_hides_its_time(monkeypatch, tmp_path):
+    # A slot dated with no time is a whole day: no fabricated 09:00 on the site.
     sched = Schedule(
         releases=[
-            Release("lab-1", _at(9, 2), [_copy("labs/01_intro")], title="Intro"),
-            # A release with an empty `deploy:` ships nothing either.
-            Release("lecture-2", _at(9, 5), [], kind="lecture", number=2),
+            Release(
+                "lab-1",
+                None,
+                kind="lab",
+                number=1,
+                slots=[Slot(date(2026, 9, 7))],
+            ),
+            Release("lab-2", _at(9, 8), kind="lab", number=2),
         ],
-        sessions=[
-            Event("lab-1-group-2", "", _at(9, 3), "lab", details="Group 2.", number=1),
-            Event("lab_02", "Trees", None, "lab", tbc=True),
-            Event("guest-1", "Guest talk", _at(9, 4), "lecture"),
+    )
+    rows = _rows(_plan(monkeypatch, tmp_path, sched))
+    assert rows["lab-1.md"]["hide_time"] is True
+    assert "hide_time" not in rows["lab-2.md"]
+
+
+def test_an_entrys_first_slot_keeps_its_row_file(monkeypatch, tmp_path):
+    # Rows are in date order; the file names are not: the first slot keeps lab-01.md
+    # even when the second group meets first.
+    sched = Schedule(
+        releases=[
+            Release(
+                "lab-1",
+                _at(9, 5),
+                [_copy("labs/01_intro")],
+                kind="lab",
+                number=1,
+                slots=[Slot(_at(9, 5)), Slot(_at(9, 3), details="Group 2.")],
+            )
+        ],
+    )
+    rows = _rows(_plan(monkeypatch, tmp_path, sched))
+    assert set(rows) == {"lab-1.md", "lab-1-2.md"}
+    assert rows["lab-1-2.md"]["details"] == "Group 2."
+
+
+def test_each_slot_is_a_row_with_the_entrys_number_title_and_files(
+    monkeypatch, tmp_path
+):
+    # Decision 0038 rule 3: two lab groups are two slots of one entry - each a "Lab 1"
+    # row with the entry's title and files, its own date, room and words; an undated
+    # entry is a TBC row; an entry with no files is a session with nothing to ship.
+    # Exams stay `_events`.
+    sched = Schedule(
+        releases=[
+            Release(
+                "lab-1",
+                _at(9, 2),
+                [_copy("labs/01_intro")],
+                kind="lab",
+                number=1,
+                title="Intro",
+                location="Lab 2.30",
+                slots=[
+                    Slot(_at(9, 2)),
+                    Slot(_at(9, 3), location="Lab 2.32", details="Group 2."),
+                ],
+            ),
+            Release("lecture-2", _at(9, 5), [], kind="lecture", number=2),
+            Release("lab-2", None, [], kind="lab", number=2, title="Trees", tbc=True),
         ],
         events=[Event("mid-term", "MidTerm", date(2026, 11, 3), "exam")],
     )
     plan = _plan(monkeypatch, tmp_path, sched)
     rows = _rows(plan)
-    sessions = {name: r for name, r in rows.items() if r.get("no_materials")}
-    assert set(sessions) == {
-        "lab-01-lab-1-group-2.md",
-        "lab-02.md",
-        "session-01.md",
-        "session-02.md",
-    }
-    assert "unreleased" not in sessions["session-02.md"]
-    group = sessions["lab-01-lab-1-group-2.md"]
-    assert (group["title"], group["subtitle"]) == ("Lab 1", "Intro")
+    group = rows["lab-1-2.md"]
+    assert (group["title"], group["subtitle"], group["location"]) == (
+        "Lab 1",
+        "Intro",
+        "Lab 2.32",
+    )
     assert group["details"] == "Group 2." and group["tabs"] == ["lab"]
-    assert "unreleased" not in group and not group.get("links")
+    assert group["unreleased"] is True  # the same files as the first group's row
     assert str(group["date"]).startswith("2026-09-03")
-    tbc = sessions["lab-02.md"]
+    assert rows["lab-1.md"]["location"] == "Lab 2.30"
+    assert rows["lecture-2.md"]["no_materials"] is True
+    assert "unreleased" not in rows["lecture-2.md"]
+    tbc = rows["lab-2.md"]
     assert (tbc["title"], tbc["subtitle"]) == ("Lab 2", "Trees")
     assert tbc["dateless"] is True and "date" not in tbc
-    # An `events:` lecture is a lecture row, on the Lectures tab, as a lab is a lab row.
-    lecture = sessions["session-01.md"]
-    assert (lecture["title"], lecture["subtitle"]) == ("Lecture 1", "Guest talk")
-    assert lecture["tabs"] == ["lecture"] and not lecture.get("links")
-    assert str(lecture["date"]).startswith("2026-09-04")
-    # The release's own row is untouched: still waiting for its files.
-    assert rows["lab-01.md"]["unreleased"] is True
     assert "/lectures/" in plan.files["_data/nav.yml"]
     events = plan.collections["_events"]
     assert any("MidTerm" in text for text in events.values())
-    assert not any("lab-1-group-2" in name or "guest" in name for name in events)

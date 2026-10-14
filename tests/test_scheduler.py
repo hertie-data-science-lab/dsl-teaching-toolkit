@@ -8,6 +8,7 @@ hourly and has NO check-team gate - scheduled runs have no actor).
 from __future__ import annotations
 
 import json
+import re
 import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -15,7 +16,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 import yaml
-from conftest import fake_config, source_fault
+from conftest import run_settings, source_fault
 
 from dsl_course import (
     access,
@@ -25,7 +26,6 @@ from dsl_course import (
     distribute,
     ghcli,
     grading_sheet,
-    materials,
     notify,
     repos,
     roster,
@@ -147,9 +147,8 @@ def _grading_spec_defaults(monkeypatch):
     real gh I/O, answered with the defaults."""
     _WINDOWS.clear()
     _institution_window(monkeypatch, 0)
-    monkeypatch.setattr(
-        settings,
-        "_assignments_text",
+    run_settings(
+        monkeypatch,
         lambda org: (
             yaml.safe_dump(
                 {
@@ -1654,9 +1653,12 @@ def test_deploy_many_counts_a_raised_site_sync(monkeypatch):
 
 
 def _assignments(**entries: AssignmentEntry) -> Schedule:
-    """A schedule of `entries`; one built by `_due(..., grading_day=)` has its late
-    window in the semester's assignments.yml (`_WINDOWS`)."""
+    """A schedule of `entries`, each numbered by the digits in its key unless it says
+    otherwise; one built by `_due(..., grading_day=)` has its late window in the
+    semester's assignments.yml (`_WINDOWS`)."""
     for slug, entry in entries.items():
+        if entry.number is None and (found := re.search(r"\d+", slug)):
+            entry.number = int(found.group())
         if getattr(entry, "window", None) is not None:
             _WINDOWS[slug] = entry.window
     return Schedule(org="Semester-f2026", assignments=dict(entries))
@@ -1670,6 +1672,9 @@ def _due(day: int, grading_day: int | None = None) -> AssignmentEntry:
         due_datetime=datetime(2026, 10, day, 23, 59, 59, tzinfo=BERLIN),
     )
     entry.window = None if grading_day is None else grading_day - day
+    if entry.window is not None:
+        # Written on the entry, as schedule.yml carries it (`AssignmentEntry.settings`).
+        entry.settings = {"late_window_days": entry.window}
     return entry
 
 
@@ -2383,6 +2388,12 @@ def test_handout_releases_synthesised_from_the_assignments_block(monkeypatch):
                 course_source_repo="a-f2026",
                 due_datetime=datetime(2026, 12, 1, 23, 59, tzinfo=BERLIN),
             ),
+            # no due date yet (TBC): nothing fires, its hand-out included
+            "undated": AssignmentEntry(
+                course_source_repo="u-f2026",
+                due_datetime=None,
+                handout_datetime=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
+            ),
         }
     )
     (r,) = scheduler._handout_releases("Course-Org", "Semester-f2026", sched, WHEN)
@@ -2485,6 +2496,10 @@ def _early_solutions() -> Schedule:
         }
     )
     sched.org = "Sem-f2026"
+    # Each window written on its entry, as schedule.yml carries it.
+    for slug, entry in sched.assignments.items():
+        if slug in _WINDOWS:
+            entry.settings = {"late_window_days": _WINDOWS[slug]}
     return sched
 
 
@@ -3072,7 +3087,7 @@ def test_lateness_is_asked_about_the_whole_plan_not_just_what_is_due(
     assert scheduler.main() == 0
     (_course, semester, verdict, items, _dry) = cadence_calls["report_semester"][0]
     assert semester == "Semester-A" and verdict is late
-    assert [i.label for i in items] == ["releases.wk1 -> deploy[0]"]
+    assert [i.label for i in items] == ["wk1 -> files[0]"]
     assert items[0].late == timedelta(hours=3)
 
 
@@ -5022,7 +5037,7 @@ def test_an_assignments_yml_that_is_not_yaml_holds_the_tick_green(monkeypatch):
         scheduler.schedule,
         "_schedule_text",
         lambda org: (
-            "assignments:\n  a1:\n    course_source_repo: t\n"
+            "assignments:\n  a1:\n    number: 1\n    template: t\n"
             "    due_datetime: 2026-10-13\n"
         ),
     )
@@ -5138,11 +5153,19 @@ def _numbers_phase(monkeypatch, dry_run: bool, sched: Schedule | None = None):
     earlier = WHEN - timedelta(hours=1)
     sched = sched or Schedule(
         releases=[
-            _r("guest", earlier, kind="lecture", deploy=[Deploy("cm", "lectures/g")]),
+            _r(
+                "guest",
+                earlier,
+                kind="lecture",
+                block="lectures",
+                deploy=[Deploy("cm", "lectures/g")],
+            ),
             _r(
                 "lecture-2",
                 earlier,
                 kind="lecture",
+                block="lectures",
+                session="2",
                 deploy=[Deploy("cm", "lectures/2")],
             ),
         ],
@@ -5168,50 +5191,24 @@ def test_a_due_entry_with_no_number_is_skipped_on_the_skipped_release_ladder(
     # The numbered lecture goes; the unnumbered lecture and hand-out do not.
     assert seen["fired"] == ["lecture-2"]
     log = capsys.readouterr().out
-    assert "[skip] guest - Give guest a number first." in log
+    assert "[skip] guest - Give guest a session first." in log
     assert "[skip] project - Give project a number first." in log
     # Both ride into the schedule.yml digest on the clock of what they stop.
-    faults = {f.where: f for f in seen["faults"] if f.field == "number"}
-    assert set(faults) == {"releases.guest", "assignments.project"}
-    assert faults["releases.guest"].fires == WHEN - timedelta(hours=1)
-    assert faults["releases.guest"].severity(WHEN) is faults_mod.Severity.MISSED
+    faults = {f.where: f for f in seen["faults"] if f.field in ("number", "session")}
+    assert set(faults) == {"lectures.guest", "assignments.project"}
+    assert faults["lectures.guest"].fires == WHEN - timedelta(hours=1)
+    assert faults["lectures.guest"].severity(WHEN) is faults_mod.Severity.MISSED
+    assert faults["lectures.guest"].plain == "Give guest a session."
     assert faults["assignments.project"].plain == "Give project a number."
-
-
-def test_a_materials_yml_that_does_not_parse_holds_no_inferred_entry(
-    monkeypatch, capsys
-):
-    # `week` would be aliased to readings; the file does not parse, so the kind is a
-    # guess (lecture) and no number is required on its strength. An explicit kind counts.
-    fake_config(monkeypatch, lambda org, repo, path: "kinds: [not closed")
-    materials.read.cache_clear()
-    earlier = WHEN - timedelta(hours=1)
-    sched = Schedule(
-        releases=[
-            _r("week-reading", earlier, deploy=[Deploy("cm", "week/1")]),
-            _r("guest", earlier, kind="lecture", deploy=[Deploy("cm", "week/2")]),
-        ]
-    )
-    try:
-        _rc, seen = _numbers_phase(monkeypatch, dry_run=False, sched=sched)
-    finally:
-        materials.read.cache_clear()
-    assert seen["fired"] == ["week-reading"]
-    assert [f.where for f in seen["faults"] if f.field == "number"] == [
-        "releases.guest"
-    ]
-    log = capsys.readouterr().out
-    assert "Give week-reading a number" not in log
-    assert log.count("[numbers] cm: materials.yml does not parse") == 1
 
 
 def test_a_numbers_check_that_fails_leaves_the_digest_as_it_is(monkeypatch, capsys):
     # Syncing without the number faults would clear them for a tick and file them again
     # as New on the next: the digest is skipped instead, and nothing is held.
-    def fails(org):
+    def fails(sched):
         raise RuntimeError("rate limited")
 
-    monkeypatch.setattr(scheduler, "kinds_reader", fails)
+    monkeypatch.setattr(scheduler.schedule_plan, "unnumbered", fails)
     rc, seen = _numbers_phase(monkeypatch, dry_run=False)
     assert rc == 0
     assert "faults" not in seen
@@ -5224,8 +5221,8 @@ def test_a_numbers_check_that_fails_leaves_the_digest_as_it_is(monkeypatch, caps
 def test_the_preview_names_an_entry_with_no_number(monkeypatch):
     summary, _seen = _numbers_phase(monkeypatch, dry_run=True)
     assert {
-        "code": "NOT_NUMBERED",
-        "text": "guest not released: Give guest a number first.",
+        "code": "NO_SESSION",
+        "text": "guest not released: Give guest a session first.",
     } in summary.reasons
     assert {
         "code": "NOT_NUMBERED",

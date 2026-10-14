@@ -9,18 +9,106 @@
   "join_repo": "join",
   "legacy": [
     {
+      "cost": "nothing in it releases or shows - run the 0.11.0 migration (`python3 -m dsl_course.migrate`)",
+      "fault_code": "NOT_MIGRATED",
+      "new": "a block per kind (`lectures:`, `labs:`, `readings:`, `exams:`, `events:`, `assets:`)",
+      "old": "releases",
+      "since": "0.11.0",
+      "where": "schedule.yml top level"
+    },
+    {
+      "cost": "the block decides the kind",
+      "fault_code": "NOT_MIGRATED",
+      "new": "the block the entry is written in",
+      "old": "kind",
+      "since": "0.11.0",
+      "where": "schedule.yml <block>.<key>"
+    },
+    {
+      "cost": "the block decides the kind",
+      "fault_code": "NOT_MIGRATED",
+      "new": "the block the entry is written in",
+      "old": "type",
+      "since": "0.11.0",
+      "where": "schedule.yml <block>.<key>"
+    },
+    {
+      "cost": "none of its copies ships - run the 0.11.0 migration (`python3 -m dsl_course.migrate`)",
+      "fault_code": "NOT_MIGRATED",
+      "new": "files",
+      "old": "deploy",
+      "since": "0.11.0",
+      "where": "schedule.yml <block>.<key>"
+    },
+    {
+      "cost": "this copy never ships",
+      "fault_code": "NOT_MIGRATED",
+      "new": "from_course_repo",
+      "old": "course_source_repo",
+      "since": "0.11.0",
+      "where": "schedule.yml <block>.<key>.files[]"
+    },
+    {
+      "cost": "this copy never ships",
+      "fault_code": "NOT_MIGRATED",
+      "new": "from_path",
+      "old": "course_source_path",
+      "since": "0.11.0",
+      "where": "schedule.yml <block>.<key>.files[]"
+    },
+    {
+      "cost": "this copy lands in the default repo",
+      "fault_code": "NOT_MIGRATED",
+      "new": "to_semester_repo",
+      "old": "semester_dest_repo",
+      "since": "0.11.0",
+      "where": "schedule.yml <block>.<key>.files[]"
+    },
+    {
+      "cost": "this copy lands at its own path",
+      "fault_code": "NOT_MIGRATED",
+      "new": "to_path",
+      "old": "semester_dest_path",
+      "since": "0.11.0",
+      "where": "schedule.yml <block>.<key>.files[]"
+    },
+    {
+      "cost": "this copy ships at its default time",
+      "fault_code": "NOT_MIGRATED",
+      "new": "release_datetime",
+      "old": "deploy_datetime",
+      "since": "0.11.0",
+      "where": "schedule.yml <block>.<key>.files[]"
+    },
+    {
+      "cost": "the assignment has no template",
+      "fault_code": "NOT_MIGRATED",
+      "new": "template",
+      "old": "course_source_repo",
+      "since": "0.11.0",
+      "where": "schedule.yml assignments.<key>"
+    },
+    {
+      "cost": "its repos take the default name",
+      "fault_code": "NOT_MIGRATED",
+      "new": "repo_name",
+      "old": "semester_dest_repo",
+      "since": "0.11.0",
+      "where": "schedule.yml assignments.<key>"
+    },
+    {
+      "cost": "none of these settings is read",
+      "fault_code": "NOT_MIGRATED",
+      "new": "schedule.yml assignments.<key> (the settings written on each entry)",
+      "old": "assignments",
+      "since": "0.11.0",
+      "where": "assignments.yml top level"
+    },
+    {
       "cost": "the assignment is handed out and graded in whatever shape grading_config.yml declares - individual when it declares none",
       "fault_code": null,
       "new": "in the assignment's own grading_config.yml, on the course template's `solution` branch",
       "old": "type",
-      "since": "0.9.0",
-      "where": "schedule.yml assignments.<key>"
-    },
-    {
-      "cost": "the 'Join team' flow uses the cap declared there, or the course default",
-      "fault_code": null,
-      "new": "in semester-config/assignments.yml (`assignments.<key>`)",
-      "old": "max_team_size",
       "since": "0.9.0",
       "where": "schedule.yml assignments.<key>"
     },
@@ -127,6 +215,14 @@
       "old": "assignment-",
       "since": "0.10.0",
       "where": "course org repos"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": "none: folders carry no kind (the schedule block decides it)",
+      "old": "kind_folder",
+      "since": "0.11.0",
+      "where": "status.json to-do check"
     }
   ],
   "opencourse_file": "opencourse.yml",

@@ -1,7 +1,7 @@
 # Add materials to the course org
 
-Create the year's materials repo and fill it with lectures + readings. **Release materials**
-later copies files and folders from here into a semester. One repo per year: `course-materials-{f/s}YYYY`
+Create the year's materials repo and fill it with lectures + readings. The semester's
+`schedule.yml` later copies files and folders from here into a semester. One repo per year: `course-materials-{f/s}YYYY`
 by default. What makes a repo a materials repo is its `dsl-materials` topic, which the scaffold sets;
 add the topic to a repo you made by hand to have it listed as one (the console's **Handout
 materials** page does it: **Treat as course materials** on the repo's row). The same page shows each materials repo's
@@ -22,17 +22,13 @@ the console (its GitHub link and a **Full screen** button in its header, for pre
 Live example: [`example-course/course-org/course-materials-f2026/`](../example-course/course-org/course-materials-f2026). Its [`SYLLABUS.md`](../example-course/course-org/course-materials-f2026/SYLLABUS.md) is the same file you receive as `SYLLABUS.md.sample` beside your own - the toolkit seeds it from there, so the two cannot drift.
 
 1. **Scaffold the repo.** 
-   - Course org → `.github` → **Actions** →
-   [New materials repo](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/new-materials.yml); input `semester` = `fYYYY`/`sYYYY` (e.g. `f2026`) 
+   - the `materials.create` op (console, or `python -m dsl_course materials.create`); input `semester` = `fYYYY`/`sYYYY` (e.g. `f2026`)
    - this creates **`course-materials-f2026`** - a private repo, pre-seeded with (edit as needed):
-      - `lectures/01_session-1/`, 
-      - `readings/01_session-1/`, 
-      - `labs/01_session-1/`, 
+      - empty `lectures/`, `labs/` and `readings/` folders,
       - a `README.md` 
       - `.system/MAINTAINING.md` (your operating notes) and `.system/SYLLABUS.md.sample`, 
       - a placeholder `SYLLABUS.md` 
       - a commented-out `.releaseignore` 
-      >It also seeds the two run-from-repo Release workflows (Release materials, Release assignment). 
    - `copy_from` (optional) starts the new repo as an existing materials repo instead
      of as the skeleton - every branch, every file, the whole history. Your content arrives
      as you left it; only `.system/` and the workflows are
@@ -42,26 +38,16 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
 2. **Push your content** to remote's `main` (git push or the web uploader):
 
    ```
-   lectures/01_session-1/   any files - slides, demo code, notebooks …
-   readings/01_session-1/   just drop the readings in - every hosted file here is listed
-                            and linked for enrolled students to access automatically.
-                            Additionally, an optional READINGS.md (or .txt/.bib) acts as an overlay, to add what a directly hosted file cannot express (a URL, pointers, page & chapter numbers to focus on, or metadata in clean citation format); it is published publicly on the deployed site (whereas the hosted files themselves are privately hosted and accessible to enrolled students and auditors only)
-   labs/01_session-1/       any files 
-   SYLLABUS.md              optional - or any name you like (SYLLABUS.pdf, ...):
-                            a root file releases by being named as the path
+   lectures/01_intro/   any files - slides, demo code, notebooks …
+   readings/01_intro/   the readings; the reading list itself is the schedule entry's
+                        `reading_list:` (07), shown on the site
+   labs/01_intro/       any files
+   SYLLABUS.md          optional - or any name you like (SYLLABUS.pdf, ...)
    ```
 
-   The layout is yours: any file or folder is releasable, and a row on the semester site is a
-   schedule entry, not a folder. The skeleton's `01_` prefixes are a starter, never needed.
-   An entry that declares no `kind` takes it from the top folder its copy lands in: `labs/`,
-   `lab/`, `tutorials/` are labs, `readings/`, `reading/`, `literature/` readings,
-   `lectures/`, `lecture/` lectures. Any other folder (`data/`, `img/`, `code/`, ...) is
-   supporting files: released like everything else, but never a row or a tab on the
-   semester site or the public website. A folder one level down counts too
-   (`students/lectures/`). Name your folders differently? Set their kinds in
-   `materials.yml` (below) or under Folder kinds in the console: which folders hold the
-   lectures, labs and readings, so the sites can sort them. Pick any folder, including one
-   inside another; a kind this course does not teach stays unassigned.
+   The layout is yours: any file or folder is releasable, and what a release IS (a
+   lecture, a lab, readings) is the block of `schedule.yml` it is written in, never its
+   folder ([07](07-schedule-releases.md)). Folder names and `NN_` prefixes mean nothing.
 
    *NB: this repo stays private - students never see it. Only the sessions you **actively release** reach the semester org, so you can privately stage the whole course here.*
 
@@ -71,23 +57,15 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
 
    *NB: material no schedule entry names (a manual release, a flat `datasets/`) appears in the semester site's **All Materials** (or the student console's, for a course with `student_console: true`).*
 
-   *NB: this repo stays the source of truth, but a release is now a MERGE - so a fix typed into the semester's copy survives, and **Propagate semester edits** offers it back here as a pull request ([08](08-release-materials-to-cohort.md#carrying-semester-edits-back)).*
+   *NB: this repo stays the source of truth, but a release is now a MERGE - so a fix typed into the semester's copy survives, and the `release.propagate_back` op offers it back here as a pull request ([08](08-release-materials-to-cohort.md#carrying-semester-edits-back)).*
 
 <a id="materialsyml"></a>
 
-   *NB: an optional `materials.yml` at the repo root says what the convention cannot:*
+   *NB: an optional `materials.yml` at the repo root names the syllabus the home page pins:*
 
    ```yaml
-   syllabus: E1282_syllabus.pdf   # the syllabus the home page pins (default SYLLABUS.md)
-   kinds:                         # a folder -> the kind of the rows it feeds
-     slides: lecture
-     students/seminars: lab       # a path names a folder at any depth
+   syllabus: E1282_syllabus.pdf   # default SYLLABUS.md
    ```
-
-   *`kinds:` keys are folder names or paths, in any case, and win over the built-in names
-   (`readings: assets` makes it supporting files). An entry with no `kind` reads them
-   against the top folder its copy LANDS in (its semester-side path). A file that does not
-   parse stops the site sync and says so.*
 
    *NB: the console's **Weekly plan** writes every session with its date and readings into
    your Markdown syllabus, between `<!-- dsl:weekly-plan -->` and `<!-- /dsl:weekly-plan -->`
@@ -96,9 +74,8 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
 
 3. **Run Refresh actions** in the course org's `.github` Actions tab - only after creating a
    *new repo*, not after pushing content into one.
-   - What it repopulates is the repo dropdowns - `course_source_repo`, the assignment list,
-     the semester list - and it runs itself nightly. The Release workflows take a typed
-     `course_source_path`, so new sessions need no refresh.
+   - What it repopulates is the repo dropdowns - the materials repos, the assignment list,
+     the semester list - and it runs itself nightly. New sessions need no refresh.
 
 ## Next
 

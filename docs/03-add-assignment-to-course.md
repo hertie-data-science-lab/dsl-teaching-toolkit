@@ -41,10 +41,11 @@ Live example: [`example-course/course-org/assignment-linear-regression/`](../exa
      penalty, who may read the repos, an external submit link - is not asked here and
      never written into `grading_config.yml` (a run setting there refuses the whole file as
      `RUN_SETTING_IN_TEMPLATE`). It
-     is that semester's `semester-config/assignments.yml`, else the course's
+     is the assignment's entry in that semester's `schedule.yml` (else its `assignments.yml`
+     `defaults:`), else the course's
      `assignment_defaults:` in `.github/dsl-course.yml`, else the institution's (Hertie:
      teams of 5, `late_penalty_per_day: 10%` per day started, `late_window_days: 10`).
-     See [07](07-schedule-releases.md#assignmentsyml---how-this-semester-runs-each-assignment).
+     See [07](07-schedule-releases.md#assignments).
    - this creates **`assignment-neural-networks-from-scratch`**, marked with the
      `dsl-assignment` topic, with two branches of stubs for you to replace:
 
@@ -144,8 +145,9 @@ reads that file, so the assignment grades as if it declared nothing at all.
 
 ### Where the work goes, and who sees it
 
-`submit_via` in `grading_config.yml`, and `submit_url` and `visibility` in each semester's
-`assignments.yml`; everything else follows from them.
+`submit_via` in `grading_config.yml`, and `submit_url` and `visibility` (written
+`assignment_repo_visibility` on a `schedule.yml` entry) in each semester; everything else
+follows from them.
 
 | Setting | Values | What it does |
 |---|---|---|
@@ -172,9 +174,8 @@ a `private` assignment publish a copy under their own account (the gradebook REA
 them how); the org's copy stays private.
 
 `visibility` is read when each repo is **created**: change it before the first hand out.
-Editing it afterwards changes nothing on GitHub, so the semester's *assignments.yml*
-digest reports the disagreement until `assignments.yml` and the repos say the same thing
-again. `student_choice` is
+Editing it afterwards changes nothing on GitHub, so the semester's digest reports the
+disagreement until the setting and the repos say the same thing again. `student_choice` is
 exempt from that check - a mixture is what it is for - and is checked against the ORG
 instead: it needs **Allow members to change repository visibilities** ON and **Allow
 members to delete or transfer repositories** OFF (semester org → Settings → Member
@@ -231,12 +232,15 @@ feedback go to the private `grades-<handle>` gradebook for every shape alike, wh
 > The shape is set in ONE place: `type: individual | group` in the assignment's own
 > `grading_config.yml`, on the template's `solution` branch. **New assignment** writes it
 > from the button, and you edit it there afterwards. How teams form and how big they may
-> be are each semester's, in its `assignments.yml`:
+> be are each semester's, on the assignment's `schedule.yml` entry:
 >
 >```yaml
-># semester-config/assignments.yml
+># semester-config/schedule.yml
 >assignments:
->  assignment-4-project:
+>  project:
+>    number: 4
+>    template: assignment-project
+>    due_datetime: 2026-11-27
 >    team_formation: self_select   # or `assigned`, and you write teams.csv
 >    max_team_size: 4
 >```

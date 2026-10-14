@@ -33,7 +33,7 @@ CODES = {
 
 
 def _fault(where, kind, fires, what="cm/lectures/05_trees does not exist"):
-    return ConfigFault(where, what, fires, kind=kind, field="course_source_path")
+    return ConfigFault(where, what, fires, kind=kind, field="from_path")
 
 
 def _parsed(line: str) -> tuple[str, str, str]:
@@ -46,11 +46,11 @@ def _parsed(line: str) -> tuple[str, str, str]:
 def test_a_due_source_that_is_not_there_is_a_decision():
     decisions = scheduler.source_decisions(
         [
-            _fault("releases.s5", FaultKind.MISSING_PATH, PAST),
+            _fault("lectures.s5", FaultKind.MISSING_PATH, PAST),
             _fault("assignments.a2", FaultKind.MISSING_REPO, PAST, "no repo cm/a2"),
-            _fault("releases.s6", FaultKind.WITHHELD, PAST, "the files are held back"),
+            _fault("lectures.s6", FaultKind.WITHHELD, PAST, "the files are held back"),
             # Not due yet: the digest counts it down, the dry run says nothing.
-            _fault("releases.s9", FaultKind.MISSING_PATH, LATER),
+            _fault("lectures.s9", FaultKind.MISSING_PATH, LATER),
         ],
         NOW,
     )
@@ -64,23 +64,20 @@ def test_a_due_source_that_is_not_there_is_a_decision():
 def test_an_archived_semester_releases_nothing_that_is_due():
     sched = schedule.parse(
         {
-            "releases": {
+            "lectures": {
                 "s1": {
                     "event_datetime": "2026-09-01T10:00",
-                    "deploy": [
-                        {"course_source_repo": "cm", "course_source_path": "l1"}
-                    ],
+                    "files": [{"from_course_repo": "cm", "from_path": "l1"}],
                 },
                 "s9": {
                     "event_datetime": "2026-12-01T10:00",
-                    "deploy": [
-                        {"course_source_repo": "cm", "course_source_path": "l9"}
-                    ],
+                    "files": [{"from_course_repo": "cm", "from_path": "l9"}],
                 },
             },
             "assignments": {
                 "a1": {
-                    "course_source_repo": "a1-f2026",
+                    "number": 1,
+                    "template": "a1-f2026",
                     "handout_datetime": "2026-09-10T10:00",
                     "due_datetime": "2026-09-20T23:59",
                 }
@@ -111,7 +108,9 @@ def _handout(monkeypatch, *, group: bool, teams_csv: dict, listing: dict | None)
         {
             "assignments": {
                 "a1": {
-                    "course_source_repo": "a1-f2026",
+                    "number": 1,
+                    "repo_name": "a1",
+                    "template": "a1-f2026",
                     "handout_datetime": "2026-09-10T10:00",
                     "due_datetime": "2026-10-20T23:59",
                 }

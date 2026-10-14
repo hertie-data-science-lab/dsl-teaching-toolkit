@@ -179,12 +179,12 @@ def configure(text: str, shape: Shape) -> str:
 
 
 def run_settings(shape: Shape) -> dict[str, str]:
-    """What the semester's `assignments.yml` says for `shape`: its `visibility` where it has
-    one (`external` and `shared` carry no per-unit repo for it to describe) and its
-    `submit_url` where it is handed in elsewhere."""
+    """The run settings written on `shape`'s schedule.yml entry (decision 0038 rule 9):
+    its repos' visibility where it has one (`external` and `shared` carry no per-unit repo
+    for it to describe) and its `submit_url` where it is handed in elsewhere."""
     out = {}
     if shape.visibility:
-        out["visibility"] = shape.visibility
+        out["assignment_repo_visibility"] = shape.visibility
     if shape.submit_url:
         out["submit_url"] = shape.submit_url
     return out

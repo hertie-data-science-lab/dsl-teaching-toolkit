@@ -68,20 +68,22 @@ from .roster import FIELDS as ROSTER_FIELDS
 from .roster import REQUIRED_FIELDS as ROSTER_REQUIRED
 from .roster import ROLE_AUDITOR, ROLE_ENROLLED
 from .schedule import (
-    EVENT_KINDS,
+    BLOCKS,
     KNOWN_ARCHIVE,
     KNOWN_ASSIGNMENT,
-    KNOWN_DEPLOY,
-    KNOWN_EVENT,
-    KNOWN_RELEASE,
-    KNOWN_ROW_KINDS,
+    KNOWN_ENTRY,
+    KNOWN_FILE,
+    KNOWN_READINGS,
+    KNOWN_SLOT,
     KNOWN_TOP_LEVEL,
+    READINGS_KIND,
 )
 from .settings import (
     ASSIGNMENT_DEFAULTS_KEY,
     ASSIGNMENTS_BLOCKS,
     ASSIGNMENTS_DEFAULTS,
     COURSE_DEFAULT_KEYS,
+    INLINE_NAMES,
     INSTANCE_KEYS,
     RUN_KEYS,
     SOURCES,
@@ -94,7 +96,6 @@ DEFAULT_OUT = Path("console/schemas")
 # The schema-level types of the keys whose parser accepts more than a string. Anything not
 # named here is a string: the parsers read dates, paths and titles as text.
 _FLAGS = {"tbc", "show_on_site"}
-_EVENT_KINDS = ("special_event", *EVENT_KINDS)
 # instructors.yml entry keys (sync_faculty and the site read them by name; no constant holds them).
 PEOPLE_ENTRY_KEYS = (
     "github_handle",
@@ -246,7 +247,8 @@ TODO_KINDS = ("course", "materials", "template", "site", "schedule", "instructor
 # The check a to-do is for: a materials check's id, else the template's, course's or
 # semester's own.
 TODO_CHECKS = (
-    "kind_folder",
+    # Read in a status an engine before 0.11.0 wrote (decision 0038 retired the check).
+    *(row.old for row in legacy.rows(legacy.STATUS_TODO_CHECK)),
     "syllabus",
     "withheld",
     "brief",
@@ -255,6 +257,10 @@ TODO_CHECKS = (
     "home",
     "archive_date",
     "email",
+    # An assignment with no `due_datetime` (dates to be confirmed).
+    "due",
+    # Plan 0.11.0 9b ruling 5: an entry written with `files: []`.
+    "files",
 )
 
 
@@ -359,6 +365,8 @@ def status_schema(*, closed: bool = True) -> dict:
             "entry": _str(),
             "need": _enum(NEEDS),
             "set_aside": {"type": "boolean"},
+            # The moment it is about (an entry with no files yet: its date).
+            "when": _str(),
         },
         ("id", "kind", "repo", "text", "need"),
     )
@@ -563,37 +571,40 @@ def ops_json() -> dict:
 
 
 def schedule_schema() -> dict:
-    deploy = _obj(_keys(KNOWN_DEPLOY), ("course_source_repo", "course_source_path"))
-    release = _obj(
-        _keys(
-            KNOWN_RELEASE,
-            {
-                "kind": _enum(KNOWN_ROW_KINDS),
-                "number": {"type": "integer", "minimum": 1},
-                "deploy": {"type": "array", "items": deploy},
-                "event_datetime": _str(),
-            },
-        )
+    """`semester-config/schedule.yml` (decision 0038): one block per kind, each a map of
+    entries, and `assignments:`; the run settings inline on an assignment entry."""
+    whole = {"type": "integer", "minimum": 1}
+    copy = _obj(
+        _keys(KNOWN_FILE, {"from_course_repo": _str(), "from_path": _str()}),
+        ("from_course_repo", "from_path"),
     )
+    slot = _obj(_keys(KNOWN_SLOT))
+    when = {
+        "oneOf": [
+            {"type": ["string", "null"]},
+            {"type": "array", "items": {"oneOf": [_str(), slot]}},
+        ]
+    }
+    shared = {
+        "session": whole,
+        "number": whole,
+        "event_datetime": when,
+        "files": {"type": "array", "items": copy},
+    }
+    entry = _obj(_keys(KNOWN_ENTRY, shared))
+    readings = _obj(_keys(KNOWN_READINGS, shared))
     marks_row = _obj({"event_datetime": _str(), "show_on_site": {"type": "boolean"}})
+    run = {INLINE_NAMES.get(k, k): v for k, v in _SPEC_TYPES.items() if k in RUN_KEYS}
     assignment = _obj(
         _keys(
             KNOWN_ASSIGNMENT,
             {
-                "number": {"type": "integer", "minimum": 1},
+                **run,
+                "number": whole,
                 "marks_return_datetime": {"oneOf": [_str(), marks_row]},
             },
         ),
-        ("due_datetime", "course_source_repo"),
-    )
-    event = _obj(
-        _keys(
-            KNOWN_EVENT,
-            {
-                "kind": _enum(_EVENT_KINDS),
-                "number": {"type": "integer", "minimum": 1},
-            },
-        )
+        ("due_datetime", "template", "number"),
     )
     archive = _obj(_keys(KNOWN_ARCHIVE, {"grace_days": {"type": "integer"}}))
     # A bare `archive:` asks for the default date (`schedule._parse_archive`).
@@ -601,9 +612,16 @@ def schedule_schema() -> dict:
     top = _keys(
         KNOWN_TOP_LEVEL,
         {
-            "releases": {"type": "object", "additionalProperties": release},
+            **{
+                block: {
+                    "type": "object",
+                    "additionalProperties": readings
+                    if kind == READINGS_KIND
+                    else entry,
+                }
+                for block, kind in BLOCKS.items()
+            },
             "assignments": {"type": "object", "additionalProperties": assignment},
-            "events": {"type": "object", "additionalProperties": event},
             "archive": archive,
         },
     )
@@ -906,6 +924,11 @@ def all_schemas() -> dict[str, dict]:
         # site block, contact and licences, so the console holds no literal of its own.
         "policy.json": policy.load(),
         "schedule.schema.json": schedule_schema(),
+        # WP-C removes: the console's schedule editor still writes the 0.10 shape and
+        # validates against that shape's schema, frozen, until it writes the 0.11 one.
+        "schedule-0.10.schema.json": json.loads(
+            Path(__file__).with_name("schedule-0.10.schema.json").read_text()
+        ),
         "instructors.schema.json": instructors_schema(),
         "students.schema.json": students_schema(),
         "teams.schema.json": teams_schema(),

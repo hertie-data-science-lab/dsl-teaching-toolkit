@@ -300,7 +300,7 @@ def _entry_label(release: Release, sched: Schedule) -> str:
     # handout" and "the suffix is the whole label", neither of which names an assignment.
     if slug and slug in sched.assignments:
         return f"assignments.{slug} handout"
-    return f"releases.{release.label}"
+    return release.label
 
 
 def late_items(
@@ -341,7 +341,7 @@ def late_items(
         for i, dep in enumerate(release.deploy):
             at = dep.deploy_datetime or release.when
             if at is not None:
-                moments.append((f"{label} -> deploy[{i}]", at))
+                moments.append((f"{label} -> files[{i}]", at))
         if release.assignment and release.when is not None:
             moments.append((label, release.when))
     for slug, entry in sched.assignments.items():

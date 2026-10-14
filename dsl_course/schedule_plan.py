@@ -1,42 +1,26 @@
 """Interpret a parsed `schedule.Schedule` into the rows a site or syllabus shows.
 
-A row is a `releases:` entry: its date, its kind, its name and the copies it makes (or an
-`events:` session, which makes none: `Schedule.sessions`). Rows come in date order and nothing is inferred from folder names beyond one fallback - an entry that
-declares no `kind` takes it from the section its first copy lands in
-(`materials.infer_kind`). An `NN_` prefix on a folder means nothing here. Pure: nothing
-touches GitHub or renders anything - `site` turns rows into pages, `syllabus` into a table.
+A row is one slot of one entry (decision 0038): its kind is the block it is written in,
+its number and session the entry's, its files the entry's `files`. Nothing is inferred from
+folder names. Pure: nothing touches GitHub or renders anything - `site` turns rows into
+pages, `syllabus` into a table.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Collection, Iterable, Mapping
+from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
-from typing import NamedTuple
 from zoneinfo import ZoneInfo
 
 from . import policy, schedule
 from .faults import ConfigFault
 from .gh_contents import line_of
 from .log import Summary, log_err
-from .materials import (
-    ASSETS_KIND,
-    DEFAULT_SYLLABUS,
-    EMPTY_ENTRY_KIND,
-    Declared,
-    alias_kind,
-    infer_kind,
-    publishable,
-)
-from .schedule import own_number, session_number
+from .materials import ASSETS_KIND, DEFAULT_SYLLABUS, Declared
 
-# A source repo -> its `materials.yml` folder aliases (None: the file does not parse).
-# The caller reads them; the plan stays pure.
-Aliases = Callable[[str], Mapping[str, str] | None]
-
-
-def _no_aliases(_repo: str) -> Mapping[str, str]:
-    return {}
+# The kind whose entries attach to a unit's first row (decision 0038 rule 5).
+READINGS_KIND = "readings"
 
 
 def deploy_dest(deploy: schedule.Deploy) -> str:
@@ -46,75 +30,25 @@ def deploy_dest(deploy: schedule.Deploy) -> str:
     return (deploy.semester_dest_path or deploy.course_source_path).strip("/")
 
 
-def deploy_section(deploy: schedule.Deploy, aliases: Mapping[str, str] | None) -> str:
-    """The section a deploy lands in - the top-level directory of its destination path,
-    or the destination repo itself when the copy lands at its root (a repo that IS one
-    section, `semester_dest_repo: labs`).
-
-    A destination with no `/` is one name at the repo's root: a whole folder copied
-    (`lectures`) or one item (`SYLLABUS.md`, `01_x` in a `labs` repo). The name is the
-    section when it names a kind (`aliases`, else a built-in one), else the repo is - the
-    order `offplan_folders` reads a tree in. `aliases` are the SOURCE repo's
-    `materials.yml` folder aliases (None: it has none), required so that the site, the
-    status and the console never place one copy in two sections."""
+def dest_section(deploy: schedule.Deploy) -> str:
+    """The section a copy's links are filed under: the top folder of where it lands, or
+    the destination repo for a copy into its root."""
     head, sep, _ = deploy_dest(deploy).partition("/")
-    if sep or (head and alias_kind(head, aliases)):
-        return head
-    return deploy.semester_dest_repo
-
-
-class Landing(NamedTuple):
-    """Where a `releases:` entry's first copy lands and the kind that gives it.
-
-    `section` is None for an entry that declares its kind (nothing is read to place it)
-    or copies nothing yet. `named`: a kind names the section (the source repo's alias or
-    a built-in one), so an undeclared kind is not left to the supporting-files default."""
-
-    section: str | None
-    kind: str
-    inferred: bool
-    named: bool
-
-
-def entry_landing(release: schedule.Release, aliases: Aliases = _no_aliases) -> Landing:
-    """The entry's `Landing`: its kind is the one it declares, else the kind the section
-    of its first copy implies (supporting files when no alias names it), else `lecture`
-    (an entry that copies nothing yet). The ONE place an entry's section and kind are
-    worked out."""
-    if release.kind:
-        return Landing(None, release.kind, False, False)
-    if not release.deploy:
-        return Landing(None, EMPTY_ENTRY_KIND, True, False)
-    first = release.deploy[0]
-    kinds = aliases(first.course_source_repo)
-    section = deploy_section(first, kinds)
-    named = alias_kind(section, kinds) is not None
-    return Landing(section, infer_kind(section, kinds), True, named)
-
-
-def entry_kind(
-    release: schedule.Release, aliases: Aliases = _no_aliases
-) -> tuple[str, bool]:
-    """`(kind, inferred)` for a `releases:` entry (`entry_landing`)."""
-    landing = entry_landing(release, aliases)
-    return landing.kind, landing.inferred
+    return head if sep else deploy.semester_dest_repo
 
 
 @dataclass
 class PlannedRow:
-    """What the plan says about one row, before anything has shipped.
+    """What the plan says about one row, before anything has shipped: one slot of one
+    entry.
 
-    `key` is the entry's label (unique in the file); `deploys` are its copies in plan
-    order, which is what the row links once they have landed. `shown` is the entry's
-    `show_on_site`: a silent row stays off the schedule and the Updates box.
+    `key` is the entry's label (unique in the file), `slot` which of its slots this is;
+    `deploys` are its copies in plan order, which is what the row links once they have
+    landed. `shown` is the entry's `show_on_site`: a silent row stays off the schedule and
+    the Updates box. `unit` is the entry's `session` (the teaching unit), "" for none.
 
-    `when` is the entry's date, None when it is `event_datetime: tbc` (`undated`).
-    `sort_at` is where the row sorts (`planned_rows`): its `when` when dated. It orders and
-    nothing else - nothing shows it or fires on it.
-
-    `session`: an `events:` session (`Schedule.sessions`) - no copies, its `number` and
-    `subtitle` already resolved (`planned_rows`). The site never marks it unreleased nor
-    announces it."""
+    `when` is the slot's date, None when it is `tbc` (`undated`). `sort_at` is where the
+    row sorts (`planned_rows`): its `when` when dated. It orders and nothing else."""
 
     key: str
     kind: str
@@ -125,9 +59,12 @@ class PlannedRow:
     subtitle: str = ""
     details: str = ""
     shown: bool = True
-    number: int | None = None  # the entry's own `number:`; a session's resolved one
+    number: int | None = None
     deploys: tuple[schedule.Deploy, ...] = ()
-    session: bool = False
+    unit: str = ""
+    location: str = ""
+    reading_list: str = ""
+    slot: int = 0
 
     @property
     def dests(self) -> list[str]:
@@ -140,65 +77,40 @@ class PlannedRow:
         return [p for p in paths if not any(p.startswith(f"{q}/") for q in paths)]
 
 
-def planned_rows(
-    sched: schedule.Schedule, aliases: Aliases = _no_aliases
-) -> list[PlannedRow]:
-    """One row per `releases:` entry and per `events:` session (`Schedule.sessions`), in
-    date order: sorted on `sort_at`, stably, so ties keep plan order with the releases
-    first. An undated (`event_datetime: tbc`) row is flagged `undated`. A session has no copies:
-    numbered by `session_number` (the label's FIRST number, `lab-01-group-2` -> 1), titled with its own `title:`, else that of the
-    shown release of the same kind and number. A session never takes the row file of the
-    release it shares a number with: the site names release rows first (`site._site_rows`).
+def planned_rows(sched: schedule.Schedule) -> list[PlannedRow]:
+    """One row per slot of every content entry (`Schedule.releases`), in date order:
+    sorted on `sort_at`, stably, so ties keep plan order. An undated (`tbc`) row is
+    flagged `undated` and sorts at the end of its kind (`_undated_placer`). A slot's own
+    `location`/`details` beat the entry's."""
 
-    An undated row's `when` is None, and it sorts (`sort_at`) at the end of its kind
-    (`_undated_placer`)."""
-
-    def row(release: schedule.Release, sort_at: date | datetime) -> PlannedRow:
+    def row(r: schedule.Release, i: int, slot: schedule.Slot, at) -> PlannedRow:
         return PlannedRow(
-            key=release.label,
-            kind=kinds[release.label],
-            when=release.when,
-            sort_at=sort_at,
-            tbc=release.tbc,
-            undated=release.when is None,
-            subtitle=release.title,
-            details=release.details,
-            shown=release.show_on_site,
-            number=release.number,
-            deploys=tuple(release.deploy),
+            key=r.label,
+            kind=r.kind,
+            when=slot.when,
+            sort_at=at,
+            tbc=r.tbc,
+            undated=slot.when is None,
+            subtitle=r.title,
+            details=slot.details or r.details,
+            shown=r.show_on_site,
+            number=r.number,
+            deploys=tuple(r.deploy),
+            unit=r.session,
+            location=slot.location or r.location,
+            reading_list=r.reading_list,
+            slot=i,
         )
 
-    def session(event: schedule.Event, sort_at: date | datetime) -> PlannedRow:
-        n = session_number(event.number, event.label)
-        return PlannedRow(
-            key=event.label,
-            kind=event.kind,
-            when=event.when,
-            sort_at=sort_at,
-            tbc=event.tbc,
-            undated=event.when is None,
-            subtitle=event.title or (titles.get((event.kind, n), "") if n else ""),
-            details=event.details,
-            shown=event.show_on_site,
-            number=n,
-            session=True,
-        )
-
-    kinds = {r.label: entry_kind(r, aliases)[0] for r in sched.releases}
-    place = _undated_placer(
-        sched,
-        [(kinds[r.label], r.when) for r in sched.releases if r.when is not None]
-        + [(e.kind, e.when) for e in sched.sessions if e.when is not None],
-    )
-    dated = [r for r in sched.releases if r.when is not None]
-    rows = [row(r, r.when) for r in sorted(dated, key=lambda r: r.when)]
-    rows += [row(r, place(kinds[r.label])) for r in sched.releases if r.when is None]
-    titles: dict[tuple[str, int], str] = {}
-    for r in rows:
-        if r.shown and r.subtitle and (n := own_number(r.number, r.key)):
-            titles.setdefault((r.kind, n), r.subtitle)
-    rows += [session(e, e.when or place(e.kind)) for e in sched.sessions]
+    slots = [(r, i, slot) for r in sched.releases for i, slot in enumerate(r.row_slots)]
+    dated = [(r, i, s) for r, i, s in slots if s.when is not None]
+    place = _undated_placer(sched, [(r.kind, s.when) for r, _i, s in dated])
     tz = ZoneInfo(sched.timezone)
+    rows = [
+        row(r, i, s, s.when)
+        for r, i, s in sorted(dated, key=lambda d: schedule._instant(d[2].when, tz))
+    ]
+    rows += [row(r, i, s, place(r.kind)) for r, i, s in slots if s.when is None]
     return sorted(rows, key=lambda r: schedule._instant(r.sort_at, tz))
 
 
@@ -237,84 +149,99 @@ def term_end(sched: schedule.Schedule, dated: list[datetime]) -> datetime:
 
 @dataclass
 class SiteRow:
-    """One row the site shows: an entry, its number, and the numbered readings entries
-    that join it (a lecture's readings)."""
+    """One row the site shows: a row, its number, the readings entries attached to it
+    (on the first row of its unit only), and `chip`: its unit has readings, so the row
+    carries the readings chip."""
 
     row: PlannedRow
     number: int | None
     readings: list[PlannedRow] = field(default_factory=list)
+    chip: bool = False
+
+
+def unit_hosts(rows: list[PlannedRow]) -> dict[str, PlannedRow]:
+    """Each unit's FIRST row by date: a shown row of any kind but readings and supporting
+    files. What a readings entry with that `session:` shows on (decision 0038 rule 5). A
+    dated row comes before any undated (`tbc`) one; a unit with no date yet takes its first
+    row in the policy's kind order (the lecture before the lab)."""
+    order = {kind["key"]: i for i, kind in enumerate(policy.kinds())}
+    hosts: dict[str, PlannedRow] = {}
+    for r in sorted(
+        rows,
+        key=lambda r: (r.undated, 0 if not r.undated else order.get(r.kind, 0)),
+    ):
+        if r.unit and r.shown and r.kind not in (READINGS_KIND, ASSETS_KIND):
+            hosts.setdefault(r.unit, r)
+    return hosts
 
 
 def site_rows(rows: list[PlannedRow]) -> list[SiteRow]:
-    """The rows the site shows, in date order (decisions 0013, 0020).
+    """The rows the site shows, in date order (decisions 0013, 0020, 0038).
 
-    - A shown row's number: `own_number`, else none (the row says "Lecture" alone).
-      Re-dating, hiding or adding an entry moves nobody's number. The syllabus reads the
-      same numbers.
-    - A `readings` entry with a number (`number:`, else its label's, `readings_03`)
-      joins the shown lecture with that number. Nothing is inferred from dates: any
-      other readings entry, or one whose number no lecture carries, is its own row.
+    - A shown row's number is its entry's; re-dating, hiding or adding an entry moves
+      nobody's number. The syllabus reads the same numbers.
+    - A readings entry whose `session` names a unit with a shown row is attached to that
+      unit's first row by date (`unit_hosts`), silent or not, and every shown row of the
+      unit carries the readings chip. Any other readings entry is its own row.
     - A silent (`show_on_site: false`) entry is no row, unless it is readings: an
-      unjoined one is a row of the Readings tab, unnumbered.
+      unattached one is a row of the Readings tab, unnumbered.
     - A supporting-files (`assets`) entry is never a row: it is released, not shown
-      (decision 0026 rule 3).
-    - A session (`PlannedRow.session`) is a row when shown, of whatever kind; it neither
-      hosts readings nor joins a lecture."""
-    lecture_numbers: dict[int, str] = {}
-    for r in rows:
-        if r.session or not r.shown or r.kind != "lecture":
-            continue
-        if n := own_number(r.number, r.key):
-            lecture_numbers.setdefault(n, r.key)
-    attached: dict[str, list[PlannedRow]] = {}
+      (decision 0026 rule 3)."""
+    hosts = unit_hosts(rows)
+    attached: dict[tuple[str, int], list[PlannedRow]] = {}
+    seen: set[str] = set()
     own = []
     for r in rows:
-        n = own_number(r.number, r.key)
-        if r.kind == ASSETS_KIND or (r.session and not r.shown):
+        if r.kind == ASSETS_KIND:
             continue
-        if r.session:
+        if r.kind == READINGS_KIND and r.unit in hosts:
+            host = hosts[r.unit]
+            if r.key not in seen:
+                seen.add(r.key)
+                attached.setdefault((host.key, host.slot), []).append(r)
+        elif r.shown or r.kind == READINGS_KIND:
             own.append(r)
-        elif r.kind == "readings" and n and (host := lecture_numbers.get(n)):
-            attached.setdefault(host, []).append(r)
-        elif r.shown or r.kind == "readings":
-            own.append(r)
+    with_readings = {h.unit for h in hosts.values() if (h.key, h.slot) in attached}
     return [
         SiteRow(
             r,
-            own_number(r.number, r.key) if r.shown else None,
-            attached.get(r.key, []),
+            r.number if r.shown else None,
+            attached.get((r.key, r.slot), []),
+            r.kind != READINGS_KIND and r.unit in with_readings,
         )
         for r in own
     ]
 
 
 # ------------------------------------------------------------------ explicit numbers
-# Decision 0020: a number is explicit. An entry of a numbered kind with none is a problem,
-# and its release or hand-out is refused with this sentence, on every path.
+# Decision 0038 (amendment): a lecture or lab names its unit (`session:`, its number by
+# default) and an assignment its number, explicitly. One without is a problem, and its
+# release or hand-out is refused with these sentences, on every path.
 NOT_NUMBERED = "NOT_NUMBERED"
+NO_SESSION = "NO_SESSION"
 
 
 def give_a_number(key: str) -> str:
-    """The one sentence an entry with no number earns, wherever it is refused."""
+    """The one sentence an assignment with no number earns, wherever it is refused."""
     return f"Give {key} a number first."
 
 
-def needs_number(release: schedule.Release, kind: str) -> bool:
-    """Whether a `releases:` entry must carry a number: every row the site shows, except
-    readings - a readings number means "join that lecture" (decision 0013 rule 3), so a
-    stand-alone readings row is rightly unnumbered - and supporting files, which are no
-    row at all (decision 0026 rule 3)."""
-    return release.show_on_site and kind not in ("readings", ASSETS_KIND)
+def give_a_due_date(key: str) -> str:
+    """The one sentence an assignment with no `due_datetime` earns: it parses as TBC and
+    nothing fires for it until it has one."""
+    return f"Give {key} a due date."
 
 
-def kind_unknown(release: schedule.Release, aliases: Aliases = _no_aliases) -> bool:
-    """Whether `release`'s kind is only inferred, from a repo whose `materials.yml` does
-    not parse: the kind is a guess, so no number is required of it on its strength."""
-    return (
-        not release.kind
-        and bool(release.deploy)
-        and aliases(release.deploy[0].course_source_repo) is None
-    )
+def give_a_session(key: str) -> str:
+    """The one sentence a lecture or lab with no session earns, wherever it is refused."""
+    return f"Give {key} a session first."
+
+
+def needs_session(release: schedule.Release) -> bool:
+    """Whether a content entry must name its unit: a lecture or a lab
+    (`schedule.SESSION_KINDS`). Readings name one only to attach; exams, events and
+    supporting files never."""
+    return release.kind in schedule.SESSION_KINDS
 
 
 def _first_fire(release: schedule.Release) -> datetime | None:
@@ -326,9 +253,10 @@ def _first_fire(release: schedule.Release) -> datetime | None:
 
 @dataclass(frozen=True)
 class Unnumbered:
-    """An entry of a numbered kind with no number: `block` is `releases` or
-    `assignments`, `fires` the release or hand-out it holds up (None: none is dated),
-    `line` the schedule.yml line to fix."""
+    """An entry missing what names it: `block` is `releases` (a lecture or lab with no
+    `session`; `key` its key) or `assignments` (no `number`), `where` its YAML path,
+    `fires` the release or hand-out it holds up (None: none is dated), `line` the
+    schedule.yml line to fix."""
 
     block: str
     key: str
@@ -336,31 +264,33 @@ class Unnumbered:
     fires: datetime | None
     line: int | None
     copies: bool = True  # False: a release row with nothing to copy
+    where: str = ""
+
+    @property
+    def field(self) -> str:
+        """What it lacks: `session` (a lecture or lab) or `number` (an assignment)."""
+        return "number" if self.block == "assignments" else "session"
 
 
-def unnumbered(
-    sched: schedule.Schedule, aliases: Aliases = _no_aliases
-) -> list[Unnumbered]:
-    """Every entry that needs a number and has none, releases first, in plan order. A
-    release whose kind is unknown (`kind_unknown`) needs none until it is known."""
+def unnumbered(sched: schedule.Schedule) -> list[Unnumbered]:
+    """Every lecture or lab with no `session` and every assignment with no `number`,
+    content entries first, in plan order."""
     out = []
     for r in sched.releases:
-        kind, _ = entry_kind(r, aliases)
-        if kind_unknown(r, aliases):
-            continue
-        if needs_number(r, kind) and own_number(r.number, r.label) is None:
+        if needs_session(r) and not r.session:
             out.append(
                 Unnumbered(
                     "releases",
                     r.label,
-                    kind,
+                    r.kind,
                     _first_fire(r),
-                    line_of(r.lines, "number"),
+                    line_of(r.lines, "session"),
                     bool(r.deploy),
+                    r.where,
                 )
             )
     for key, entry in sched.assignments.items():
-        if own_number(entry.number, key) is None:
+        if entry.number is None:
             out.append(
                 Unnumbered(
                     "assignments",
@@ -368,24 +298,22 @@ def unnumbered(
                     "assignment",
                     entry.handout_datetime,
                     line_of(entry.lines, "number"),
+                    where=f"assignments.{key}",
                 )
             )
     return out
 
 
-def duplicate_numbers(
-    sched: schedule.Schedule, aliases: Aliases = _no_aliases
-) -> list[tuple[str, int, list[str]]]:
-    """`(kind, number, keys)` for every number two or more entries of one kind share."""
+def duplicate_numbers(sched: schedule.Schedule) -> list[tuple[str, int, list[str]]]:
+    """`(kind, number, keys)` for every number two or more entries of one kind share: a
+    shown entry's number (its `number:`, else its `session:`), per kind (decision 0038
+    amendment rule 3)."""
     groups: dict[tuple[str, int], list[str]] = {}
     for r in sched.releases:
-        kind, _ = entry_kind(r, aliases)
-        if kind_unknown(r, aliases):
-            continue
-        if needs_number(r, kind) and (n := own_number(r.number, r.label)):
-            groups.setdefault((kind, n), []).append(r.label)
+        if r.show_on_site and (n := r.number):
+            groups.setdefault((r.kind, n), []).append(r.label)
     for key, entry in sched.assignments.items():
-        if n := own_number(entry.number, key):
+        if n := entry.number:
             groups.setdefault(("assignment", n), []).append(key)
     return [(kind, n, keys) for (kind, n), keys in groups.items() if len(keys) > 1]
 
@@ -402,8 +330,9 @@ def duplicate_text(kind: str, n: int, keys: list[str]) -> str:
 
 
 def number_faults(missing: list[Unnumbered]) -> list[ConfigFault]:
-    """One fault per entry with no number (`unnumbered`), for the schedule.yml digest: on
-    the clock of the release or hand-out it stops, like a source that is not found."""
+    """One fault per entry missing its session or number (`unnumbered`), for the
+    schedule.yml digest: on the clock of the release or hand-out it stops, like a source
+    that is not found."""
     out = []
     for m in missing:
         if m.block == "assignments":
@@ -414,26 +343,27 @@ def number_faults(missing: list[Unnumbered]) -> list[ConfigFault]:
             cost = "its row on the site has no number until it has one"
         out.append(
             ConfigFault(
-                f"{m.block}.{m.key}",
-                f"{m.key} has no number",
+                m.where or m.key,
+                f"{m.key} has no {m.field}",
                 fires=m.fires if m.block == "assignments" or m.copies else None,
-                field="number",
+                field=m.field,
                 lineno=m.line,
                 file=schedule.SCHEDULE_PATH,
-                fix_text="give the entry a `number:`",
+                fix_text=f"give the entry a `{m.field}:`",
                 consequence=cost,
-                noun=("entry without a number", "entries without a number"),
-                plain=f"Give {m.key} a number.",
+                noun=(f"entry without a {m.field}", f"entries without a {m.field}"),
+                plain=f"Give {m.key} a {m.field}.",
             )
         )
     return out
 
 
 def refuse_unnumbered(text: str) -> Summary:
-    """A manual run's refusal of an entry with no number: `text` is `give_a_number`'s,
-    which names a schedule key and nobody."""
+    """A manual run's refusal of an entry with no session or number: `text` is
+    `give_a_session`'s or `give_a_number`'s, which names a schedule key and nobody."""
     log_err(text)
-    return Summary(text, reasons=[{"code": NOT_NUMBERED, "text": text}], code=1)
+    code = NO_SESSION if "session" in text else NOT_NUMBERED
+    return Summary(text, reasons=[{"code": code, "text": text}], code=1)
 
 
 def unnumbered_assignment(
@@ -449,22 +379,18 @@ def unnumbered_assignment(
     elif len(entries) > 1:
         return None
     for key, entry in entries:
-        if own_number(entry.number, key) is None:
+        if entry.number is None:
             return give_a_number(key)
     return None
 
 
 def unnumbered_release(
-    sched: schedule.Schedule,
-    repo: str,
-    paths: Iterable[str],
-    aliases: Aliases = _no_aliases,
+    sched: schedule.Schedule, repo: str, paths: Iterable[str]
 ) -> str | None:
-    """The refusal for a manual release of `paths` from `repo` that a numbered entry of
-    the plan copies, itself or inside a requested folder, and that entry has no number;
-    None otherwise (an entry with a number, or a copy the plan does not name)."""
+    """The refusal for a manual release of `paths` from `repo` that a lecture or lab with
+    no session copies, itself or inside a requested folder; None otherwise."""
     wanted = {p.strip("/") for p in paths}
-    held = {m.key for m in unnumbered(sched, aliases) if m.block == "releases"}
+    held = {m.key for m in unnumbered(sched) if m.block == "releases"}
 
     def asked(path: str) -> bool:
         path = path.strip("/")
@@ -475,7 +401,7 @@ def unnumbered_release(
             d.course_source_repo == repo and asked(d.course_source_path)
             for d in r.deploy
         ):
-            return give_a_number(r.label)
+            return give_a_session(r.label)
     return None
 
 
@@ -532,40 +458,3 @@ def declared_syllabus(
                 return repo, path
             fallback = fallback or (repo, path)
     return fallback
-
-
-def offplan_folders(
-    deploys: Iterable[schedule.Deploy], trees: Mapping[str, Iterable[str]]
-) -> list[tuple[str, str, str]]:
-    """`(repo, folder, kind)` for every released folder of a kind-named section
-    (`lectures/05_x`, `labs/lab-2`, ..., or a top folder of a repo so named) that none of
-    `deploys` covers: material released outside the plan (decision 0013 item 4). `trees`
-    is `{semester repo: its blob paths}`. The site's off-plan rows follow the same rule."""
-    copies = [(d.semester_dest_repo, deploy_dest(d)) for d in deploys]
-
-    def covered(repo: str, folder: str) -> bool:
-        return any(
-            r == repo
-            and (
-                not p
-                or p == folder
-                or folder.startswith(f"{p}/")
-                or p.startswith(f"{folder}/")
-            )
-            for r, p in copies
-        )
-
-    found: dict[tuple[str, str], str] = {}
-    for repo in sorted(trees):
-        for path in sorted(trees[repo]):
-            parts = path.split("/")
-            if len(parts) >= 3 and (kind := alias_kind(parts[0])):
-                folder = "/".join(parts[:2])
-            elif len(parts) >= 2 and (kind := alias_kind(repo)):
-                folder = parts[0]
-            else:
-                continue
-            if not publishable(path) or covered(repo, folder):
-                continue
-            found.setdefault((repo, folder), kind)
-    return [(repo, folder, kind) for (repo, folder), kind in found.items()]

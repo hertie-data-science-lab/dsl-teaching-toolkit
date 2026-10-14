@@ -24,8 +24,6 @@ from dsl_course import (
     records,
     repos,
     scaffold,
-    schedule,
-    schedule_plan,
     workflows_render,
 )
 from dsl_course.central import MissingCentralRef
@@ -37,7 +35,7 @@ from dsl_course.course import (
     SUBMIT_VIA,
 )
 from dsl_course.faults import NOT_MIGRATED
-from dsl_course.gh_contents import blob_sha, load_yaml_lines
+from dsl_course.gh_contents import blob_sha
 from dsl_course.migrate import OLD_CONFIG_REPO, OLD_JOIN_REPO, OLD_SEMESTER_TOPIC
 from dsl_course.opencourse import OpenCourse
 from dsl_course.welcome import template
@@ -606,7 +604,10 @@ def test_a_real_run_migrates_every_step_once_with_actions_off(
     assert "dsl-course.yml" not in fake.tree(SEM, ".github")
     schedule = tree["schedule.yml"].decode()
     assert "cohort_dest" not in schedule
-    assert "    kind: lecture" in schedule and "    kind: exam" in schedule
+    # Decision 0038: the schedule shape step leaves one block per kind.
+    plan = yaml.safe_load(schedule)
+    assert plan["lectures"]["s1"]["session"] == 1 and "exam" in plan["exams"]
+    assert plan["assignments"]["a1"]["repo_name"] == "work"
     assert fake._repo(SEM, ".github")["topics"] == [SEMESTER_TOPIC]
     # The pause record is written first, while everything still runs; every commit after
     # it - status.json included - landed with Actions off everywhere, until the restore
@@ -667,9 +668,9 @@ def test_a_second_run_finds_every_step_already_migrated(
 
     assert _main(monkeypatch, SEM, "--no-preview") == 0
     out = capsys.readouterr().out
-    # Ten steps, each "already migrated" in the plan and again in the run: nothing is
+    # Nine steps, each "already migrated" in the plan and again in the run: nothing is
     # paused, nothing written, status.json not rewritten.
-    assert out.count("already migrated") == 20
+    assert out.count("already migrated") == 18
     assert fake.commits == commits and fake.puts == puts and semester == []
     assert len(fake.dispatches) == 3  # nothing paused, so nothing was dropped
 
@@ -1102,7 +1103,11 @@ def test_every_new_seeded_line_is_the_current_templates():
     missing = [
         new for new in migrate.seeded_wording("main").values() if new not in current
     ]
-    assert missing == []
+    # Decision 0038 retired the 0.10 schedule skeleton: its comment lines are reworded
+    # only in a cohort-era schedule.yml with no entries (the schedule shape step rewrites
+    # any other whole), so their new side is the 0.10 seed's, not today's.
+    assert all(line.startswith("# ") for line in missing), missing
+    assert len(missing) == 9
     assert [new for _, new in migrate.seeded_blocks()] == [
         template("course/people-header.yml")
     ] * 2
@@ -1950,8 +1955,9 @@ def test_the_keys_step_commits_a_schedule_with_every_entry_where_it_was(
     fake.tree(SEM, OLD_CONFIG_REPO)["schedule.yml"] = INTERIOR_SCHEDULE.encode()
     assert _main(monkeypatch, SEM, "--no-preview") == 0
     meta = yaml.safe_load(fake.tree(SEM, CONFIG_REPO)["schedule.yml"])
-    assert set(meta) == {"assignments", "events", "releases"}
-    assert set(meta["events"]) == {"exam"}
+    # ...and the schedule shape step after it, one block per kind.
+    assert set(meta) == {"assignments", "exams", "lectures"}
+    assert set(meta["exams"]) == {"exam"}
 
 
 def test_the_run_keys_are_written_into_the_skeleton_and_read_back():
@@ -1962,7 +1968,8 @@ def test_the_run_keys_are_written_into_the_skeleton_and_read_back():
          "a2": {"semester_dest_repo": "homework-2"}},
     )  # fmt: skip
     got = migrate.settings.parse_instance(text)
-    assert got.faults == ()
+    # Read back as the schedule shape step reads them, to move them inline.
+    assert [f.code for f in got.faults] == ["NOT_MIGRATED"]
     assert got.blocks["a1"] == {"late_window_days": 2, "late_penalty_per_day": "5%"}
     assert got.dests == {"a2": "homework-2"}
     assert text.startswith(skeleton.rstrip("\n"))  # the skeleton's comments kept
@@ -2028,18 +2035,23 @@ def test_a_semester_migrated_before_b2_completes_on_the_next_run(
     out = capsys.readouterr().out
     assert "  keys:\n" in out and "-    grading_datetime: 2026-10-15" in out
     assert "seed the skeleton, and write what the old files said" in out
-    assert "+    late_window_days: 2" in out and "+# INSTRUCTOR-OWNED" not in out
+    assert "+    late_window_days: 2" in out
+    assert "listed once the keys step has run" in out
     assert fake.commits == []
 
     assert _main(monkeypatch, SEM, "--no-preview") == 0
     tree = fake.tree(SEM, CONFIG_REPO)
-    got = migrate.settings.parse_instance(tree["assignments.yml"].decode())
-    assert got.blocks["a1"] == {
+    # The keys step wrote the blocks; the schedule shape step moved them inline.
+    plan = yaml.safe_load(tree["schedule.yml"])["assignments"]
+    assert {k: plan["a1"][k] for k in A1_RUN_KEYS | {"late_window_days": 0}} == {
         "max_team_size": 3,
         "late_window_days": 2,
         "late_penalty_per_day": "5%",
     }
-    assert got.dests == {"a2": "homework-2"}
+    assert plan["a2"]["repo_name"] == "homework-2"
+    assert (
+        migrate.settings.parse_instance(tree["assignments.yml"].decode()).faults == ()
+    )
     assert migrate._schedule_clean(tree["schedule.yml"].decode(),
                                    tree["assignments.yml"].decode())  # fmt: skip
     keys = [c for c in fake.commits if c[3] == migrate.KEYS_COMMIT]
@@ -2539,126 +2551,6 @@ def test_a_catch_up_still_running_at_the_bound_is_said_and_is_no_failure(
     assert f"{SEM} is migrated" in out
 
 
-# ---------------------------------------------------------------- proposed releases
-
-LAYOUTS = Path(__file__).parent / "fixtures" / "layouts"
-
-
-def _nlp(fake):
-    """The nlp semester as it is on 25 Sep 2026: every folder released by hand, none in
-    its plan (paths and dates from the real repos, tests/fixtures/layouts/)."""
-    tree = {
-        p: b"x" for p in (LAYOUTS / "nlp-tree.txt").read_text().split() if p.strip()
-    }
-    fake.repos[(SEM, "materials")]["branches"]["main"] = dict(tree)
-    fake.tree(COURSE, "course-materials-f2026").update(tree)
-    config = fake.tree(SEM, OLD_CONFIG_REPO)
-    config["schedule.yml"] = (LAYOUTS / "nlp-schedule.yml").read_bytes()
-    for line in (LAYOUTS / "nlp-landed.txt").read_text().splitlines():
-        if line and not line.startswith("#"):
-            folder, when = line.split()
-            fake.history[(SEM, "materials", folder)] = when
-
-
-def test_a_preview_proposes_a_releases_plan_for_the_folders_outside_it(
-    fake, semester, monkeypatch, capsys
-):
-    _nlp(fake)
-    before = _state(fake)
-    assert _main(monkeypatch, SEM) == 0
-    out = capsys.readouterr().out
-    assert (
-        f"write {CONFIG_REPO}/{migrate.PROPOSED_RELEASES}: a releases plan for 14 "
-        "folder(s) released outside the plan"
-    ) in out
-    # The plan shows the block itself, as it will be written.
-    assert "-     lecture-01:\n    -       event_datetime: 2026-08-31T22:35\n" in out
-    assert "-           course_source_path: labs/04_session-4\n" in out
-    assert _state(fake) == before
-
-
-def test_the_proposal_is_written_beside_the_schedule_never_into_it(
-    fake, semester, monkeypatch
-):
-    _nlp(fake)
-    assert _main(monkeypatch, SEM, "--no-preview") == 0
-    tree = fake.tree(SEM, CONFIG_REPO)
-    assert "releases" not in yaml.safe_load(tree["schedule.yml"])
-    text = tree[migrate.PROPOSED_RELEASES].decode()
-    assert text.startswith(migrate.PROPOSAL_HEADER)
-    # What faculty paste reads clean with this engine: one entry per folder, kind from
-    # its section, dated by its first commit in the semester's time zone.
-    sched = migrate.schedule.parse(yaml.safe_load(text))
-    assert sched.faults == [] and sched.dropped == []
-    by_label = {r.label: r for r in sched.releases}
-    assert sorted(by_label) == sorted(
-        [f"lecture-0{n}" for n in range(1, 5)]
-        + [f"lab-0{n}" for n in range(1, 5)]
-        + [f"readings-0{n}" for n in range(1, 7)]
-    )
-    lab = by_label["lab-01"]
-    # `01_session-1` only restates the number: no title, so the row reads `Lab 1`.
-    assert (lab.kind, lab.title, lab.show_on_site) == ("lab", "", True)
-    assert lab.when.isoformat() == "2026-09-01T21:26:00+02:00"
-    assert [(d.course_source_repo, d.course_source_path, d.semester_dest_repo)
-            for d in lab.deploy] == [
-        ("course-materials-f2026", "labs/01_session-1", "materials")
-    ]  # fmt: skip
-    # A readings entry has no title; its label's number joins it to its lecture.
-    assert by_label["readings-01"].title == ""
-    rows = migrate.offplan_folders(
-        [d for r in sched.releases for d in r.deploy],
-        {"materials": list(fake.tree(SEM, "materials"))},
-    )
-    assert rows == []  # accepted, the proposal leaves no folder outside the plan
-    # Once the file is there the step is done: a rerun proposes nothing new.
-    commits = list(fake.commits)
-    assert _main(monkeypatch, SEM, "--no-preview") == 0
-    assert fake.commits == commits
-
-
-def test_a_proposal_titles_only_a_folder_whose_name_says_more_than_its_number():
-    landed = datetime(2026, 9, 1, 12, tzinfo=UTC)
-    folders = [
-        ("materials", "lectures/01_session-1", "lecture", landed, "c"),
-        ("materials", "lectures/02_transformers-and-attention", "lecture", landed, "c"),
-        ("materials", "labs/03_Week_3", "lab", landed, "c"),
-        ("materials", "readings/02_readings-2", "readings", landed, "c"),
-    ]
-    text = migrate.proposed_entries(folders, set(), UTC)
-    entries = yaml.safe_load(text)["releases"]
-    assert "title" not in entries["lecture-01"]
-    assert entries["lecture-02"]["title"] == "Transformers and attention"
-    assert "title" not in entries["lab-03"]
-    assert "title" not in entries["readings-02"]
-
-
-def test_a_folder_no_one_course_repo_holds_names_no_source(fake, semester, monkeypatch):
-    _nlp(fake)
-    course = fake.tree(COURSE, "course-materials-f2026")
-    for path in [p for p in course if p.startswith("labs/02_session-2/")]:
-        del course[path]
-    # A label the schedule already uses is never proposed again.
-    fake.tree(SEM, OLD_CONFIG_REPO)["schedule.yml"] += (
-        b"releases:\n  lab-01:\n    event_datetime: 2026-09-01\n"
-    )
-    assert _main(monkeypatch, SEM, "--no-preview") == 0
-    text = fake.tree(SEM, CONFIG_REPO)[migrate.PROPOSED_RELEASES].decode()
-    entries = yaml.safe_load(text)["releases"]
-    assert "lab-01" not in entries and "lab-01-2" in entries
-    assert entries["lab-02"]["deploy"][0]["course_source_repo"] == "CHANGE-ME"
-    assert entries["lab-03"]["deploy"][0]["course_source_repo"] == (
-        "course-materials-f2026"
-    )
-
-
-def test_a_semester_whose_folders_are_all_in_the_plan_proposes_nothing(
-    fake, semester, monkeypatch, capsys
-):
-    assert _main(monkeypatch, SEM) == 0
-    assert "proposed releases: already migrated" in capsys.readouterr().out
-
-
 # ---------------------------------------------------------------- public website
 
 
@@ -2726,123 +2618,6 @@ def test_the_public_website_step_on_a_migrated_course_keeps_its_opencourse(
 )
 def test_the_old_publish_settings_become_opencourse(config, expected):
     assert migrate.opencourse_from(config) == expected
-
-
-# ------------------------------------------------------------ explicit numbers (0020)
-
-POSITIONAL = """\
-timezone: Europe/Berlin
-releases:
-  intro:        # the first lecture
-    event_datetime: 2026-09-08T10:00
-    kind: lecture
-  lecture-5:
-    event_datetime: 2026-09-15T10:00
-    kind: lecture
-  setup:
-    event_datetime: 2026-09-16T10:00
-    show_on_site: false
-  wrap-up:
-    kind: lecture
-    event_datetime: 2026-09-22T10:00
-  reading:
-    event_datetime: 2026-09-23T10:00
-    kind: readings
-  flow: {event_datetime: 2026-09-29T10:00, kind: lab}
-assignments:
-  project:
-    course_source_repo: assignment-project
-    due_datetime: 2026-11-01T23:59
-  assignment-1:
-    course_source_repo: assignment-one
-    due_datetime: 2026-10-01T23:59
-"""
-
-
-def _parsed(text: str) -> schedule.Schedule:
-    return schedule.parse(load_yaml_lines(text))
-
-
-def test_position_numbers_are_the_numbers_shown_today_and_only_those():
-    stamps = migrate.position_numbers(_parsed(POSITIONAL), lambda repo: {})
-    # Label-numbered entries, a silent copy and a stand-alone readings row are left.
-    assert stamps == {
-        ("releases", "intro"): 1,
-        ("releases", "wrap-up"): 3,
-        ("releases", "flow"): 1,
-        ("assignments", "project"): 2,
-    }
-
-
-def test_numbers_are_stamped_keeping_every_comment_and_read_done_on_rerun():
-    stamps = migrate.position_numbers(_parsed(POSITIONAL), lambda repo: {})
-    new, declined = migrate.stamp_numbers(POSITIONAL, stamps)
-    assert declined == {"flow": "written as a flow mapping"}
-    assert "  intro:        # the first lecture\n    number: 1\n" in new
-    assert "  wrap-up:\n    number: 3\n    kind: lecture\n" in new
-    assert "  project:\n    number: 2\n" in new
-    # Only lines added: every line of the original is still there, in order.
-    assert [ln for ln in new.splitlines() if "number:" not in ln] == (
-        POSITIONAL.splitlines()
-    )
-    again = migrate.position_numbers(_parsed(new), lambda repo: {})
-    assert again == {("releases", "flow"): 1}
-    # The site shows exactly what it showed before.
-    before = {
-        sr.row.key: sr.number
-        for sr in schedule_plan.site_rows(schedule_plan.planned_rows(_parsed(new)))
-    }
-    assert before["intro"] == 1 and before["wrap-up"] == 3
-
-
-def test_an_empty_entry_is_declined_as_empty_not_as_a_flow_mapping():
-    text = "releases:\n  guest:\n  flow: {kind: lab}\n"
-    stamps = {("releases", "guest"): 1, ("releases", "flow"): 2}
-    new, declined = migrate.stamp_numbers(text, stamps)
-    assert new == text
-    assert declined == {"guest": "empty", "flow": "written as a flow mapping"}
-
-
-UNDATED = POSITIONAL.replace(
-    "assignments:\n",
-    "  later:\n    event_datetime: tbc\n    kind: lecture\n"
-    "  hidden:\n    event_datetime: tbc\n    show_on_site: false\n"
-    "assignments:\n",
-)
-
-
-def test_an_undated_shown_entry_is_listed_apart_from_the_stamps():
-    sched = _parsed(UNDATED)
-    assert migrate.undated_unnumbered(sched, lambda repo: {}) == ["later"]
-    assert ("releases", "later") not in migrate.position_numbers(sched, lambda repo: {})
-
-
-def test_the_numbers_step_previews_each_key_then_stamps_then_reads_done(
-    fake, semester, monkeypatch, capsys
-):
-    assert _main(monkeypatch, SEM, "--no-preview") == 0
-    tree = fake.tree(SEM, CONFIG_REPO)
-    tree["schedule.yml"] = UNDATED.replace(
-        "  flow: {event_datetime: 2026-09-29T10:00, kind: lab}\n", ""
-    ).encode()
-    fake.commits.clear()
-    capsys.readouterr()
-
-    assert _main(monkeypatch, SEM) == 0
-    out = capsys.readouterr().out
-    assert "  intro: 1\n" in out and "  wrap-up: 3\n" in out and "  project: 2\n" in out
-    assert "  later: undated: will show as a problem until dated and numbered\n" in out
-    assert fake.commits == []
-
-    assert _main(monkeypatch, SEM, "--no-preview") == 0
-    text = fake.tree(SEM, CONFIG_REPO)["schedule.yml"].decode()
-    assert "  intro:        # the first lecture\n    number: 1\n" in text
-    assert [c[3] for c in fake.commits].count(migrate.NUMBERS_COMMIT) == 1
-    commits = list(fake.commits)
-    capsys.readouterr()
-    assert _main(monkeypatch, SEM, "--no-preview") == 0
-    assert "  explicit numbers: already migrated" in capsys.readouterr().out
-    assert fake.commits == commits
 
 
 def test_the_old_pointer_at_publish_yml_names_opencourse_yml():
@@ -2932,18 +2707,6 @@ def test_an_entry_the_rewrite_would_lose_stops_the_preview(
     out, err = capsys.readouterr()
     assert "will stop here: the schedule.yml rewrite would lose or add an entry" in out
     assert "fix by hand" in err
-
-
-def test_an_entry_numbers_cannot_reach_stops_the_preview(
-    fake, semester, monkeypatch, capsys
-):
-    monkeypatch.setattr(migrate.Semester, "numbers_work",
-                        lambda self: ("", "", {}, {"flow": "written as a flow mapping"},
-                                      []))  # fmt: skip
-    assert _main(monkeypatch, SEM) == 1
-    assert "will stop here: schedule.yml flow: add `number:` by hand" in (
-        capsys.readouterr().out
-    )
 
 
 def test_a_course_file_left_not_migrated_stops_the_preview(

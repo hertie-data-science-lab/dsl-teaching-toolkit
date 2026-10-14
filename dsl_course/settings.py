@@ -7,7 +7,7 @@ The cascade: a RUN setting (`RUN_KEYS`: how teams form, the team cap, the late p
 repo visibility, the external submit link, whether returned marks show each question)
 resolves nearest-first through four layers -
 
-    assignment   semester-config/assignments.yml  assignments.<slug>.<key>
+    assignment   semester-config/schedule.yml     assignments.<key>.<key> (inline, 0038)
     semester     semester-config/assignments.yml  defaults.<key>
     course       .github/dsl-course.yml            assignment_defaults.<key>
     institution  policy.yml                        defaults.<key>
@@ -16,9 +16,10 @@ and `effective` says which layer answered. The late pair is ONE rule: whichever 
 states either half states both, the other half absent meaning none (`_late_pair`).
 `assignments.yml` is optional: absent, both of its layers are empty. A template's
 `grading_config.yml` states no run setting (a run key there is RUN_SETTING_IN_TEMPLATE). This is the
-ONE module that reads `assignment_defaults`, and the one parser of `assignments.yml`
-(`parse_instance`): its `semester_dest_repo` per assignment is read here too, for
-`schedule.load`.
+ONE module that reads `assignment_defaults`, the one parser of `assignments.yml`
+(`parse_instance`; its per-assignment `assignments:` blocks are legacy, read only for the
+0.11.0 migration) and of the settings written inline on a schedule entry
+(`inline_settings`; `assignment_repo_visibility` there is the `visibility` setting).
 """
 
 from __future__ import annotations
@@ -29,9 +30,9 @@ from dataclasses import dataclass, field
 
 import yaml
 
-from . import policy, run
+from . import legacy, policy, run
 from .config import read_semester
-from .course import ASSIGNMENTS_FILE, CONFIG_REPO, COURSE_CONFIG
+from .course import ASSIGNMENTS_FILE, CONFIG_REPO, COURSE_CONFIG, SCHEDULE_FILE
 from .discovery import course_org_for_semester, org_meta
 from .faults import ConfigFault, Unusable
 from .gh_contents import (
@@ -97,6 +98,36 @@ RUN_KEYS = (
     "marks_per_question",
 )
 LATE_PAIR = ("late_window_days", "late_penalty_per_day")
+# The run settings as a schedule.yml assignment entry spells them (decision 0038 rule 9):
+# `visibility` says whose the repos are, so on the entry it is `assignment_repo_visibility`.
+INLINE_NAMES = {"visibility": "assignment_repo_visibility"}
+INLINE_KEYS = tuple(INLINE_NAMES.get(key, key) for key in RUN_KEYS)
+
+
+def inline_settings(entry: Mapping, where: str, dropped: list) -> dict:
+    """The run settings written on one schedule.yml assignment entry, each through its
+    reader, keyed by setting (`visibility`, not its inline spelling). A value its reader
+    refuses is None (the next layer answers) and is recorded in `dropped`."""
+    spelt = {inline: key for key, inline in INLINE_NAMES.items()}
+    raw = {
+        spelt.get(str(k), str(k)): v for k, v in entry.items() if str(k) in INLINE_KEYS
+    }
+    return read_settings(raw, RUN_KEYS, where, dropped)
+
+
+def inline_blocks(assignments: object) -> dict[str, dict]:
+    """`{schedule key: its inline run settings}` out of a schedule.yml `assignments:`
+    block as YAML gives it; values a reader refuses are left out (the schedule's own parse
+    reports them)."""
+    if not isinstance(assignments, dict):
+        return {}
+    return {
+        str(key): _usable(inline_settings(entry, f"assignments.{key}", []))
+        for key, entry in assignments.items()
+        if isinstance(entry, dict)
+    }
+
+
 SOURCES = ("assignment", "semester", "course", "institution")
 ASSIGNMENTS_DEFAULTS = "defaults"
 ASSIGNMENTS_BLOCKS = "assignments"
@@ -251,6 +282,20 @@ def parse_instance(text: str | None) -> Instance:
                     str(key),
                 )
             )
+    if raw_blocks:
+        row = legacy.flag(ASSIGNMENTS_BLOCKS, legacy.ASSIGNMENTS_YML)
+        faults.append(
+            _fault(
+                ASSIGNMENTS_BLOCKS,
+                f"moved: each assignment's settings are written on its entry in "
+                f"{SCHEDULE_FILE} (`{row.new}`) - ignored here, so {row.cost}",
+                top.get(ASSIGNMENTS_BLOCKS),
+                ASSIGNMENTS_BLOCKS,
+                code=row.fault_code,
+            )
+        )
+    # Read all the same, for the 0.11.0 migration (`migrate.schedule_shape`), which moves
+    # each block onto its entry; nothing else reads them.
     blocks: dict[str, dict] = {}
     dests: dict[str, str] = {}
     for slug, raw in (raw_blocks or {}).items():
@@ -297,16 +342,16 @@ def instance(semester_org: str) -> Instance:
     )
 
 
-@run.per_run(
-    lambda semester_org: run.scope(semester_org, CONFIG_REPO, ASSIGNMENTS_FILE)
-)
-def semester_blocks(semester_org: str) -> tuple[dict, dict[str, dict]]:
-    """`(defaults, {slug: block})` out of the semester's `assignments.yml`, each value
-    through its reader; `({}, {})` when the file is absent (a 404). A read that fails for
-    any other reason RAISES and is not cached, and a file that is not YAML raises
-    `Unusable` - the same fail-closed rule as `course_defaults`: nothing hands out or
-    grades on defaults the semester did not choose. `schedule.load` carries the fault.
-    Held by the run (`run.per_run`)."""
+@run.per_run(lambda semester_org: run.scope(semester_org, CONFIG_REPO))
+def semester_defaults(semester_org: str) -> dict:
+    """The semester's `assignments.yml` `defaults:`, each value through its reader; `{}`
+    when the file is not there (a 404). The assignment layer - the settings written on
+    each schedule.yml entry - is never read here: the caller hands it over from the
+    parsed `Schedule` (`AssignmentEntry.settings`), so schedule.yml is read once. A read
+    that fails for any other reason RAISES and is not cached, and an `assignments.yml`
+    that is not YAML raises `Unusable` - the same fail-closed rule as `course_defaults`:
+    nothing hands out or grades on defaults the semester did not choose. `schedule.load`
+    carries the fault. Held by the run (`run.per_run`)."""
     read = instance(semester_org)
     if read.unparseable:
         raise Unusable(
@@ -314,7 +359,7 @@ def semester_blocks(semester_org: str) -> tuple[dict, dict[str, dict]]:
         )
     for fault in read.faults:
         log_err(f"  ! {ASSIGNMENTS_FILE} {fault.where}: {fault.what}")
-    return read.defaults, read.blocks
+    return read.defaults
 
 
 def institution_defaults() -> dict:
@@ -325,22 +370,25 @@ def institution_defaults() -> dict:
     return out
 
 
-def layers(course_org: str, semester_org: str = "", slug: str = "") -> list[Layer]:
-    """The layers for one assignment, nearest first."""
-    defaults, blocks = semester_blocks(semester_org)
+def layers(
+    course_org: str, semester_org: str = "", inline: Mapping | None = None
+) -> list[Layer]:
+    """The layers for one assignment, nearest first. `inline` is its schedule.yml entry's
+    own run settings (`AssignmentEntry.settings`), from the parsed plan."""
     return [
-        ("assignment", _usable(blocks.get(slug, {}) if slug else {})),
-        ("semester", _usable(defaults)),
+        ("assignment", _usable(inline or {})),
+        ("semester", _usable(semester_defaults(semester_org))),
         ("course", _usable(course_defaults(course_org))),
         ("institution", institution_defaults()),
     ]
 
 
-def instance_layers(read: Instance, slug: str) -> list[Layer]:
-    """The two layers `assignments.yml` states for `slug`, off a file already read: what
-    a parse can resolve with no course and no policy in hand."""
+def instance_layers(read: Instance, inline: Mapping) -> list[Layer]:
+    """The two layers a semester states for one assignment, off files already read: its
+    entry's inline settings and `assignments.yml` `defaults:` - what a parse can resolve
+    with no course and no policy in hand."""
     return [
-        ("assignment", _usable(read.blocks.get(slug, {}))),
+        ("assignment", _usable(inline)),
         ("semester", _usable(read.defaults)),
     ]
 
@@ -376,18 +424,23 @@ def _course_of(semester_org: str, course_org: str) -> str:
 
 
 def effective(
-    semester_org: str, slug: str, key: str, *, course_org: str = ""
+    semester_org: str,
+    key: str,
+    *,
+    inline: Mapping | None = None,
+    course_org: str = "",
 ) -> tuple[object, str]:
-    """The effective value of run setting `key` for assignment `slug` of `semester_org`,
-    and the layer it came from: `assignment`, `semester`, `course` or `institution`."""
+    """The effective value of run setting `key` for an assignment of `semester_org`
+    whose schedule.yml entry states `inline`, and the layer it came from: `assignment`,
+    `semester`, `course` or `institution`."""
     course_org = _course_of(semester_org, course_org)
-    return resolve(key, layers(course_org, semester_org, slug))
+    return resolve(key, layers(course_org, semester_org, inline))
 
 
 def effective_all(
-    semester_org: str, slug: str, *, course_org: str = ""
+    semester_org: str, *, inline: Mapping | None = None, course_org: str = ""
 ) -> dict[str, tuple[object, str]]:
     """`effective` for every run key, off one set of layers."""
     course_org = _course_of(semester_org, course_org)
-    stack = layers(course_org, semester_org, slug)
+    stack = layers(course_org, semester_org, inline)
     return {key: resolve(key, stack) for key in RUN_KEYS}

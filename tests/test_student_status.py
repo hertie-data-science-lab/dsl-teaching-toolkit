@@ -43,62 +43,64 @@ semester_end: 2026-12-18
 archive:
   event_datetime: 2027-01-31
   show_on_site: false
-releases:
+lectures:
   lecture_01:
-    event_datetime: 2026-09-08T10:00
-    kind: lecture
+    session: 1
+    event_datetime:
+      - 2026-09-08T10:00
+      - {at: 2026-09-09T18:00, details: "The same lecture, online."}
     title: Intro
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: lectures/01_intro
-        semester_dest_repo: materials
-  readings_01:
-    event_datetime: 2026-09-01T10:00
-    kind: readings
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: readings/01_intro
-        semester_dest_repo: materials
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: lectures/01_intro
+        to_semester_repo: materials
   lecture_02:
+    session: 2
     event_datetime: 2026-09-30T10:00
-    kind: lecture
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: lectures/02_trees
-        semester_dest_repo: materials
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: lectures/02_trees
+        to_semester_repo: materials
   lecture_03:
+    session: 3
     event_datetime: tbc
-    kind: lecture
     title: Forests
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: lectures/03_forests
-        semester_dest_repo: materials
-events:
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: lectures/03_forests
+        to_semester_repo: materials
+readings:
+  readings_01:
+    session: 1
+    event_datetime: 2026-09-01T10:00
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: readings/01_intro
+        to_semester_repo: materials
+exams:
   midterm:
-    kind: exam
     event_datetime: 2026-10-28T09:00
     title: Midterm
-  lecture-1-online:
-    kind: lecture
-    number: 1
-    details: The same lecture, online.
-    event_datetime: 2026-09-09T18:00
 assignments:
   assignment-1:
-    course_source_repo: assignment-1-f2026
+    number: 1
+    template: assignment-1-f2026
     handout_datetime: 2026-09-15T10:00
     due_datetime: 2026-09-27T23:59
   assignment-2-project:
-    course_source_repo: assignment-2-project-f2026
+    number: 2
+    repo_name: assignment-2-project
+    template: assignment-2-project-f2026
     handout_datetime: 2026-09-20T10:00
     due_datetime: 2026-10-30T23:59
   assignment-3:
-    course_source_repo: assignment-3-f2026
+    number: 3
+    template: assignment-3-f2026
     handout_datetime: 2026-10-20T10:00
     due_datetime: 2026-11-01T23:59
   assignment-4:
-    course_source_repo: assignment-4-f2026
+    number: 4
+    template: assignment-4-f2026
     handout_datetime: 2026-10-20T10:00
     due_datetime: 2026-11-01T23:59
     show_on_site: false
@@ -694,35 +696,53 @@ def test_an_undated_event_is_a_dateless_row_with_no_when():
     assert row["sort_at"].startswith(facts.sched.semester_end.isoformat())
 
 
-def test_a_session_event_is_a_row_of_its_kind_with_nothing_to_ship():
-    # An `events:` entry of a policy kind: "Lecture 1" with the release's title, on the
-    # Lectures tab, no files and nothing pending - and no exam/special-event row.
+def test_an_assignment_with_no_due_date_is_two_dateless_rows():
+    import dataclasses
+
+    facts = _facts()
+    key = next(iter(facts.sched.assignments))
+    entry = facts.sched.assignments[key]
+    facts.sched.assignments[key] = dataclasses.replace(entry, due_datetime=None)
+    name = schedule.semester_name(key, entry)
+    rows = {r["id"]: r for r in student_status.event_rows(facts)}
+    for row in (rows[f"{name}:handout"], rows[f"{name}:due"]):
+        assert row["when"] is None and row["dateless"] is True and row["tbc"] is True
+        assert row["sort_at"].startswith(facts.sched.semester_end.isoformat())
+
+
+def test_a_second_slot_is_a_row_of_its_entry():
+    # Decision 0038 rule 3: lecture 1 given twice is two rows, "Lecture 1" with the
+    # entry's title and files; the second's id is `<key>-2`, as the site names its file.
     rows = {r["id"]: r for r in _render()["rows"]}
-    row = rows["lecture-1-online"]
+    row = rows["lecture_01-2"]
     assert (row["kind"], row["title"], row["subtitle"]) == (
         "lecture",
         "Lecture 1",
         "Intro",
     )
     assert row["details"] == "The same lecture, online."
-    assert row["released"] is True and row["no_materials"] is True
-    assert row["links"] == [] and row["tabs"] == ["lecture"]
     assert row["when"].startswith("2026-09-09T18:00")
-    assert not rows["lecture_01"]["no_materials"]
-    assert "lecture-1-online" not in {
-        r["id"] for r in student_status.event_rows(_facts())
-    }
+    # Its own files; the unit's readings ride its first row alone.
+    assert row["links"] and all(x in rows["lecture_01"]["links"] for x in row["links"])
+    assert len(row["links"]) < len(rows["lecture_01"]["links"])
+    assert "lecture_01-2" not in {r["id"] for r in student_status.event_rows(_facts())}
 
 
-def test_a_whole_day_session_is_all_day_for_the_student_console():
-    # A session dated with no time: the console prints the day and no 09:00.
+def test_a_whole_day_slot_is_all_day_for_the_student_console():
+    # A slot dated with no time: the console prints the day and no 09:00.
     facts = _facts()
-    facts.sched.sessions.append(
-        schedule.Event("field-trip", "Field trip", NOW.date(), "lab", number=7)
+    facts.sched.releases.append(
+        schedule.Release(
+            "field-trip",
+            None,
+            kind="lab",
+            number=7,
+            slots=[schedule.Slot(NOW.date())],
+        )
     )
     rows = {r["id"]: r for r in student_status.release_rows(facts, _extra(facts))}
     assert rows["field-trip"]["all_day"] is True
-    assert rows["lecture-1-online"]["all_day"] is False
+    assert rows["lecture_01-2"]["all_day"] is False
 
 
 def test_a_release_with_an_empty_deploy_ships_nothing_like_a_session():

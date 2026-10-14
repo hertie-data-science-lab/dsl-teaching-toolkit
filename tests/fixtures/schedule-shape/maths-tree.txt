@@ -16,6 +16,16 @@ labs/04_lab/lab4_handout.pdf
 labs/04_lab/lab4_student.ipynb
 labs/04_lab/solutions/lab4_solutions.ipynb
 labs/04_lab/solutions/lab4_solutions.pdf
+labs/05_lab/lab5_handout.pdf
+labs/05_lab/lab5_student.ipynb
+labs/05_lab/solutions/lab5_solutions.ipynb
+labs/05_lab/solutions/lab5_solutions.pdf
+labs/06_lab/lab6_handout.pdf
+labs/06_lab/lab6_student.ipynb
+labs/06_lab/solutions/lab6_solutions.ipynb
+labs/06_lab/solutions/lab6_solutions.pdf
+labs/07_lab/lab7_handout.pdf
+labs/07_lab/lab7_student.ipynb
 lectures/01_lecture/01_probability_theory.html
 lectures/01_lecture/01_probability_theory.pdf
 lectures/01_lecture/01_probability_theory_files/figure-revealjs/cell-10-output-1.png
@@ -176,6 +186,9 @@ lectures/01_lecture/media/videos/garden_to_peeble2/720p30/GardenToPeeble2.mp4
 lectures/02_lecture/02_random_variables_and_their_distributions.pdf
 lectures/03_lecture/03_expectation_and_joint_distributions.pdf
 lectures/04_lecture/04_calculus_for_data_science.pdf
+lectures/05_lecture/05_continuous_random_variables_and_limit_theorems.pdf
+lectures/06_lecture/06_maximum_likelihood_estimation.pdf
+lectures/07_lecture/07_bayesian_analysis.pdf
 m4ds/__init__.py
 m4ds/images/__init__.py
 m4ds/images/figure.py
@@ -187,4 +200,7 @@ readings/02_week-2/READINGS.md
 readings/03_week-3/READINGS.md
 readings/04_week-4/READINGS.md
 readings/05_week-5/READINGS.md
+readings/06_week-6/READINGS.md
+readings/07_week-7/READINGS.md
+readings/08_week-8/READINGS.md
 uv.lock

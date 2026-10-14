@@ -168,12 +168,14 @@ def _no_semester_is_closed_out(monkeypatch):
 @pytest.fixture(autouse=True)
 def _no_course_or_semester_defaults(monkeypatch):
     """Answer the cascade's live reads (`settings`) with "nothing declared" by default:
-    the course's `dsl-course.yml`, the semester's `assignments.yml` and the semester's
-    pointer to its course. Every spec read and every late cutoff resolves through them,
+    the course's `dsl-course.yml`, the semester's `assignments.yml`, the run settings
+    the settings written on a schedule.yml entry (`schedule.run_settings_of`, which reads
+    the parsed plan) and the semester's pointer to its course. Every spec read and every late cutoff resolves through them,
     and the institution's policy is the uninteresting answer for every test but the ones
     about a layer, which set their own after this fixture and win."""
     monkeypatch.setattr(settings, "org_meta", lambda org: {})
     monkeypatch.setattr(settings, "_assignments_text", lambda org: None)
+    monkeypatch.setattr(schedule, "run_settings_of", lambda org, slug: {})
     monkeypatch.setattr(settings, "course_org_for_semester", lambda org: "")
 
 
@@ -534,3 +536,39 @@ def entry_link_rows(rendered: str) -> list[dict]:
 def entry_links(rendered: str) -> list[tuple[str, str]]:
     """The (section, name) pairs of the same block - the view most assertions want."""
     return [(l["section"], l["name"]) for l in entry_link_rows(rendered)]
+
+
+def run_settings(monkeypatch, read) -> None:
+    """Stub a semester's run settings from `read(org)`, the text of an `assignments.yml`
+    as it was written before decision 0038: its `defaults:` stay in `assignments.yml`,
+    and each `assignments.<key>` block becomes the settings written on that key's
+    schedule.yml entry (`settings.inline_settings`; `visibility` spelt
+    `assignment_repo_visibility` there). Text that is not YAML is the `assignments.yml`
+    as it stands."""
+
+    def split(org):
+        text = read(org)
+        try:
+            data = yaml.safe_load(text) if text else None
+        except yaml.YAMLError:
+            return text, None
+        if not isinstance(data, dict):
+            return text, None
+        blocks = data.pop("assignments", None)
+        defaults = yaml.safe_dump(data, sort_keys=False) if data else None
+        if not isinstance(blocks, dict):
+            return defaults, None
+        inline = {
+            key: {settings.INLINE_NAMES.get(k, k): v for k, v in (block or {}).items()}
+            for key, block in blocks.items()
+        }
+        return defaults, yaml.safe_dump({"assignments": inline}, sort_keys=False)
+
+    def inline(org, slug):
+        text = split(org)[1]
+        blocks = (yaml.safe_load(text) or {}).get("assignments") if text else None
+        return settings.inline_blocks(blocks).get(slug, {})
+
+    monkeypatch.setattr(settings, "_assignments_text", lambda org: split(org)[0])
+    # The entry's own settings, as the parsed plan carries them (`AssignmentEntry.settings`).
+    monkeypatch.setattr(schedule, "run_settings_of", inline)

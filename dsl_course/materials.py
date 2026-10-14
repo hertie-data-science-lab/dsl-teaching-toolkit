@@ -1,31 +1,21 @@
-"""A materials repo's optional `materials.yml`, and the kind a folder implies.
+"""A materials repo's optional `materials.yml`.
 
 A materials repo is any course-org repo carrying the `dsl-materials` topic; the name
 `course-materials-<tag>` is only the default the scaffold picks. Nothing about its layout is
-required. `materials.yml` at its root is the one escape hatch for what the convention cannot
-say, and is absent for the default layout:
+required, and no folder name means anything (decision 0038: the schedule says what each
+entry is). `materials.yml` at its root names the syllabus when it is not `SYLLABUS.md`:
 
-    syllabus: E1282_syllabus.pdf   # the syllabus file (default SYLLABUS.md)
-    kinds:                         # a folder (a name or a path) -> the kind it holds
-      tutorials: lab
-      students/lectures: lecture
-      quiz: other
+    syllabus: E1282_syllabus.pdf
 
-A release entry that declares no `kind` takes one from the section its first copy lands in:
-the top folder of the DESTINATION path; for a copy into the root, the copied name when it
-names a kind (`lectures` copied whole), else the destination repo itself. The source
-repo's `kinds:` first, then the built-in aliases, both matched case-insensitively, else
-supporting files (`assets`, decision 0031 rule 10): a folder not named lectures, labs or
-readings (or a synonym) is released, never shown.
-
-A built-in name is recognised at the top and one level down (`students/lectures`,
-`ALIAS_DEPTH`); a `kinds:` path is honoured at any depth. Deeper undeclared folders are part
-of the folder above them.
+Its `kinds:` folder map, and the folder-name kinds below it, are no longer read by the
+semester side: the open site still reads them (`public_site`, until WP-P rebuilds it on
+the schedule), the console's `materials.json` still exports them (until WP-C), and
+`migrate` reads them once, to write each 0.10 entry's kind into its block.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 import yaml
@@ -45,21 +35,18 @@ PLAN_START = "<!-- dsl:weekly-plan -->"
 PLAN_END = "<!-- /dsl:weekly-plan -->"
 # The kind whose folders are released but get no row or tab on either site.
 ASSETS_KIND = "assets"
+# WP-P/WP-C remove: the kind a folder implies, for the open site, the console's
+# materials.json and the 0.11.0 migration only.
 # The kind of a folder no alias names (decision 0031 rule 10; it was `lecture`).
 DEFAULT_KIND = ASSETS_KIND
-# The kind of a `releases:` entry that names none and copies nothing yet: there is no
-# folder to infer from, so it stays the row it always was.
+# The kind a 0.10 `releases:` entry that named none and copied nothing had.
 EMPTY_ENTRY_KIND = "lecture"
 
 # How deep a folder's own name still names its kind: the top, and one level down. A
 # `kinds:` path is honoured at any depth.
 ALIAS_DEPTH = 2
 
-# The folder names every course gets for free. A folder of one of these names that no
-# schedule entry releases still gets its rows (`site`'s off-plan rows), except a
-# supporting-files one (`ASSETS_KIND`), which is released and never shown. The
-# supporting-files names add nothing to the default; they record that such a folder got
-# no row under the old `lecture` default either (`status_json.kindless_problems`).
+# The folder names a kind was inferred from before decision 0038.
 BUILTIN_ALIASES = {
     "lecture": "lecture",
     "lectures": "lecture",
@@ -78,9 +65,7 @@ BUILTIN_ALIASES = {
     "src": "assets",
     "static": "assets",
 }
-# The kinds a folder may be set to (the console's Folder kinds dropdown): the policy's kinds a
-# built-in folder name implies, in the policy's order; its other kinds belong to schedule
-# entries, not folders.
+# The kinds a folder could be set to (the console's retired Folder kinds dropdown).
 FOLDER_KINDS = tuple(
     k for k in policy.content_kinds() if k in set(BUILTIN_ALIASES.values())
 )
@@ -142,21 +127,6 @@ def declared(file: ConfigFile, quiet: bool = False) -> Declared:
     except yaml.YAMLError as exc:
         raise Unusable(f"{where} is not valid YAML") from exc
     return parse(data, where)
-
-
-def kinds_reader(org: str) -> Callable[[str], Mapping[str, str] | None]:
-    """Each repo's folder aliases (`kinds`), as the plan's kind inference reads them. A
-    declaration that does not parse is None: inference falls back to the built-in aliases,
-    and a caller that must not act on a guess (a number to require) can tell. Its own
-    problem reports the file."""
-
-    def read_kinds(repo: str) -> Mapping[str, str] | None:
-        try:
-            return read(org, repo).kinds
-        except Unusable:
-            return None
-
-    return read_kinds
 
 
 def known_kind(kind: str) -> str:

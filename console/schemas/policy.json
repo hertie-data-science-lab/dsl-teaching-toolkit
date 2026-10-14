@@ -120,7 +120,7 @@
       "key": "other",
       "label": "Event",
       "numbered": false,
-      "plural": "other",
+      "plural": "events",
       "shown": true,
       "system": false
     }

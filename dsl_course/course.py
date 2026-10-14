@@ -683,6 +683,8 @@ INSTRUCTORS_FILE = "instructors.yml"
 # `assignments:` map of per-slug deviations), at the root of semester-config beside the
 # schedule. Named now so the console has no literal; the engine reads it from B2.
 ASSIGNMENTS_FILE = "assignments.yml"
+# The semester's plan, beside it in `semester-config` (`schedule`).
+SCHEDULE_FILE = "schedule.yml"
 # `role:` value -> the role key every consumer groups by (the old file's own keys).
 INSTRUCTOR_ROLES = {
     "instructor": "instructors",
@@ -744,6 +746,9 @@ def is_repo_root(path: str) -> bool:
     return path.strip("/").strip() in ("", ".")
 
 
+# WP-P removes (with the open site's rebuild on the schedule, plan 0.11.0 section 2): the
+# `NN_` session-folder rule below is read by `public_site` alone. Nothing on the semester
+# side gives a folder name any meaning (decision 0038).
 # Session directories are named "<ordinal>_<free text>" (e.g. "00_intro",
 # "07_finals-review") - only the leading, zero-padding-tolerant ordinal is meaningful;
 # the rest is whatever the course calls it. No "week"/"session" literal is required.
@@ -766,10 +771,7 @@ def session_dirs(dir_paths: Iterable[str]) -> list[tuple[str, str, int]]:
     ordinal prefix, is not a session folder. A `parent` is therefore exactly a
     releasable section.
 
-    One rule, two transports: the local filesystem (discover_sections here, used by
-    the public-site builder) and the GitHub trees API (dsl_course.discovery) both feed their
-    directory listing through this, so "ordinal-prefixed directory = session folder"
-    is defined once.
+    Read through the local filesystem (`discover_sections`, the public-site builder).
     """
     found = []
     for path in dir_paths:
@@ -816,9 +818,7 @@ def find_session_dir(section_dir: Path, session: str) -> Path | None:
 def discover_local_sessions(repo_root: Path) -> list[str]:
     """The session numbers a CHECKOUT holds, across every discovered section.
 
-    The local-checkout twin of `discovery.discover_sessions`, which asks GitHub for a
-    recursive tree instead. A caller that has already cloned the repo to copy files out of
-    it has the answer on disk, and the API's copy of it can only be the same or staler."""
+    The public-site builder's, which has already cloned the repo."""
     return [
         str(n)
         for n in sorted(
@@ -830,10 +830,7 @@ def discover_local_sessions(repo_root: Path) -> list[str]:
 def discover_sections(repo_root: Path) -> list[str]:
     """Any top-level directory containing at least one ordinal-prefixed subdirectory is
     a releasable section - no declared config, the directory structure is the only
-    source of truth. Sorted for a deterministic order.
-
-    The local-checkout transport of the session_dirs rule; dsl_course.discovery is the
-    API-side one."""
+    source of truth. Sorted for a deterministic order."""
     return sorted(
         {parent for parent, _, _ in session_dirs(_local_dir_paths(repo_root)) if parent}
     )

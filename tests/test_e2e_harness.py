@@ -34,6 +34,7 @@ from dsl_course import (
     settings,
     team_formation,
 )
+from dsl_course.gh_contents import load_yaml_lines
 from dsl_course.ops.request import parse_request
 from tests.e2e import (
     allowlist,
@@ -357,7 +358,8 @@ timezone: Europe/Berlin
 
 assignments:
   assignment-1:
-    course_source_repo: assignment-1-f2026
+    number: 1
+    template: assignment-1-f2026
     due_datetime: 2026-10-13
 
 events:
@@ -367,7 +369,8 @@ events:
 
 BLOCK = """\
   assignment-90-e2eab12cd:
-    course_source_repo: assignment-90-e2eab12cd
+    number: 90
+    template: assignment-90-e2eab12cd
     due_datetime: 2026-09-04T23:59
 """
 
@@ -795,26 +798,23 @@ def test_the_block_the_harness_really_inserts_is_valid_yaml(monkeypatch):
     indentation slip here would not fail the harness, it would fail the semester."""
     module = _pipeline_module(monkeypatch)
     when = datetime(2026, 9, 4, 14, 0)
-    block = module._schedule_block("assignment-90-e2eab12cd", when, when)
-    doc = yaml.safe_load(schedule_edit.insert_block(SCHEDULE, "e2eab12cd", block))
+    shape = shapes.BY_NAME["private"]
+    block = module._schedule_block("assignment-90-e2eab12cd", when, when, shape, 90)
+    text = schedule_edit.insert_block(SCHEDULE, "e2eab12cd", block)
+    doc = yaml.safe_load(text)
     assert set(doc) == {"timezone", "assignments", "events"}
     entry = doc["assignments"]["assignment-90-e2eab12cd"]
-    assert entry["course_source_repo"] == "assignment-90-e2eab12cd"
+    assert entry["template"] == "assignment-90-e2eab12cd" and "repo_name" not in entry
     assert set(entry) <= schedule.KNOWN_ASSIGNMENT
     # The due date and the cutoff are separate instants: collapsing them would skip the
     # refresh pass entirely, which is most of what the live run is there to exercise. And
     # both halves of the late rule, or the penalty reads as "no such rule".
-    shape = shapes.BY_NAME["private"]
-    run = module._instance_block("assignment-90-e2eab12cd", shape)
-    instance = settings.parse_instance(
-        schedule_edit.insert_block(
-            schedule_edit.with_assignments_key(""), "e2eab12cd", run
-        )
-    )
-    assert not instance.faults
-    block = instance.blocks["assignment-90-e2eab12cd"]
-    assert block["late_window_days"] == module.LATE_WINDOW_DAYS == 1
-    assert block["late_penalty_per_day"] == module.LATE_PENALTY
+    sched = schedule.parse(load_yaml_lines(text))
+    assert sched.faults == []
+    run = sched.assignments["assignment-90-e2eab12cd"].settings
+    assert run["late_window_days"] == module.LATE_WINDOW_DAYS == 1
+    assert run["late_penalty_per_day"] == module.LATE_PENALTY
+    assert run["visibility"] == "private"
 
 
 # ------------------------------------------------- the timeline, against the engine
@@ -860,14 +860,10 @@ def test_the_preflight_itself_refuses_a_start_near_midnight(monkeypatch):
 def _engine_reads(monkeypatch, module, handout, due) -> schedule.Schedule:
     """What the ENGINE makes of the two fenced blocks the harness writes for `due`: the
     schedule text through `schedule.parse`, the run settings through the real cascade."""
-    blocks = schedule_edit.insert_block(
-        schedule_edit.with_assignments_key(""), RUN, module._instance_blocks(RUN)
-    )
-    settings.semester_blocks.cache_clear()
-    monkeypatch.setattr(settings, "_assignments_text", lambda org: blocks)
     text = schedule_edit.insert_block(
         SCHEDULE, RUN, module._schedule_blocks(RUN, handout, due)
     )
+    settings.semester_defaults.cache_clear()
     sched = schedule.parse(yaml.safe_load(text))
     sched.org = SEMESTER
     return sched
@@ -1186,10 +1182,10 @@ def test_the_config_the_harness_writes_parses_to_the_shape_it_meant(shape):
     # semester's run settings, and a value the parser drops hands out the DEFAULT shape
     # under another name.
     template = grading_spec.parse_grading_spec(shapes.configure(_seeded(shape), shape))
-    block = yaml.safe_dump({"assignments": {"a": shapes.run_settings(shape)}})
-    (fault,) = settings.parse_instance(block).faults or (None,)
-    assert fault is None
-    spec = dataclasses.replace(template, **settings.parse_instance(block).blocks["a"])
+    dropped: list = []
+    run = settings.inline_settings(shapes.run_settings(shape), "assignments.a", dropped)
+    assert dropped == []
+    spec = dataclasses.replace(template, **run)
     assert spec.submit_via == shape.submit_via
     assert spec.submit_shape == shape.key
     assert spec.submit_url == shape.submit_url
@@ -1378,21 +1374,19 @@ def test_the_run_puts_one_schedule_entry_per_shape_in_one_fence(monkeypatch):
     assert mine == {shapes.slug("e2eab12cd", s) for s in shapes.SHAPES}
     for slug in mine:
         entry = doc["assignments"][slug]
-        assert entry["course_source_repo"] == slug
+        assert entry["template"] == slug and "repo_name" not in entry
         assert set(entry) <= schedule.KNOWN_ASSIGNMENT
-    # The run settings of all five, in one fence of the semester's assignments.yml, each
-    # with a late window so the due date and the cutoff stay separate instants.
-    instance = settings.parse_instance(
-        schedule_edit.insert_block(
-            schedule_edit.with_assignments_key(""),
-            "e2eab12cd",
-            module._instance_blocks("e2eab12cd"),
-        )
+    # Each with its own number and a late window, so the due date and the cutoff stay
+    # separate instants.
+    sched = schedule.parse(
+        load_yaml_lines(schedule_edit.insert_block(SCHEDULE, "e2eab12cd", blocks))
     )
-    assert not instance.faults and set(instance.blocks) == mine
-    for block in instance.blocks.values():
-        assert block["late_window_days"] == module.LATE_WINDOW_DAYS
-        assert block["late_penalty_per_day"] == module.LATE_PENALTY
+    assert sched.faults == []
+    assert len({sched.assignments[slug].number for slug in mine}) == len(mine)
+    for slug in mine:
+        run = sched.assignments[slug].settings
+        assert run["late_window_days"] == module.LATE_WINDOW_DAYS
+        assert run["late_penalty_per_day"] == module.LATE_PENALTY
     # And removing the one fence takes all five out again.
     fenced = schedule_edit.insert_block(SCHEDULE, "e2eab12cd", blocks)
     assert schedule_edit.remove_block(fenced, "e2eab12cd") == SCHEDULE

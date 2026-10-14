@@ -1,0 +1,343 @@
+# The demo's schedule.yml in the 0.11 shape: tests/fixtures/schedule-shape/
+# demo-schedule-0.10.yml as `migrate.schedule_shape` rewrites it.
+# INSTRUCTOR-OWNED - yours to edit freely; edits here are not overwritten.
+#
+# This semester's plan: one block per kind (lectures, labs, readings, exams, events, assets),
+# each a map whose KEY names what the toolkit makes for the entry (its site row, its ids; an
+# assignment's repos and mark sheet) and is never displayed or read for a number.
+#   session         the teaching unit (integer): REQUIRED on lectures and labs; optional on
+#                   readings (absent = a standalone row)
+#   number          optional, default = session: the row word ("Lab 2"); REQUIRED on assignments
+#   event_datetime  a datetime, `tbc`, or a list of slots {at, location, details}
+#   files           from_course_repo, from_path, to_semester_repo, to_path, release_datetime
+# Field reference: docs/07-schedule-releases.md in the toolkit.
+
+timezone: Europe/Berlin
+semester_start: 2026-08-04
+semester_end: 2026-11-13
+archive:
+  event_datetime: 2027-01-12
+  show_on_site: true
+  details: 'This semester is archived on {date}: every repository in it becomes read-only. You keep read access, so you can still fork or clone anything you want to keep working on into your own account.'
+lectures:
+  lecture-01:
+    session: 1
+    title: Deep learning in public policy
+    details: What deep learning is, where it already sits in public-sector decision making, and what this course will and will not claim for it.
+    event_datetime: 2026-08-04T10:00
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: lectures/01_deep-learning-in-public-policy
+        release_datetime: 2026-08-04T08:00
+  lecture-02:
+    session: 2
+    title: Deep neural networks (1)
+    details: Perceptrons, activation functions and the forward pass; why depth buys representational power.
+    event_datetime: 2026-08-11T10:00
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: lectures/02_deep-neural-networks-1
+        release_datetime: 2026-08-11T08:00
+  lecture-03:
+    session: 3
+    title: Deep neural networks (2)
+    details: 'Backpropagation and gradient descent in practice: initialisation, learning rates, and the failure modes of each.'
+    event_datetime: 2026-08-18T10:00
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: lectures/03_deep-neural-networks-2
+        release_datetime: 2026-08-18T08:00
+  lecture-04:
+    session: 4
+    title: 'Computer vision (1): Convolutional neural networks'
+    details: Convolution, pooling and parameter sharing, and why they suit images.
+    event_datetime: 2026-08-25T10:00
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: lectures/04_computer-vision-1-cnns
+        release_datetime: 2026-08-25T08:00
+  lecture-05:
+    session: 5
+    title: 'Computer vision (2): Modern CNNs, implementation and applications'
+    details: Residual connections and modern architectures, with applications to satellite imagery for policy.
+    event_datetime: 2026-09-01T10:00
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: lectures/05_computer-vision-2-modern-cnns
+        release_datetime: 2026-09-01T08:00
+  lecture-06:
+    session: 6
+    title: Sequence methods and time-series analysis
+    details: Recurrent architectures and their limits; where classical time-series methods remain the better tool.
+    event_datetime: 2026-09-08T10:00
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: lectures/06_sequence-methods-and-time-series
+        release_datetime: 2026-09-08T08:00
+  lecture-07:
+    session: 7
+    title: Natural language processing (1)
+    details: 'Text as data: tokenisation, embeddings, and what a language model is actually estimating.'
+    event_datetime: 2026-09-15T10:00
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: lectures/07_natural-language-processing-1
+        release_datetime: 2026-09-15T08:00
+  lecture-08:
+    session: 8
+    title: 'Natural language processing (2): Encoder-decoder architecture and attention'
+    details: The attention mechanism and the transformer, read through the papers that introduced them.
+    event_datetime: 2026-09-22T10:00
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: lectures/08_nlp-2-encoder-decoder-and-attention
+        release_datetime: 2026-09-22T08:00
+  lecture-09:
+    session: 9
+    title: Further topics in deep learning
+    details: Uncertainty quantification, generative models, and the state of the research frontier.
+    event_datetime: 2026-09-29T10:00
+    files:
+      - from_course_repo: lecture-code-f2026
+        from_path: dldemo/uncertainty.py
+        to_path: code/dldemo/uncertainty.py
+  lecture-10:
+    session: 10
+    title: Policy approaches to regulate deep learning
+    details: Regulation, auditing and the documented harms of large models, with the EU AI Act as the worked case.
+    event_datetime: 2026-10-06T10:00
+    files:
+      - from_course_repo: lecture-code-f2026
+        from_path: dldemo/audit.py
+        to_path: code/dldemo/audit.py
+  lecture-11:
+    session: 11
+    title: Deep learning in practice
+    details: 'Putting a model into a real workflow: compute, reproducibility and maintenance.'
+    event_datetime: 2026-10-13T10:00
+    files:
+      - from_course_repo: lecture-code-f2026
+        from_path: dldemo/serving.py
+        to_path: code/dldemo/serving.py
+labs:
+  lab-01:
+    session: 1
+    title: Lab 1
+    event_datetime: 2026-08-06T14:00
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: labs/01_deep-learning-in-public-policy
+  lab-02:
+    session: 2
+    title: Lab 2
+    event_datetime: 2026-08-13T14:00
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: labs/02_deep-neural-networks-1
+  lab-03:
+    session: 3
+    title: Lab 3
+    event_datetime: 2026-08-20T14:00
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: labs/03_deep-neural-networks-2
+  lab-04:
+    session: 4
+    title: Lab 4
+    event_datetime: 2026-08-27T14:00
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: labs/04_computer-vision-1-cnns
+  lab-05:
+    session: 5
+    title: Lab 5
+    event_datetime: 2026-09-03T14:00
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: labs/05_computer-vision-2-modern-cnns
+  lab-06:
+    session: 6
+    title: Lab 6
+    event_datetime: 2026-09-10T14:00
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: labs/06_sequence-methods-and-time-series
+  lab-09:
+    session: 9
+    title: Lab 9
+    event_datetime: 2026-10-01T14:00
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: labs/09_further-topics
+  lab-11:
+    session: 11
+    title: Lab 11
+    event_datetime: 2026-10-15T14:00
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: labs/11_deep-learning-in-practice
+readings:
+  readings-01:
+    session: 1
+    event_datetime: 2026-07-30T09:00
+    show_on_site: false
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: readings/01_deep-learning-in-public-policy
+    reading_list: |
+      ## Readings
+
+      The list in `readings/01_deep-learning-in-public-policy/READINGS.md`.
+  readings-02:
+    session: 2
+    event_datetime: 2026-08-06T09:00
+    show_on_site: false
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: readings/02_deep-neural-networks-1
+    reading_list: |
+      ## Readings
+
+      The list in `readings/02_deep-neural-networks-1/READINGS.md`.
+  readings-03:
+    session: 3
+    event_datetime: 2026-08-13T09:00
+    show_on_site: false
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: readings/03_deep-neural-networks-2
+    reading_list: |
+      ## Readings
+
+      The list in `readings/03_deep-neural-networks-2/READINGS.md`.
+  readings-04:
+    session: 4
+    event_datetime: 2026-08-20T09:00
+    show_on_site: false
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: readings/04_computer-vision-1-cnns
+    reading_list: |
+      ## Readings
+
+      The list in `readings/04_computer-vision-1-cnns/READINGS.md`.
+  readings-05:
+    session: 5
+    event_datetime: 2026-08-27T09:00
+    show_on_site: false
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: readings/05_computer-vision-2-modern-cnns
+    reading_list: |
+      ## Readings
+
+      The list in `readings/05_computer-vision-2-modern-cnns/READINGS.md`.
+  readings-08:
+    session: 8
+    event_datetime: 2026-09-17T09:00
+    show_on_site: false
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: readings/08_nlp-2-encoder-decoder-and-attention
+    reading_list: |
+      ## Readings
+
+      The list in `readings/08_nlp-2-encoder-decoder-and-attention/READINGS.md`.
+  readings-09:
+    session: 9
+    event_datetime: 2026-09-24T09:00
+    show_on_site: false
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: readings/09_further-topics
+  readings-10:
+    session: 10
+    event_datetime: 2026-10-01T09:00
+    show_on_site: false
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: readings/10_policy-approaches-and-responsible-implementation
+    reading_list: |
+      ## Readings
+
+      The list in `readings/10_policy-approaches-and-responsible-implementation/READINGS.md`.
+  readings-11:
+    session: 11
+    event_datetime: 2026-10-08T09:00
+    show_on_site: false
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: readings/11_deep-learning-in-practice
+exams:
+  midterm-exam:
+    title: Midterm Exam
+    event_datetime: 2026-09-22T10:00
+  final-exam:
+    title: Final Exam
+    event_datetime: 2026-11-10T10:00
+  resit-exam:
+    title: Resit Exam
+    event_datetime: tbc
+drop-ins:
+  lecture-12:
+    number: 1
+    title: Tutorial presentations
+    details: Students present their tutorial topic to the group.
+    event_datetime: 2026-10-20T10:00
+assets:
+  course-intro:
+    event_datetime: 2026-07-28T09:00
+    show_on_site: false
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: SYLLABUS.md
+events:
+  guest-lecture:
+    title: 'Guest lecture: deep learning at the Federal Statistical Office'
+    event_datetime: 2026-09-22T16:00
+  reading-week:
+    title: Reading week - no class
+    event_datetime: 2026-10-06
+assignments:
+  assignment-1:
+    number: 1
+    template: assignment-1-f2026
+    handout_datetime: 2026-08-18T14:00
+    due_datetime: 2026-09-08T23:59
+    solution_datetime: 2026-09-15T09:00
+  assignment-2:
+    number: 2
+    template: assignment-2-f2026
+    handout_datetime: 2026-09-01T14:00
+    due_datetime: 2026-09-29T23:59
+  assignment-3-project:
+    number: 8
+    template: assignment-3-project-f2026
+    repo_name: assignment-3-project
+    handout_datetime: 2026-09-15T14:00
+    due_datetime: 2026-10-23T23:59
+  assignment-4:
+    number: 4
+    template: assignment-4-f2026
+    handout_datetime: 2026-09-17T04:35
+    due_datetime: 2026-09-20T23:59
+  assignment-5:
+    number: 5
+    template: assignment-5-f2026
+    handout_datetime: 2026-09-17T04:35
+    due_datetime: 2026-09-20T23:59
+  assignment-6:
+    number: 6
+    template: assignment-6-f2026
+    handout_datetime: 2026-09-17T04:35
+    due_datetime: 2026-09-20T23:59
+  assignment-7:
+    number: 7
+    template: assignment-7-f2026
+    handout_datetime: 2026-09-17T04:35
+    due_datetime: 2026-09-20T23:59
+  assignment-8:
+    number: 8
+    template: assignment-8-f2026
+    handout_datetime: 2026-09-23T14:00
+    due_datetime: 2026-09-29T23:59

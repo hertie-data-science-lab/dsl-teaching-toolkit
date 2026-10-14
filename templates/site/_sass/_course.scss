@@ -800,3 +800,18 @@ hr.session-rule {
     background-color: #fcf8e3;
     border-color: #faebcc;
 }
+
+// Where a session happens (schedule.yml `location:`), under its date.
+.session-location {
+    opacity: 0.8;
+}
+
+// A row whose teaching unit has readings links the Readings tab (decision 0038 rule 5).
+.readings-chip {
+    display: inline-block;
+    padding: 0 6px;
+    border-radius: 8px;
+    font-size: 0.85em;
+    background-color: #dcefec;
+    color: #2b6a60;
+}

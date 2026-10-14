@@ -130,6 +130,7 @@ ROW_KEYS = (
     "readings_pending",
     "tabs",
     "no_materials",
+    "repeat",
 )
 LINK_KEYS = ("name", "repo", "path", "url")
 ASSIGNMENT_KEYS = (
@@ -195,6 +196,7 @@ def json_schema() -> dict:
         "off_schedule": _B,
         "readings_pending": _B,
         "no_materials": _B,
+        "repeat": _B,
         "when": _SN,
         "sort_at": _SN,
         "assignment": _SN,
@@ -366,6 +368,7 @@ def _row(
     readings_pending: bool = False,
     tabs: list[str] | None = None,
     no_materials: bool = False,
+    repeat: bool = False,
 ) -> dict:
     return {
         "id": id_,
@@ -394,16 +397,19 @@ def _row(
         # It ships nothing (an `events:` session): nothing pends, and it is never news
         # (the site's `no_materials`).
         "no_materials": no_materials,
+        # An entry's later slot (the site's `repeat`): its files shipped with the first,
+        # so it is never news.
+        "repeat": repeat,
     }
 
 
 def release_rows(facts: SemesterFacts, extra: StudentFacts) -> list[dict]:
-    """A row per entry the site shows (`schedule_plan.site_rows`, the `events:` sessions
-    among them), numbered as the site numbers it, with the files it has landed and the
-    readings attached to it. A row that ships nothing is `no_materials`, as on the site."""
-    aliases = lambda repo: facts.aliases.get(repo, {})
+    """A row per slot of each entry the site shows (`schedule_plan.site_rows`; a second
+    slot's id is `<key>-2`, as the site names its file), numbered as the site numbers
+    it, with the files it has landed and the readings attached to it. A row that ships
+    nothing is `no_materials`, and a later slot `repeat`, as on the site."""
     out = []
-    for sr in site_rows(planned_rows(facts.sched, aliases)):
+    for sr in site_rows(planned_rows(facts.sched)):
         r = sr.row
         own = r.kind == "readings"
         links, prose, landed = _landed(facts, r, own, extra.link_extensions)
@@ -419,7 +425,7 @@ def release_rows(facts: SemesterFacts, extra: StudentFacts) -> list[dict]:
         nothing = not (landed or readings or pending or r.deploys)
         out.append(
             _row(
-                r.key,
+                r.key if r.slot == 0 else f"{r.key}-{r.slot + 1}",
                 r.kind,
                 r.when,
                 title,
@@ -437,6 +443,7 @@ def release_rows(facts: SemesterFacts, extra: StudentFacts) -> list[dict]:
                 # Readings attached, landed or not: the site's own test.
                 tabs=row_tabs(r.kind, bool(sr.readings)),
                 no_materials=nothing,
+                repeat=r.slot > 0,
             )
         )
     return out
@@ -458,16 +465,22 @@ def event_rows(facts: SemesterFacts) -> list[dict]:
     for key, entry in _public_assignments(sched):
         name = schedule.semester_name(key, entry)
         title = identifier(name)
-        if entry.handout_datetime is not None:
+        # No due date yet: both rows TBC at the end of term, as an undated session is (the
+        # site's `_assignment_entry`); nothing fires for it, so its hand-out is TBC too.
+        undated = entry.due_datetime is None
+        end = term_end(sched, []) if undated else None
+        if entry.handout_datetime is not None or undated:
             out.append(
                 _row(
                     f"{name}:handout",
                     "assignment",
-                    entry.handout_datetime,
+                    None if undated else entry.handout_datetime,
                     title,
+                    sort_at=end,
                     details=entry.details,
                     assignment=name,
-                    tbc=entry.tbc,
+                    tbc=entry.tbc or undated,
+                    dateless=undated,
                 )
             )
         out.append(
@@ -476,9 +489,11 @@ def event_rows(facts: SemesterFacts) -> list[dict]:
                 "due",
                 entry.due_datetime,
                 title,
+                sort_at=end,
                 details=entry.details,
                 assignment=name,
-                tbc=entry.tbc,
+                tbc=entry.tbc or undated,
+                dateless=undated,
             )
         )
         if entry.marks_return_datetime is not None and entry.marks_return_on_site:
@@ -833,7 +848,7 @@ def gather(course: CourseFacts, facts: SemesterFacts, now: datetime) -> StudentF
         if spec.is_group and spec.team_formation_resolved == SELF_SELECT:
             extra.caps[key] = team_formation.team_cap(course.org, spec, org, key)
     # The reading lists: the prose overlays of every readings copy that has landed.
-    for sr in site_rows(planned_rows(sched, lambda repo: facts.aliases.get(repo, {}))):
+    for sr in site_rows(planned_rows(sched)):
         own = [sr.row] if sr.row.kind == "readings" else []
         for row in [*own, *sr.readings]:
             for repo, path in _landed(facts, row, True, frozenset())[1]:

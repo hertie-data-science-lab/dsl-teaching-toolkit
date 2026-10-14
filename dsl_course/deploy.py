@@ -68,7 +68,6 @@ from .log import (
     log_withheld,
     plural,
 )
-from .materials import kinds_reader
 from .records import SYSTEM_DIR
 from .releaseignore import RELEASEIGNORE, deny_for, excludes
 from .repos import (
@@ -808,13 +807,11 @@ def main() -> int:
         return 1
     # A copy the plan names under an entry that needs a number and has none is refused,
     # as the scheduled release skips it (decision 0020 rule 3). Off the plan it goes.
-    aliases = kinds_reader(args.course_org)
     for repo in dict.fromkeys(d.course_source_repo for d in deploys):
         refusal = unnumbered_release(
             sched,
             repo,
             [d.course_source_path for d in deploys if d.course_source_repo == repo],
-            aliases,
         )
         if refusal:
             return refuse_unnumbered(refusal)

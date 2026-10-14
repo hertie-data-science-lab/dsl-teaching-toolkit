@@ -15,3 +15,11 @@
 - `DSL_COURSE_ADMIN_EMAILS` is gone: a fault in a course's own config is mailed to the admins'
   `email:` in `dsl-course.yml`.
 - A run setting in a template's `grading_config.yml` is refused as `RUN_SETTING_IN_TEMPLATE`.
+- `schedule.yml` has one block per kind (`lectures:`, `labs:`, `readings:`, `exams:`,
+  `drop-ins:`, `events:`, `assets:`) beside `assignments:`, and it is the only source of
+  rows: a lecture or lab names its unit with `session:`, `number:` is explicit, slots replace
+  second-group events, `files:` (`from_course_repo`, `from_path`, `to_semester_repo`,
+  `to_path`, `release_datetime`) replaces `deploy:`, a readings entry's `reading_list:`
+  replaces `READINGS.md`, and an assignment's run settings sit on its entry. Folder names
+  and `materials.yml` `kinds:` no longer mean anything. The migration's **schedule shape**
+  step rewrites each semester's file (decision 0038).

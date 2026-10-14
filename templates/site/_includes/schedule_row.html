@@ -12,7 +12,7 @@ schedule keeps rendering.
 
 Date: a `dateless` row (`event_datetime: tbc`) has no `date:` and prints "TBC"; a
 `hide_time` row (a whole-day row) prints its day and no clock time; `tbc` marks a
-provisional date "(TBC)".
+provisional date "(TBC)"; `location`, when the schedule names one, goes under it.
 
 Title: `title` is the row's IDENTIFIER - a session's kind and number, an assignment's name -
 and `subtitle` its NAME, under it. The identifier stays, because it is what ties the row to
@@ -31,7 +31,7 @@ what the row generates:
   generated sentence in the body, the same one the Assignments tab shows. `team_join_url`
   is a group assignment whose teams students pick: one line naming the day teams close.
 - a release row: its files once they exist (`lecture_links.html`), the "not released yet"
-  sentence until then.
+  sentence until then; `readings_chip` (its unit has readings) links the Readings tab.
 - any other row: its body.
 {%- endcomment -%}
 {%- if include.colour -%}
@@ -53,6 +53,7 @@ what the row generates:
     {% if include.event.tbc %}<b>(TBC)</b>{% endif %}
     <br class="date-spliter"/>{{ include.event.date | date: "%A" }}
     {% endif %}
+    {% if include.event.location %}<br/><span class="session-location">{{ include.event.location }}</span>{% endif %}
 </div>
 <div class="col col-2" data-label="Title">
     <b>{{ include.event.title }}</b>
@@ -92,5 +93,9 @@ what the row generates:
     {% include lecture_links.html lecture=include.event %}
     {%- else -%}
     {{ include.event.content }}
+    {%- endif -%}
+    {%- if include.event.readings_chip -%}
+    {%- assign readings_kind = site.data.kinds | where: "key", "readings" | first -%}
+    {{ " " }}<a class="readings-chip" href="{{ readings_kind.tab | prepend: site.baseurl }}">{{ readings_kind.plural }}</a>
     {%- endif -%}
 </div>

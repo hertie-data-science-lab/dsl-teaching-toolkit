@@ -207,7 +207,7 @@ class ConfigFault:
     Part II added has a default, and an immediate fault leaves the source-only three
     (`kind`, `repo`, `path`) alone."""
 
-    where: str  # the YAML path or row, e.g. "releases.lecture-2", "row 4"
+    where: str  # the YAML path or row, e.g. "lectures.week-2", "row 4"
     what: str  # what is wrong, e.g. "`cm/lectures/02_b` does not exist yet"
     # What makes a source fault actionable, and the line between the two clocks - see the
     # module docstring. None = nothing pins this to a moment.

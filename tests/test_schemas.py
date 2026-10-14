@@ -70,17 +70,15 @@ def test_file_schema_enums_are_the_engine_constants():
     sched = schemas.schedule_schema()
     top = sched["properties"]
     assert set(top) == set(schedule.KNOWN_TOP_LEVEL)
-    release = top["releases"]["additionalProperties"]
-    assert set(release["properties"]) == set(schedule.KNOWN_RELEASE)
-    assert set(release["properties"]["kind"]["enum"]) == set(schedule.KNOWN_ROW_KINDS)
-    assert set(release["properties"]["deploy"]["items"]["properties"]) == set(
-        schedule.KNOWN_DEPLOY
-    )
+    # Decision 0038: one block per content kind, each a map of entries.
+    for block, kind in schedule.BLOCKS.items():
+        entry = top[block]["additionalProperties"]
+        known = schedule.KNOWN_READINGS if kind == "readings" else schedule.KNOWN_ENTRY
+        assert set(entry["properties"]) == set(known), block
+        files = entry["properties"]["files"]["items"]["properties"]
+        assert set(files) == set(schedule.KNOWN_FILE)
     assert set(top["assignments"]["additionalProperties"]["properties"]) == set(
         schedule.KNOWN_ASSIGNMENT
-    )
-    assert set(top["events"]["additionalProperties"]["properties"]) == set(
-        schedule.KNOWN_EVENT
     )
     assert set(top["archive"]["properties"]) == set(schedule.KNOWN_ARCHIVE)
 
@@ -393,13 +391,17 @@ def test_blank_schedule_keys_validate():
     # A live schedule's shape: rows carrying a `details:` slot nobody has filled yet (the
     # engine reads blank as absent), and the console's own cleared archive date.
     rows = {
-        f"week{i:02d}": {"event_datetime": f"2026-09-{i:02d}", "details": None}
+        f"lecture-{i:02d}": {
+            "session": i,
+            "event_datetime": f"2026-09-{i:02d}",
+            "details": None,
+        }
         for i in range(1, 24)
     }
     doc = {
         "semester_start": "2026-09-01",
-        "releases": rows,
-        "events": {"midterm": {"kind": "exam", "details": None, "tbc": None}},
+        "lectures": rows,
+        "exams": {"midterm": {"details": None, "tbc": None}},
         "archive": {"event_datetime": None, "show_on_site": True},
     }
     assert validate(doc, schemas.schedule_schema()) == []

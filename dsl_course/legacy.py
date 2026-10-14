@@ -16,7 +16,8 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 
-from .course import ASSIGNMENTS_FILE, CONFIG_REPO, INSTRUCTORS_FILE, JOIN_REPO
+from .course import CONFIG_REPO, INSTRUCTORS_FILE, JOIN_REPO
+from .faults import NOT_MIGRATED
 
 
 @dataclass(frozen=True)
@@ -33,7 +34,11 @@ class Old:
 
 
 # The surfaces old names were spelt in.
+SCHEDULE_TOP = "schedule.yml top level"
+SCHEDULE_ENTRY = "schedule.yml <block>.<key>"
+SCHEDULE_FILE = "schedule.yml <block>.<key>.files[]"
 SCHEDULE_ASSIGNMENT = "schedule.yml assignments.<key>"
+ASSIGNMENTS_YML = "assignments.yml top level"
 GRADING_CONFIG = "grading_config.yml"
 SETTINGS = "assignment settings"
 COURSE_CONFIG = "dsl-course.yml"
@@ -42,14 +47,118 @@ SEMESTER_ORG = "semester org"
 SEMESTER_TOPICS = "semester .github topics"
 COURSE_REPOS = "course org repos"
 MEMBERSHIP_DISPATCH = "sync-membership dispatch payload"
+STATUS_TODO_CHECK = "status.json to-do check"
 
 _GRADING_CONFIG_HOME = (
     "in the assignment's own grading_config.yml, on the course template's "
     "`solution` branch"
 )
-_RUN_KEYS_HOME = f"in {CONFIG_REPO}/{ASSIGNMENTS_FILE} (`assignments.<key>`)"
+
+_BLOCKS = "a block per kind (`lectures:`, `labs:`, `readings:`, `exams:`, `events:`, `assets:`)"
+_MIGRATE = "run the 0.11.0 migration (`python3 -m dsl_course.migrate`)"
 
 ROWS: tuple[Old, ...] = (
+    # schedule.yml before decision 0038: one `releases:` block, the kind and number on the
+    # entry or inferred from a folder or a label, `deploy:` copies. Read as NOT_MIGRATED
+    # by `schedule.parse`, rewritten by `migrate.schedule_shape`.
+    Old(
+        "releases",
+        _BLOCKS,
+        SCHEDULE_TOP,
+        "0.11.0",
+        NOT_MIGRATED,
+        f"nothing in it releases or shows - {_MIGRATE}",
+    ),
+    Old(
+        "kind",
+        "the block the entry is written in",
+        SCHEDULE_ENTRY,
+        "0.11.0",
+        NOT_MIGRATED,
+        "the block decides the kind",
+    ),
+    Old(
+        "type",
+        "the block the entry is written in",
+        SCHEDULE_ENTRY,
+        "0.11.0",
+        NOT_MIGRATED,
+        "the block decides the kind",
+    ),
+    Old(
+        "deploy",
+        "files",
+        SCHEDULE_ENTRY,
+        "0.11.0",
+        NOT_MIGRATED,
+        f"none of its copies ships - {_MIGRATE}",
+    ),
+    Old(
+        "course_source_repo",
+        "from_course_repo",
+        SCHEDULE_FILE,
+        "0.11.0",
+        NOT_MIGRATED,
+        "this copy never ships",
+    ),
+    Old(
+        "course_source_path",
+        "from_path",
+        SCHEDULE_FILE,
+        "0.11.0",
+        NOT_MIGRATED,
+        "this copy never ships",
+    ),
+    Old(
+        "semester_dest_repo",
+        "to_semester_repo",
+        SCHEDULE_FILE,
+        "0.11.0",
+        NOT_MIGRATED,
+        "this copy lands in the default repo",
+    ),
+    Old(
+        "semester_dest_path",
+        "to_path",
+        SCHEDULE_FILE,
+        "0.11.0",
+        NOT_MIGRATED,
+        "this copy lands at its own path",
+    ),
+    Old(
+        "deploy_datetime",
+        "release_datetime",
+        SCHEDULE_FILE,
+        "0.11.0",
+        NOT_MIGRATED,
+        "this copy ships at its default time",
+    ),
+    Old(
+        "course_source_repo",
+        "template",
+        SCHEDULE_ASSIGNMENT,
+        "0.11.0",
+        NOT_MIGRATED,
+        "the assignment has no template",
+    ),
+    Old(
+        "semester_dest_repo",
+        "repo_name",
+        SCHEDULE_ASSIGNMENT,
+        "0.11.0",
+        NOT_MIGRATED,
+        "its repos take the default name",
+    ),
+    # An assignment's run settings, per assignment, moved inline onto its schedule.yml
+    # entry (decision 0038 rule 9); `defaults:` stays until WP-F.
+    Old(
+        "assignments",
+        "schedule.yml assignments.<key> (the settings written on each entry)",
+        ASSIGNMENTS_YML,
+        "0.11.0",
+        NOT_MIGRATED,
+        "none of these settings is read",
+    ),
     # Settings that USED to live in a schedule.yml `assignments:` entry (decision 0009):
     # flagged by name, so the note says where the declaration went. Live guidance.
     Old(
@@ -61,13 +170,6 @@ ROWS: tuple[Old, ...] = (
             "the assignment is handed out and graded in whatever shape grading_config.yml "
             "declares - individual when it declares none"
         ),
-    ),
-    Old(
-        "max_team_size",
-        _RUN_KEYS_HOME,
-        SCHEDULE_ASSIGNMENT,
-        "0.9.0",
-        cost="the 'Join team' flow uses the cap declared there, or the course default",
     ),
     # ds01's hourly membership timer (an EXTERNAL system, ds01-infra) still sends it: read
     # as `all_semesters` with a log line and no fault until ds01-infra switches.
@@ -86,6 +188,15 @@ ROWS: tuple[Old, ...] = (
     Old("semester_defaults", "", COURSE_CONFIG, "0.10.0"),
     # An assignment template told by its name before the `dsl-assignment` topic (0014).
     Old("assignment-", "dsl-assignment", COURSE_REPOS, "0.10.0"),
+    # A status.json an engine before 0.11.0 wrote still carries it until the semester's next
+    # status refresh rewrites the file; the final sweep drops the row once every live org
+    # has migrated and refreshed (decision 0038 retired the check).
+    Old(
+        "kind_folder",
+        "none: folders carry no kind (the schedule block decides it)",
+        STATUS_TODO_CHECK,
+        "0.11.0",
+    ),
 )
 
 

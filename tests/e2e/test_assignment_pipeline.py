@@ -353,19 +353,33 @@ def _preflight(run_id: str) -> None:
 # ----------------------------------------------------------------------- the stages
 
 
-def _schedule_block(slug: str, handout: datetime, due: datetime) -> str:
-    """One assignment's timings, as `assignments:` wants them - the template repo in the
-    course org, and a semester-side name that defaults to the key, so every repo this makes
-    falls inside the run's namespace. The late cutoff is not written here: it is the due
-    date plus `late_window_days` (`_instance_block`)."""
+def _schedule_block(
+    slug: str, handout: datetime, due: datetime, shape: shapes.Shape, number: int
+) -> str:
+    """One assignment, as `assignments:` wants it (decision 0038): the template repo in the
+    course org, its number (its repos are named by the key), so every repo it
+    makes falls inside the run's namespace, its dates, and its run settings - the run's
+    late rule, then the shape's own. The late cutoff is not written: it is the due date
+    plus `late_window_days`."""
+    run = {
+        "late_window_days": LATE_WINDOW_DAYS,
+        "late_penalty_per_day": LATE_PENALTY,
+        **shapes.run_settings(shape),
+    }
     return "\n".join(
         [
             f"  {slug}:",
-            f"    course_source_repo: {slug}",
+            f"    number: {number}",
+            f"    template: {slug}",
             f"    handout_datetime: {handout:%Y-%m-%dT%H:%M}",
             f"    due_datetime: {due:%Y-%m-%dT%H:%M}",
+            *(f"    {k}: {v}" for k, v in run.items()),
         ]
     )
+
+
+# The numbers the run's five assignments take, out of any real semester's way.
+FIRST_NUMBER = 90
 
 
 # The run's late rule, stated for all five shapes in the semester's `assignments.yml`. ONE
@@ -444,17 +458,6 @@ def _assert_one_day_late(pushed: dict[str, dict], cutoff: datetime) -> None:
         )
 
 
-def _instance_block(slug: str, shape: shapes.Shape) -> str:
-    """One assignment's run settings, as the semester's `assignments.yml` wants them: the
-    run's late rule, then the shape's own."""
-    settings = {
-        "late_window_days": LATE_WINDOW_DAYS,
-        "late_penalty_per_day": LATE_PENALTY,
-        **shapes.run_settings(shape),
-    }
-    return "\n".join([f"  {slug}:", *(f"    {k}: {v}" for k, v in settings.items())])
-
-
 def _schedule_blocks(run_id: str, handout: datetime, due: datetime) -> str:
     """All five of this run's assignments, one entry per shape, on the same dates.
 
@@ -462,32 +465,11 @@ def _schedule_blocks(run_id: str, handout: datetime, due: datetime) -> str:
     external assignment freezes nothing, a drop box freezes a folder), and giving them one
     clock is what lets a single tick exercise every arm of the same pass."""
     return "\n".join(
-        _schedule_block(shapes.slug(run_id, shape), handout, due)
-        for shape in shapes.SHAPES
+        _schedule_block(
+            shapes.slug(run_id, shape), handout, due, shape, FIRST_NUMBER + i
+        )
+        for i, shape in enumerate(shapes.SHAPES)
     )
-
-
-def _instance_blocks(run_id: str) -> str:
-    """All five of this run's assignments' run settings, for `assignments.yml`."""
-    return "\n".join(
-        _instance_block(shapes.slug(run_id, shape), shape) for shape in shapes.SHAPES
-    )
-
-
-def _write_instance(run_id: str) -> str:
-    """Put (or move) this run's fenced block into the semester's `assignments.yml`, the
-    file created (with an `assignments:` key) where the semester has none yet."""
-    read = gh_contents.get_file_with_sha(
-        SEMESTER_ORG, course.CONFIG_REPO, schedule_edit.ASSIGNMENTS_PATH
-    )
-    text, sha = read if read is not None and read[0] else ("", "")
-    edited = schedule_edit.insert_block(
-        schedule_edit.with_assignments_key(text),
-        run_id,
-        _instance_blocks(run_id),
-    )
-    assert schedule_edit.put_instance(SEMESTER_ORG, edited, sha)
-    return edited
 
 
 def _write_schedule(run_id: str, handout: datetime, due: datetime) -> Stage:
@@ -501,9 +483,6 @@ def _write_schedule(run_id: str, handout: datetime, due: datetime) -> Stage:
     fires the course org's Scheduled release from every schedule.yml push, so the edit
     starts a real tick. It is waited out here rather than raced, so the pass dispatched
     next is the one whose log and artefacts the stage after it reads."""
-    # The run settings first: the schedule push below is what drives the tick, and that
-    # tick must read the late window this stage's cutoff is computed with.
-    instance = _write_instance(run_id)
     read = gh_contents.get_file_with_sha(
         SEMESTER_ORG, course.CONFIG_REPO, "schedule.yml"
     )
@@ -521,7 +500,6 @@ def _write_schedule(run_id: str, handout: datetime, due: datetime) -> Stage:
             "due": due,
             "cutoff": cutoff_for_due(due),
             "text": edited,
-            "instance": instance,
             "driven": driven,
         },
     )
@@ -580,8 +558,8 @@ def _scaffold(run_id: str) -> Stage:
 def _configure(run_id: str) -> Stage:
     """Write each template's `submit_via` into its own `grading_config.yml`, as an
     instructor would: on the solution branch, over what the form seeded - rather than
-    trusting the dropdown it clicked. The rest of the shape is the semester's
-    `assignments.yml` (`_write_instance`)."""
+    trusting the dropdown it clicked. The rest of the shape is written on its schedule.yml
+    entry (`_schedule_block`)."""
     written: dict[str, str] = {}
     for shape in shapes.SHAPES:
         slug = shapes.slug(run_id, shape)

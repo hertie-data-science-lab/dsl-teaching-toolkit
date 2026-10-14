@@ -195,39 +195,40 @@ SCHEDULE = """\
 timezone: Europe/Berlin
 semester_start: 2026-09-07
 semester_end: 2026-12-18
-releases:
+assets:
   syllabus:
     event_datetime: 2026-09-08T10:00
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: SYLLABUS.md
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: SYLLABUS.md
+lectures:
   lecture-1:
+    session: 1
     event_datetime: 2026-09-10T10:00
-    number: 1
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: lectures/01_intro
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: lectures/01_intro
   lecture-2:
+    session: 2
     event_datetime: 2026-09-24T10:00
-    number: 2
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: lectures/02_trees
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: lectures/02_trees
   lecture-3:
+    session: 3
     event_datetime: 2026-10-08T10:00
-    number: 3
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: lectures/03_forests
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: lectures/03_forests
 assignments:
   a1:
     number: 1
-    course_source_repo: assignment-a1
+    template: assignment-a1
     handout_datetime: 2026-09-15T10:00
     due_datetime: 2026-09-27T23:59
   a2:
     number: 2
-    course_source_repo: assignment-a2
+    template: assignment-a2
     handout_datetime: 2026-10-20T10:00
     due_datetime: 2026-11-01T23:59
 """

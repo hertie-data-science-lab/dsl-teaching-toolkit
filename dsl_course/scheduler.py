@@ -132,7 +132,6 @@ from .log import (
     log_step,
     plural,
 )
-from .materials import kinds_reader
 from .repos import listed_is_private, set_visibility
 from .run import current as current_run
 from .schedule import Release, grading_cutoff_datetime
@@ -261,8 +260,11 @@ def preview_summary(due: list[Release], decisions: list[Decision]) -> Summary:
 
 
 def _entry_ref(where: str) -> str:
-    """`releases.lecture-2` / `assignments.a1` -> the entry's own name."""
-    return where.split(".", 1)[1] if "." in where else where
+    """`assignments.a1` / `lectures.lecture-2.files[0]` -> the entry's own key."""
+    block, _, rest = where.partition(".")
+    if not rest or (block != "assignments" and block not in schedule.BLOCKS):
+        return where
+    return rest.split(".files", 1)[0]
 
 
 def source_decisions(faults: list[ConfigFault], now: datetime) -> list[Decision]:
@@ -735,33 +737,25 @@ def _held_solution_faults(sched: schedule.Schedule, now: datetime) -> list[Confi
 def _unnumbered(
     course_org: str, sched: schedule.Schedule
 ) -> tuple[list[ConfigFault] | None, set[str], set[str]]:
-    """Decision 0020 rule 3: the plan's entries that need a number and have none, as
-    `(faults for the schedule.yml digest, release labels held, assignment keys held)`.
+    """Decisions 0020 and 0038: the lectures and labs with no session and the
+    assignments with no number, as `(faults for the schedule.yml digest, release labels held, assignment keys held)`.
     Guarded: a read that fails holds nothing this tick and says so, and its faults are
-    None, so the digest is left as it is rather than cleared (`_preflight_sources`).
-    A release whose kind comes only from a `materials.yml` that does not parse is not
-    held either: one line says so."""
+    None, so the digest is left as it is rather than cleared (`_preflight_sources`)."""
     try:
-        kinds = kinds_reader(course_org)
-        missing = schedule_plan.unnumbered(sched, kinds)
+        missing = schedule_plan.unnumbered(sched)
         faults = schedule_plan.number_faults(missing)
-        unsure = sorted(
-            {
-                r.deploy[0].course_source_repo
-                for r in sched.releases
-                if schedule_plan.kind_unknown(r, kinds)
-            }
-        )
     except Exception as exc:
         log_err(f"could not check the schedule's numbers ({type(exc).__name__})")
         return None, set(), set()
-    if unsure:
-        log(
-            f"  [numbers] {', '.join(unsure)}: materials.yml does not parse, so an entry "
-            "whose kind only it decides needs no number this tick"
-        )
     releases = {m.key for m in missing if m.block == "releases"}
     return faults, releases, {m.key for m in missing if m.block == "assignments"}
+
+
+def _held_text(release: Release) -> str:
+    """Why a held release waits: its assignment's number, or its own session."""
+    if release.assignment_slug:
+        return schedule_plan.give_a_number(release.assignment_slug)
+    return schedule_plan.give_a_session(release.label)
 
 
 def _held(release: Release, releases: set[str], assignments: set[str]) -> bool:
@@ -805,6 +799,10 @@ def _handout_releases(
     out = []
     for slug, entry in sched.assignments.items():
         if entry.handout_datetime is None:
+            continue
+        if entry.due_datetime is None:
+            # Dates to be confirmed: nothing fires until it has a due date.
+            log(f"  [skip] handout {slug} - {schedule_plan.give_a_due_date(slug)}")
             continue
         template = _template_for(templates, course_org, slug, entry)
         if template is None:
@@ -1807,8 +1805,14 @@ def _release_phase(
             )
         decisions = dry_run_decisions(course_org, semester_org, sched, due, now)
         decisions += [
-            Decision(ref, schedule_plan.NOT_NUMBERED, schedule_plan.give_a_number(ref))
-            for ref in (r.assignment_slug or r.label for r in held)
+            Decision(
+                r.assignment_slug or r.label,
+                schedule_plan.NOT_NUMBERED
+                if r.assignment_slug
+                else schedule_plan.NO_SESSION,
+                _held_text(r),
+            )
+            for r in held
         ]
         for decision in decisions:
             log(decision.line())
@@ -1816,8 +1820,7 @@ def _release_phase(
         return Summary(preview.text, preview.counts, preview.reasons, code=errors)
 
     for r in held:
-        ref = r.assignment_slug or r.label
-        log(f"  [skip] {ref} - {schedule_plan.give_a_number(ref)}")
+        log(f"  [skip] {r.assignment_slug or r.label} - {_held_text(r)}")
     due = [r for r in due if not _held(r, held_releases, held_assignments)]
     release_changed = False
     if not releases:

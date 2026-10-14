@@ -41,6 +41,24 @@ RELEASEIGNORE = ".releaseignore"
 # it withholds nothing. The console writes it; spelt once, here.
 REVIEWED_MARK = "# Reviewed: nothing withheld."
 
+
+def reviewed(text: str | None) -> bool:
+    """A `.releaseignore` somebody has been through: one pattern (a line that is not blank
+    or a comment), or `REVIEWED_MARK`. The seeded one is every line a comment (`scaffold`),
+    in every wording it has had."""
+    lines = [line.strip() for line in (text or "").splitlines()]
+    return REVIEWED_MARK in lines or any(
+        line and not line.startswith("#") for line in lines
+    )
+
+
+def confirmed(text: str | None) -> str:
+    """`text` with `REVIEWED_MARK` appended (the Confirm of the materials checklist's
+    "Withheld patterns reviewed", plan 0.11.0 9b ruling 6): nothing else changes."""
+    body = (text or "").rstrip("\n")
+    return f"{body}\n{REVIEWED_MARK}\n" if body else f"{REVIEWED_MARK}\n"
+
+
 # Withheld by every copy, with no pattern needed and no way to opt back in - see the
 # module docstring. A `!` cannot re-include it: the check runs before the chain.
 _SELF_EXCLUDED = frozenset({RELEASEIGNORE})

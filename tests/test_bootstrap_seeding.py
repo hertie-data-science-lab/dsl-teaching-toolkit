@@ -694,19 +694,15 @@ def test_every_example_assignment_has_the_layout_the_engine_pushes():
         assert any((a / "main").iterdir()), f"{a.name}: main/ is empty"
 
 
-def test_the_example_materials_tree_is_a_releasable_one():
-    # A section is any top-level dir with an ordinal-prefixed subdir - the structure IS
-    # the config, so an example that renamed a folder out of that shape would document a
-    # tree the Release actions cannot see.
+def test_the_example_semester_writes_its_reading_lists_in_the_schedule():
+    # Decision 0038 rule 5: a reading list is the entry's `reading_list:`, not a
+    # READINGS.md in the folder - the example shows the one way.
     materials = welcome.EXAMPLE_COURSE / "course-materials-f2026"
-    sections = course.discover_sections(materials)
-    assert {"lectures", "labs", "readings"} <= set(sections), sections
-    # the readings redesign: the overlay is named by FILENAME, not extension
-    overlays = sorted(materials.glob(f"readings/*/{readings.READING_OVERLAY_FILE}"))
-    assert overlays, (
-        f"no {readings.READING_OVERLAY_FILE} in the example's readings sessions - the "
-        f"example must show the optional prose overlay, not just uploaded files"
+    assert not sorted(materials.glob(f"readings/*/{readings.READING_OVERLAY_FILE}"))
+    plan = yaml.safe_load(
+        (welcome.EXAMPLE_COURSE.parent / "semester-org" / "schedule.yml").read_text()
     )
+    assert all(entry.get("reading_list") for entry in plan["readings"].values())
 
 
 def test_the_example_course_names_nobody_real():

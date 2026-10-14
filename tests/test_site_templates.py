@@ -502,7 +502,6 @@ def semester_plan(monkeypatch, tmp_path):
         lambda org, build: captured.update(plan=build(tmp_path)) or 0,
     )
     monkeypatch.setattr(site, "list_org_repos", lambda org: [])
-    monkeypatch.setattr(site, "discover_release_sources", lambda org, repos: [])
     monkeypatch.setattr(site, "yaml_file", lambda *a: {})
     fake_config(monkeypatch, site.yaml_file)
     monkeypatch.setattr(site, "read_opencourse", lambda org: None)
@@ -1398,7 +1397,7 @@ def test_the_fixture_site_holds_both_shapes_of_file_row(generated):
     # The fixture is what CI builds with Jekyll, so it has to exercise the branch: one
     # published file with a hosted copy, one without. With only one shape, a template that
     # rendered the other wrong would build green.
-    session = _front_matter(generated["collections"]["_lectures"]["session-01.md"])
+    session = _front_matter(generated["collections"]["_lectures"]["lecture-1.md"])
     hosted = {link["name"]: link.get("view_url") for link in session["links"]}
     assert hosted["slides.html"].startswith("https://")
     assert hosted["slides.pdf"] is None

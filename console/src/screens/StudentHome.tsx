@@ -33,13 +33,13 @@ export type Update =
 
 /**
  * The Updates box's bullets, as the site's `announcements.html` picks them: sessions whose
- * files shipped (dated, on the schedule; a session with nothing to ship is never news), assignments handed out, the archive row's text in the
+ * files shipped (dated, on the schedule; a session with nothing to ship, or an entry's later slot, is never news), assignments handed out, the archive row's text in the
  * fortnight before it, and the instructors' announcements; newest first, seven.
  */
 export function homeUpdates(facts: SemesterFacts, now: number): Update[] {
   const tz = facts.timezone || DEFAULT_TIMEZONE;
   const out: Update[] = [];
-  for (const row of facts.rows) if (!isEventRow(row) && row.released && !row.noMaterials && row.when) out.push({ at: instant(row.when, tz), row });
+  for (const row of facts.rows) if (!isEventRow(row) && row.released && !row.noMaterials && !row.repeat && row.when) out.push({ at: instant(row.when, tz), row });
   // Dated as the site dates it (site.py `_assignment_entry`): the hand-out, else, for an
   // assignment handed out by hand with no scheduled hand-out, the due date, the only one known.
   for (const a of facts.assignments) {

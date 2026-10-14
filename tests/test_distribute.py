@@ -29,11 +29,10 @@ from dsl_course import (
     receipts,
     records,
     roster,
-    settings,
     status_json,
 )
 from dsl_course.schedule import AssignmentEntry, Schedule
-from tests.conftest import ROSTER_HEADER, repo_row, split_grading
+from tests.conftest import ROSTER_HEADER, repo_row, run_settings, split_grading
 
 
 def test_unsent_grade_notifications_are_reported(monkeypatch, capsys):
@@ -345,7 +344,7 @@ def _distribute(
     monkeypatch.setattr(distribute, "course_org_for_semester", lambda org: "COURSE")
     template_text, semester_text = split_grading(grading)
     monkeypatch.setattr(grading_spec, "_grading_text", lambda org, tpl: template_text)
-    monkeypatch.setattr(settings, "_assignments_text", lambda org: semester_text)
+    run_settings(monkeypatch, lambda org: semester_text)
     monkeypatch.setattr(
         distribute.schedule,
         "load",

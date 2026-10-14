@@ -1,0 +1,323 @@
+# hertie-nlp-f2026 semester-config/schedule.yml as read 14 Oct 2026, comments removed:
+# the old (0.10) shape the 0.11.0 migration rewrites (tests/test_schedule_shape.py).
+semester_start: 2026-08-31
+semester_end: 2026-11-27
+
+assignments:
+  quiz-1:
+    course_source_repo: assignment-1-f2026
+    handout_datetime: 2026-10-04T20:00
+    due_datetime: 2026-10-04
+
+archive:
+  event_datetime: 2027-02-13
+  show_on_site: true
+  details: >-
+    This semester is archived on {date}: every repository in it becomes read-only. You keep read access, so you can still fork or clone anything you want to keep working on into your own account.
+
+releases:
+  readings-01:
+    event_datetime: 2026-08-28
+    kind: readings
+    show_on_site: true
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: readings/01_session-1
+  lecture-01:
+    event_datetime: 2026-09-01T18:00
+    title: "Introduction, motivation and course overview"
+    kind: lecture
+    show_on_site: true
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: lectures/01_session-1
+  lab-01:
+    event_datetime: 2026-09-02T08:00
+    title: "Introduction, motivation and course overview"
+    kind: lab
+    details: "Lab group 1 - Wednesday 08:00-10:00, room 2.30"
+    show_on_site: true
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: labs/01_session-1
+        deploy_datetime: 2026-09-01T20:00
+  lecture-02:
+    event_datetime: 2026-09-08T18:00
+    title: "String processing, regular expressions, and text preprocessing"
+    kind: lecture
+    show_on_site: true
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: lectures/02_session-2
+  lab-02:
+    event_datetime: 2026-09-09T08:00
+    title: "String processing, regular expressions, and text preprocessing"
+    kind: lab
+    details: "Lab group 1 - Wednesday 08:00-10:00, room 2.30"
+    show_on_site: true
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: labs/02_session-2
+        deploy_datetime: 2026-09-08T20:00
+  lecture-03:
+    event_datetime: 2026-09-15T18:00
+    title: "Text representation I - Vector-based"
+    kind: lecture
+    show_on_site: true
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: lectures/03_session-3
+  lab-03:
+    event_datetime: 2026-09-16T08:00
+    title: "Text representation I - Vector-based"
+    kind: lab
+    details: "Lab group 1 - Wednesday 08:00-10:00, room 2.30"
+    show_on_site: true
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: labs/03_session-3
+        deploy_datetime: 2026-09-15T20:00
+  readings-02:
+    event_datetime: 2026-09-18
+    kind: readings
+    show_on_site: true
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: readings/02_session-2
+  readings-03:
+    event_datetime: 2026-09-18
+    kind: readings
+    show_on_site: true
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: readings/03_session-3
+  readings-04:
+    event_datetime: 2026-09-18
+    kind: readings
+    show_on_site: true
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: readings/04_session-4
+  readings-05:
+    event_datetime: 2026-09-18
+    kind: readings
+    show_on_site: true
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: readings/05_session-5
+  readings-06:
+    event_datetime: 2026-09-18
+    kind: readings
+    show_on_site: true
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: readings/06_session-6
+  lab-04:
+    event_datetime: 2026-09-23T08:00
+    title: "Text representation II - Distribution-based"
+    kind: lab
+    details: "Lab group 1 - Wednesday 08:00-10:00, room 2.30"
+    show_on_site: true
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: labs/04_session-4
+        deploy_datetime: 2026-09-22T20:00
+  lecture-04:
+    event_datetime: 2026-09-22T18:00
+    title: "Text representation II - Distribution-based"
+    kind: lecture
+    show_on_site: true
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: lectures/04_session-4
+  lecture-05:
+    event_datetime: 2026-09-29T18:00
+    title: "Basic models I - Text classification with logistic regression"
+    kind: lecture
+    show_on_site: true
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: lectures/05_session-5
+  lab-05:
+    event_datetime: 2026-09-30T08:00
+    title: "Basic models I - Text classification with logistic regression"
+    kind: lab
+    details: "Lab group 1 - Wednesday 08:00-10:00, room 2.30"
+    show_on_site: true
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: labs/05_session-5
+        deploy_datetime: 2026-09-29T20:00
+  readings-07:
+    event_datetime: 2026-10-04
+    kind: readings
+    show_on_site: true
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: readings/07_session-7
+  readings-08:
+    event_datetime: 2026-10-04
+    kind: readings
+    show_on_site: true
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: readings/08_session-8
+  readings-09:
+    event_datetime: 2026-10-04
+    kind: readings
+    show_on_site: true
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: readings/09_session-9
+  lab-06:
+    event_datetime: 2026-10-07T08:00
+    title: "Neural models I - Text classification with neural networks"
+    kind: lab
+    details: "Lab group 1 - Wednesday 08:00-10:00, room 2.30"
+    show_on_site: true
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: labs/06_session-6
+        deploy_datetime: 2026-10-06T20:00
+  lecture-06:
+    event_datetime: 2026-10-06T18:00
+    title: "Neural models I - Text classification with neural networks"
+    kind: lecture
+    show_on_site: true
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: lectures/06_session-6
+  lecture-07:
+    event_datetime: 2026-10-13T18:00
+    title: "Neural models II - Topic modelling with LDA + BERTopic"
+    kind: lecture
+    show_on_site: true
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: lectures/07_session-7
+  lecture-08:
+    event_datetime: tbc
+    title: "Neural models III - Language modelling with Transformers I"
+    kind: lecture
+    show_on_site: true
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: lectures/08_session-8
+  lecture-09:
+    event_datetime: tbc
+    title: "Neural models III - Language modelling with Transformers II"
+    kind: lecture
+    show_on_site: true
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: lectures/09_session-9
+  lecture-10:
+    event_datetime: tbc
+    title: "NLP visualizations + Explainable AI"
+    kind: lecture
+    show_on_site: true
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: lectures/10_session-10
+  lecture-11:
+    event_datetime: tbc
+    title: "Extending NLP to LLM workflows and agents"
+    kind: lecture
+    show_on_site: true
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: lectures/11_session-11
+  lecture-12:
+    event_datetime: tbc
+    title: "LLM Workflows and Agents II"
+    kind: lecture
+    show_on_site: true
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: lectures/12_session-12
+  lab-07:
+    event_datetime: tbc
+    title: "Neural models II - Topic modelling with LDA + BERTopic"
+    kind: lab
+    details: "Two lab groups: Wednesday 08:00-10:00 (room 2.30) and Thursday 18:00-20:00 (room 2.32)"
+    show_on_site: true
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: labs/07_session-7
+  lab-08:
+    event_datetime: tbc
+    title: "Neural models III - Language modelling with Transformers I"
+    kind: lab
+    details: "Two lab groups: Wednesday 08:00-10:00 (room 2.30) and Thursday 18:00-20:00 (room 2.32)"
+    show_on_site: true
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: labs/08_session-8
+  lab-09:
+    event_datetime: tbc
+    title: "Neural models III - Language modelling with Transformers II"
+    kind: lab
+    details: "Two lab groups: Wednesday 08:00-10:00 (room 2.30) and Thursday 18:00-20:00 (room 2.32)"
+    show_on_site: true
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: labs/09_session-9
+  lab-10:
+    event_datetime: tbc
+    title: "NLP visualizations + Explainable AI"
+    kind: lab
+    details: "Two lab groups: Wednesday 08:00-10:00 (room 2.30) and Thursday 18:00-20:00 (room 2.32)"
+    show_on_site: true
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: labs/10_session-10
+  lab-11:
+    event_datetime: tbc
+    title: "Extending NLP to LLM workflows and agents"
+    kind: lab
+    details: "Two lab groups: Wednesday 08:00-10:00 (room 2.30) and Thursday 18:00-20:00 (room 2.32)"
+    show_on_site: true
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: labs/11_session-11
+  lab-12:
+    event_datetime: tbc
+    title: "LLM Workflows and Agents II"
+    kind: lab
+    details: "Two lab groups: Wednesday 08:00-10:00 (room 2.30) and Thursday 18:00-20:00 (room 2.32)"
+    show_on_site: true
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: labs/12_session-12
+
+events:
+  lab-01-group-2:
+    kind: lab
+    number: 1
+    details: "Lab group 2 - Thursday 18:00-20:00, room 2.32"
+    event_datetime: 2026-09-03T18:00
+  lab-02-group-2:
+    kind: lab
+    number: 2
+    details: "Lab group 2 - Thursday 18:00-20:00, room 2.32"
+    event_datetime: 2026-09-10T18:00
+  lab-03-group-2:
+    kind: lab
+    number: 3
+    details: "Lab group 2 - Thursday 18:00-20:00, room 2.32"
+    event_datetime: 2026-09-17T18:00
+  lab-04-group-2:
+    kind: lab
+    number: 4
+    details: "Lab group 2 - Thursday 18:00-20:00, room 2.32"
+    event_datetime: 2026-09-24T18:00
+  lab-05-group-2:
+    kind: lab
+    number: 5
+    details: "Lab group 2 - Thursday 18:00-20:00, room 2.32"
+    event_datetime: 2026-10-01T18:00
+  lab-06-group-2:
+    kind: lab
+    number: 6
+    details: "Lab group 2 - Thursday 18:00-20:00, room 2.32"
+    event_datetime: 2026-10-08T18:00

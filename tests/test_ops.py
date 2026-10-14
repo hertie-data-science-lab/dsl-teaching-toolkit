@@ -55,6 +55,8 @@ CONTRACT_REQUEST = {
 }
 
 CONTRACT_OPS = {
+    # Plan 0.11.0 9b ruling 6: the Confirm of "Withheld patterns reviewed".
+    "materials.confirm_withheld",
     "semester.check",
     "semester.preview_automation",
     "release.entry",

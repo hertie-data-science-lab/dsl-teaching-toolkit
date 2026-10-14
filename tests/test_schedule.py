@@ -17,7 +17,7 @@ import pytest
 import yaml
 from conftest import source_fault
 
-from dsl_course import course, gh_contents, materials, policy, schedule, settings
+from dsl_course import course, gh_contents, policy, schedule, settings
 from dsl_course import faults as faults_module
 from dsl_course.schedule import (
     AssignmentEntry,
@@ -73,31 +73,20 @@ def _instance(text: str) -> settings.Instance:
     return settings.parse_instance(text)
 
 
-def _parse_moved(meta: dict) -> schedule.Schedule:
-    """`meta` parsed with each entry's `semester_dest_repo` where it lives now: the
-    semester's assignments.yml."""
-    blocks = {
-        slug: {"semester_dest_repo": entry.pop("semester_dest_repo")}
-        for slug, entry in meta["assignments"].items()
-        if "semester_dest_repo" in entry
-    }
-    return parse(meta, _instance(yaml.safe_dump({"assignments": blocks})))
-
-
 def test_parse_full_schedule():
     meta = {
         "timezone": "Europe/Berlin",
         "semester_start": "2026-09-07",
         "semester_end": "2026-12-18",
-        "releases": {
+        "lectures": {
             "session_2": {
                 "event_datetime": "2026-09-15T14:00",
-                "deploy": [
+                "files": [
                     {
-                        "course_source_repo": "cm-f2026",
-                        "course_source_path": "lectures/02_intro",
-                        "semester_dest_repo": "materials",
-                        "semester_dest_path": "lectures/02_intro",
+                        "from_course_repo": "cm-f2026",
+                        "from_path": "lectures/02_intro",
+                        "to_semester_repo": "materials",
+                        "to_path": "lectures/02_intro",
                     }
                 ],
             },
@@ -105,12 +94,14 @@ def test_parse_full_schedule():
         },
         "assignments": {
             "assignment-1": {
-                "course_source_repo": "a-f2026",
+                "template": "a-f2026",
                 "due_datetime": "2026-10-13",
             }
         },
+        "exams": {
+            "final": {"title": "Final", "event_datetime": "2026-12-15"},
+        },
         "events": {
-            "final": {"kind": "exam", "title": "Final", "event_datetime": "2026-12-15"},
             "project-clinic": {
                 "title": "Project Clinic",
                 "event_datetime": "2026-10-14T10:00",
@@ -145,7 +136,7 @@ def test_parse_full_schedule():
         .isoformat()
         .startswith("2026-10-23T23:59:59")
     )
-    # events are display-only rows, in calendar order; `type` defaults to special_event
+    # exams and events with no files are display-only rows, in calendar order
     assert sched.events == [
         Event(
             label="project-clinic",
@@ -164,9 +155,9 @@ def test_parse_empty_is_safe():
 
 def test_release_without_when_is_dropped():
     meta = {
-        "releases": {
-            "ok": {"event_datetime": "2026-09-01", "deploy": []},
-            "nope": {"deploy": []},
+        "lectures": {
+            "ok": {"event_datetime": "2026-09-01", "files": []},
+            "nope": {"files": []},
         }
     }
     assert [r.label for r in parse(meta).releases] == ["ok"]
@@ -174,12 +165,12 @@ def test_release_without_when_is_dropped():
 
 def test_deploy_accepts_single_mapping_defaults_semester_dest_path_none():
     meta = {
-        "releases": {
+        "lectures": {
             "s": {
                 "event_datetime": "2026-09-01",
-                "deploy": {
-                    "course_source_repo": "cm",
-                    "course_source_path": "lectures/00_x",
+                "files": {
+                    "from_course_repo": "cm",
+                    "from_path": "lectures/00_x",
                 },
             }
         }
@@ -191,10 +182,10 @@ def test_deploy_accepts_single_mapping_defaults_semester_dest_path_none():
 
 def test_deploy_entry_missing_source_is_skipped():
     meta = {
-        "releases": {
+        "lectures": {
             "s": {
                 "event_datetime": "2026-09-01",
-                "deploy": [{"course_source_repo": "cm"}, {"course_source_path": "x"}],
+                "files": [{"from_course_repo": "cm"}, {"from_path": "x"}],
             }
         }
     }
@@ -205,10 +196,10 @@ def test_deploy_entry_using_the_old_unprefixed_keys_is_skipped():
     # The org prefixes are a hard rename with no alias handling, so a semester whose
     # schedule.yml predates it must lose the copy outright rather than half-parse it.
     meta = {
-        "releases": {
+        "lectures": {
             "s": {
                 "event_datetime": "2026-09-01",
-                "deploy": [
+                "files": [
                     {
                         "source_repo": "cm",
                         "source_path": "lectures/00_x",
@@ -285,20 +276,27 @@ def test_event_without_a_usable_date_is_dropped():
     )
 
 
-def test_event_type_defaults_to_special_event_and_rejects_unknown_values():
+def test_a_display_rows_kind_is_its_block():
+    # Decision 0038 rule 1: an exam is an `exams:` entry, a special event an `events:`
+    # one; a 0.10 `kind:` on the entry is an old name, read as nothing.
     meta = {
+        "exams": {"mid-term": {"event_datetime": "2026-11-03"}},
         "events": {
-            "mid-term": {"kind": "Exam", "event_datetime": "2026-11-03"},
             "clinic": {"event_datetime": "2026-10-14T10:00"},
-            "typo": {"kind": "examm", "event_datetime": "2026-10-20"},
-        }
+            "typo": {"kind": "exam", "event_datetime": "2026-10-20"},
+        },
     }
-    events = {e.label: e for e in parse(meta).events}
-    assert events["mid-term"].kind == "exam"  # case-normalised
+    sched = parse(meta)
+    events = {e.label: e for e in sched.events}
+    assert events["mid-term"].kind == "exam"
     assert events["clinic"].kind == "special_event"
-    assert (
-        events["typo"].kind == "special_event"
-    )  # unknown value -> the display default
+    assert events["typo"].kind == "special_event"
+    (fault,) = sched.faults
+    assert (fault.where, fault.field, fault.code) == (
+        "events.typo",
+        "kind",
+        faults_module.NOT_MIGRATED,
+    )
 
 
 def test_events_sort_by_date_with_undated_last():
@@ -337,10 +335,10 @@ def test_assignment_without_due_is_skipped():
 
 def test_event_datetime_is_the_only_accepted_key():
     meta = {
-        "releases": {
-            "new-style": {"event_datetime": "2026-09-15T10:00", "deploy": []},
-            "old-alias": {"calendar_event": "2026-09-01T09:00", "deploy": []},
-            "older-alias": {"when": "2026-08-01T09:00", "deploy": []},
+        "lectures": {
+            "new-style": {"event_datetime": "2026-09-15T10:00", "files": []},
+            "old-alias": {"calendar_event": "2026-09-01T09:00", "files": []},
+            "older-alias": {"when": "2026-08-01T09:00", "files": []},
         }
     }
     releases = {r.label: r for r in parse(meta).releases}
@@ -349,12 +347,12 @@ def test_event_datetime_is_the_only_accepted_key():
 
 
 def _one_release(when: str, *deploys: dict) -> schedule.Release:
-    base = {"course_source_repo": "cm-f2026", "course_source_path": "lectures/02_intro"}
+    base = {"from_course_repo": "cm-f2026", "from_path": "lectures/02_intro"}
     meta = {
-        "releases": {
+        "lectures": {
             "session_2": {
                 "event_datetime": when,
-                "deploy": [{**base, **d} for d in deploys],
+                "files": [{**base, **d} for d in deploys],
             }
         }
     }
@@ -365,8 +363,8 @@ def _one_release(when: str, *deploys: dict) -> schedule.Release:
 def test_deploy_datetime_parses_and_defaults_to_an_hour_before_the_event():
     r = _one_release(
         "2026-09-15T10:00",
-        {"deploy_datetime": "2026-09-15T18:00"},
-        {"course_source_path": "readings/02_intro"},
+        {"release_datetime": "2026-09-15T18:00"},
+        {"from_path": "readings/02_intro"},
     )
     after, default = r.deploy
     # An explicit time is never touched, even one after the class.
@@ -400,7 +398,7 @@ def test_a_tbc_entry_gets_no_default_ship_time():
 
 def test_display_only_entry_is_kept_with_its_title():
     meta = {
-        "releases": {
+        "lectures": {
             "project-clinic": {
                 "event_datetime": "2026-11-17T10:00",
                 "title": "Project clinic",
@@ -413,14 +411,14 @@ def test_display_only_entry_is_kept_with_its_title():
 
 def test_malformed_deploy_datetime_falls_back_to_the_default():
     meta = {
-        "releases": {
+        "lectures": {
             "s": {
                 "event_datetime": "2026-09-15T10:00",
-                "deploy": [
+                "files": [
                     {
-                        "course_source_repo": "cm-f2026",
-                        "course_source_path": "lectures/02_intro",
-                        "deploy_datetime": "not-a-date",
+                        "from_course_repo": "cm-f2026",
+                        "from_path": "lectures/02_intro",
+                        "release_datetime": "not-a-date",
                     }
                 ],
             }
@@ -434,13 +432,12 @@ def test_malformed_deploy_datetime_falls_back_to_the_default():
 def test_the_settings_that_moved_out_of_schedule_are_flagged_by_name():
     # The clean break. A semester still carrying `type: group` is not making a typo, it is
     # declaring the shape in a file that no longer reads it - so the entry is KEPT (its
-    # dates are still good) and the message says which file the declaration moved to:
-    # the shape to grading_config.yml, the team cap (a run setting, which grading_config
-    # refuses whole) to the semester's assignments.yml.
+    # dates are still good) and the message says which file the declaration moved to.
+    # The team cap is a run setting written on the entry now (decision 0038 rule 9).
     meta = {
         "assignments": {
             "assignment-4-project": {
-                "course_source_repo": "a-f2026-1",
+                "template": "a-f2026-1",
                 "due_datetime": "2026-11-15",
                 "type": "group",
                 "max_team_size": 3,
@@ -449,17 +446,13 @@ def test_the_settings_that_moved_out_of_schedule_are_flagged_by_name():
     }
     sched = parse(meta)
     entry = sched.assignments["assignment-4-project"]
-    assert not hasattr(entry, "type") and not hasattr(entry, "max_team_size")
+    assert not hasattr(entry, "type")
+    assert entry.settings["max_team_size"] == 3
     assert entry.due_datetime is not None  # the timing it DID declare still stands
     kinds = {line.split(":")[0] for line in sched.dropped}
-    assert kinds == {
-        "assignments.assignment-4-project.type",
-        "assignments.assignment-4-project.max_team_size",
-    }
-    said = {line.split(":")[0].rsplit(".", 1)[1]: line for line in sched.dropped}
-    assert "grading_config.yml" in said["type"] and "solution" in said["type"]
-    assert "semester-config/assignments.yml" in said["max_team_size"]
-    assert "grading_config.yml" not in said["max_team_size"]
+    assert kinds == {"assignments.assignment-4-project.type"}
+    (said,) = sched.dropped
+    assert "grading_config.yml" in said and "solution" in said
     for line in sched.dropped:
         # named as MOVED, not as the generic typo they are not
         assert "unrecognised key" not in line
@@ -469,12 +462,12 @@ def test_assignment_handout_parses():
     meta = {
         "assignments": {
             "assignment-1": {
-                "course_source_repo": "a-f2026-1",
+                "template": "a-f2026-1",
                 "due_datetime": "2026-10-13",
                 "handout_datetime": "2026-09-22T09:00",
             },
             "assignment-2": {
-                "course_source_repo": "a-f2026-2",
+                "template": "a-f2026-2",
                 "due_datetime": "2026-11-10",
             },
         }
@@ -495,13 +488,13 @@ def test_assignment_solution_datetime_parses_and_has_no_default():
     meta = {
         "assignments": {
             "assignment-1": {
-                "course_source_repo": "a-f2026-1",
+                "template": "a-f2026-1",
                 "due_datetime": "2026-10-13",
                 "handout_datetime": "2026-09-22T09:00",
                 "solution_datetime": "2026-10-16T09:00",
             },
             "assignment-2": {
-                "course_source_repo": "a-f2026-2",
+                "template": "a-f2026-2",
                 "due_datetime": "2026-11-10",
             },
         }
@@ -525,7 +518,7 @@ def test_a_solution_datetime_without_a_handout_is_flagged_at_parse_time():
         {
             "assignments": {
                 "assignment-1": {
-                    "course_source_repo": "a-f2026",
+                    "template": "a-f2026",
                     "due_datetime": "2026-10-13",
                     "solution_datetime": "2026-10-16T09:00",
                 }
@@ -549,7 +542,7 @@ def test_a_solution_datetime_not_after_the_handout_is_refused():
             {
                 "assignments": {
                     "assignment-1": {
-                        "course_source_repo": "a-f2026",
+                        "template": "a-f2026",
                         "due_datetime": "2026-10-13",
                         "handout_datetime": "2026-09-22T09:00",
                         "solution_datetime": bad,
@@ -567,7 +560,7 @@ def _with_solution(solution: str, **more) -> dict:
     return {
         "assignments": {
             "assignment-1": {
-                "course_source_repo": "a-f2026",
+                "template": "a-f2026",
                 "due_datetime": "2026-10-13",
                 "handout_datetime": "2026-09-22T09:00",
                 "solution_datetime": solution,
@@ -604,17 +597,18 @@ def test_saving_a_solution_before_the_cutoff_is_refused_and_nothing_else_is(tmp_
         "2026-10-10T09:00",
         **{
             "assignment-2": {
-                "course_source_repo": "b-f2026",
+                "template": "b-f2026",
                 "due_datetime": "2026-11-13",
                 "handout_datetime": "2026-10-22T09:00",
                 "solution_datetime": "2026-11-20T09:00",
             }
         },
     )
-    meta["releases"] = {
+    meta["lectures"] = {
         "lecture_01": {
+            "session": 1,
             "event_datetime": "2026-09-15T10:00",
-            "deploy": [{"course_source_repo": "cm", "course_source_path": "l/01"}],
+            "files": [{"from_course_repo": "cm", "from_path": "l/01"}],
         }
     }
     sched = _validated(tmp_path, meta)
@@ -638,26 +632,23 @@ def test_saving_a_solution_before_the_cutoff_is_refused_and_nothing_else_is(tmp_
     assert [r.label for r in sched.releases] == ["lecture_01"]
 
 
-def test_the_check_reads_the_window_assignments_yml_states_per_assignment(tmp_path):
-    # A per-assignment deviation: a1 takes 5 late days, a2 the semester's 0. The same
-    # solution date is inside a1's window and after a2's cutoff.
+def test_the_check_reads_the_window_each_entry_states(tmp_path):
+    # A per-assignment deviation, written on the entry (decision 0038 rule 9): a1 takes 5
+    # late days, a2 the semester's 0. The same solution date is inside a1's window and
+    # after a2's cutoff.
     meta = _with_solution(
         "2026-10-16T09:00",
         **{
             "assignment-2": {
-                "course_source_repo": "b-f2026",
+                "template": "b-f2026",
                 "due_datetime": "2026-10-13",
                 "handout_datetime": "2026-09-22T09:00",
                 "solution_datetime": "2026-10-16T09:00",
             }
         },
     )
-    sched = _validated(
-        tmp_path,
-        meta,
-        "defaults:\n  late_window_days: 0\n"
-        "assignments:\n  assignment-1:\n    late_window_days: 5\n",
-    )
+    meta["assignments"]["assignment-1"]["late_window_days"] = 5
+    sched = _validated(tmp_path, meta, "defaults:\n  late_window_days: 0\n")
     assert sched.assignments["assignment-1"].solution_datetime is None
     assert "before its late cutoff on 2026-10-18 23:59" in sched.dropped[0]
     assert sched.assignments["assignment-2"].solution_datetime is not None
@@ -717,7 +708,7 @@ def test_an_unparseable_solution_datetime_is_flagged_with_what_it_costs():
         {
             "assignments": {
                 "assignment-1": {
-                    "course_source_repo": "a-f2026",
+                    "template": "a-f2026",
                     "due_datetime": "2026-10-13",
                     "handout_datetime": "2026-09-22T09:00",
                     "solution_datetime": "the friday after",
@@ -733,10 +724,10 @@ def test_an_unparseable_solution_datetime_is_flagged_with_what_it_costs():
 
 def test_tbc_event_datetime_keeps_an_undated_entry():
     meta = {
-        "releases": {
+        "lectures": {
             "guest-lecture": {"event_datetime": "tbc", "title": "Guest lecture"},
-            "dated": {"event_datetime": "2026-09-15T10:00", "deploy": []},
-            "dropped": {"deploy": []},  # no date, no tbc -> gone
+            "dated": {"event_datetime": "2026-09-15T10:00", "files": []},
+            "dropped": {"files": []},  # no date, no tbc -> gone
         }
     }
     releases = parse(meta).releases
@@ -749,7 +740,7 @@ def test_tbc_event_datetime_keeps_an_undated_entry():
 
 def test_tbc_flag_keeps_a_provisional_date_firing():
     meta = {
-        "releases": {
+        "lectures": {
             "clinic": {"event_datetime": "2026-11-17T10:00", "tbc": True},
         },
     }
@@ -762,7 +753,7 @@ def test_show_on_site_defaults_true_and_only_an_explicit_false_silences_an_entry
     # Only a literal `false` opts out - a missing key, or anything truthy, shows the row,
     # and the entry deploys either way.
     meta = {
-        "releases": {
+        "lectures": {
             "lecture-1": {"event_datetime": "2026-09-01T10:00"},
             "readings-1": {"event_datetime": "2026-08-25T09:00", "show_on_site": False},
             "lab-1": {"event_datetime": "2026-09-03T14:00", "show_on_site": True},
@@ -778,7 +769,7 @@ def test_show_on_site_is_a_known_release_key():
     # An unrecognised key is FLAGGED rather than silently ignored, so a schedule that
     # opts out of the site must not read as a typo faculty are told to fix.
     meta = {
-        "releases": {
+        "lectures": {
             "readings-1": {"event_datetime": "2026-08-25T09:00", "show_on_site": False},
         },
     }
@@ -820,7 +811,7 @@ def test_record_handout_round_trips_through_the_parser(monkeypatch):
     from dsl_course import schedule as S
 
     store = {
-        "text": "assignments:\n  assignment-1:\n    course_source_repo: a-f2026\n    due_datetime: 2026-10-13\n"
+        "text": "assignments:\n  assignment-1:\n    template: a-f2026\n    due_datetime: 2026-10-13\n"
     }
     monkeypatch.setattr(
         S, "get_file_with_sha", lambda org, repo, path: (store["text"], "sha0")
@@ -907,9 +898,9 @@ MALFORMED_SCHEDULE = """\
 materials_releases:
   lab-1:
     event_datetime: 2026-09-03T14:00
-    deploy:
-      - {course_source_repo: course-materials-f2026,
-        course_source_path: labs/01_lab
+    files:
+      - {from_course_repo: course-materials-f2026,
+        from_path: labs/01_lab
 """
 
 
@@ -939,12 +930,13 @@ def test_a_wellformed_schedule_is_untouched_by_the_yaml_guard(monkeypatch, capsy
     good = (
         "timezone: Europe/Berlin\n"
         "semester_start: 2026-09-07\n"
-        "releases:\n"
+        "labs:\n"
         "  lab-1:\n"
+        "    session: 1\n"
         "    event_datetime: 2026-09-03T14:00\n"
-        "    deploy:\n"
-        "      - course_source_repo: course-materials-f2026\n"
-        "        course_source_path: labs/01_lab\n"
+        "    files:\n"
+        "      - from_course_repo: course-materials-f2026\n"
+        "        from_path: labs/01_lab\n"
     )
     monkeypatch.setattr(S, "get_file_content", lambda org, repo, path: good)
 
@@ -1017,21 +1009,21 @@ def test_a_comment_only_schedule_is_empty_not_unparseable(monkeypatch, capsys):
 def test_every_kind_of_dropped_entry_is_recorded_with_its_cost():
     sched = parse(
         {
-            "releases": {
+            "lectures": {
                 "ok": {
                     "event_datetime": "2026-09-15T10:00",
-                    "deploy": [
-                        {"course_source_repo": "cm", "course_source_path": "l/01"},
+                    "files": [
+                        {"from_course_repo": "cm", "from_path": "l/01"},
                         {"source_repo": "cm", "source_path": "l/02"},  # pre-rename keys
                     ],
                 },
                 "typo": {"evetn_datetime": "2026-09-22T10:00"},
             },
             "assignments": {
-                "a1": {"course_source_repo": "a-f2026", "due_datetime": "2026-10-13"},
+                "a1": {"template": "a-f2026", "due_datetime": "2026-10-13"},
                 "a2": {"due_date": "2026-11-13"},
             },
-            "events": {"mid-term": {"kind": "exam"}},
+            "exams": {"mid-term": {"title": "Midterm"}},
         }
     )
     # the well-formed entries still parse - one bad entry never poisons its neighbours
@@ -1040,35 +1032,35 @@ def test_every_kind_of_dropped_entry_is_recorded_with_its_cost():
     assert list(sched.assignments) == ["a1"]
 
     where = [d.split(":")[0] for d in sched.dropped]
-    assert where == [
-        "releases.ok.deploy[1]",
-        "releases.typo",
-        "assignments.a2",
-        "events.mid-term",
-    ]
+    assert sorted(where) == sorted(
+        [
+            "lectures.ok.files[1]",
+            "lectures.typo",
+            "exams.mid-term",
+            "assignments.a2",
+        ]
+    )
+    said = dict(zip(where, sched.dropped, strict=True))
     # each line names the field at fault AND what the semester loses by it
-    assert (
-        "`course_source_repo`" in sched.dropped[0] and "never ships" in sched.dropped[0]
-    )
-    assert (
-        "`event_datetime`" in sched.dropped[1] and "nothing deploys" in sched.dropped[1]
-    )
-    assert "`due_datetime`" in sched.dropped[2] and "no autograding" in sched.dropped[2]
-    assert (
-        "`event_datetime`" in sched.dropped[3] and "never appears" in sched.dropped[3]
-    )
+    assert "`from_course_repo`" in said["lectures.ok.files[1]"]
+    assert "never ships" in said["lectures.ok.files[1]"]
+    assert "`event_datetime`" in said["lectures.typo"]
+    assert "nothing deploys" in said["lectures.typo"]
+    assert "`template`" in said["assignments.a2"]
+    assert "no autograding" in said["assignments.a2"]
+    assert "`event_datetime`" in said["exams.mid-term"]
 
 
-def test_an_assignment_without_a_course_source_repo_is_dropped():
+def test_an_assignment_without_a_template_is_dropped():
     # Required, like due_datetime: the repo is never guessed from the slug, so an entry
     # that does not name one has nothing to hand out and no way to be graded.
     sched = parse(
         {
             "assignments": {
-                "ok": {"course_source_repo": "a-f2026", "due_datetime": "2026-10-13"},
+                "ok": {"template": "a-f2026", "due_datetime": "2026-10-13"},
                 "no-repo": {"due_datetime": "2026-10-20"},
                 "blank-repo": {
-                    "course_source_repo": "  ",
+                    "template": "  ",
                     "due_datetime": "2026-10-27",
                 },
             }
@@ -1079,36 +1071,42 @@ def test_an_assignment_without_a_course_source_repo_is_dropped():
         "assignments.no-repo",
         "assignments.blank-repo",
     ]
-    assert "`course_source_repo`" in sched.dropped[0]
+    assert "`template`" in sched.dropped[0]
     assert "no autograding" in sched.dropped[0]
 
 
-def test_semester_dest_repo_comes_from_assignments_yml_and_defaults_to_the_slug():
+def test_the_repos_are_repo_name_else_assignment_and_the_number():
     from dsl_course.schedule import semester_name
 
     sched = parse(
         {
             "assignments": {
-                "hw": {"course_source_repo": "a-f2026-1", "due_datetime": "2026-10-13"},
+                "hw": {
+                    "template": "a-f2026-1",
+                    "number": 1,
+                    "due_datetime": "2026-10-13",
+                },
                 "named": {
-                    "course_source_repo": "a-f2026-2",
+                    "template": "a-f2026-2",
+                    "number": 2,
+                    "repo_name": "homework-1",
                     "due_datetime": "2026-10-20",
                 },
                 "blank": {
-                    "course_source_repo": "a-f2026-3",
+                    "template": "a-f2026-3",
+                    "number": 3,
+                    "repo_name": "  ",
                     "due_datetime": "2026-10-27",
                 },
+                "unnumbered": {"template": "a-f2026-4", "due_datetime": "2026-10-28"},
             }
         },
-        _instance(
-            "assignments:\n  named:\n    semester_dest_repo: homework-1\n"
-            "  blank:\n    semester_dest_repo: '  '\n"
-        ),
     )
-    # unset (and blank) -> the slug IS the semester-side name; set -> it wins
+    # unset (and blank) -> the key (decision 0038 amendment rule 1); set -> it wins
     assert semester_name("hw", sched.assignments["hw"]) == "hw"
     assert semester_name("named", sched.assignments["named"]) == "homework-1"
     assert semester_name("blank", sched.assignments["blank"]) == "blank"
+    assert semester_name("unnumbered", sched.assignments["unnumbered"]) == "unnumbered"
 
 
 def test_an_unknown_timezone_is_reported_rather_than_silently_swapped():
@@ -1152,24 +1150,26 @@ def test_an_absent_term_date_is_not_flagged(key):
     assert parse({key: date(2026, 9, 1)}).dropped == []
 
 
-def test_a_dangling_deploy_key_is_flagged_but_an_explicit_empty_list_is_not():
-    # `deploy:` with nothing under it parses to None, indistinguishable from the key being
-    # absent by the time _parse_deploy sees it - and absent is legitimate (a display-only
-    # session row). Both demo semesters carried three of these on live sessions, each looking
-    # for all the world like it should ship something.
-    def drops(entry):
-        return parse({"releases": {"lecture-9": entry}}).dropped
+def test_a_files_key_written_with_nothing_in_it_is_a_to_do_not_a_fault():
+    # Plan 0.11.0 9b ruling 5: no `files:` key is a plain session; `files:` written with
+    # nothing in it (`[]`, or the bare key) is the quiet "no files yet" to-do the status
+    # raises - never a parse fault.
+    def entry(extra):
+        sched = parse(
+            {
+                "lectures": {
+                    "lecture-9": {"session": 9, "event_datetime": "2026-09-29", **extra}
+                }
+            }
+        )
+        assert sched.dropped == []
+        (r,) = sched.releases
+        return r
 
-    when = {"event_datetime": "2026-09-29"}
-    assert drops(when) == []  # absent: a deliberate display-only row
-    assert drops({**when, "deploy": []}) == []  # explicit "no copies", left alone
-    flagged = drops({**when, "deploy": None})
-    assert len(flagged) == 1
-    assert "ships NOTHING" in flagged[0]
-    # the entry itself survives as the display-only row it in fact is
-    (r,) = parse({"releases": {"lecture-9": {**when, "deploy": None}}}).releases
-    assert r.deploy == []
-    assert r.is_event_only
+    assert not entry({}).files_written
+    assert entry({"files": []}).files_written
+    bare = entry({"files": None})
+    assert bare.files_written and bare.deploy == [] and bare.is_event_only
 
 
 def test_a_clean_schedule_drops_nothing():
@@ -1177,10 +1177,10 @@ def test_a_clean_schedule_drops_nothing():
     assert (
         parse(
             {
-                "releases": {"s": {"event_datetime": "2026-09-01", "deploy": []}},
+                "lectures": {"s": {"event_datetime": "2026-09-01", "files": []}},
                 "assignments": {
                     "a1": {
-                        "course_source_repo": "a-f2026",
+                        "template": "a-f2026",
                         "due_datetime": "2026-10-13",
                     }
                 },
@@ -1195,7 +1195,7 @@ def test_tbc_entries_are_not_drops():
     # `tbc` is a deliberate "date not settled yet", not a malformed date
     sched = parse(
         {
-            "releases": {"r": {"event_datetime": "tbc"}},
+            "lectures": {"r": {"event_datetime": "tbc"}},
             "events": {"guest": {"event_datetime": "tbc"}},
         }
     )
@@ -1210,7 +1210,7 @@ def test_load_logs_every_dropped_entry_loudly(monkeypatch, capsys):
         S,
         "get_file_content",
         lambda org, repo, path: (
-            "assignments:\n  assignment-2:\n    due_date: 2026-11-13\n"
+            "assignments:\n  assignment-2:\n    number: 2\n    due_datetime: 2026-11-13\n"
         ),
     )
 
@@ -1222,7 +1222,7 @@ def test_load_logs_every_dropped_entry_loudly(monkeypatch, capsys):
     assert "Semester-f2026/semester-config/schedule.yml" in err
     assert "DROPPED" in err
     assert "assignments.assignment-2" in err
-    assert "`due_datetime`" in err
+    assert "`template`" in err
     assert "no autograding" in err
 
 
@@ -1233,7 +1233,7 @@ def test_load_file_reports_unparseable_yaml_rather_than_treating_it_as_empty(tmp
     # The opposite stance to `load`: the cron must survive a typo, a validator must fail on
     # one. A broken file that silently validated would be worse than no validator at all.
     bad = tmp_path / "schedule.yml"
-    bad.write_text("releases:\n  a:\n    deploy:\n      - {x: 1,\n")
+    bad.write_text("releases:\n  a:\n    files:\n      - {x: 1,\n")
     sched, error = schedule.load_file(str(bad))
     assert sched is None
     assert "not valid YAML" in error and "line" in error
@@ -1276,21 +1276,24 @@ def test_shipped_schedules_parse_with_nothing_dropped(path):
     assert sched.dropped == [], f"{path} drops entries:\n" + "\n".join(sched.dropped)
 
 
-def test_the_seeded_skeleton_states_the_numbering_and_kind_rules_the_engine_runs():
-    # It still said a row is numbered by its position and that an unknown folder is a
-    # lecture (decisions 0020, 0031): an instructor following it had a release skipped.
+def test_the_seeded_skeleton_states_the_rules_the_engine_runs():
+    # Decision 0038: the block is the kind, `session` is required on lectures and labs,
+    # `number` on assignments, and nothing is read off a key, a folder or a position.
     text = (
         Path(__file__).resolve().parents[1] / "templates/semester-config/schedule.yml"
     ).read_text()
-    assert "position" not in text and "anything else -> lecture" not in text
-    assert "anything else -> assets" in text
-    assert materials.infer_kind("week-1") == materials.ASSETS_KIND == "assets"
+    assert "position" not in text and "kind:" not in text and "deploy:" not in text
     lines = text.splitlines()
-    head = lines.index("# assignments:                      ")
-    block = lines[head : head + 12]
-    assert any(
-        line.startswith("#     number:") and "REQUIRED" in line for line in block
-    )
+    for block, field in (
+        ("lectures", "session"),
+        ("labs", "session"),
+        ("assignments", "number"),
+    ):
+        head = next(i for i, line in enumerate(lines) if line.startswith(f"# {block}:"))
+        assert any(
+            line.startswith(f"#     {field}:") and "REQUIRED" in line
+            for line in lines[head : head + 6]
+        ), block
 
 
 def test_the_worked_example_shows_the_archive_block():
@@ -1370,13 +1373,13 @@ def test_an_unknown_top_level_key_is_reported_not_silently_zero_releases():
 def test_a_typod_field_within_an_entry_is_reported_but_the_entry_survives():
     sched = parse(
         {
-            "releases": {
+            "lectures": {
                 "s": {
                     "event_datetime": "2026-09-01",
-                    "deploy": [
+                    "files": [
                         {
-                            "course_source_repo": "cm",
-                            "course_source_path": "l/01",
+                            "from_course_repo": "cm",
+                            "from_path": "l/01",
                             "dest_repo": "materials",  # legacy key, silently ignored
                         }
                     ],
@@ -1384,7 +1387,7 @@ def test_a_typod_field_within_an_entry_is_reported_but_the_entry_survives():
             },
             "assignments": {
                 "a1": {
-                    "course_source_repo": "a-f2026",
+                    "template": "a-f2026",
                     "due_datetime": "2026-10-13",
                     "grading_dateime": "2026-10-15",  # typo, grading silently falls back
                 }
@@ -1395,7 +1398,7 @@ def test_a_typod_field_within_an_entry_is_reported_but_the_entry_survives():
     assert len(sched.releases) == 1 and len(sched.releases[0].deploy) == 1
     assert list(sched.assignments) == ["a1"]
     where = {d.split(":")[0] for d in sched.dropped}
-    assert "releases.s.deploy[0].dest_repo" in where
+    assert "lectures.s.files[0].dest_repo" in where
     assert "assignments.a1.grading_dateime" in where
 
 
@@ -1411,7 +1414,7 @@ def test_an_unparseable_handout_datetime_is_flagged_with_what_it_costs():
         {
             "assignments": {
                 "a1": {
-                    "course_source_repo": "a-f2026",
+                    "template": "a-f2026",
                     "due_datetime": "2026-10-13",
                     "handout_datetime": "2026-13-01T09:00",  # month 13
                 }
@@ -1428,31 +1431,18 @@ def test_an_unparseable_handout_datetime_is_flagged_with_what_it_costs():
 
 def test_the_late_cutoff_is_the_due_date_plus_the_effective_window(monkeypatch):
     sched = parse(
-        {
-            "assignments": {
-                "a1": {"course_source_repo": "a", "due_datetime": "2026-10-13"}
-            }
-        }
+        {"assignments": {"a1": {"template": "a", "due_datetime": "2026-10-13"}}}
     )
     due = sched.assignments["a1"].due_datetime
     # Nothing declared: the institution's 10 days.
     assert schedule.grading_cutoff_datetime(sched, "a1") == due + timedelta(days=10)
-    # The semester's assignments.yml answers first; 0 is no late work at all.
+    # The entry's own setting answers first; 0 is no late work at all.
     sched.org = "Sem"
-    monkeypatch.setattr(
-        settings,
-        "_assignments_text",
-        lambda org: "assignments:\n  a1:\n    late_window_days: 0\n",
-    )
     monkeypatch.setattr(settings, "course_org_for_semester", lambda org: "C")
+    sched.assignments["a1"].settings = {"late_window_days": 0}
     assert schedule.grading_cutoff_datetime(sched, "a1") == due
     # A late rule naming only the penalty names no window: no late work either.
-    settings.semester_blocks.cache_clear()
-    monkeypatch.setattr(
-        settings,
-        "_assignments_text",
-        lambda org: "assignments:\n  a1:\n    late_penalty_per_day: 5%\n",
-    )
+    sched.assignments["a1"].settings = {"late_penalty_per_day": "5%"}
     assert schedule.grading_cutoff_datetime(sched, "a1") == due
     assert schedule.grading_cutoff_datetime(sched, "unknown") is None
 
@@ -1462,12 +1452,12 @@ def test_an_unparseable_marks_return_datetime_is_flagged():
         {
             "assignments": {
                 "a1": {
-                    "course_source_repo": "a-f2026",
+                    "template": "a-f2026",
                     "due_datetime": "2026-10-13",
                     "marks_return_datetime": "next tuesday",
                 },
                 "a2": {
-                    "course_source_repo": "b-f2026",
+                    "template": "b-f2026",
                     "due_datetime": "2026-10-13",
                     "marks_return_datetime": {
                         "event_datetime": "2026-10-01",
@@ -1475,7 +1465,7 @@ def test_an_unparseable_marks_return_datetime_is_flagged():
                     },
                 },
                 "a3": {
-                    "course_source_repo": "c-f2026",
+                    "template": "c-f2026",
                     "due_datetime": "2026-10-13",
                     "marks_return_datetime": {"event_datetime": "2026-10-27"},
                     "show_on_site": True,
@@ -1501,7 +1491,7 @@ def test_the_formation_window_runs_from_the_handout_to_the_grading_pin():
         {
             "assignments": {
                 "a1": {
-                    "course_source_repo": "a-f2026",
+                    "template": "a-f2026",
                     "due_datetime": "2026-10-13",
                     "handout_datetime": "2026-09-22T09:00",
                 }
@@ -1520,11 +1510,7 @@ def test_an_assignment_handed_out_by_hand_has_a_window_that_never_opens():
     # No handout_datetime = a moment nobody wrote down, so there is no hour from which
     # "form your team now" would be true.
     sched = parse(
-        {
-            "assignments": {
-                "a1": {"course_source_repo": "a-f2026", "due_datetime": "2026-10-13"}
-            }
-        }
+        {"assignments": {"a1": {"template": "a-f2026", "due_datetime": "2026-10-13"}}}
     )
     opens, closes = schedule.formation_window(sched, "a1")
     assert opens is None
@@ -1534,14 +1520,14 @@ def test_an_assignment_handed_out_by_hand_has_a_window_that_never_opens():
 def test_an_unparseable_deploy_datetime_is_flagged():
     sched = parse(
         {
-            "releases": {
+            "lectures": {
                 "s": {
                     "event_datetime": "2026-09-15T10:00",
-                    "deploy": [
+                    "files": [
                         {
-                            "course_source_repo": "cm-f2026",
-                            "course_source_path": "lectures/02_intro",
-                            "deploy_datetime": "sept 15th",
+                            "from_course_repo": "cm-f2026",
+                            "from_path": "lectures/02_intro",
+                            "release_datetime": "sept 15th",
                         }
                     ],
                 }
@@ -1556,77 +1542,124 @@ def test_an_unparseable_deploy_datetime_is_flagged():
         .startswith("2026-09-15T09:00")
     )
     (line,) = sched.dropped
-    assert line.startswith("releases.s.deploy[0].deploy_datetime:")
-    assert "an hour before the entry's `event_datetime`" in line
+    assert line.startswith("lectures.s.files[0].release_datetime:")
+    assert "an hour before the entry's first slot" in line
 
 
-def test_an_unknown_event_type_is_flagged_like_an_unknown_assignment_type():
-    sched = parse(
-        {"events": {"mid-term": {"kind": "exma", "event_datetime": "2026-11-03"}}}
-    )
-    assert sched.events[0].kind == "special_event"  # the row still shows
-    (line,) = sched.dropped
-    assert line.startswith("events.mid-term.kind:")
-    assert "'exma'" in line and "not an exam" in line
-
-
-def test_an_event_takes_any_session_kind_and_a_number():
+def test_a_lab_in_two_groups_is_one_entry_with_two_slots():
+    # Decision 0038 rule 3: a slot is a datetime, `tbc` or `{at, location, details}`; one
+    # row each, one number, one set of files, shipped before the first.
     sched = parse(
         {
-            "events": {
-                "lab-01-group-2": {
-                    "kind": "Lab",
-                    "number": 1,
-                    "event_datetime": "2026-09-17T18:00",
-                },
-                "lecture_04": {"kind": "lecture", "event_datetime": "tbc"},
-                "mid-term": {"kind": "exam", "event_datetime": "2026-11-03"},
-                "clinic": {"event_datetime": "2026-10-14"},
+            "labs": {
+                "lab-1": {
+                    "session": 1,
+                    "event_datetime": [
+                        "2026-09-17T18:00",
+                        {
+                            "at": "2026-09-16T08:00",
+                            "location": "Lab 2.30",
+                            "details": "G1",
+                        },
+                        "tbc",
+                    ],
+                    "files": [{"from_course_repo": "cm", "from_path": "labs/01"}],
+                }
             }
         }
     )
-    assert not sched.dropped
-    by = {e.label: e for e in [*sched.events, *sched.sessions]}
-    assert (by["lab-01-group-2"].kind, by["lab-01-group-2"].number) == ("lab", 1)
-    # `kind: lecture` is a lecture session, as `lab` is a lab one. No `number:`: the
-    # label's own, as on a release (`own_number`).
-    assert by["lecture_04"].kind == "lecture" and by["lecture_04"].number is None
-    assert schedule.own_number(None, "lecture_04") == 4
-    assert by["lecture_04"].when is None and by["lecture_04"].tbc
-    # Exams and special events are what they were, and stay `events`; a content kind
-    # is a session.
-    assert by["mid-term"].kind == "exam" and by["clinic"].kind == "special_event"
-    assert [e.label for e in sched.events] == ["clinic", "mid-term"]
-    assert [e.label for e in sched.sessions] == ["lab-01-group-2", "lecture_04"]
+    assert sched.dropped == []
+    (lab,) = sched.releases
+    assert [(s.when, s.location, s.details) for s in lab.slots] == [
+        (datetime(2026, 9, 17, 18, 0, tzinfo=BERLIN), "", ""),
+        (datetime(2026, 9, 16, 8, 0, tzinfo=BERLIN), "Lab 2.30", "G1"),
+        (None, "", ""),
+    ]
+    assert lab.when == datetime(2026, 9, 16, 8, 0, tzinfo=BERLIN)  # the first slot
+    assert lab.deploy[0].deploy_datetime == datetime(2026, 9, 16, 7, 0, tzinfo=BERLIN)
 
 
-@pytest.mark.parametrize("kind", ["assets", "assignment", "term", "lab-group"])
-def test_an_event_kind_that_is_no_row_still_shows_as_a_special_event(kind):
-    sched = parse({"events": {"x": {"kind": kind, "event_datetime": "2026-11-03"}}})
-    assert sched.events[0].kind == "special_event"
-    (line,) = sched.dropped
-    assert line.startswith("events.x.kind:")
-
-
-def test_an_unusable_event_number_is_flagged_and_falls_back_to_the_label():
-    sched = parse(
-        {"events": {"lab_2": {"kind": "lab", "number": "two", "event_datetime": "tbc"}}}
-    )
-    assert sched.sessions[0].number is None
-    (line,) = sched.dropped
-    assert line.startswith("events.lab_2.number:")
-
-
-def test_validate_counts_the_session_events():
+def test_an_unusable_slot_is_flagged_and_the_others_stand():
     sched = parse(
         {
-            "events": {
-                "lab-1-b": {"kind": "lab", "number": 1, "event_datetime": "tbc"},
-                "exam": {"kind": "exam", "event_datetime": "2026-11-03"},
+            "labs": {
+                "lab-1": {
+                    "session": 1,
+                    "event_datetime": ["2026-09-17T18:00", "soon"],
+                }
             }
         }
     )
-    assert "| 2 event(s), 1 of them session(s)" in schedule._validate_report(sched, "x")
+    assert len(sched.releases[0].slots) == 1
+    (line,) = sched.dropped
+    assert line.startswith("labs.lab-1.event_datetime[1].event_datetime:")
+
+
+def test_session_and_number_are_whole_numbers_and_number_defaults_to_session():
+    sched = parse(
+        {
+            "lectures": {"l": {"session": 3, "event_datetime": "tbc"}},
+            "labs": {
+                "a": {"session": 3, "number": 2, "event_datetime": "tbc"},
+                "b": {"session": "three", "event_datetime": "tbc"},
+            },
+        }
+    )
+    by = {r.label: r for r in sched.releases}
+    assert (by["l"].session, by["l"].number) == ("3", 3)
+    assert (by["a"].session, by["a"].number) == ("3", 2)
+    assert (by["b"].session, by["b"].number) == ("", None)
+    (line,) = sched.dropped
+    assert line.startswith("labs.b.session:")
+
+
+def test_a_key_is_used_once_across_the_blocks():
+    sched = parse(
+        {
+            "lectures": {"x": {"session": 1, "event_datetime": "tbc"}},
+            "labs": {"x": {"session": 1, "event_datetime": "tbc"}},
+        }
+    )
+    assert [r.where for r in sched.releases] == ["lectures.x"]
+    (line,) = sched.dropped
+    assert line.startswith("labs.x:") and "already the key of lectures.x" in line
+
+
+def test_a_0_10_plan_is_not_migrated_and_nothing_in_it_is_read():
+    sched = parse(
+        {
+            "releases": {"lecture-1": {"event_datetime": "2026-09-01"}},
+            "lectures": {
+                "l": {
+                    "session": 1,
+                    "kind": "lab",
+                    "event_datetime": "2026-09-01",
+                    "deploy": [{"course_source_repo": "cm"}],
+                }
+            },
+        }
+    )
+    assert [r.label for r in sched.releases] == ["l"]
+    assert sched.releases[0].kind == "lecture"
+    codes = {(f.where, f.field): f.code for f in sched.faults}
+    assert codes == {
+        ("", "releases"): faults_module.NOT_MIGRATED,
+        ("lectures.l", "kind"): faults_module.NOT_MIGRATED,
+        ("lectures.l", "deploy"): faults_module.NOT_MIGRATED,
+    }
+    assert schedule.drops_assignments(sched)
+
+
+def test_validate_counts_the_entries_files_and_events():
+    sched = parse(
+        {
+            "labs": {"lab-1-b": {"session": 1, "event_datetime": "tbc"}},
+            "exams": {"exam": {"event_datetime": "2026-11-03"}},
+        }
+    )
+    assert "1 entry, 0 file(s) | 0 assignment(s) | 1 event(s)" in (
+        schedule._validate_report(sched, "x")
+    )
 
 
 def test_an_absent_optional_value_is_never_flagged():
@@ -1635,17 +1668,15 @@ def test_an_absent_optional_value_is_never_flagged():
     assert (
         parse(
             {
-                "releases": {
+                "lectures": {
                     "s": {
                         "event_datetime": "2026-09-01",
-                        "deploy": [
-                            {"course_source_repo": "cm", "course_source_path": "l/01"}
-                        ],
+                        "files": [{"from_course_repo": "cm", "from_path": "l/01"}],
                     }
                 },
                 "assignments": {
                     "a1": {
-                        "course_source_repo": "a-f2026",
+                        "template": "a-f2026",
                         "due_datetime": "2026-10-13",
                     }
                 },
@@ -1676,7 +1707,7 @@ def test_insert_handout_finds_a_deeper_indented_entry_and_keeps_its_due_datetime
     base = (
         "assignments:\n"
         "    assignment-1:\n"
-        "        course_source_repo: a-f2026\n"
+        "        template: a-f2026\n"
         "        due_datetime: 2026-10-13\n"
     )
     out = _insert_handout(base, "assignment-1", "2026-09-22T14:05")
@@ -1870,6 +1901,8 @@ def _release(label, path, repo="cm"):
         label,
         datetime(2026, 9, 8, 10, 0, tzinfo=BERLIN),
         deploy=[Deploy(repo, path, "materials", None)],
+        kind="lecture",
+        block="lectures",
     )
 
 
@@ -1883,7 +1916,7 @@ def test_missing_sources_names_the_path_that_will_ship_nothing(monkeypatch):
     )
     out = [f.line() for f in schedule.source_faults(s, "Course-Org")]
     assert len(out) == 1
-    assert out[0].startswith("releases.lecture-2 -> course_source_path - ")
+    assert out[0].startswith("lectures.lecture-2 -> from_path - ")
     # The WHOLE address of the thing that is missing: the notification tells somebody
     # where to push, and `cm/lectures/02_b` alone leaves them guessing which org.
     assert "Course-Org/cm/lectures/02_b does not exist" in out[0]
@@ -1900,7 +1933,7 @@ def test_a_source_withheld_by_a_releaseignore_is_a_fault_at_commit_time(monkeypa
     s = Schedule(releases=[_release("lecture-1", "lectures/01_a")])
     out = [f.line() for f in schedule.source_faults(s, "Course-Org")]
     assert len(out) == 1
-    assert out[0].startswith("releases.lecture-1 -> course_source_path - ")
+    assert out[0].startswith("lectures.lecture-1 -> from_path - ")
     assert "the files exist but cm/.releaseignore keeps them back" in out[0]
 
 
@@ -1990,7 +2023,7 @@ def test_missing_sources_checks_an_assignments_template_repo(monkeypatch):
 
 
 def test_a_whole_repo_release_only_needs_the_repo(monkeypatch):
-    # `course_source_path: /` (or `.`) means the whole repo - there is no path to look up.
+    # `from_path: /` (or `.`) means the whole repo - there is no path to look up.
     _org(monkeypatch, {"cm": ["README.md"]})
     s = Schedule(releases=[_release("everything", "/"), _release("dot", ".")])
     assert [f.line() for f in schedule.source_faults(s, "Course-Org")] == []
@@ -2058,7 +2091,7 @@ def test_the_severity_ladder_scales_with_distance_to_the_fire_time(monkeypatch):
     S = schedule.Severity
 
     def at(when):
-        return source_fault("releases.x", fires=when).severity(now)
+        return source_fault("lectures.x", fires=when).severity(now)
 
     assert at(now + timedelta(days=30)) is S.ADVISORY
     assert at(now + timedelta(days=2)) is S.ADVISORY
@@ -2085,25 +2118,25 @@ def test_the_severity_ladder_scales_with_distance_to_the_fire_time(monkeypatch):
 _LOCATABLE = """\
 timezone: Europe/Berlin
 
-releases:
+lectures:
   # week one
   lecture_01:
     event_datetime: 2026-09-08T10:00
-    deploy:
-      - course_source_repo: cm
-        course_source_path: lectures/01_lecture
+    files:
+      - from_course_repo: cm
+        from_path: lectures/01_lecture
   lecture_02:
     event_datetime: 2026-09-15T10:00
-    deploy:
-      - course_source_repo: cm
-        course_source_path: lectures/02_lecture
-      - course_source_repo: cm
-        course_source_path: readings/02_readings
+    files:
+      - from_course_repo: cm
+        from_path: lectures/02_lecture
+      - from_course_repo: cm
+        from_path: readings/02_readings
 
 assignments:
   assignment-2:
     due_datetime: 2026-10-27T23:59
-    course_source_repo: assignment-2-f2026
+    template: assignment-2-f2026
 """
 
 
@@ -2116,8 +2149,8 @@ def _parsed(tmp_path, text: str = _LOCATABLE) -> Schedule:
 
 
 def test_every_deploy_field_knows_the_line_it_is_written_on(tmp_path):
-    # Per FIELD, because that is what a fault cites: `-> course_source_path` must send
-    # faculty to the `course_source_path:` line, and the copy's `course_source_repo:` is
+    # Per FIELD, because that is what a fault cites: `-> from_path` must send
+    # faculty to the `from_path:` line, and the copy's `course_source_repo:` is
     # a different line of the same block. Captured by the loader that read the file, not
     # scanned for afterwards: a scan found the entry key and then the first matching field
     # under it, so the SECOND deploy of an entry was reported - and deep-linked - at the
@@ -2125,8 +2158,8 @@ def test_every_deploy_field_knows_the_line_it_is_written_on(tmp_path):
     sched = _parsed(tmp_path)
     assert [
         (
-            schedule.line_of(d.lines, "course_source_repo"),
-            schedule.line_of(d.lines, "course_source_path"),
+            schedule.line_of(d.lines, "from_course_repo"),
+            schedule.line_of(d.lines, "from_path"),
         )
         for r in sched.releases
         for d in r.deploy
@@ -2135,7 +2168,7 @@ def test_every_deploy_field_knows_the_line_it_is_written_on(tmp_path):
 
 def test_an_assignment_field_knows_the_line_it_is_written_on(tmp_path):
     entry = _parsed(tmp_path).assignments["assignment-2"]
-    assert schedule.line_of(entry.lines, "course_source_repo") == 21
+    assert schedule.line_of(entry.lines, "template") == 21
 
 
 def test_the_field_is_cited_wherever_it_sits_in_its_entry(tmp_path):
@@ -2143,18 +2176,18 @@ def test_the_field_is_cited_wherever_it_sits_in_its_entry(tmp_path):
     # line of the FIELD - not of whichever key happens to open the block.
     sched = _parsed(
         tmp_path,
-        "releases:\n"
+        "lectures:\n"
         "  lecture_01:\n"
         "    event_datetime: 2026-09-08T10:00\n"
-        "    deploy:\n"
-        "      - semester_dest_repo: materials\n"
-        "        deploy_datetime: 2026-09-08T09:00\n"
-        "        course_source_path: lectures/01\n"
-        "        course_source_repo: cm\n",
+        "    files:\n"
+        "      - to_semester_repo: materials\n"
+        "        release_datetime: 2026-09-08T09:00\n"
+        "        from_path: lectures/01\n"
+        "        from_course_repo: cm\n",
     )
     (deploy,) = sched.releases[0].deploy
-    assert schedule.line_of(deploy.lines, "course_source_path") == 7
-    assert schedule.line_of(deploy.lines, "course_source_repo") == 8
+    assert schedule.line_of(deploy.lines, "from_path") == 7
+    assert schedule.line_of(deploy.lines, "from_course_repo") == 8
     # A field the entry does not carry falls back to the line the entry opens on: a
     # citation pointing at the right block beats no citation, and beats a link to line 1.
     assert schedule.line_of(deploy.lines, "nonesuch") == 5
@@ -2165,17 +2198,17 @@ def test_a_dict_built_by_hand_has_no_line_and_says_so(tmp_path):
     # without a deep link, so a caller that parsed the YAML itself is not a special case.
     sched = schedule.parse(
         {
-            "releases": {
+            "lectures": {
                 "a": {
                     "event_datetime": "2026-09-08T10:00",
-                    "deploy": [{"course_source_repo": "cm", "course_source_path": "x"}],
+                    "files": [{"from_course_repo": "cm", "from_path": "x"}],
                 }
             }
         }
     )
     deploy = sched.releases[0].deploy[0]
     assert deploy.lines == {}
-    assert schedule.line_of(deploy.lines, "course_source_path") is None
+    assert schedule.line_of(deploy.lines, "from_path") is None
 
 
 def test_the_line_stamp_never_reaches_the_parsed_plan(tmp_path):
@@ -2193,19 +2226,19 @@ def test_a_commented_out_entry_is_not_read_as_a_real_one(tmp_path):
     # not written a plan yet has nothing else in the file.
     sched = _parsed(
         tmp_path,
-        "# releases:\n"
+        "# lectures:\n"
         "#   lecture_01:\n"
-        "#     deploy:\n"
-        "#       - course_source_path: lectures/01_lecture\n"
-        "releases:\n"
+        "#     files:\n"
+        "#       - from_path: lectures/01_lecture\n"
+        "lectures:\n"
         "  lecture_01:\n"
         "    event_datetime: 2026-09-08T10:00\n"
-        "    deploy:\n"
-        "      - course_source_repo: cm\n"
-        "        course_source_path: lectures/01_lecture\n",
+        "    files:\n"
+        "      - from_course_repo: cm\n"
+        "        from_path: lectures/01_lecture\n",
     )
     lines = sched.releases[0].deploy[0].lines
-    assert (lines["course_source_repo"], lines["course_source_path"]) == (9, 10)
+    assert (lines["from_course_repo"], lines["from_path"]) == (9, 10)
 
 
 def test_a_fault_carries_the_line_it_is_written_on(monkeypatch, tmp_path):
@@ -2213,17 +2246,17 @@ def test_a_fault_carries_the_line_it_is_written_on(monkeypatch, tmp_path):
     faults = {
         f.path: f for f in schedule.source_faults(_parsed(tmp_path), "Course-Org")
     }
-    # The `course_source_path:` line - the line the fault names as the one to edit.
+    # The `from_path:` line - the line the fault names as the one to edit.
     assert faults["lectures/02_lecture"].lineno == 14
     # Two deploys under one entry are two faults at two lines, and two identities - keyed
     # on the entry alone the second inherited the first's recorded rung.
     assert faults["readings/02_readings"].lineno == 16
     assert faults["readings/02_readings"].key == (
-        "releases.lecture_02[readings/02_readings].course_source_path"
+        "lectures.lecture_02[readings/02_readings].from_path"
     )
     # The row shape the commit comment reuses verbatim: entry, field, line, fault, when.
     assert faults["lectures/02_lecture"].line() == (
-        "releases.lecture_02 -> course_source_path - schedule.yml:14 - "
+        "lectures.lecture_02 -> from_path - schedule.yml:14 - "
         "Course-Org/cm/lectures/02_lecture does not exist - "
         "fires Tue 15 Sep 2026, 09:00 Europe/Berlin"
     )
@@ -2236,7 +2269,7 @@ def test_the_json_dump_is_the_plan_the_parser_understood(monkeypatch, capsys, tm
     assert schedule.main() == 0
     dumped = json.loads(capsys.readouterr().out)
     assert dumped["timezone"] == "Europe/Berlin"
-    assert dumped["releases"][0]["deploy"][0]["lines"]["course_source_path"] == 9
+    assert dumped["releases"][0]["deploy"][0]["lines"]["from_path"] == 9
 
 
 def test_a_deploy_datetime_dates_the_fault_not_the_class(monkeypatch):
@@ -2271,12 +2304,12 @@ def test_a_distant_missing_source_reports_but_keeps_the_run_green(
     # the red X stops meaning "an entry you wrote is not in your plan".
     f = tmp_path / "schedule.yml"
     f.write_text(
-        "releases:\n"
+        "lectures:\n"
         "  lecture-1:\n"
         "    event_datetime: 2099-09-08T10:00\n"
-        "    deploy:\n"
-        "      - course_source_repo: cm\n"
-        "        course_source_path: lectures/99_nope\n"
+        "    files:\n"
+        "      - from_course_repo: cm\n"
+        "        from_path: lectures/99_nope\n"
     )
     _org(monkeypatch, {"cm": ["lectures"]})
     monkeypatch.setattr(
@@ -2288,21 +2321,19 @@ def test_a_distant_missing_source_reports_but_keeps_the_run_green(
     assert "1 SOURCE(S) NOT IN Course-Org YET:" in out
     # The rung, and the line of the file to go and edit - the entry name alone still
     # leaves faculty scrolling a plan they wrote in August.
-    assert (
-        "    [advisory] releases.lecture-1 -> course_source_path - schedule.yml:6"
-    ) in out
+    assert ("    [advisory] lectures.lecture-1 -> from_path - schedule.yml:6") in out
     assert "OK: nothing dropped" in out
 
 
 def _imminent(tmp_path):
     f = tmp_path / "schedule.yml"
     f.write_text(
-        "releases:\n"
+        "lectures:\n"
         "  lecture-1:\n"
         "    event_datetime: 2020-09-08T10:00\n"
-        "    deploy:\n"
-        "      - course_source_repo: cm\n"
-        "        course_source_path: lectures/99_nope\n"
+        "    files:\n"
+        "      - from_course_repo: cm\n"
+        "        from_path: lectures/99_nope\n"
     )
     return f
 
@@ -2329,7 +2360,7 @@ def test_even_a_missed_rung_source_leaves_the_parse_verdict_alone(
     )
     assert schedule.main() == 0
     out = capsys.readouterr().out
-    assert "[missed] releases.lecture-1 -> course_source_path" in out
+    assert "[missed] lectures.lecture-1 -> from_path" in out
     assert "OK: nothing dropped" in out
     # The file parses perfectly. The two verdicts stay apart.
     assert "entry/ies dropped" not in out
@@ -2359,7 +2390,7 @@ def test_annotations_are_emitted_by_the_process_that_knows_the_severity(
     # `line=` is what puts the annotation on the offending line of the diff rather than at
     # the top of the file.
     assert (
-        "::warning file=schedule.yml,line=6::releases.lecture-1 -> course_source_path"
+        "::warning file=schedule.yml,line=6::lectures.lecture-1 -> from_path"
     ) in captured.err
     assert "::warning" not in captured.out
 
@@ -2407,12 +2438,12 @@ def test_a_plan_with_every_source_staged_says_so_rather_than_saying_nothing(
     # from "the check did not run".
     f = tmp_path / "schedule.yml"
     f.write_text(
-        "releases:\n"
+        "lectures:\n"
         "  lecture-1:\n"
         "    event_datetime: 2099-09-08T10:00\n"
-        "    deploy:\n"
-        "      - course_source_repo: cm\n"
-        "        course_source_path: lectures/01_a\n"
+        "    files:\n"
+        "      - from_course_repo: cm\n"
+        "        from_path: lectures/01_a\n"
     )
     _org(monkeypatch, {"cm": ["lectures", "lectures/01_a"]})
     out = tmp_path / "step_output"
@@ -2470,11 +2501,11 @@ def test_two_assignments_cannot_hand_out_the_same_repo():
     meta = {
         "assignments": {
             "assignment-2": {
-                "course_source_repo": "a2-f2026",
+                "template": "a2-f2026",
                 "due_datetime": "2026-10-13",
             },
             "assignment-3": {
-                "course_source_repo": "a2-f2026",
+                "template": "a2-f2026",
                 "due_datetime": "2026-11-10",
             },
         }
@@ -2492,18 +2523,18 @@ def test_two_assignments_may_share_a_template_when_both_name_their_own_repos():
     meta = {
         "assignments": {
             "assignment-2": {
-                "course_source_repo": "a2-f2026",
-                "semester_dest_repo": "assignment-2",
+                "template": "a2-f2026",
+                "repo_name": "assignment-2",
                 "due_datetime": "2026-10-13",
             },
             "assignment-2-resit": {
-                "course_source_repo": "a2-f2026",
-                "semester_dest_repo": "assignment-2-resit",
+                "template": "a2-f2026",
+                "repo_name": "assignment-2-resit",
                 "due_datetime": "2026-11-10",
             },
         }
     }
-    sched = _parse_moved(meta)
+    sched = parse(meta)
     assert set(sched.assignments) == {"assignment-2", "assignment-2-resit"}
     assert sched.dropped == []
     assert [slug for slug, _ in schedule.entries_for_repo(sched, "a2-f2026")] == [
@@ -2518,20 +2549,20 @@ def test_one_entry_leaving_the_semester_repo_to_default_re_breaks_the_pair():
     meta = {
         "assignments": {
             "assignment-2": {
-                "course_source_repo": "a2-f2026",
+                "template": "a2-f2026",
                 "due_datetime": "2026-10-13",
             },
             "assignment-2-resit": {
-                "course_source_repo": "a2-f2026",
-                "semester_dest_repo": "assignment-2-resit",
+                "template": "a2-f2026",
+                "repo_name": "assignment-2-resit",
                 "due_datetime": "2026-11-10",
             },
         }
     }
-    sched = _parse_moved(meta)
+    sched = parse(meta)
     assert set(sched.assignments) == {"assignment-2"}
     (drop,) = [d for d in sched.dropped if "assignments.assignment-2-resit" in d]
-    assert "EVERY one of them sets its own `semester_dest_repo`" in drop
+    assert "EVERY one of them sets its own `repo_name`" in drop
 
 
 def test_resolve_target_refuses_to_choose_between_two_entries_on_one_template():
@@ -2540,18 +2571,18 @@ def test_resolve_target_refuses_to_choose_between_two_entries_on_one_template():
     meta = {
         "assignments": {
             "assignment-2": {
-                "course_source_repo": "a2-f2026",
-                "semester_dest_repo": "assignment-2",
+                "template": "a2-f2026",
+                "repo_name": "assignment-2",
                 "due_datetime": "2026-10-13",
             },
             "assignment-2-resit": {
-                "course_source_repo": "a2-f2026",
-                "semester_dest_repo": "assignment-2-resit",
+                "template": "a2-f2026",
+                "repo_name": "assignment-2-resit",
                 "due_datetime": "2026-11-10",
             },
         }
     }
-    sched = _parse_moved(meta)
+    sched = parse(meta)
     refusal = schedule.resolve_target(sched, "a2-f2026")
     assert isinstance(refusal, str)
     assert "assignment-2" in refusal and "assignment-2-resit" in refusal
@@ -2580,17 +2611,17 @@ def test_two_assignments_cannot_resolve_to_one_semester_name():
     meta = {
         "assignments": {
             "assignment-1": {
-                "course_source_repo": "a1-f2026",
+                "template": "a1-f2026",
                 "due_datetime": "2026-10-13",
             },
             "assignment-1-resit": {
-                "course_source_repo": "a1-resit-f2026",
-                "semester_dest_repo": "assignment-1",
+                "template": "a1-resit-f2026",
+                "repo_name": "assignment-1",
                 "due_datetime": "2026-11-10",
             },
         }
     }
-    sched = _parse_moved(meta)
+    sched = parse(meta)
     assert set(sched.assignments) == {"assignment-1"}
     (drop,) = [d for d in sched.dropped if "assignments.assignment-1-resit" in d]
     assert "semester-side name of assignments.assignment-1" in drop
@@ -2601,18 +2632,18 @@ def test_two_semester_dest_repos_that_match_each_other_are_refused():
     meta = {
         "assignments": {
             "week-3": {
-                "course_source_repo": "a3-f2026",
-                "semester_dest_repo": "homework",
+                "template": "a3-f2026",
+                "repo_name": "homework",
                 "due_datetime": "2026-10-13",
             },
             "week-4": {
-                "course_source_repo": "a4-f2026",
-                "semester_dest_repo": "homework",
+                "template": "a4-f2026",
+                "repo_name": "homework",
                 "due_datetime": "2026-11-10",
             },
         }
     }
-    sched = _parse_moved(meta)
+    sched = parse(meta)
     assert set(sched.assignments) == {"week-3"}
     assert any("semester-side name of assignments.week-3" in d for d in sched.dropped)
 
@@ -2630,7 +2661,7 @@ def _from_text(text: str):
 
 
 UNREADABLE = """timezone: Nowhere/Nothing
-releases:
+lectures:
   lecture_02:
     event_datetime: not-a-date
   lecture_03:
@@ -2639,7 +2670,7 @@ releases:
 assignments:
   a1:
     due_datetime: 2026-10-01
-    course_source_repo: a1-f2026
+    template: a1-f2026
     solution_datetime: 2026-09-01
 """
 
@@ -2657,8 +2688,8 @@ def test_every_dropped_line_has_a_fault_beside_it():
 
 def test_a_dropped_entry_cites_the_line_it_is_written_on():
     faults = {f.key: f for f in _from_text(UNREADABLE).faults}
-    assert faults["releases.lecture_02.event_datetime"].lineno == 4
-    assert faults["releases.lecture_03.titel"].lineno == 7
+    assert faults["lectures.lecture_02.event_datetime"].lineno == 4
+    assert faults["lectures.lecture_03.titel"].lineno == 7
     assert faults["assignments.a1.solution_datetime"].lineno == 12
     assert faults["timezone"].lineno == 1
 
@@ -2676,14 +2707,16 @@ def test_a_dropped_entry_is_an_immediate_fault():
 
 
 def test_a_whole_block_written_as_a_list_names_the_block():
-    sched = _from_text("releases:\n  - lecture_02\n")
+    sched = _from_text("lectures:\n  - lecture_02\n")
     (fault,) = sched.faults
-    assert fault.where == "releases" and fault.field == "releases"
+    assert fault.where == "lectures" and fault.field == "lectures"
     assert fault.lineno == 1
 
 
 def test_a_clean_plan_has_no_faults():
-    sched = _from_text("releases:\n  l1:\n    event_datetime: 2026-09-15T10:00\n")
+    sched = _from_text(
+        "lectures:\n  l1:\n    session: 1\n    event_datetime: 2026-09-15T10:00\n"
+    )
     assert sched.faults == [] and sched.dropped == []
 
 
@@ -2742,10 +2775,10 @@ def test_a_blank_details_is_an_empty_slot_rather_than_a_mistake():
         for block, entry in (
             ("archive", {"details": said}),
             (
-                "releases",
+                "lectures",
                 {"lecture-1": {"event_datetime": "2026-09-01", "details": said}},
             ),
-            ("events", {"exam": {"event_datetime": "2026-11-03", "details": said}}),
+            ("exams", {"exam": {"event_datetime": "2026-11-03", "details": said}}),
         ):
             sched = parse({block: entry})
             assert sched.dropped == [], (block, said)
@@ -2803,12 +2836,12 @@ def test_an_unreadable_flag_is_flagged_on_every_block_that_takes_one():
     # now, and a hand edit that did not take is visible wherever it was made.
     sched = parse(
         {
-            "releases": {
+            "lectures": {
                 "lecture-1": {"event_datetime": "2026-09-01", "show_on_site": "nope"}
             },
             "assignments": {
                 "a1": {
-                    "course_source_repo": "a1-f2026",
+                    "template": "a1-f2026",
                     "due_datetime": "2026-10-13",
                     "tbc": "yes",
                 }
@@ -2821,7 +2854,7 @@ def test_an_unreadable_flag_is_flagged_on_every_block_that_takes_one():
     assert sched.assignments["a1"].tbc is False
     assert sched.events[0].show_on_site is True
     assert {drop.split(":")[0] for drop in sched.dropped} == {
-        "releases.lecture-1.show_on_site",
+        "lectures.lecture-1.show_on_site",
         "assignments.a1.tbc",
         "events.clinic.show_on_site",
     }
@@ -2835,12 +2868,12 @@ def test_an_unusable_details_is_flagged_on_every_block_that_takes_one():
     # `['a', 'b']`. One key, one meaning, one guard.
     sched = parse(
         {
-            "releases": {
+            "lectures": {
                 "lecture-1": {"event_datetime": "2026-09-01", "details": ["a", "b"]}
             },
             "assignments": {
                 "a1": {
-                    "course_source_repo": "a1-f2026",
+                    "template": "a1-f2026",
                     "due_datetime": "2026-10-13",
                     "details": {"text": "x"},
                 }
@@ -2855,7 +2888,7 @@ def test_an_unusable_details_is_flagged_on_every_block_that_takes_one():
     assert sched.events[0].details == ""
     assert sched.archive.details is None
     assert {drop.split(":")[0] for drop in sched.dropped} == {
-        "releases.lecture-1.details",
+        "lectures.lecture-1.details",
         "assignments.a1.details",
         "events.clinic.details",
         "archive.details",
@@ -2915,7 +2948,7 @@ def test_the_old_spelling_is_now_an_unknown_key_like_any_other_typo():
     sched = parse(
         {
             "semester_end": "2026-12-18",
-            "releases": {
+            "lectures": {
                 "lecture-1": {
                     "event_datetime": "2026-09-01T10:00",
                     "title": "Probability",
@@ -2932,7 +2965,7 @@ def test_the_old_spelling_is_now_an_unknown_key_like_any_other_typo():
     assert len(sched.dropped) == 3 and len(sched.faults) == 3
     assert all("unrecognised key" in line for line in sched.dropped)
     for loc in (
-        "releases.lecture-1.description",
+        "lectures.lecture-1.description",
         "archive.date",
         "archive.description",
     ):
@@ -2945,7 +2978,7 @@ def test_only_the_new_spelling_is_read_where_a_file_carries_both():
     # rather than quietly preferred.
     sched = parse(
         {
-            "releases": {
+            "lectures": {
                 "lecture-1": {
                     "event_datetime": "2026-09-01T10:00",
                     "details": "The new one.",
@@ -2970,19 +3003,20 @@ def test_only_the_new_spelling_is_read_where_a_file_carries_both():
 def test_an_event_carries_its_details_and_can_be_kept_off_the_site():
     sched = parse(
         {
-            "events": {
+            "exams": {
                 "mid-term": {
-                    "kind": "exam",
                     "title": "MidTerm",
                     "details": "Room A1. Two hours, open book.",
                     "event_datetime": "2026-11-03",
                 },
+            },
+            "events": {
                 "reserve-slot": {
                     "title": "Reserve slot",
                     "event_datetime": "2026-11-10",
                     "show_on_site": False,
                 },
-            }
+            },
         }
     )
     exam, reserve = sched.events
@@ -2998,7 +3032,7 @@ def test_an_assignment_takes_the_same_four_display_fields():
         {
             "assignments": {
                 "assignment-1": {
-                    "course_source_repo": "assignment-1-f2026",
+                    "template": "assignment-1-f2026",
                     "due_datetime": "2026-10-13",
                     "details": "Closed form first, then gradient descent.",
                     "tbc": True,
@@ -3022,7 +3056,7 @@ def test_a_tbc_assignment_moves_no_date_at_all():
             {
                 "assignments": {
                     "assignment-1": {
-                        "course_source_repo": "assignment-1-f2026",
+                        "template": "assignment-1-f2026",
                         "handout_datetime": "2026-09-22T09:00",
                         "due_datetime": "2026-10-13",
                         "solution_datetime": "2026-10-16T09:00",
@@ -3042,64 +3076,36 @@ def test_a_tbc_assignment_moves_no_date_at_all():
         assert getattr(marked, field_name) == getattr(plain, field_name)
 
 
-def test_a_release_can_declare_which_row_it_belongs_to():
-    sched = parse(
-        {
-            "releases": {
-                "week-1-clinic": {
-                    "event_datetime": "2026-09-03T14:00",
-                    "kind": "lab",
-                    "deploy": [
-                        {
-                            "course_source_repo": "cm",
-                            "course_source_path": "clinics/01_week-1",
-                        }
-                    ],
+def test_an_entrys_kind_is_the_block_it_is_written_in():
+    # Decision 0038 rule 1: every content kind of the policy is a block; the folder its
+    # files land in means nothing.
+    for kind in ("lecture", "lab", "readings", "drop-in", "exam", "other", "assets"):
+        block = policy.plural_of(kind)
+        sched = parse(
+            {
+                block: {
+                    "x": {
+                        "event_datetime": "2026-09-01T10:00",
+                        "files": [{"from_course_repo": "cm", "from_path": "labs/01"}],
+                    }
                 }
             }
-        }
-    )
-    assert sched.releases[0].kind == "lab"
-    assert sched.dropped == []
-
-
-def test_an_unknown_release_kind_is_flagged_and_shown_as_other():
-    # Never dropped: the cost of a typo here is a row under the wrong tab, and taking a
-    # whole session off the schedule instead would be far the worse of the two.
-    sched = parse(
-        {
-            "releases": {
-                "lecture-1": {"event_datetime": "2026-09-01T10:00", "kind": "lecutre"}
-            }
-        }
-    )
-    assert sched.releases[0].kind == "other"
-    (drop,) = sched.dropped
-    assert drop.startswith("releases.lecture-1.kind: unusable value")
-    assert "shown as `other`" in drop
-
-
-def test_every_content_kind_of_the_policy_is_a_release_kind():
-    for kind in ("lecture", "lab", "readings", "drop-in", "exam", "other"):
-        sched = parse(
-            {"releases": {"x": {"event_datetime": "2026-09-01T10:00", "kind": kind}}}
         )
-        assert (sched.releases[0].kind, sched.dropped) == (kind, [])
+        assert (sched.releases[0].kind, sched.dropped) == (kind, []), kind
+
+
+def test_an_unknown_block_is_flagged_and_read_as_nothing():
+    sched = parse({"lecturs": {"x": {"event_datetime": "2026-09-01T10:00"}}})
+    assert sched.releases == []
+    (drop,) = sched.dropped
+    assert drop.startswith("lecturs: unrecognised key")
 
 
 def test_display_text_on_a_readings_entry_is_its_rows_name():
     # A readings entry is a row of its own now, so its title and details show.
     display = {"title": "Week 4 readings", "details": "Two papers on attention."}
     sched = parse(
-        {
-            "releases": {
-                "readings-4": {
-                    "event_datetime": "2026-09-15T09:00",
-                    "kind": "readings",
-                    **display,
-                }
-            }
-        }
+        {"readings": {"readings-4": {"event_datetime": "2026-09-15T09:00", **display}}}
     )
     assert sched.dropped == []
     (release,) = sched.releases
@@ -3114,10 +3120,9 @@ def test_the_retired_spelling_on_a_readings_entry_is_reported_once_not_twice():
     # as unknown.
     sched = parse(
         {
-            "releases": {
+            "readings": {
                 "readings-4": {
                     "event_datetime": "2026-09-15T09:00",
-                    "kind": "readings",
                     "description": "Two papers on attention.",
                 }
             }
@@ -3160,12 +3165,14 @@ def _entry(repo: str, day: int, **kw) -> schedule.AssignmentEntry:
 
 
 def test_assignment_pages_are_numbered_by_the_plan():
-    # Decision 0020: `number:`, else the key's own number, else none - never a position.
+    # Decision 0038: the entry's `number:` (required), never its key or a position.
     # Hidden ones are numbered too.
     sched = schedule.Schedule(
         assignments={
-            "assignment-10": _entry("assignment-trees", 20),
-            "assignment-2": _entry("assignment-regression", 6, show_on_site=False),
+            "assignment-10": _entry("assignment-trees", 20, number=10),
+            "assignment-2": _entry(
+                "assignment-regression", 6, show_on_site=False, number=2
+            ),
             "project": _entry("assignment-nets", 27, semester_dest_repo="team-project"),
             "capstone": _entry("assignment-capstone", 28, number=7),
         }
@@ -3203,12 +3210,12 @@ def test_an_assignment_entry_takes_a_number():
         {
             "assignments": {
                 "trees": {
-                    "course_source_repo": "assignment-trees",
+                    "template": "assignment-trees",
                     "due_datetime": "2026-10-13",
                     "number": 3,
                 },
                 "nets": {
-                    "course_source_repo": "assignment-nets",
+                    "template": "assignment-nets",
                     "due_datetime": "2026-10-20",
                     "number": "three",
                 },
@@ -3227,12 +3234,12 @@ def test_an_assignment_entry_takes_a_number():
 _WITH_SOLUTION = """\
 assignments:
   a1:
-    course_source_repo: t1
+    template: t1
     handout_datetime: 2026-09-22T09:00
     due_datetime: 2026-10-13
     solution_datetime: 2026-10-16T09:00
   a2:
-    course_source_repo: t2
+    template: t2
     handout_datetime: 2026-09-22T09:00
     due_datetime: 2026-10-20
     solution_datetime: 2026-10-23T09:00
@@ -3254,7 +3261,7 @@ def test_an_entry_the_old_file_could_not_run_is_not_noticed_as_new():
     # Two entries on one template, their repo names in an assignments.yml the old file is
     # read without: parsed, the second is dropped. Read as written, it already carried
     # its solution date, so nothing is new.
-    shared = _WITH_SOLUTION.replace("course_source_repo: t2", "course_source_repo: t1")
+    shared = _WITH_SOLUTION.replace("template: t2", "template: t1")
     before = yaml.safe_load(shared)
     assert (
         schedule.solution_notices(before, parse(yaml.safe_load(_WITH_SOLUTION))) == []
@@ -3287,26 +3294,3 @@ def test_no_previous_file_or_an_unreadable_one_gives_no_notice(
     monkeypatch, tmp_path, capsys, previous
 ):
     assert "::notice" not in _validate(monkeypatch, tmp_path, capsys, previous)
-
-
-def test_validate_flags_a_session_label_with_two_numbers_and_no_number():
-    meta = {
-        "events": {
-            "lab-01-group-2": {"event_datetime": "2026-09-17T18:00", "kind": "lab"},
-            "lab-01-group-3": {
-                "event_datetime": "2026-09-18T18:00",
-                "kind": "lab",
-                "number": 1,
-            },
-            "exam-2026-1": {"event_datetime": "2026-11-03", "kind": "exam"},
-        }
-    }
-    sched = parse(meta)
-    flagged = [d for d in sched.dropped if "more than one number" in d]
-    assert flagged == [
-        (
-            "events.lab-01-group-2.number: the label carries more than one number "
-            "and no `number:` - number it or it reads as Lab 1"
-        )
-    ]
-    assert [e.label for e in sched.sessions] == ["lab-01-group-2", "lab-01-group-3"]

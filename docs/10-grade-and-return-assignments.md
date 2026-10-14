@@ -216,8 +216,8 @@ gone out. A refused `grading_config.yml` (`RUN_SETTING_IN_TEMPLATE`) stops
 its sheet refresh and Return marks until it is fixed. Untick `notify` to skip the email.
 
 The marks per question and the feedback per question go to the page unless the
-assignment's run setting `marks_per_question` is `false` (`assignments.yml`, see
-[the run settings](07-schedule-releases.md#assignmentsyml---how-this-semester-runs-each-assignment)).
+assignment's run setting `marks_per_question` is `false` (its `schedule.yml` entry, see
+[the run settings](07-schedule-releases.md#assignments)).
 Set it on the assignment's **How this semester runs it**, or with Return marks' **Include
 marks per question** box: the box starts at the setting, a preview follows the box, and the
 real run saves a changed box for the assignment before it goes, so the automatic return does

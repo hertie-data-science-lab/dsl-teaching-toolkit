@@ -326,6 +326,16 @@ def _syllabus(request: Request) -> list[str]:
     return argv
 
 
+def _confirm_withheld(request: Request) -> list[str]:
+    return [
+        "confirm-withheld",
+        "--org",
+        request.course_org,
+        "--repo",
+        _a(request, "repo"),
+    ]
+
+
 def _new_materials(request: Request) -> list[str]:
     argv = [
         "materials",
@@ -380,7 +390,7 @@ def _open_window(request: Request) -> list[str]:
 # ------------------------------------------------------------------ the registry
 
 _RELEASE_ENTRY_ARGS = _args(
-    {"entry": _string(KEY_PATTERN, "The schedule.yml releases key"), **_DEPLOY_FIELDS},
+    {"entry": _string(KEY_PATTERN, "The schedule.yml entry key"), **_DEPLOY_FIELDS},
     required=("entry",),
 )
 _RELEASE_COUNTS = "Copied paths per destination, as deploy reports them."
@@ -686,6 +696,20 @@ _OPS = (
         module="scaffold",
         argv=_new_materials,
         refresh_after=True,
+    ),
+    Operation(
+        name="materials.confirm_withheld",
+        scope=COURSE,
+        required_team=INSTRUCTORS_TEAM,
+        args_schema=_args(
+            {"repo": _string(REPO_PATTERN, "The materials repo")},
+            required=("repo",),
+        ),
+        help="Confirm a materials repo's withheld patterns are reviewed, unchanged.",
+        done_text="Withheld patterns confirmed.",
+        doc="docs/08-release-materials-to-cohort.md",
+        module="scaffold",
+        argv=_confirm_withheld,
     ),
     Operation(
         name="assignment.create",

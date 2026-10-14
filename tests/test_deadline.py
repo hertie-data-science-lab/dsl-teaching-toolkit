@@ -11,6 +11,7 @@ import pytest
 
 from dsl_course import settings
 from dsl_course.schedule import Schedule, grading_cutoff_datetime, parse
+from tests.conftest import run_settings
 
 
 def grading_datetime_iso(sched: Schedule, slug: str) -> str | None:
@@ -22,7 +23,11 @@ def _one(due) -> Schedule:
     return parse(
         {
             "assignments": {
-                "assignment-1": {"course_source_repo": "a-f2026", "due_datetime": due}
+                "assignment-1": {
+                    "number": 1,
+                    "template": "a-f2026",
+                    "due_datetime": due,
+                }
             }
         }
     )
@@ -30,16 +35,13 @@ def _one(due) -> Schedule:
 
 @pytest.fixture
 def window(monkeypatch):
-    """Give the semester's assignments.yml a window for assignment-1."""
+    """Give the semester's assignments.yml a window (its `defaults:`)."""
 
     def set_days(days: int) -> None:
-        settings.semester_blocks.cache_clear()
-        monkeypatch.setattr(
-            settings,
-            "_assignments_text",
-            lambda org: (
-                f"assignments:\n  assignment-1:\n    late_window_days: {days}\n"
-            ),
+        settings.semester_defaults.cache_clear()
+        run_settings(
+            monkeypatch,
+            lambda org: f"defaults:\n  late_window_days: {days}\n",
         )
 
     return set_days
@@ -91,11 +93,10 @@ def test_a_zero_window_is_the_due_date(window):
     assert grading_datetime_iso(sched, "assignment-1").startswith("2026-10-13T23:59:59")
 
 
-def test_a_cutoff_without_due_is_still_dropped():
-    # `due_datetime` remains the required field - it is what students are told.
-    assert (
-        parse(
-            {"assignments": {"assignment-1": {"course_source_repo": "a"}}}
-        ).assignments
-        == {}
-    )
+def test_an_assignment_without_a_due_date_is_tbc_and_fires_nothing():
+    # Kept, undated: no cutoff, so no snapshot, autograde or solution; the status asks for
+    # the date as a quiet to-do.
+    sched = parse({"assignments": {"assignment-1": {"number": 1, "template": "a"}}})
+    assert sched.assignments["assignment-1"].due_datetime is None
+    assert sched.dropped == []
+    assert grading_cutoff_datetime(sched, "assignment-1") is None

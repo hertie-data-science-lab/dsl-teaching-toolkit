@@ -14,8 +14,8 @@ from dsl_course import (
     grading_sheet,
     grading_spec,
     policy,
-    settings,
 )
+from tests.conftest import run_settings
 
 # ------------------------------------------- the late-work rule a silent file is graded by
 
@@ -38,7 +38,7 @@ def test_a_file_that_says_nothing_about_late_work_gets_the_hertie_rule():
 def _semester_spec(monkeypatch, block: str) -> grading_spec.GradingSpec:
     """An assignment whose semester's assignments.yml gives it `block` (YAML lines)."""
     text = "assignments:\n  a1:\n" + "".join(f"    {ln}\n" for ln in block.splitlines())
-    monkeypatch.setattr(settings, "_assignments_text", lambda org: text)
+    run_settings(monkeypatch, lambda org: text)
     return grading_spec.with_run_settings(
         grading_spec.parse_grading_spec(""), "C", "SEM", "a1"
     )

@@ -64,20 +64,31 @@ def test_schedule_yml_seed_is_commented_and_covers_every_field():
     assert live.startswith("  event_datetime:") and "details: >-" in live
     for key in (
         "timezone",
-        "releases",
+        # Decision 0038: a block per kind, each entry's fields, and its files'.
+        "lectures",
+        "labs",
+        "readings",
+        "exams",
+        "events",
+        "assets",
+        "session",
+        "number",
         "event_datetime",
-        "deploy",
-        "course_source_repo",
-        "course_source_path",
-        "semester_dest_repo",
-        "semester_dest_path",
+        "location",
+        "files",
+        "from_course_repo",
+        "from_path",
+        "to_semester_repo",
+        "to_path",
+        "release_datetime",
+        "reading_list",
         "semester_start",
         "semester_end",
         "assignments",
+        "template",
         "handout_datetime",
         "solution_datetime",
         "marks_return_datetime",
-        "events",
         # The four display fields the schedule table's four columns read, which every
         # block now takes: a skeleton that teaches them on one block only is a skeleton
         # that teaches faculty they belong to that block alone.
@@ -88,7 +99,15 @@ def test_schedule_yml_seed_is_commented_and_covers_every_field():
     ):
         assert key in schedule
     # Timings only: nothing the seed offers is a key that left the file.
-    for key in ("grading_datetime", "default: the slug above", "README's `# ` heading"):
+    for key in (
+        "grading_datetime",
+        "default: the slug above",
+        "README's `# ` heading",
+        "releases:",
+        "deploy:",
+        "course_source_repo",
+        "kind:",
+    ):
         assert key not in schedule, key
 
 

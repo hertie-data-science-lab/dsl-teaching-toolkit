@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 import yaml
 
-from dsl_course import course, discovery, gh_contents
+from dsl_course import course, discovery
 
 INFRA_AND_CONTENT = [
     {"name": ".github", "topics": []},
@@ -170,26 +170,6 @@ def test_listing_by_name_answers_none_when_it_could_not_look(monkeypatch, capsys
     assert "could not list Org's repos" in capsys.readouterr().err
 
 
-TREES = {
-    "labs": ["01_intro", "02_functions", "materials/01_intro", "readings"],
-    "lectures": ["01_intro"],
-}
-
-
-def test_discover_release_sources_detects_root_and_nested_shapes(monkeypatch):
-    # root shape: a deploy landed with no semester_dest_path, so session folders sit directly at
-    # the dest repo's root (labs/lectures in a live course).
-    # nested shape: a deploy routed its session folders under a shared repo's subfolder.
-    monkeypatch.setattr(discovery, "_repo_tree_dirs", lambda org, repo: TREES[repo])
-    sources = discovery.discover_release_sources("org", ["labs", "lectures"])
-    assert set(sources) == {
-        ("labs", "", "01_intro", 1),
-        ("labs", "", "02_functions", 2),
-        ("labs", "materials", "01_intro", 1),
-        ("lectures", "", "01_intro", 1),
-    }
-
-
 def test_sections_and_sessions_ignore_root_level_and_over_deep_folders(tmp_path):
     # Only `section/NN_.../` makes a section: a bare `NN_.../` at the root has no
     # section name, and anything deeper is a session's own contents.
@@ -206,10 +186,9 @@ def test_sections_and_sessions_ignore_root_level_and_over_deep_folders(tmp_path)
     assert course.discover_local_sessions(tmp_path) == ["1", "2"]
 
 
-def test_api_and_filesystem_transports_share_one_session_folder_rule(tmp_path):
-    # course.discover_sections (local checkout, used by the public-site builder) and the API-side
-    # discovery must never drift: both feed their directory listing through
-    # course.session_dirs, so the same tree yields the same sections either way.
+def test_the_public_sites_sections_are_the_folders_holding_session_folders(tmp_path):
+    # WP-P removes: course.discover_sections (the open site's local checkout) reads the
+    # `NN_` rule through course.session_dirs.
     tree = [
         "lectures",
         "lectures/01_intro",
@@ -221,55 +200,7 @@ def test_api_and_filesystem_transports_share_one_session_folder_rule(tmp_path):
     ]
     for rel in tree:
         (tmp_path / rel).mkdir(parents=True, exist_ok=True)
-    api_sections = sorted(
-        {section for section, _, _ in course.session_dirs(tree) if section}
-    )
-    assert course.discover_sections(tmp_path) == api_sections == ["labs", "lectures"]
-
-
-def test_repo_tree_dirs_reads_an_absent_or_empty_repo_as_no_directories(monkeypatch):
-    # A 404 (no such repo/tree) and a 409 (a repo with no commits yet) both genuinely mean
-    # "no session folders" - a brand-new semester repo is not a failure.
-    monkeypatch.setattr(discovery, "default_branch", lambda org, repo, **k: "main")
-    for out in ("gh: Not Found (HTTP 404)", "gh: Conflict (HTTP 409)"):
-        monkeypatch.setattr(gh_contents, "gh", lambda *a, out=out, **k: (1, out))
-        assert discovery._repo_tree_dirs("Semester-f2026", "materials") == ()
-
-
-def test_repo_tree_dirs_raises_rather_than_reporting_a_repo_with_no_sessions(
-    monkeypatch,
-):
-    # The site-wipe class: these rows ARE the semester site's schedule, and the sync clears
-    # and rewrites the collections from them - so a rate-limited tree fetch swallowed as
-    # `[]` republished the site with every session row deleted, silently and green.
-    monkeypatch.setattr(discovery, "default_branch", lambda org, repo, **k: "main")
-    monkeypatch.setattr(
-        gh_contents, "gh", lambda *a, **k: (1, "gh: HTTP 502 Bad Gateway")
-    )
-    with pytest.raises(RuntimeError, match="could not read the tree"):
-        discovery.discover_release_sources("Semester-f2026", ["materials"])
-
-
-def test_both_transports_share_one_tree_fetch(monkeypatch):
-    # discovery filters the directories, site filters the blobs, but the fetch - and its
-    # absent-vs-failed discrimination - is one helper, so the two can't drift apart again.
-    from dsl_course import site
-
-    calls = []
-
-    def fake_gh(*args, **kwargs):
-        calls.append(args)
-        return (0, "false\nlectures\nlectures/01_intro\n")
-
-    monkeypatch.setattr(discovery, "default_branch", lambda org, repo, **k: "main")
-    monkeypatch.setattr(site, "default_branch", lambda org, repo, **k: "main")
-    monkeypatch.setattr(gh_contents, "gh", fake_gh)
-    discovery._repo_tree_dirs("Semester-f2026", "materials")
-    site._repo_tree("Semester-f2026", "materials")
-    assert [a[-1] for a in calls] == [
-        '"\\(.truncated)", (.tree[] | select(.type=="tree") | .path)',
-        '"\\(.truncated)", (.tree[] | select(.type=="blob") | .path)',
-    ]
+    assert course.discover_sections(tmp_path) == ["labs", "lectures"]
 
 
 def _registry(text: str | None):
