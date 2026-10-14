@@ -184,3 +184,17 @@ export function saveMarksWidths(org: string, path: string, widths: Record<string
   if (Object.keys(widths).length) writeJson(store, widthsKey(org, path), widths);
   else remove(store, widthsKey(org, path));
 }
+
+const foldKey = (org: string, path: string) => `dsl-console-marks-fold:${org.toLowerCase()}:${path}`;
+
+/** Whether the person folded (true) or opened (false) one mark sheet's submission columns; null until they chose. */
+export function marksSubFolded(org: string, path: string, store: KeyStore | null = localStore()): boolean | null {
+  const v = readText(store, foldKey(org, path));
+  return v === '1' ? true : v === '0' ? false : null;
+}
+
+/** Keep the fold choice; null forgets it. */
+export function saveMarksSubFolded(org: string, path: string, folded: boolean | null, store: KeyStore | null = localStore()): void {
+  if (folded === null) remove(store, foldKey(org, path));
+  else writeText(store, foldKey(org, path), folded ? '1' : '0');
+}

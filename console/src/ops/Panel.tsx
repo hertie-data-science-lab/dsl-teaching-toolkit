@@ -328,6 +328,6 @@ export function OpButtons({ def, small, label, previewLabel = def.previewLabel ?
 /** A single button that opens the panel on `def` (no preview shortcut). */
 export function OpOpen({ def, cls = 'btn', label }: { def: OpDef; cls?: string; label?: string }) {
   const env = useEnv();
-  return <button class={cls} type="button" onClick={() => env?.ops.open(def)}>{label ?? def.name}</button>;
+  return <><button class={cls} type="button" onClick={() => env?.ops.open(def)}>{label ?? def.name}</button><VerbHint def={def} /></>;
 }
 

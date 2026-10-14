@@ -18,8 +18,9 @@ import { returnMarks } from '../src/ops/defs';
 import { DispatchAdapter } from '../src/ops/adapter';
 import { OpPanel } from '../src/ops/Panel';
 import { OpsSession } from '../src/ops/session';
+import { parseHash } from '../src/router';
 import { AssignmentScreen } from '../src/screens/Assignments';
-import { previewEmails, templateChecks } from '../src/screens/Marking';
+import { PreviewEmails, previewEmails, templateChecks } from '../src/screens/Marking';
 import type { CohortProps } from '../src/screens/types';
 import example from './fixtures/status.example.json';
 import { FakeGitHub, fileBody, json, type Seen } from './fake';
@@ -233,10 +234,11 @@ let root: HTMLElement | null = null;
 const windowWidth = (w: number) => Object.defineProperty(window, 'innerWidth', { value: w, configurable: true, writable: true });
 beforeEach(() => windowWidth(1440));
 afterEach(() => {
-  localStorage.clear();
+  // Unmounted first: the screen keeps its unsaved marks as it goes.
   if (root) render(null, root);
   root?.remove();
   root = null;
+  localStorage.clear();
 });
 
 async function mount(env: Env, ui: preact.VNode) {
@@ -371,12 +373,34 @@ describe('the marking screen', () => {
     expect(q('.marking').getAttribute('role')).toBe('dialog');
     expect(icon().getAttribute('aria-label')).toBe('Exit full screen');
     expect(q('.marking .marks-bar')).not.toBeNull(); // the toolbar stays inside
-    await act(() => void document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
+    await act(() => void document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
     expect(q('.marking').classList.contains('full')).toBe(false);
     expect(document.activeElement).toBe(icon());
     await click(icon());
     await click(icon());
     expect(q('.marking').classList.contains('full')).toBe(false);
+  });
+
+  it('leaves full screen on when Escape closes a dialog or a ? popover inside it', async () => {
+    await marks();
+    const esc = () => act(() => void (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+    const isFull = () => q('.marking').classList.contains('full');
+    await click(q('button.full-toggle'));
+    await click(q('button[aria-label="Open feedback for ada-l"]'));
+    await esc();
+    expect(root!.querySelector('aside.marks-drawer')).toBeNull();
+    expect(isFull()).toBe(true);
+    await click(button('Student view'));
+    await esc();
+    expect(root!.querySelector('.student-view')).toBeNull();
+    expect(isFull()).toBe(true);
+    await act(() => q<HTMLButtonElement>('button[aria-label="About Feedback"]').focus());
+    expect(q<HTMLButtonElement>('button[aria-label="About Feedback"]').nextElementSibling).toBeNull(); // open: at the end of the page
+    await esc();
+    expect(q<HTMLButtonElement>('button[aria-label="About Feedback"]').nextElementSibling).not.toBeNull();
+    expect(isFull()).toBe(true);
+    await esc();
+    expect(isFull()).toBe(false);
   });
 
   it('keeps Return marks and Student view above the marking panel, and the toolbar to marking and saving', async () => {
@@ -413,6 +437,7 @@ describe('the marking screen', () => {
     expect(view.textContent).toContain('ada-l · Assignment 2: Regression');
     expect([...view.querySelectorAll('th')].map((t) => t.textContent)).toEqual(['Q1', 'Q2', 'Score', 'Submitted', 'Late', 'Final grade']);
     expect(view.textContent).toContain('17 / 20');
+    expect([...view.querySelectorAll('td')].map((t) => t.textContent)).toContain('27 Sep 20:00'); // as the grid's Submitted
     expect(view.textContent).toContain('Good.');
     expect(view.textContent).not.toContain('Check the plot.');
     await act(() => void document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
@@ -443,6 +468,7 @@ describe('the marking screen', () => {
     expect(ada().querySelector('.md-line')!.textContent).toBe('Good.');
     expect(ada().title).toBe('Good.\nThe plot needs labels.');
     expect(root!.textContent).toContain('1 student changed');
+    await act(() => void q('textarea[aria-label="Feedback for ada-l"]').dispatchEvent(new FocusEvent('focusout', { bubbles: true }))); // kept at once when a box loses focus
     expect(JSON.parse(localStorage.getItem(k)!).edits['["submissions","ada-l","feedback_individual"]']).toBe('Good.\nThe plot needs labels.');
     // Escape closes it, and focus goes back to the line that opened it.
     await act(() => void q('textarea[aria-label="Feedback for ada-l"]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
@@ -467,10 +493,10 @@ describe('the marking screen', () => {
     await click(q('button.full-toggle'));
     await click(q('button[aria-label="Open feedback for ada-l"]'));
     expect(q('.marking.full aside.marks-drawer')).not.toBeNull();
-    await act(() => void document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
+    await act(() => void document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
     expect(root!.querySelector('aside.marks-drawer')).toBeNull();
     expect(q('.marking').classList.contains('full')).toBe(true);
-    await act(() => void document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
+    await act(() => void document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
     expect(q('.marking').classList.contains('full')).toBe(false);
   });
 
@@ -525,13 +551,46 @@ describe('Return marks from the marking screen', () => {
     const live: Loaded = { ...ready, status: { ...ready.status!, assignments: [{ ...solo, marks: { filled: 1, total: 3 } }] } } as Loaded;
     await mount(env, <AssignmentScreen {...props(f, { tab: 'overview', loaded: live })} />);
     const verb = [...root!.querySelectorAll<HTMLAnchorElement>('a.btn')].find((x) => x.textContent === 'Return marks')!;
-    expect(verb.getAttribute('href')).toBe('#assignment-assignment-2/marks');
+    expect(verb.getAttribute('href')).toBe('#assignment-assignment-2/marks/return-run');
     await click(verb);
     expect(env.ops.current.value).toBeNull(); // nothing opens until the Marks tab has read the sheet
     render(null, root!);
-    await act(() => render(<EnvCtx.Provider value={env}><AssignmentScreen {...props(f, { loaded: live })} /><OpPanel /></EnvCtx.Provider>, root!));
+    await act(() => render(<EnvCtx.Provider value={env}><AssignmentScreen {...props(f, { loaded: live, open: 'return-run' })} /><OpPanel /></EnvCtx.Provider>, root!));
     expect(env.ops.current.value?.def.verb).toBe('Return marks to 1 student');
     expect(q('.op-facts').textContent).toContain('1 held (fix first)');
+  });
+
+  it('opens once per arrival: the address drops the open, so a reload or Back does not preview again', async () => {
+    const gh = github(), f = files(), env = envOf(gh, f);
+    const opened = vi.spyOn(env.ops, 'open').mockImplementation(() => {});
+    location.hash = '#assignment-assignment-2/marks/return-preview';
+    const arrive = () => act(() => render(<EnvCtx.Provider value={env}><AssignmentScreen {...props(f, { open: parseHash(location.hash).open })} /></EnvCtx.Provider>, root!));
+    root = document.createElement('div');
+    document.body.appendChild(root);
+    await arrive();
+    expect(opened).toHaveBeenCalledTimes(1);
+    expect(location.hash).toBe('#assignment-assignment-2/marks');
+    render(null, root);
+    await arrive();
+    expect(opened).toHaveBeenCalledTimes(1);
+    location.hash = '';
+  });
+
+  it('finds the preview issue past the first page of open issues, and says so when there is none', async () => {
+    const PREVIEW = { title: 'Distribute grades preview', body: '### Students who would be emailed (1)\n- `cy-d` - their first grades email.' };
+    const page = (n: number, extra: object[] = []) => [...Array.from({ length: n }, (_, i) => ({ number: i + 1, title: `Question ${i}` })), ...extra];
+    const shown = async (pages: Record<string, object[]>) => {
+      const gh = new FakeGitHub().on('GET', /\/semester-config\/issues\?/, (r: Seen) => json(pages[new URL(r.url).searchParams.get('page') ?? '1'] ?? []));
+      const env = envOf(gh, files());
+      await mount(env, <PreviewEmails org={COHORT_ORG} slug="assignment-2" />);
+      await settle(() => !root!.textContent!.includes('Reading'));
+      const said = root!.textContent;
+      render(null, root!);
+      root!.remove();
+      return said;
+    };
+    expect(await shown({ 1: page(100), 2: page(3, [PREVIEW]) })).toBe('Email to: cy-d (first marks email).');
+    expect(await shown({ 1: page(100), 2: page(3) })).toBe('Could not find the preview issue in semester-config, so who would be emailed is not shown.');
   });
 
   it('names who a preview would email, from the private preview issue', () => {
@@ -540,11 +599,32 @@ describe('Return marks from the marking screen', () => {
   });
 });
 
+describe('the Submitted column', () => {
+  const submitted = () => [...root!.querySelectorAll('tr.unit-row')].map((r) => r.querySelector('td.sys')!.textContent);
+  it('shows a recorded time short and as written (no timezone shift), a date alone as a day, and anything else as written', async () => {
+    await marks(files(SHEET.replace('submitted: 2026-09-27T20:00', "submitted: '2026-10-13 22:41:05+02:00'").replace('submitted: 2026-09-29T20:00', "submitted: '2026-10-03'")));
+    expect(submitted()).toEqual(['13 Oct 22:41', '3 Oct', 'Nothing']);
+    root!.remove();
+    await marks(files(SHEET.replace('submitted: 2026-09-27T20:00', 'submitted: by email')));
+    expect(submitted()).toEqual(['by email', '29 Sep 20:00', 'Nothing']);
+  });
+});
+
+/** The Marks tab on freshly loaded modules, as a browser without field-sizing loads them (Firefox, Safari). */
+async function marksNoFieldSizing(f = files()) {
+  vi.stubGlobal('CSS', { supports: () => false, escape: (s: string) => s });
+  vi.resetModules();
+  const fresh = await import('../src/screens/Assignments');
+  const { EnvCtx: FreshCtx } = await import('../src/env');
+  root = document.createElement('div');
+  document.body.appendChild(root);
+  await act(() => render(<FreshCtx.Provider value={envOf(github(), f)}><fresh.AssignmentScreen {...props(f)} /></FreshCtx.Provider>, root!));
+}
+
 describe('growing text boxes', () => {
   it('grows a textarea with its text where the browser has no field-sizing', async () => {
-    // As Firefox and Safari answer: no field-sizing.
-    vi.stubGlobal('CSS', { supports: () => false, escape: (s: string) => s });
-    await marks();
+    // As Firefox and Safari answer: no field-sizing (asked once, when the side panel's module loads).
+    await marksNoFieldSizing();
     await click(q('button[aria-label="Open feedback for ada-l"]'));
     const fb = q<HTMLTextAreaElement>('textarea[aria-label="Feedback for ada-l"]');
     Object.defineProperty(fb, 'scrollHeight', { configurable: true, get: () => 90 });
@@ -553,6 +633,24 @@ describe('growing text boxes', () => {
       fb.dispatchEvent(new Event('input', { bubbles: true }));
     });
     expect(fb.style.height).toBe('92px');
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('the text box sweep', () => {
+  it('measures only the box typed in on a keystroke, and a box a snippet changed', async () => {
+    await marksNoFieldSizing(files(SHEET.replace('submissions:\n', 'snippets:\n  - Label your axes.\nsubmissions:\n')));
+    await click(q('button[aria-label="Open feedback for ada-l"]'));
+    const read: string[] = [];
+    for (const el of root!.querySelectorAll<HTMLTextAreaElement>('aside.marks-drawer textarea')) {
+      Object.defineProperty(el, 'scrollHeight', { configurable: true, get: () => (read.push(el.getAttribute('aria-label')!), 60) });
+    }
+    await type('textarea[aria-label="Feedback for ada-l"]', 'Good. More');
+    expect(read).toEqual(['Feedback for ada-l']);
+    read.length = 0;
+    await act(() => q<HTMLTextAreaElement>('textarea[aria-label="Feedback on Q1 for ada-l"]').focus());
+    await click(q('.md-snip'));
+    expect(read).toEqual(['Feedback on Q1 for ada-l']);
     vi.unstubAllGlobals();
   });
 });
@@ -566,6 +664,18 @@ describe('unsaved marks', () => {
     await click(button('Restore'));
     expect(q<HTMLInputElement>('input[aria-label="Q1 (out of 10) for cy-d"]').value).toBe('6');
     expect(root!.textContent).toContain('1 student changed');
+  });
+
+  it('keeps marks typed while a draft is still offered, and the offer with them', async () => {
+    const k = `dsl-console-marks-draft:${COHORT_ORG}:grading_sheets/assignment-2.yml`;
+    localStorage.setItem(k, JSON.stringify({ sha: 'static', at: 0, edits: { '["submissions","cy-d","score_individual","Q1"]': 6 } }));
+    await marks();
+    await type('input[aria-label="Q2 (out of 10) for cy-d"]', '7');
+    await act(() => void window.dispatchEvent(new Event('pagehide')));
+    expect(JSON.parse(localStorage.getItem(k)!).edits).toEqual({ '["submissions","cy-d","score_individual","Q1"]': 6, '["submissions","cy-d","score_individual","Q2"]': 7 });
+    await click(button('Restore'));
+    expect(q<HTMLInputElement>('input[aria-label="Q1 (out of 10) for cy-d"]').value).toBe('6');
+    expect(q<HTMLInputElement>('input[aria-label="Q2 (out of 10) for cy-d"]').value).toBe('7');
   });
 
   it('Discard drops the draft', async () => {
@@ -582,6 +692,8 @@ describe('unsaved marks', () => {
     const gh = github();
     await marks(files(), gh);
     await type('input[aria-label="Q1 (out of 10) for cy-d"]', '6');
+    expect(localStorage.getItem(k)).toBeNull(); // kept once typing pauses, or the box loses focus
+    await act(() => void q('input[aria-label="Q1 (out of 10) for cy-d"]').dispatchEvent(new FocusEvent('focusout', { bubbles: true })));
     expect(JSON.parse(localStorage.getItem(k)!)).toMatchObject({ sha: 'static', edits: { '["submissions","cy-d","score_individual","Q1"]': 6 } });
     await click(button('Save marks'));
     await settle(() => puts(gh).length > 0 && localStorage.getItem(k) === null);
@@ -748,15 +860,19 @@ describe('column widths', () => {
     expect(folded()).toBe(false); // full screen counts as wide
     await click(q('button.full-toggle'));
     expect(folded()).toBe(true);
-    // The instructor's choice sticks for this sheet, whatever the width, until Reset widths.
+    // The instructor's choice sticks for this sheet, whatever the width, until Reset widths; it is no width, so it alone offers no Reset widths.
     await click(q('thead th .th-fold'));
     expect(folded()).toBe(false);
-    expect(JSON.parse(localStorage.getItem(widthsKey)!)).toEqual({ __subFolded: 0 });
+    expect(localStorage.getItem(`dsl-console-marks-fold:${COHORT_ORG}:grading_sheets/assignment-2.yml`)).toBe('0');
+    expect(localStorage.getItem(widthsKey)).toBeNull();
+    expect(button('Reset widths')).toBeUndefined();
     root!.remove();
     await marks();
     expect(folded()).toBe(false);
+    await act(() => void grip('days').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })));
     await click(button('Reset widths'));
     expect(folded()).toBe(true);
+    expect(localStorage.getItem(`dsl-console-marks-fold:${COHORT_ORG}:grading_sheets/assignment-2.yml`)).toBeNull();
     root!.remove();
     localStorage.clear();
     windowWidth(1440);

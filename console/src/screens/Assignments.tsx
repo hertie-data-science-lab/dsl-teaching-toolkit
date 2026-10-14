@@ -15,7 +15,7 @@ import { replaceHash, tabHref, type AssignmentTab } from '../router';
 import { ProblemCards } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { asgSummary } from './Cohort';
-import { MarksTab, TeamsTab, requestReturnMarks } from './Marking';
+import { MarksTab, TeamsTab } from './Marking';
 import { AssignmentRun, SemesterDefaults, sheetName } from './RunSettings';
 import { WithStatus, cohortName, cohortScope, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
@@ -152,11 +152,10 @@ export interface TabProps extends ReadyProps {
 
 /** Return marks from the Overview: the Marks tab's own panel, opened there, so its figures are always read from the sheet. */
 function ReturnFromMarks({ slug, label }: { slug: string; label: string }) {
-  const to = tabHref(slug, 'marks');
   return (
     <>
-      <a class="btn small" href={to} onClick={() => requestReturnMarks(slug, 'preview')}>Preview</a>
-      <a class="btn small outline" href={to} onClick={() => requestReturnMarks(slug, 'run')}>{label}</a>
+      <a class="btn small" href={tabHref(slug, 'marks', 'return-preview')}>Preview</a>
+      <a class="btn small outline" href={tabHref(slug, 'marks', 'return-run')}>{label}</a>
     </>
   );
 }

@@ -9,12 +9,23 @@ import type { Path } from '../edit/yamlText';
 import { insertSnippet } from '../model/marks';
 
 /** Whether the browser grows a textarea with its text by itself (CSS `field-sizing`, Chromium only). */
-const sizesItself = () => typeof CSS !== 'undefined' && typeof CSS.supports === 'function' && CSS.supports('field-sizing', 'content');
-/** Grow a textarea to its text where the browser does not (Firefox, Safari); its CSS min-height still holds. */
-export function grow(el: HTMLTextAreaElement): void {
-  if (sizesItself()) return;
-  el.style.height = 'auto';
-  el.style.height = `${el.scrollHeight + 2}px`;
+const SIZES_ITSELF = typeof CSS !== 'undefined' && typeof CSS.supports === 'function' && CSS.supports('field-sizing', 'content');
+/** Each box's text as last grown. */
+const grownText = new WeakMap<HTMLTextAreaElement, string>();
+/**
+ * Grow textareas to their text where the browser does not (Firefox, Safari); their CSS min-height
+ * still holds. Only a box whose text changed since it was last grown is measured, or every box
+ * (`all`, when the panel moves to another row); all heights are reset before any is read.
+ */
+function grow(els: HTMLTextAreaElement[], all = false): void {
+  if (SIZES_ITSELF) return;
+  const todo = all ? els : els.filter((el) => grownText.get(el) !== el.value);
+  for (const el of todo) el.style.height = 'auto';
+  const heights = todo.map((el) => el.scrollHeight);
+  todo.forEach((el, i) => {
+    el.style.height = `${heights[i] + 2}px`;
+    grownText.set(el, el.value);
+  });
 }
 
 /** One text box in the panel: the sheet cell it edits, and how it is named. */
@@ -65,11 +76,12 @@ export function MarksDrawer(p: MarksDrawerProps) {
   useEffect(() => {
     last.current = null;
     const areas = [...(box.current?.querySelectorAll<HTMLTextAreaElement>('textarea[data-field]') ?? [])];
-    areas.forEach(grow);
+    grow(areas, true);
     if (p.grab) (areas.find((a) => a.dataset.field === p.focus) ?? areas[0])?.focus();
   }, [p.rowKey, p.focus, p.grab]);
+  // A box whose text changed without typing in it (a snippet, a restored draft) grows; typing grows its own box.
   useEffect(() => {
-    box.current?.querySelectorAll<HTMLTextAreaElement>('textarea[data-field]').forEach(grow);
+    grow([...(box.current?.querySelectorAll<HTMLTextAreaElement>('textarea[data-field]') ?? [])]);
   });
   const insert = (s: string) => {
     const target = last.current && box.current?.contains(last.current.el) ? last.current : null;
@@ -120,7 +132,7 @@ export function MarksDrawer(p: MarksDrawerProps) {
             <label for={`md-${b.field}`}>{b.heading}</label>
             <textarea id={`md-${b.field}`} class="md-text" aria-label={b.label} data-field={b.field} value={b.value}
               onFocus={(e) => { last.current = b.private ? last.current : { path: b.path, el: e.target as HTMLTextAreaElement }; }}
-              onInput={(e) => { const t = e.target as HTMLTextAreaElement; grow(t); p.onText(b.path, t.value); }} />
+              onInput={(e) => { const t = e.target as HTMLTextAreaElement; grow([t]); p.onText(b.path, t.value); }} />
           </div>
         ))}
         <section class="md-snippets" aria-label="Feedback snippets">

@@ -9,7 +9,7 @@ import { GitHubClient } from '../src/github/client';
 import { StatusStore } from '../src/model/status';
 import { DispatchAdapter } from '../src/ops/adapter';
 import { OpsSession } from '../src/ops/session';
-import { PhotoThumb } from '../src/screens/People';
+import { Avatar } from '../src/ui/Avatar';
 import { FakeGitHub, fileBody } from './fake';
 import { StaticFiles } from './staticFiles';
 
@@ -27,7 +27,7 @@ async function thumb(photo: string, gh = new FakeGitHub()) {
   const env: Env = { client, user: USER, ops: new OpsSession(new DispatchAdapter(client, () => USER.login)), statuses: new StatusStore(client), files: new StaticFiles(), pollMs: 0 };
   root = document.createElement('div');
   document.body.appendChild(root);
-  await act(() => render(<EnvCtx.Provider value={env}><PhotoThumb photo={photo} name="Ana Lopez" org={ORG} /></EnvCtx.Provider>, root!));
+  await act(() => render(<EnvCtx.Provider value={env}><Avatar small picture={photo} name="Ana Lopez" org={ORG} /></EnvCtx.Provider>, root!));
   for (let i = 0; i < 20; i++) await act(() => new Promise((r) => setTimeout(r, 0)));
   return root.firstElementChild as HTMLElement;
 }
@@ -35,7 +35,7 @@ async function thumb(photo: string, gh = new FakeGitHub()) {
 describe('the Instructors tab’s photo thumbnail', () => {
   it('shows an absolute URL as is, a site path read from the site repo, and the muted initials otherwise', async () => {
     const abs = await thumb('https://avatars.githubusercontent.com/u/1');
-    expect([abs.tagName, abs.className, abs.getAttribute('src'), abs.getAttribute('alt')]).toEqual(['IMG', 'thumb', 'https://avatars.githubusercontent.com/u/1', 'Ana Lopez']);
+    expect([abs.tagName, abs.className, abs.getAttribute('src'), abs.getAttribute('alt')]).toEqual(['IMG', 'p-avatar small', 'https://avatars.githubusercontent.com/u/1', 'Ana Lopez']);
     // A broken image falls back to the initials.
     await act(() => void abs.dispatchEvent(new Event('error')));
     expect([root!.firstElementChild!.tagName, root!.firstElementChild!.textContent]).toEqual(['SPAN', 'AL']);
@@ -48,6 +48,6 @@ describe('the Instructors tab’s photo thumbnail', () => {
     root!.remove();
 
     const none = await thumb('');
-    expect([none.tagName, none.className, none.textContent, none.getAttribute('aria-label')]).toEqual(['SPAN', 'thumb none', 'AL', 'Ana Lopez: no photo']);
+    expect([none.tagName, none.className, none.textContent, none.getAttribute('aria-label')]).toEqual(['SPAN', 'p-avatar small none', 'AL', 'Ana Lopez: no photo']);
   });
 });

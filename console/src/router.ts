@@ -18,10 +18,15 @@ export interface Route {
   entry?: string;
   /** The assignment hub's tab, when the hash names one. */
   tab?: AssignmentTab;
+  /** What the Marks tab opens on arrival (`#assignment-<slug>/marks/return-preview`): the Overview's Return marks buttons. */
+  open?: AssignmentOpen;
 }
 
 export type AssignmentTab = 'overview' | 'teams' | 'marks';
 const TABS: AssignmentTab[] = ['overview', 'teams', 'marks'];
+/** Return marks at its Preview or at the run, opened by the Marks tab once it has read the sheet. */
+export type AssignmentOpen = 'return-preview' | 'return-run';
+const OPENS: AssignmentOpen[] = ['return-preview', 'return-run'];
 
 const ENTRY_SCREENS = ['schedule', 'assignment', 'release', 'template', 'materials'];
 
@@ -35,8 +40,9 @@ export function parseHash(hash: string): Route {
     if (!r.startsWith(`${s}-`)) continue;
     const entry = r.slice(s.length + 1);
     if (s === 'assignment') {
-      const [slug, tab] = entry.split('/');
-      return TABS.includes(tab as AssignmentTab) ? { screen: s, entry: slug, tab: tab as AssignmentTab } : { screen: s, entry: slug };
+      const [slug, tab, open] = entry.split('/');
+      if (!TABS.includes(tab as AssignmentTab)) return { screen: s, entry: slug };
+      return tab === 'marks' && OPENS.includes(open as AssignmentOpen) ? { screen: s, entry: slug, tab, open: open as AssignmentOpen } : { screen: s, entry: slug, tab: tab as AssignmentTab };
     }
     return { screen: s, entry };
   }
@@ -46,7 +52,7 @@ export function parseHash(hash: string): Route {
 /** The hash a route is canonically written as. */
 export function hashOf(r: Route): string {
   const sep = r.screen.startsWith('kind-') ? '/' : '-';
-  return `#${r.screen}${r.entry ? `${sep}${r.entry}` : ''}${r.tab ? `/${r.tab}` : ''}`;
+  return `#${r.screen}${r.entry ? `${sep}${r.entry}` : ''}${r.tab ? `/${r.tab}` : ''}${r.open ? `/${r.open}` : ''}`;
 }
 
 /** The hash to write instead of `hash` (a tab the screen does not have, say), or null when it is already canonical. */
@@ -80,9 +86,9 @@ export function installReturn(search: string, saved: () => string | null): strin
   return `${rest ? `?${rest}` : ''}${m?.[2] ?? '#new-course-1'}`;
 }
 
-/** The link to one tab of an assignment. */
-export function tabHref(slug: string, tab: AssignmentTab): string {
-  return `#assignment-${slug}/${tab}`;
+/** The link to one tab of an assignment, and what it opens there. */
+export function tabHref(slug: string, tab: AssignmentTab, open?: AssignmentOpen): string {
+  return `#assignment-${slug}/${tab}${open ? `/${open}` : ''}`;
 }
 
 export interface Selection {
