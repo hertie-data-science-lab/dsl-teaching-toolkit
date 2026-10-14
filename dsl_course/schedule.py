@@ -8,7 +8,7 @@ lifecycle, `events` are display-only calendar rows.
                                      # below are interpreted; GitHub cron itself is UTC
     releases:                        # the auto-release plan - label ->
       lecture_02:                    # {event_datetime + deploys}. Each deploy ships at its
-        event_datetime: 2026-09-15T10:00   # deploy_datetime (default: the event itself).
+        event_datetime: 2026-09-15T10:00   # deploy_datetime (default: an hour before the event).
         title: Linear regression           # the session's name - the site's TITLE column
         details: Least squares by hand     # its DETAILS column, and the session's own page
         number: 2                          # the row's number; without it, the
@@ -22,7 +22,7 @@ lifecycle, `events` are display-only calendar rows.
             course_source_path: lectures/02_intro        # are the only required keys;
             semester_dest_repo: materials                  # semester_dest_repo, semester_dest_path
             semester_dest_path: lectures/02_intro          # and deploy_datetime are optional.
-            deploy_datetime: 2026-09-15T09:00
+            deploy_datetime: 2026-09-14T18:00     # the evening before
     assignments:                     # each assignment's TIMINGS. The key is a label;
       assignment-1:                  # course_source_repo names the COURSE-org repo
         course_source_repo: assignment-neural-nets   # it hands out from, and is REQUIRED.
@@ -275,10 +275,13 @@ class Deploy:
     """One source->dest copy: a path in a COURSE-org source repo copied into a SEMESTER-org
     dest repo. `semester_dest_path` defaults to `course_source_path` (mirror).
 
-    `deploy_datetime` optionally overrides the copy's own ship time; unset, it ships at
-    the parent entry's `event_datetime`. This is what disaggregates the class from its
-    materials: the entry's `event_datetime` is the session the site announces, a deploy's
-    `deploy_datetime` ships the files an hour (or a week) before or after it."""
+    `deploy_datetime` optionally overrides the copy's own ship time; unset, it ships an
+    hour before the parent entry's `event_datetime` (`_default_ship_times` fills it in at
+    parse time, so every reader sees the moment the copy actually ships). A whole-day
+    event has no clock time, so its copies ship at the day's start; a `tbc` entry's have
+    no time at all. This is what disaggregates the class from its materials: the entry's
+    `event_datetime` is the session the site announces, a deploy's `deploy_datetime`
+    ships the files an hour (or a week) before or after it."""
 
     course_source_repo: str
     course_source_path: str
@@ -986,8 +989,8 @@ def _flagged_details(
 def _parse_deploy(raw: object, tz: ZoneInfo, drops: Drops, label: str) -> list[Deploy]:
     """Parse a release's `deploy:` - a list (or a single mapping) of source->dest copies.
     Entries missing course_source_repo/course_source_path are skipped (nothing to copy).
-    A malformed `deploy_datetime` parses to None - the copy ships at the entry's
-    event_datetime, and the unusable value is flagged (see `_flag_bad_value`)."""
+    A malformed `deploy_datetime` parses to None - the copy ships at the entry's default
+    (`_default_ship_times`), and the unusable value is flagged (see `_flag_bad_value`)."""
     items = [raw] if isinstance(raw, dict) else (raw or [])
     out: list[Deploy] = []
     for i, d in enumerate(items):
@@ -1032,14 +1035,32 @@ def _parse_deploy(raw: object, tz: ZoneInfo, drops: Drops, label: str) -> list[D
                     tz,
                     drops,
                     where,
-                    "this copy ships at the entry's `event_datetime` instead of the "
-                    "time written here",
+                    "this copy ships an hour before the entry's `event_datetime` "
+                    "instead of the time written here",
                     lines,
                 ),
                 lines=lines,
             )
         )
     return out
+
+
+# How long before its session a copy with no `deploy_datetime` ships.
+DEFAULT_DEPLOY_LEAD = timedelta(hours=1)
+
+
+def _default_ship_times(deploys: list[Deploy], raw_when: object, tz: ZoneInfo) -> None:
+    """Give each copy that names no `deploy_datetime` its default: an hour before the
+    entry's timed `event_datetime`. A whole-day event has no clock time to count back
+    from, so its copies keep shipping at the day's start (the entry's `when`, 00:00); a
+    `tbc` entry has no time, so nothing is filled and nothing fires. An explicit
+    `deploy_datetime` is never touched."""
+    when = _coerce_date_or_datetime(raw_when, tz)
+    if not isinstance(when, datetime):
+        return
+    for d in deploys:
+        if d.deploy_datetime is None:
+            d.deploy_datetime = when - DEFAULT_DEPLOY_LEAD
 
 
 def _is_tbc(value: object) -> bool:
@@ -1136,11 +1157,13 @@ def _parse_releases(raw: object, tz: ZoneInfo, drops: Drops) -> list[Release]:
         number = _parse_number(
             entry, where, drops, lines, "the row is numbered from its label instead"
         )
+        deploys = _parse_deploy(entry.get("deploy"), tz, drops, str(label))
+        _default_ship_times(deploys, raw_when, tz)
         out.append(
             Release(
                 label=str(label),
                 when=when,
-                deploy=_parse_deploy(entry.get("deploy"), tz, drops, str(label)),
+                deploy=deploys,
                 kind=kind,
                 number=number,
                 title=str(entry.get("title") or ""),

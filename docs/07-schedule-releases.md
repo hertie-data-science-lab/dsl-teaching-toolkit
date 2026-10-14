@@ -47,7 +47,7 @@ Each entry is one row on the semester site, in date order. The site names the ro
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|
-| `event_datetime` | **yes** | - | when the class happens - what the site's schedule shows, and the default fire time for this entry's deploys |
+| `event_datetime` | **yes** | - | when the class happens - what the site's schedule shows; this entry's deploys ship an hour before it by default |
 | `deploy` (nested entry) | no | - | the copies this entry ships (a nested list - see below) |
 | `number` | unless the label carries one | the label's number | the row's number (`Lecture 3`); the console fills in the next one |
 | `kind` | no | inferred | the row's kind: one of the institution's kinds (Hertie: `lecture`, `lab`, `readings`, `exam`, `drop-in`, `assets`, `other`). Left out, it is inferred once from the folder the first copy lands in: `lectures`/`lecture` -> lecture, `labs`/`lab`/`tutorials` -> lab, `readings`/`reading`/`literature` -> readings, anything else -> assets (supporting files: released, never a row), unless the source repo's own `materials.yml` aliases say otherwise; an entry with no copies yet is a lecture ([02](02-add-materials-to-course.md#materialsyml)). The folder is the top folder of the DESTINATION path (for a copy into the repo's root: the copied name when it names a kind, as `lectures` copied whole does, else the destination repo), matched whatever its case. The console shows the inferred kind for you to confirm. An unknown value is flagged by **Validate schedule** and shown as `other`. Each kind gets its own tab on the site |
@@ -90,7 +90,7 @@ Nested under `deploy:` we have the following:
 | `course_source_path` | **yes** | - | the folder or file to copy, relative to `course_source_repo` - or `/` for the whole repo |
 | `semester_dest_repo` | no | `materials` | the semester repo to copy into - created on first release |
 | `semester_dest_path` | no | mirrors `course_source_path` | where it lands, relative to `semester_dest_repo` |
-| `deploy_datetime` | no | the entry's `event_datetime` | ship this one copy earlier (or later) than the class it belongs to |
+| `deploy_datetime` | no | an hour before the entry's `event_datetime` (a whole-day `event_datetime`: the day's start) | ship this one copy at another time, earlier or later than the class it belongs to |
 
 NB: `semester_dest_repo` is yours to choose - one shared `materials` repo, or one repo for lectures, another for labs etc; any non-existent repo and/or directory structure specified between `semester_dest_repo` and `semester_dest_path` is created on release if non-exist.
 
@@ -107,7 +107,7 @@ releases:
     deploy:
       - course_source_repo: course-materials-f2026
         course_source_path: lectures/02_intro
-# -> lands at materials/lectures/02_intro when the class starts (the event_datetime)
+# -> lands at materials/lectures/02_intro an hour before the class (09:00)
 
   lab_02:
     event_datetime: 2026-09-17T14:00
@@ -128,13 +128,13 @@ releases:
       - course_source_repo: course-materials-f2026 # item 1
         course_source_path: lectures/02_intro
         semester_dest_repo: lecture_materials
-        deploy_datetime: 2026-09-15T09:00   # is released 1h early
+        deploy_datetime: 2026-09-14T18:00   # released the evening before
       - course_source_repo: course-materials-f2026 # item 2
         course_source_path: readings/02_intro
         semester_dest_repo: lecture_materials   
 
   lab_02:
-    event_datetime: 2026-09-17T14:00   # the lab session, which the undefined deploy_datetime will default to
+    event_datetime: 2026-09-17T14:00   # the lab session; with no deploy_datetime its copy ships an hour before (13:00)
     deploy:
       - course_source_repo: course-materials-f2026
         course_source_path: labs/02_intro
@@ -153,7 +153,7 @@ second copy into the same session folder is how solutions reach students after t
     title: Your first classifier
     deploy:
       - course_source_repo: course-materials-f2026
-        course_source_path: labs/02_intro          # the empty scripts, at lab time
+        course_source_path: labs/02_intro          # the empty scripts, an hour before the lab
       - course_source_repo: course-materials-f2026
         course_source_path: solutions/labs/02_intro   # staged OUTSIDE labs/02_intro
         semester_dest_path: labs/02_intro/solutions
@@ -162,7 +162,7 @@ second copy into the same session folder is how solutions reach students after t
 
 Both land on the same Lab row; the solutions links appear at 18:00 and never overwrite the
 scripts. **Stage the solutions outside the folder you release as the lab** - a `solutions/`
-inside `labs/02_intro` ships with the 14:00 copy.
+inside `labs/02_intro` ships with the 13:00 copy.
 
 ## `assignments:` 
 
@@ -433,7 +433,7 @@ An entry that is valid YAML but not a valid *schedule* entry is **dropped**: it 
 | no valid `due_datetime` on an `assignments:` entry | no deadline, no submission snapshot, no autograding |
 | a `deploy` item missing `course_source_repo` or `course_source_path` | that one copy never ships |
 
-Kept rather than dropped - the entry still runs on its documented fallback, and the fallback is reported alongside the drops (so `--validate` catches it): a malformed `handout_datetime` (**nothing is ever handed out**), `marks_return_datetime` (marks go back by hand) or `deploy_datetime` (the copy ships at the `event_datetime`); an unknown `kind:` on an event (shown as a plain special event); a typo'd or unknown key at any level; and an unknown `timezone:` (falls back to `Europe/Berlin`). A key that left this file - an assignment's `title`, `grading_datetime` or `semester_dest_repo`, a release's `assignment`, `enrolment` - is `NOT_MIGRATED`, naming where it lives now; an assignment carrying one is dropped until the migration moves it.
+Kept rather than dropped - the entry still runs on its documented fallback, and the fallback is reported alongside the drops (so `--validate` catches it): a malformed `handout_datetime` (**nothing is ever handed out**), `marks_return_datetime` (marks go back by hand) or `deploy_datetime` (the copy ships at its default, an hour before the `event_datetime`); an unknown `kind:` on an event (shown as a plain special event); a typo'd or unknown key at any level; and an unknown `timezone:` (falls back to `Europe/Berlin`). A key that left this file - an assignment's `title`, `grading_datetime` or `semester_dest_repo`, a release's `assignment`, `enrolment` - is `NOT_MIGRATED`, naming where it lives now; an assignment carrying one is dropped until the migration moves it.
 
 An empty `deploy:` - the key written with nothing under it - is flagged too. It parses as "no copies", so the entry becomes a display-only row that ships nothing; if that is what you meant, delete the key (or write `deploy: []`) and the flag goes away.
 

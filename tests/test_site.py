@@ -3290,7 +3290,11 @@ def test_a_session_event_is_a_row_of_its_kind_with_no_files(monkeypatch, tmp_pat
     tbc = sessions["lab-02.md"]
     assert (tbc["title"], tbc["subtitle"]) == ("Lab 2", "Trees")
     assert tbc["dateless"] is True and "date" not in tbc
-    assert sessions["session-01.md"]["title"] == "Lecture 1"
+    # An `events:` lecture is a lecture row, on the Lectures tab, as a lab is a lab row.
+    lecture = sessions["session-01.md"]
+    assert (lecture["title"], lecture["subtitle"]) == ("Lecture 1", "Guest talk")
+    assert lecture["tabs"] == ["lecture"] and not lecture.get("links")
+    assert str(lecture["date"]).startswith("2026-09-04")
     # The release's own row is untouched: still waiting for its files.
     assert rows["lab-01.md"]["unreleased"] is True
     assert "/lectures/" in plan.files["_data/nav.yml"]

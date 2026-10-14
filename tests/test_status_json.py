@@ -1002,7 +1002,8 @@ def test_a_problem_is_dated_by_the_moment_it_bites_and_a_roster_one_is_not(
         )
     )
     when = {(p["stage"], p["fix"]["entry"]): p.get("when") for p in doc["problems"]}
-    assert when[("K4", "s5")] == "2026-10-08T10:00:00+02:00"  # the release
+    # The release's copy ships by default an hour before its 10:00 session.
+    assert when[("K4", "s5")] == "2026-10-08T09:00:00+02:00"
     assert when[("K4", "assignment-3")] == "2026-10-20T10:00:00+02:00"  # hand out
     # A template fault bites when the template is handed out, not at the late cutoff.
     assert when[("C5", "assignment-3-f2026")] == "2026-10-20T10:00:00+02:00"
@@ -1803,7 +1804,7 @@ def test_an_entry_with_no_number_is_a_problem_dated_at_what_it_stops():
     guest = problems["number:lecture:guest"]
     assert guest["text"] == "Give guest a number."
     assert guest["stops"] == "The release on Thu 8 Oct will be skipped."
-    assert guest["when"] == "2026-10-08T10:00:00+02:00"
+    assert guest["when"] == "2026-10-08T09:00:00+02:00"  # its copy, an hour early
     assert guest["scope"] == "semester"
     assert guest["fix"]["path"] == "schedule.yml"
     assert guest["fix"]["entry"] == "guest"
@@ -2722,7 +2723,8 @@ def test_a_cited_placeholder_stub_is_a_source_unwritten_problem():
         "the placeholder."
     )
     assert problem["stops"] == "The release on Wed 30 Sep will leave it out."
-    assert (problem["when"], problem["bites"]) == ("2026-09-30T10:00:00+02:00", "soon")
+    # The copy ships by default an hour before the 10:00 entry.
+    assert (problem["when"], problem["bites"]) == ("2026-09-30T09:00:00+02:00", "soon")
     assert problem["fix"]["repo"] == f"{COURSE}/course-materials-f2026"
     # Written: no problem.
     doc = _render(

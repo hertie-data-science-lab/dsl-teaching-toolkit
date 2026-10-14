@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -125,7 +125,13 @@ def test_parse_full_schedule():
     ]  # sorted by when
     s2 = sched.releases[0]
     assert s2.deploy == [
-        Deploy("cm-f2026", "lectures/02_intro", "materials", "lectures/02_intro")
+        Deploy(
+            "cm-f2026",
+            "lectures/02_intro",
+            "materials",
+            "lectures/02_intro",
+            deploy_datetime=s2.when - timedelta(hours=1),
+        )
     ]
     assert sched.releases[1].is_event_only
     assert (
@@ -342,34 +348,54 @@ def test_event_datetime_is_the_only_accepted_key():
     assert releases["new-style"].when.isoformat().startswith("2026-09-15T10:00")
 
 
-def test_deploy_datetime_parses_and_defaults_to_none():
+def _one_release(when: str, *deploys: dict) -> schedule.Release:
+    base = {"course_source_repo": "cm-f2026", "course_source_path": "lectures/02_intro"}
     meta = {
         "releases": {
             "session_2": {
-                "event_datetime": "2026-09-15T10:00",
-                "deploy": [
-                    {
-                        "course_source_repo": "cm-f2026",
-                        "course_source_path": "lectures/02_intro",
-                        "deploy_datetime": "2026-09-15T09:00",
-                    },
-                    {
-                        "course_source_repo": "cm-f2026",
-                        "course_source_path": "readings/02_intro",
-                    },
-                ],
+                "event_datetime": when,
+                "deploy": [{**base, **d} for d in deploys],
             }
         }
     }
     (r,) = parse(meta).releases
-    early, at_class = r.deploy
-    assert early.deploy_datetime.isoformat().startswith("2026-09-15T09:00")
-    assert at_class.deploy_datetime is None
-    # due_deploys: the early copy fires before the class, the other at it
-    tz = early.deploy_datetime.tzinfo
-    between = datetime(2026, 9, 15, 9, 30, tzinfo=tz)
-    assert r.due_deploys(between) == [early]
-    assert r.due_deploys(datetime(2026, 9, 15, 10, 0, tzinfo=tz)) == [early, at_class]
+    return r
+
+
+def test_deploy_datetime_parses_and_defaults_to_an_hour_before_the_event():
+    r = _one_release(
+        "2026-09-15T10:00",
+        {"deploy_datetime": "2026-09-15T18:00"},
+        {"course_source_path": "readings/02_intro"},
+    )
+    after, default = r.deploy
+    # An explicit time is never touched, even one after the class.
+    assert after.deploy_datetime.isoformat().startswith("2026-09-15T18:00")
+    assert default.deploy_datetime.isoformat().startswith("2026-09-15T09:00")
+    tz = default.deploy_datetime.tzinfo
+    assert r.due_deploys(datetime(2026, 9, 15, 8, 59, tzinfo=tz)) == []
+    assert r.due_deploys(datetime(2026, 9, 15, 9, 0, tzinfo=tz)) == [default]
+    assert r.due_deploys(datetime(2026, 9, 15, 18, 0, tzinfo=tz)) == [after, default]
+
+
+def test_the_default_hour_before_crosses_midnight():
+    (d,) = _one_release("2026-09-15T00:30", {}).deploy
+    assert d.deploy_datetime.isoformat().startswith("2026-09-14T23:30")
+
+
+def test_a_whole_day_event_ships_its_copies_at_the_day_start():
+    # No clock time to count back from: the copy ships when the day opens, as before.
+    r = _one_release("2026-09-15", {})
+    assert r.deploy[0].deploy_datetime is None
+    tz = r.when.tzinfo
+    assert r.due_deploys(datetime(2026, 9, 14, 23, 59, tzinfo=tz)) == []
+    assert r.due_deploys(datetime(2026, 9, 15, 0, 0, tzinfo=tz)) == r.deploy
+
+
+def test_a_tbc_entry_gets_no_default_ship_time():
+    r = _one_release("tbc", {})
+    assert r.when is None and r.deploy[0].deploy_datetime is None
+    assert r.due_deploys(datetime(2030, 1, 1, tzinfo=timezone.utc)) == []
 
 
 def test_display_only_entry_is_kept_with_its_title():
@@ -385,7 +411,7 @@ def test_display_only_entry_is_kept_with_its_title():
     assert r.is_event_only and r.title == "Project clinic"
 
 
-def test_malformed_deploy_datetime_falls_back_to_the_event_datetime():
+def test_malformed_deploy_datetime_falls_back_to_the_default():
     meta = {
         "releases": {
             "s": {
@@ -401,7 +427,8 @@ def test_malformed_deploy_datetime_falls_back_to_the_event_datetime():
         }
     }
     (r,) = parse(meta).releases
-    assert r.deploy[0].deploy_datetime is None  # ships at the event_datetime
+    # Ships at the default, an hour before the event_datetime.
+    assert r.deploy[0].deploy_datetime.isoformat().startswith("2026-09-15T09:00")
 
 
 def test_the_settings_that_moved_out_of_schedule_are_flagged_by_name():
@@ -1571,10 +1598,16 @@ def test_an_unparseable_deploy_datetime_is_flagged():
             }
         }
     )
-    assert sched.releases[0].deploy[0].deploy_datetime is None  # ships at the event
+    # Ships at the default, an hour before the event.
+    assert (
+        sched.releases[0]
+        .deploy[0]
+        .deploy_datetime.isoformat()
+        .startswith("2026-09-15T09:00")
+    )
     (line,) = sched.dropped
     assert line.startswith("releases.s.deploy[0].deploy_datetime:")
-    assert "event_datetime" in line
+    assert "an hour before the entry's `event_datetime`" in line
 
 
 def test_an_unknown_event_type_is_flagged_like_an_unknown_assignment_type():
@@ -1605,8 +1638,9 @@ def test_an_event_takes_any_session_kind_and_a_number():
     assert not sched.dropped
     by = {e.label: e for e in [*sched.events, *sched.sessions]}
     assert (by["lab-01-group-2"].kind, by["lab-01-group-2"].number) == ("lab", 1)
-    # No `number:`: the label's own, as on a release (`own_number`).
-    assert by["lecture_04"].number is None
+    # `kind: lecture` is a lecture session, as `lab` is a lab one. No `number:`: the
+    # label's own, as on a release (`own_number`).
+    assert by["lecture_04"].kind == "lecture" and by["lecture_04"].number is None
     assert schedule.own_number(None, "lecture_04") == 4
     assert by["lecture_04"].when is None and by["lecture_04"].tbc
     # Exams and special events are what they were, and stay `events`; a content kind
@@ -2241,7 +2275,7 @@ def test_a_fault_carries_the_line_it_is_written_on(monkeypatch, tmp_path):
     assert faults["lectures/02_lecture"].line() == (
         "releases.lecture_02 -> course_source_path - schedule.yml:14 - "
         "Course-Org/cm/lectures/02_lecture does not exist - "
-        "fires Tue 15 Sep 2026, 10:00 Europe/Berlin"
+        "fires Tue 15 Sep 2026, 09:00 Europe/Berlin"
     )
 
 
