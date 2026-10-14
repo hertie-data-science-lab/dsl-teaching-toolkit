@@ -780,7 +780,7 @@ export function MarksTab(p: TabProps) {
         <Modal title="Student view" onClose={() => setViewing(null)}>
           <div class="field">
             <label for="student-pick">Student</label>
-            <select id="student-pick" class="student-pick" value={view?.pr.handle ?? ''} onChange={(e) => setViewing((e.target as HTMLSelectElement).value)}>
+            <select id="student-pick" value={view?.pr.handle ?? ''} onChange={(e) => setViewing((e.target as HTMLSelectElement).value)}>
               {people.map(({ pr }) => <option value={pr.handle}>{realName(pr.handle) ? `${realName(pr.handle)} (${pr.handle})` : pr.handle}</option>)}
             </select>
           </div>

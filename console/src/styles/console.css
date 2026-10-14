@@ -763,20 +763,17 @@ input[aria-invalid="true"] { border-color: var(--bad); background: var(--bad-sof
 /* Fixed layout from the colgroup: each column at its content width (or the width dragged), Feedback
    and Private notes sharing the rest; numbers in tabular figures at 13px. */
 table.marks { table-layout: fixed; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }
-table.marks th { white-space: normal; position: sticky; }
-table.marks td { white-space: nowrap; }
+table.marks th { white-space: normal; position: sticky; padding: 7px 6px; }
+table.marks td { white-space: nowrap; padding: 4px 6px; }
 table.marks td:first-child, table.marks td.grow, table.marks tr.qfb-row td { white-space: normal; }
 .col-grip { position: absolute; top: 0; right: -3px; width: 6px; height: 100%; cursor: col-resize; z-index: 4; touch-action: none; }
 .col-grip:hover, .col-grip:focus-visible { background: var(--rule-strong); outline: none; }
-table.marks td { padding: 4px 6px; }
-table.marks th { padding: 7px 6px; }
 table.marks input { min-height: 30px; padding: 3px 6px; }
 table.marks td input { border-color: var(--rule-strong); background: var(--surface); }
 table.marks input.q { width: 100%; }
-table.marks input.adj { width: 100%; }
+table.marks input.adj { width: 100%; border-color: var(--amber-ink); }
 table.marks td.calc { font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
 table.marks td.pen { color: var(--amber-ink); font-variant-numeric: tabular-nums; text-align: left; }
-table.marks td.pen .late-apply { display: flex; gap: 6px; justify-content: flex-end; color: var(--ink-2); font-size: 12.5px; white-space: nowrap; }
 table.marks td.pen .pen-a { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
 table.marks td.pen .val { min-width: 42px; text-align: right; font-weight: 600; }
 table.marks td.pen .val.off { text-decoration: line-through; color: var(--muted); font-weight: 400; }
@@ -790,13 +787,12 @@ table.marks input.ovr { width: 54px; min-height: 26px; text-align: right; }
 table.marks input.ovr.set { border-color: var(--amber-ink); background: var(--amber-soft); }
 table.marks input.ovr.bad { border-color: var(--bad); }
 table.marks input.ovr:disabled { opacity: 0.5; }
-table.marks td.pen .invalid-msg { display: flex; justify-content: flex-start; margin-top: 2px; white-space: normal; }
+table.marks td.pen .invalid-msg { margin-top: 2px; white-space: normal; }
 table.marks td.sys.auto { background: var(--ok-soft); }
 table.marks .held-chip { margin-top: 4px; }
 table.marks .held-why { font-size: 12px; font-weight: 400; color: var(--bad-ink); }
 table.marks .qfb-chip { margin-top: 4px; border: 0; cursor: pointer; }
 table.marks th.adjcol, table.marks td.adjcol { background: var(--amber-soft); }
-table.marks input.adj { border-color: var(--amber-ink); }
 table.marks .team-names { font-weight: 400; }
 .marks-filters .adj-chip { border: 0; cursor: pointer; }
 table.marks th .hint-wrap.small { line-height: 1; }
@@ -809,7 +805,6 @@ table.marks thead tr:first-child th:first-child { position: sticky; left: 0; z-i
 .marks-filters .chip.filter { border: 0; cursor: pointer; }
 .marks-filters .chip.filter.on { background: var(--ink); color: var(--surface); }
 .marks-tools .savebar { margin: 0; }
-.marks-tools .student-pick { width: auto; min-height: 30px; padding: 3px 8px; font-size: 13.5px; }
 /* Return marks: its own block above the marking panel, right-aligned, with Student view under it. */
 .return-block { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; margin-bottom: 12px; }
 .return-block .return-main { display: inline-flex; align-items: center; gap: 4px; }
@@ -840,8 +835,6 @@ table.marks td.grow textarea { width: 100%; }
 table.marks .area-open { position: absolute; top: 3px; right: 3px; border: 0; background: none; padding: 0 2px; min-height: 0; font-size: 12px; line-height: 1; color: var(--muted); cursor: pointer; }
 table.marks .area-open:hover, table.marks .area-open:focus-visible { color: var(--ink); }
 .big-editor { width: 100%; height: 60vh; resize: vertical; font-size: 14.5px; }
-table.marks textarea.fb { min-width: 160px; }
-table.marks textarea.pn { min-width: 160px; }
 table.marks textarea.qfb { width: 100%; min-width: 0; font-size: 13px; resize: vertical; }
 table.marks tr.qfb-row td { border-top: 0; font-weight: 400; }
 
