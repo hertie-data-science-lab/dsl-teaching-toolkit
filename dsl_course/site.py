@@ -1147,7 +1147,7 @@ def _assignment_entry(
 
     The page's rule sentences are the same helpers the student console's assignment
     reads (`student_status.render_assignments`): `course.late_rule`, `CUTOFF_SENTENCE`,
-    `course.shape_note`, `grading_spec.total_points`, `team_formation.team_cap`, `teams.teams_for`.
+    `course.shape_note`, `grades.total_points`, `grades.team_cap`, `teams.teams_for`.
 
     `when` is the due date (a real one from schedule.yml, or a synthesised fallback);
     `handout` the scheduled provisioning moment when there is one. A handout dates the
