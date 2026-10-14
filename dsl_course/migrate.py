@@ -1796,23 +1796,11 @@ def _stated(block: dict, where: str) -> tuple[dict, list[str]]:
     setting, and a line for each value a reader refuses: the fold never drops one
     silently."""
     dropped: list = []
-    values = settings.read_defaults(
-        block, where, dropped, (*settings.DEFAULT_KEYS, *settings.COURSE_ASKED_KEYS)
-    )
+    values = settings.read_defaults(block, where, dropped)
     return (
         {k: v for k, v in values.items() if v is not None},
         [getattr(d, "what", str(d)) for d in dropped],
     )
-
-
-def _defaults_text(inherited: list, stated: dict) -> str:
-    """A `defaults:` skeleton with `stated` live; a stated `submit_via` (not in the fixed
-    key set, kept readable at the course level) after it."""
-    text = settings.defaults_skeleton(inherited, stated)
-    for key in settings.COURSE_ASKED_KEYS:
-        if key in stated:
-            text += f"  {key}: {_scalar_text(stated[key])}\n"
-    return text
 
 
 def old_opencourse_text(oc: OpenCourse) -> str:
@@ -1859,7 +1847,16 @@ def course_layer(
         f"assignment wizard asks)"
         for key in gone
     ]
-    stated, refused = _stated(defaults, f"{COURSE_CONFIG} {ASSIGNMENT_DEFAULTS_KEY}")
+    homeless = [k for k in defaults if k not in settings.DEFAULT_FILE_KEYS]
+    stops += [
+        f"{COURSE_CONFIG}: `{ASSIGNMENT_DEFAULTS_KEY}.{key}:` has no place in "
+        f"{NEW_COURSE_FILE} `{DEFAULTS_BLOCK}:` - move or delete it by hand, then run again"
+        for key in homeless
+    ]
+    stated, refused = _stated(
+        {k: v for k, v in defaults.items() if k not in homeless},
+        f"{COURSE_CONFIG} {ASSIGNMENT_DEFAULTS_KEY}",
+    )
     stops += [f"{COURSE_CONFIG}: {line} - fix it first" for line in refused]
     try:
         oc = opencourse.parse(_yaml(oc_text), OPENCOURSE_FILE) if oc_text else None
@@ -1876,7 +1873,9 @@ def course_layer(
     out = "\n".join(lines) + "\n\n"
     if admins:
         out += f"{PEOPLE_BLOCK}:\n  course_admins:\n" + _emit(admins, 4) + "\n\n"
-    out += _defaults_text([("institution", settings.institution_defaults())], stated)
+    out += settings.defaults_skeleton(
+        [("institution", settings.institution_defaults())], stated
+    )
     out += "\n" + opencourse_text(oc or OpenCourse(), str(meta.get("contact") or ""))
     for key in COURSE_KEPT_KEYS:
         if meta.get(key):

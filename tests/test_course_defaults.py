@@ -28,7 +28,7 @@ SENTINEL = course.COURSE_DEFAULT_CHOICE
 # ------------------------------------------------------------- course.yml defaults
 
 
-def test_the_course_defaults_block_reads_its_keys_and_the_submit_box():
+def test_the_course_defaults_block_reads_its_keys_and_never_the_submit_box():
     block = {
         "submit_via": "external",
         "team_formation": "assigned",
@@ -36,7 +36,6 @@ def test_the_course_defaults_block_reads_its_keys_and_the_submit_box():
         "materials_repo": "handouts",
     }
     assert settings.parse_course_defaults(block) == {
-        "submit_via": "external",
         "team_formation": "assigned",
         "visibility": "public",
         "materials_repo": "handouts",
@@ -59,10 +58,9 @@ def test_a_course_default_outside_the_vocabulary_is_refused_out_loud(capsys):
     assert "visibility" in capsys.readouterr().err
 
 
-def test_the_legacy_submit_via_word_reads_as_its_new_name():
-    assert settings.parse_course_defaults({"submit_via": "github"}) == {
-        "submit_via": "assignment_repo"
-    }
+def test_submit_via_is_not_a_course_default():
+    # Decision 0039's fixed key set: the New assignment wizard asks for it.
+    assert settings.parse_course_defaults({"submit_via": "external"}) == {}
 
 
 def test_a_box_left_at_the_course_default_takes_the_courses_value():
@@ -76,11 +74,11 @@ def test_a_box_left_at_the_course_default_takes_the_courses_value():
         answers, {"formats": "rmd", "submit_via": "external", "visibility": "private"}
     )
     # A box somebody chose is kept; one they left falls to the course, then the toolkit
-    # (formats to the toolkit at once: it left the cascade).
+    # (formats and submit_via to the toolkit at once: they left the cascade).
     assert got == {
         "formats": "ipynb",
-        "team_formation": "self_select",
-        "submit_via": "external",
+        "team_formation": "none",
+        "submit_via": "assignment_repo",
         "visibility": "public",
     }
 
@@ -91,7 +89,7 @@ def test_with_no_course_defaults_the_toolkit_answers_as_the_form_used_to():
     )
     assert scaffold.resolve_answers(answers, {}) == {
         "formats": "ipynb",
-        "team_formation": "self_select",
+        "team_formation": "none",
         "submit_via": "assignment_repo",
         "visibility": "private",
     }
@@ -133,8 +131,9 @@ def test_the_button_untouched_scaffolds_with_the_courses_defaults(monkeypatch):
         },
     )
     assert seen["formats"] == ["ipynb"]
-    assert seen["submit_via"] == "shared_dropbox_repo"
-    # No run box at all: how a semester runs it is that semester's assignments.yml.
+    # `submit_via` left the course's defaults (decision 0039): the toolkit answers.
+    assert seen["submit_via"] == "assignment_repo"
+    # No run box at all: how a semester runs it is that semester's schedule.yml entry.
     assert "team_formation" not in seen and "visibility" not in seen
 
 

@@ -72,14 +72,6 @@
         "max_team_size": {
           "type": "integer"
         },
-        "submit_via": {
-          "enum": [
-            "assignment_repo",
-            "shared_dropbox_repo",
-            "external"
-          ],
-          "type": "string"
-        },
         "team_formation": {
           "enum": [
             "self_select",
