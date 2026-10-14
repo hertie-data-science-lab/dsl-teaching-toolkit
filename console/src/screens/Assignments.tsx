@@ -16,7 +16,7 @@ import { replaceHash, tabHref, type AssignmentTab } from '../router';
 import { ProblemCards } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { asgSummary } from './Cohort';
-import { MarksTab, TeamsTab, lateUntil } from './Marking';
+import { MarksTab, TeamsTab, lateReturn } from './Marking';
 import { AssignmentRun, SemesterDefaults, sheetName } from './RunSettings';
 import { WithStatus, cohortName, cohortScope, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
@@ -163,7 +163,7 @@ function Overview(p: TabProps) {
   // A group assignment is handed out when its teams start forming: each team's repo follows.
   const handedOut = cur >= 1;
   const late = a.state === 'late_window';
-  const lateTo = lateUntil(a, now, tz, year);
+  const lateTo = lateReturn(a, now, tz, year);
   // Teams form until the late cutoff.
   const cutoffPassed = a.state === 'marking' || a.state === 'returned';
   const marked = `${a.marks.filled} of ${a.marks.total} marked`;

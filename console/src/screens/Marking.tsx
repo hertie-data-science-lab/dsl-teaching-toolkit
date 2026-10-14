@@ -1,26 +1,31 @@
 // The assignment hub's Marks tab (S12, the grading sheet as a grid) and Teams tab (S9,
 // teams.csv for a team assignment).
 
-import { useMemo, useState } from 'preact/hooks';
+import type { ComponentChildren } from 'preact';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import { readTable, writeTable } from '../edit/csv';
-import { useSave } from '../edit/save';
-import { YamlText, type Path } from '../edit/yamlText';
+import { CONFLICT, saveText, useSave, type SaveState } from '../edit/save';
+import { YamlText, blank, isObj, type Path } from '../edit/yamlText';
 import { Invalid } from '../forms/Form';
 import { assignmentTitle, fmtDay, fmtWhen, plural, str } from '../model/format';
-import { NOTES_KEY, cellValue, effectivePenalty, finalGrade, num, overrideText, overrideValue, penaltyText, questionFile, questionPoints, readSheet, round, scoreTotal, type Penalty, type Unit } from '../model/marks';
+import {
+  HOLD_WORDS, NOTES_KEY, cellValue, effectivePenalty, finalGrade, holdReasons, lateRule, num, overrideText, overrideValue, penaltyFigure, questionFile,
+  questionPoints, readSheet, round, rowsChanged, scoreTotal, spread, studentMarks, type HoldReason, type HoldUnit, type Penalty, type Person, type Unit,
+} from '../model/marks';
 import { SOURCE_WORD, resolve, valueWord } from '../model/cascade';
 import { assignmentSettings, sheetName } from './RunSettings';
 import { penaltyRate } from '../model/policy';
+import { marksDraft, saveMarksDraft, type MarksDraft } from '../model/prefs';
 import { parseRoster, sameHandle } from '../model/people';
 import type { Assignment } from '../model/types';
-import { returnMarks, teamsWindow, type AsgRef } from '../ops/defs';
+import { returnMarks, teamsWindow, type AsgRef, type LateReturn } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
 import { assignmentHref, tabHref } from '../router';
 import { CheckLine, Loading } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveBar } from '../ui/edit';
-import { Check, Lock } from '../ui/icons';
+import { Check } from '../ui/icons';
 import type { TabProps } from './Assignments';
 import { cohortScope, todayOf, tzOf, useGradingConfig, yearOf } from './common';
 import { CONFIG_REPO } from '../model/names';
@@ -29,6 +34,20 @@ import { CONFIG_REPO } from '../model/names';
 export function lateUntil(a: Assignment, now: number, tz: string, year: number): string | null {
   const at = a.grading_cutoff_datetime;
   return at && Date.parse(at) > now ? fmtWhen(at, tz, year) : null;
+}
+
+/** The late penalty the marks grid applies: the assignment's effective `late_penalty_per_day` as status states it (`status_json.run_settings`). */
+function penaltyOf(a: Assignment): number | null {
+  return penaltyRate(a.settings?.late_penalty_per_day?.value);
+}
+
+/** The assignment's late rule in the one wording the lede, the Penalty `?` and Return marks share. */
+export const lateRuleOf = (a: Assignment) => lateRule(penaltyOf(a), a.settings?.late_window_days?.value);
+
+/** What Return marks says while late work can still arrive: the deadline, the late cutoff and the late rule; null once the cutoff has passed. */
+export function lateReturn(a: Assignment, now: number, tz: string, year: number): LateReturn | null {
+  const until = lateUntil(a, now, tz, year);
+  return until ? { due: fmtWhen(a.due, tz, year), until, rule: lateRuleOf(a) } : null;
 }
 
 function asgRef(a: Assignment, group: boolean): AsgRef {
@@ -45,49 +64,146 @@ function outOf(m: unknown): string {
   return pts == null || pts === '' ? '' : ` (out of ${String(pts)})`;
 }
 
-/** The late penalty the marks grid applies: the assignment's effective `late_penalty_per_day` as status states it (`status_json.run_settings`). */
-function penaltyOf(a: Assignment): number | null {
-  return penaltyRate(a.settings?.late_penalty_per_day?.value);
+type Filter = 'all' | 'unmarked' | 'late' | 'held';
+const FILTER_WORD: Record<Filter, string> = { all: 'All', unmarked: 'Unmarked', late: 'Late', held: 'Held' };
+
+/** The issue a Return marks preview writes in semester-config (grades.PREVIEW_TITLE). */
+export const PREVIEW_TITLE = 'Distribute grades preview';
+
+/** A column header's `?`: small, so the header row does not grow. */
+const ColHint = ({ col, children }: { col: string; children: ComponentChildren }) => <Hint small label={`About ${col}`}>{children}</Hint>;
+
+/** A unit as the hold rules read it. */
+const holdUnit = (u: Unit, score: unknown, latePenalty: unknown, adj: (pr: Person) => unknown): HoldUnit => ({
+  score, daysLate: u.info?.days_late, latePenalty, people: u.people.map((pr) => ({ handle: pr.handle, adjustment: adj(pr) })),
+});
+
+/** Whether a score cell holds no mark at all (grades.is_blank: a map of blanks too). */
+const noMark = (score: unknown) => (isObj(score) ? Object.values(score).every(blank) : blank(score));
+
+/**
+ * Who a preview would email, from the preview issue's body (grades._preview_body): each handle with
+ * why, and this assignment's mark change where it has one ("ana-lopez (mark 36 -> 40)").
+ */
+export function previewEmails(body: string, slug: string): string[] | null {
+  const section = (title: string) => {
+    const at = body.indexOf(`### ${title}`);
+    if (at < 0) return [];
+    const rest = body.slice(at).split('\n').slice(1);
+    const end = rest.findIndex((l) => l.startsWith('### '));
+    return (end < 0 ? rest : rest.slice(0, end)).filter((l) => l.startsWith('- '));
+  };
+  const marks: Record<string, string> = {};
+  for (const l of section('Grades that would change')) {
+    const m = /^- \*\*(.+?)\*\* · `([^`]+)`.* · (\S+) \((?:was (.+)|new)\)$/.exec(l);
+    if (m && m[1] === slug) marks[m[2]] = m[4] !== undefined ? `mark ${m[4]} -> ${m[3]}` : `new mark ${m[3]}`;
+  }
+  if (!body.includes('### Students who would be emailed')) return null;
+  return section('Students who would be emailed').flatMap((l) => {
+    const m = /^- `([^`]+)`.* - (their first grades email|a grade changed|feedback changed)\./.exec(l);
+    if (!m) return [];
+    const why = marks[m[1]] ?? (m[2] === 'feedback changed' ? 'feedback changed' : m[2] === 'a grade changed' ? 'mark changed' : 'first marks email');
+    return [`${m[1]} (${why})`];
+  });
+}
+
+/** Under a Return marks preview: who would be emailed, read from the private preview issue. */
+function PreviewEmails({ org, slug }: { org: string; slug: string }) {
+  const env = useEnv();
+  const [said, setSaid] = useState<string | null>('Reading who would be emailed…');
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const issue = (await env!.client.listIssues(org, CONFIG_REPO, 'state=open')).find((i) => i.title === PREVIEW_TITLE);
+        const who = issue?.body ? previewEmails(issue.body, slug) : null;
+        if (live) setSaid(who === null ? null : `Email to: ${who.length ? who.join(', ') : 'nobody'}.`);
+      } catch {
+        if (live) setSaid('Could not read who would be emailed; the preview issue in semester-config lists them.');
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [org, slug]);
+  return said ? <p class="footnote preview-emails">{said}</p> : null;
 }
 
 export function MarksTab(p: TabProps) {
   const { a, status, now } = p;
   const tz = tzOf(status), year = yearOf(now, tz);
   const env = useEnv();
+  const name = sheetName(p, a.slug);
+  const path = `grading_sheets/${name}.yml`;
+  const org = p.cohort.org;
   const [edits, setEdits] = useState<Record<string, unknown>>({});
-  // Folds, by unit: `m:<unit>` hides a team's members, `q:<unit>` shows its feedback per question.
+  // A draft kept from an earlier visit is offered, never replayed silently.
+  const [pending, setPending] = useState<MarksDraft | null>(() => marksDraft(org, path));
+  // Folds, by unit: `m:<unit>` shows or hides a team's members, `q:<unit>` its feedback per question.
   const [folds, setFolds] = useState<Record<string, boolean>>({});
   // The late-penalty override box as typed, by unit: the sheet gets `15%`, the box keeps `15.`.
   const [typed, setTyped] = useState<Record<string, string>>({});
-  const [save, runSave, setSave] = useSave(env);
-  const name = sheetName(p, a.slug);
-  const path = `grading_sheets/${name}.yml`;
-  const file = p.files.file(p.cohort.org, CONFIG_REPO, path);
+  const [filter, setFilter] = useState<Filter>('all');
+  const [subFolded, setSubFolded] = useState(false);
+  // An individual assignment's Adjustment column: null opens it where the saved sheet has any adjustment.
+  const [adjChoice, setAdjChoice] = useState<boolean | null>(null);
+  const [full, setFull] = useState(false);
+  const [viewing, setViewing] = useState('');
+  const table = useRef<HTMLTableElement>(null);
+  const [save, , setSave] = useSave(env);
+  const file = p.files.file(org, CONFIG_REPO, path);
+  const sha = file.kind === 'ready' ? file.sha : null;
+  // Unsaved marks survive a reload: kept in this browser per sheet, with the sha they were made on, until saved.
+  useEffect(() => {
+    if (!pending) saveMarksDraft(org, path, Object.keys(edits).length ? { sha, at: Date.now(), edits } : null);
+  }, [edits, pending, org, path]);
+  useEffect(() => {
+    if (!full) return;
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setFull(false);
+    document.addEventListener('keydown', esc);
+    return () => document.removeEventListener('keydown', esc);
+  }, [full]);
   const text = file.kind === 'ready' ? file.text : null;
   const parsed = useMemo(() => {
     if (text === null) return null;
     const y = new YamlText(text);
     return y.errors.length ? { error: y.errors[0] } : { sheet: readSheet(text, y.toJS()) };
   }, [text]);
+  const roster = p.files.file(org, CONFIG_REPO, 'students.csv');
+  const rosterText = roster.kind === 'ready' ? roster.text : null;
+  const students = useMemo(() => (rosterText === null ? [] : parseRoster(rosterText).rows), [rosterText]);
+  /** A person's real name from students.csv, or '' when it has none. */
+  const realName = (h: string) => students.find((s) => sameHandle(s.handle, h))?.name ?? '';
   const cfg = useGradingConfig(p, a.template);
   const questions = cfg.questions && typeof cfg.questions === 'object' ? (cfg.questions as Record<string, unknown>) : null;
   const qs = questions ? Object.entries(questions) : [];
   const rate = penaltyOf(a);
+  const rule = lateRuleOf(a);
   const max = qs.reduce((n, [, m]) => n + (Number(questionPoints(m)) || 0), 0);
   const group = a.teams !== null && a.teams !== undefined;
   const scope = cohortScope(p);
-  const head = (
-    <div class="page-head">
-      <div><h2 class="h1">{assignmentTitle(a)} <Hint doc="10-grade-and-return-assignments.md">You enter {qs.length ? 'points per question' : 'one score'}, feedback students see, an adjustment and private notes that are never shared. {rate !== null ? 'A late unit’s penalty can be waived (untick it) or overridden with the whole penalty as a percentage. ' : ''}{group ? 'A team’s marks and feedback reach every member once you return marks.' : 'Nothing reaches a student until you return marks.'}</Hint></h2><p class="lede">{a.marks.filled} of {a.marks.total} marked. {rate !== null ? `Totals and late penalties (${round(rate * 100)}% of the total per late day) are worked out for you.` : 'Totals are worked out for you; no late penalty applies.'}</p></div>
-      <div class="actions"><OpButtons def={returnMarks(scope, asgRef(a, group), a.marks.filled, name, lateUntil(a, now, tz, year))} /></div>
-    </div>
+  const lede = (
+    <p class="lede">{a.marks.filled} of {a.marks.total} marked. {rule ? `Totals and late penalties (${rule}) are worked out for you.` : 'Totals are worked out for you; no late penalty applies.'}</p>
   );
-  const top = <>{head}{p.tabs}</>;
-  if (file.kind === 'loading') return <>{top}<Loading what="Reading the mark sheet" /></>;
+  const title = (
+    <h2 class="h1">{assignmentTitle(a)} <Hint doc="10-grade-and-return-assignments.md">You enter {qs.length ? 'points per question' : 'one score'}, feedback students see, an adjustment and private notes that are never shared. {rate !== null ? 'A late unit’s penalty can be waived (switch it off) or overridden with the whole penalty as a percentage. ' : ''}{group ? 'Each member of a team receives the team’s final grade and feedback; a member’s own adjustment moves only their total.' : 'Nothing reaches a student until you return marks.'}</Hint></h2>
+  );
+  const late = lateReturn(a, now, tz, year);
+  // Before the sheet is read, Return marks sits in the page head; with a sheet, in the grid's toolbar.
+  const headOnly = (
+    <>
+      <div class="page-head">
+        <div>{title}{lede}</div>
+        <div class="actions"><OpButtons def={returnMarks(scope, asgRef(a, group), a.marks.filled, name, late)} /></div>
+      </div>
+      {p.tabs}
+    </>
+  );
+  if (file.kind === 'loading') return <>{headOnly}<Loading what="Reading the mark sheet" /></>;
   if (file.kind !== 'ready')
-    return <>{top}<section class="panel section stub"><h2>No mark sheet yet</h2><p>{group && !a.teams ? 'No teams yet, so no mark sheet: it appears with the first team.' : 'The mark sheet appears at hand out, with a row for every student or team.'}</p></section></>;
+    return <>{headOnly}<section class="panel section stub"><h2>No mark sheet yet</h2><p>{group && !a.teams ? 'No teams yet, so no mark sheet: it appears with the first team.' : 'The mark sheet appears at hand out, with a row for every student or team.'}</p></section></>;
   if (!parsed?.sheet)
-    return <>{top}<CheckLine cls="bad">The mark sheet does not parse ({parsed?.error}). Fix it with Edit the file directly.</CheckLine></>;
+    return <>{headOnly}<CheckLine cls="bad">The mark sheet does not parse ({parsed?.error}). Fix it with Edit the file directly.</CheckLine></>;
   const { sheet } = parsed;
   const v = (pth: Path, orig: unknown) => (key(pth) in edits ? edits[key(pth)] : orig);
   const set = (pth: Path, raw: string, typed = false) => {
@@ -102,19 +218,11 @@ export function MarksTab(p: TabProps) {
     }
     return v(u.scorePath, u.score && typeof u.score === 'object' ? null : u.score);
   };
-  const input = (pth: Path, orig: unknown, cls: string, label: string, typed = true, area = false) =>
-    area ? (
-      <textarea class={cls} rows={1} aria-label={label} onInput={(e) => set(pth, (e.target as HTMLTextAreaElement).value, false)}>{str(v(pth, orig))}</textarea>
-    ) : (
-      <input class={cls} type="text" inputMode={typed ? 'decimal' : undefined} value={str(v(pth, orig))} aria-label={label} onInput={(e) => set(pth, (e.target as HTMLInputElement).value, typed)} />
-    );
-  const info = (u: Unit) => [
-    <td class="sys">{str(u.info?.submitted).replace('T', ' ') || (u.info ? 'Nothing' : '—')}</td>,
-    <td class="sys num">{str(u.info?.days_late)}</td>,
-    <td class="sys">{str(u.info?.autograde)}</td>,
-    <td class="sys">{str(u.info?.completion)}</td>,
-  ];
-  // A late unit's penalty (`late_penalty`): ticked writes `apply`, unticked `waive`; an override
+  // The whole score map as the engine reads it: questions the sheet has but `questions` lacks included.
+  const fullScore = (u: Unit) => (qs.length && isObj(u.score) ? { ...u.score, ...(scoreOf(u) as Record<string, unknown>) } : scoreOf(u));
+  const adjOf = (pr: Person) => v([...pr.base, 'adjustment_individual'], pr.adjustment);
+  const fbOf = (pr: Person) => v([...pr.base, 'feedback_individual'], pr.feedback);
+  // A late unit's penalty (`late_penalty`): switched on writes `apply`, off `waive`; an override
   // is the whole penalty and implies applied, and clearing it writes `apply` back - or, on a unit
   // whose sheet has no `late_penalty` key, drops the edit, so no key is written and nothing reads
   // as changed.
@@ -126,129 +234,335 @@ export function MarksTab(p: TabProps) {
   };
   // What the unit loses for lateness, worked out once for its late cell and its final grades.
   const lateFor = (u: Unit) => effectivePenalty(rate, u.info?.days_late, lateOf(u));
+  // The engine's hold rules over the marks on screen: each held handle and why.
+  const heldNow = holdReasons(sheet.units.map((u) => holdUnit(u, fullScore(u), lateOf(u), adjOf)), questions, rate);
+  const heldOf = (u: Unit): HoldReason | null => u.people.map((pr) => heldNow[pr.handle]).find(Boolean) ?? null;
+  const unmarked = (u: Unit) => noMark(scoreOf(u));
+  const isLate = (u: Unit) => (num(u.info?.days_late) ?? 0) > 0;
+  const counts: Record<Filter, number> = {
+    all: sheet.units.length,
+    unmarked: sheet.units.filter(unmarked).length,
+    late: sheet.units.filter(isLate).length,
+    held: sheet.units.filter((u) => heldOf(u) !== null).length,
+  };
+  const shown = sheet.units.filter((u) => filter === 'all' || (filter === 'unmarked' ? unmarked(u) : filter === 'late' ? isLate(u) : heldOf(u) !== null));
+  // Handed in outside GitHub: no `info:` anywhere, so nothing to show from the submission.
+  const external = sheet.units.length > 0 && sheet.units.every((u) => u.info === null);
+  // Tests and Completion: a column only when some unit's submission has the fact (the template runs tests / the completion check).
+  const hasInfo = (k: string) => sheet.units.some((u) => u.info !== null && k in u.info);
+  const showTests = hasInfo('autograde'), showCompletion = hasInfo('completion');
+  const subCols = external ? 0 : subFolded ? 1 : 2 + (showTests ? 1 : 0) + (showCompletion ? 1 : 0);
+  // A team's member rows: its ▸/▾ (or Open/Close all teams) decides; until then open where a member carries an adjustment or their own feedback.
+  const membersOpen = (u: Unit) => folds[`m:${u.key}`] ?? u.people.some((pr) => !blank(pr.adjustment) || !blank(pr.feedback));
+  // The Adjustment column: while any team is open; on an individual sheet behind the Adjustments chip, open where any is saved.
+  const adjOpen = sheet.group ? sheet.units.some(membersOpen) : (adjChoice ?? sheet.units.some((u) => !blank(u.people[0]?.adjustment)));
+  const setAllTeams = (open: boolean) => setFolds({ ...folds, ...Object.fromEntries(sheet.units.map((u) => [`m:${u.key}`, open])) });
+  /** A person's cell: real name, handle under it (the handle alone when the roster has no name). */
+  const who = (h: string, strong: boolean) => {
+    const n = realName(h);
+    const top = n || h;
+    return <>{strong ? <b>{top}</b> : <span>{top}</span>}{n ? <><br /><span class="slug footnote">{h}</span></> : null}</>;
+  };
+  const input = (pth: Path, orig: unknown, cls: string, label: string, col: string, typed = true, area = false) =>
+    area ? (
+      <textarea class={cls} rows={1} aria-label={label} data-col={col} onInput={(e) => set(pth, (e.target as HTMLTextAreaElement).value, false)}>{str(v(pth, orig))}</textarea>
+    ) : (
+      <input class={cls} type="text" inputMode={typed ? 'decimal' : undefined} value={str(v(pth, orig))} aria-label={label} data-col={col} onInput={(e) => set(pth, (e.target as HTMLInputElement).value, typed)} />
+    );
+  const fact = (u: Unit, k: string) => (u.info !== null && !(k in u.info) ? '—' : str(u.info?.[k]));
+  const info = (u: Unit) => {
+    if (external) return [];
+    if (subFolded) {
+      const parts: string[] = [];
+      if (u.info) {
+        const days = num(u.info.days_late);
+        if (!u.info.submitted) parts.push('Nothing');
+        else if (days !== null) parts.push(days > 0 ? `${plural(days, 'day')} late` : 'on time');
+        if (!blank(u.info.autograde)) parts.push(`${str(u.info.autograde)} tests`);
+        if (!blank(u.info.completion)) parts.push(`completion ${str(u.info.completion)}`);
+      }
+      return [<td class="sys">{parts.length ? <span class="chip">{parts.join(' · ')}</span> : null}</td>];
+    }
+    return [
+      <td class="sys">{str(u.info?.submitted).replace('T', ' ') || (u.info ? 'Nothing' : '—')}</td>,
+      <td class="sys num">{str(u.info?.days_late)}</td>,
+      ...(showTests ? [<td class={`sys${blank(u.info?.autograde) ? '' : ' auto'}`}>{fact(u, 'autograde')}</td>] : []),
+      ...(showCompletion ? [<td class="sys">{fact(u, 'completion')}</td>] : []),
+    ];
+  };
+  // Layout A: the penalty, its switch, and the override box on one line.
   const lateCell = (u: Unit, pen: Penalty) => {
     const days = num(u.info?.days_late);
     // No late rule: nothing to waive or override, so no controls (the engine ignores the key).
     if (!pen.late || days === null || rate === null) return <td class="pen" />;
-    const computed = penaltyText(effectivePenalty(rate, days), rate);
-    const late = `${plural(days, 'day')} late`;
+    const waived = pen.mode === 'waive';
+    const figure = penaltyFigure(waived ? effectivePenalty(rate, days) : pen);
+    const box = typed[u.key] ?? overrideText(lateOf(u));
     return (
       <td class="pen">
-        {penaltyText(pen, rate)}
-        <label class="check late-apply">
-          <input type="checkbox" checked={pen.mode !== 'waive'} onChange={(e) => { const on = (e.target as HTMLInputElement).checked; setTyped({ ...typed, [u.key]: '' }); setLate(u, on ? 'apply' : 'waive'); }} />
-          <span>Apply late penalty ({computed ? `${computed}, ${late}` : late})</span>
-        </label>
-        <input class="ovr" type="text" inputMode="decimal" placeholder="Override %" aria-label={`Late penalty override for ${u.key}, as a percentage`} value={typed[u.key] ?? overrideText(lateOf(u))} onInput={(e) => { const raw = (e.target as HTMLInputElement).value; setTyped({ ...typed, [u.key]: raw }); setLate(u, overrideValue(raw)); }} />
+        <span class="pen-a">
+          <span class={`val${waived ? ' off' : ''}`}>{figure}</span>
+          <input class="late-switch" type="checkbox" role="switch" title="Apply the late penalty" aria-label={`Apply the late penalty for ${u.key}`} checked={!waived} onChange={(e) => { const on = (e.target as HTMLInputElement).checked; setTyped({ ...typed, [u.key]: '' }); setLate(u, on ? 'apply' : 'waive'); }} />
+          <input class={`ovr${pen.mode === 'set' ? ' set' : ''}${pen.mode === 'bad' ? ' bad' : ''}`} type="text" inputMode="decimal" placeholder="%" title="Override: the whole penalty as a percentage" aria-label={`Late penalty override for ${u.key}, as a percentage`} aria-invalid={pen.mode === 'bad' ? 'true' : undefined} disabled={waived} data-col="ovr" value={box} onInput={(e) => { const raw = (e.target as HTMLInputElement).value; setTyped({ ...typed, [u.key]: raw }); setLate(u, overrideValue(raw)); }} />
+        </span>
         {pen.mode === 'bad' ? <Invalid>Write a percentage, or clear it: held until then.</Invalid> : null}
       </td>
     );
   };
-  const toggle = (k: string, open: boolean, label: string, text: string) => (
-    <button class="fold-toggle" type="button" aria-expanded={open} aria-label={label} onClick={() => setFolds({ ...folds, [k]: !open })}>{open ? '▾' : '▸'} {text}</button>
-  );
-  const hasQf = (u: Unit) => Object.values(u.questionFeedback).some((x) => str(x).trim());
-  const qOpen = (u: Unit) => folds[`q:${u.key}`] ?? hasQf(u);
+  const qfbCount = (u: Unit) => qs.filter(([q]) => !blank(v([...u.questionFeedbackPath, q], u.questionFeedback[q] ?? null))).length;
+  const qOpen = (u: Unit) => folds[`q:${u.key}`] ?? false;
+  const heldChip = (u: Unit) => {
+    const why = heldOf(u);
+    return why ? <><br /><span class="chip bad held-chip">held</span> <span class="held-why">{HOLD_WORDS[why]}</span></> : null;
+  };
   // The unit's own row: its score per question, and (on a group sheet) the team's feedback.
   const unitRow = (u: Unit) => {
     const total = scoreTotal(scoreOf(u), questions);
     const pen = lateFor(u);
     const nosub = u.info !== null && !u.info?.submitted;
     const scoreCells = qs.length
-      ? qs.map(([q, m]) => <td>{input([...u.scorePath, q], (u.score as Record<string, unknown> | null)?.[q] ?? null, 'q', `${q}${outOf(m)} for ${u.key}`)}</td>)
-      : [<td>{input(u.scorePath, typeof u.score === 'object' ? null : u.score, 'q', `Score for ${u.key}`)}</td>];
-    const membersOpen = !folds[`m:${u.key}`];
-    const qToggle = qs.length ? <><br />{toggle(`q:${u.key}`, qOpen(u), `${qOpen(u) ? 'Hide' : 'Show'} feedback per question for ${u.key}`, 'Feedback per question')}</> : null;
+      ? [...qs.map(([q, m]) => <td>{input([...u.scorePath, q], (u.score as Record<string, unknown> | null)?.[q] ?? null, 'q', `${q}${outOf(m)} for ${u.key}`, `q:${q}`)}</td>), <td class="calc">{round(total)}</td>]
+      : [<td>{input(u.scorePath, typeof u.score === 'object' ? null : u.score, 'q', `Score for ${u.key}`, 'score')}</td>];
+    const n = qfbCount(u);
+    const qChip = qs.length ? (
+      <><br /><button class="chip qfb-chip" type="button" aria-expanded={qOpen(u)} aria-label={`${qOpen(u) ? 'Hide' : 'Show'} feedback per question for ${u.key}`} onClick={() => setFolds({ ...folds, [`q:${u.key}`]: !qOpen(u) })}>✎ Feedback per question{n ? ` (${n})` : ''}</button></>
+    ) : null;
+    const mark = unmarked(u) ? { 'data-unmarked': '' } : {};
     if (!sheet.group) {
       const pr = u.people[0];
       return (
-        <tr class={`unit-row${nosub ? ' nosub' : ''}`}>
-          <td><b>{u.key}</b>{qToggle}</td>{info(u)}{scoreCells}
-          <td>{input([...pr.base, 'feedback_individual'], pr.feedback, 'fb', `Feedback for ${u.key}`, false, true)}</td>
-          <td>{input([...pr.base, 'adjustment_individual'], pr.adjustment, 'adj', `Adjustment for ${u.key}`)}</td>
-          <td>{input([...pr.base, NOTES_KEY], pr.notes, 'pn', `Private notes for ${u.key}`, false)}</td>
+        <tr class={`unit-row${nosub ? ' nosub' : ''}`} {...mark}>
+          <td>{who(u.key, true)}{heldChip(u)}{qChip}</td>{info(u)}{scoreCells}
           {lateCell(u, pen)}
-          <td class="calc">{round(finalGrade(total, pen, v([...pr.base, 'adjustment_individual'], pr.adjustment)))}</td>
+          {adjOpen ? <td class="adjcol">{input([...pr.base, 'adjustment_individual'], pr.adjustment, 'adj', `Adjustment for ${u.key}`, 'adj')}</td> : null}
+          <td class="calc">{round(finalGrade(total, pen, adjOf(pr)))}</td>
+          <td>{input([...pr.base, 'feedback_individual'], pr.feedback, 'fb', `Feedback for ${u.key}`, 'fb', false, true)}</td>
+          <td>{input([...pr.base, NOTES_KEY], pr.notes, 'pn', `Private notes for ${u.key}`, 'pn', false, true)}</td>
         </tr>
       );
     }
+    const open = membersOpen(u);
+    const names = u.people.map((pr) => realName(pr.handle) || pr.handle);
     return (
-      <tr class={`team-row${nosub ? ' nosub' : ''}`}>
+      <tr class={`team-row${nosub ? ' nosub' : ''}`} {...mark}>
         <td>
-          {toggle(`m:${u.key}`, membersOpen, `${membersOpen ? 'Hide' : 'Show'} the members of ${u.key}`, '')}
-          <b>{u.key}</b><br /><span class="footnote">{u.people.length} member{u.people.length === 1 ? '' : 's'}</span>{qToggle}
+          <button class="fold-toggle" type="button" aria-expanded={open} aria-label={`${open ? 'Hide' : 'Show'} the members of ${u.key}`} onClick={() => setFolds({ ...folds, [`m:${u.key}`]: !open })}>{open ? '▾' : '▸'}</button>
+          <b>{u.key}</b><br /><span class="footnote team-names">{names.length ? `${names.join(', ')} · ` : ''}{names.length}</span>{heldChip(u)}{qChip}
         </td>{info(u)}{scoreCells}
-        <td>{u.feedbackPath ? input(u.feedbackPath, u.feedback, 'fb', `Team feedback for ${u.key}`, false, true) : null}</td>
-        <td /><td />{lateCell(u, pen)}<td class="calc">{round(finalGrade(total, pen, 0))}</td>
+        {lateCell(u, pen)}{adjOpen ? <td class="adjcol" /> : null}<td class="calc">{round(finalGrade(total, pen, 0))}</td>
+        <td>{u.feedbackPath ? input(u.feedbackPath, u.feedback, 'fb', `Team feedback for ${u.key}`, 'fb', false, true) : null}</td>
+        <td />
       </tr>
     );
   };
-  // Feedback per question: one cell under each score (the team's on a group sheet).
+  const after = 4 + (adjOpen ? 1 : 0); // Penalty, [Adjustment,] Final, Feedback, Private notes
+  // Feedback per question: one row under the unit, a box under each question (the team's on a group sheet).
   const questionRow = (u: Unit) => (
     <tr class="qfb-row">
       <td class="footnote" style="padding-left:22px">{sheet.group ? 'Team feedback per question' : 'Feedback per question'}</td>
-      <td class="sys" colSpan={4} />
-      {qs.map(([q]) => <td>{input([...u.questionFeedbackPath, q], u.questionFeedback[q] ?? null, 'qfb', `Feedback on ${q} for ${u.key}`, false, true)}</td>)}
-      <td colSpan={5} />
+      {subCols ? <td class="sys" colSpan={subCols} /> : null}
+      {qs.map(([q]) => <td>{input([...u.questionFeedbackPath, q], u.questionFeedback[q] ?? null, 'qfb', `Feedback on ${q} for ${u.key}`, `qfb:${q}`, false, true)}</td>)}
+      <td colSpan={1 + after} />
     </tr>
   );
+  // A member's row: the team's score, the member's own adjustment, final, feedback and private notes.
   const memberRows = (u: Unit) => {
     const total = scoreTotal(scoreOf(u), questions);
     const pen = lateFor(u);
     return u.people.map((pr) => (
       <tr class="member-row">
-        <td style="padding-left:22px"><span class="slug">{pr.handle}</span></td>
-        <td class="sys" colSpan={4} /><td colSpan={Math.max(1, qs.length)} />
-        <td>{input([...pr.base, 'feedback_individual'], pr.feedback, 'fb', `Feedback for ${pr.handle}`, false, true)}</td>
-        <td>{input([...pr.base, 'adjustment_individual'], pr.adjustment, 'adj', `Adjustment for ${pr.handle}`)}</td>
-        <td>{input([...pr.base, NOTES_KEY], pr.notes, 'pn', `Private notes for ${pr.handle}`, false)}</td>
-        <td class="pen" /><td class="calc">{round(finalGrade(total, pen, v([...pr.base, 'adjustment_individual'], pr.adjustment)))}</td>
+        <td style="padding-left:22px">{who(pr.handle, false)}</td>
+        {subCols ? <td class="sys" colSpan={subCols} /> : null}{qs.length ? <td colSpan={qs.length} /> : null}
+        <td class="calc team-score">{qs.length ? round(total) : str(scoreOf(u))}</td>
+        <td class="pen" />
+        <td class="adjcol">{input([...pr.base, 'adjustment_individual'], pr.adjustment, 'adj', `Adjustment for ${pr.handle}`, 'adj')}</td>
+        <td class="calc">{round(finalGrade(total, pen, adjOf(pr)))}</td>
+        <td>{input([...pr.base, 'feedback_individual'], pr.feedback, 'fb', `Feedback for ${pr.handle}`, 'fb', false, true)}</td>
+        <td>{input([...pr.base, NOTES_KEY], pr.notes, 'pn', `Private notes for ${pr.handle}`, 'pn', false, true)}</td>
       </tr>
     ));
   };
-  const rows = sheet.units.flatMap((u) => [
+  const rows = shown.flatMap((u) => [
     unitRow(u),
     ...(qs.length && qOpen(u) ? [questionRow(u)] : []),
-    ...(sheet.group && !folds[`m:${u.key}`] ? memberRows(u) : []),
+    ...(sheet.group && membersOpen(u) ? memberRows(u) : []),
   ]);
-  const doSave = async () => {
-    const out = new YamlText(file.text);
+  const applyTo = (base: string) => {
+    const out = new YamlText(base);
     for (const [k, val] of Object.entries(edits)) out.assign(JSON.parse(k) as Path, val);
-    const ok = await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path }, out.text, file.sha, { message: `marks: ${a.slug}, ${changed} ${sheet.group ? 'team' : 'student'}${changed === 1 ? '' : 's'}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] });
+    return out.text;
+  };
+  // A save over someone else's: read the sheet again, put the edits over it cell by cell, and save once more.
+  const doSave = async () => {
+    if (!env) return setSave({ kind: 'bad', text: 'Sign in to save.' });
+    const target = { owner: org, repo: CONFIG_REPO, path };
+    const opts = { message: `marks: ${a.slug}, ${changed} ${sheet.group ? 'team' : 'student'}${changed === 1 ? '' : 's'}, from the DSL Teaching Console`, statusRepo: [org, CONFIG_REPO] as [string, string] };
+    const seen: { last: SaveState | null } = { last: null };
+    const report = (s: SaveState) => {
+      seen.last = s;
+      setSave(s);
+    };
+    let ok = await saveText(env, target, applyTo(file.text), file.sha, opts, report);
+    if (!ok && seen.last?.kind === 'bad' && seen.last.conflict) {
+      report({ kind: 'busy', text: 'Someone else saved this sheet; reading it again…' });
+      const fresh = await env.client.getContents(org, CONFIG_REPO, path).catch(() => null);
+      if (!fresh) return report({ kind: 'bad', text: CONFLICT, conflict: true });
+      const n = rowsChanged(file.text, fresh.text);
+      env.files.put(org, CONFIG_REPO, path, undefined, fresh.text, fresh.sha);
+      const told = `${n} ${n === 1 ? 'row' : 'rows'} changed by someone else; your edits kept.`;
+      ok = await saveText(env, target, applyTo(fresh.text), fresh.sha, opts, (s) => report(s.kind === 'busy' || s.kind === 'idle' ? s : { ...s, text: `${told} ${s.text}` }));
+    }
     if (ok) {
       setEdits({});
       setTyped({});
     }
   };
+  // Enter moves a number box to the same cell one row down; in a text box Ctrl/Cmd+Enter does, and Enter is a new line.
+  const onKey = (e: KeyboardEvent) => {
+    const el = e.target as HTMLElement;
+    const col = el.dataset?.col;
+    if (e.key !== 'Enter' || !col) return;
+    if (el.tagName === 'TEXTAREA' ? !(e.ctrlKey || e.metaKey) : el.tagName !== 'INPUT' || e.shiftKey) return;
+    const same = [...(table.current?.querySelectorAll<HTMLInputElement>('[data-col]') ?? [])].filter((x) => x.dataset.col === col && !x.disabled);
+    const next = same[same.indexOf(el as HTMLInputElement) + 1];
+    if (!next) return;
+    e.preventDefault();
+    next.focus();
+    next.select?.();
+  };
+  const nextUnmarked = () => {
+    const marked = [...(table.current?.querySelectorAll<HTMLTableRowElement>('tr[data-unmarked]') ?? [])];
+    const at = (document.activeElement as HTMLElement | null)?.closest('tr');
+    const to = (at && marked.find((r) => at.compareDocumentPosition(r) & Node.DOCUMENT_POSITION_FOLLOWING)) || marked[0];
+    if (!to) return;
+    to.scrollIntoView?.({ block: 'center' });
+    to.querySelector<HTMLElement>('input, textarea')?.focus();
+  };
+  // Return marks reads the sheet as saved: who gets marks, who is skipped or held, and the final grades.
+  const savedHeld = holdReasons(sheet.units.map((u) => holdUnit(u, u.score, u.latePenalty, (pr) => pr.adjustment)), questions, rate);
+  const heldUnits = sheet.units.filter((u) => u.people.some((pr) => savedHeld[pr.handle])).length;
+  const skipped = sheet.units.filter((u) => !u.people.some((pr) => savedHeld[pr.handle]) && noMark(u.score)).length;
+  const sending = sheet.units.length - heldUnits - skipped;
+  const finals = sheet.units.flatMap((u) => {
+    const pen = effectivePenalty(rate, u.info?.days_late, u.latePenalty);
+    return u.people.filter((pr) => !savedHeld[pr.handle]).map((pr) => finalGrade(scoreTotal(u.score, questions), pen, pr.adjustment)).filter((f): f is number => f !== null);
+  });
+  const noun = sheet.group ? 'team' : 'student';
+  const facts = [
+    `${sending} ${noun}${sending === 1 ? ' gets' : 's get'} marks · ${skipped} not marked yet (skipped) · ${heldUnits} held (fix first)`,
+    spread(finals, Object.keys(savedHeld).length),
+  ];
+  const people = sheet.units.flatMap((u) => u.people.map((pr) => ({ u, pr })));
+  const view = people.find((x) => x.pr.handle === viewing) ?? null;
+  const restore = () => {
+    if (!pending) return;
+    setEdits({ ...pending.edits, ...edits });
+    setPending(null);
+  };
+  const tools = (
+    <div class="marks-bar">
+      <div class="marks-filters" role="group" aria-label="Show">
+        <span class="footnote">Show:</span>
+        {(['all', 'unmarked', 'late', 'held'] as const).map((f) => <button class={`chip filter${filter === f ? ' on' : ''}`} type="button" aria-pressed={filter === f} onClick={() => setFilter(f)}>{FILTER_WORD[f]} {counts[f]}</button>)}
+        <button class="btn small quiet" type="button" disabled={!counts.unmarked} onClick={nextUnmarked}>Next unmarked ↓</button>
+        {sheet.group ? null : <button class="chip adj-chip" type="button" aria-expanded={adjOpen} onClick={() => setAdjChoice(!adjOpen)}>Adjustments {adjOpen ? '▾' : '▸'}</button>}
+      </div>
+      <div class="marks-tools">
+        {external ? null : <button class="btn small quiet" type="button" aria-expanded={!subFolded} onClick={() => setSubFolded(!subFolded)}>From the submission {subFolded ? '▸' : '▾'}</button>}
+        {sheet.group ? <><button class="btn small quiet" type="button" onClick={() => setAllTeams(true)}>Open all teams</button><button class="btn small quiet" type="button" onClick={() => setAllTeams(false)}>Close all teams</button></> : null}
+        <button class="btn small quiet" type="button" aria-pressed={full} onClick={() => setFull(!full)}>{full ? 'Leave full screen' : 'Full screen'}</button>
+        <select class="student-pick" aria-label="Student view: what a student’s marks page will show" value={viewing} onChange={(e) => setViewing((e.target as HTMLSelectElement).value)}>
+          <option value="">Student view…</option>
+          {people.map(({ pr }) => <option value={pr.handle}>{pr.handle}</option>)}
+        </select>
+        <SaveBar state={save} onSave={() => void doSave()} label="Save marks" disabled={!changed} small file={{ org, repo: CONFIG_REPO, path }} note={changed ? `${changed} ${noun}${changed > 1 ? 's' : ''} changed` : 'No unsaved changes'} />
+        <span class="marks-return"><OpButtons def={returnMarks(scope, { ...asgRef(a, group), units: a.units }, sending, name, late, facts, <PreviewEmails org={org} slug={name} />)} small /></span>
+      </div>
+    </div>
+  );
+  const subHint = <ColHint col="From the submission">Filled in by the toolkit from the submission; you never type these.</ColHint>;
+  const head = (
+    <thead>
+      <tr>
+        <th rowSpan={2}>{sheet.group ? 'Team' : 'Student'}</th>
+        {external ? null : subFolded ? <th class="sys" rowSpan={2}>From the submission {subHint}</th> : <th class="sys grp-h" colSpan={subCols}>From the submission {subHint}</th>}
+        {qs.length ? <th class="grp-h" colSpan={qs.length}>Points per question</th> : null}
+        {qs.length
+          ? <th rowSpan={2} class="num">Score{max ? ` / ${max}` : ''} <ColHint col="Score">The questions added up, before any late penalty.</ColHint></th>
+          : <th rowSpan={2}>Score{max ? ` / ${max}` : ''} <ColHint col="Score">Your mark for the whole assignment: a number, or a word such as pass that students get as written.</ColHint></th>}
+        <th rowSpan={2} class="sys">Penalty <ColHint col="Penalty">{rule ? `${rule.charAt(0).toUpperCase()}${rule.slice(1)}. Switch it off to waive it, or type the whole penalty as a percentage to override it.` : 'No late penalty applies to this assignment.'}</ColHint></th>
+        {adjOpen ? <th rowSpan={2} class="adjcol">Adjustment <ColHint col="Adjustment">Added to this person’s final grade (plus or minus points). Students see it as its own line on their marks page.</ColHint></th> : null}
+        <th rowSpan={2} class="sys">Final{max ? ` / ${max}` : ''} <ColHint col="Final">What the student gets: the score less any late penalty, plus their adjustment, never below 0.</ColHint></th>
+        <th rowSpan={2}>Feedback <ColHint col="Feedback">Students see this with their marks.{sheet.group ? ' On a team row it reaches every member; on a member’s row, only that member.' : ''} Enter starts a new line; Ctrl+Enter (⌘+Enter on a Mac) moves to the row below.</ColHint></th>
+        <th rowSpan={2}>Private notes <ColHint col="Private notes">For the teaching team only: never sent to students.</ColHint></th>
+      </tr>
+      <tr>
+        {external || subFolded ? null : (
+          <>
+            <th class="sys">Submitted <ColHint col="Submitted">When the work was handed in, as the latest collection found it. Nothing: no submission yet.</ColHint></th>
+            <th class="sys">Days late <ColHint col="Days late">Days started after the deadline, counted by the toolkit. 0 is on time.</ColHint></th>
+            {showTests ? <th class="sys">Tests <ColHint col="Tests">The template’s automatic tests passed, filled in at the late cutoff. Information for you, never a mark. — where the template has no tests.</ColHint></th> : null}
+            {showCompletion ? <th class="sys">Completion <ColHint col="Completion">Whether the submission runs to the end, from the completion check at the late cutoff. Information for you, never a mark. — where the template has no check.</ColHint></th> : null}
+          </>
+        )}
+        {qs.map(([q, m]) => (
+          <th>{q} <ColHint col={q}>Your points for {q}{outOf(m)}{questionFile(m) ? `, marked from ${questionFile(m)}` : ''}. Leave it blank until you have marked it.</ColHint><span class="grp">{questionPoints(m) != null && questionPoints(m) !== '' ? `/ ${String(questionPoints(m))}` : ''}{questionFile(m) ? <>{questionPoints(m) != null && questionPoints(m) !== '' ? ' · ' : ''}<code>{questionFile(m)}</code></> : null}</span></th>
+        ))}
+      </tr>
+    </thead>
+  );
   return (
     <>
-      {top}
+      <div class="page-head"><div>{title}{lede}</div></div>
+      {p.tabs}
       {sheet.frozen ? <p class="note" style="margin-bottom:12px"><b>Frozen at the late cutoff.</b> The submission details no longer change; your marks and feedback are still yours to edit.</p> : null}
-      <div class="table-wrap" style="max-height:620px;overflow:auto">
-        <table class="grid marks">
-          <thead>
-            <tr>
-              <th rowSpan={2}>{sheet.group ? 'Team' : 'Student'}</th>
-              <th class="sys grp-h" colSpan={4}>Submission<span class="grp">system <Lock /></span></th>
-              <th class="grp-h" colSpan={Math.max(1, qs.length)}>{qs.length ? 'Points per question' : 'Score'}</th>
-              <th rowSpan={2}>Feedback<span class="grp">students see</span></th>
-              <th rowSpan={2}>Adjust ±<span class="grp">{sheet.group ? 'individual adjustment relative to team (optional)' : 'optional'}</span></th>
-              <th rowSpan={2}>Private notes<span class="grp">never shared</span></th>
-              <th rowSpan={2} class="sys">Penalty</th>
-              <th rowSpan={2} class="sys">Total{max ? ` / ${max}` : ''}</th>
-            </tr>
-            <tr>
-              <th class="sys">Submitted</th><th class="sys">Days late</th><th class="sys">Tests</th><th class="sys">Completion</th>
-              {qs.length ? qs.map(([q, m]) => <th>{q}<span class="grp">{questionPoints(m) != null && questionPoints(m) !== '' ? `/ ${String(questionPoints(m))}` : ''}{questionFile(m) ? <>{questionPoints(m) != null && questionPoints(m) !== '' ? ' · ' : ''}<code>{questionFile(m)}</code></> : null}</span></th>) : <th>{max ? `/ ${max}` : 'score'}</th>}
-            </tr>
-          </thead>
-          <tbody>{rows}</tbody>
-        </table>
-      </div>
-      <div class="panel" style="display:grid;gap:10px;margin-top:14px">
-        <SaveBar state={save} onSave={() => void doSave()} label="Save marks" disabled={!changed} file={{ org: p.cohort.org, repo: CONFIG_REPO, path }} note={changed ? `${changed} ${sheet.group ? 'team' : 'student'}${changed > 1 ? 's' : ''} changed` : 'No unsaved changes'} />
+      {pending ? (
+        <p class="note draft-offer">
+          Unsaved draft from {fmtWhen(new Date(pending.at).toISOString(), tz, year)} ({plural(new Set(Object.keys(pending.edits).map((k) => String((JSON.parse(k) as Path)[1]))).size, 'row')}){pending.sha && pending.sha !== sha ? ', made before the sheet last changed: restoring puts your edits over the current marks cell by cell' : ''}:{' '}
+          <button class="btn small" type="button" onClick={restore}>Restore</button> <button class="btn small quiet" type="button" onClick={() => setPending(null)}>Discard</button>
+        </p>
+      ) : null}
+      <div class={`marking${full ? ' full' : ''}`}>
+        {tools}
+        {external ? <p class="footnote">Submitted outside GitHub: no dates, no late penalty.</p> : null}
+        {view ? <StudentView handle={view.pr.handle} title={assignmentTitle(a)} onClose={() => setViewing('')} submitted={view.u.info?.submitted} m={studentMarks({
+          group: sheet.group, team: view.u.key, score: fullScore(view.u), questions, max: max || null, rate, daysLate: view.u.info?.days_late, latePenalty: lateOf(view.u),
+          adjustment: adjOf(view.pr), feedback: fbOf(view.pr),
+          teamFeedback: view.u.feedbackPath ? v(view.u.feedbackPath, view.u.feedback) : null,
+          questionFeedback: { ...view.u.questionFeedback, ...Object.fromEntries(qs.map(([q]) => [q, v([...view.u.questionFeedbackPath, q], view.u.questionFeedback[q] ?? null)])) },
+        })} /> : null}
+        <div class="table-wrap marks-wrap">
+          <table class="grid marks" ref={table} onKeyDown={onKey}>
+            {head}
+            <tbody>{rows}</tbody>
+          </table>
+        </div>
       </div>
     </>
+  );
+}
+
+/** What one student's marks page will show, read-only, from the marks on screen: the whole breakdown, never the private notes. */
+function StudentView({ handle, title, m, submitted, onClose }: { handle: string; title: string; m: ReturnType<typeof studentMarks>; submitted: unknown; onClose: () => void }) {
+  const over = (x: string) => (x && m.max ? `${x} / ${m.max}` : x);
+  const qs = Object.entries(m.score).filter(([q]) => q);
+  const late = m.daysLate === null ? '' : m.daysLate > 0 ? `${plural(m.daysLate, 'day')} late` : 'on time';
+  const perQ = m.questionFeedback.length ? <ul>{m.questionFeedback.map(([q, x]) => <li><b>{q}:</b> <span class="pre">{x}</span></li>)}</ul> : null;
+  return (
+    <section class="panel section student-view" aria-label={`${handle}’s marks page`}>
+      <div class="section-head"><h2>{handle} · {title}</h2><button class="btn small quiet" type="button" onClick={onClose}>Close</button></div>
+      <p class="footnote">What {handle} will see once marks are returned, from the marks on this screen. Private notes are never shown.</p>
+      <div class="table-wrap">
+        <table class="grid">
+          <thead><tr>{qs.map(([q]) => <th>{q}</th>)}<th>Score</th><th>Submitted</th><th>Late</th>{m.adjustment ? <th>Adjustment</th> : null}<th>Final grade</th>{m.team ? <th>Team</th> : null}</tr></thead>
+          <tbody><tr>{qs.map(([, x]) => <td>{str(x)}</td>)}<td>{over(m.total || (m.score[''] !== undefined ? str(m.score['']) : '')) || '—'}</td><td>{str(submitted).replace('T', ' ') || 'not submitted'}</td><td>{late}{m.penalty ? ` · penalty ${m.penalty}` : ''}</td>{m.adjustment ? <td>{m.adjustment}</td> : null}<td><b>{over(m.final) || '—'}</b></td>{m.team ? <td>{m.team}</td> : null}</tr></tbody>
+        </table>
+      </div>
+      {m.feedback ? <p class="pre">{m.feedback}</p> : null}
+      {m.teamFeedback || (m.team && perQ) ? <blockquote class="sv-team"><b>Team feedback (shared with {m.team}):</b> <span class="pre">{m.teamFeedback}</span>{perQ}</blockquote> : null}
+      {!m.team ? perQ : null}
+      {m.team ? <p class="footnote">Until the next engine release, a team member’s live page shows the final grade only.</p> : null}
+    </section>
   );
 }
 

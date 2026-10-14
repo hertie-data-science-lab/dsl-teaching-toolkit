@@ -1,0 +1,465 @@
+// @vitest-environment happy-dom
+// The marking screen (WP-M1): the engine's hold rules, the Return marks figures and preview
+// emails, the draft kept in the browser, the conflict-safe save, and the grid's toolbar and keys.
+
+import { render } from 'preact';
+import { act } from 'preact/test-utils';
+import { afterEach, describe, expect, it } from 'vitest';
+import { parse } from 'yaml';
+import { EnvCtx, type Env } from '../src/env';
+import { GitHubClient, decodeBase64 } from '../src/github/client';
+import type { Course } from '../src/model/discovery';
+import { holdReasons, lateRule, needsHandDecision, rowsChanged, spread, studentMarks, type HoldUnit } from '../src/model/marks';
+import { marksDraft, saveMarksDraft } from '../src/model/prefs';
+import { StatusStore, type Loaded } from '../src/model/status';
+import type { Assignment, Status } from '../src/model/types';
+import { returnMarks } from '../src/ops/defs';
+import { DispatchAdapter } from '../src/ops/adapter';
+import { OpPanel } from '../src/ops/Panel';
+import { OpsSession } from '../src/ops/session';
+import { AssignmentScreen } from '../src/screens/Assignments';
+import { previewEmails } from '../src/screens/Marking';
+import type { CohortProps } from '../src/screens/types';
+import example from './fixtures/status.example.json';
+import { FakeGitHub, fileBody, json, type Seen } from './fake';
+import { StaticFiles } from './staticFiles';
+
+// ------------------------------------------------------------------ the hold rules, golden vectors from the engine's tests
+
+const Q = { Q1: 10, Q2: 10 };
+const unit = (score: unknown, people: [string, unknown][], daysLate: unknown = null, latePenalty: unknown = null): HoldUnit => ({
+  score, daysLate, latePenalty, people: people.map(([handle, adjustment]) => ({ handle, adjustment })),
+});
+
+describe('the hold rules (grades.sheet_hold_reasons, grades.needs_hand_decision)', () => {
+  it('holds a word for a score only where a penalty takes something off (test_grading_view)', () => {
+    expect(needsHandDecision(unit('pass', [], 2), null, 0.1)).toBe(true);
+    expect(needsHandDecision(unit('pass', [], 0), null, 0.1)).toBe(false); // nothing to apply
+    expect(needsHandDecision(unit(20, [], 2), null, 0.1)).toBe(false); // a number: arithmetic
+    expect(needsHandDecision(unit(null, [], 2), null, 0.1)).toBe(false); // late and not marked yet
+    expect(needsHandDecision(unit('pass', [], 2, 'waive'), null, 0.1)).toBe(false);
+    expect(needsHandDecision(unit('pass', [], 2, '5%'), null, 0.1)).toBe(true);
+    for (const lp of ['waive', '15%', 'half']) expect(needsHandDecision(unit('pass', [], 2, lp), null, null)).toBe(false);
+  });
+
+  it('holds every member of a team whose mark is not a number, as one reason (test_a_teams_bad_mark_is_one_fault)', () => {
+    expect(holdReasons([unit({ Q1: 'pass' }, [['ada-l', null], ['ben-k', null]])], Q, 0.1)).toEqual({ 'ada-l': 'score', 'ben-k': 'score' });
+  });
+
+  it('holds a late unit whose late_penalty nobody can apply, and no on-time one (test_a_late_penalty_nobody_can_apply…)', () => {
+    expect(holdReasons([unit({ Q1: 12 }, [['ada-l', null], ['ben-k', null]], 2, 'half'), unit({ Q1: 9 }, [['cy-d', null]], null, 'waive')], Q, 0.1)).toEqual({ 'ada-l': 'late_penalty', 'ben-k': 'late_penalty' });
+    const sheet = [unit({ Q1: 12 }, [['ada-l', null]], 0, 'half'), unit({ Q1: 9 }, [['ben-k', null]], null, 'half'), unit({ Q1: 9 }, [['cy-d', null]], 1, 'half')];
+    expect(holdReasons(sheet, Q, 0.1)).toEqual({ 'cy-d': 'late_penalty' });
+    expect(holdReasons(sheet, Q, null)).toEqual({});
+  });
+
+  it('holds a question the assignment never declared, a word processor’s minus, and a handle in two teams', () => {
+    expect(holdReasons([unit({ Q5: 3 }, [['ada-l', null]])], Q, 0.1)).toEqual({ 'ada-l': 'question' });
+    expect(holdReasons([unit({ Q1: 3 }, [['ada-l', '−3']])], Q, 0.1)).toEqual({ 'ada-l': 'adjustment' });
+    expect(holdReasons([unit({ Q1: 3 }, [['Alice', null]]), unit({ Q1: 4 }, [['alice', null]])], Q, 0.1)).toEqual({ alice: 'duplicate' });
+    // No late rule: a late_penalty of any kind holds nobody (test_no_late_rule_ignores_any_late_penalty).
+    for (const lp of ['waive', '15%', 'half']) expect(holdReasons([unit(20, [['ada-l', null]], 2, lp)], null, null)).toEqual({});
+  });
+
+  it('lets what a grader typed outrank the arithmetic', () => {
+    expect(holdReasons([unit('pass', [['ada-l', 'x']], 2)], null, 0.1)).toEqual({ 'ada-l': 'adjustment' });
+    expect(holdReasons([unit('pass', [['ada-l', null]], 2)], null, 0.1)).toEqual({ 'ada-l': 'penalty' });
+  });
+});
+
+describe('the figures the marking screen shows', () => {
+  it('words the late rule once', () => {
+    expect(lateRule(0.1, 10)).toBe('10% of the total per day started, up to 10 days');
+    expect(lateRule(0.05, null)).toBe('5% of the total per day started');
+    expect(lateRule(null, 10)).toBeNull();
+  });
+
+  it('puts the final grades in one line', () => {
+    expect(spread([22, 38, 47], 2)).toBe('Final: median 38, range 22–47, 2 held');
+    expect(spread([10, 20], 0)).toBe('Final: median 15, range 10–20');
+    expect(spread([], 1)).toBe('Final: nothing marked yet, 1 held');
+  });
+
+  it('gives a student the whole breakdown: marks per question, score, penalty, adjustment where set, final', () => {
+    const base = { team: 'geneva', questions: Q, max: 20, rate: 0.1, daysLate: 0, latePenalty: null, adjustment: 3, feedback: 'Well done.', teamFeedback: 'Clean.', questionFeedback: { Q1: 'Good', Q2: '' } };
+    const member = studentMarks({ ...base, group: true, score: { Q1: 8, Q2: 9 } });
+    expect(member).toMatchObject({ final: '20', score: { Q1: 8, Q2: 9 }, total: '17', adjustment: '+3', team: 'geneva', teamFeedback: 'Clean.', questionFeedback: [['Q1', 'Good']] });
+    const solo = studentMarks({ ...base, group: false, score: { Q1: 8, Q2: null }, daysLate: 2, adjustment: null });
+    expect(solo).toMatchObject({ final: '6.4', score: { Q1: 8 }, total: '8', adjustment: '', team: null, teamFeedback: '', penalty: '−20%' });
+  });
+
+  it('counts the rows someone else changed', () => {
+    const a = 'submissions:\n  ada-l:\n    score_individual: 3\n  ben-k:\n    score_individual: 4\n';
+    expect(rowsChanged(a, a)).toBe(0);
+    expect(rowsChanged(a, a.replace('4', '5'))).toBe(1);
+    expect(rowsChanged(a, `${a}  cy-d:\n    score_individual: 1\n`)).toBe(1);
+  });
+
+  it('reads who a preview would email from the preview issue', () => {
+    const issue = [
+      '### Grades that would change (2)',
+      '- **assignment-2** · `ana-lopez` (Ana Lopez) · 40 (was 36)',
+      '- **assignment-1** · `ben-okafor` · 12 (new)',
+      '',
+      '### Students who would be emailed (3)',
+      '- `ana-lopez` (Ana Lopez) - a grade changed.',
+      '  Their gradebook shows: assignment-2 40',
+      '- `ben-okafor` - feedback changed.',
+      '  Their gradebook shows: assignment-1 12',
+      '- `cy-d` - their first grades email.',
+    ].join('\n');
+    expect(previewEmails(issue, 'assignment-2')).toEqual(['ana-lopez (mark 36 -> 40)', 'ben-okafor (feedback changed)', 'cy-d (first marks email)']);
+    expect(previewEmails('### Students who would be emailed (0)\nNothing - nobody has a new mark to be told about.', 'a')).toEqual([]);
+    expect(previewEmails('no sections', 'a')).toBeNull();
+  });
+
+  it('keeps a draft with its sha until it is cleared', () => {
+    const m = new Map<string, string>();
+    const store = { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k) };
+    expect(marksDraft('Org', 'grading_sheets/a.yml', store)).toBeNull();
+    saveMarksDraft('Org', 'grading_sheets/a.yml', { sha: 's1', at: 5, edits: { '["submissions","ada-l","score_individual"]': 3 } }, store);
+    expect(marksDraft('org', 'grading_sheets/a.yml', store)).toEqual({ sha: 's1', at: 5, edits: { '["submissions","ada-l","score_individual"]': 3 } });
+    saveMarksDraft('Org', 'grading_sheets/a.yml', null, store);
+    expect(marksDraft('Org', 'grading_sheets/a.yml', store)).toBeNull();
+  });
+});
+
+// ------------------------------------------------------------------ the screen
+
+const COURSE_ORG = 'hertie-dsl-demo-course-e1234';
+const COHORT_ORG = 'hertie-dsl-demo-f2026';
+const NOW = Date.parse('2026-10-09T10:00:00+02:00'); // after the fixture's late cutoff
+const USER = { login: 'a-example', id: 1, name: 'A. Example', email: null, avatar_url: '' };
+const cohort = { org: COHORT_ORG, term: 'f2026', termLabel: 'Fall 2026' };
+const course: Course = { org: COURSE_ORG, name: 'Machine Learning', code: 'E1234', description: '', write: true, admins: [], cohorts: [cohort], meta: {} };
+const STATUS = example as unknown as Status;
+const solo: Assignment = { ...STATUS.assignments![0], state: 'marking', settings: { late_penalty_per_day: { value: '10%', source: 'institution' }, late_window_days: { value: 10, source: 'institution' } } };
+const ready: Loaded = { kind: 'ready', status: { ...STATUS, assignments: [solo] }, sha: 's', stale: [] };
+const SHEET_PATH = `${COHORT_ORG}/semester-config/grading_sheets/assignment-2.yml`;
+const SHEET = [
+  'submissions:',
+  '  ada-l:',
+  '    info:',
+  '      submitted: 2026-09-27T20:00',
+  '      days_late: 0',
+  '      autograde: 8/10',
+  '    score_individual:',
+  '      Q1: 8',
+  '      Q2: 9',
+  '    adjustment_individual:',
+  '    feedback_individual: Good.',
+  '    notes_not_shared_with_students: Check the plot.',
+  '  ben-k:',
+  '    info:',
+  '      submitted: 2026-09-29T20:00',
+  '      days_late: 2',
+  '      autograde: 5/10',
+  '    score_individual:',
+  '      Q1: pass',
+  '      Q2:',
+  '    adjustment_individual:',
+  '    feedback_individual:',
+  '    notes_not_shared_with_students:',
+  '  cy-d:',
+  '    info:',
+  '      submitted:',
+  '      days_late:',
+  '      autograde:',
+  '    score_individual:',
+  '      Q1:',
+  '      Q2:',
+  '    adjustment_individual:',
+  '    feedback_individual:',
+  '    notes_not_shared_with_students:',
+  '',
+].join('\n');
+
+function files(sheet = SHEET) {
+  return new StaticFiles({
+    [`${COHORT_ORG}/semester-config/schedule.yml`]: 'timezone: Europe/Berlin\nassignments:\n  assignment-2:\n    course_source_repo: assignment-2-f2026\n',
+    [`${COURSE_ORG}/assignment-2-f2026/grading_config.yml`]: 'type: individual\nquestions:\n  Q1: 10\n  Q2: 10\n',
+    [SHEET_PATH]: sheet,
+  });
+}
+
+function github(conflictOnce = false, fresh = SHEET) {
+  let n = 0, refused = !conflictOnce;
+  return new FakeGitHub()
+    .on('PUT', /\/contents\//, () => {
+      if (!refused) {
+        refused = true;
+        return json({ message: 'Conflict' }, 409);
+      }
+      return json({ content: { sha: `b${++n}` }, commit: { sha: `c${n}` } });
+    })
+    .on('GET', /\/contents\/grading_sheets/, fileBody('grading_sheets/assignment-2.yml', fresh, 'fresh-sha'))
+    .on('GET', /\/check-runs/, { check_runs: [] });
+}
+
+function envOf(gh: FakeGitHub, f: StaticFiles): Env {
+  const client = new GitHubClient({ token: () => 't', fetch: gh.fetch });
+  return { client, user: USER, ops: new OpsSession(new DispatchAdapter(client, () => USER.login)), statuses: new StatusStore(client), files: f, pollMs: 0 };
+}
+
+let root: HTMLElement | null = null;
+afterEach(() => {
+  localStorage.clear();
+  if (root) render(null, root);
+  root?.remove();
+  root = null;
+});
+
+async function mount(env: Env, ui: preact.VNode) {
+  root = document.createElement('div');
+  document.body.appendChild(root);
+  await act(() => render(<EnvCtx.Provider value={env}>{ui}</EnvCtx.Provider>, root!));
+}
+const q = <T extends Element>(sel: string) => root!.querySelector<T>(sel)!;
+async function type(sel: string, value: string) {
+  await act(() => {
+    const el = q<HTMLInputElement>(sel);
+    el.value = value;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+const click = (el: Element) => act(() => (el as HTMLElement).click());
+const button = (text: string) => [...root!.querySelectorAll('button')].find((b) => b.textContent?.trim() === text)!;
+async function settle(until: () => boolean) {
+  for (let i = 0; i < 200 && !until(); i++) await act(() => new Promise((r) => setTimeout(r, 0)));
+}
+const puts = (gh: FakeGitHub) => gh.seen.filter((s: Seen) => s.method === 'PUT');
+const body = (s: Seen) => decodeBase64((s.body as { content: string }).content);
+const props = (f: StaticFiles, over: Partial<CohortProps> = {}): CohortProps => ({ course, cohort, loaded: ready, files: f, now: NOW, entry: 'assignment-2', tab: 'marks', ...over });
+const marks = (f = files(), gh = github()) => mount(envOf(gh, f), <AssignmentScreen {...props(f)} />);
+const filter = (word: string) => [...root!.querySelectorAll<HTMLButtonElement>('.chip.filter')].find((b) => b.textContent?.startsWith(word))!;
+
+describe('the marking screen', () => {
+  it('counts All, Unmarked, Late and Held, and marks a held row with its reason', async () => {
+    await marks();
+    expect(['All', 'Unmarked', 'Late', 'Held'].map((w) => filter(w).textContent)).toEqual(['All 3', 'Unmarked 1', 'Late 1', 'Held 1']);
+    const ben = [...root!.querySelectorAll('tr.unit-row')].find((r) => r.textContent?.includes('ben-k'))!;
+    expect(ben.querySelector('.held-chip')?.textContent).toBe('held');
+    expect(ben.textContent).toContain('a question mark that is not a number');
+    await click(filter('Held'));
+    expect([...root!.querySelectorAll('tr.unit-row b')].map((b) => b.textContent)).toEqual(['ben-k']);
+    // Fixing the mark clears the hold as you type.
+    await click(filter('All'));
+    await type('input[aria-label="Q1 (out of 10) for ben-k"]', '7');
+    expect(filter('Held').textContent).toBe('Held 0');
+  });
+
+  it('keeps Tests with a light tint where the template runs them, and hides both columns where nothing does', async () => {
+    await marks();
+    expect(root!.querySelector('th.sys')!.parentElement!.parentElement!.textContent).toContain('Tests');
+    expect(q('td.sys.auto').textContent).toBe('8/10');
+    expect(root!.textContent).not.toContain('Completion');
+    root!.remove();
+    await marks(files(SHEET.replace(/ {6}autograde:.*\n/g, '')));
+    expect(q('thead').textContent).not.toContain('Tests');
+  });
+
+  it('hides the submission columns for work handed in outside GitHub, and says so', async () => {
+    const external = SHEET.replace(/ {4}info:\n( {6}.*\n)+/g, '');
+    await marks(files(external));
+    expect(root!.textContent).toContain('Submitted outside GitHub: no dates, no late penalty.');
+    expect(q('thead').textContent).not.toContain('From the submission');
+    expect(button('From the submission ▾')).toBeUndefined();
+  });
+
+  it('folds the submission columns to one chip per row', async () => {
+    await marks();
+    await click(button('From the submission ▾'));
+    const ben = [...root!.querySelectorAll('tr.unit-row')].find((r) => r.textContent?.includes('ben-k'))!;
+    expect(ben.querySelector('td.sys .chip')!.textContent).toBe('2 days late · 5/10 tests');
+  });
+
+  it('moves down a column with Enter in a number box, and with Ctrl+Enter in a text box', async () => {
+    await marks();
+    const box = q<HTMLInputElement>('input[aria-label="Q1 (out of 10) for ada-l"]');
+    box.focus();
+    await act(() => void box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('Q1 (out of 10) for ben-k');
+    const fb = q<HTMLTextAreaElement>('textarea[aria-label="Feedback for ada-l"]');
+    fb.focus();
+    await act(() => void fb.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+    expect(document.activeElement).toBe(fb);
+    await act(() => void fb.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true })));
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('Feedback for ben-k');
+  });
+
+  it('jumps to the next unmarked row', async () => {
+    await marks();
+    await click(button('Next unmarked ↓'));
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('Q1 (out of 10) for cy-d');
+  });
+
+  it('fills the window in full screen, and Escape leaves it', async () => {
+    await marks();
+    await click(button('Full screen'));
+    expect(q('.marking').classList.contains('full')).toBe(true);
+    await act(() => void document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
+    expect(q('.marking').classList.contains('full')).toBe(false);
+  });
+
+  it('shows a student’s marks page as it will be, never the private notes', async () => {
+    await marks();
+    await act(() => {
+      const s = q<HTMLSelectElement>('select.student-pick');
+      s.value = 'ada-l';
+      s.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const view = q('.student-view');
+    expect(view.textContent).toContain('ada-l · Assignment 2: Regression');
+    expect([...view.querySelectorAll('th')].map((t) => t.textContent)).toEqual(['Q1', 'Q2', 'Score', 'Submitted', 'Late', 'Final grade']);
+    expect(view.textContent).toContain('17 / 20');
+    expect(view.textContent).toContain('Good.');
+    expect(view.textContent).not.toContain('Check the plot.');
+  });
+
+  it('opens feedback per question as one row under the unit, closed by default', async () => {
+    await marks();
+    expect(root!.querySelector('tr.qfb-row')).toBeNull();
+    await click(q('button[aria-label="Show feedback per question for ada-l"]'));
+    expect(root!.querySelectorAll('tr.qfb-row')).toHaveLength(1);
+    expect(root!.querySelectorAll('tr.qfb-row textarea')).toHaveLength(2);
+  });
+});
+
+describe('Return marks from the marking screen', () => {
+  it('counts who gets marks, who is skipped and who is held, and gives the final grades', async () => {
+    const gh = github(), f = files(), env = envOf(gh, f);
+    await mount(env, <><AssignmentScreen {...props(f)} /><OpPanel /></>);
+    expect(button('Return marks to 1 student')).toBeDefined();
+    await click(button('Return marks to 1 student'));
+    const facts = [...root!.querySelectorAll('.op-facts p')].map((p) => p.textContent);
+    expect(facts).toEqual(['1 student gets marks · 1 not marked yet (skipped) · 1 held (fix first)', 'Final: median 17, range 17–17, 1 held']);
+  });
+
+  it('names who a preview would email, from the private preview issue', () => {
+    const def = returnMarks({ courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' }, { slug: 'a', title: 'A', template: 't', units: 1, group: false, when: 'Marking' }, 1, 'a', null, [], 'extra');
+    expect(def.dryExtra).toBe('extra');
+  });
+});
+
+describe('unsaved marks', () => {
+  it('offers a kept draft instead of replaying it, and Restore puts it over the sheet', async () => {
+    localStorage.setItem(`dsl-console-marks-draft:${COHORT_ORG}:grading_sheets/assignment-2.yml`, JSON.stringify({ sha: 'older', at: Date.parse('2026-10-08T09:00:00Z'), edits: { '["submissions","cy-d","score_individual","Q1"]': 6 } }));
+    await marks();
+    expect(q<HTMLInputElement>('input[aria-label="Q1 (out of 10) for cy-d"]').value).toBe('');
+    expect(q('.draft-offer').textContent).toContain('Unsaved draft from Thu 8 Oct 11:00 (1 row), made before the sheet last changed');
+    await click(button('Restore'));
+    expect(q<HTMLInputElement>('input[aria-label="Q1 (out of 10) for cy-d"]').value).toBe('6');
+    expect(root!.textContent).toContain('1 student changed');
+  });
+
+  it('Discard drops the draft', async () => {
+    const k = `dsl-console-marks-draft:${COHORT_ORG}:grading_sheets/assignment-2.yml`;
+    localStorage.setItem(k, JSON.stringify({ sha: 'static', at: 0, edits: { '["submissions","cy-d","score_individual","Q1"]': 6 } }));
+    await marks();
+    await click(button('Discard'));
+    expect(root!.querySelector('.draft-offer')).toBeNull();
+    expect(localStorage.getItem(k)).toBeNull();
+  });
+
+  it('keeps typed marks in the browser until they are saved', async () => {
+    const k = `dsl-console-marks-draft:${COHORT_ORG}:grading_sheets/assignment-2.yml`;
+    const gh = github();
+    await marks(files(), gh);
+    await type('input[aria-label="Q1 (out of 10) for cy-d"]', '6');
+    expect(JSON.parse(localStorage.getItem(k)!)).toMatchObject({ sha: 'static', edits: { '["submissions","cy-d","score_individual","Q1"]': 6 } });
+    await click(button('Save marks'));
+    await settle(() => puts(gh).length > 0 && localStorage.getItem(k) === null);
+    expect(localStorage.getItem(k)).toBeNull();
+  });
+
+  it('saves over someone else’s change: reads the sheet again, keeps both, and says how many rows moved', async () => {
+    const theirs = SHEET.replace('      Q1: 8\n', '      Q1: 9\n');
+    const gh = github(true, theirs);
+    await marks(files(), gh);
+    await type('input[aria-label="Q1 (out of 10) for cy-d"]', '6');
+    await click(button('Save marks'));
+    await settle(() => puts(gh).length > 1 && !root!.textContent!.includes('Checking'));
+    const second = puts(gh)[1];
+    expect((second.body as { sha: string }).sha).toBe('fresh-sha');
+    const saved = parse(body(second)).submissions;
+    expect(saved['ada-l'].score_individual.Q1).toBe(9); // theirs
+    expect(saved['cy-d'].score_individual.Q1).toBe(6); // mine
+    expect(root!.textContent).toContain('1 row changed by someone else; your edits kept.');
+  });
+});
+
+describe('teams and people on the grid', () => {
+  const ROSTER = `${COHORT_ORG}/semester-config/students.csv`;
+  const roster = 'hertie_email,name,role,github_handle\nana@x.org,Ana Lopez,enrolled,ana-l\nben@x.org,Ben Okafor,enrolled,ben-k\n';
+  const TEAMS = [
+    'teams:',
+    '  geneva:',
+    '    info:',
+    '      submitted: 2026-09-27T20:00',
+    '      days_late: 0',
+    '    feedback_group:',
+    '    members:',
+    '      ana-l:',
+    '        adjustment_individual:',
+    '        feedback_individual:',
+    '        notes_not_shared_with_students:',
+    '      ben-k:',
+    '        adjustment_individual:',
+    '        feedback_individual:',
+    '        notes_not_shared_with_students:',
+    '      cy-d:',
+    '        adjustment_individual:',
+    '        feedback_individual:',
+    '        notes_not_shared_with_students:',
+    '    score_group:',
+    '      Q1: 8',
+    '      Q2: 9',
+    '',
+  ].join('\n');
+  const team: Assignment = { ...solo, teams: 1, units: 1 };
+  const loaded: Loaded = { kind: 'ready', status: { ...STATUS, assignments: [team] }, sha: 's', stale: [] };
+  const teamFiles = (sheet = TEAMS) => new StaticFiles({
+    [`${COURSE_ORG}/assignment-2-f2026/grading_config.yml`]: 'type: group\nquestions:\n  Q1: 10\n  Q2: 10\n',
+    [SHEET_PATH]: sheet,
+    [ROSTER]: roster,
+  });
+  const mountTeams = (f = teamFiles()) => mount(envOf(github(), f), <AssignmentScreen {...props(f, { loaded })} />);
+
+  it('shows one row per team with its members’ names, and opens the members on its toggle', async () => {
+    await mountTeams();
+    expect(q('tr.team-row .team-names').textContent).toBe('Ana Lopez, Ben Okafor, cy-d · 3');
+    expect(root!.querySelector('tr.member-row')).toBeNull();
+    expect(q('thead').textContent).not.toContain('Adjustment');
+    await click(q('button[aria-label="Show the members of geneva"]'));
+    const members = [...root!.querySelectorAll('tr.member-row')];
+    expect(members.map((r) => r.querySelector('td')!.textContent)).toEqual(['Ana Lopezana-l', 'Ben Okaforben-k', 'cy-d']);
+    // The team's score on each member row, their own adjustment in the amber column.
+    expect(members[0].querySelector('td.team-score')!.textContent).toBe('17');
+    expect(q('thead th.adjcol').textContent).toContain('Adjustment');
+    expect(q('tr.team-row td.adjcol').textContent).toBe('');
+    await type('input[aria-label="Adjustment for ana-l"]', '3');
+    expect([...members[0].querySelectorAll('td.calc')].pop()!.textContent).toBe('20');
+  });
+
+  it('opens and closes every team from the toolbar, and opens a team on load where a member has an adjustment', async () => {
+    await mountTeams();
+    await click(button('Open all teams'));
+    expect(root!.querySelectorAll('tr.member-row')).toHaveLength(3);
+    await click(button('Close all teams'));
+    expect(root!.querySelectorAll('tr.member-row')).toHaveLength(0);
+    root!.remove();
+    await mountTeams(teamFiles(TEAMS.replace('      ben-k:\n        adjustment_individual:', '      ben-k:\n        adjustment_individual: -2')));
+    expect(root!.querySelectorAll('tr.member-row')).toHaveLength(3);
+  });
+
+  it('names an individual student, handle under the name, and keeps Adjustment behind its chip', async () => {
+    const f = files();
+    (f as unknown as { map: Record<string, string> }).map[ROSTER] = roster;
+    await marks(f);
+    const ada = [...root!.querySelectorAll('tr.unit-row')][1];
+    expect(ada.querySelector('td')!.textContent).toContain('Ben Okaforben-k');
+    expect(root!.querySelector('input[aria-label="Adjustment for ben-k"]')).toBeNull();
+    await click(q('button.adj-chip'));
+    expect(root!.querySelector('input[aria-label="Adjustment for ben-k"]')).not.toBeNull();
+  });
+});
