@@ -20,6 +20,10 @@ import { StudentCounts } from './Cohort';
 import { WithStatus, cohortScope } from './common';
 import type { CohortProps, ReadyProps } from './types';
 import { CONFIG_REPO, INSTRUCTORS_FILE } from '../model/names';
+import { pictureOf } from '../model/student';
+import { useLoad } from '../ui/load';
+import { studentData } from './Student';
+import { initials } from './StudentInstructors';
 
 type Row = Record<string, string>;
 const YOURS = ['hertie_email', 'name', 'role'] as const;
@@ -146,12 +150,17 @@ function Students(p: ReadyProps) {
     <>
       <div class="page-head">
         <div><h2 class="h1">Students <Hint doc="06-enrol-students-to-cohort.md">Adding a row emails that student a code, which they redeem on the semester’s join form. You edit email, name and role; the code itself is never shown. A joined student who switched GitHub account: type their new login in GitHub handle, and the next sync moves their repos, marks and team to it.</Hint></h2></div>
-        <div class="actions">
-          <button class={`btn${editing ? ' quiet' : ''}`} type="button" aria-pressed={editing} disabled={!table || !!missing.length || !!replacement} onClick={() => setEditing(!editing)}>{editing ? 'Done editing' : 'Edit roster'}</button>
-          <button class="btn quiet" type="button" aria-expanded={upload.open} onClick={() => setUpload({ ...upload, open: !upload.open })}>Replace from CSV</button>
-          {/* Preview lives in each op's panel, not beside the button. */}
-          <OpOpen def={sendCodes(scope, waiting)} cls="btn quiet" label="Send codes" />
-          <a class="btn quiet" href={syncMembershipUrl(scope)} target="_blank" rel="noopener" title="Opens Sync membership on GitHub: press Run workflow there. Saving the roster starts it anyway.">Sync now</a>
+        <div class="students-actions">
+          {/* Send codes is the page's main action; Preview lives in its panel, not beside the button. */}
+          <div class="main-action">
+            <OpOpen def={sendCodes(scope, waiting)} cls="btn big" label="Send codes" />
+            <Hint label="About Send codes">{SEND_CODES_HINT}</Hint>
+          </div>
+          <div class="actions">
+            <button class="btn quiet" type="button" aria-expanded={upload.open} onClick={() => setUpload({ ...upload, open: !upload.open })}>Replace from CSV</button>
+            <Hint label="About Replace from CSV">{REPLACE_CSV_HINT}</Hint>
+            <a class="btn quiet" href={syncMembershipUrl(scope)} target="_blank" rel="noopener" title="Opens Sync membership on GitHub: press Run workflow there. Saving the roster starts it anyway.">Sync now</a>
+          </div>
         </div>
       </div>
       <div class="stack">
@@ -188,7 +197,9 @@ function Students(p: ReadyProps) {
         {file.kind === 'error' ? <CheckLine cls="bad">Could not read students.csv: {file.message}</CheckLine> : null}
         {missing.length ? <CheckLine cls="bad">students.csv is missing the {missing.join(', ')} column{missing.length > 1 ? 's' : ''}.</CheckLine> : null}
         {table && !missing.length ? (
-          <div>
+          <div class="roster-box">
+            {/* Edit roster: a pencil over the table's corner, a tick while editing. */}
+            <button class="icon-btn roster-edit" type="button" aria-pressed={editing} aria-label={editing ? 'Done editing' : 'Edit roster'} title={editing ? 'Done editing' : 'Edit roster'} disabled={!table || !!missing.length || !!replacement} onClick={() => setEditing(!editing)}>{editing ? '✓' : '✎'}</button>
             <div class={`table-wrap roster-table${editing ? ' editing' : ''}`} style="max-height:600px;overflow:auto">
               <table class="grid" style="min-width:980px">
                 <thead>
@@ -357,7 +368,7 @@ function Instructors(p: ReadyProps) {
                       <td class="mono" style="font-size:13px">{x.email}</td>
                       <td><Access v={x.handle ? p.files.member(p.cohort.org, x.handle) : null} /></td>
                       <td class="num">{dates(x)}</td>
-                      <td>{x.photo ? <span class="chip ok">Photo</span> : <span class="chip">No photo</span>}</td>
+                      <td><PhotoThumb photo={x.photo} name={x.name || x.handle} org={p.cohort.org} /></td>
                       <td>
                         <button class="btn small quiet" type="button" onClick={() => { setEditing({ idx: i, values: formOf(x, rawOf(i)) }); setSave({ kind: 'idle' }); }}>Edit</button>
                         <button class="btn small quiet" type="button" onClick={() => setRemoved([...removed, i])}>Remove</button>
@@ -435,6 +446,28 @@ function PhotoField({ p, values, set }: { p: ReadyProps; values: Record<string, 
       {state.kind === 'busy' ? <CheckLine cls="busy">{state.text}</CheckLine> : state.kind === 'bad' ? <CheckLine cls="bad">{state.text}</CheckLine> : null}
     </div>
   );
+}
+
+/**
+ * A person's photo as a small round thumbnail: an absolute URL as is; a path in the site repo
+ * (`/_images/pp/x.jpg`, or a bare name in the photo folder) read through the API as the site would
+ * show it; the initials, muted, when there is none or it does not load.
+ */
+const SEND_CODES_HINT =
+  'Every student on the roster gets a private enrolment code by email the moment their row is saved; they paste it on the semester’s join form to get their repos. This button sends a NEW code to everyone who has not joined yet (their old code stops working) and emails it again. Preview first to see how many that is.';
+const REPLACE_CSV_HINT =
+  'Upload a CSV from the registrar to replace the roster in one go: you see a diff of added, removed and changed rows before anything is saved. Columns the toolkit fills (GitHub handle, code, when it was sent) are kept for rows that stay.';
+
+export function PhotoThumb({ photo, name, org }: { photo: string; name: string; org: string }) {
+  const env = useEnv();
+  const [failed, setFailed] = useState(false);
+  const raw = photo.trim();
+  const absolute = /^https?:\/\//.test(raw);
+  const path = !raw || absolute ? '' : raw.startsWith('/') ? raw : `/${PHOTO_DIR}/${raw}`;
+  const load = useLoad(env && path ? () => studentData(env.client).picture(org, pictureOf(path, org)) : null, [path, org]);
+  const src = absolute ? raw : load.kind === 'ready' ? load.value : '';
+  if (!src || failed) return <span class={`thumb${raw ? '' : ' none'}`} role="img" aria-label={raw ? name : `${name}: no photo`}>{initials(name)}</span>;
+  return <img class="thumb" src={src} alt={name} onError={() => setFailed(true)} />;
 }
 
 export function InstructorsScreen(p: CohortProps) {

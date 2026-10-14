@@ -551,7 +551,7 @@ describe('editing screens', () => {
     const out = html(<StudentsScreen {...props()} />);
     expect(out).toContain('anna@x.org');
     expect(out).not.toContain('value="anna@x.org"');
-    expect(out).toContain('>Edit roster<');
+    expect(out).toContain('aria-label="Edit roster"');
     expect(out).toContain('Add a student');
     expect(out).toContain('Replace from CSV');
     expect(out).toContain('>Send codes<');
