@@ -510,7 +510,7 @@ layers above its own:
 | 2 | `central` (which ref an org runs), `repos` (existence, creation, topics, descriptions, the publication denylist), `gh_teams` (an org's settings and its teams), `issues` (one self-updating issue, found by its EXACT title), `pulls` (one pull request per HEAD BRANCH, created or adopted), `invitations` (the bot accepts its own org invitations, from registered course orgs only) |
 | 3 | `gh_contents` (file reads and writes, seeded stubs), `workflows_render` |
 | 4 | `config` (one reader per hand-edited config file: `read_course`, `read_semester`), `discovery`, `roster`/`teams`/`schedule`, `workflows_place` |
-| 5 and up | `access` (team permissions and the faculty floor), `materials` (`materials.yml`'s `syllabus`; its kind aliases only for the console and `public_site` until WP-P/WP-C), `opencourse` (the public website's `open_course_site:` block), `schedule_plan` (the rows a plan declares: one per slot of each entry, readings attached to their session's first row), `cadence` (the scheduler's driver-health and late-delivery alarms, read off its own run history), `join`, `profile_readme`, `scaffold`, `site_repo` (the Jekyll site repo both websites publish into), `site`, then the CLIs |
+| 5 and up | `access` (team permissions and the faculty floor), `materials` (the semester's `student_site.syllabus`, a folder's kind in the institution's kinds; the old aliases only for the console until WP-C2 and `migrate`), `opencourse` (the public website's `open_course_site:` block), `schedule_plan` (the rows a plan declares: one per slot of each entry, readings attached to their session's first row), `cadence` (the scheduler's driver-health and late-delivery alarms, read off its own run history), `join`, `profile_readme`, `scaffold`, `site_repo` (the Jekyll site repo both websites publish into), `site`, then the CLIs |
 | grading, each above the one before | `grading_sheet` (the sheet file: shape, load and dump, merge, mark arithmetic, what holds a mark), `grading_spec` (`grading_config.yml`, its faults, the `SheetSpec` it gives), `gradebook` (the `grades-<handle>` repos, what a student is shown, the semester grades file, `distributed.csv`), `receipts` (the Submission receipts issue), `distribute` (sending marks); `team_formation` (and its lock file) sits above `grading_spec` and `gradebook`, and `grades` is only the CLI over `distribute` |
 
 `legacy` is the one module that knows old names: every parser and `migrate` reads them from
@@ -575,8 +575,8 @@ A semester is archived when its `semester-config` is (`status.loadStatus` reads 
 flag): the engine writes no status once it is, so the last file still says `live: true`. Beside the schemas it
 writes `names.json` (repo and path names, and the `_config.yml` keys a site sync rewrites or
 leaves to the site) and `policy.json` (the loaded policy, below), so
-the console holds no default of its own, and `materials.schema.json` (a materials repo's
-optional `materials.yml`: `syllabus`, `kinds` folder aliases, names or paths; `materials.parse`).
+the console holds no default of its own, and `materials.schema.json` (the old `materials.yml`'s
+shape, for the console's Folder kinds panel until WP-C2; the engine reads no `materials.yml`).
 
 ## The course org registry
 
@@ -630,7 +630,8 @@ drop it; the public website neither hosts nor links its files, since it hosts by
 One hand-edited file per level (decision 0039), each with the same fixed `defaults:` key set:
 `timezone`, `late_window_days`, `late_penalty_per_day`, `max_team_size`,
 `assignment_repo_visibility`, `archive_grace_days`, `materials_repo`, `marks_per_question`, and
-`team_formation` from the course level down (none at the institution: `settings.TEAM_FORMATION_FALLBACK`).
+`team_formation` from the course level down (none at the institution: absent everywhere is
+`none`, no team forms, `settings.TEAM_FORMATION_FALLBACK`).
 `formats` is not a default: New assignment asks. A key resolves nearest first, per key never per
 block, and `settings.resolve` returns `(value, source)`:
 
@@ -1055,6 +1056,9 @@ marks (`course.py`), the archive notice prefixes (`teardown.py`) and the digest 
 | `students.csv` `hertie_email`, `github_handle`, `github_id`, `enrol_code`, `code_sent_at`; `teams.csv` (0.11.0) | `students.csv` `email` + one `team:<number>` column per team assignment; the engine's columns in `.system/roster.csv` | semester org; split by the config layers step (`roster.split_legacy`) |
 | `semester-config/.system/dsl-course.yml` (0.11.0) | `semester-config/.system/course.yml` | semester org; moved by the config layers step |
 | toolkit `policy.yml`, `dsl_course/policy.default.yml` (0.11.0) | `institution.yml`, `dsl_course/institution.default.yml` (`contact` -> `contacts:` list) | this repo; `policy.read` refuses a checkout still carrying `policy.yml` |
+| a materials repo's `materials.yml` (0.11.0) | `syllabus:` -> each semester's `semester.yml` `student_site.syllabus`; `kinds:` -> the institution's kinds | not read; folded by the config layers step, the file left in place |
+| course `defaults:` `submit_via` (0.11.0) | none: New assignment asks | not read; the config layers step stops on it |
+| the institution's `team_formation: self_select` default (0.11.0) | none (no team forms); the config layers step writes `team_formation: self_select` into a semester's `defaults:` when neither it nor its course states one | semester org |
 
 Not renamed here, deliberately: the frozen doc filenames, the site's `_data/people.yml` the pinned theme reads, the
 `SCOPED_RUN_TITLE` run-name the cadence check reads back, the `dsl_course.welcome` module
