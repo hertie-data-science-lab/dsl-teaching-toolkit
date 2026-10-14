@@ -66,6 +66,12 @@
                 "from_path": {
                   "type": "string"
                 },
+                "public": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
                 "release_datetime": {
                   "type": [
                     "string",
@@ -330,6 +336,12 @@
                 "from_path": {
                   "type": "string"
                 },
+                "public": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
                 "release_datetime": {
                   "type": [
                     "string",
@@ -457,6 +469,12 @@
                 },
                 "from_path": {
                   "type": "string"
+                },
+                "public": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
                 },
                 "release_datetime": {
                   "type": [
@@ -586,6 +604,12 @@
                 "from_path": {
                   "type": "string"
                 },
+                "public": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
                 "release_datetime": {
                   "type": [
                     "string",
@@ -713,6 +737,12 @@
                 },
                 "from_path": {
                   "type": "string"
+                },
+                "public": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
                 },
                 "release_datetime": {
                   "type": [
@@ -842,6 +872,12 @@
                 "from_path": {
                   "type": "string"
                 },
+                "public": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
                 "release_datetime": {
                   "type": [
                     "string",
@@ -969,6 +1005,12 @@
                 },
                 "from_path": {
                   "type": "string"
+                },
+                "public": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
                 },
                 "release_datetime": {
                   "type": [

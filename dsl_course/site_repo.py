@@ -35,7 +35,8 @@ from .gh_teams import acting_login
 from .ghcli import GIT_ENV, clone, gh, git, is_missing_resource
 from .log import Summary, log, log_err, log_ok, log_step, plural
 from .readings import is_reading_overlay
-from .repos import has_never_material_component, repo_exists, repo_is_archived
+from .repos import repo_exists, repo_is_archived
+from .selection import is_clutter
 
 # The shared Jekyll theme, and the ref every generated site pins it at.
 #
@@ -983,7 +984,7 @@ def shape_links(
     a dot, while `.Rprofile`, `.env.example` and a `.devcontainer/` are real course
     material such a rule would hide. What is filtered is narrower and can be written
     honestly - the short closed list of NAMES that are never course material in any course
-    (`repos.NEVER_MATERIAL`), dropped before the counts are taken so a folder cannot be
+    (`selection.CLUTTER`), dropped before the counts are taken so a folder cannot be
     listed as "3 files" while showing two.
 
     The site applies it as well as the release, not instead: a semester site showed
@@ -996,7 +997,7 @@ def shape_links(
     (`landed_links`); `tree_base` is the folder's own GitHub tree URL and `base` its path
     in the repo ("" for the root). Order follows `blobs` (path
     sorted), files before folders, for a stable diff."""
-    blobs = [b for b in blobs if not has_never_material_component(b.name)]
+    blobs = [b for b in blobs if not any(is_clutter(p) for p in b.name.split("/") if p)]
     if allow:
         return [b for b in blobs if file_ext(b.name) in allow] + [
             Link(_BROWSE_ALL, tree_base, base)

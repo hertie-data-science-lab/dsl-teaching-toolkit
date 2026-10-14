@@ -51,7 +51,7 @@ from .course import (
     UPSTREAM_BRANCH,
     is_repo_root,
 )
-from .fs import copy_tree, union_deny
+from .fs import copy_tree
 from .gh_contents import (
     WITHHELD_ROOT_STUBS,
     is_withheld_stub,
@@ -68,33 +68,24 @@ from .log import (
     log_withheld,
     plural,
 )
-from .records import SYSTEM_DIR
-from .releaseignore import RELEASEIGNORE, deny_for, excludes
+from .releaseignore import RELEASEIGNORE, excludes
 from .repos import (
     allow_forking,
     create_repo,
     default_branch,
-    is_never_material,
     repo_is_archived,
 )
 from .schedule import DEFAULT_DEST_REPO, Deploy
 from .schedule_plan import deploy_dest, refuse_unnumbered, unnumbered_release
+from .selection import Selection
+from .selection import deny as selection_deny
 
-# Never copied, at any depth: a `.git` landing in the dest overwrites its git metadata and
-# redirects the release's own push into the SOURCE repo. That is a mechanical fact about
-# copying a repo into a repo, not a judgement about content - clutter that is never course
-# material is the separate `repos.NEVER_MATERIAL`, which `_copy_ignore` applies alongside
-# this.
-NEVER_COPIED = frozenset({".git"})
-
-# Additionally skipped when the WHOLE repo is released (`course_source_path: /`), and only
-# at the repo root: `.github` holds the Release workflows and their bot-token wiring,
-# `.system/` holds the maintainer guide, the filled syllabus example faculty copy from, and
-# the sessions block the Generate syllabus workflow builds for them to paste - the toolkit
-# describing itself, never released. Excluded as a folder, so a file added there later is
-# withheld too. Naming any of these paths explicitly still releases it: that is
-# what "give me everything" means, not a ban.
-ROOT_RELEASE_EXCLUDED = frozenset({".github", SYSTEM_DIR})
+# Skipped when the WHOLE repo is released (`course_source_path: /`), and only at the repo
+# root: `.github` holds the Release workflows and their bot-token wiring - the toolkit's
+# plumbing, never released. Naming a path inside it explicitly still releases it: that is
+# what "give me everything" means, not a ban. (`.system/`, `.git` and clutter are the
+# institution denylist's, at every depth: `selection`.)
+ROOT_RELEASE_EXCLUDED = (".github",)
 
 
 def _warn_withheld_stub(course_org: str, repo: str, path: str) -> None:
@@ -145,35 +136,22 @@ def _resolve_within(base: Path, rel: str) -> Path | None:
     return target if target.is_relative_to(base_r) else None
 
 
-def _copy_ignore(
-    whole_repo_root: Path | None, extra_root_skips: frozenset[str] = frozenset()
-):
-    """A copytree `ignore` filter: NEVER_COPIED and `repos.NEVER_MATERIAL` at every depth,
-    plus ROOT_RELEASE_EXCLUDED and `extra_root_skips` at `whole_repo_root` when a whole
-    repo is being released (None for a subpath copy).
+def _release_use(whole_repo: bool, stubs: frozenset[str] = frozenset()) -> Selection:
+    """A release's use-site selection (decision 0040 rule 3): nothing more for a subpath
+    copy; for a WHOLE-repo copy, the root `.github/` and each root stub still carrying the
+    scaffold placeholder (`stubs`, decided per release).
 
-    The two every-depth rules answer different questions and are kept apart on purpose.
-    NEVER_COPIED is about this copy working at all; NEVER_MATERIAL is about what a release
-    means - a session folder is copied wholesale, so a `.gitkeep` holding it open and the
-    `.DS_Store` a file manager left in it ship to students as course material unless
-    something drops them here.
-
-    Root-anchored deliberately, rather than `shutil.ignore_patterns`, which matches by
-    basename at every level of the walk - that would also drop a `labs/.github/`, which is
-    the faculty member's own content and nothing to do with the release plumbing.
-
-    `extra_root_skips` is decided per release rather than by contract - currently a README
-    still carrying the scaffold placeholder. Skipping the COPY rather than deleting the
-    result afterwards is what keeps a withheld file from touching the destination: a
-    delete-after-copy stages a deletion of whatever the semester repo already had there."""
-
-    def ignore(dirpath: str, names: list[str]) -> set[str]:
-        skip = {n for n in names if n in NEVER_COPIED or is_never_material(n)}
-        if whole_repo_root is not None and Path(dirpath) == whole_repo_root:
-            skip |= {n for n in names if n in ROOT_RELEASE_EXCLUDED | extra_root_skips}
-        return skip
-
-    return ignore
+    Skipping the COPY rather than deleting the result afterwards is what keeps a withheld
+    stub from touching the destination: a delete-after-copy stages a deletion of whatever
+    the semester repo already had there."""
+    if not whole_repo:
+        return Selection()
+    return Selection(
+        exclude=(
+            *(f"/{name}/" for name in ROOT_RELEASE_EXCLUDED),
+            *(f"/{stub}" for stub in sorted(stubs)),
+        )
+    )
 
 
 class Dest(NamedTuple):
@@ -576,7 +554,9 @@ def deploy_many(
             if excludes(src_root, srcp):
                 # The source path is itself excluded - so is everything under it, and no
                 # `!` deeper down can re-include any of it. Nothing else was asked for, so
-                # this copy is a no-op rather than a partial one.
+                # this copy is a no-op rather than a partial one. (A path on the
+                # institution denylist named outright DOES ship: the denylist only stops
+                # a folder copy sweeping one up - `selection.deny`.)
                 _warn_ignored_source(
                     course_org, d.course_source_repo, d.course_source_path
                 )
@@ -603,16 +583,14 @@ def deploy_many(
                                 _warn_withheld_stub(
                                     course_org, d.course_source_repo, stub
                                 )
+                    # The selection's layers (decision 0040): the institution denylist,
+                    # faculty's `.releaseignore`, this release's own exclusions. Anchored
+                    # at the CLONE root even for a subpath copy, as a root `.gitignore`.
                     copy_tree(
                         srcp,
                         destp,
-                        union_deny(
-                            # Two filters unioned, not one list: the toolkit's exclusions
-                            # are a contract it keeps with itself, `.releaseignore` is
-                            # faculty's. The patterns anchor at the CLONE root even for a
-                            # subpath copy, as a root `.gitignore` would.
-                            _copy_ignore(srcp if srcp == src_root else None, withheld),
-                            deny_for(src_root),
+                        selection_deny(
+                            src_root, use=_release_use(srcp == src_root, withheld)
                         ),
                     )
                 elif is_withheld_stub(

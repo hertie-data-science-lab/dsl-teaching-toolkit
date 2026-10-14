@@ -6,7 +6,7 @@
 // file tree (decision 0026 rule 5): indent guides, folder and file icons, withheld rows greyed with
 // the name struck through (`ft-out`), the kind chip on kind folders. A folder with something
 // withheld inside says how much, and how much still reaches students. `control` swaps the
-// per-row control for the caller's own (Folder kinds' kind picker): one tree, two settings.
+// per-row control for the caller's own. `SelectionEditor` wraps it for every "which files" setting.
 
 import type { ComponentChildren } from 'preact';
 import { useState } from 'preact/hooks';

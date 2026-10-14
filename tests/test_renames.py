@@ -164,7 +164,9 @@ def test_the_new_instructors_file_is_read(monkeypatch):
 
 def test_the_site_cards_read_semester_yml_only(monkeypatch):
     files = {"people.yml": OLD_PEOPLE, "semester.yml": NEW_INSTRUCTORS}
-    monkeypatch.setattr(site, "yaml_file", lambda org, repo, path: files.get(path, {}))
+    monkeypatch.setattr(
+        site, "yaml_file", lambda org, repo, path: files.get(path, {}), raising=False
+    )
     fake_config(monkeypatch, site.yaml_file)
     meta, path = site._instructors_meta("Sem")
     assert path == "semester.yml"

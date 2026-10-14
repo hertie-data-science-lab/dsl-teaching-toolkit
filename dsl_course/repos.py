@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import json
 import time
-from fnmatch import fnmatch
 from typing import NamedTuple
 
 from . import run
@@ -624,98 +623,6 @@ def create_repo(
         return True
     log_err(f"failed to create repo {org}/{name}: {out[:200]}")
     return False
-
-
-# Path components a PUBLISHED course page must never carry - matched by NAME, at every
-# depth, case-insensitively, and as glob patterns so `.env.local` is caught alongside
-# `.env`. The public site copies whole discovered session folders wholesale, so anything a
-# faculty member happens to keep beside their teaching material is published with it: a
-# `solution/` next to the lab it answers, the `grading_config.yml` that says how it is
-# marked, the
-# hidden `tests/`, a `.env` with a live key. None of those is a release decision anyone
-# made; they are what "copy the folder" means.
-#
-# NOT a release policy for the semester path - `deploy` deliberately releases what faculty
-# name, including a solution, because a semester repo is private and marking sometimes needs
-# one. This is the PUBLIC site, where there is no such case.
-PUBLICATION_DENYLIST = (
-    "solution",
-    "solutions",
-    "grading_config.yml",
-    "grading.yml",  # the pre-rename name; the engine stopped reading it, this list has not
-    "tests",
-    ".env",
-    ".env.*",
-    ".git",
-)
-
-
-def is_denied_publication(name: str) -> bool:
-    """Whether one path COMPONENT is on PUBLICATION_DENYLIST."""
-    lowered = name.casefold()
-    return any(fnmatch(lowered, pattern) for pattern in PUBLICATION_DENYLIST)
-
-
-def has_denied_component(path: str) -> bool:
-    """Whether any component of `path` is on PUBLICATION_DENYLIST."""
-    return any(is_denied_publication(part) for part in path.split("/") if part)
-
-
-# Artefacts that are never course material, in any course, on any page - matched by NAME,
-# at every depth, case-insensitively. What a file manager drops in a folder it opened
-# (`.DS_Store`, `Thumbs.db`, `desktop.ini`), the empty placeholder that holds an empty
-# folder open in git (`.gitkeep`), and the caches an interpreter and a notebook leave
-# behind (`__pycache__/`, `.ipynb_checkpoints/`). A semester's public site listed four of
-# these as its course materials and counted them into its sessions - "6 files" over a
-# session holding five, one of which was a `.gitkeep`.
-#
-# Kept apart from PUBLICATION_DENYLIST deliberately, and it is not an oversight that
-# neither list mentions the other. That one is a SECURITY boundary: a `solution/`, a
-# `grading_config.yml`, a `.env` must not leak, and every entry earns its place by what it
-# would
-# cost to publish. Nothing here leaks anything - it is clutter. Folding the two together
-# would let an edit meant for a list of nuisances widen the list that keeps answers away
-# from a class.
-#
-# NOT a rule about dots, which cannot be written honestly: `.Rprofile`, `.env.example` and
-# a `.devcontainer/` are real course material a dot rule would hide, while `__pycache__/`
-# and `node_modules/` are clutter and are not dotted. A closed list of NAMES is the only
-# form of this rule that is true, which is also why it is short and stays short.
-#
-# The rule is "never copied out to students, never listed on a page" - NOT "never
-# committed". `.gitkeep` still does its job wherever this toolkit writes one (the scaffold's
-# empty `lectures/01_session-1/`, the site repo's own collections) and in a course's SOURCE
-# repo, where it is what holds an unwritten future session open until someone writes it.
-NEVER_MATERIAL = frozenset(
-    {
-        ".DS_Store",
-        ".gitkeep",
-        "Thumbs.db",
-        "desktop.ini",
-        "__pycache__",
-        ".ipynb_checkpoints",
-    }
-)
-
-_NEVER_MATERIAL_FOLDED = frozenset(n.casefold() for n in NEVER_MATERIAL)
-
-
-def is_never_material(name: str) -> bool:
-    """Whether one path COMPONENT is on NEVER_MATERIAL.
-
-    Case-insensitive: `.DS_Store`, `.ds_store`, `Thumbs.db` and `desktop.ini` all appear in
-    the wild, and which spelling a machine wrote is not a decision about course content."""
-    return name.casefold() in _NEVER_MATERIAL_FOLDED
-
-
-def has_never_material_component(path: str) -> bool:
-    """Whether any component of `path` is on NEVER_MATERIAL.
-
-    Component-wise, because two entries are DIRECTORY names: a copytree filter skipping
-    `__pycache__` skips the subtree with it, but a listing path holds `/`-joined strings,
-    where `__pycache__/lab.cpython-312.pyc` is one entry and only its parent gives it
-    away."""
-    return any(is_never_material(part) for part in path.split("/") if part)
 
 
 def _failed_on(person: bool, public: str, detail: str) -> None:

@@ -68,6 +68,7 @@ from . import (
     roster,
     schedule,
     seed,
+    selection,
     settings,
     status,
     teams,
@@ -134,7 +135,7 @@ from .materials import (
     is_materials_repo,
     known_kind,
 )
-from .opencourse import READINGS_MODES, OpenCourse
+from .opencourse import READING_LISTS, OpenCourse
 from .opencourse import seed_text as opencourse_text
 from .profile_readme import profile_files, update_profile_readme
 from .readings import is_reading_overlay
@@ -1176,7 +1177,8 @@ PUBLISH_COMMIT = "migrate: seed opencourse.yml"
 
 def opencourse_from(config: str | None) -> OpenCourse:
     """`opencourse.yml`'s values from a leftover `_publish-config.yml`: on, with its
-    settings, when it names a source repo; else off."""
+    settings folded into `publish:` (`fold_open_site`), when it names a source repo; else
+    off."""
     try:
         cfg = yaml.safe_load(config or "")
     except yaml.YAMLError:
@@ -1184,12 +1186,45 @@ def opencourse_from(config: str | None) -> OpenCourse:
     if not isinstance(cfg, dict) or not cfg.get("source_repo"):
         return OpenCourse()
     mode = str(cfg.get("readings_mode") or "")
-    return OpenCourse(
-        enabled=True,
-        source_repo=str(cfg["source_repo"]),
-        readings_mode=mode if mode in READINGS_MODES else READINGS_MODES[0],
-        include_lectures=bool(cfg.get("include_lectures", True)),
+    old = {
+        "enabled": True,
+        "source_repo": str(cfg["source_repo"]),
+        "readings_mode": mode if mode in OLD_READINGS_MODES else OLD_READINGS_MODES[0],
+        "include_lectures": bool(cfg.get("include_lectures", True)),
+    }
+    return opencourse.parse(fold_open_site(old))
+
+
+# Decision 0040: a 0.10 open site's `readings_mode` / `include_lectures` / `withhold` fold
+# into one `publish:` Selection (`legacy.OPEN_SITE_KEYS`).
+OLD_SITE_KEYS = legacy.renames(legacy.OPEN_SITE_KEYS)
+OLD_READINGS_MODES = ("reading-list", "actual-readings", "none")
+
+
+def fold_open_site(data: object) -> object:
+    """A 0.10 `opencourse.yml` mapping with its selection keys folded into `publish:`,
+    faithfully: `include_lectures` (on by default) published every shown kind but
+    readings; `actual-readings` hosts the readings, `reading-list` (the default) is
+    `reading_lists: true`; `withhold` is `exclude` (written even empty, so the open
+    site's default exclusions do not change a live site). A mapping that already says
+    `publish:`, or is empty, is returned as it is. Pure."""
+    if not isinstance(data, dict) or not data or "publish" in data:
+        return data
+    out = {k: v for k, v in data.items() if k not in OLD_SITE_KEYS}
+    mode = str(data.get("readings_mode") or OLD_READINGS_MODES[0])
+    kinds = (
+        [k for k in selection.shown_kind_names() if k != selection.READINGS]
+        if data.get("include_lectures", True) is not False
+        else []
     )
+    if mode == "actual-readings":
+        kinds.append("readings")
+    out["publish"] = {
+        "kinds": kinds,
+        "exclude": [str(p) for p in data.get("withhold") or ()],
+        READING_LISTS: mode == OLD_READINGS_MODES[0],
+    }
+    return out
 
 
 # ------------------------------------------------------------------ schedule shape
@@ -1859,7 +1894,11 @@ def course_layer(
     )
     stops += [f"{COURSE_CONFIG}: {line} - fix it first" for line in refused]
     try:
-        oc = opencourse.parse(_yaml(oc_text), OPENCOURSE_FILE) if oc_text else None
+        oc = (
+            opencourse.parse(fold_open_site(_yaml(oc_text)), OPENCOURSE_FILE)
+            if oc_text
+            else None
+        )
     except Unusable as exc:
         oc, stops = None, [*stops, f"{OPENCOURSE_FILE}: {exc} - fix it first"]
     header = template("course/course.yml").split(f"{COURSE_BLOCK}:\n", 1)[0]
@@ -1916,7 +1955,11 @@ def course_layer_kept(
         now.get(OPEN_SITE_BLOCK) if isinstance(now.get(OPEN_SITE_BLOCK), dict) else {}
     )
     try:
-        was = opencourse.parse(_yaml(oc_text)) if oc_text else OpenCourse()
+        was = (
+            opencourse.parse(fold_open_site(_yaml(oc_text)))
+            if oc_text
+            else OpenCourse()
+        )
         if opencourse.parse(site) != was:
             out.append(f"{OPENCOURSE_FILE} -> `{OPEN_SITE_BLOCK}`")
     except Unusable:
@@ -1988,12 +2031,14 @@ def semester_layer(
     syllabus: str,
     inherited: list,
     carried: Mapping | None = None,
+    host: dict | None = None,
 ) -> tuple[str, list[str]]:
     """`(semester.yml, stops)` folded out of a 0.10 `instructors.yml` (its list becomes
     `people:`, faculty's lines and comments as written), `assignments.yml` `defaults:` (the
     skeleton's live keys, with `carried` - `carried_defaults` - live beside them; every
-    other key commented with what it inherits from `inherited`) and the declared
-    `syllabus` (`student_site.syllabus`; "" = none). Pure."""
+    other key commented with what it inherits from `inherited`), the declared `syllabus`
+    (`student_site.syllabus`; "" = none) and the course's `publish.yml` folded into
+    `student_site.host` (`publish_host`; None = none). Pure."""
     stops: list[str] = []
     meta = _yaml(instructors)
     extra = [k for k in meta if k != "instructors"]
@@ -2025,16 +2070,57 @@ def semester_layer(
         head, rest = text.split("# people:\n", 1)
         rest = rest.split("\n\n", 1)[1]
         text = head + "\n".join([f"{PEOPLE_BLOCK}:", *people[1:]]) + "\n\n" + rest
-    if syllabus:
+    if syllabus or host is not None:
         head, rest = text.split(f"# {STUDENT_SITE_BLOCK}:\n", 1)
-        rest = rest.split("\n", 1)[1] if "\n" in rest else ""
-        text = (
-            head
-            + f"{STUDENT_SITE_BLOCK}:\n  syllabus: {_scalar_text(syllabus)}"
-            + "   # the released path the home page pins\n"
-            + rest
+        rest = "".join(
+            line + "\n"
+            for line in rest.split("\n")
+            if line and not line.startswith("#   ")
         )
+        block = f"{STUDENT_SITE_BLOCK}:\n"
+        if syllabus:
+            block += (
+                f"  syllabus: {_scalar_text(syllabus)}"
+                "   # the released path the home page pins\n"
+            )
+        if host is not None:
+            flow = yaml.safe_dump(host, default_flow_style=True, width=10_000).strip()
+            block += f"  host: {flow}   # folded from {PUBLISH_FILE} (decision 0040)\n"
+        text = head + block + rest
     return text, stops
+
+
+# A 0.10 materials repo's hosted-copy opt-in (`legacy.MATERIALS_REPO`): its `public:`
+# patterns fold into each semester's `student_site.host` `include:`.
+PUBLISH_FILE = legacy.old_name(
+    f"{SEMESTER_FILE} student_site.host include", legacy.MATERIALS_REPO
+)
+
+
+def publish_host(texts: dict[str, str | None]) -> tuple[dict | None, list[str]]:
+    """`(host, stops)` out of the `publish.yml` text of each source repo a semester
+    releases from (None = absent): None when no repo has one; else `{kinds: [],
+    include: [...]}` - nothing hosted by kind, exactly the patterns the files listed (a
+    repo's `!` lines kept in its order). Pure."""
+    host: dict | None = None
+    stops: list[str] = []
+    for repo, text in sorted(texts.items()):
+        if text is None:
+            continue
+        try:
+            declared = (yaml.safe_load(text) or {}).get("public")
+        except (yaml.YAMLError, AttributeError):
+            stops.append(f"{repo}/{PUBLISH_FILE} does not parse - fix it first")
+            continue
+        if declared is not None and (
+            not isinstance(declared, list)
+            or not all(isinstance(x, str) for x in declared)
+        ):
+            stops.append(f"{repo}/{PUBLISH_FILE}: `public:` is not a list of patterns")
+            continue
+        host = host or {"kinds": [], "include": []}
+        host["include"] += [x for x in declared or () if x not in host["include"]]
+    return host, stops
 
 
 def semester_layer_kept(
@@ -2043,6 +2129,7 @@ def semester_layer_kept(
     syllabus: str,
     new: str,
     carried: Mapping | None = None,
+    host: dict | None = None,
 ) -> list[str]:
     """What `new` (a semester.yml) says differently from the old files; `[]` when every
     value is kept."""
@@ -2058,6 +2145,8 @@ def semester_layer_kept(
     site = now.get(STUDENT_SITE_BLOCK) or {}
     if str(site.get("syllabus") or "") != syllabus:
         out.append(f"`syllabus` -> `{STUDENT_SITE_BLOCK}.syllabus`")
+    if site.get("host") != host:
+        out.append(f"{PUBLISH_FILE} -> `{STUDENT_SITE_BLOCK}.host`")
     return out
 
 
@@ -3642,6 +3731,8 @@ class Semester:
             syllabus, more = self._syllabus()
             stops += more
             inherited = settings.layers(self.course)[2:]
+            host, more = publish_host(self.publish_texts())
+            stops += more
             carried = carried_defaults(
                 inherited[0][1],
                 settings.parse_legacy_assignments(old.get(ASSIGNMENTS_FILE)).defaults,
@@ -3659,6 +3750,7 @@ class Semester:
                 syllabus,
                 inherited,
                 carried,
+                host,
             )
             stops += more
             lost = semester_layer_kept(
@@ -3667,6 +3759,7 @@ class Semester:
                 syllabus,
                 text,
                 carried,
+                host,
             )
             stops += [f"{SEMESTER_FILE} would lose {what}" for what in lost]
             files[SEMESTER_FILE] = text.encode()
@@ -3713,6 +3806,25 @@ class Semester:
             "delete": delete,
             "notes": notes,
             "stops": stops,
+        }
+
+    def publish_texts(self) -> dict[str, str | None]:
+        """Each course source repo this semester's schedule releases from, mapped to its
+        `publish.yml` text (None = absent): what `publish_host` folds."""
+        sched_text = get_file_content(self.org, self.config(), schedule.SCHEDULE_PATH)
+        try:
+            sched = schedule.parse(load_yaml_lines(sched_text or "") or {})
+        except (yaml.YAMLError, Unusable):
+            return {}
+        repos = {
+            d.course_source_repo
+            for r in sched.releases
+            for d in r.deploy
+            if d.course_source_repo
+        }
+        return {
+            repo: get_file_content(self.course, repo, PUBLISH_FILE)
+            for repo in sorted(repos)
         }
 
     def _assignments_after(self) -> str | None:
@@ -4300,7 +4412,7 @@ class Course:
                 f".github/{OPENCOURSE_FILE}: seeded "
                 + (
                     f"on, from {pages_repo(self.org)}/{RETIRED_PUBLISH_CONFIG} "
-                    f"(source_repo {oc.source_repo}, readings_mode {oc.readings_mode})"
+                    f"(source_repo {oc.source_repo}, publish {oc.publish_data()})"
                     if oc.enabled
                     else "off (no earlier publish settings)"
                 )

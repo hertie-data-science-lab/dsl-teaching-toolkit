@@ -39,6 +39,7 @@ from dsl_course.gh_contents import blob_sha
 from dsl_course.legacy import OLD_INSTRUCTORS_FILE as INSTRUCTORS_FILE
 from dsl_course.migrate import OLD_CONFIG_REPO, OLD_JOIN_REPO, OLD_SEMESTER_TOPIC
 from dsl_course.opencourse import OpenCourse
+from dsl_course.selection import Selection
 
 SEM, COURSE = "Sem-f2026", "Course-E1"
 WORKFLOW = {".github/workflows/any.yml": b"on: push\n"}
@@ -1342,7 +1343,7 @@ def test_a_course_run_migrates_and_a_second_finds_it_done(
         *migrate.RELEASE_WORKFLOWS,
     }
     assert opencourse.parse(meta["open_course_site"]) == OpenCourse(
-        enabled=True, source_repo="course-materials-f2026"
+        True, "course-materials-f2026", Selection(kinds=FOLDED_KINDS, exclude=())
     )
     assert tree["course.yml"].startswith(b"# INSTRUCTOR-OWNED")
     assert fake._repo(COURSE, "course-materials-f2026")["topics"] == ["dsl-materials"]
@@ -2586,7 +2587,10 @@ def test_the_public_website_step_seeds_off_without_earlier_settings(
     assert _main(monkeypatch, COURSE, "--no-preview") == 0
     tree = fake.tree(COURSE, ".github")
     site = yaml.safe_load(tree["course.yml"])["open_course_site"]
-    assert opencourse.parse(site) == OpenCourse(withhold=opencourse.DEFAULT_WITHHOLD)
+    # A new site's seed: lectures and labs, the open site's default exclusions.
+    assert opencourse.parse(site) == OpenCourse(
+        publish=Selection(kinds=("lectures", "labs"))
+    )
 
 
 def test_a_website_already_on_is_seeded_with_nothing_extra_withheld(
@@ -2599,7 +2603,7 @@ def test_a_website_already_on_is_seeded_with_nothing_extra_withheld(
         yaml.safe_load(fake.tree(COURSE, ".github")["course.yml"])["open_course_site"]
     )
     assert seeded.enabled
-    assert seeded.withhold == ()
+    assert seeded.selection.exclude == ()
 
 
 def test_the_public_website_step_on_a_migrated_course_keeps_its_opencourse(
@@ -2624,6 +2628,11 @@ def test_the_public_website_step_on_a_migrated_course_keeps_its_opencourse(
     assert "public website: already migrated" in capsys.readouterr().out
 
 
+# What a 0.10 `include_lectures: true` (the default) folds to (decision 0040): every shown
+# kind but readings.
+FOLDED_KINDS = ("lectures", "labs", "exams", "drop-ins", "events")
+
+
 @pytest.mark.parametrize(
     ("config", "expected"),
     [
@@ -2633,9 +2642,12 @@ def test_the_public_website_step_on_a_migrated_course_keeps_its_opencourse(
         (": not yaml: [", OpenCourse()),
         (
             "source_repo: m\nreadings_mode: actual-readings\ninclude_lectures: false\n",
-            OpenCourse(True, "m", "actual-readings", False),
+            OpenCourse(True, "m", Selection(kinds=("readings",), exclude=()), False),
         ),
-        ("source_repo: m\nreadings_mode: junk\n", OpenCourse(True, "m")),
+        (
+            "source_repo: m\nreadings_mode: junk\n",
+            OpenCourse(True, "m", Selection(kinds=FOLDED_KINDS, exclude=())),
+        ),
     ],
 )
 def test_the_old_publish_settings_become_opencourse(config, expected):

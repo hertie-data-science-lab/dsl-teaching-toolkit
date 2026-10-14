@@ -21,14 +21,13 @@ from dsl_course import (
     ghcli,
     grading_spec,
     roster,
+    selection,
     settings,
     site,
     site_repo,
 )
-from dsl_course import run as run_context
 from dsl_course import schedule as schedule_mod
-from dsl_course.faults import Unusable
-from dsl_course.opencourse import OpenCourse
+from dsl_course.config import ConfigFile
 from dsl_course.schedule import (
     ArchiveRow,
     AssignmentEntry,
@@ -38,6 +37,7 @@ from dsl_course.schedule import (
     Schedule,
     Slot,
 )
+from dsl_course.selection import Selection
 from dsl_course.setting_readers import read_settings
 from dsl_course.site_repo import Link
 from tests.conftest import (
@@ -108,11 +108,17 @@ def _individual_by_default(monkeypatch):
     monkeypatch.setattr(site, "load_grading_spec", lambda *a, **k: _spec(""))
 
 
+# The real reader, for the tests about it; every other test hosts nothing (below).
+REAL_HOST_SELECTION = site.host_selection
+
+
 @pytest.fixture(autouse=True)
-def _no_opencourse(monkeypatch):
-    """The course's `opencourse.yml` (its `withhold` filters the hosted copies) is a
-    course-org read; a course without one is what every test here but its own wants."""
-    monkeypatch.setattr(site, "read_opencourse", lambda org: None)
+def _host_nothing(monkeypatch):
+    """`semester.yml student_site.host` is a semester-config read; a host that selects
+    nothing is what every test here but the hosting ones wants (no clone)."""
+    monkeypatch.setattr(
+        site, "host_selection", lambda org: Selection(kinds=(), include=())
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -1337,7 +1343,7 @@ def _plan(
             + [{"name": n, "topics": ["assignment-template"]} for n in handed_out]
         ),
     )
-    monkeypatch.setattr(site, "yaml_file", yaml_file)
+    monkeypatch.setattr(site, "yaml_file", yaml_file, raising=False)
     fake_config(monkeypatch, site.yaml_file)
     monkeypatch.setattr(site.schedule, "load", lambda org: sched)
     monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
@@ -1381,7 +1387,7 @@ def test_the_build_lists_the_semester_once_for_both_of_its_questions(
         "semester_content_repos",
         lambda repos: seen_content.append(real(repos)) or seen_content[-1],
     )
-    monkeypatch.setattr(site, "yaml_file", lambda *a: {})
+    monkeypatch.setattr(site, "yaml_file", lambda *a: {}, raising=False)
     fake_config(monkeypatch, site.yaml_file)
     monkeypatch.setattr(site.schedule, "load", lambda org: Schedule())
     monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
@@ -1434,13 +1440,16 @@ def test_course_description_flows_from_course_metadata_into_config(
     monkeypatch.setattr(site.schedule, "load", lambda org: Schedule())
     monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
 
-    monkeypatch.setattr(site, "yaml_file", lambda *a: {})
+    monkeypatch.setattr(site, "yaml_file", lambda *a: {}, raising=False)
     fake_config(monkeypatch, site.yaml_file)
     assert site.sync_site("Course-Org", "Semester-f2026") == 0
     assert "course_description" not in captured["plan"].config
 
     monkeypatch.setattr(
-        site, "yaml_file", lambda *a: {"course": {"description": "Nets, from 0."}}
+        site,
+        "yaml_file",
+        lambda *a: {"course": {"description": "Nets, from 0."}},
+        raising=False,
     )
     fake_config(monkeypatch, site.yaml_file)
     assert site.sync_site("Course-Org", "Semester-f2026") == 0
@@ -1469,7 +1478,7 @@ def test_the_exported_config_keys_are_the_ones_the_sync_writes_and_the_seed_keep
     monkeypatch.setattr(site.schedule, "load", lambda org: Schedule())
     monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
     meta = {"course": {"name": "Nets", "code": "E1", "description": "D."}}
-    monkeypatch.setattr(site, "yaml_file", lambda *a: meta)
+    monkeypatch.setattr(site, "yaml_file", lambda *a: meta, raising=False)
     fake_config(monkeypatch, site.yaml_file)
     assert site.sync_site("Course-Org", "Semester-f2026") == 0
     written = {*captured["plan"].config, "title"}  # `title` follows `course_name`
@@ -1512,7 +1521,10 @@ def test_site_still_builds_when_schedule_yml_does_not_parse(
     )
     monkeypatch.setattr(site, "list_org_repos", lambda org: [])
     monkeypatch.setattr(
-        site, "yaml_file", lambda *a: {"course": {"name": "Deep Learning"}}
+        site,
+        "yaml_file",
+        lambda *a: {"course": {"name": "Deep Learning"}},
+        raising=False,
     )
     fake_config(monkeypatch, site.yaml_file)
     monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
@@ -2677,20 +2689,12 @@ def test_supporting_files_get_no_row_and_no_tab(monkeypatch, tmp_path):
     assert "/lectures/" in nav and "Supporting files" not in nav
 
 
-# ---------------------------------------------------- public copies of published files
+# ---------------------------------------------------- public copies of hosted files
 # What a semester site hosts itself, so an HTML deck renders in a browser instead of
-# showing as source on GitHub (decision 0035 rule 1). `_mirror_public` is the ONE
-# decision: it says which paths it copied, and every renderer links a hosted copy only for
-# a path it names - so a page cannot offer a rendered copy that a size cap, a denylist or
-# a failed clone stopped being made.
-
-
-@pytest.fixture(autouse=True)
-def _fresh_publish_policy():
-    """The policy memo lives for one sync run, and a test is a run."""
-    site._publish_policy.cache_clear()
-    yield
-    site._publish_policy.cache_clear()
+# showing as source on GitHub (decision 0035 rule 1), as `student_site.host` selects it
+# (decision 0040). `_mirror_public` is the ONE decision: it says which paths it copied,
+# and every renderer links a hosted copy only for a path it names - so a page cannot
+# offer a rendered copy that a size cap, a denylist or a failed clone stopped being made.
 
 
 @pytest.fixture
@@ -2701,8 +2705,19 @@ def origins(tmp_path, monkeypatch) -> BareOrigins:
     return world
 
 
-def _policy(*patterns: str) -> dict[str, tuple]:
-    return {"materials": (site.parse_patterns("\n".join(patterns)),)}
+def _policy(*patterns: str) -> Selection:
+    """A host that selects by pattern only (no kind), as html and pdf."""
+    return Selection(kinds=(), types=("html", "pdf"), include=patterns, exclude=())
+
+
+# Each top folder of the faked `materials` repo landed by an entry of its own kind.
+LANDINGS = {
+    "materials": (
+        ("lectures", "lectures", False),
+        ("labs", "labs", False),
+        ("readings", "readings", False),
+    )
+}
 
 
 def _mirror(
@@ -2710,9 +2725,9 @@ def _mirror(
     origins,
     tmp_path,
     tree: dict[str, str],
-    policies,
-    withhold=(),
-    renames=None,
+    host: Selection,
+    landings=None,
+    repos=("materials",),
 ):
     """Mirror a faked semester repo into a site checkout; return (hosted, what it serves).
 
@@ -2724,7 +2739,13 @@ def _mirror(
         site, "_repo_tree", lambda org, repo: ("main", tuple(sorted(tree)))
     )
     site_wd = tmp_path / "site"
-    hosted = site._mirror_public(site_wd, "Semester-f2026", policies, withhold, renames)
+    hosted = site._mirror_public(
+        site_wd,
+        "Semester-f2026",
+        list(repos),
+        host,
+        LANDINGS if landings is None else landings,
+    )
     served = site_wd / site.SITE_FILES_DIR
     return hosted, sorted(
         p.relative_to(served).as_posix() for p in served.rglob("*") if p.is_file()
@@ -2793,6 +2814,59 @@ def test_a_hosted_copy_rides_the_rows_front_matter():
     assert "      view_url: https://o.io/x\n" in block
 
 
+def test_the_default_hosts_every_kind_but_readings_as_html_and_pdf(
+    monkeypatch, origins, tmp_path
+):
+    # Decision 0040 rule 2: the semester site is public, so a readings pdf (copyright) is
+    # not hosted by default; a lecture's or a lab's html and pdf are. A file no entry
+    # landed has no kind and is never hosted.
+    tree = {
+        "lectures/01_a/slides.pdf": "pdf",
+        "lectures/01_a/lab.ipynb": NOTEBOOK,
+        "labs/01_a/lab.html": "lab",
+        "readings/01_a/paper.pdf": "copyrighted",
+        "extra/notes.pdf": "by hand",
+    }
+    _hosted, served = _mirror(
+        monkeypatch, origins, tmp_path, tree, selection.host_default()
+    )
+    assert served == [
+        "materials/labs/01_a/lab.html",
+        "materials/lectures/01_a/slides.pdf",
+    ]
+
+
+def test_a_readings_file_made_public_is_hosted(monkeypatch, origins, tmp_path):
+    # `public: true` on a copy (the console's per-file toggle) hosts it whatever `kinds`
+    # says; its neighbours stay unhosted.
+    tree = {
+        "readings/01_a/paper.pdf": "open access",
+        "readings/01_a/book.pdf": "copyrighted",
+    }
+    landings = {
+        "materials": (
+            ("readings/01_a", "readings", False),
+            ("readings/01_a/paper.pdf", "readings", True),
+        )
+    }
+    _hosted, served = _mirror(
+        monkeypatch, origins, tmp_path, tree, selection.host_default(), landings
+    )
+    assert served == ["materials/readings/01_a/paper.pdf"]
+
+
+def test_the_institutions_floor_is_the_last_word(monkeypatch, origins, tmp_path):
+    # `institution.yml selection_floor` (decision 0040 rule 5): `never: [readings]` holds
+    # even for a host that lists readings.
+    monkeypatch.setattr(
+        selection, "floor", lambda use: selection.Floor(never=("readings",))
+    )
+    tree = {"readings/01_a/paper.pdf": "x", "lectures/01_a/slides.pdf": "y"}
+    host = Selection(kinds=("lectures", "readings"), types=("pdf",))
+    _hosted, served = _mirror(monkeypatch, origins, tmp_path, tree, host)
+    assert served == ["materials/lectures/01_a/slides.pdf"]
+
+
 def test_a_published_decks_bundle_follows_it(monkeypatch, origins, tmp_path):
     # A Quarto deck is one deliverable plus a `<stem>_files/` directory its renderer
     # invented. Copied without it, the deck loads with no figures and no styles.
@@ -2813,6 +2887,22 @@ def test_a_published_decks_bundle_follows_it(monkeypatch, origins, tmp_path):
     )
 
 
+def test_exclude_keeps_a_deck_and_a_bundle_off(monkeypatch, origins, tmp_path):
+    # `exclude` beats everything, the bundle of a deck that is itself hosted included.
+    tree = {
+        "lectures/01_a/slides.html": "deck",
+        "lectures/01_a/slides_files/fig.svg": "<svg/>",
+        "lectures/02_b/draft.html": "deck",
+        "lectures/02_b/draft_files/fig.svg": "<svg/>",
+    }
+    host = Selection(
+        kinds=("lectures",), types=("html",), exclude=("draft*", "slides_files/")
+    )
+    hosted, served = _mirror(monkeypatch, origins, tmp_path, tree, host)
+    assert served == ["materials/lectures/01_a/slides.html"]
+    assert hosted["materials"] == frozenset({"lectures/01_a/slides.html"})
+
+
 def test_a_denylisted_path_is_never_copied_however_wide_the_pattern(
     monkeypatch, origins, tmp_path
 ):
@@ -2830,11 +2920,11 @@ def test_a_denylisted_path_is_never_copied_however_wide_the_pattern(
 
 
 def _never_cloned(*_a, **_k):
-    raise AssertionError("cloned a repo with nothing declared public")
+    raise AssertionError("cloned a repo with nothing hosted")
 
 
-def test_removing_a_pattern_removes_the_copy(monkeypatch, origins, tmp_path):
-    # Unpublishing is deleting the pattern: the mirror is rebuilt every sync.
+def test_narrowing_the_host_removes_the_copy(monkeypatch, origins, tmp_path):
+    # Unhosting is narrowing `host:`: the mirror is rebuilt every sync.
     tree = {"lectures/01_a/slides.html": "deck", "labs/01_a/lab.html": "lab"}
     _hosted, served = _mirror(
         monkeypatch, origins, tmp_path, tree, _policy("**/*.html")
@@ -2847,9 +2937,9 @@ def test_removing_a_pattern_removes_the_copy(monkeypatch, origins, tmp_path):
         monkeypatch, origins, tmp_path, tree, _policy("lectures/**/*.html")
     )
     assert served == ["materials/lectures/01_a/slides.html"]
-    # Declaring nothing public takes the whole mirror with it - without a clone.
+    # A host that selects nothing takes the whole mirror with it - without a clone.
     monkeypatch.setattr(site, "clone", _never_cloned)
-    hosted, served = _mirror(monkeypatch, origins, tmp_path, tree, {"materials": ()})
+    hosted, served = _mirror(monkeypatch, origins, tmp_path, tree, _policy())
     assert (hosted, served) == ({}, [])
 
 
@@ -2860,68 +2950,110 @@ def _one_deploy() -> Schedule:
                 "s1",
                 datetime(2026, 9, 8, 10, 0, tzinfo=BERLIN),
                 deploy=[Deploy("course-materials-f2026", "lectures/01_a", "materials")],
+                kind="lecture",
+                block="lectures",
             )
         ]
     )
 
 
-def test_a_course_with_no_publish_file_is_never_cloned(monkeypatch, origins, tmp_path):
-    # The cost of this feature on a course that does not use it is zero: no clone, no
-    # copy, no directory.
-    monkeypatch.setattr(site, "yaml_file", lambda *a: {})
-    fake_config(monkeypatch, site.yaml_file)
-    monkeypatch.setattr(site, "clone", _never_cloned)
-    policies = site._publish_policies("Course-Org", _one_deploy(), ["materials"])
-    assert policies == {"materials": ()}
-    assert _mirror(monkeypatch, origins, tmp_path, {}, policies) == ({}, [])
-
-
-def test_a_policy_that_does_not_parse_stops_the_sync(monkeypatch):
-    # Read as "nothing public", a bad indent would unpublish a whole course's decks over a
-    # typo, on a green run. So it fails loudly: nothing is republished, nothing wiped.
-    def boom(*_a):
-        raise yaml.YAMLError("mapping values are not allowed here")
-
-    monkeypatch.setattr(site, "yaml_file", boom)
-
-    fake_config(monkeypatch, site.yaml_file)
-    with pytest.raises(yaml.YAMLError):
-        site._publish_policies("Course-Org", _one_deploy(), ["materials"])
-
-    # A faculty-fixable config fault, so a RuntimeError: a hand-out (assign.py) and the
-    # CLI catch exactly that and YAMLError, and anything else aborted the hand-out.
-    monkeypatch.setattr(site, "yaml_file", lambda *a: {"public": "lectures/**"})
-    fake_config(monkeypatch, site.yaml_file)
-    with pytest.raises(RuntimeError, match="must be a list of patterns"):
-        site._publish_policies("Course-Org", _one_deploy(), ["materials"])
-
-
-def test_every_semester_of_one_run_reuses_the_courses_policy(monkeypatch, tmp_path):
-    # `--all-semesters` builds each semester in one process: the course's publish.yml is
-    # read once for the run, and `main` drops the memo when the run ends.
-    asked = []
-
-    def yaml_file(org, repo, path):
-        asked.append(path)
-        return {"public": ["lectures/**"]} if path == site.PUBLISH_FILE else {}
-
-    monkeypatch.setattr(site, "_mirror_public", lambda *a, **k: {})
-    for _semester in range(2):
-        _plan(
-            monkeypatch,
-            tmp_path,
-            _one_deploy(),
-            trees={"materials": ()},
-            yaml_file=yaml_file,
-        )
-    assert asked.count(site.PUBLISH_FILE) == 1
-
+def _semester_yml(monkeypatch, text: str | None) -> None:
+    """`semester.yml` as `host_selection` reads it."""
+    file = ConfigFile("Semester-f2026", "semester-config", "semester.yml", text)
     monkeypatch.setattr(
-        "sys.argv", ["site", "sync", "--course-org", "C", "--all-semesters"]
+        site,
+        "read_semester",
+        lambda org: type("S", (), {"semester": file})(),
     )
-    monkeypatch.setattr(site, "live_semesters", lambda org: [])
-    assert site.main() == 0
-    assert run_context.current().holds(site._publish_policy) == 0
+
+
+@pytest.mark.parametrize(
+    ("text", "kinds", "types"),
+    [
+        (None, ("lectures", "labs", "exams", "drop-ins", "events"), ("html", "pdf")),
+        (
+            "people: []\n",
+            ("lectures", "labs", "exams", "drop-ins", "events"),
+            ("html", "pdf"),
+        ),
+        (
+            "student_site:\n  host: {kinds: [lectures, readings]}\n",
+            ("lectures", "readings"),
+            ("html", "pdf"),
+        ),
+        ("student_site:\n  host: {types: [PDF]}\n", None, ("pdf",)),
+    ],
+)
+def test_the_host_reads_semester_yml_with_each_key_defaulted(
+    monkeypatch, text, kinds, types
+):
+    _semester_yml(monkeypatch, text)
+    host = REAL_HOST_SELECTION("Semester-f2026")
+    assert host.types == types
+    if kinds is not None:
+        assert host.kinds == kinds
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "student_site:\n  host: {kinds: [lecture]}\n",
+        "student_site:\n  host: [lectures]\n",
+        "student_site: nope\n",
+        "student_site:\n  host: {kinds: lectures}\n",
+    ],
+)
+def test_a_host_that_does_not_validate_stops_the_sync(monkeypatch, text):
+    # Read as "the default", a typo would host what somebody wrote to keep off, on a
+    # green run. A RuntimeError: every caller of `sync_site` reports it in one line.
+    _semester_yml(monkeypatch, text)
+    with pytest.raises(RuntimeError, match="student_site.host"):
+        REAL_HOST_SELECTION("Semester-f2026")
+
+
+def test_the_hosted_repos_and_kinds_come_from_the_plan():
+    # Keyed on the semester DESTINATION, which is the repo whose files the site links and
+    # whose bytes get copied; a path's kind is the entry that landed it, the deepest one
+    # when copies nest, and none for a path no entry landed.
+    sched = _one_deploy()
+    sched.releases[0].deploy.append(Deploy("course-code-f2026", "src", "code"))
+    sched.releases.append(
+        Release(
+            "r1",
+            None,
+            deploy=[
+                Deploy(
+                    "course-materials-f2026",
+                    "readings/x",
+                    "materials",
+                    "lectures/01_a/r",
+                )
+            ],
+            kind="readings",
+            block="readings",
+        )
+    )
+    # `code` is not one of this semester's content repos, so it is not hosted.
+    assert site._hosted_repos(sched, ["materials"]) == ["materials"]
+    kind_of = site.kind_of_landed(site._landings(sched)["materials"])
+    assert kind_of("lectures/01_a/slides.pdf") == "lectures"
+    assert kind_of("lectures/01_a/r/paper.pdf") == "readings"
+    assert kind_of("extra/notes.pdf") is None
+
+
+def test_the_sync_hands_the_host_and_the_landings_to_the_mirror(monkeypatch, tmp_path):
+    seen = []
+    host = Selection(kinds=("lectures",))
+    monkeypatch.setattr(site, "host_selection", lambda org: host)
+    monkeypatch.setattr(
+        site,
+        "_mirror_public",
+        lambda wd, org, repos, h, landings: seen.append((repos, h, landings)) or {},
+    )
+    _plan(monkeypatch, tmp_path, _one_deploy(), trees={"materials": ()})
+    assert seen == [
+        (["materials"], host, {"materials": (("lectures/01_a", "lectures", False),)})
+    ]
 
 
 def test_a_file_github_would_refuse_is_skipped_rather_than_failing_the_sync(
@@ -2953,26 +3085,6 @@ def test_a_clone_that_failed_leaves_the_last_syncs_copies_standing(
     # The copies stand, and nothing links them.
     assert served == ["materials/lectures/01_a/slides.html"] and hosted == {}
     assert "could not clone" in capsys.readouterr().err
-
-
-def test_the_policy_is_read_from_the_source_repo_the_plan_names(monkeypatch):
-    # Course-level, in the repo faculty actually edit - keyed on the semester DESTINATION,
-    # which is the repo whose files the site links and whose bytes get copied.
-    asked: list[tuple[str, str, str]] = []
-
-    def yaml_file(org, repo, path):
-        asked.append((org, repo, path))
-        return {"public": ["lectures/**/*.html"]}
-
-    monkeypatch.setattr(site, "yaml_file", yaml_file)
-
-    fake_config(monkeypatch, site.yaml_file)
-    sched = _one_deploy()
-    sched.releases[0].deploy.append(Deploy("course-code-f2026", "src", "code"))
-    policies = site._publish_policies("Course-Org", sched, ["materials"])
-    # `code` is not one of this semester's content repos, so it is not asked about.
-    assert asked == [("Course-Org", "course-materials-f2026", "publish.yml")]
-    assert policies["materials"][0].check_file("lectures/01_a/slides.html").include
 
 
 def test_the_sync_writes_the_restored_tabs_and_the_materials_index(
@@ -3026,154 +3138,15 @@ def test_only_a_file_a_link_will_open_is_copied(monkeypatch, origins, tmp_path):
         "lectures/01_a/notes.md": "notes",
         "lectures/01_a/data.csv": "a,b",
     }
-    hosted, served = _mirror(monkeypatch, origins, tmp_path, tree, _policy("**"))
+    hosted, served = _mirror(
+        monkeypatch, origins, tmp_path, tree, Selection(kinds=("lectures",))
+    )
     assert served == [
         "materials/lectures/01_a/notes.pdf",
         "materials/lectures/01_a/slides.html",
         "materials/lectures/01_a/slides_files/data.csv",
     ]
     assert set(hosted["materials"]) == {p.split("/", 1)[1] for p in served}
-
-
-def test_what_the_open_site_withholds_is_never_hosted(monkeypatch, origins, tmp_path):
-    # `opencourse.yml`'s `withhold` is an extra deny filter: a file the course keeps off
-    # its open-courseware site is not hosted publicly on a semester site either. Nothing
-    # here is on the denylist, so the withhold alone is what keeps each one back: a whole
-    # deck, and the bundle of a deck that is itself hosted.
-    tree = {
-        "lectures/01_a/slides.html": "deck",
-        "lectures/01_a/slides_files/fig.svg": "<svg/>",
-        "lectures/02_b/draft.html": "deck",
-        "lectures/02_b/draft_files/fig.svg": "<svg/>",
-    }
-    hosted, served = _mirror(
-        monkeypatch,
-        origins,
-        tmp_path,
-        tree,
-        _policy("lectures/**"),
-        withhold=("draft*", "slides_files/"),
-    )
-    assert served == ["materials/lectures/01_a/slides.html"]
-    assert hosted["materials"] == frozenset({"lectures/01_a/slides.html"})
-    # Without the withhold, all four would be hosted.
-    _hosted, served = _mirror(
-        monkeypatch, origins, tmp_path, tree, _policy("lectures/**")
-    )
-    assert len(served) == 4
-
-
-def test_the_sync_hands_the_open_sites_withhold_list_to_the_mirror(
-    monkeypatch, tmp_path
-):
-    seen = []
-    monkeypatch.setattr(
-        site, "read_opencourse", lambda org: OpenCourse(withhold=("*exam*",))
-    )
-    monkeypatch.setattr(
-        site,
-        "_mirror_public",
-        lambda wd, org, policies, withhold=(), renames=None: (
-            seen.append((withhold, renames)) or {}
-        ),
-    )
-    monkeypatch.setattr(
-        site, "_publish_policies", lambda *a: _policy("lectures/**/*.html")
-    )
-    _plan(monkeypatch, tmp_path, _one_deploy(), trees={"materials": ()})
-    # And where each copy came from, so the withhold is matched on the source paths too.
-    assert seen == [(("*exam*",), {"materials": (("lectures/01_a", "lectures/01_a"),)})]
-
-
-def test_a_renamed_deploy_of_a_withheld_folder_hosts_nothing(
-    monkeypatch, origins, tmp_path
-):
-    # `withhold` is written against the SOURCE repo's paths. A deploy that renames the
-    # folder on its way into the semester must not carry it past the filter: the copy is
-    # judged on the path it came from as well as the path it landed at.
-    sched = Schedule(
-        releases=[
-            Release(
-                "s1",
-                datetime(2026, 9, 8, 10, 0, tzinfo=BERLIN),
-                deploy=[
-                    Deploy(
-                        "course-materials-f2026",
-                        "drafts/exam-review",
-                        "materials",
-                        "lectures/01_review",
-                    )
-                ],
-            )
-        ]
-    )
-    renames = site._deploy_sources(sched)
-    assert renames == {"materials": (("lectures/01_review", "drafts/exam-review"),)}
-    tree = {
-        "lectures/01_review/slides.html": "deck",
-        "lectures/01_review/slides_files/fig.svg": "<svg/>",
-    }
-    hosted, served = _mirror(
-        monkeypatch,
-        origins,
-        tmp_path,
-        tree,
-        _policy("lectures/**"),
-        withhold=("drafts/",),
-        renames=renames,
-    )
-    assert (hosted, served) == ({}, [])
-
-
-def _broken_opencourse(org):
-    raise Unusable(".github/opencourse.yml is not valid YAML")
-
-
-def test_a_course_that_hosts_nothing_never_reads_opencourse_yml(monkeypatch, tmp_path):
-    # No publish.yml, so no withhold to apply: a broken opencourse.yml is the open
-    # site's problem and must not touch this sync.
-    monkeypatch.setattr(site, "read_opencourse", _broken_opencourse)
-    plan = _plan(monkeypatch, tmp_path, _one_deploy(), trees={"materials": ()})
-    assert "materials.md" in plan.files
-
-
-def test_a_broken_opencourse_yml_stops_the_hosting_not_the_sync(
-    monkeypatch, tmp_path, capsys
-):
-    monkeypatch.setattr(site, "read_opencourse", _broken_opencourse)
-    monkeypatch.setattr(
-        site, "_publish_policies", lambda *a: _policy("lectures/**/*.html")
-    )
-    seen = []
-    monkeypatch.setattr(
-        site,
-        "_mirror_public",
-        lambda wd, org, policies, withhold=(), renames=None: (
-            seen.append(withhold) or {"materials": frozenset({"x.html"})}
-        ),
-    )
-    plan = _plan(monkeypatch, tmp_path, _one_deploy(), trees={"materials": ()})
-    assert "materials.md" in plan.files
-    assert "no copy is hosted" in capsys.readouterr().err
-    # The mirror still runs, to delete (`withhold=None`), and nothing it says is linked.
-    assert seen == [None]
-    assert "/files/" not in plan.files["_data/materials.yml"]
-
-
-def test_an_unreadable_opencourse_yml_still_unpublishes(monkeypatch, origins, tmp_path):
-    # Only the COPY half waits for a readable opencourse.yml: a file whose pattern was
-    # removed leaves `files/` on this sync, with no clone, and nothing is linked.
-    tree = {"lectures/01_a/slides.html": "deck", "labs/01_a/lab.html": "lab"}
-    _hosted, served = _mirror(
-        monkeypatch, origins, tmp_path, tree, _policy("**/*.html")
-    )
-    assert len(served) == 2
-    monkeypatch.setattr(site, "clone", _never_cloned)
-    hosted, served = _mirror(
-        monkeypatch, origins, tmp_path, tree, _policy("lectures/**"), withhold=None
-    )
-    assert (hosted, served) == ({}, ["materials/lectures/01_a/slides.html"])
-    assert not (tmp_path / "site" / site.SITE_FILES_DIR / "materials" / "labs").exists()
 
 
 def test_a_repo_no_longer_released_into_loses_its_copies(

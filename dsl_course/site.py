@@ -31,21 +31,22 @@ import stat
 import sys
 import tempfile
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from functools import cache
 from pathlib import Path
 from textwrap import indent
 
 import yaml
-from pathspec import GitIgnoreSpec
 
-from . import policy, run, schedule, status, teams
+from . import policy, run, schedule, selection, status, teams
 from .config import read_semester
 from .course import (
+    CONFIG_REPO,
     CUTOFF_SENTENCE,
     SELF_SELECT,
     SEMESTER_FILE,
+    STUDENT_SITE_BLOCK,
     advertises_console,
     course_block,
     identifier,
@@ -69,17 +70,15 @@ from .discovery import (
     semester_content_repos,
     semester_is_live,
 )
+from .faults import Unusable
 from .gh_contents import get_file_content, repo_tree
 from .ghcli import clone
 from .gradebook import spoken_day
 from .grading_spec import load_grading_spec, total_points
 from .log import CLIParser, log, log_err, log_step, log_withheld
-from .materials import publishable, semester_syllabus
-from .opencourse import read as read_opencourse
+from .materials import semester_syllabus
 from .public_site import publish as publish_public_site
 from .readings import demote_headings
-from .releaseignore import listed
-from .releaseignore import parse as parse_patterns
 from .repos import (
     default_branch,
 )
@@ -92,6 +91,7 @@ from .schedule_plan import (
     planned_rows,
     site_rows,
 )
+from .selection import Selection, exact_pattern, publishable
 from .site_repo import (
     DECK_EXTENSIONS,
     RENDERED_EXTENSIONS,
@@ -119,7 +119,6 @@ from .site_repo import (
     slug,
     sync_site_repo,
     theme_pages,
-    yaml_file,
 )
 from .student_status import _brief as read_brief
 from .team_formation import team_cap
@@ -166,108 +165,96 @@ def _repo_tree(org: str, repo: str) -> tuple[str, tuple[str, ...]]:
 
 # ---------------------------------------------------------------- publicly hosted copies
 
-# A course's declaration of what its semester sites may host, in the source repo faculty
-# edit (one file per course, applying to every semester of it).
-PUBLISH_FILE = "publish.yml"
-
 # GitHub refuses a file over 100 MB on a push, so one carried into the site repo fails the
 # sync's own push rather than the release that put it in the materials repo.
 _MAX_PUBLIC_FILE_BYTES = 100 * 1024 * 1024
+HOST_KEY = "host"
 
 
-@run.per_run(lambda course_org, source_repo: run.scope(course_org, source_repo))
-def _publish_policy(course_org: str, source_repo: str) -> GitIgnoreSpec | None:
-    """What `publish.yml` in `source_repo` declares public, or None when it declares
-    nothing.
+def host_selection(semester_org: str) -> Selection:
+    """`semester.yml student_site.host` (decision 0040), each key it leaves out taken from
+    `selection.host_default`: every shown kind but readings, as html and pdf.
 
-    The policy is COURSE-level and lives in the source repo faculty actually edit, not in
-    each semester's copy. Memoised for the run because `--all-semesters` asks the same
-    course the same question once per semester: `sync_site` leaves the memo alone, and
-    `main` clears it once the run's last semester is built. Patterns go through the
-    parser faculty's `.releaseignore` goes through, so one syntax covers both directions
-    of the question.
-
-    A file that is absent or empty is "nothing public", and the mirror may then delete
-    what an earlier sync copied. A file that does not PARSE, or whose `public:` is not a
-    list of patterns, stops the sync and reports: read as "nothing public" it would
-    unpublish a whole course's rendered decks over a typo, on a green run. The second is
-    a `RuntimeError`, the faculty-fixable config fault every caller of `sync_site` (a
-    hand-out, the CLI) reports in one line and survives."""
-    declared = yaml_file(course_org, source_repo, PUBLISH_FILE).get("public")
-    if declared is None:
-        return None
-    if not isinstance(declared, list) or not all(isinstance(x, str) for x in declared):
-        raise RuntimeError(
-            f"{course_org}/{source_repo}/{PUBLISH_FILE}: `public:` must be a list of "
-            "patterns"
-        )
-    return parse_patterns("\n".join(declared)) if declared else None
+    A file that does not parse, or a `host:` that does not validate, stops the sync and
+    reports (a `RuntimeError`, the faculty-fixable config fault every caller of
+    `sync_site` reports in one line and survives): read as "host the default" it would
+    publish what somebody wrote to keep off, on a green run."""
+    where = (
+        f"{semester_org}/{CONFIG_REPO}/{SEMESTER_FILE} {STUDENT_SITE_BLOCK}.{HOST_KEY}"
+    )
+    try:
+        meta = read_semester(semester_org).semester.mapping() or {}
+        block = meta.get(STUDENT_SITE_BLOCK) or {}
+        if not isinstance(block, dict):
+            raise Unusable(f"{where}: `{STUDENT_SITE_BLOCK}:` is not a mapping")
+        written = selection.parse(block.get(HOST_KEY), where)
+    except (yaml.YAMLError, Unusable) as exc:
+        raise RuntimeError(f"{where} could not be read: {exc}") from exc
+    return selection.with_defaults(written, selection.host_default())
 
 
-def _publish_policies(
-    course_org: str, sched: schedule.Schedule, content_repos: list[str]
-) -> dict[str, tuple[GitIgnoreSpec, ...]]:
-    """Each semester content repo the schedule releases into, mapped to the policies of
-    the source repos that feed it.
-
-    Keyed on the DESTINATION, because that is the repo whose files the site links and
-    whose bytes the mirror copies. Several sources may feed one destination, so a path is
-    public if ANY of their policies says so. A repo with no policies at all is still a key:
-    that is the instruction to delete what an earlier sync copied for it.
-
-    The schedule's declared destinations, not discovery's findings: this decides what gets
-    CLONED and copied into a public site repo, so it reads a faculty declaration rather
-    than a heuristic over an org listing (the same argument `_indexable_repos` makes)."""
-    sources: dict[str, set[str]] = {}
-    for release in sched.releases:
-        for d in release.deploy:
-            if d.semester_dest_repo in content_repos and d.course_source_repo:
-                sources.setdefault(d.semester_dest_repo, set()).add(
-                    d.course_source_repo
-                )
-    return {
-        repo: tuple(
-            spec
-            for source in sorted(source_repos)
-            if (spec := _publish_policy(course_org, source)) is not None
-        )
-        for repo, source_repos in sources.items()
-    }
+def _hosted_repos(sched: schedule.Schedule, content_repos: list[str]) -> list[str]:
+    """The semester content repos the schedule releases into: the only ones whose files
+    the site may host. The schedule's declared destinations, not discovery's findings:
+    this decides what gets CLONED and copied into a public site repo."""
+    return sorted(
+        {
+            d.semester_dest_repo
+            for release in sched.releases
+            for d in release.deploy
+            if d.course_source_repo
+        }
+        & set(content_repos)
+    )
 
 
-# A destination repo's copies as (path in the semester copy, path in the course source)
-# pairs, one per deploy into it (`_deploy_sources`).
-Renames = dict[str, tuple[tuple[str, str], ...]]
+# One semester repo's landed copies: (path in the repo, the entry's kind, public: true).
+Landings = tuple[tuple[str, str, bool], ...]
 
 
-def _deploy_sources(sched: schedule.Schedule) -> Renames:
+def _landings(sched: schedule.Schedule) -> dict[str, Landings]:
     """Each semester repo the schedule releases into, mapped to where each copy into it
-    came from: `(semester_dest_path, course_source_path)`, the destination as
-    `deploy_dest` resolves it. What turns a path in the semester copy back into the
-    path faculty wrote a pattern against, when a deploy renamed it on the way."""
-    out: dict[str, list[tuple[str, str]]] = {}
+    landed (`deploy_dest`), the kind of the entry that landed it (its block, `lectures`)
+    and whether the copy says `public: true`."""
+    out: dict[str, list[tuple[str, str, bool]]] = {}
     for release in sched.releases:
+        kind = release.block or policy.plural_of(release.kind)
         for d in release.deploy:
-            pair = (deploy_dest(d), d.course_source_path.strip("/"))
-            out.setdefault(d.semester_dest_repo, []).append(pair)
-    return {repo: tuple(pairs) for repo, pairs in out.items()}
+            out.setdefault(d.semester_dest_repo, []).append(
+                (deploy_dest(d), kind, d.public)
+            )
+    return {repo: tuple(rows) for repo, rows in out.items()}
 
 
-def _source_paths(path: str, renames: tuple[tuple[str, str], ...]) -> set[str]:
-    """Where `path` of a semester copy came from in the course source, through every
-    deploy that landed it (a copy may land inside another, so there can be several)."""
-    out = set()
-    for dest, source in renames:
-        if not dest:
-            rest = path
-        elif path == dest:
-            rest = ""
-        elif path.startswith(f"{dest}/"):
-            rest = path[len(dest) + 1 :]
-        else:
+def _landing(path: str, landings: Landings) -> tuple[str, bool] | None:
+    """The copy that landed `path`: the deepest one whose destination holds it, as (kind,
+    public), or None for a path no entry landed (released by hand)."""
+    best: tuple[int, str, bool] | None = None
+    for dest, kind, public in landings:
+        if dest and path != dest and not path.startswith(f"{dest}/"):
             continue
-        out.add("/".join(p for p in (source, rest) if p))
-    return out
+        if best is None or len(dest) > best[0]:
+            best = (len(dest), kind, public)
+    return None if best is None else (best[1], best[2])
+
+
+def kind_of_landed(landings: Landings) -> selection.KindOf:
+    """`selection`'s `kind_of` over one repo's landings."""
+
+    def kind_of(path: str) -> str | None:
+        hit = _landing(path, landings)
+        return hit[0] if hit else None
+
+    return kind_of
+
+
+def _with_public(host: Selection, landings: Landings) -> Selection:
+    """`host` with every `public: true` copy's destination included (decision 0040: a
+    readings file made public is hosted whatever `kinds` says)."""
+    public = tuple(exact_pattern(dest) for dest, _kind, pub in landings if pub and dest)
+    if not public:
+        return host
+    return replace(host, include=(*(host.include or ()), *public))
 
 
 def _bundle_prefix(path: str) -> str:
@@ -275,86 +262,46 @@ def _bundle_prefix(path: str) -> str:
     return f"{path.rsplit('.', 1)[0]}_files/"
 
 
-def _matched(
-    paths: tuple[str, ...],
-    specs: tuple[GitIgnoreSpec, ...],
-    allowed: Callable[[str], bool],
-) -> set[str]:
-    """The paths a policy makes public and `allowed` lets through: rendered formats, plus
-    each matched deck's bundle (`_public_selection`)."""
+def _hostable(paths: tuple[str, ...], host: Selection, landings: Landings) -> set[str]:
+    """The paths the selection hosts (`selection.select`: the denylist, `host` with the
+    public copies included, the institution's floor), only where a link will open the
+    copy - a file a browser renders (`RENDERED_EXTENSIONS`) - plus the `<stem>_files/`
+    bundle beside each hosted deck, without which it loads with no figures and no
+    styles. A bundle is the deck's, whatever its own kind or type; only the denylist,
+    `exclude` and the floor hold for it."""
+    use = _with_public(host, landings)
+    kind_of = kind_of_landed(landings)
+    limit = selection.floor(selection.HOST)
     matched = {
-        path
-        for path in paths
-        if file_ext(path) in RENDERED_EXTENSIONS
-        and any(spec.check_file(path).include for spec in specs)
-        and allowed(path)
+        p
+        for p in selection.select(paths, kind_of, use=use, limit=limit)
+        if file_ext(p) in RENDERED_EXTENSIONS
     }
+    bundle_rule = Selection(exclude=host.exclude)
     for path in list(matched):
         if file_ext(path) in DECK_EXTENSIONS:
             prefix = _bundle_prefix(path)
-            matched |= {a for a in paths if a.startswith(prefix) and allowed(a)}
+            matched |= {
+                a
+                for a in paths
+                if a.startswith(prefix)
+                and selection.kept(a, kind_of, use=bundle_rule, limit=limit)
+            }
     return matched
 
 
-def _prune(served: Path, keep: set[str]) -> None:
-    """Delete every file under `served` that is not in `keep`, and the directories that
-    leaves empty."""
-    if not served.is_dir():
-        return
-    for path in sorted(served.rglob("*"), reverse=True):
-        if path.is_dir() and not path.is_symlink():
-            if not any(path.iterdir()):
-                path.rmdir()
-        elif path.relative_to(served).as_posix() not in keep:
-            path.unlink()
-    if not any(served.iterdir()):
-        served.rmdir()
-
-
 def _public_selection(
-    src: Path,
-    repo: str,
-    paths: tuple[str, ...],
-    specs: tuple[GitIgnoreSpec, ...],
-    withhold: tuple[str, ...] = (),
-    renames: tuple[tuple[str, str], ...] = (),
+    src: Path, repo: str, paths: tuple[str, ...], host: Selection, landings: Landings
 ) -> frozenset[str]:
-    """Which paths of `repo` the site can host, out of its released tree.
-
-    What a policy matches - last match wins WITHIN one policy, which is what makes
-    `!lectures/09_*/**` carve a session back out - and only where a link will open the
-    copy: a file a browser renders (`RENDERED_EXTENSIONS`, html/htm/pdf), plus the
-    `<stem>_files/` bundle beside each matched deck, without which it loads with no
-    figures and no styles. A matched `.ipynb`, `.md` or `.csv` is not copied: GitHub
-    already renders it, and nothing would link the copy.
-
-    Two deny filters gate every candidate, bundles included, and cannot be written
-    around: the denylist (`materials.publishable`), and `opencourse.yml`'s `withhold`
-    (`withhold`) - a file kept off the open-courseware site is never hosted publicly here
-    either. `withhold` is written against SOURCE repo paths, so it is matched against the
-    path in this copy AND every source path a deploy landed it from (`renames`, this
-    repo's `_deploy_sources`): a deploy that renames a withheld folder hosts nothing.
+    """Which paths of `repo` the site can host, out of its released tree (`_hostable`).
 
     A file GitHub would refuse on a push is dropped with a warning rather than failing the
     sync. So is anything that is not a regular file - `lstat`, so a symlink is judged as
     the link it is rather than as what it points at - and anything the clone does not
     have. Judged over the same tree the links are built from (`_repo_tree`); the clone is
     only where the bytes and the sizes come from."""
-
-    ignore = listed(withhold) if withhold else None
-
-    def withheld(path: str) -> bool:
-        # Every name above a released blob is a directory, and the blob itself is not.
-        return any(
-            ignore.excludes(p, lambda rel, p=p: rel != p)
-            for p in {path, *_source_paths(path, renames)}
-        )
-
-    def allowed(path: str) -> bool:
-        return publishable(path) and not (ignore and withheld(path))
-
     keep = set()
-    for path in _matched(paths, specs, allowed):
+    for path in _hostable(paths, host, landings):
         try:
             st = (src / path).lstat()
         except OSError:
@@ -374,53 +321,45 @@ def _public_selection(
 def _mirror_public(
     site_wd: Path,
     semester_org: str,
-    policies: dict[str, tuple[GitIgnoreSpec, ...]],
-    withhold: tuple[str, ...] | None = (),
-    renames: Renames | None = None,
+    repos: list[str],
+    host: Selection,
+    landings: dict[str, Landings],
 ) -> Hosted:
-    """Copy every publicly declared file of this semester's content repos into the site's
-    own `files/<repo>/` tree, and say what actually landed there.
+    """Copy every hosted file of this semester's content repos into the site's own
+    `files/<repo>/` tree, and say what actually landed there.
 
     The copy source is the RELEASED semester repo, never the course-org source: one
     release boundary for the whole toolkit, so a `.releaseignore` that held a file back
     from the semester holds it back from the public site too. The clone is shallow.
 
-    Deleted and rebuilt per repo on every sync, which is what makes unpublishing work:
-    removing a pattern removes the copy. Only ever AFTER a successful clone - a site
+    Deleted and rebuilt per repo on every sync, which is what makes unhosting work:
+    narrowing `host:` removes the copy. Only ever AFTER a successful clone - a site
     republished with every rendered deck deleted because one clone failed is a worse
-    outage than a copy one sync stale. A `files/<repo>/` whose repo is no longer a key of
-    `policies` (the plan stopped releasing into it) goes too.
+    outage than a copy one sync stale. A `files/<repo>/` whose repo is not in `repos`
+    (the plan stopped releasing into it) goes too, and so does every copy when `host:`
+    selects nothing at all.
 
-    `withhold` is `opencourse.yml`'s list and `renames` the plan's `_deploy_sources`
-    (`_public_selection`). `withhold=None` is an `opencourse.yml` that could not be read:
-    then only the deletion half runs - stale repos, repos with nothing declared, and every
-    copy the policy no longer matches go, with no clone - and nothing is copied or linked,
-    because what the file would withhold is unknown.
-
-    Logs name repos and paths only: `policies` covers the release plan's declared
+    Logs name repos and paths only: `repos` are the release plan's declared
     destinations, never a student's repo."""
     hosted: dict[str, frozenset[str]] = {}
     root = site_wd / SITE_FILES_DIR
+    nothing = (
+        not host.kinds
+        and not host.include
+        and not any(pub for rows in landings.values() for _d, _k, pub in rows)
+    )
     if root.is_dir():
         for stale in sorted(root.iterdir()):
-            if stale.name not in policies:
+            if stale.name not in repos or nothing:
                 if stale.is_dir():
                     shutil.rmtree(stale)
                 else:
                     stale.unlink()
-    for repo in sorted(policies):
+    if nothing:
+        return hosted
+    for repo in repos:
         served = root / repo
-        if not policies[repo]:
-            # Nothing declared public: an earlier sync's copy has to go.
-            if served.exists():
-                shutil.rmtree(served)
-            continue
         _branch, paths = _repo_tree(semester_org, repo)
-        if withhold is None:
-            # A superset of what a readable file would keep: whatever is outside it was
-            # unpublished, and has to go now rather than when the file is fixed.
-            _prune(served, _matched(paths, policies[repo], publishable))
-            continue
         with tempfile.TemporaryDirectory() as work:
             src = Path(work) / repo
             if not clone(semester_org, repo, src, shallow=True):
@@ -429,14 +368,7 @@ def _mirror_public(
                     "site are left as the last sync made them"
                 )
                 continue
-            keep = _public_selection(
-                src,
-                repo,
-                paths,
-                policies[repo],
-                withhold,
-                (renames or {}).get(repo, ()),
-            )
+            keep = _public_selection(src, repo, paths, host, landings.get(repo, ()))
             if served.exists():
                 shutil.rmtree(served)
             if not keep:
@@ -1513,35 +1445,17 @@ def sync_site(course_org: str, semester_org: str) -> int:
         # The repos the release plan names: never a student's repo, whose folder names
         # would reach this public site.
         live = frozenset(indexable)
-        # What this course declares PUBLIC, per release destination (`publish.yml` in the
-        # source repo the plan names). Copied before a single row is rendered, so every
-        # page that links a hosted copy links one that exists.
-        # `opencourse.yml`'s `withhold` is a deny filter here too: what the course keeps
-        # off its open-courseware site is never hosted publicly on this one. Read only
-        # when something is declared public, and a file that cannot be read stops the
-        # copying (the last sync's copies stand, linked from nothing), never the sync -
-        # nor the deletions: an unpublished file still leaves `files/`.
-        policies = _publish_policies(course_org, sched, content_repos)
-        hosted: Hosted = {}
-        if any(policies.values()):
-            try:
-                opencourse = read_opencourse(course_org)
-            except RuntimeError as exc:
-                log_err(
-                    f"{course_org}/.github/opencourse.yml could not be read, so no copy "
-                    f"is hosted on this sync: {exc}"
-                )
-                _mirror_public(site_wd, semester_org, policies, None)
-            else:
-                hosted = _mirror_public(
-                    site_wd,
-                    semester_org,
-                    policies,
-                    opencourse.withhold if opencourse else (),
-                    _deploy_sources(sched),
-                )
-        else:
-            hosted = _mirror_public(site_wd, semester_org, policies)
+        # What the semester hosts publicly (`student_site.host`, decision 0040), per
+        # release destination. Copied before a single row is rendered, so every page
+        # that links a hosted copy links one that exists. A `host:` that cannot be read
+        # stops the sync (`host_selection`).
+        hosted = _mirror_public(
+            site_wd,
+            semester_org,
+            _hosted_repos(sched, content_repos),
+            host_selection(semester_org),
+            _landings(sched),
+        )
         rows, present = _site_rows(semester_org, planned, allow, live, hosted)
         # ONE read of the team cells for every self-select group assignment (`_formed_teams`).
         formed_teams = _formed_teams(semester_org, sched)
@@ -1775,9 +1689,6 @@ def main() -> int:
     except (RuntimeError, yaml.YAMLError) as exc:
         log_err(str(exc))
         return 1
-    finally:
-        # The end of the build: every semester of this run has read the course's policy.
-        _publish_policy.cache_clear()
 
 
 if __name__ == "__main__":

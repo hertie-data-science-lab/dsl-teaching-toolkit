@@ -11,8 +11,8 @@ that makes `!` correct - is here.
 `Ignore` is the whole rule and reads no files. Two adapters feed it, because the outbound
 paths do not all have a clone to look at:
 
-  deny_for(root) / excludes(root, path)   a local clone      (deploy, public_site, assign)
-  deny_lines(root, lines)                 a pattern list     (open_course_site withhold)
+  deny_for(root) / excludes(root, path)   a local clone      (selection, assign)
+  listed(lines)                           a pattern list     (selection's include/exclude)
   from_tree(paths, read)                  a GitHub tree      (assign's semester template,
                                                               schedule's source check)
 
@@ -210,18 +210,12 @@ def listed(lines: Iterable[str]) -> Ignore:
     return Ignore(lambda dirrel: None if dirrel else spec)
 
 
-def deny_lines(root: Path, lines: Iterable[str]) -> Deny:
-    """`deny_for` for a pattern list that lives in no file (`open_course_site:`'s
-    `withhold:`): the same rule, read as if it were `root`'s own `.releaseignore`."""
-    return _deny(root, listed(lines))
-
-
-def excludes(root: Path, path: Path, lines: Iterable[str] | None = None) -> bool:
-    """Whether one named `path` under the clone at `root` is withheld: by the
-    `.releaseignore` files under `root`, or, given `lines`, by that pattern list alone."""
+def excludes(root: Path, path: Path) -> bool:
+    """Whether one named `path` under the clone at `root` is withheld by the
+    `.releaseignore` files under `root`."""
     if path == root or root not in path.parents:
         return False
-    ignore = _local(root) if lines is None else listed(lines)
+    ignore = _local(root)
     return ignore.excludes(
         path.relative_to(root).as_posix(), lambda rel: _is_dir(root / rel)
     )

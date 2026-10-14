@@ -35,8 +35,4 @@ defaults:   # every key present; uncomment to override. The comment shows the in
 open_course_site:   # the public website, an open version of one materials repo
   enabled: false
   source_repo: course-materials-f2026
-  readings_mode: reading-list
-  include_lectures: true
-  withhold:
-    - .system/
-    - "[Ss]olution*"
+  publish: {kinds: [lectures, labs], reading_lists: true}   # which files it publishes; reading lists are text

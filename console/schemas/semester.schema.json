@@ -126,6 +126,45 @@
     "student_site": {
       "additionalProperties": false,
       "properties": {
+        "host": {
+          "additionalProperties": false,
+          "properties": {
+            "exclude": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "include": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kinds": {
+              "items": {
+                "enum": [
+                  "lectures",
+                  "labs",
+                  "readings",
+                  "exams",
+                  "drop-ins",
+                  "assets",
+                  "events"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "types": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        },
         "syllabus": {
           "type": "string"
         }

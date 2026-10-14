@@ -64,8 +64,8 @@ Cron-driven runs (**Scheduled release**, and the automatic paths of **Sync site*
 **Sync membership** / **Publish course website**) skip the access gate entirely - a scheduled run
 has no actor to check.
 
-> **Publish course website:** `actual-readings` mode hosts the reading files publicly. Only
-> publish what you hold the rights to share - use `reading-list` for copyrighted readings.
+> **Publish course website:** listing `readings` in `publish.kinds` hosts the reading files
+> publicly. Only publish what you hold the rights to share; the reading lists are text.
 
 <a id="what-instructors-tag-reaches"></a>
 

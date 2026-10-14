@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// Course details (WP-S6): the public website switch writes opencourse.yml at once, each
+// Course details (WP-S6): the public website switch writes course.yml at once, each
 // select lists its inherited value once as "X (default)", and "Edit the file directly".
 
 import { render } from 'preact';
@@ -54,7 +54,9 @@ async function flip() {
 async function settle(until: () => boolean) {
   for (let i = 0; i < 200 && !until(); i++) await act(() => new Promise((r) => setTimeout(r, 0)));
 }
-const puts = (gh: FakeGitHub) => gh.seen.filter((s) => s.method === 'PUT' && s.url.endsWith('/contents/opencourse.yml'));
+const puts = (gh: FakeGitHub) => gh.seen.filter((s) => s.method === 'PUT' && s.url.endsWith('/contents/course.yml'));
+/** A course.yml whose public website is off (as seeded). */
+const COURSE_YML = '# INSTRUCTOR-OWNED\ncourse:\n  name: Machine Learning\nopen_course_site:\n  enabled: false\n  source_repo:\n';
 const body = (s: Seen) => decodeBase64((s.body as { content: string }).content);
 const word = () => root!.querySelector('.web-switch .footnote')!.textContent;
 
@@ -62,30 +64,30 @@ const idle = () => !root!.querySelector<HTMLInputElement>('#cd-web')!.disabled;
 const input = () => root!.querySelector<HTMLInputElement>('#cd-web')!;
 const noMaterials: Loaded = { kind: 'ready', status: { ...(example as unknown as Status), course: { ...(example as unknown as Status).course!, materials: [] } }, sha: 's', stale: [] };
 
-/** A file store whose opencourse.yml could not be read. */
+/** A file store whose course.yml could not be read. */
 class Unreadable extends StaticFiles {
   file(owner: string, repo: string, path: string): FileState {
-    return path === 'opencourse.yml' ? { kind: 'error', message: 'boom' } : super.file(owner, repo, path);
+    return path === 'course.yml' ? { kind: 'error', message: 'boom' } : super.file(owner, repo, path);
   }
 }
 
 describe('the public website switch in Course details', () => {
   it('writes enabled at once, keeping the rest of the file', async () => {
     const gh = github();
-    const f = new StaticFiles({ [`${ORG}/.github/dsl-course.yml`]: META, [`${ORG}/.github/opencourse.yml`]: '# mine\nenabled: true\nsource_repo: course-materials-f2026\n' });
+    const f = new StaticFiles({ [`${ORG}/.github/dsl-course.yml`]: META, [`${ORG}/.github/course.yml`]: '# mine\nopen_course_site:\n  enabled: true\n  source_repo: course-materials-f2026\n' });
     await mount(envOf(gh, f), f);
     expect(word()).toBe('On: updates daily');
     expect(input().getAttribute('aria-describedby')).toBe('cd-web-state');
     await flip();
     await settle(() => puts(gh).length > 0 && idle());
-    expect(body(puts(gh)[0])).toBe('# mine\nenabled: false\nsource_repo: course-materials-f2026\n');
+    expect(body(puts(gh)[0])).toBe('# mine\nopen_course_site:\n  enabled: false\n  source_repo: course-materials-f2026\n');
     expect(word()).toBe('Off');
     expect(input().checked).toBe(false);
   });
 
-  it('seeds opencourse.yml when there is none, holding the new position while it saves', async () => {
+  it('turns the website on with the newest materials repo, holding the new position while it saves', async () => {
     const gh = github();
-    const f = new StaticFiles({ [`${ORG}/.github/dsl-course.yml`]: META });
+    const f = new StaticFiles({ [`${ORG}/.github/dsl-course.yml`]: META, [`${ORG}/.github/course.yml`]: COURSE_YML });
     await mount(envOf(gh, f), f);
     expect(word()).toBe('Off');
     await flip();
@@ -97,24 +99,23 @@ describe('the public website switch in Course details', () => {
     await settle(() => puts(gh).length > 0 && idle());
     const text = body(puts(gh)[0]);
     expect(text.startsWith('# INSTRUCTOR-OWNED')).toBe(true);
-    expect(parse(text)).toMatchObject({ enabled: true, source_repo: 'course-materials-f2026' });
-    expect((puts(gh)[0].body as { sha?: string }).sha).toBeUndefined();
+    expect(parse(text).open_course_site).toMatchObject({ enabled: true, source_repo: 'course-materials-f2026' });
     expect(word()).toBe('On: updates daily');
   });
 
   it('is not part of the form’s Save', async () => {
     const gh = github();
-    const f = new StaticFiles({ [`${ORG}/.github/dsl-course.yml`]: META });
+    const f = new StaticFiles({ [`${ORG}/.github/dsl-course.yml`]: META, [`${ORG}/.github/course.yml`]: COURSE_YML });
     await mount(envOf(gh, f), f);
     await flip();
     await settle(() => puts(gh).length > 0 && idle());
-    expect(gh.seen.filter((s) => s.method === 'PUT').map((s) => s.url.split('/contents/')[1])).toEqual(['opencourse.yml']);
+    expect(gh.seen.filter((s) => s.method === 'PUT').map((s) => s.url.split('/contents/')[1])).toEqual(['course.yml']);
     expect([...root!.querySelectorAll('button')].find((b) => b.textContent === 'Save')!.disabled).toBe(true);
   });
 
   it('goes back and says why when the save fails', async () => {
     const gh = new FakeGitHub().on('PUT', /\/contents\//, () => json({ message: 'Server error' }, 500));
-    const f = new StaticFiles({ [`${ORG}/.github/dsl-course.yml`]: META });
+    const f = new StaticFiles({ [`${ORG}/.github/dsl-course.yml`]: META, [`${ORG}/.github/course.yml`]: COURSE_YML });
     await mount(envOf(gh, f), f);
     await flip();
     await settle(() => idle());
@@ -125,7 +126,7 @@ describe('the public website switch in Course details', () => {
 
   it('refuses to turn on without a materials repo, and writes nothing', async () => {
     const gh = github();
-    const f = new StaticFiles({ [`${ORG}/.github/dsl-course.yml`]: META });
+    const f = new StaticFiles({ [`${ORG}/.github/dsl-course.yml`]: META, [`${ORG}/.github/course.yml`]: COURSE_YML });
     await mount(envOf(gh, f), f, noMaterials);
     await flip();
     expect(input().checked).toBe(false);
@@ -184,7 +185,7 @@ describe('copy', () => {
     expect(CONFLICT).toContain('or use Edit the file directly.');
   });
   it('explains the linked file types with a ?', () => {
-    const f = new StaticFiles({ [`${ORG}/.github/dsl-course.yml`]: META });
+    const f = new StaticFiles({ [`${ORG}/.github/dsl-course.yml`]: META, [`${ORG}/.github/course.yml`]: COURSE_YML });
     const host = document.body.appendChild(document.createElement('div'));
     render(<DetailsScreen course={course} loaded={loaded} cohortStates={{}} files={f} now={0} />, host);
     const q = host.querySelector('button[aria-label="About linked file types"]');
@@ -194,7 +195,7 @@ describe('copy', () => {
     host.remove();
   });
   it('says what the linked file types do, and that the public website is not affected', () => {
-    const f = new StaticFiles({ [`${ORG}/.github/dsl-course.yml`]: META });
+    const f = new StaticFiles({ [`${ORG}/.github/dsl-course.yml`]: META, [`${ORG}/.github/course.yml`]: COURSE_YML });
     const out = html(<DetailsScreen course={course} loaded={loaded} cohortStates={{}} files={f} now={0} />);
     expect(out).toContain('File types linked on each semester’s student site');
     expect(out).toContain('Other files are still released: students reach them through the repo.');

@@ -26,6 +26,7 @@ from dsl_course import (
     releaseignore,
     repos,
     scaffold,
+    selection,
     settings,
     workflows_place,
 )
@@ -1323,10 +1324,8 @@ def test_no_system_file_is_ever_released_to_students():
     # toolkit wrote about itself - into a semester. Asserted over the whole manifest because
     # the nightly refresh back-fills these into repos that have been running for months:
     # the exclusion is the precondition that makes creating them there safe.
-    from dsl_course import deploy
-
     for path in scaffold.materials_system_files("Org", "course-materials-f2026"):
-        assert path.split("/")[0] in deploy.ROOT_RELEASE_EXCLUDED, path
+        assert selection.denied(path), path
 
 
 def test_a_stub_faculty_have_written_over_is_never_touched_again(fake):

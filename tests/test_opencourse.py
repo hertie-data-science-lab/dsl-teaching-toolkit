@@ -1,15 +1,16 @@
 """opencourse: the public website's `open_course_site:` block of `course.yml`, and its
-withhold list."""
+`publish:` Selection."""
 
 from __future__ import annotations
 
 import pytest
 import yaml
 
-from dsl_course import config, opencourse, releaseignore, schemas
+from dsl_course import config, opencourse, schemas, selection
 from dsl_course.faults import Unusable
 from dsl_course.opencourse import OpenCourse
 from dsl_course.schema_check import validate
+from dsl_course.selection import Selection
 
 
 def _seeded(oc: OpenCourse | None = None) -> dict | None:
@@ -24,46 +25,21 @@ def test_absent_or_empty_is_off():
 
 def test_the_seeded_block_is_off_and_parses():
     assert opencourse.seed_text().startswith("open_course_site:")
-    assert opencourse.parse(_seeded()) == OpenCourse(
-        withhold=opencourse.DEFAULT_WITHHOLD
-    )
+    oc = opencourse.parse(_seeded())
+    assert oc == OpenCourse(publish=Selection(kinds=("lectures", "labs")))
+    # The keys the seed leaves out take the open site's defaults (decision 0040).
+    assert oc.selection.exclude == selection.PUBLISH_EXCLUDE
+    assert oc.reading_lists is True
 
 
-def test_the_seed_withholds_the_system_folder_and_answers_by_default():
-    text = opencourse.seed_text()
-    assert (
-        "  # word solution, exam, grade, marks or private in it:\n"
-        "  withhold:\n"
-        "  - .system/\n"
-        "  - '[Ss]olution*'\n"
-        "  - '*[-_.][Ss]olution*'\n"
-        "  - '*[Ee]xam'\n"
-        "  - '*[Ee]xams'\n"
-        "  - '*[Ee]xam[-_.]*'\n"
-        "  - '[Gg]rade*'\n"
-        "  - '*[-_.][Gg]rade*'\n"
-        "  - '[Mm]arks*'\n"
-        "  - '*[-_.][Mm]arks*'\n"
-        "  - '*[Pp]rivate*'\n"
-    ) in text
-    # A website already on keeps its empty list: a default would take files off it.
-    assert opencourse.parse(_seeded(OpenCourse(True, "m"))).withhold == ()
-    # A seed that names its own list keeps it: the defaults fill only an empty one.
-    mine = _seeded(OpenCourse(withhold=("drafts/",)))
-    assert opencourse.parse(mine).withhold == ("drafts/",)
-
-
-def test_the_default_withhold_list_keeps_answers_off_at_any_depth(tmp_path):
+def test_the_default_exclude_keeps_answers_off_at_any_depth():
     kept = (
-        ".system/MAINTAINING.md",
         "labs/01/lab1_solution.ipynb",
-        "labs/02/solutions/a.py",
         "solutions/a.py",
         "exams/2025/paper.pdf",
         "lectures/03/midterm_exam.pdf",
         "grades/marks.csv",
         "notes/private/todo.md",
-        "labs/Solutions/a.py",
         "Exams/paper.pdf",
         "labs/lab1_Solution.ipynb",
     )
@@ -73,25 +49,27 @@ def test_the_default_withhold_list_keeps_answers_off_at_any_depth(tmp_path):
         "examples/a.py",
         "benchmarks/run.py",
         "notes/remarks.md",
-        "lectures/03/example.py",
         "lectures/04/image-resolution.ipynb",
         "conflict-resolution/notes.md",
     )
-    for rel in kept + public:
-        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
-        (tmp_path / rel).write_text("x")
-    lines = opencourse.parse(_seeded()).withhold
+    sel = OpenCourse().selection
     for rel in kept:
-        assert releaseignore.excludes(tmp_path, tmp_path / rel, lines), rel
+        assert not sel.keeps(rel, "lectures"), rel
     for rel in public:
-        assert not releaseignore.excludes(tmp_path, tmp_path / rel, lines), rel
+        assert sel.keeps(rel, "lectures"), rel
 
 
 def test_a_seed_round_trips_its_values():
     oc = OpenCourse(
-        True, "course-materials-f2025", "none", False, ("labs/**", "*.key", "!x", "#y")
+        True,
+        "course-materials-f2025",
+        Selection(kinds=("readings",), exclude=("labs/**", "*.key", "!x", "#y")),
+        False,
     )
     assert opencourse.parse(_seeded(oc)) == oc
+    # An empty `exclude:` is written, so a migrated live site keeps no default list.
+    bare = OpenCourse(True, "m", Selection(kinds=("lectures",), exclude=()))
+    assert opencourse.parse(_seeded(bare)).selection.exclude == ()
     # The site's contact rides in the block (decision 0019).
     block = opencourse.block(yaml.safe_load(opencourse.seed_text(oc, "c@x.edu")))
     assert block["contact"] == "c@x.edu" and opencourse.parse(block) == oc
@@ -101,8 +79,11 @@ def test_a_seed_round_trips_its_values():
     ("data", "why"),
     [
         ({"enabled": "yes"}, "enabled: must be boolean"),
-        ({"readings_mode": "all"}, "readings_mode: must be one of"),
-        ({"withhold": "labs/"}, "withhold: must be array"),
+        ({"readings_mode": "all"}, "`readings_mode` is retired"),
+        ({"withhold": ["labs/"]}, "`withhold` is retired"),
+        ({"publish": {"kinds": ["lecture"]}}, "not a kind of the institution"),
+        ({"publish": {"withhold": []}}, "withhold: is not a known field"),
+        ({"publish": {"reading_lists": "yes"}}, "reading_lists: must be boolean"),
         ({"licence": "cc-by"}, "licence: is not a known field"),
         ({"enabled": True}, "enabled needs a source_repo"),
     ],
@@ -141,16 +122,3 @@ def test_the_exported_schema_takes_what_the_parser_takes():
     good = yaml.safe_load(opencourse.seed_text(OpenCourse(True, "m")))
     assert validate(good, exported) == []
     assert validate({"open_course_site": {"enabled": "yes"}}, exported)
-
-
-def test_the_withhold_list_prunes_like_a_root_releaseignore(tmp_path):
-    for rel in ("labs/01/lab.pdf", "labs/01/data.csv", "lectures/01/a.pdf"):
-        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
-        (tmp_path / rel).write_text("x")
-    lines = ("labs/", "!labs/01/lab.pdf", "*.pdf")
-    assert releaseignore.excludes(tmp_path, tmp_path / "labs/01/lab.pdf", lines)
-    assert releaseignore.excludes(tmp_path, tmp_path / "lectures/01/a.pdf", lines)
-    deny = releaseignore.deny_lines(tmp_path, lines)
-    assert deny(str(tmp_path), ["labs", "lectures"]) == {"labs"}
-    # No `.releaseignore` file is read: the list alone decides.
-    assert not releaseignore.excludes(tmp_path, tmp_path / "lectures/01/a.pdf")

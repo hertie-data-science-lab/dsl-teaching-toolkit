@@ -59,7 +59,11 @@ def _render(monkeypatch, tmp_path, sched) -> dict:
     monkeypatch.setattr(
         test_site.site, "load_grading_spec", lambda *a, **k: test_site._spec("")
     )
-    monkeypatch.setattr(test_site.site, "read_opencourse", lambda org: None)
+    monkeypatch.setattr(
+        test_site.site,
+        "host_selection",
+        lambda org: test_site.Selection(kinds=(), include=()),
+    )
     monkeypatch.setattr(test_site.site_repo, "acting_login", lambda: None)
     plan = _plan(monkeypatch, tmp_path, sched, trees={"materials": _TREE})
     return {

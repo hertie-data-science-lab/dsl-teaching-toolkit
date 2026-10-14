@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'preact/hooks';
 import { useEnv } from '../env';
-import { useSave } from '../edit/save';
+import { invalidText, useSave } from '../edit/save';
 import { YamlText, deepEqual, obj, render } from '../edit/yamlText';
 import { Field, SchemaForm, fieldErrors } from '../forms/Form';
 import { ago, fmtWhen, kebab, str } from '../model/format';
@@ -20,7 +20,12 @@ import { SaveBar, SaveLine } from '../ui/edit';
 import { Ext } from '../ui/icons';
 import { WithStatus, cohortScope, todayOf, tzOf, useOperations, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
-import { COURSE_REPO, CONFIG_REPO, INSTRUCTORS_FILE, SITE_CONFIG } from '../model/names';
+import { COURSE_REPO, CONFIG_REPO, INSTRUCTORS_FILE, SEMESTER_FILE, SITE_CONFIG } from '../model/names';
+import semesterSchema from '../../schemas/semester.schema.json';
+import { DEFAULT_DEST_REPO } from '../model/policy';
+import { FLOORS, HOST_DEFAULT, kindOfLanded, landings, readSel, withPublic, type Sel } from '../model/selection';
+import { validator } from '../model/validate';
+import { SelectionEditor } from '../ui/SelectionEditor';
 import { draftErrors, readDraft, type SemesterDraft } from '../model/scheduleEdit';
 import { ABOUT } from '../tiers/course';
 import type { FieldTier, Tiers, Values } from '../tiers/types';
@@ -188,9 +193,65 @@ function Site(p: ReadyProps) {
             ))}
           </ul>
         </section>
+        <HostedPanel p={p} />
         <SiteSettings p={p} repo={repo} cfgFile={cfgFile} cfg={cfg} />
       </div>
     </>
+  );
+}
+
+const validSemester = validator(semesterSchema);
+
+/** `semester.yml` with `student_site.host` written (an empty selection removes the key), or why it would not be valid. */
+export function hostFileAfter(text: string, host: Sel): { text: string } | { error: string } {
+  const y = new YamlText(text);
+  if (y.errors.length) return { error: `${SEMESTER_FILE} does not parse; fix it with Edit the file directly.` };
+  y.assign(['student_site', 'host'], Object.keys(host).length ? host : undefined);
+  return validSemester(y.toJS() ?? {}) ? { text: y.text } : { error: invalidText(SEMESTER_FILE, validSemester) };
+}
+
+/**
+ * What the PUBLIC semester site hosts a viewable copy of (`student_site.host`, decision 0040): the
+ * selection editor over a repo the schedule releases into, each file's kind the schedule entry
+ * that landed it. A readings file marked public is hosted whatever the kinds say.
+ */
+function HostedPanel({ p }: { p: ReadyProps }) {
+  const sf = useSchedFile(p);
+  const doc = sf && sf !== 'loading' && !sf.error ? sf.doc : null;
+  const repos = useMemo(() => {
+    const found = new Set<string>();
+    for (const b of Object.values(doc ?? {})) for (const e of Object.values(obj(b))) {
+      const files = obj(e).files;
+      for (const f of Array.isArray(files) ? files : []) if (obj(f).from_course_repo) found.add(String(obj(f).to_semester_repo || DEFAULT_DEST_REPO));
+    }
+    return [...found].sort();
+  }, [doc]);
+  const [picked, setPicked] = useState<string | null>(null);
+  const target = picked ?? repos[0] ?? DEFAULT_DEST_REPO;
+  const file = p.files.file(p.cohort.org, CONFIG_REPO, SEMESTER_FILE);
+  const parsed = useYaml(file);
+  const base = useMemo(() => readSel(obj(parsed?.doc?.student_site).host), [parsed]);
+  const { cur, set, save, setSave, run, unchanged } = useDraftSave<Sel>(base);
+  const ls = useMemo(() => (doc ? landings(doc, target) : []), [doc, target]);
+  const tree = p.files.tree(p.cohort.org, target);
+  const files = tree.kind === 'ready' ? tree.paths.filter((x) => !x.dir).map((x) => x.path) : [];
+  const doSave = async () => {
+    if (file.kind !== 'ready') return;
+    const out = hostFileAfter(file.text, cur);
+    if ('error' in out) return setSave({ kind: 'bad', text: out.error });
+    await run({ owner: p.cohort.org, repo: CONFIG_REPO, path: SEMESTER_FILE }, out.text, file.sha, { message: 'semester: edit what the student site hosts, from the DSL Teaching Console', statusRepo: [p.cohort.org, CONFIG_REPO] });
+  };
+  return (
+    <section class="panel section">
+      <h2>Hosted on this site <Hint label="About hosted copies">The student site is public. It hosts a viewable copy of the files picked here, so a deck or a pdf opens in the browser; the rest link to GitHub, where only the class can open them. Readings are copyrighted: their chip turns red when they are hosted. A readings file marked public in the schedule is hosted anyway.</Hint></h2>
+      {repos.length > 1 ? (
+        <div class="field"><label for="host-repo">Repo</label><select id="host-repo" onChange={(e) => setPicked((e.target as HTMLSelectElement).value)}>{repos.map((r) => <option value={r} selected={r === target}>{r}</option>)}</select><p class="hint">One selection for every repo the schedule releases into; this shows it on one.</p></div>
+      ) : null}
+      {file.kind === 'loading' || tree.kind === 'loading' ? <Loading what="Reading the released files" /> : tree.kind !== 'ready' ? <p class="footnote">Nothing released into {target} yet.</p> : (
+        <SelectionEditor files={files} value={cur} onChange={set} defaults={HOST_DEFAULT} kindOf={kindOfLanded(ls)} floor={FLOORS.student_site_host} rendered also={withPublic({}, ls).include} inWord="hosted" outWord="not hosted" />
+      )}
+      <SaveBar state={save} onSave={() => void doSave()} small disabled={file.kind !== 'ready' || unchanged} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: SEMESTER_FILE, exists: file.kind !== 'absent' }} />
+    </section>
   );
 }
 

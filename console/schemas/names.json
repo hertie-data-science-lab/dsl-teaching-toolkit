@@ -397,6 +397,38 @@
       "where": "a defaults: block"
     },
     {
+      "cost": "the public website does not publish - run the 0.11.0 migration (`python3 -m dsl_course.migrate`)",
+      "fault_code": "NOT_MIGRATED",
+      "new": "publish.kinds (readings) and publish.reading_lists",
+      "old": "readings_mode",
+      "since": "0.11.0",
+      "where": "course.yml open_course_site"
+    },
+    {
+      "cost": "the public website does not publish - run the 0.11.0 migration (`python3 -m dsl_course.migrate`)",
+      "fault_code": "NOT_MIGRATED",
+      "new": "publish.kinds",
+      "old": "include_lectures",
+      "since": "0.11.0",
+      "where": "course.yml open_course_site"
+    },
+    {
+      "cost": "the public website does not publish - run the 0.11.0 migration (`python3 -m dsl_course.migrate`)",
+      "fault_code": "NOT_MIGRATED",
+      "new": "publish.exclude",
+      "old": "withhold",
+      "since": "0.11.0",
+      "where": "course.yml open_course_site"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": "semester.yml student_site.host include",
+      "old": "publish.yml",
+      "since": "0.11.0",
+      "where": "course materials repo"
+    },
+    {
       "cost": "",
       "fault_code": null,
       "new": "email",

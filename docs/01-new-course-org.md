@@ -65,7 +65,7 @@ One file for the course, in course org → `.github`. Worked example: [`example-
 | `course:` | `name`, `code`, `description` (the blurb on every site), `toolkit_version_ref` (absent = `release`), `licence` (one of the institution's; absent = its first) |
 | `people:` | `course_admins`: the course's owners - admin on the course and every semester, mailed about faults here, shown as the course leads on the open course site |
 | `defaults:` | the defaults every semester inherits: `timezone`, `late_window_days`, `late_penalty_per_day`, `max_team_size`, `assignment_repo_visibility`, `archive_grace_days`, `materials_repo`, `marks_per_question`, `team_formation`. Seeded with every key commented, showing the value it inherits and from where; uncomment to override |
-| `open_course_site:` | the public website: `enabled`, `source_repo`, `readings_mode`, `include_lectures`, `withhold`, `contact` |
+| `open_course_site:` | the public website: `enabled`, `source_repo`, `publish` ([11](11-configure-cohort-site.md#what-the-public-sites-show)), `contact` |
 
 A default resolves nearest first, per key: the assignment's `schedule.yml` entry, the semester's `semester.yml`, this file, then the institution's `institution.yml`. The console shows each effective value and where it came from.
 

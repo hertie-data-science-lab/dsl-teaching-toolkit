@@ -59,7 +59,7 @@ from .course import (
 )
 from .discovery import handed_out_assignments
 from .gh_contents import get_file_content, repo_tree
-from .materials import publishable, semester_syllabus
+from .materials import semester_syllabus
 from .readings import demote_headings
 from .repos import default_branch
 from .schedule_plan import (
@@ -70,6 +70,7 @@ from .schedule_plan import (
     site_rows,
     term_end,
 )
+from .selection import publishable
 from .site_repo import (
     landed_links,
     people_cards,
@@ -296,7 +297,7 @@ def _all_day(when: datetime | date | None) -> bool:
 
 def _files(paths: set[str]) -> list[str]:
     """The files of a destination tree read with both kinds (`dest_paths`), sorted, minus
-    any path the public file may not name (`materials.publishable`): every path no other
+    any path the public file may not name (`selection.publishable`): every path no other
     path sits under."""
     folders = {p.rsplit("/", 1)[0] for p in paths if "/" in p}
     return sorted(p for p in paths if p not in folders and publishable(p))

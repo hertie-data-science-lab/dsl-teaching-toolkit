@@ -280,6 +280,15 @@ export function generateSyllabus(s: Scope, repo: string, syllabus: string): OpDe
   };
 }
 
+/** "Withheld patterns reviewed" (decision 0040 rule 7): marks the repo's `.releaseignore` reviewed, changing no pattern. */
+export function confirmWithheld(s: Scope, repo: string): OpDef {
+  return {
+    ...base(s, 'materials.confirm_withheld', repo), name: 'Withheld patterns reviewed', title: repo, where: s.where,
+    intro: `Marks ${repo}’s withheld patterns as reviewed without changing any: everything not withheld keeps reaching students.`,
+    verb: 'Confirm', running: 'Confirming', cancel: 'Stop', args: { repo }, target: ghUrl(s.courseOrg, repo, '.releaseignore'),
+  };
+}
+
 // ------------------------------------------------------------------ the wizards' operations
 
 export function bootstrapCohort(s: Scope & { cohortOrg: string }, courseName: string): OpDef {

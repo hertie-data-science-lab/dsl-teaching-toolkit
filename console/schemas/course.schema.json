@@ -98,29 +98,51 @@
         "enabled": {
           "type": "boolean"
         },
-        "include_lectures": {
-          "type": "boolean"
-        },
-        "readings_mode": {
-          "enum": [
-            "reading-list",
-            "actual-readings",
-            "none"
-          ],
-          "type": "string"
+        "publish": {
+          "additionalProperties": false,
+          "properties": {
+            "exclude": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "include": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kinds": {
+              "items": {
+                "enum": [
+                  "lectures",
+                  "labs",
+                  "readings",
+                  "exams",
+                  "drop-ins",
+                  "assets",
+                  "events"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "reading_lists": {
+              "type": "boolean"
+            },
+            "types": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
         },
         "source_repo": {
           "type": [
             "string",
-            "null"
-          ]
-        },
-        "withhold": {
-          "items": {
-            "type": "string"
-          },
-          "type": [
-            "array",
             "null"
           ]
         }
