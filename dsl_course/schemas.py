@@ -36,6 +36,7 @@ from .course import (
     CONFIG_REPO,
     COURSE_BLOCK,
     COURSE_CONFIG,
+    DEFAULT_FORMATS,
     DEFAULTS_BLOCK,
     FORMATS,
     INSTRUCTOR_ROLES,
@@ -795,6 +796,8 @@ def names_json() -> dict:
         "semester_topic": SEMESTER_TOPIC,
         "system_dir": records.SYSTEM_DIR,
         "course_file": COURSE_CONFIG,
+        # The starters New assignment offers when nobody chose (`course.DEFAULT_FORMATS`).
+        "default_formats": list(DEFAULT_FORMATS),
         "semester_file": SEMESTER_FILE,
         # WP-C removes: the console's settings screens still edit the 0.10 files.
         "instructors_file": legacy.OLD_INSTRUCTORS_FILE,

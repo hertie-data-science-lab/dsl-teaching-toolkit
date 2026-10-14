@@ -2,6 +2,9 @@
   "assignments_file": "assignments.yml",
   "config_repo": "semester-config",
   "course_file": "course.yml",
+  "default_formats": [
+    "ipynb"
+  ],
   "instructors_file": "instructors.yml",
   "join_markers": {
     "join_course": "<!-- dsl:join-course -->",
