@@ -350,13 +350,6 @@ def _secret_env(*names: str) -> str:
 
 
 _MAIL_ENV = _secret_env(*mailer.GRAPH_ENV, mailer.MAINTAINER_ENV)
-# Who hears about a fault in the COURSE org's OWN config - dsl-course.yml and the semester
-# registry, the two files that decide whether the course is synced at all. Separate from
-# _MAIL_ENV because only two steps in the estate check those files (the scheduler's release
-# pass and Sync membership's automatic job, both of which run in the course org), and an
-# address list has no business in the env of a workflow that never reads it. Never in a
-# semester-seeded workflow: see maintainers.md.
-_COURSE_ADMIN_ENV = _secret_env(mailer.COURSE_ADMIN_ENV)
 
 # Fail CLOSED: only an explicit `false` acts. Any other value - "True", "1", a blank from a
 # renamed input - previews. EVERY button with a `preview` box carries it (decision 0012),
@@ -1150,11 +1143,9 @@ def render_sync_membership(semester_orgs: list[str]) -> str:
         f"""          # The JSON boolean `true` and nothing else - a string "true" or a 1 is absent.
           DISPATCH_ALL: ${{{{ {_PAYLOAD_ALL_SEMESTERS} }}}}
 {_OLD_PAYLOAD_ENV}{_DEPRECATED_ALL_ENV}# A fault in the course org's own config is emailed to its admins from this step (see
-# dsl_course.notify.route_course), so the automatic job carries the transport and the
-# address list alongside the token. The manual button does not: somebody is standing at
-# that run and reads its log.
+# dsl_course.notify.route_course), so the automatic job carries the transport alongside
+# the token. The manual button does not: somebody is standing at that run and reads its log.
 {_MAIL_ENV}
-{_COURSE_ADMIN_ENV}
 """,
         f"""{_OLD_PAYLOAD_CHECK}{_DEPRECATED_ALL_NOTE}          # First, and never fatal: a push to either of the course's own config files is
           # what this job is here for, and the reconcile below is what SKIPS the course
@@ -1730,9 +1721,8 @@ on:
 # alongside the token. Without it the digest issue's @mention is the only channel, which
 # reaches whoever happens to read GitHub notifications that week. This pass also pre-flights
 # the COURSE org's own dsl-course.yml and semester registry, whose mail goes to the course
-# admins instead - a second address list, read only here and by Sync membership.
+# admins' `email:` there instead.
 {_MAIL_ENV}
-{_COURSE_ADMIN_ENV}
         run: |
 {_OLD_PAYLOAD_CHECK}          gh auth setup-git
           # Which driver delivered this tick. The run history is the only record of that,

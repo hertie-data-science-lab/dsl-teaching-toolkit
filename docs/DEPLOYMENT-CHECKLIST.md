@@ -74,9 +74,9 @@ passing, revokes on the next sync. This org's `instructors`/`teaching_assistants
 display-only cards; TAs are declared per semester in [`instructors.yml`](#instructorsyml).
 Runbook: [05](05-manage-teaching-team.md).
 
-An admin's `email` is optional. When any admin has one, a fault in this file is mailed to
-those addresses; when none has, it goes to the `DSL_COURSE_ADMIN_EMAILS` org secret (retiring
-after one release). This file is public, so an address written here is public too.
+An admin's `email` is optional: a fault in this file is mailed to it. This file is public,
+so an address written here is public too; without one, the digest issue's @mention is the
+only channel.
 
 `assignment_defaults:` (optional) is this course's defaults for its assignments:
 `max_team_size`, `late_window_days`, `late_penalty_per_day`, `team_formation`,

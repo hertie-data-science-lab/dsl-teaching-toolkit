@@ -2556,12 +2556,8 @@ def test_the_release_pass_itself_carries_the_transport():
     assert step["env"][mailer.MAINTAINER_ENV] == _secret_ref(mailer.MAINTAINER_ENV)
 
 
-# Where a fault in a COURSE org's OWN config is emailed: the two steps that check
-# dsl-course.yml and the semester registry, and nowhere else. An address list has no business
-# in the env of a workflow that never reads it.
-COURSE_ADMIN_CARRIERS = ("scheduler", "sync_membership")
-
-
+# The two steps that check dsl-course.yml and the semester registry mail a fault in them to
+# the course admins, so they carry the transport.
 @pytest.mark.parametrize(
     ("name", "command"),
     [
@@ -2569,22 +2565,12 @@ COURSE_ADMIN_CARRIERS = ("scheduler", "sync_membership")
         ("sync_membership", "--check-course-config"),
     ],
 )
-def test_the_course_config_check_carries_the_admin_addresses(name, command):
+def test_the_course_config_check_carries_the_transport(name, command):
     steps = [
         s for job in workflow_jobs(ALL_RENDERED[name]).values() for s in job["steps"]
     ]
     step = next(s for s in steps if command in str(s.get("run", "")))
-    # The transport AND the list: a step carrying one and not the other can mail, and has
-    # nobody to tell.
     assert set(mailer.GRAPH_ENV) <= set(step["env"])
-    assert step["env"][mailer.COURSE_ADMIN_ENV] == _secret_ref(mailer.COURSE_ADMIN_ENV)
-
-
-def test_no_other_workflow_is_handed_the_admin_addresses():
-    for name, rendered in ALL_RENDERED.items():
-        if name in COURSE_ADMIN_CARRIERS:
-            continue
-        assert mailer.COURSE_ADMIN_ENV not in rendered, name
 
 
 def test_a_push_to_either_course_config_file_checks_it_within_the_minute():
@@ -2604,11 +2590,11 @@ def test_a_push_to_either_course_config_file_checks_it_within_the_minute():
     assert run.index("--check-course-config") < run.index("dsl_course.sync_membership")
 
 
-def test_the_manual_sync_button_is_not_given_the_addresses():
+def test_the_manual_sync_button_is_not_given_the_transport():
     # Somebody is standing at that run and reads its log; the automatic job is the one
     # with nobody watching.
     steps = workflow_jobs(ALL_RENDERED["sync_membership"])["sync-dispatch"]["steps"]
-    assert all(mailer.COURSE_ADMIN_ENV not in (s.get("env") or {}) for s in steps)
+    assert all(not set(mailer.GRAPH_ENV) & set(s.get("env") or {}) for s in steps)
 
 
 def test_a_semester_bootstrap_forwards_the_maintainer_address_to_the_new_org():

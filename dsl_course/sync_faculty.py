@@ -234,9 +234,9 @@ def parse_faculty_from_meta(
                                 repo,
                             )
                         )
-                # A course admin's `email:` is OPTIONAL: when any admin declares one,
-                # `mailer.course_admin_addresses` prefers them over the
-                # `DSL_COURSE_ADMIN_EMAILS` org secret. Absent is fine; present and
+                # A course admin's `email:` is OPTIONAL: it is where a fault in the
+                # course's own config is mailed (`mailer.course_admin_addresses`). Absent
+                # is fine (the digest issue still @mentions); present and
                 # unusable is a fault, because the admin who wrote it expects mail.
                 if (
                     role == "course_admins"

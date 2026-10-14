@@ -308,7 +308,7 @@ spawned. What it guarantees, and what it does not:
 
 ## Secrets an org carries
 
-Three values are published onto an org by the toolkit itself, all through
+Two values are published onto an org by the toolkit itself, all through
 `bootstrap_course.set_org_secret` - which scopes the org secret to the infra repos that
 exist and then mirrors it as a repo secret onto the private ones, because on GitHub Free a
 `selected` org secret is never delivered to a private repo:
@@ -317,7 +317,6 @@ exist and then mirrors it as a repo secret onto the private ones, because on Git
 |---|---|---|
 | `DSL_BOT_TOKEN` | a secret on this repo | Bootstrap with `set_secret: true`; `seed refresh` also mirrors it onto each content repo and assignment template |
 | `DSL_MAINTAINER_EMAIL` | a repository **variable** on this repo | Bootstrap with `set_secret: true`, and Bootstrap semester forwards it to a semester |
-| `DSL_COURSE_ADMIN_EMAILS` | a repository **variable** on this repo | Bootstrap with `set_secret: true`. COURSE orgs only - Bootstrap semester does NOT forward it |
 
 `DSL_MAINTAINER_EMAIL` is where fault mail goes. A variable centrally and a secret on the
 org: an address is not a credential (and a masked secret cannot be read back to check it),
@@ -331,23 +330,11 @@ repo's variables, so an org bootstrapped before the variable existed gets it onc
     gh secret set DSL_MAINTAINER_EMAIL --org <course-org> \
       --visibility selected --repos .github --body '<address>'
 
-`DSL_COURSE_ADMIN_EMAILS` is the same arrangement one level down, and needs the same command
-with the same flags on an org bootstrapped before it existed:
-
-    gh secret set DSL_COURSE_ADMIN_EMAILS --org <course-org> \
-      --visibility selected --repos .github --body 'a@x.edu,b@x.edu'
-
-It is a comma-separated list of the course admins' addresses, and it is who hears about a
-fault in that course org's OWN config - `dsl-course.yml` and `semesters.yml`,
-which share one digest issue in the course org's `.github` (*dsl-course.yml / semester registry
-has entries the sync cannot use*). It is the fallback: when any admin in `dsl-course.yml` has
-an optional `email:`, `mailer.course_admin_addresses` uses those and never reads the secret.
-That file is public, so the secret is how an admin keeps an address private; an `email:` that
-is not an address is a fault in the same digest. Two steps read the secret
-- the scheduler's release pass and Sync membership's automatic job, both in the course org -
-and no other rendered workflow carries it (`tests/test_renderers.py` enforces both halves).
-Unset, the digest issue's `cc @<course>/course-admin` is the only channel and the run log
-says how many admins went unmailed.
+A fault in a course org's OWN config (`dsl-course.yml`, `semesters.yml`; one digest issue in
+its `.github`) is mailed to the course admins' optional `email:` in `dsl-course.yml`
+(`mailer.course_admin_addresses`). That file is public; an admin who keeps an address out of it
+is reached by the digest issue's `cc @<course>/course-admin` alone, and the run log says how many
+admins went unmailed.
 
 `.github` is the only infra repo a COURSE org has, and it is public, so no mirror is needed
 there. (Re-running Bootstrap on the org with `set_secret: true` does the same thing and is
@@ -741,9 +728,9 @@ half a dozen assignments in one afternoon.
 **Recipients** are the committer of the faulty line, by blame of the file at that line (for a
 CSV, the actor who pushed it, skipping the bot). Any addressee who is a TA puts the
 instructors on Cc; nobody identifiable falls back to every instructor, and a semester whose
-`instructors.yml` holds no address at all falls further - to `DSL_COURSE_ADMIN_EMAILS`, then to the
+`instructors.yml` holds no address at all falls further - to the course admins' `email:`, then to the
 maintainer, with the run log naming which fallback it used and never an address. The
-course-level digest goes to `DSL_COURSE_ADMIN_EMAILS` (see
+course-level digest goes to the course admins' `email:` in `dsl-course.yml` (see
 [Secrets an org carries](#secrets-an-org-carries)) with the maintainer copied from the first
 mail, and falls back to `cc @<course>/course-admin`.
 A CSV or sheet fault carries the row or line and the column - never a cell value, never a
