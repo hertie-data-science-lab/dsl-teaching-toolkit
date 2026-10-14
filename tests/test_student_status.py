@@ -509,6 +509,19 @@ def test_hand_out_due_exam_and_term_rows():
     assert ids.index("term-start") < ids.index("lecture_01") < ids.index("term-end")
 
 
+def test_a_term_row_carries_the_entry_s_own_title_and_details():
+    facts = _facts()
+    facts.sched.semester_start_title = "Welcome week"
+    facts.sched.semester_start_details = "Orientation in the atrium."
+    rows = {
+        r["id"]: r
+        for r in student_status.render(_course(), facts, _extra(facts), NOW)["rows"]
+    }
+    assert rows["term-start"]["title"] == "Welcome week"
+    assert rows["term-start"]["details"] == "Orientation in the atrium."
+    assert rows["term-end"]["title"] == "Semester ends"
+
+
 def test_kinds_come_from_the_policy():
     kinds = _render()["kinds"]
     assert kinds["lecture"]["label"] == "Lecture"

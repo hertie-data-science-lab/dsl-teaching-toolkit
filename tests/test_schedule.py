@@ -3368,6 +3368,51 @@ def test_the_semester_block_holds_the_term_s_dates_by_type():
     assert sched.dropped == []
 
 
+def test_start_and_end_take_a_title_and_details_else_the_default_rows():
+    plain = parse(
+        {
+            "semester": {
+                "start": {"type": "start", "event_datetime": "2026-09-07"},
+                "end": {"type": "end", "event_datetime": "2026-12-18"},
+            }
+        }
+    )
+    assert (plain.semester_start_title, plain.semester_start_details) == (
+        "Semester starts",
+        "",
+    )
+    assert (plain.semester_end_title, plain.semester_end_details) == (
+        "Semester ends",
+        "",
+    )
+    named = parse(
+        {
+            "semester": {
+                "start": {
+                    "type": "start",
+                    "event_datetime": "2026-09-07",
+                    "title": "Welcome week",
+                    "details": "Orientation in the atrium.",
+                },
+                "end": {
+                    "type": "end",
+                    "event_datetime": "2026-12-18",
+                    "title": "Last day of teaching",
+                },
+            }
+        }
+    )
+    assert (named.semester_start_title, named.semester_start_details) == (
+        "Welcome week",
+        "Orientation in the atrium.",
+    )
+    assert (named.semester_end_title, named.semester_end_details) == (
+        "Last day of teaching",
+        "",
+    )
+    assert named.semester_start == date(2026, 9, 7) and named.dropped == []
+
+
 def test_a_second_start_and_an_unusable_break_are_dropped():
     sched = parse(
         {

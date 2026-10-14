@@ -147,6 +147,9 @@ ARCHIVE_NOTICE = timedelta(days=14)
 # `title:`/`details:` pair as every other block and faculty may name the day whatever
 # their programme calls it ("Semester closed", "Repositories frozen").
 ARCHIVE_TITLE = "Semester archived"
+# The rows of the `semester:` block's `start` and `end` entries, where they set no `title:`.
+SEMESTER_START_TITLE = "Semester starts"
+SEMESTER_END_TITLE = "Semester ends"
 
 # What a fault in schedule.yml has always been called here, and still is: `ConfigFault`
 # with a `kind` set. One type rather than two, so the digest, the mail and the ladder are
@@ -560,6 +563,11 @@ class Schedule:
     # The `semester:` block's `type: start` and `type: end` entries.
     semester_start: date | None = None
     semester_end: date | None = None
+    # Their rows' `title:` (else the default) and `details:`.
+    semester_start_title: str = SEMESTER_START_TITLE
+    semester_start_details: str = ""
+    semester_end_title: str = SEMESTER_END_TITLE
+    semester_end_details: str = ""
     assignments: dict[str, AssignmentEntry] = field(default_factory=dict)
     # The `semester:` block's `type: break` entries, in date order.
     breaks: list[Break] = field(default_factory=list)
@@ -1667,29 +1675,38 @@ def _parse_archive(
     )
 
 
-KNOWN_SEMESTER_DATE = frozenset({"type", "event_datetime"})
+KNOWN_SEMESTER_DATE = frozenset({"type", "event_datetime", "title", "details"})
 KNOWN_BREAK = frozenset({"type", "title", "details", "from", "to", "show_on_site"})
 
 
 def _parse_semester(
     raw: object, drops: Drops
-) -> tuple[date | None, date | None, list[Break], ArchiveRow | None]:
+) -> tuple[
+    date | None,
+    date | None,
+    list[Break],
+    ArchiveRow | None,
+    dict[str, tuple[str, str]],
+]:
     """The `semester:` block (decision 0038 amendment 2): `(start, end, breaks,
-    archive)`. Each entry names its `type`: one `start`, one `end` (the week numbering),
+    archive, labels)`, `labels` holding the `(title, details)` the `start` and `end`
+    entries write for their rows. Each entry names its `type`: one `start`, one `end` (the
+    week numbering),
     any number of `break`s (`from`/`to`), and at most one `archive` - the switch, as its
     own block was (`_parse_archive`). An entry with no usable type is dropped; a second
     start, end or archive too."""
     if raw is None:
-        return None, None, [], None
+        return None, None, [], None, {}
     raw = _require_mapping(
         raw, drops, SEMESTER_BLOCK, "key", "the semester has no dates of its own"
     )
     if raw is None:
-        return None, None, [], None
+        return None, None, [], None, {}
     seen: dict[str, str] = {}
     start = end = None
     breaks: list[Break] = []
     archive_raw: tuple[str, object] | None = None
+    labels: dict[str, tuple[str, str]] = {}
     term_cost = "the site synthesises semester dates, shifting every session row"
     for key, entry in raw.items():
         key = str(key)
@@ -1736,6 +1753,10 @@ def _parse_semester(
             when = _flagged_date(
                 entry, "event_datetime", drops, where, term_cost, lines
             )
+            labels[kind] = (
+                str(entry.get("title") or "").strip(),
+                _flagged_details(entry, drops, where, lines) or "",
+            )
             if kind == "start":
                 start = when
             else:
@@ -1773,7 +1794,7 @@ def _parse_semester(
         if archive_raw
         else None
     )
-    return start, end, sorted(breaks, key=lambda b: b.start), archive
+    return start, end, sorted(breaks, key=lambda b: b.start), archive, labels
 
 
 def parse(meta: dict, instance: settings.Instance | None = None) -> Schedule:
@@ -1809,9 +1830,11 @@ def parse(meta: dict, instance: settings.Instance | None = None) -> Schedule:
             f"`{tz_name}` is not a known zone - falling back to {DEFAULT_TZ}, so every "
             f"naive time below is read in {DEFAULT_TZ}",
         )
-    semester_start, semester_end, breaks, archive = _parse_semester(
+    semester_start, semester_end, breaks, archive, labels = _parse_semester(
         meta.get(SEMESTER_BLOCK), drops
     )
+    start_title, start_details = labels.get("start", ("", ""))
+    end_title, end_details = labels.get("end", ("", ""))
     releases: list[Release] = []
     events: list[Event] = []
     taken: dict[str, str] = {}
@@ -1836,6 +1859,10 @@ def parse(meta: dict, instance: settings.Instance | None = None) -> Schedule:
         releases=releases,
         semester_start=semester_start,
         semester_end=semester_end,
+        semester_start_title=start_title or SEMESTER_START_TITLE,
+        semester_start_details=start_details,
+        semester_end_title=end_title or SEMESTER_END_TITLE,
+        semester_end_details=end_details,
         breaks=breaks,
         assignments=_parse_assignments(meta.get("assignments"), tz, drops),
         events=events,
