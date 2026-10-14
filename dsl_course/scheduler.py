@@ -737,8 +737,8 @@ def _held_solution_faults(sched: schedule.Schedule, now: datetime) -> list[Confi
 def _unnumbered(
     course_org: str, sched: schedule.Schedule
 ) -> tuple[list[ConfigFault] | None, set[str], set[str]]:
-    """Decision 0020 rule 3: the plan's entries that need a number and have none, as
-    `(faults for the schedule.yml digest, release labels held, assignment keys held)`.
+    """Decisions 0020 and 0038: the lectures and labs with no session and the
+    assignments with no number, as `(faults for the schedule.yml digest, release labels held, assignment keys held)`.
     Guarded: a read that fails holds nothing this tick and says so, and its faults are
     None, so the digest is left as it is rather than cleared (`_preflight_sources`)."""
     try:
@@ -749,6 +749,13 @@ def _unnumbered(
         return None, set(), set()
     releases = {m.key for m in missing if m.block == "releases"}
     return faults, releases, {m.key for m in missing if m.block == "assignments"}
+
+
+def _held_text(release: Release) -> str:
+    """Why a held release waits: its assignment's number, or its own session."""
+    if release.assignment_slug:
+        return schedule_plan.give_a_number(release.assignment_slug)
+    return schedule_plan.give_a_session(release.label)
 
 
 def _held(release: Release, releases: set[str], assignments: set[str]) -> bool:
@@ -1794,8 +1801,14 @@ def _release_phase(
             )
         decisions = dry_run_decisions(course_org, semester_org, sched, due, now)
         decisions += [
-            Decision(ref, schedule_plan.NOT_NUMBERED, schedule_plan.give_a_number(ref))
-            for ref in (r.assignment_slug or r.label for r in held)
+            Decision(
+                r.assignment_slug or r.label,
+                schedule_plan.NOT_NUMBERED
+                if r.assignment_slug
+                else schedule_plan.NO_SESSION,
+                _held_text(r),
+            )
+            for r in held
         ]
         for decision in decisions:
             log(decision.line())
@@ -1803,8 +1816,7 @@ def _release_phase(
         return Summary(preview.text, preview.counts, preview.reasons, code=errors)
 
     for r in held:
-        ref = r.assignment_slug or r.label
-        log(f"  [skip] {ref} - {schedule_plan.give_a_number(ref)}")
+        log(f"  [skip] {r.assignment_slug or r.label} - {_held_text(r)}")
     due = [r for r in due if not _held(r, held_releases, held_assignments)]
     release_changed = False
     if not releases:
