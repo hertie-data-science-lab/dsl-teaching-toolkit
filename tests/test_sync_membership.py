@@ -10,9 +10,8 @@ from __future__ import annotations
 import pytest
 import yaml
 
-from dsl_course import faults, sync_membership
+from dsl_course import faults, roster, sync_membership
 from dsl_course.team_formation import LockWrite
-from tests.conftest import parse_roster
 
 
 def _stub_course_admins(monkeypatch, rv: int = 0):
@@ -394,7 +393,7 @@ def _semicolon_roster_fault() -> Exception:
     """The exception a `;`-delimited students.csv really raises, taken from the reader the
     sync actually calls - not a hand-built stand-in whose type could drift from it."""
     with pytest.raises(faults.Unusable) as caught:
-        parse_roster("hertie_email;name;github_handle\na;b;c\n")
+        roster.parse("email;name;role\na;b;c\n")
     return caught.value
 
 

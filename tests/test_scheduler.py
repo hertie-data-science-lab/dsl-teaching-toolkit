@@ -3814,9 +3814,8 @@ def _config_preflight(
     """Drive `_preflight_configs` with every reader stubbed, capturing what each digest
     was handed.
 
-    `vetted_against` is an out-parameter: a one-item list that ends up holding the
-    allowlist teams.csv was vetted against, which is how the roster's own state reaches
-    the teams check."""
+    `vetted_against` is an out-parameter: the roster each team-column check was handed
+    (none when the roster was absent)."""
     synced: dict = {}
     mailed: list = []
 
@@ -3835,16 +3834,17 @@ def _config_preflight(
             raise roster_raises
         return None if roster_absent else []
 
-    def _teams(semester, found=None, known=None):
+    def _teams(students, keys, found=None):
         if vetted_against is not None:
-            vetted_against.append(known)
+            vetted_against.append(students)
+        found.append(ConfigFault("team:9", "a team fault", file="students.csv"))
         return {}
 
     monkeypatch.setattr(scheduler.roster, "load", _roster)
     monkeypatch.setattr(
         scheduler.sync_faculty, "read_semester_people", lambda semester, found: {}
     )
-    monkeypatch.setattr(scheduler.teams, "load", _teams)
+    monkeypatch.setattr(scheduler.teams, "parse", _teams)
     monkeypatch.setattr(
         scheduler,
         "semester_sheet_faults",
@@ -3887,7 +3887,6 @@ def test_the_config_preflight_checks_every_hand_edited_file(monkeypatch):
     everything = {
         "instructors.yml",
         "students.csv",
-        "teams.csv",
         "grading_sheets/",
         "grading_config.yml",
         "assignments.yml",
@@ -3913,8 +3912,8 @@ def test_an_assignments_yml_fault_from_the_definition_pass_goes_in_its_own_issue
 def test_a_content_fault_reaches_that_files_digest_and_nobody_elses(monkeypatch):
     fault = _csv_fault()
     _rc, synced, _mailed = _config_preflight(monkeypatch, roster_faults=[fault])
-    assert synced["students.csv"] == [fault]
-    assert synced["teams.csv"] == []
+    assert synced["students.csv"][0] == fault
+    assert synced["instructors.yml"] == []
 
 
 @pytest.mark.parametrize(
@@ -3974,19 +3973,17 @@ def test_an_absent_roster_is_a_fault_of_its_own_not_a_healthy_empty_one(monkeypa
     assert fault.file == "students.csv" and "missing" in fault.what
 
 
-def test_an_absent_roster_does_not_report_every_teams_row_as_a_stranger(monkeypatch):
-    # The roster is the allowlist teams.csv is vetted against. Absent, it implies the
-    # EMPTY allowlist - and vetting against that files one "not an onboarded handle"
-    # fault per row, on top of the one fault that is actually true.
+def test_an_absent_roster_checks_no_team_column(monkeypatch):
     seen: list = []
     _config_preflight(monkeypatch, roster_absent=True, vetted_against=seen)
-    assert seen == [None]
+    assert seen == []
 
 
-def test_a_roster_that_was_read_still_vets_teams_against_it(monkeypatch):
+def test_the_team_columns_faults_go_on_the_students_csv_digest(monkeypatch):
     seen: list = []
-    _config_preflight(monkeypatch, vetted_against=seen)
-    assert seen == [set()]
+    _rc, synced, _mailed = _config_preflight(monkeypatch, vetted_against=seen)
+    assert seen == [[]]
+    assert [f.where for f in synced["students.csv"]] == ["team:9"]
 
 
 def test_a_digest_that_cannot_be_written_never_touches_the_exit_code(monkeypatch):

@@ -429,16 +429,16 @@ DISPATCH_MAP = {
         "assignments.yml",
         "instructors.yml",
         "students.csv",
-        "teams.csv",
+        ".system/roster.csv",
     },
     "sync-membership": {
         "students.csv",
-        "teams.csv",
+        ".system/roster.csv",
         "instructors.yml",
         "schedule.yml",
         "assignments.yml",
     },
-    "sync-site": {"schedule.yml", "assignments.yml", "instructors.yml", "teams.csv"},
+    "sync-site": {"schedule.yml", "assignments.yml", "instructors.yml", "students.csv"},
     "send-codes": {"students.csv"},
 }
 

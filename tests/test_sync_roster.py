@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from dsl_course import roster, sync_roster
-from tests.conftest import ROSTER_HEADER, parse_roster, repo_row
+from tests.conftest import ROSTER_HEADER, parse_roster, repo_row, roster_files
 
 HEADER = ROSTER_HEADER
 
@@ -144,7 +144,9 @@ def test_load_distinguishes_missing_from_empty(monkeypatch):
     monkeypatch.setattr(roster, "get_file_content", lambda *a, **kw: None)
     assert roster.load("semester-without-a-roster") is None
 
-    monkeypatch.setattr(roster, "get_file_content", lambda *a, **kw: HEADER + "\n")
+    monkeypatch.setattr(
+        roster, "get_file_content", lambda *a, **kw: "email,name,role\n"
+    )
     assert roster.load("semester-with-an-empty-roster") == []
 
 
@@ -155,17 +157,15 @@ def test_students_csv_is_read_once_per_semester_but_each_caller_parses_its_own(
     # gradebook sync). The TEXT is memoised, not the rows - so no caller can hand another
     # a list it has since edited.
     reads: list[str] = []
+    files = roster_files(HEADER + "\nada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n")
     monkeypatch.setattr(
         roster,
         "get_file_content",
-        lambda org, repo, path: (
-            reads.append(org)
-            or (HEADER + "\nada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n")
-        ),
+        lambda org, repo, path: reads.append(path) or files[path],
     )
     first = roster.load("SEMESTER")
     second = roster.load("SEMESTER")
-    assert reads == ["SEMESTER"]
+    assert reads == [roster.STUDENTS_PATH, roster.SYSTEM_PATH]
     assert first == second and first is not second
     first.clear()
     assert roster.load("SEMESTER") == second

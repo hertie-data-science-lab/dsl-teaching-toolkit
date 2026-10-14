@@ -238,7 +238,7 @@
     "instructors.yml": "9e091",
     "schedule.yml": "5c4ed",
     "students.csv": "57ude",
-    "teams.csv": "7ea45"
+    ".system/roster.csv": "7ea45"
   },
   "operations": [],
   "problems": [

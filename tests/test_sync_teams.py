@@ -218,22 +218,6 @@ def test_sync_never_adds_a_handle_that_is_not_on_the_roster(stub_team, monkeypat
     assert stub_team["added"] == ["ben-baker"]
 
 
-def test_sync_refuses_to_reconcile_when_there_is_no_roster(stub_team, monkeypatch):
-    # teams.csv present but students.csv absent (None): the allowlist would be empty and
-    # a pruning reconcile would evict every project team. Refuse - and stay green, like
-    # every other file faculty have to write. A read that FAILED raises out of
-    # `roster.load` instead, and still reds the run.
-    monkeypatch.setattr(
-        sync_teams.teams,
-        "load_or_none",
-        lambda org: {"assignment-4-project": {"wizards": ["ben-baker"]}},
-    )
-    monkeypatch.setattr(roster, "load", lambda org: None)  # no roster
-    errors = sync_teams.sync("org", prune=True)
-    assert errors == 0
-    assert stub_team["added"] == [] and stub_team["removed"] == []  # nothing touched
-
-
 def test_a_read_that_failed_still_reds_the_teams_sync(stub_team, monkeypatch):
     # The other half of the rule above: "we could not look" is not a file faculty can
     # fix, and it must not be reported to them as one - nor quietly pass as green.
@@ -281,31 +265,6 @@ def test_a_student_cannot_materialise_a_faculty_team_from_teams_csv(capsys):
     assert wanted == {"assignment-4-project-team-x": {"ada-l"}}
     err = capsys.readouterr().err
     assert "course-admin" in err and "instructors-f2026" in err
-
-
-def test_a_rejected_teams_csv_handle_is_counted_publicly_and_named_only_when_verbose(
-    stub_team, monkeypatch, capsys
-):
-    # The handle came from a STUDENT (the public "Join team" issue), and this sync runs in
-    # a world-readable log - so the name is verbose-only, while the count faculty act on
-    # stays where they can see it. Neither reds the run.
-    monkeypatch.delenv("DSL_VERBOSE", raising=False)
-    monkeypatch.setattr(
-        sync_teams.teams,
-        "load_or_none",
-        lambda org: {"assignment-4-project": {"wizards": ["ben-baker", "m-stranger"]}},
-    )
-    monkeypatch.setattr(
-        roster, "load", lambda org: _students("ben@uni.edu,Ben,,ben-baker,42,")
-    )
-    assert sync_teams.sync("org", prune=False) == 0
-    captured = capsys.readouterr()
-    assert "m-stranger" not in captured.out + captured.err
-    assert "1 handle(s) in teams.csv are not onboarded roster handles" in captured.err
-
-    monkeypatch.setenv("DSL_VERBOSE", "1")
-    assert sync_teams.sync("org", prune=False) == 0
-    assert "m-stranger" in capsys.readouterr().out
 
 
 def _emptied_world(monkeypatch, stub_team, csv, existing):
@@ -414,7 +373,7 @@ def test_an_absent_teams_csv_empties_no_project_team(stub_team, monkeypatch, cap
     )
     assert sync_teams.sync("org", prune=True) == 0
     assert stub_team["removed"] == []
-    assert "teams.csv is absent" in capsys.readouterr().err
+    assert "students.csv is absent" in capsys.readouterr().err
 
 
 def test_an_absent_teams_csv_and_an_unreadable_team_listing_reds(

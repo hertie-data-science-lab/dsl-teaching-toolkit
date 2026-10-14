@@ -281,11 +281,11 @@ def test_c8_reports_the_release_plans_own_digest(monkeypatch):
 def test_c9_names_the_files_whose_digest_issues_are_standing(monkeypatch):
     _stub_every_read(
         monkeypatch,
-        standing={config_digest.ROSTER.title, config_digest.TEAMS.title},
+        standing={config_digest.ROSTER.title, config_digest.PEOPLE.title},
     )
     row = status.collect("Course", "Semester-f2026")["C9"]
     assert row["status"] == status.ATTENTION
-    assert row["detail"] == "config faults: 2 open - students.csv, teams.csv"
+    assert row["detail"] == "config faults: 2 open - instructors.yml, students.csv"
 
 
 def test_c9_covers_every_digest_a_semester_can_have(monkeypatch):
