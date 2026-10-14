@@ -548,10 +548,3 @@ def sample_message_of(
     } | placeholders
     _to, subject, body = build(roster.Student(**fields))
     return subject, body
-
-
-def sample_of(
-    build: Callable[[roster.Student], tuple[str, str, str]], **placeholders: str
-) -> str:
-    """The BODY of `sample_message_of` - what `send_bulk` prints under a dry run."""
-    return sample_message_of(build, **placeholders)[1]

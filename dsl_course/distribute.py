@@ -1380,7 +1380,7 @@ def sample_message(
 ) -> tuple[str, str]:
     """The notification's `(subject, body)` rendered with PLACEHOLDERS, for the preview.
 
-    `update_message` with a placeholder in place of a student - see `mailer.sample_of`."""
+    `update_message` with a placeholder in place of a student - see `mailer.sample_message_of`."""
     return mailer.sample_message_of(
         lambda student: update_message(
             student, semester_org, course_name, "<feedback>" if feedback else ""

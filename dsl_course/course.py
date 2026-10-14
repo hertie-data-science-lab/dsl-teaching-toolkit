@@ -386,10 +386,6 @@ SOLUTION_BEFORE_CUTOFF = (
     "shown on or after it."
 )
 CUTOFF_SENTENCE = "What is on main at the late cutoff is what is marked."
-# GitHub's cap on a repo description. The About line is `<slug> - submission repo. ` plus
-# the cutoff sentence plus the note, so a note that grew past this would be TRUNCATED by
-# GitHub rather than refused, and the warning would lose its second half silently.
-MAX_REPO_DESCRIPTION = 350
 
 
 def shape_note(shape: str) -> str:

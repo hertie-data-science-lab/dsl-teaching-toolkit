@@ -3588,4 +3588,4 @@ def test_every_about_line_fits_inside_githubs_cap():
     # About line now carries the cutoff sentence as well as the note.
     what = "assignment-10-neural-networks-from-scratch - shared submission drop box"
     for shape in course.SHAPE_NOTES:
-        assert len(assign._about(what, shape)) <= course.MAX_REPO_DESCRIPTION, shape
+        assert len(assign._about(what, shape)) <= 350, shape  # GitHub's cap

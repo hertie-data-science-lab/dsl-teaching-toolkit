@@ -960,8 +960,6 @@ def notify_overwritten_edits(
     by_login: dict[str, list[tuple[str, str]]],
     issue_url: str | None,
     now: datetime,
-    *,
-    dry_run: bool = False,
 ) -> Unsent:
     """Mail each person whose edit to a generated file the site sync just rebuilt over.
     Never raises.
@@ -1056,7 +1054,7 @@ def notify_overwritten_edits(
             # not a run that broke.
             lambda _keys: False,
             "overwritten edit(s)",
-            dry_run,
+            dry_run=False,
         )
     except Exception as exc:
         log_err(

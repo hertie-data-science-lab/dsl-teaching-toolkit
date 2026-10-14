@@ -1240,9 +1240,9 @@ SITE_ISSUE = "https://github.com/Semester-f2026/semester-f2026.github.io/issues/
 SHA = "a1b2c3d4e5f67890"
 
 
-def _overwritten(by_login, dry_run=False) -> notify.Unsent:
+def _overwritten(by_login) -> notify.Unsent:
     return notify.notify_overwritten_edits(
-        SEMESTER, SITE, COURSE, by_login, SITE_ISSUE, NOW, dry_run=dry_run
+        SEMESTER, SITE, COURSE, by_login, SITE_ISSUE, NOW
     )
 
 

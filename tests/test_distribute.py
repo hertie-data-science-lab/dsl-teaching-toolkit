@@ -1611,7 +1611,7 @@ def test_a_record_written_while_marks_were_commented_still_reads(tmp_path, monke
     ((_cfg, files, _d),) = out["config"]
     written = gradebook.parse_distributed(files[gradebook.DISTRIBUTED_PATH])
     # The old row is still there, unchanged, and the gradebook row is new beside it.
-    assert written[("ada-l", "assignment-1", gradebook.CHANNEL_ISSUE)] == (
+    assert written[("ada-l", "assignment-1", "issue")] == (
         "anoldhash",
         "2026-10-05T00:00:00",
         "7",

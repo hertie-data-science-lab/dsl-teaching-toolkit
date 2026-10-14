@@ -328,14 +328,12 @@ class SemesterFacts:
 # ---------------------------------------------------------------------------- pure core
 
 
-def _sentence(text: str, capitalise: bool = True) -> str:
-    """A fault's lower-case, unpunctuated clause as a sentence the console shows verbatim.
-    `capitalise=False` for one that opens on a file or entry name, which keeps its case."""
+def _sentence(text: str) -> str:
+    """A fault's lower-case, unpunctuated clause as a sentence the console shows verbatim."""
     text = text.strip()
     if not text:
         return ""
-    if capitalise:
-        text = text[0].upper() + text[1:]
+    text = text[0].upper() + text[1:]
     return text if text.endswith((".", "!", "?")) else f"{text}."
 
 

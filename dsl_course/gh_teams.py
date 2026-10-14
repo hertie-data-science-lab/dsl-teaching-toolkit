@@ -337,14 +337,14 @@ def set_org_membership(org: str, login: str, role: str = "member") -> bool:
     return False
 
 
-def add_team_member(org: str, team_slug: str, login: str, role: str = "member") -> bool:
+def add_team_member(org: str, team_slug: str, login: str) -> bool:
     code, out = gh(
         "api",
         "--method",
         "PUT",
         f"orgs/{org}/teams/{team_slug}/memberships/{login}",
         "--field",
-        f"role={role}",
+        "role=member",
     )
     if code == 0:
         return True

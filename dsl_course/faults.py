@@ -476,18 +476,15 @@ def not_migrated_fault(
     *,
     where: str,
     file: str,
-    field: str = "",
     in_repo: str = CONFIG_REPO,
-    lineno: int | None = None,
 ) -> ConfigFault:
     """The ConfigFault for an old spelling in a hand-edited file."""
     return ConfigFault(
         where,
         not_migrated_text(old, new),
-        field=field or old,
+        field=old,
         file=file,
         in_repo=in_repo,
-        lineno=lineno,
         fix_text="run the migration, which rewrites it to the new name",
         code=NOT_MIGRATED,
     )

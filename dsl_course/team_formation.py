@@ -562,7 +562,7 @@ def message(
 
 
 def sample_message(semester_org: str, course_name: str = "") -> tuple[str, str]:
-    """The message rendered from PLACEHOLDERS, for the dry run - `mailer.sample_of`'s job,
+    """The message rendered from PLACEHOLDERS, for the dry run - `mailer.sample_message_of`'s job,
     done by hand because the facts this message stands on are an assignment's and not a
     student's.
 

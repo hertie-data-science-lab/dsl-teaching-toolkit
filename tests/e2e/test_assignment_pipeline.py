@@ -1178,9 +1178,7 @@ def test_no_shape_records_an_issue_channel(pipeline, shape):
     # and is in this list with the rest: having one is no longer a reason to use one.
     recorded = _text(pipeline.stages["distribute"].detail["after"]["distributed"])
     rows = [line for line in recorded.splitlines()[1:] if pipeline.student in line]
-    assert not [
-        r for r in rows if f",{pipeline.slug(shape)},{gradebook.CHANNEL_ISSUE}," in r
-    ]
+    assert not [r for r in rows if f",{pipeline.slug(shape)},issue," in r]
 
 
 # --------------------------------------------------- github/private: the shape that was

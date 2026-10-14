@@ -243,18 +243,15 @@ class _Flow(list):
     """A list `_setting` writes inline, `[a, b]`."""
 
 
-def _setting(key: str, value: object, comment: str, live: bool = True) -> str:
+def _setting(key: str, value: object, comment: str) -> str:
     """One line of grading_config.yml: `key: value` padded to a common column, then its
-    explanation. `live=False` comments the whole line out - the setting is documented and
-    inert until an instructor uncomments it."""
+    explanation."""
     shown = (
         f"[{', '.join(_yaml_scalar(v) for v in value)}]"
         if isinstance(value, _Flow)
         else _yaml_scalar(value)
     )
     line = f"{key}: {shown}"
-    if not live:
-        line = f"# {line}"
     return f"{line:<29} # {comment}".rstrip()
 
 

@@ -846,9 +846,7 @@ DISTRIBUTED_HEADER = (
     "issue",
 )
 # Marks and feedback go to ONE place, the student's gradebook, so the channels are the
-# gradebook, the registrar's export and the email. `issue` is RETIRED: no run writes it,
-# and it is named here only so a row left by an older run is recognisable as one.
-CHANNEL_ISSUE = "issue"
+# gradebook, the registrar's export and the email.
 CHANNEL_GRADEBOOK = "gradebook"
 CHANNEL_EMAIL = "email"
 # `{(target, assignment, channel): (content hash, when, issue number or "")}`
