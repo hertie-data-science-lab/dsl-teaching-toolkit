@@ -2,7 +2,7 @@
 what reached it.
 
 Provisioning the repos, what a student is shown (`student_view`, the README), the
-registrar's export, and the distributed-records ledger (`distributed.csv`) that makes a
+semester grades file, and the distributed-records ledger (`distributed.csv`) that makes a
 re-run say nothing twice.
 """
 
@@ -80,7 +80,7 @@ GRADEBOOK_PERMISSION = (
 )
 SEMESTER_CSV_NAME = records.path(
     "semester_gradebook"
-)  # the wide faculty-only glance view
+)  # the semester grades file: the wide faculty-only glance view
 
 # What a gradebook says before its student has been marked in anything. The legend names
 # the keys `STUDENT_VIEW_KEYS` allows and no others: this is the first file a student opens,
@@ -602,7 +602,7 @@ def render_readme(handle: str, book: dict[str, dict], titles: dict[str, str]) ->
 def render_registrar_csv(
     students: list[roster.Student], books: dict[str, dict[str, dict]]
 ) -> str:
-    """The registrar's export: one row per ENROLLED student, one column per assignment,
+    """The semester grades file: one row per ENROLLED student, one column per assignment,
     each cell the final grade exactly as that student was told it.
 
     Every enrolled student is a row, marked or not, and a student who has not onboarded
@@ -846,7 +846,7 @@ DISTRIBUTED_HEADER = (
     "issue",
 )
 # Marks and feedback go to ONE place, the student's gradebook, so the channels are the
-# gradebook, the registrar's export and the email. `issue` is RETIRED: no run writes it,
+# gradebook, the semester grades file and the email. `issue` is RETIRED: no run writes it,
 # and it is named here only so a row left by an older run is recognisable as one.
 CHANNEL_ISSUE = "issue"
 CHANNEL_GRADEBOOK = "gradebook"
@@ -932,12 +932,20 @@ def _retired_gradebook_files(wd: Path) -> list[str]:
     return sorted(f"{GRADEBOOK_DIR}/{p.name}" for p in folder.glob("*.yml"))
 
 
-def _told_grades(wd: Path) -> tuple[dict[str, dict[str, str]], set[str]]:
-    """`({handle (casefolded): {slug: final grade}}, the export's columns)` as the last
-    real run exported them, so the preview can say which grades a run would CHANGE and
-    which columns it would ADD. Empty when there is no export yet or it cannot be read,
-    and every grade and column is then new."""
+def semester_grades_file(wd: Path) -> Path:
+    """The semester grades file in a semester-config checkout: at its name, or - until the
+    first real run after 0.11.0 renames it - at `records.RETIRED_SEMESTER_GRADES`."""
     path = wd / SEMESTER_CSV_NAME
+    retired = wd / records.RETIRED_SEMESTER_GRADES
+    return retired if not path.is_file() and retired.is_file() else path
+
+
+def _told_grades(wd: Path) -> tuple[dict[str, dict[str, str]], set[str]]:
+    """`({handle (casefolded): {slug: final grade}}, the file's columns)` as the last
+    real run wrote the semester grades file, so the preview can say which grades a run
+    would CHANGE and which columns it would ADD. Empty when there is no file yet or it
+    cannot be read, and every grade and column is then new."""
+    path = semester_grades_file(wd)
     if not path.is_file():
         return {}, set()
     try:
@@ -957,10 +965,10 @@ def _told_grades(wd: Path) -> tuple[dict[str, dict[str, str]], set[str]]:
 
 def _already_returned(wd: Path) -> set[str] | None:
     """The assignments students have already been told a mark for: each with at least one
-    non-empty cell in the registrar export the last real run wrote. None when that cannot
-    be told - the export is there and cannot be read, or it is missing while gradebooks
-    have already been written (`distributed.csv` has rows)."""
-    path = wd / SEMESTER_CSV_NAME
+    non-empty cell in the semester grades file the last real run wrote. None when that
+    cannot be told - the file is there and cannot be read, or it is missing while
+    gradebooks have already been written (`distributed.csv` has rows)."""
+    path = semester_grades_file(wd)
     if not path.is_file():
         distributed, _ = _read_distributed(wd)
         return None if distributed else set()

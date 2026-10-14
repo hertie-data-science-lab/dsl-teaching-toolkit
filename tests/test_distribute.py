@@ -276,6 +276,7 @@ def _distribute(
     listed: dict[str, dict] | None = _ANY_PRIVATE,
     due: datetime = _DUE_PASSED,
     exported: str | None = None,
+    exported_at: str = gradebook.SEMESTER_CSV_NAME,
     preview_issues: list[dict] | None = None,
     assignment: str | None = None,
     include_feedback: bool = False,
@@ -309,8 +310,8 @@ def _distribute(
         (cfg / gradebook.GRADEBOOK_DIR).mkdir(parents=True, exist_ok=True)
         (cfg / gradebook.GRADEBOOK_DIR / name).write_text("student: someone\n")
     if exported is not None:
-        (cfg / gradebook.SEMESTER_CSV_NAME).parent.mkdir(parents=True, exist_ok=True)
-        (cfg / gradebook.SEMESTER_CSV_NAME).write_text(exported)
+        (cfg / exported_at).parent.mkdir(parents=True, exist_ok=True)
+        (cfg / exported_at).write_text(exported)
     store = [] if preview_issues is None else preview_issues
     _fake_issues(monkeypatch, store)
 

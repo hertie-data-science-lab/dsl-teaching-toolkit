@@ -185,7 +185,7 @@ could change is not it.
 - **The private gradebook** `grades-<handle>`: `grades.yml` and a rendered `README.md`, in
   one commit. The student sees their final grade, never the sum behind it. Each member of
   a team reads the team's shared feedback here, in their own repo, beside their own grade.
-- **`.system/semester-gradebook.csv`** in `semester-config` - the semester grades file, one row per
+- **`.system/semester-grades.csv`** in `semester-config` - the semester grades file, one row per
   enrolled student including the ungraded. Private, never logged.
 - **An email** with a link and no marks in it.
 
@@ -382,7 +382,7 @@ so no date, is archived. Run it again if it fails part-way - it picks up where i
 and only the last step seals the record.
 
 `semester-config` is now the semester's whole record of assessment - roster, teams, schedule,
-grading sheets, autograde detail, what was sent to whom, and `.system/semester-gradebook.csv`. Delete
+grading sheets, autograde detail, what was sent to whom, and `.system/semester-grades.csv`. Delete
 the repository, and the archived student repos with it, when your institution's retention
 period for that record expires.
 
