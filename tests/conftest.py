@@ -245,7 +245,7 @@ def stub_bootstrap(monkeypatch) -> None:
     monkeypatch.setattr(bc, "register_semester", lambda course, semester: True)
     monkeypatch.setattr(bc, "update_profile_readme", lambda *a, **k: 0)
     monkeypatch.setattr(bc.sync_faculty, "sync", lambda course, semesters=None: 0)
-    # The org's tier is read off its (not yet written) dsl-course.yml; a bootstrap test is
+    # The org's tier is read off its (not yet written) course.yml; a bootstrap test is
     # about what the run does, not which ref it seeds at.
     monkeypatch.setattr(bc, "central_ref_for", lambda org: "release")
 

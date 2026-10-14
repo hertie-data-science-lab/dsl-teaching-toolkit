@@ -83,8 +83,8 @@ def _profile_topics(is_semester: bool, course_code: str = "") -> list[str]:
 # every re-run. The guard has to be per FILE, and it depends on who owns the file:
 #
 #   USER-owned - content faculty edit, or that the running system writes live state into.
-#   In a semester: semester-config/{students.csv, teams.csv, schedule.yml, instructors.yml} and
-#   join/README.md (the student landing page). On a course org: .github/dsl-course.yml
+#   In a semester: semester-config/{students.csv, teams.csv, schedule.yml, semester.yml} and
+#   join/README.md (the student landing page). On a course org: .github/course.yml
 #   (the faculty/course_admins SSOT). Seed these ONLY
 #   when absent (gh_contents.seed_if_absent) - rewriting them on a re-run destroys live enrolment
 #   state (roster rows, enrol codes, onboarded handles) and the faculty's schedule.
@@ -93,7 +93,7 @@ def _profile_topics(is_semester: bool, course_code: str = "") -> list[str]:
 #   in place: everything under `.github/` in the seeded repos (join/onboard.yml,
 #   join/team-formation.yml, the ISSUE_TEMPLATE join forms those workflows parse - they
 #   must stay in lockstep with them - and semester-config's dispatch.yml), a
-#   semester's `semester-config/.system/dsl-course.yml` (a wholly generated course pointer with no
+#   semester's `semester-config/.system/course.yml` (a wholly generated course pointer with no
 #   faculty-authored content), semester-config's README.md (the schema contract - it went
 #   stale as USER-owned).
 #   These are written unconditionally on every run so fixes propagate, exactly like
@@ -107,7 +107,7 @@ def _profile_topics(is_semester: bool, course_code: str = "") -> list[str]:
 def _tag_and_year(org: str) -> tuple[str, int]:
     """This semester's year tag (fYYYY/sYYYY) and year, derived from the org-name suffix.
 
-    Renders the seeded scaffolds' examples (schedule.yml repo names/dates, instructors.yml
+    Renders the seeded scaffolds' examples (schedule.yml repo names/dates, semester.yml
     dates) copy-paste-correct for THIS semester. A name with no tag falls back to
     f2026-shaped examples - purely cosmetic, everything rendered from this is commented.
 
@@ -258,7 +258,7 @@ def grant_button_access(org: str) -> int:
 # Every org is tightened to default_repository_permission=none, so without these grants
 # only org OWNERS can touch either repo - yet the whole faculty workflow lives in them:
 # `semester-config` is what instructors edit (schedule.yml, students.csv, teams.csv,
-# instructors.yml, grading_sheets/), and `join` is where they triage `needs-review`
+# semester.yml, grading_sheets/), and `join` is where they triage `needs-review`
 # onboarding issues. Course orgs have neither repo, so this is semester-only. Single-sourced
 # with the nightly sweep's floor (access.SEMESTER_WRITE_REPOS), so the two cannot disagree.
 SEMESTER_FACULTY_REPOS = sorted(SEMESTER_WRITE_REPOS - {".github"})
@@ -288,12 +288,12 @@ def add_course_admins(org: str, handles: str) -> int:
     added to a course they don't run). `handles` is a comma/space-separated list of GitHub
     logins; each gets an org invite they accept once (membership shows `pending` until
     then). Instructors/TAs are declared per semester in that semester's
-    semester-config/instructors.yml, which Sync membership reconciles into the `instructors`
+    semester-config/semester.yml, which Sync membership reconciles into the `instructors`
     team - never added on the Teams page, which the next sync reverts.
 
     This is a direct, immediate team invite ONLY - it does not persist anywhere. On the
     course org, `course_seed` also seeds these same handles into
-    `dsl-course.yml`'s `people.course_admins` (the SSOT `sync_faculty` reconciles
+    `course.yml`'s `people.course_admins` (the SSOT `sync_faculty` reconciles
     against), so the next sync doesn't undo this invite by pruning them right back out
     for not being declared. On a semester org there's no SSOT to write to (course_admins
     stays exclusively course-level) - this invite is real but only until the next sync
@@ -404,21 +404,21 @@ def create_profile_repo(
 
     Also tags the repo with `dsl-course-hub` so `list_orgs.py` can discover it.
 
-    The course org's dsl-course.yml carries identity + the faculty roster. A semester org
+    The course org's course.yml carries identity + the faculty roster. A semester org
     instead gets a tiny pointer back to its course org, in `semester-config/.system/`
     (written in main()'s semester wiring via _semester_metadata, once --course is known) -
     the semester-config dispatchers read its `course:` line. Its schedule lives in
-    semester-config/schedule.yml. `admins` (course org only) seeds dsl-course.yml's
+    semester-config/schedule.yml. `admins` (course org only) seeds course.yml's
     people.course_admins live from the start - see _course_admins_block.
 
     Every write in here used to log and continue under an unconditional "initialised"
-    line: a course org with no dsl-course.yml has no faculty SSOT and no identity for
+    line: a course org with no course.yml has no faculty SSOT and no identity for
     the site, and an untagged `.github` is invisible to `list_orgs`. Both are counted.
     """
     log_step("Setting up .github profile repo")
     # Opposite instructions to the same reader, so the description says which: a semester
     # org's `.github` is machine-owned scaffolding, a course org's is where faculty work -
-    # it holds dsl-course.yml and every workflow they run.
+    # it holds course.yml and every workflow they run.
     if not create_repo(
         org,
         ".github",
@@ -589,7 +589,7 @@ def setup_semester_extras(org: str, central_ref: str, course_org: str = "") -> i
     else:
         # USER-owned files are create-only: this repo holds the semester's LIVE state - the
         # roster with enrol codes and onboarded handles, the schedule the scheduler
-        # releases from, this semester's instructors.yml, and returned grades. Re-running
+        # releases from, this semester's semester.yml, and returned grades. Re-running
         # "Bootstrap semester" mid-semester must leave all of it exactly as faculty (and the
         # onboarding/enrol-code/grade flows) left it.
         tag, year = _tag_and_year(org)
@@ -697,14 +697,14 @@ def main() -> int:
     parser.add_argument(
         "--course-name",
         default=None,
-        help="Course name, written to dsl-course.yml `course_name` and the org README "
+        help="Course name, written to course.yml `course_name` and the org README "
         "(e.g. 'Deep Learning'). If not set, uses --org.",
     )
     parser.add_argument(
         "--course-code",
         default="",
         help="Hertie course code (e.g. 'GRAD-E1394'). Stored in "
-        ".github/dsl-course.yml and set as a repo topic on .github.",
+        ".github/course.yml and set as a repo topic on .github.",
     )
     parser.add_argument(
         "--set-secret",
@@ -730,7 +730,7 @@ def main() -> int:
         default=None,
         help="Which tier of the central toolkit this course org's seeded workflows run "
         "the engine from: main, release (default), or a full commit SHA. Written "
-        "to .github/dsl-course.yml as `central_ref:`. Course orgs only - a semester inherits "
+        "to .github/course.yml as `central_ref:`. Course orgs only - a semester inherits "
         "its course org's, so the two flags together are refused. Only the demo course "
         "should sit anywhere but release.",
     )
@@ -746,9 +746,9 @@ def main() -> int:
         default="",
         help="GitHub handle(s) of this course's admin(s), comma/space-separated. Added to "
         "the course-admin team (admin on .github) so they can run the workflows - and, on "
-        "a course-org bootstrap, declared in dsl-course.yml's SSOT so a later sync doesn't "
+        "a course-org bootstrap, declared in course.yml's SSOT so a later sync doesn't "
         "revert it. Each accepts an org invite once. Instructors/TAs are declared per "
-        "semester, in that semester's semester-config/instructors.yml (docs/05) - never on the "
+        "semester, in that semester's semester-config/semester.yml (docs/05) - never on the "
         "Teams page, which Sync membership reconciles away.",
     )
     args = parser.parse_args()
@@ -761,7 +761,7 @@ def main() -> int:
             "--central-ref is a COURSE org's setting: a semester inherits its course org's "
             "tier, and tonight's refresh would re-render this one at that tier anyway. "
             f"Set `central_ref:` in {args.course or 'the course org'}/.github/"
-            "dsl-course.yml instead."
+            "course.yml instead."
         )
         return 1
     # A read helper that couldn't reach the API raises; in an Actions log a one-line
@@ -777,7 +777,7 @@ def _outcome_lines(steps: list[tuple[int, str]]) -> str:
     """The bootstrap's closing summary, rendered from what each step actually returned.
 
     It used to be a fixed block asserting every line, printed whatever happened - so a run
-    that failed to tighten the org, or never seeded dsl-course.yml, still handed the
+    that failed to tighten the org, or never seeded course.yml, still handed the
     operator "DONE (automated): ...". The failure count at the very bottom was the only
     hint, and it named no step.
 
@@ -795,7 +795,7 @@ def _run(args: argparse.Namespace) -> int:
     course_name = args.course_name or args.org
     admin_logins = _parse_handles(args.admins)
     # Which tier of the toolkit everything seeded below runs: the flag when given (a
-    # course org's own dsl-course.yml does not exist yet on a first bootstrap), else what
+    # course org's own course.yml does not exist yet on a first bootstrap), else what
     # the org already declares - and for a semester that is its COURSE org's declaration,
     # which is the file central_ref_for reads through the pointer anyway.
     central_ref = (
@@ -840,7 +840,7 @@ def _run(args: argparse.Namespace) -> int:
     )
 
     # 3. Profile repo (course org only - identity + faculty roster; a semester org
-    # gets no dsl-course.yml, its config all lives in semester-config). --admins is
+    # gets no course.yml, its config all lives in semester-config). --admins is
     # seeded into the SSOT here (course org only - see _course_admins_block) as well
     # as given a one-time direct team invite below (add_course_admins), so the next
     # sync doesn't undo that invite.
@@ -871,10 +871,10 @@ def _run(args: argparse.Namespace) -> int:
             #
             # SYSTEM-owned (see the ownership note at the top of this file): the file is
             # wholly generated from --org/--course and carries no faculty-authored content
-            # (a semester's identity lives in the course org's dsl-course.yml, its schedule in
+            # (a semester's identity lives in the course org's course.yml, its schedule in
             # semester-config/schedule.yml), so refreshing it is what repairs a semester
             # bootstrapped before this pointer existed. Unlike the COURSE org's
-            # dsl-course.yml, which is the faculty SSOT and therefore create-only.
+            # course.yml, which is the faculty SSOT and therefore create-only.
             # A failed write leaves the semester-config dispatchers unable to resolve the
             # course org, so Sync membership / Sync site never fire - count it into the exit.
             if not put_file(
@@ -953,7 +953,7 @@ def _run(args: argparse.Namespace) -> int:
                 "Workflow access: instructors (write) + course-admin (admin) "
                 "granted on .github; any\n  --admins handles added to course-admin "
                 "(they accept the org invite once, then the\n  workflows appear in "
-                "their Actions tab) and declared in dsl-course.yml's SSOT"
+                "their Actions tab) and declared in course.yml's SSOT"
             ),
         )
     )
@@ -1014,20 +1014,20 @@ def _run(args: argparse.Namespace) -> int:
     if admin_logins and not args.semester:
         admins_step = (
             f"2. Course admins ({', '.join(admin_logins)}) are already declared in the "
-            f"`people:` block of {args.org}/.github/dsl-course.yml - nothing to do here. "
+            f"`people:` block of {args.org}/.github/course.yml - nothing to do here. "
             "Add more later by editing that file directly (not the Teams page - "
             '"Sync membership" reconciles the `course-admin` team FROM that file, so an '
             "undeclared manual addition gets reverted on the next sync). Instructors/TAs "
             "are declared per semester instead, in that semester's own "
-            "semester-config/instructors.yml (see step 4)."
+            "semester-config/semester.yml (see step 4)."
         )
     else:
         admins_step = (
             f"2. Declare THIS course's course_admins in the `people:` block of "
-            f'{args.org}/.github/dsl-course.yml, then push - "Sync membership" reconciles '
+            f'{args.org}/.github/course.yml, then push - "Sync membership" reconciles '
             "the `course-admin` team automatically (here and into every semester's own "
             "course-admin team; no manual Teams-page edit needed). Instructors/TAs are "
-            "declared per semester instead, in that semester's own semester-config/instructors.yml "
+            "declared per semester instead, in that semester's own semester-config/semester.yml "
             "(see step 4)."
         )
     headline = "complete" if failures == 0 else "INCOMPLETE"
@@ -1065,7 +1065,7 @@ then run bootstrap with --semester (seeds join + roster).
             f"- join repo (public): Join issue form + onboard workflow\n"
             f"- semester-config repo (private): starter students.csv "
             f"(edit https://github.com/{args.org}/semester-config/blob/HEAD/students.csv with registrar data), "
-            f"plus schedule.yml and instructors.yml (this semester's calendar/due-dates and "
+            f"plus schedule.yml and semester.yml (this semester's calendar/due-dates and "
             f"instructors/TAs - both seeded mostly-commented, uncomment what you want)\n"
             f"- faculty access: instructors (write) + course-admin (admin) on join and "
             f"semester-config, so non-owner faculty can edit the roster/schedule and "

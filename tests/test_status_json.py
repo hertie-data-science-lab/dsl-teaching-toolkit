@@ -85,12 +85,11 @@ CONTRACT_EXAMPLE = {
     "schema": "dsl.status/1",
     "inputs": {
         "schedule.yml": "<blob sha>",
-        "assignments.yml": "...",
-        "instructors.yml": "...",
+        "semester.yml": "...",
         "students.csv": "...",
         "teams.csv": "...",
         "grading_sheets": "<sha of the directory tree>",
-        "course/dsl-course.yml": "...",
+        "course/course.yml": "...",
         ".system/assignments.lock.yml": "...",
     },
     "course": {
@@ -213,7 +212,8 @@ def _student(handle: str = "", sent: str = "2026-09-01T10:00:00Z") -> roster.Stu
 
 def _people(email: str | None = "prof@x.edu") -> dict:
     entry = {"github_handle": "prof", **({"email": email} if email else {})}
-    return sync_faculty.parse_faculty_from_meta({"people": {"instructors": [entry]}})
+    entry["role"] = "instructor"
+    return sync_faculty.parse_faculty_from_meta({"people": [entry]})
 
 
 def _materials(repo: str, syllabus: str | None = "# Syllabus", **over):
@@ -257,16 +257,18 @@ def _course(**over) -> status_json.CourseFacts:
     facts = status_json.CourseFacts(
         org=COURSE,
         meta={
-            "course_name": "Machine Learning",
-            "course_code": "E1234",
-            "course_description": "Learning from data.",
+            "course": {
+                "name": "Machine Learning",
+                "code": "E1234",
+                "description": "Learning from data.",
+            },
             "set_aside": list(QUIET_WEEKS),
             "people": {
                 "course_admins": [{"github_handle": "admin1", "email": "a@x.edu"}]
             },
         },
         github_paths={
-            "dsl-course.yml": "c0ffee",
+            "course.yml": "c0ffee",
             "semesters.yml": "facade",
             ".github/workflows/scheduled-release.yml": "beef",
         },
@@ -294,8 +296,7 @@ def _semester(**over) -> status_json.SemesterFacts:
         listing=listing,
         config_paths={
             "schedule.yml": "5c4ed",
-            "assignments.yml": "a551g",
-            "instructors.yml": "9e091",
+            "semester.yml": "9e091",
             "students.csv": "57ude",
             "teams.csv": "7ea45",
             "grading_sheets": "5hee7",
@@ -482,8 +483,8 @@ def _course_block(course: status_json.CourseFacts) -> dict:
         ),
         # C1-C3 are required.
         ({"github_paths": None}, False),
-        ({"github_paths": {"dsl-course.yml": "c0ffee"}}, False),
-        ({"meta": {"course_name": "Machine Learning"}}, False),
+        ({"github_paths": {"course.yml": "c0ffee"}}, False),
+        ({"meta": {"course": {"name": "Machine Learning"}}}, False),
     ],
 )
 def test_ready_is_c1_to_c3_done(over, ready):
@@ -886,7 +887,7 @@ def test_a_staff_entry_without_an_email_is_a_counted_suggestion():
     assert doc["problems"] == []
     todo = {t["id"]: t for t in doc["semester"]["todo"]}["instructors:email"]
     assert (todo["need"], todo["screen"]) == ("suggested", "instructors")
-    assert todo["text"].startswith("1 instructor entry in instructors.yml has no email")
+    assert todo["text"].startswith("1 instructor entry in semester.yml has no email")
     assert "prof" not in json.dumps(todo)
 
 
@@ -894,12 +895,11 @@ def test_inputs_carry_shas_and_no_timestamp_is_recorded_for_the_write():
     doc = _render()
     assert doc["inputs"] == {
         "schedule.yml": "5c4ed",
-        "assignments.yml": "a551g",
-        "instructors.yml": "9e091",
+        "semester.yml": "9e091",
         "students.csv": "57ude",
         "teams.csv": "7ea45",
         "grading_sheets": "5hee7",
-        "course/dsl-course.yml": "c0ffee",
+        "course/course.yml": "c0ffee",
         ".system/assignments.lock.yml": "10c4",
     }
     stamp = re.compile(
@@ -919,7 +919,7 @@ def test_the_course_file_carries_no_handle_email_or_student_repo():
                 "people.course_admins[0]",
                 "no usable `email:` - access is still granted, but no fault reaches "
                 "this person",
-                file="dsl-course.yml",
+                file="course.yml",
                 field="email",
                 in_repo=".github",
                 lineno=12,
@@ -932,7 +932,7 @@ def test_the_course_file_carries_no_handle_email_or_student_repo():
     assert set(doc) == {"schema", "inputs", "horizon", "course", "problems"}
     assert doc["course"]["stages"]["C3"] == "problem"
     assert doc["inputs"] == {
-        "dsl-course.yml": "c0ffee",
+        "course.yml": "c0ffee",
         "semesters.yml": "facade",
     }
 
@@ -1197,7 +1197,7 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
         status_json,
         "repo_path_shas",
         lambda org, repo, branch: (
-            {"dsl-course.yml": "c0ffee"}
+            {"course.yml": "c0ffee"}
             if repo == ".github"
             else {"schedule.yml": "5c4ed", ".system/outcomes/release.entry.json": "0u7"}
         ),
@@ -1205,7 +1205,7 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
     monkeypatch.setattr(
         status_json,
         "org_meta",
-        lambda org: {"course_name": "Machine Learning", "course_code": "E1234"},
+        lambda org: {"course": {"name": "Machine Learning", "code": "E1234"}},
     )
     monkeypatch.setattr(
         status_json.sync_faculty, "read_course_config", lambda org, faults: {}
@@ -1245,7 +1245,7 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
     doc = status_json.collect_semester(COURSE, SEMESTER, NOW)
     assert doc["semester"]["org"] == SEMESTER
     assert doc["inputs"]["schedule.yml"] == "5c4ed"
-    assert doc["inputs"]["course/dsl-course.yml"] == "c0ffee"
+    assert doc["inputs"]["course/course.yml"] == "c0ffee"
     assert doc["staff"] == {"instructors": 1, "tas": 0, "synced": True}
     assert doc["operations"][0]["op"] == "release.entry"
     a2 = next(a for a in doc["assignments"] if a["slug"] == "assignment-2")
@@ -1309,8 +1309,8 @@ def _many_faults() -> list[ConfigFault]:
     faults += spec_faults
     sync_faculty.parse_faculty_from_meta(
         load_yaml_lines(
-            "people:\n  instructors:\n    - github_handle: 'not valid!'\n"
-            "      email: p@x.edu\n  teaching_assistants:\n    - github_handle: ta1\n"
+            "people:\n  - github_handle: 'not valid!'\n    role: instructor\n"
+            "    email: p@x.edu\n  - github_handle: ta1\n    role: teaching_assistant\n"
         ),
         faults,
     )
@@ -1353,8 +1353,8 @@ def test_no_problem_sentence_carries_markdown_or_a_null_stage():
 
 def test_a_derived_sentence_names_its_subject_in_the_consoles_words():
     by_id = {p["id"]: p for p in _problems(_many_faults())}
-    ta = by_id["people:people.teaching_assistants-0:PEOPLE"]
-    assert ta["text"] == "Teaching assistant 1 in instructors.yml: no usable email."
+    ta = by_id["people:people-1:PEOPLE"]
+    assert ta["text"] == "Person 2 in semester.yml: no usable email."
     assert ta["stops"] == (
         "Access is still granted, but no notification reaches this person."
     )
@@ -1404,7 +1404,7 @@ def test_a_visibility_mismatch_is_the_semesters_problem_not_the_courses():
     assert fault.per_semester
     doc = _render(semester=_semester(template_faults=[fault]))
     (problem,) = doc["problems"]
-    # Filed where the setting lives now: the semester's assignments.yml (decision 0009).
+    # Filed with the semester's own settings (decision 0039).
     assert problem["scope"] == "semester"
     assert problem["id"] == "assignments:assignment-1:ASSIGNMENTS"
     assert problem["text"] == (
@@ -1415,9 +1415,9 @@ def test_a_visibility_mismatch_is_the_semesters_problem_not_the_courses():
         "Those repos stay as they are, and the pages the toolkit writes describe them "
         "wrongly."
     )
-    # The fix is the semester's assignments.yml; the course's own stage does not move.
+    # The fix is the semester's; the course's own stage does not move.
     assert problem["fix"]["repo"] == f"{SEMESTER}/semester-config"
-    assert problem["fix"]["path"] == "assignments.yml"
+    assert problem["fix"]["path"] == "semester.yml"
     assert doc["course"]["stages"]["C5"] == "done"
     assert all(t["state"] == "ready" for t in doc["course"]["templates"])
     assert "problem" not in doc["semester"]["stages"].values()
@@ -1477,9 +1477,13 @@ def test_a_stage_that_is_not_done_says_why():
     # The demo: one TA and no instructor, and last term's materials repo unwritten.
     ta_only = sync_faculty.parse_faculty_from_meta(
         {
-            "people": {
-                "teaching_assistants": [{"github_handle": "ta", "email": "t@x.edu"}]
-            }
+            "people": [
+                {
+                    "github_handle": "ta",
+                    "role": "teaching_assistant",
+                    "email": "t@x.edu",
+                }
+            ]
         }
     )
     course = _course(
@@ -1488,7 +1492,7 @@ def test_a_stage_that_is_not_done_says_why():
     doc = _render(course, _semester(people=ta_only))
     assert doc["semester"]["stages"]["K3"] == "todo"
     assert doc["semester"]["stage_why"]["K3"] == (
-        "No instructor is declared in instructors.yml yet."
+        "No instructor is declared in semester.yml yet."
     )
     # Decision 0034: a stub syllabus is suggested, and no folder needs a kind (decision
     # 0038): the repo is ready.
@@ -2351,7 +2355,7 @@ def test_the_three_course_verdicts():
         "suggestions": 2,
     }
     # A needed stage open: not ready, naming it. The description is a suggestion.
-    course = _course(meta={"course_name": "ML", "course_code": "E1"})
+    course = _course(meta={"course": {"name": "ML", "code": "E1"}})
     block = _course_block(course)
     assert block["verdict"]["state"] == "not_ready"
     assert block["verdict"]["missing"] == (
@@ -2510,10 +2514,10 @@ def test_assignments_values_bite_at_their_hand_out_and_drift_stands_now():
     value = ConfigFault(
         "assignments.assignment-3",
         "`late_days: soon` is not a number",
-        file="assignments.yml",
+        file="semester.yml",
         field="late_days",
     )
-    whole = ConfigFault("", "this file is not valid YAML", file="assignments.yml")
+    whole = ConfigFault("", "this file is not valid YAML", file="semester.yml")
     doc = _render(semester=_semester(schedule_faults=[value, whole]))
     by_entry = {p["fix"]["entry"]: p for p in doc["problems"]}
     assert by_entry["assignment-3"]["when"] == "2026-10-20T10:00:00+02:00"
@@ -2727,7 +2731,7 @@ def test_an_opencourse_file_that_does_not_parse_is_a_problem_while_the_site_is_o
     on = _course(website_unusable=True, website_on=True)
     doc = status_json.render_course_file(on, NOW)
     (problem,) = doc["problems"]
-    assert problem["id"] == "website:opencourse.yml:WEBSITE"
+    assert problem["id"] == "website:course.yml:WEBSITE"
     assert (problem["stage"], problem["bites"]) == ("C6", "now")
     assert problem["fix"]["screen"] == "website"
     assert doc["course"]["stages"]["C6"] == "problem"
@@ -2794,7 +2798,7 @@ def test_only_a_biting_problem_flags_its_assignment():
 
 def test_two_course_faults_with_one_base_id_both_count_in_the_course_file():
     twice = [
-        ConfigFault("course_code", f"`course_code` problem {n}", file="dsl-course.yml")
+        ConfigFault("course_code", f"`course_code` problem {n}", file="course.yml")
         for n in (1, 2)
     ]
     doc = status_json.render_course_file(_course(faults=twice), NOW)
@@ -2810,7 +2814,11 @@ def test_the_email_to_do_counts_who_is_active_on_the_renders_own_date():
     # An instructor from 1 Jan 2030, no email: counted once the render's date (in the
     # semester's timezone) reaches it, whatever the machine's clock says.
     people = sync_faculty.parse_faculty_from_meta(
-        {"people": {"instructors": [{"github_handle": "prof", "start": "2030-01-01"}]}}
+        {
+            "people": [
+                {"github_handle": "prof", "role": "instructor", "start": "2030-01-01"}
+            ]
+        }
     )
     facts = _semester(people=people)
     eve = datetime(2029, 12, 31, 22, 30, tzinfo=UTC)  # 23:30 in Berlin

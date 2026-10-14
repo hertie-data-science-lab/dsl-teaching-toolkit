@@ -240,7 +240,7 @@ def world() -> FakeGitHub:
         COURSE,
         ".github",
         {
-            "dsl-course.yml": "course_name: ML\ncourse_code: E1\ncourse_description: d\npeople:\n  course_admins:\n    - github_handle: admin1\n      email: a@x.edu\n",
+            "course.yml": "course_name: ML\ncourse_code: E1\ncourse_description: d\npeople:\n  course_admins:\n    - github_handle: admin1\n      email: a@x.edu\n",
             "semesters.yml": f"semesters:\n  - {LIVE}\n  - {OLD1}\n  - {OLD2}\n",
             "opencourse.yml": "enabled: false\n",
             ".github/workflows/scheduled-release.yml": "on: push\n",
@@ -281,9 +281,9 @@ def world() -> FakeGitHub:
             "semester-config",
             {
                 "schedule.yml": SCHEDULE,
-                "instructors.yml": "instructors:\n  - github_handle: prof\n    email: p@x.edu\n",
+                "semester.yml": "instructors:\n  - github_handle: prof\n    email: p@x.edu\n",
                 "students.csv": "email,name,github_handle,student_id,enrol_code,code_sent_at,onboarded,role\n",
-                ".system/dsl-course.yml": f"course: {COURSE}\n",
+                ".system/course.yml": f"course: {COURSE}\n",
             },
             archived=archived,
         )

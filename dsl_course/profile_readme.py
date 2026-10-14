@@ -258,7 +258,7 @@ to run and configure the course.
 
 ## Run an operation
 
-Every operation is a button in the **Instructor Console** and a command, `python -m dsl_course <op>`, from a laptop. Either needs you to be (1) in this org's `course-admin` team (declared here, course-wide), or (2) in a semester's `instructors` team (declared in that semester's own `semester-config/instructors.yml`). The full list, with each command, is on the **[org home page](https://github.com/{org})**. The [Actions tab](https://github.com/{org}/.github/actions) holds the automatic workflows those operations and the schedule run.
+Every operation is a button in the **Instructor Console** and a command, `python -m dsl_course <op>`, from a laptop. Either needs you to be (1) in this org's `course-admin` team (declared here, course-wide), or (2) in a semester's `instructors` team (declared in that semester's own `semester-config/semester.yml`). The full list, with each command, is on the **[org home page](https://github.com/{org})**. The [Actions tab](https://github.com/{org}/.github/actions) holds the automatic workflows those operations and the schedule run.
 
 ## Typical flow
 
@@ -403,7 +403,7 @@ _(automatically bootstrapped from the central
 | [**Collect submissions**](https://github.com/{org}/.github/actions/workflows/collect-submissions.yml) | Refresh an assignment's grading sheet now instead of waiting for the cron. The Console's *Collect now* runs it: grading runs student code in this workflow's own sandboxed job. | Console |
 | [**Distribute grades**](https://github.com/{org}/.github/actions/workflows/distribute-grades.yml) | Send what the grading sheet holds: each student's private `grades-<handle>` repo, the semester grades file, and an email. The Console's *Return marks* and the scheduler both run it, in one queue. | Console |
 | [**Send enrolment codes**](https://github.com/{org}/.github/actions/workflows/send-codes.yml) | Emails each student their enrolment code. There is no button: a push to a semester's `students.csv` fires it, and it sends for real. | Automatic |
-| [**Sync membership**](https://github.com/{org}/.github/actions/workflows/sync-membership.yml) | Reconciles teams and access from `students.csv`, `teams.csv`, this org's `people:` block and each semester's `instructors.yml`. Runs on a push to any of them and daily; a manual run walks every semester. | Auto-handled |
+| [**Sync membership**](https://github.com/{org}/.github/actions/workflows/sync-membership.yml) | Reconciles teams and access from `students.csv`, `teams.csv`, this org's `people:` block and each semester's `semester.yml`. Runs on a push to any of them and daily; a manual run walks every semester. | Auto-handled |
 | [**Sync site**](https://github.com/{org}/.github/actions/workflows/sync-site.yml) | Regenerates every semester's website from the org structure. Releases and schedule pushes already do; a manual run walks every semester. | Auto-handled |
 | [**Publish course website**](https://github.com/{org}/.github/actions/workflows/publish-site.yml) | **[OPTIONAL]** Builds the public open-courseware site `{org}.github.io` as `.github/opencourse.yml` says (off by default); a daily cron re-syncs it once on. | Auto-handled |
 | [**Refresh actions**](https://github.com/{org}/.github/actions/workflows/refresh-actions.yml) | Repopulates the dropdowns, re-equips content repos, and rebuilds this index. Runs itself nightly. | Auto-handled |
@@ -501,12 +501,12 @@ def profile_files(
     writing: `README.md` always, `profile/README.md` unless an instructor's page is left
     as it is (see `_semester_profile_body`)."""
     if course_name is None:
-        # Guarded load: absent (None) is normal - a semester org has no dsl-course.yml of its
+        # Guarded load: absent (None) is normal - a semester org has no course.yml of its
         # own. A MALFORMED config raises here (with a clear, logged message) rather than
         # the bare `yaml.safe_load` traceback that used to surface from mid-refresh - a
         # non-mapping is likewise refused, not coerced to {}.
         cfg = org_meta(org)
-        # A SEMESTER org has no dsl-course.yml of its own (its pointer lives in its config
+        # A SEMESTER org has no course.yml of its own (its pointer lives in its config
         # repo), so this used to fall all the way back to the org slug and title the
         # students' landing page "hertie-dsl-demo-f2026". Follow the pointer to the course
         # org that does hold the name; the slug stays as the last resort.

@@ -1123,9 +1123,14 @@ _SHAPE_ANSWERS = {"submit_via": "assignment_repo", "formats": DEFAULT_FORMATS}
 
 def resolve_answers(answers: dict[str, str], defaults: dict) -> dict[str, str]:
     """The New assignment answers with every box left at `COURSE_DEFAULT_CHOICE` replaced
-    through the course's `defaults:` (`submit_via` only, pending the maintainer's ruling)
-    else `_SHAPE_ANSWERS`. An answer somebody chose is kept as given."""
-    stack = [("course", defaults), ("institution", _SHAPE_ANSWERS)]
+    through the course's `defaults:` (`formats` excepted: the wizard asks, decision 0039)
+    else the toolkit's (`_SHAPE_ANSWERS`, the institution's defaults). An answer
+    somebody chose is kept as given."""
+    course = {k: v for k, v in defaults.items() if k != "formats"}
+    stack = [
+        ("course", course),
+        ("institution", {**settings.institution_defaults(), **_SHAPE_ANSWERS}),
+    ]
     out = {}
     for key, value in answers.items():
         if value == COURSE_DEFAULT_CHOICE:

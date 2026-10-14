@@ -2,7 +2,7 @@
 
 Faculty & instructors currently touch several distinct files across 2 orgs to run a semester: course
 identity, course admins, and semester-config's roster/teams/grading sheets/schedule.yml (which
-now carries the release plan too)/instructors.yml. This module answers one glance-able question -
+now carries the release plan too)/semester.yml. This module answers one glance-able question -
 what's configured, what's still missing, and where do I go to fix it - by reusing
 each source's existing loader rather than re-deriving anything. Read-only; it
 changes no state.
@@ -412,7 +412,7 @@ def collect(course_org: str, semester_org: str) -> dict[str, dict]:
         f"{dates}{archives}{dropped}",
     )
 
-    # load_semester_faculty returns None when instructors.yml is absent - an empty desired set
+    # load_semester_faculty returns None when semester.yml is absent - an empty desired set
     # for this read-only status view (no team to count).
     try:
         semester_faculty = sync_faculty.load_semester_faculty(semester_org) or {}
@@ -627,7 +627,7 @@ COURSE_TOUCHING_OPS = frozenset(
 def write_after_op(request: dict) -> int:
     """The hook the Console run calls at the end of every operation, with its
     `dsl.request/1` request. Rewrites the semester's status when the request names one,
-    and the course's after a course operation (a new template, a fixed dsl-course.yml) or
+    and the course's after a course operation (a new template, a fixed course.yml) or
     a semester one that changes the course's facts (`COURSE_TOUCHING_OPS`). Never raises;
     returns the error count, which the caller may ignore: the operation's outcome is its
     own."""
@@ -680,7 +680,7 @@ def main() -> int:
     # error beats a traceback, and the run still goes red.
     try:
         # collect()'s dependencies (schedule.load, roster.load, sync_faculty...) log
-        # informational lines to stdout, some naming instructors.yml entries. Both modes keep
+        # informational lines to stdout, some naming semester.yml entries. Both modes keep
         # them off stdout: --format json promises parseable output, and the workflow
         # appends the markdown to $GITHUB_STEP_SUMMARY of a PUBLIC repo.
         with contextlib.redirect_stdout(io.StringIO()):

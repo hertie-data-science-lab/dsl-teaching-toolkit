@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def _override(tmp_path: Path, data: dict) -> Path:
-    path = tmp_path / "policy.yml"
+    path = tmp_path / "institution.yml"
     path.write_text(yaml.safe_dump(data))
     return path
 
@@ -23,17 +23,18 @@ def _override(tmp_path: Path, data: dict) -> Path:
 def test_the_shipped_policy_carries_hertie_values():
     shipped = policy.read(override=None)
     assert shipped["defaults"] == {
+        "timezone": "Europe/Berlin",
         "late_window_days": 10,
         "late_penalty_per_day": "10%",
         "max_team_size": 5,
-        "visibility": "private",
-        "team_formation": "self_select",
+        "assignment_repo_visibility": "private",
+        "archive_grace_days": 60,
+        "materials_repo": "materials",
         "marks_per_question": True,
-        "formats": ["ipynb"],
-        "timezone": "Europe/Berlin",
-        "archive": {"grace_days": 60},
-        "semester_dest_repo": "materials",
     }
+    # Decision 0039 rule 2: `team_formation` is set from the course down, `formats` by
+    # the New assignment wizard; neither is an institutional default.
+    assert list(shipped["defaults"]) == list(policy.DEFAULT_KEYS)
     assert [k["key"] for k in shipped["kinds"]] == [
         "lecture",
         "lab",
@@ -47,7 +48,9 @@ def test_the_shipped_policy_carries_hertie_values():
         "other",
     ]
     assert shipped["licences"][0]["name"] == "CC BY-NC-SA 4.0"
-    assert "@" in shipped["contact"]
+    assert all("@" in c for c in shipped["institution"]["contacts"])
+    assert policy.contact() == shipped["institution"]["contacts"][0]
+    assert shipped["selection_floor"] == {}
 
 
 def test_the_shipped_default_validates():
@@ -65,7 +68,7 @@ def test_an_override_merges_defaults_and_replaces_lists(tmp_path):
     path = _override(
         tmp_path,
         {
-            "defaults": {"late_window_days": 3, "archive": {"grace_days": 30}},
+            "defaults": {"late_window_days": 3, "archive_grace_days": 30},
             "institution": {"name": "Elsewhere"},
             "kinds": kinds,
         },
@@ -73,7 +76,7 @@ def test_an_override_merges_defaults_and_replaces_lists(tmp_path):
     got = policy.read(override=path)
     assert got["defaults"]["late_window_days"] == 3
     assert got["defaults"]["late_penalty_per_day"] == "10%"
-    assert got["defaults"]["archive"] == {"grace_days": 30}
+    assert got["defaults"]["archive_grace_days"] == 30
     assert got["institution"]["name"] == "Elsewhere"
     assert got["institution"]["dsl_org_url"].startswith("https://")
     assert got["kinds"][0]["key"] == "seminar"
@@ -87,11 +90,14 @@ def test_an_override_merges_defaults_and_replaces_lists(tmp_path):
         ({"defaults": {"late_penalty_per_day": "100.9%"}}, "late_penalty_per_day"),
         ({"defaults": {"max_team_size": -3}}, "max_team_size"),
         ({"defaults": {"late_window_days": -10}}, "late_window_days"),
-        ({"defaults": {"archive": {"grace_days": -60}}}, "grace_days"),
-        ({"defaults": {"visibility": "internal"}}, "visibility"),
+        ({"defaults": {"archive_grace_days": -60}}, "archive_grace_days"),
+        ({"defaults": {"assignment_repo_visibility": "internal"}}, "visibility"),
+        ({"defaults": {"team_formation": "assigned"}}, "team_formation"),
+        ({"defaults": {"materials_repo": "no spaces"}}, "materials_repo"),
         ({"defaults": {"timezone": "Mars/Olympus"}}, "timezone"),
         ({"defaults": {"typo": 1}}, "typo"),
-        ({"contact": "nobody"}, "contact"),
+        ({"institution": {"contacts": ["nobody"]}}, "contacts"),
+        ({"institution": {"contacts": []}}, "contacts"),
         ({"licences": []}, "licences"),
         (
             {
@@ -170,3 +176,11 @@ def test_two_kinds_may_not_share_a_plural(tmp_path):
 def test_the_console_export_is_the_policy_the_engine_runs_on():
     exported = json.loads((ROOT / "console/schemas/policy.json").read_text())
     assert exported == policy.load()
+
+
+def test_a_leftover_policy_yml_is_refused_not_ignored(tmp_path):
+    # Decision 0039: `policy.yml` is now `institution.yml`. A checkout that still carries
+    # the old file would otherwise run on the shipped values with nothing said.
+    (tmp_path / "policy.yml").write_text("defaults: {}\n")
+    with pytest.raises(policy.PolicyError, match="policy.yml is now institution.yml"):
+        policy.read(override=tmp_path / "institution.yml")

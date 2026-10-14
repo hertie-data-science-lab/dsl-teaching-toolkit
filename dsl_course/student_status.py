@@ -280,7 +280,7 @@ class StudentFacts:
     syllabus: tuple[str, str] | None = None
     # The course's `site_link_extensions` (`site_repo.link_extensions`): what a row lists.
     link_extensions: frozenset[str] = frozenset()
-    # (instructors, teaching assistants) as site cards; None when instructors.yml
+    # (instructors, teaching assistants) as site cards; None when semester.yml
     # declares nobody.
     cards: tuple[list[dict], list[dict]] | None = None
     home: str = ""

@@ -144,7 +144,7 @@ def test_put_files_seeds_a_repo_that_has_no_commits_yet(monkeypatch):
     # one. This test used to assert the opposite (that omitting base_tree was enough), with
     # a stub that let the POST succeed - so the real 409 went unnoticed until the first
     # semester org bootstrapped after the semester-config scaffolds were batched, whose
-    # roster, schedule and instructors.yml never landed at all.
+    # roster, schedule and semester.yml never landed at all.
     calls = []
 
     def fake_gh(*args, **kwargs):
@@ -315,36 +315,36 @@ def test_load_yaml_config_distinguishes_absent_empty_and_malformed(monkeypatch):
     # ABSENT (404 -> get_file_content None) -> None: pruning callers must not treat this
     # as an empty desired set.
     monkeypatch.setattr(gh_contents, "get_file_content", lambda *a, **k: None)
-    assert gh_contents.load_yaml_config("Org", ".github", "dsl-course.yml") is None
+    assert gh_contents.load_yaml_config("Org", ".github", "course.yml") is None
 
     # present but empty -> {} (a legitimate "empty the team")
     monkeypatch.setattr(gh_contents, "get_file_content", lambda *a, **k: "")
-    assert gh_contents.load_yaml_config("Org", ".github", "dsl-course.yml") == {}
+    assert gh_contents.load_yaml_config("Org", ".github", "course.yml") == {}
 
     # present with content -> the parsed mapping
     monkeypatch.setattr(
         gh_contents, "get_file_content", lambda *a, **k: "people:\n  x: 1\n"
     )
-    assert gh_contents.load_yaml_config("Org", ".github", "dsl-course.yml") == {
+    assert gh_contents.load_yaml_config("Org", ".github", "course.yml") == {
         "people": {"x": 1}
     }
 
     # malformed YAML -> logged + raised, never silently {}
     monkeypatch.setattr(gh_contents, "get_file_content", lambda *a, **k: "a: b: c\n")
     with pytest.raises(yaml.YAMLError):
-        gh_contents.load_yaml_config("Org", ".github", "dsl-course.yml")
+        gh_contents.load_yaml_config("Org", ".github", "course.yml")
 
     # a non-mapping top level (list/scalar) -> raised, naming the file
     monkeypatch.setattr(gh_contents, "get_file_content", lambda *a, **k: "- a\n- b\n")
     with pytest.raises(RuntimeError, match="not a YAML mapping"):
-        gh_contents.load_yaml_config("Org", ".github", "dsl-course.yml")
+        gh_contents.load_yaml_config("Org", ".github", "course.yml")
 
 
 def test_a_malformed_config_is_logged_by_its_problem_not_by_its_contents(
     monkeypatch, capsys
 ):
     # These log lines land in a PUBLIC course-org Actions log, and the line that breaks a
-    # instructors.yml is as often as not the one carrying somebody's address - which is what
+    # semester.yml is as often as not the one carrying somebody's address - which is what
     # PyYAML renders into `str(exc)`.
     import yaml
 
@@ -354,10 +354,10 @@ def test_a_malformed_config_is_logged_by_its_problem_not_by_its_contents(
         lambda *a, **k: "people:\n  - email: jan@x.edu: typo\n",
     )
     with pytest.raises(yaml.YAMLError):
-        gh_contents.load_yaml_config("Org", "semester-config", "instructors.yml")
+        gh_contents.load_yaml_config("Org", "semester-config", "semester.yml")
     err = capsys.readouterr().err
     assert "jan@x.edu" not in err
-    assert "malformed YAML in Org/semester-config/instructors.yml: " in err
+    assert "malformed YAML in Org/semester-config/semester.yml: " in err
     assert "ScannerError: mapping values are not allowed here (line 2)" in err
 
 
@@ -371,11 +371,11 @@ def test_load_yaml_config_propagates_a_non_404_read_error(monkeypatch):
     # get_file_content raises on any non-404 failure; load_yaml_config must not swallow it
     # into None/{}, or a transient error reads as "not configured".
     def boom(*a, **k):
-        raise RuntimeError("could not read Org/.github/dsl-course.yml: HTTP 403")
+        raise RuntimeError("could not read Org/.github/course.yml: HTTP 403")
 
     monkeypatch.setattr(gh_contents, "get_file_content", boom)
     with pytest.raises(RuntimeError, match="HTTP 403"):
-        gh_contents.load_yaml_config("Org", ".github", "dsl-course.yml")
+        gh_contents.load_yaml_config("Org", ".github", "course.yml")
 
 
 # ------------------------- a read-modify-write must not clobber a concurrent commit

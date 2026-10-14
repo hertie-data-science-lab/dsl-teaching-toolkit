@@ -1,6 +1,6 @@
 """bootstrap_course metadata builders: instructors/TAs/course-admins live on the
 persistent course org (the SSOT, mirrored into every semester by sync_faculty). A semester
-org's .github/dsl-course.yml is only a pointer back to it - its schedule lives in
+org's .github/course.yml is only a pointer back to it - its schedule lives in
 semester-config/schedule.yml (seeded from templates/semester-config/schedule.yml).
 
 The seeded content itself lives in real files under templates/, read at runtime by
@@ -52,7 +52,7 @@ def test_parse_handles_splits_comma_and_space():
 
 
 def test_schedule_yml_seed_is_commented_and_covers_every_field():
-    # Mostly-commented, like the old semester dsl-course.yml schedule block - faculty
+    # Mostly-commented, like the old semester course.yml schedule block - faculty
     # uncomment what they want to pin. The one live block is `archive:` at the end: the
     # maintainer wants every semester to say in its own file what happens at term end, with
     # the date left to its default and the sentence written out.
@@ -137,10 +137,10 @@ def test_the_seeded_archive_sentence_names_the_day_it_is_rendered_for():
 
 
 def test_config_readme_documents_the_semester_files_it_holds():
-    # Instructors configure a semester HERE (instructors.yml, schedule.yml, the roster); the README
+    # Instructors configure a semester HERE (semester.yml, schedule.yml, the roster); the README
     # must document those files and never send them back up to the course org.
     readme = welcome.template("semester-config/README.md")
-    assert "instructors.yml" in readme
+    assert "semester.yml" in readme
     assert "schedule.yml" in readme
     assert "schedule.csv" not in readme
     assert "course org's" not in readme
@@ -182,7 +182,7 @@ def test_every_seeded_template_path_resolves():
 
 
 def test_semester_metadata_carries_course_pointer():
-    # The semester .github/dsl-course.yml must carry a `course:` line - the semester-config
+    # The semester .github/course.yml must carry a `course:` line - the semester-config
     # dispatchers grep it to find where to fire Sync membership / Sync site.
     md = bc._semester_metadata("My-Course-E1")
     assert "course: My-Course-E1" in md
@@ -239,7 +239,7 @@ def test_a_repo_that_could_not_be_created_is_not_stamped(monkeypatch):
 
 def test_inventory_skips_semester_pointer_orgs(monkeypatch):
     # Semesters bootstrapped before the topic split still carry dsl-course-hub, so the
-    # inventory must also filter by metadata shape: a semester's dsl-course.yml is a
+    # inventory must also filter by metadata shape: a semester's course.yml is a
     # `course:` pointer, a course org's is not.
     from dsl_course import list_orgs
 
@@ -288,4 +288,4 @@ def test_a_semester_cannot_be_bootstrapped_onto_its_own_tier(monkeypatch, capsys
         ],
     )
     assert bc.main() == 1
-    assert "Course-Org/.github/dsl-course.yml" in capsys.readouterr().err
+    assert "Course-Org/.github/course.yml" in capsys.readouterr().err

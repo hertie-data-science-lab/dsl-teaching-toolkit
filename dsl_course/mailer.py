@@ -160,7 +160,7 @@ def maintainer_address() -> str:
 
 def course_admin_addresses(declared: Iterable[str] = ()) -> tuple[str, ...]:
     """The course admins' addresses for THIS org, in declaration order: the `email:` of
-    each active admin in `dsl-course.yml` (`sync_faculty.course_admin_emails`). `()` when
+    each active admin in `course.yml` (`sync_faculty.course_admin_emails`). `()` when
     none declares one; the committer git names is @mentioned on the digest issue either way.
 
     Anything without an `@` is dropped rather than handed to Graph.
@@ -395,7 +395,7 @@ def _masked(addresses: tuple[str, ...]) -> str:
     apart, not enough to identify either.
 
     For `log_person` ONLY, which prints under `DSL_VERBOSE=1` and is set by no rendered
-    workflow. A mask is not anonymity: `j***@pm.me` beside a semester's instructors.yml is a
+    workflow. A mask is not anonymity: `j***@pm.me` beside a semester's semester.yml is a
     name, and every one of these workflows runs in a PUBLIC repo. What the run log gets is
     a count."""
     return ", ".join(mask_email(a) for a in addresses)

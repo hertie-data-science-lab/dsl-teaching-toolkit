@@ -405,7 +405,7 @@ def test_parse_grading_spec_drops_a_malformed_value_and_keeps_the_rest(capsys):
 def test_the_course_defaults_block_is_validated_like_the_file_it_is_stamped_into(
     capsys,
 ):
-    # `assignment_defaults:` in dsl-course.yml is what `New assignment` stamps into the
+    # `assignment_defaults:` in course.yml is what `New assignment` stamps into the
     # file it generates - at WRITE time, so a reader never merges it - and it goes through
     # the same readers, so a value the writer would emit cannot be one the reader refuses.
     assert settings.parse_assignment_defaults(

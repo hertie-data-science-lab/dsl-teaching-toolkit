@@ -427,7 +427,7 @@ def test_the_marker_is_not_written_when_a_solution_push_failed(tmp_path, monkeyp
 
 def test_the_marker_IS_written_when_the_site_sync_fails(tmp_path, monkeypatch):
     # A site-sync failure says nothing about whether the solution shipped - and it is
-    # PERSISTENT (a malformed instructors.yml raises every run), so withholding the marker for
+    # PERSISTENT (a malformed semester.yml raises every run), so withholding the marker for
     # it would re-clone every student repo every hour for the rest of the term.
     rc, recorded = _marker_run(tmp_path, monkeypatch, site_raises=True)
     assert recorded == [("SEMESTER", "assignment-1", 1)]

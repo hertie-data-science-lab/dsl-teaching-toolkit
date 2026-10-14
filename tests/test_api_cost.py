@@ -123,13 +123,13 @@ class FakeGitHub:
             (
                 COURSE,
                 ".github",
-                "dsl-course.yml",
+                "course.yml",
             ): "course_name: Deep Learning\ncourse_code: E1234\n",
             (COURSE, ".github", "semesters.yml"): f"semesters:\n- {SEMESTER}\n",
             (
                 SEMESTER,
                 "semester-config",
-                ".system/dsl-course.yml",
+                ".system/course.yml",
             ): f"course: {COURSE}\n",
             (SEMESTER, "semester-config", "schedule.yml"): _schedule(),
             (SEMESTER, "semester-config", "students.csv"): roster
@@ -140,7 +140,7 @@ class FakeGitHub:
                 "semester-config",
                 "teams.csv",
             ): "assignment,team,github_handle\n",
-            (SEMESTER, "semester-config", "instructors.yml"): "instructors: []\n",
+            (SEMESTER, "semester-config", "semester.yml"): "instructors: []\n",
         }
         materials = (FIXTURES / "demo-course-tree.txt").read_text().splitlines()
         self.trees: dict[tuple[str, str], list[str]] = {

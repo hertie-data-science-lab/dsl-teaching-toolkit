@@ -5,12 +5,12 @@ Two independent flows, split by role rather than by "stability":
 
 - `course_admins` - genuinely course-wide (course director / permanent admin, needs
   admin rights everywhere). Declared ONCE on the persistent COURSE org's
-  `.github/dsl-course.yml` `people:` block - the SSOT, reconciled into the course
+  `.github/course.yml` `people:` block - the SSOT, reconciled into the course
   org's own `course-admin` team AND mirrored into every semester org's own
   `course-admin` team. Unchanged from the original course-org-SSOT design.
 - `instructors`/`teaching_assistants` - genuinely semester-scoped (most semesters have
   different lecturers/TAs). Declared PER SEMESTER, in that semester's own
-  `semester-config/instructors.yml` (see `load_semester_faculty`) - reconciled into that
+  `semester-config/semester.yml` (see `load_semester_faculty`) - reconciled into that
   semester's own `instructors` team, AND synced UP into a parallel, tag-scoped
   `instructors-<tag>` team on the COURSE org (push access on just that tag's
   content repos, PLUS the central `.github` repo so its members can also use the
@@ -82,7 +82,7 @@ ROLE_TEAM = {
 SEMESTER_PEOPLE_PATH = SEMESTER_FILE
 # The roles a semester declares: its teaching team, the people a notification is addressed
 # to and therefore the entries `email:` is required on. course_admins is course-level and
-# notified through the course org, not a semester's instructors.yml.
+# notified through the course org, not a semester's semester.yml.
 TEACHING_ROLES = ("instructors", "teaching_assistants")
 
 
@@ -113,7 +113,7 @@ def _people_fault(
     fault's identity in the digest's state and its heading in the mail, and an entry
     somebody renames is not a new fault. The line is what sends anybody to it - and
     `repo`, with `file`, is what makes that line a place: the same block is a semester's
-    `semester-config/instructors.yml` and a course org's `.github/dsl-course.yml`."""
+    `semester-config/semester.yml` and a course org's `.github/course.yml`."""
     return ConfigFault(
         where,
         what,
@@ -133,7 +133,7 @@ def _declared(
 ) -> dict[str, list[tuple[str, object]]] | None:
     """`{role key: [(where, entry)]}` from either shape of a people block, or None.
 
-    `instructors.yml`'s one `instructors:` list, grouped by each entry's REQUIRED `role:`
+    `semester.yml`'s one `instructors:` list, grouped by each entry's REQUIRED `role:`
     (an entry without a valid one is skipped and, with `faults`, reported); or a course
     file's `people:` mapping of role -> list. `where` is the entry's place in the file as
     written - its identity in the digest's state."""
@@ -186,7 +186,7 @@ def parse_faculty_from_meta(
     skipped: list[str] | None = None,
 ) -> dict[str, list[dict]]:
     """Parse an already-loaded config mapping's `people:` block (course org's
-    dsl-course.yml, or a semester's instructors.yml - same schema) for the roles in ROLE_TEAM.
+    course.yml, or a semester's semester.yml - same schema) for the roles in ROLE_TEAM.
     Only entries with a `github_handle` grant access; a named entry without one is a
     legitimate display-only card (noted, not an error), anything else is junk (flagged).
 
@@ -197,7 +197,7 @@ def parse_faculty_from_meta(
     grant anything to, a handle that cannot be a GitHub username (adding it to a team
     would INVITE it, so the sync skips it), and a teaching entry no notification can
     reach. `file` and `repo` name where they are - the same schema is a semester's
-    `semester-config/instructors.yml` and a course org's `.github/dsl-course.yml`, and a fault
+    `semester-config/semester.yml` and a course org's `.github/course.yml`, and a fault
     that cited the wrong one would link a reader at a file that does not exist.
 
     `skipped` collects the place (`instructors[2]`) of every entry that could not be
@@ -351,7 +351,7 @@ def _active_teaching_entries(
 
     The role rides along because who gets COPIED on a notification depends on it: a mail
     addressed to a TA copies the instructors. Reading it back off the entry afterwards
-    would mean iterating instructors.yml a second way."""
+    would mean iterating semester.yml a second way."""
     return [
         (role, p)
         for role in TEACHING_ROLES
@@ -381,7 +381,7 @@ def teaching_contacts(faculty: dict[str, list[dict]], today: str) -> list[Contac
     can actually reach, in declaration order.
 
     A parsed faculty dict and a clock, exactly like `without_email`: the caller reads
-    instructors.yml once and both answers are about the same tick. Taking the raw `people:`
+    semester.yml once and both answers are about the same tick. Taking the raw `people:`
     mapping instead meant a second parse - and a second `date.today()`, which is not the
     clock a scheduler run is reasoning about.
 
@@ -420,7 +420,7 @@ def without_email(faculty: dict[str, list[dict]], today: str) -> list[str]:
 
 
 def _semester_roles_only(faculty: dict[str, list[dict]]) -> dict[str, list[dict]]:
-    """A semester's instructors.yml declares instructors/TAs only - course_admins stays
+    """A semester's semester.yml declares instructors/TAs only - course_admins stays
     exclusively course-level, so drop it even if someone puts it there."""
     return {
         role: entries for role, entries in faculty.items() if role != "course_admins"
@@ -448,12 +448,12 @@ def _cited_repos(
 def load_faculty(
     course_org: str, skipped: list[str] | None = None
 ) -> dict[str, list[dict]] | None:
-    """Fetch + parse the course org's `.github/dsl-course.yml` `people:` block -
+    """Fetch + parse the course org's `.github/course.yml` `people:` block -
     course_admins only in practice; instructors/TAs are declared per semester
     (see `load_semester_faculty`), but any stray entries here are still parsed
     (and reconciled) the same way `parse_faculty_from_meta` always has.
 
-    Returns None when dsl-course.yml is genuinely ABSENT - the caller must then NOT prune
+    Returns None when course.yml is genuinely ABSENT - the caller must then NOT prune
     (an absent config is not an empty desired set). A present-but-empty `people:` block
     parses to {} and legitimately empties the team.
 
@@ -465,14 +465,14 @@ def load_faculty(
 
 
 def load_semester_faculty(semester_org: str) -> dict[str, list[dict]] | None:
-    """Fetch + parse this semester's own semester-config/instructors.yml - instructors/TAs
+    """Fetch + parse this semester's own semester-config/semester.yml - instructors/TAs
     only (no course_admins key here; that role stays exclusively course-level).
 
-    Returns None when instructors.yml is genuinely ABSENT (do not prune). A file with no
+    Returns None when semester.yml is genuinely ABSENT (do not prune). A file with no
     `instructors:` list raises `NoInstructorsList`, and `instructors: []` - said in as many
     words - is the one way to empty the team.
 
-    THE door to a semester's instructors.yml, and memoised per process like `repos._repo`: a
+    THE door to a semester's semester.yml, and memoised per process like `repos._repo`: a
     release tick asks it who to notify, `status` asks it who is unreachable, and the file
     changes only when somebody edits it. The memo also means the "no usable `email:`"
     error lines are printed once per run rather than once per reader.
@@ -496,7 +496,7 @@ def _semester_faculty(
 
 
 class NoInstructorsList(Unusable):
-    """A present `instructors.yml` that declares no `instructors:` list - the seeded,
+    """A present `semester.yml` that declares no `instructors:` list - the seeded,
     all-comment skeleton, or a file emptied by hand. Refused rather than read as "nobody":
     a sweep with prune on an empty desired set would strip every instructor's access."""
 
@@ -504,7 +504,7 @@ class NoInstructorsList(Unusable):
 def _load_semester_file(
     semester_org: str, *, lines: bool = False
 ) -> tuple[dict | None, str]:
-    """`(meta, path)` for this semester's `instructors.yml`; `(None, path)` when it is
+    """`(meta, path)` for this semester's `semester.yml`; `(None, path)` when it is
     absent. Raises exactly what `load_yaml_config` raises otherwise, and
     `NoInstructorsList` for a present file that lists nobody."""
     meta = read_semester(semester_org).file(SEMESTER_PEOPLE_PATH).mapping(lines=lines)
@@ -520,7 +520,7 @@ def _load_semester_file(
 def read_semester_people(
     semester_org: str, faults: list[ConfigFault]
 ) -> dict[str, list[dict]] | None:
-    """This semester's instructors.yml, parsed, with everything a human must fix collected.
+    """This semester's semester.yml, parsed, with everything a human must fix collected.
 
     The fault-collecting twin of `load_semester_faculty`, and deliberately NOT memoised: it
     reads the file with line stamps (which the cached loader must not hand to the site
@@ -536,7 +536,7 @@ def read_semester_people(
     except NoInstructorsList:
         faults.append(
             _file_fault(
-                "this file declares no `instructors:` list yet, so nothing is reconciled "
+                "this file declares no `people:` list yet, so nothing is reconciled "
                 "from it"
             )
         )
@@ -548,7 +548,7 @@ def read_semester_people(
         # `Unusable` and NOT `RuntimeError`: `load_yaml_config` raises the first for a top
         # level that is not a mapping, and `get_file_content` under it raises the second
         # for any read that was not a 404 - a rate limit, a token that lost its scope. Read
-        # as the same thing, a rate limit came back as ONE fault saying instructors.yml is
+        # as the same thing, a rate limit came back as ONE fault saying semester.yml is
         # broken, which closes every real fault in that issue as cleared and mails the
         # teaching team about it. That is the line this whole function exists to draw.
         faults.append(
@@ -566,7 +566,7 @@ def read_semester_people(
 
 
 def _file_fault(what: str) -> ConfigFault:
-    """instructors.yml as a whole, unusable - no entry to name and no line to point at."""
+    """semester.yml as a whole, unusable - no entry to name and no line to point at."""
     return ConfigFault(
         SEMESTER_PEOPLE_PATH,
         f"{what} - no instructor or TA is granted access or notified",
@@ -579,14 +579,14 @@ def _file_fault(what: str) -> ConfigFault:
     )
 
 
-# What to do about a `dsl-course.yml` that is missing, is not YAML, or is not a mapping.
+# What to do about a `course.yml` that is missing, is not YAML, or is not a mapping.
 # The file's own fallback sentence (`faults.FIX`) says "correct the line above", which is
-# the right instruction for the one fault here that HAS a line (`central_ref:`) and no
+# the right instruction for the one fault here that HAS a line (`toolkit_version_ref:`) and no
 # instruction at all for the three that do not - there is no line above, and the citation
 # beside it is a bare filename with nothing to link to.
 _COURSE_FILE_FIX = (
     f"restore {COURSE_CONFIG} in the course org's `.github` from the template and "
-    f"declare the course's admins and its `central_ref:` in it"
+    f"declare the course's admins in it"
 )
 
 
@@ -611,7 +611,7 @@ def _course_fault(what: str, field: str = "", lineno: int | None = None) -> Conf
 def read_course_config(
     course_org: str, faults: list[ConfigFault]
 ) -> dict[str, list[dict]] | None:
-    """The COURSE org's `.github/dsl-course.yml`, parsed, with everything a human must fix
+    """The COURSE org's `.github/course.yml`, parsed, with everything a human must fix
     collected. None when the file could not be used at all.
 
     The fault-collecting twin of `load_faculty`, and deliberately not memoised for the
@@ -683,10 +683,10 @@ def sync_course_admins(
     skipped: list[str] = []
     faculty = load_faculty(course_org, skipped)
     if faculty is None:
-        # ABSENT dsl-course.yml: parsing it as "" would yield an empty desired set and a
+        # ABSENT course.yml: parsing it as "" would yield an empty desired set and a
         # pruning reconcile would strip course-admin from EVERY org. Refuse to prune.
         log_err(
-            f"course identity {course_org}/.github/dsl-course.yml is absent - refusing "
+            f"course identity {course_org}/.github/course.yml is absent - refusing "
             f"to reconcile course-admin (an absent config would prune every admin from "
             f"{1 + len(semesters)} org(s)); skipping"
         )
@@ -715,7 +715,7 @@ def sync_semester_instructors(
     assignments: list[str],
     dry_run: bool = False,
 ) -> int:
-    """instructors/TAs: declared in this semester's own semester-config/instructors.yml,
+    """instructors/TAs: declared in this semester's own semester-config/semester.yml,
     reconciled into that semester's own `instructors` team AND a parallel
     `instructors-<tag>` team on the course org, with push on the course repos this
     semester's schedule cites - no merge with any other semester.
@@ -730,10 +730,10 @@ def sync_semester_instructors(
         log_err(f"  ! {exc} - instructors not reconciled for {semester_org}; skipping")
         return 0
     if faculty is None:
-        # ABSENT instructors.yml: reconciling an empty desired set with prune=True would strip
+        # ABSENT semester.yml: reconciling an empty desired set with prune=True would strip
         # this semester's instructors team (and its course-org tag team). Refuse to prune -
         # and stay GREEN, because a file faculty have to write is a CONTENT fault. It is
-        # already on the instructors.yml digest issue in this semester's semester-config
+        # already on the semester.yml digest issue in this semester's semester-config
         # (`read_semester_people`), with a mail beside it to the people who can act on it; a
         # red X here opens "Sync membership is failing" in the COURSE org and mails a
         # maintainer who cannot write another org's teaching team. A read that FAILED

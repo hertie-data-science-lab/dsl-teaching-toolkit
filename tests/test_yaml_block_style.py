@@ -2,7 +2,7 @@
 used as a list item (`- {a: 1, b: 2}`).
 
 Flow and block parse identically, so this is a teaching/readability standard rather than a
-correctness one: `schedule.yml`, `instructors.yml`, `dsl-course.yml`, `grading_config.yml` and the docs
+correctness one: `schedule.yml`, `semester.yml`, `course.yml`, `grading_config.yml` and the docs
 that mirror them are read and hand-edited by course teams, and one shape everywhere is what
 makes them copyable. The guard matters most for the SEEDED templates - a flow item left in
 `templates/semester-config/schedule.yml` is `.format()`ed into every new semester org, so the
@@ -34,7 +34,7 @@ from tests.conftest import new_sheet
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# `#` allowed: the seeded schedule.yml/instructors.yml scaffolds are commented-out YAML, which
+# `#` allowed: the seeded schedule.yml/semester.yml scaffolds are commented-out YAML, which
 # is exactly where the last flow item hid.
 FLOW_ITEM = re.compile(r"^\s*(?:#\s*)?-\s*\{")
 
@@ -166,16 +166,16 @@ SEEDED = {
     "semester-config/schedule.yml (seeded)": lambda: welcome.template(
         "semester-config/schedule.yml"
     ).format(tag="f2026", year=2026, timezone="Europe/Berlin", grace_days=60),
-    "semester-config/instructors.yml (seeded)": lambda: welcome.template(
-        "semester-config/instructors.yml"
+    "semester-config/semester.yml (seeded)": lambda: welcome.template(
+        "semester-config/semester.yml"
     ).format(year=2026, year_next=2027),
-    "course/dsl-course.yml (seeded, commented)": lambda: (
-        bootstrap_course._course_metadata("Course", "CODE")
+    "course/course.yml (seeded, commented)": lambda: bootstrap_course._course_metadata(
+        "Course", "CODE"
     ),
-    "course/dsl-course.yml (seeded, --admins)": lambda: (
-        bootstrap_course._course_metadata("Course", "CODE", admins=["adminhandle"])
+    "course/course.yml (seeded, --admins)": lambda: bootstrap_course._course_metadata(
+        "Course", "CODE", admins=["adminhandle"]
     ),
-    "semester/dsl-course.yml (seeded)": lambda: bootstrap_course._semester_metadata(
+    "semester/course.yml (seeded)": lambda: bootstrap_course._semester_metadata(
         "Course"
     ),
     "grading_config.yml (scaffolded, group)": lambda: _grading_config(

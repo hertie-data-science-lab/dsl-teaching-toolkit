@@ -402,12 +402,12 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
             files={
                 # People from the course org's declared `people:` block (else the GitHub
                 # teams). Instructors only - the open-courseware site is multi-year, and
-                # TAs are declared per semester (in each semester's instructors.yml), never
+                # TAs are declared per semester (in each semester's semester.yml), never
                 # course-level.
                 "_data/people.yml": people_yaml(
                     course_org,
                     meta,
-                    edit_at=f"the `people:` block of {course_org}/.github/dsl-course.yml",
+                    edit_at=f"the `people:` block of {course_org}/.github/course.yml",
                     include_tas=False,
                 ),
                 "_data/course.yml": course_facts(meta),

@@ -41,9 +41,11 @@ from .course import (
     CONFIG_REPO,
     COURSE_CONFIG,
     DEFAULTS_BLOCK,
+    PEOPLE_BLOCK,
     SCHEDULE_FILE,
     SELF_SELECT,
     SEMESTER_FILE,
+    STUDENT_SITE_BLOCK,
 )
 from .discovery import course_org_for_semester, org_meta
 from .faults import ConfigFault, Unusable
@@ -102,6 +104,8 @@ COURSE_ASKED_KEYS = ("submit_via",)
 TEAM_FORMATION_FALLBACK = SELF_SELECT
 
 _REPO_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
+# `semester.yml`'s blocks (decision 0039).
+SEMESTER_BLOCKS = (PEOPLE_BLOCK, DEFAULTS_BLOCK, STUDENT_SITE_BLOCK)
 
 
 def _timezone(value: object, where: str, dropped: list[str]) -> str | None:
@@ -266,7 +270,15 @@ class Instance:
     )
 
 
+# What a refused `defaults:` value costs: `semester.yml`'s own sentence in
+# `faults.CONSEQUENCE` is about its `people:`.
+_DEFAULTS_COST = (
+    "that value is not read: the course's or the institution's default applies"
+)
+
+
 def _fault(where: str, what: str, lineno: int | None, field_name: str = "", **kw):
+    kw.setdefault("consequence", _DEFAULTS_COST)
     return ConfigFault(
         where, what, file=SEMESTER_FILE, field=field_name, lineno=lineno, **kw
     )
@@ -322,7 +334,17 @@ def parse_instance(text: str | None, course: Mapping | None = None) -> Instance:
         )
     data = data or {}
     top = take_lines(data)
-    faults: list[ConfigFault] = []
+    faults: list[ConfigFault] = [
+        _fault(
+            str(key),
+            f"`{key}:` is not a block the toolkit reads (only "
+            f"{', '.join(f'`{b}:`' for b in SEMESTER_BLOCKS)}) - ignored",
+            top.get(str(key)),
+            str(key),
+        )
+        for key in data
+        if key not in SEMESTER_BLOCKS
+    ]
     raw = data.get(DEFAULTS_BLOCK)
     values: dict = {}
     if raw is not None and not isinstance(raw, dict):

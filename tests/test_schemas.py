@@ -145,11 +145,11 @@ CONTRACT_STATUS = {
     "inputs": {
         "schedule.yml": "a",
         "assignments.yml": "a2",
-        "instructors.yml": "b",
+        "semester.yml": "b",
         "students.csv": "c",
         "teams.csv": "d",
         "grading_sheets": "e",
-        "course/dsl-course.yml": "f",
+        "course/course.yml": "f",
         ".system/assignments.lock.yml": "g",
     },
     "course": {
@@ -294,9 +294,9 @@ def test_the_console_copy_of_the_status_schema_is_open_and_the_engines_closed():
 
 
 def test_the_example_course_file_validates():
-    # The demo course's dsl-course.yml has this shape: dated instructor cards and a
+    # The demo course's course.yml has this shape: dated instructor cards and a
     # course-level TA list, both of which the site reads (`site_repo.people_cards`).
-    example = ROOT / "example-course" / "course-org" / "dsl-course.yml"
+    example = ROOT / "example-course" / "course-org" / "course.yml"
     meta = yaml.safe_load(example.read_text())
     assert meta["people"]["teaching_assistants"]
     assert "start" in meta["people"]["instructors"][0]

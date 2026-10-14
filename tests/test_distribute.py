@@ -960,7 +960,7 @@ def test_the_dry_run_sample_email_is_the_one_that_would_be_sent(tmp_path, monkey
 def test_an_unreadable_course_name_still_previews_the_email(tmp_path, monkeypatch):
     # Same fallback the send has: the name is a nicety, the notification is not.
     def boom(org):
-        raise RuntimeError("no dsl-course.yml")
+        raise RuntimeError("no course.yml")
 
     out = _distribute(monkeypatch, tmp_path, dry_run=True, course_name=boom)
     assert out["rc"] == 0

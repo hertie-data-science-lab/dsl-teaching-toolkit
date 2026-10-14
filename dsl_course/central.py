@@ -27,7 +27,7 @@ CENTRAL = "hertie-data-science-lab/dsl-teaching-toolkit"
 TIERS = ("main", "release", "preview")
 
 # The DEFAULT ref a seeded workflow runs the engine from, for any org that does not say
-# otherwise in its own `.github/dsl-course.yml` `central_ref:`.
+# otherwise in its own `.github/course.yml` `central_ref:`.
 #
 # `release`, not `main`. Every seeded workflow in every org checks the engine out at run
 # time, so whatever sits on this ref IS production, in every live course, from the moment
@@ -124,6 +124,6 @@ def pin_central_ref(text: str, ref: str) -> str:
             f"{CENTRAL}@{ref} is not a tier branch or a commit on main's history - "
             f"refusing to render workflows that would every one of them fail at checkout. "
             f"Create the ref (Promote), or fix `central_ref:` in the course org's "
-            f".github/dsl-course.yml."
+            f".github/course.yml."
         )
     return text.replace(CENTRAL_REF_PLACEHOLDER, ref)

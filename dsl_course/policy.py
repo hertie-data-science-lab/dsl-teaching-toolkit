@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
+from . import legacy
 from .course import VISIBILITIES
 from .schema_check import validate
 from .setting_readers import READERS
@@ -210,8 +211,14 @@ def _problems(policy: dict) -> list[str]:
 
 
 def read(default: Path = DEFAULT_PATH, override: Path | None = OVERRIDE_PATH) -> dict:
-    """The institution file: `default`, with `override` merged over it when that file exists.
-    Raises `PolicyError` naming every problem."""
+    """The institution file: `default`, with `override` merged over it when that file
+    exists. Raises `PolicyError` naming every problem - and for a checkout that still
+    carries the old `policy.yml` beside it, which nothing reads any more: an institution's
+    own values silently dropped would be worse than a stop."""
+    if override is not None:
+        (row,) = legacy.rows(legacy.TOOLKIT_ROOT)
+        if override.with_name(row.old).is_file():
+            raise PolicyError(f"{row.old} is now {row.new}: rename it (decision 0039)")
     policy = _parse(default)
     if override is not None and override.is_file():
         policy = merge(policy, _parse(override))

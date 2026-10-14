@@ -23,10 +23,10 @@ schedule.yml line and the last committer of the materials repo it names are the 
 who can act, and telling the whole teaching team about every entry is how a notification
 stops being read. The whole team is the FALLBACK, for a line nobody can be named for, and
 below it the course admins and then the maintainer (`_fallback_to`), for a semester whose
-instructors.yml can address nobody at all.
+semester.yml can address nobody at all.
 
 A fault in the COURSE org's own config is the one exception (`route_course`). Its
-addressees are the course admins - their `email:` in `dsl-course.yml` when any admin
+addressees are the course admins - their `email:` in `course.yml` when any admin
 declares one, else an org SECRET - all of them on every mail, and git's answer is spent
 on the digest's @mention instead of on the To line.
 
@@ -129,7 +129,7 @@ class Routing:
 
     `logins` is what the digest comment mentions - the same people the mail is addressed
     to, so the two channels reach one set of humans. Empty means git could name nobody in
-    instructors.yml, and the digest falls back to the semester's instructors team."""
+    semester.yml, and the digest falls back to the semester's instructors team."""
 
     by_key: dict[str, Routed] = field(default_factory=dict)
     logins: list[str] = field(default_factory=list)
@@ -138,7 +138,7 @@ class Routing:
 def _addresses(emails: Iterable[str]) -> tuple[str, ...]:
     """Addresses in declaration order, once each, case-insensitively.
 
-    Two instructors.yml entries sharing a mailbox are one recipient, and a shared address
+    Two semester.yml entries sharing a mailbox are one recipient, and a shared address
     written two ways is the same mailbox. One implementation, because a second copy of
     this rule is a second answer to "have we already told them"."""
     out: dict[str, str] = {}
@@ -189,7 +189,7 @@ def _wrote_it(semester_org: str, fault: ConfigFault, bot: str) -> str | None:
     written by a form and rewritten by the bot while a YAML's are typed by a person. The
     bot is skipped either way: it is the last committer of every file it maintains, and
     mailing it is mailing nobody. On the BLAME side that matters as much - the bot writes
-    `central_ref:` into every dsl-course.yml and `handout_datetime:` into schedule.yml, so
+    `central_ref:` into every course.yml and `handout_datetime:` into schedule.yml, so
     it is the honest blame answer for lines nobody at the school has ever typed - and
     None here is what lets `route_course` fall through to whoever pushed the file."""
     if not fault.file:
@@ -247,7 +247,7 @@ def _bot() -> str:
 
 
 def _declared_admin_emails(course_org: str, now: datetime) -> list[str]:
-    """The `email:` of each active course admin in the course org's `dsl-course.yml`,
+    """The `email:` of each active course admin in the course org's `course.yml`,
     or none when the file declares none or cannot be read.
 
     Guarded like `_teaching_contacts`: every caller is about to tell somebody something."""
@@ -260,7 +260,7 @@ def _declared_admin_emails(course_org: str, now: datetime) -> list[str]:
 
 
 def _fallback_to(course_org: str, now: datetime) -> tuple[str, ...]:
-    """The To line for a semester fault its own instructors.yml can address nobody for: the course
+    """The To line for a semester fault its own semester.yml can address nobody for: the course
     ADMINS, else the MAINTAINER (`mailer.maintainer_address`, which always has one).
 
     A semester with no `email:` anywhere is not a semester with nothing to hear: its releases
@@ -281,7 +281,7 @@ def _fallback_to(course_org: str, now: datetime) -> tuple[str, ...]:
 
 
 def _teaching_contacts(semester_org: str, now: datetime) -> list[sync_faculty.Contact]:
-    """This semester's instructors and TAs active `now`, or none when instructors.yml is
+    """This semester's instructors and TAs active `now`, or none when semester.yml is
     unreadable.
 
     Guarded, because `load_semester_faculty` raises on a file it cannot parse - and every
@@ -291,7 +291,7 @@ def _teaching_contacts(semester_org: str, now: datetime) -> list[sync_faculty.Co
     try:
         faculty = sync_faculty.load_semester_faculty(semester_org) or {}
     except Exception as exc:
-        log_err(f"could not read {semester_org}'s instructors.yml ({read_error(exc)})")
+        log_err(f"could not read {semester_org}'s semester.yml ({read_error(exc)})")
         faculty = {}
     return sync_faculty.teaching_contacts(faculty, now.date().isoformat())
 
@@ -310,7 +310,7 @@ def route(
     said on either channel, so nothing needs addressing and a quiet tick costs no API
     calls at all.
 
-    A semester whose instructors.yml holds no address at all falls through to `_fallback_to` -
+    A semester whose semester.yml holds no address at all falls through to `_fallback_to` -
     the course admins, then the maintainer - so the To line is empty only for a course
     that declares neither."""
     loud = [f for f in faults if f.severity(now) >= NOTIFY_FROM]
@@ -352,19 +352,17 @@ def route(
             mention += [c.handle for c in matched]
             routed[f.key] = Routed(to, cc)
         else:
-            # Git named nobody in instructors.yml: the team is the fallback, and there is
+            # Git named nobody in semester.yml: the team is the fallback, and there is
             # nobody in particular to copy because everybody is already in `to`.
             routed[f.key] = Routed(everyone, ())
     if unaddressable:
         # Count only, in a public log. The handles themselves are public but the line
         # says who is not on the teaching team, which is a judgement about a person.
-        log(
-            f"  [skip] {len(unaddressable)} addressee(s) without email in instructors.yml"
-        )
+        log(f"  [skip] {len(unaddressable)} addressee(s) without email in semester.yml")
         for handle in sorted(unaddressable):
-            log_person(f"    no instructors.yml address: {handle}")
+            log_person(f"    no semester.yml address: {handle}")
     if not any(r.to for r in routed.values()):
-        # instructors.yml holds no address at all, so `everyone` is empty and so is every group
+        # semester.yml holds no address at all, so `everyone` is empty and so is every group
         # git could name from it - all of this tick's faults or none. One fallback set for
         # the lot, and the @mention (`mention`) is untouched: who wrote the line does not
         # change because nobody in the semester can be written to.
@@ -383,7 +381,7 @@ def route_course(
 
     Two things differ, and both follow from the file being the course's rather than a
     semester's. The addresses are the course ADMINS' - their own `email:` in
-    `dsl-course.yml` (`mailer.course_admin_addresses`) - and every admin gets every course mail, so there
+    `course.yml` (`mailer.course_admin_addresses`) - and every admin gets every course mail, so there
     is no handle-to-address routing here. And the person git names is @mentioned on the
     issue rather than addressed: the issue is where the line is, and the mail goes to the
     people who own the course.
@@ -403,7 +401,7 @@ def route_course(
         # digest @mention is the only channel left.
         log(
             f"  [skip] {len(list(admins))} addressee(s) without email - "
-            f"no admin declares `email:` in {course_org}'s dsl-course.yml"
+            f"no admin declares `email:` in {course_org}'s course.yml"
         )
     bot = _bot()
     mention: list[str] = []
@@ -737,7 +735,7 @@ def notify_source_transitions(
             dry_run,
         )
     except Exception as exc:
-        # Inside a release cron. Whatever went wrong - an unreadable instructors.yml, a
+        # Inside a release cron. Whatever went wrong - an unreadable semester.yml, a
         # credential Graph refused - the release itself is the job. Nothing went out, so
         # everything this tick owed is held.
         log_err(
@@ -977,14 +975,14 @@ def notify_overwritten_edits(
     git email is linked to no GitHub account - those fall back to the whole teaching team,
     which is the same fallback a blame nobody could read gets. `site_org` is a semester org
     for a semester site and the course org itself for the public one; the latter declares no
-    instructors.yml, so nobody is addressable there and the issue's cc is the only channel."""
+    semester.yml, so nobody is addressable there and the issue's cc is the only channel."""
     shas: dict[str, str] = {}
     faults_by_key: dict[str, ConfigFault] = {}
     groups: dict[Routed, list[str]] = {}
     try:
         faculty = sync_faculty.load_semester_faculty(site_org) or {}
     except Exception as exc:
-        log_err(f"could not read {site_org}'s instructors.yml ({read_error(exc)})")
+        log_err(f"could not read {site_org}'s semester.yml ({read_error(exc)})")
         faculty = {}
     contacts = sync_faculty.teaching_contacts(faculty, now.date().isoformat())
     by_handle = {c.handle.lower(): c for c in contacts}
@@ -998,7 +996,7 @@ def notify_overwritten_edits(
             to = _addresses([who.email])
             cc = tuple(a for a in instructors if a not in to) if who.is_ta else ()
         else:
-            # Git named nobody in instructors.yml - the team is the fallback, and everybody is
+            # Git named nobody in semester.yml - the team is the fallback, and everybody is
             # already in `to`, so there is nobody in particular to copy.
             to, cc = everyone, ()
         for path, sha in edits:

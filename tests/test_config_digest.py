@@ -359,7 +359,7 @@ COURSE = cd.COURSE
 COURSE_CTX = cd.Context("Course", "Course")
 
 
-def _course_fault(file: str = "dsl-course.yml", field: str = "central_ref"):
+def _course_fault(file: str = "course.yml", field: str = "central_ref"):
     return ConfigFault(
         file,
         "this file is not valid YAML, so none of it is read",
@@ -382,20 +382,20 @@ def test_the_course_digest_is_written_in_the_course_orgs_own_github(gh):
 def test_the_course_digest_falls_back_to_the_course_admin_team(gh):
     body = cd.render_body(COURSE, [_course_fault()], NOW, COURSE_CTX)
     assert "cc @Course/course-admin" in body
-    assert "`.github/dsl-course.yml` has broken entries" in body
+    assert "`.github/course.yml` has broken entries" in body
     assert "/docs/01-new-course-org.md" in body
 
 
 def test_both_course_files_sit_in_the_one_issue(gh):
-    # dsl-course.yml and the registry are one failure - either unreadable and the sync
+    # course.yml and the registry are one failure - either unreadable and the sync
     # walks past the whole course - so they are one issue, each fault citing its own file.
     faults = [_course_fault(), _course_fault("semesters.yml", "semesters")]
     body = cd.render_body(COURSE, faults, NOW, COURSE_CTX)
-    assert "`dsl-course.yml`" in body and "`semesters.yml`" in body
+    assert "`course.yml`" in body and "`semesters.yml`" in body
 
 
 def test_the_course_digest_survives_the_very_file_it_reports_on(gh, monkeypatch):
-    # The docs link asks the course org which tier it runs, which reads the dsl-course.yml
+    # The docs link asks the course org which tier it runs, which reads the course.yml
     # this issue is being written ABOUT. A malformed one raises out of the YAML loader, and
     # letting that through would silence the digest reporting exactly that.
     def unparseable(org):
@@ -422,7 +422,7 @@ def test_an_issue_open_under_an_older_title_is_kept_and_closed_as_this_one(gh):
 
 
 def test_the_instructors_digest_keeps_the_issue_it_opened_as_people_yml(gh):
-    # The file became instructors.yml and its issue title followed it; an issue still
+    # The file became semester.yml and its issue title followed it; an issue still
     # open under the people.yml title is that semester's, found and closed as this one.
     people = cd.PEOPLE
     fault = ConfigFault(
@@ -432,7 +432,7 @@ def test_the_instructors_digest_keeps_the_issue_it_opened_as_people_yml(gh):
         field="github_handle",
     )
     assert people.titles == (
-        "instructors.yml has entries the sync cannot use",
+        "semester.yml has entries the sync cannot use",
         "people.yml has entries the sync cannot use",
     )
     body = cd.render_body(people, [fault], NOW, SEMESTER)

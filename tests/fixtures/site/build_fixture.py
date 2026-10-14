@@ -545,7 +545,7 @@ def data_files(hosted: site_repo.Hosted) -> dict[str, str]:
         "_data/people.yml": site_repo.people_yaml(
             SEMESTER_ORG,
             PEOPLE,
-            edit_at=f"{SEMESTER_ORG}/semester-config/instructors.yml",
+            edit_at=f"{SEMESTER_ORG}/semester-config/semester.yml",
         ),
         "_data/nav.yml": site_repo.nav_yaml(semester=True, kinds=kinds),
         "_data/materials.yml": site._materials_index(

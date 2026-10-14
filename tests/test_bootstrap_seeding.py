@@ -6,7 +6,7 @@ an already-existing repo as success, so the `if create_repo(...)` blocks are no
 first-run guard - the guard has to be per file. These tests pin the split:
 
 - USER-owned (semester-config roster/teams/schedule/people/grades, welcome's
-  student-facing README, and the course org's dsl-course.yml SSOT): seeded once, NEVER
+  student-facing README, and the course org's course.yml SSOT): seeded once, NEVER
   rewritten - a rewrite destroyed a live roster (enrol codes + onboarded handles) in
   hertie-dsl-demo-f2026.
 - SYSTEM-owned (join's onboard/team-formation workflows + the issue forms they parse,
@@ -169,7 +169,7 @@ def test_every_seeded_doc_link_names_the_orgs_own_tier(fake):
     # The scaffolds link the runbooks by absolute URL. They named `main` whatever the org
     # ran, so a release semester read the schema of code nobody had promoted yet.
     bc.setup_semester_extras("Semester-f2026", "main")
-    for path in ("schedule.yml", "instructors.yml"):
+    for path in ("schedule.yml", "semester.yml"):
         body = fake.files[("semester-config", path)]
         assert f"{CENTRAL}/blob/main/docs/" in body, path
         assert f"{CENTRAL}/blob/release/docs/" not in body, path
@@ -211,7 +211,7 @@ def test_rerun_preserves_user_config_and_refreshes_workflows(fake):
         "students.csv": "email,github_handle,enrol_code\na@x.edu,ahandle,AB12CD\n",
         "teams.csv": "assignment,team,github_handle\na1,team-1,ahandle\n",
         "schedule.yml": "timezone: Europe/Berlin\nassignments:\n  - id: a1\n",
-        "instructors.yml": "people:\n  instructors:\n    - github_handle: profx\n",
+        "semester.yml": "people:\n  instructors:\n    - github_handle: profx\n",
         "assignments.yml": "defaults:\n  max_team_size: 3\n",
         "README.md": "# stale contract from an older engine\n",
         ".github/workflows/dispatch.yml": "name: stale dispatcher\n",
@@ -283,7 +283,7 @@ def test_the_scaffold_set_lands_as_one_commit_but_stays_create_only_per_file(
         {
             "students.csv": b"header only\n",
             "teams.csv": b"t\n",
-            "instructors.yml": b"p\n",
+            "semester.yml": b"p\n",
         },
         "init: scaffolds",
         create_only=True,
@@ -291,7 +291,7 @@ def test_the_scaffold_set_lands_as_one_commit_but_stays_create_only_per_file(
     assert len(committed) == 1
     assert {entry["path"] for entry in committed[0]} == {
         "teams.csv",
-        "instructors.yml",
+        "semester.yml",
     }, "a file already present must be left exactly as faculty left it"
 
 
@@ -338,7 +338,7 @@ def test_seed_if_absent_returns_false_only_when_the_write_fails(monkeypatch):
 
 
 def test_seeded_scaffolds_render_this_semesters_tag(fake):
-    # instructors.yml's commented example carries THIS semester's dates, so the window a faculty
+    # semester.yml's commented example carries THIS semester's dates, so the window a faculty
     # member uncomments is already the right one. The schedule.yml scaffold deliberately
     # ships key-only (no example values to render) - `schedule.yml.sample` is where a
     # filled, tag-correct term lives instead.
@@ -347,7 +347,7 @@ def test_seeded_scaffolds_render_this_semesters_tag(fake):
     # into a seeded file. A `{tag}` reaching a semester repo is a broken example, and it
     # would only be noticed by the faculty member who copy-pasted it.
     bc.setup_semester_extras("Deep-Learning-f2027", "release")
-    people = fake.files[("semester-config", "instructors.yml")]
+    people = fake.files[("semester-config", "semester.yml")]
     assert '"2027-09-01"' in people and '"2028-01-31"' in people
     for (repo, path), content in fake.files.items():
         assert "{tag}" not in content and "{year" not in content, f"{repo}/{path}"
@@ -366,7 +366,7 @@ def test_the_seeded_people_stub_teaches_every_required_field(fake):
     # yield entries the real parser accepts with nothing missing - `email:` included,
     # since an entry without one is granted access but can never be notified.
     bc.setup_semester_extras("Deep-Learning-f2027", "release")
-    stub = fake.files[("semester-config", "instructors.yml")]
+    stub = fake.files[("semester-config", "semester.yml")]
     block = "# instructors:" + stub.split("# instructors:", 1)[1]
     uncommented = "\n".join(line.removeprefix("# ") for line in block.splitlines())
     faculty = sync_faculty.parse_faculty_from_meta(yaml.safe_load(uncommented) or {})
@@ -409,7 +409,7 @@ def test_every_shipped_sample_parses_with_the_real_parser():
     assert sched.releases and sched.assignments and sched.events
 
     faculty = sync_faculty.parse_faculty_from_meta(
-        yaml.safe_load(example_semester_file("instructors.yml")) or {}
+        yaml.safe_load(example_semester_file("semester.yml")) or {}
     )
     assert faculty["instructors"] and faculty["teaching_assistants"]
 
@@ -514,7 +514,7 @@ def test_the_people_sample_names_nobody_real():
     # only: either no handle at all (valid - the card is display-only) or the
     # demo-*-placeholder convention.
     faculty = sync_faculty.parse_faculty_from_meta(
-        yaml.safe_load(example_semester_file("instructors.yml")) or {}
+        yaml.safe_load(example_semester_file("semester.yml")) or {}
     )
     for role, people in faculty.items():
         for person in people:
@@ -580,14 +580,14 @@ def test_the_example_course_declares_every_key_the_generator_writes():
     # expectation is DERIVED from the generator's own template, never a hand-kept list
     # that could drift the same way.
     generated = yaml.safe_load(
-        welcome.template("course/dsl-course.yml").format(
+        welcome.template("course/course.yml").format(
             org="Course-E1",
             org_name="Course",
             course_name="Deep Learning",
             course_code="E1",
         )
     )
-    example = yaml.safe_load(welcome.example_course_file("dsl-course.yml"))
+    example = yaml.safe_load(welcome.example_course_file("course.yml"))
     assert set(generated) <= set(example), (
         f"the worked example omits {sorted(set(generated) - set(example))}"
     )
@@ -620,11 +620,11 @@ def test_the_seeded_assignment_defaults_block_parses_with_the_real_reader(capsys
     # grading_config.yml, so a key or a spelling the reader does not know would be
     # silently dropped there rather than here. Both files that carry it are checked.
     for text in (
-        welcome.template("course/dsl-course.yml").format(
+        welcome.template("course/course.yml").format(
             course_name="Deep Learning",
             course_code="E1",
         ),
-        welcome.example_course_file("dsl-course.yml"),
+        welcome.example_course_file("course.yml"),
     ):
         block = yaml.safe_load(text)[settings.ASSIGNMENT_DEFAULTS_KEY]
         # Whatever a course states here is read through the same readers as the
@@ -637,7 +637,7 @@ def test_the_example_courses_people_block_feeds_both_of_its_readers():
     # One block, two consumers: sync_faculty grants GitHub access from it, site_repo.py renders
     # website cards from it. A card key the theme cannot read is invisible until a real
     # site is built, so check the mapping here.
-    meta = yaml.safe_load(welcome.example_course_file("dsl-course.yml"))
+    meta = yaml.safe_load(welcome.example_course_file("course.yml"))
     faculty = sync_faculty.parse_faculty_from_meta(meta)
     assert faculty["course_admins"], "course_admins is the SSOT for course-wide admin"
     assert faculty["instructors"], (
@@ -708,7 +708,7 @@ def test_the_example_semester_writes_its_reading_lists_in_the_schedule():
 def test_the_example_course_names_nobody_real():
     # Same rule as the semester samples, for the same reason: faculty copy this file, and a
     # real handle would send an unasked-for org invitation (the file says so itself).
-    meta = yaml.safe_load(welcome.example_course_file("dsl-course.yml"))
+    meta = yaml.safe_load(welcome.example_course_file("course.yml"))
     for role, people in sync_faculty.parse_faculty_from_meta(meta).items():
         for person in people:
             handle = (person.get("github_handle") or "").strip()
@@ -718,24 +718,24 @@ def test_the_example_course_names_nobody_real():
 
 
 def test_course_dsl_course_yml_is_never_rewritten(fake, monkeypatch):
-    # The course org's dsl-course.yml is the faculty SSOT (people.course_admins, instructor
+    # The course org's course.yml is the faculty SSOT (people.course_admins, instructor
     # cards): a repair re-run of "Bootstrap course" must not reset it to the template.
     monkeypatch.setattr(bc, "set_repo_topics", lambda *a, **k: True)
     edited = (
         "org: My-Course-E1\npeople:\n  course_admins:\n    - github_handle: alice\n"
     )
-    fake.files[(".github", "dsl-course.yml")] = edited
+    fake.files[(".github", "course.yml")] = edited
     fake.files[(".github", "opencourse.yml")] = "enabled: true\nsource_repo: m\n"
 
     bc.create_profile_repo("My-Course-E1", "Deep Learning", "E1")
 
-    assert fake.files[(".github", "dsl-course.yml")] == edited
+    assert fake.files[(".github", "course.yml")] == edited
     assert fake.writes == []
-    assert fake.skips == [".github/dsl-course.yml", ".github/opencourse.yml"]
+    assert fake.skips == [".github/course.yml", ".github/opencourse.yml"]
 
 
 def test_a_new_course_gets_its_public_website_settings_seeded_off(fake, monkeypatch):
-    # INSTRUCTOR-OWNED and create-only like dsl-course.yml: nothing is public until
+    # INSTRUCTOR-OWNED and create-only like course.yml: nothing is public until
     # someone turns it on (decision 0016).
     monkeypatch.setattr(bc, "set_repo_topics", lambda *a, **k: True)
     bc.create_profile_repo("My-Course-E1", "Deep Learning", "E1")
@@ -1079,7 +1079,7 @@ def test_refresh_reaches_every_registered_semester(monkeypatch, per_semester_job
 
 
 def test_refresh_repushes_every_semesters_course_pointer(monkeypatch):
-    # `.github/dsl-course.yml` is what a semester's semester-config dispatchers read to
+    # `.github/course.yml` is what a semester's semester-config dispatchers read to
     # find their course org. SYSTEM-owned, but written only by Bootstrap semester's own
     # wiring until now, so every live semester's copy froze the day it was created - same
     # bug class as the landing pages below.
@@ -1848,7 +1848,7 @@ def test_the_nightly_config_refresh_touches_only_system_owned_files(monkeypatch)
     # THE no-clobber invariant. refresh_config_system_files runs nightly against LIVE
     # semesters, so every path it writes is a path overwritten from a template every night.
     # The semester's own config - students.csv (enrol codes + onboarded handles), teams.csv,
-    # schedule.yml, instructors.yml - is seeded create-if-missing at bootstrap and must stay
+    # schedule.yml, semester.yml - is seeded create-if-missing at bootstrap and must stay
     # that way; adding one of them to the refresh set would destroy a live roster
     # (which is exactly what happened once, in hertie-dsl-demo-f2026).
     #
@@ -1870,7 +1870,7 @@ def test_the_nightly_config_refresh_touches_only_system_owned_files(monkeypatch)
         ".github/workflows/validate-schedule.yml",
     }, (
         "the nightly refresh may only re-push SYSTEM-owned semester-config files; a "
-        "USER-owned file here (students.csv, teams.csv, schedule.yml, instructors.yml) "
+        "USER-owned file here (students.csv, teams.csv, schedule.yml, semester.yml) "
         "would be overwritten from the template every night"
     )
     assert {repo for repo, _ in written} == {roster.CONFIG_REPO}
@@ -1900,12 +1900,12 @@ def _profile_repo_run(monkeypatch, *, seeded=True, topics=True):
 
 
 def test_an_unseeded_course_ssot_reds_the_bootstrap(monkeypatch, capsys):
-    # No dsl-course.yml means no faculty SSOT and no course identity for the site, but
+    # No course.yml means no faculty SSOT and no course identity for the site, but
     # its write used to be unchecked under an unconditional "initialised" line.
     assert _profile_repo_run(monkeypatch, seeded=False) == 2
     out = capsys.readouterr()
     assert "profile repo initialised" not in out.out
-    assert "dsl-course.yml" in out.err and "opencourse.yml" in out.err
+    assert "course.yml" in out.err and "opencourse.yml" in out.err
 
 
 def test_an_untagged_github_repo_reds_the_bootstrap(monkeypatch):

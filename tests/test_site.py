@@ -1382,9 +1382,7 @@ def test_the_banner_shows_only_for_a_course_that_opts_into_the_console(
         monkeypatch,
         tmp_path,
         Schedule(),
-        yaml_file=lambda *a: (
-            {"student_console": True} if a[-1] == "dsl-course.yml" else {}
-        ),
+        yaml_file=lambda *a: {"student_console": True} if a[-1] == "course.yml" else {},
     )
     url = yaml.safe_load(on.files["_data/console.yml"])["url"]
     assert url.endswith("?semester=Semester-f2026#week")
@@ -1393,7 +1391,7 @@ def test_the_banner_shows_only_for_a_course_that_opts_into_the_console(
 def test_course_description_flows_from_course_metadata_into_config(
     monkeypatch, tmp_path
 ):
-    # course_description is declared once in the course org's dsl-course.yml and pushed to
+    # course_description is declared once in the course org's course.yml and pushed to
     # every semester site. Undeclared, it must not be written at all - the site repo keeps
     # whatever blurb it has.
     captured = {}
@@ -1454,7 +1452,7 @@ def test_the_exported_config_keys_are_the_ones_the_sync_writes_and_the_seed_keep
 
 
 def test_replacing_a_config_scalar_writes_one_line_over_a_block_scalar():
-    # A faculty `>` block in dsl-course.yml, and/or one already in _config.yml: either way
+    # A faculty `>` block in course.yml, and/or one already in _config.yml: either way
     # the result must stay valid YAML on one line, its body not stranded as loose text.
     cfg = site_repo._replace_config_scalar(
         "course_description: >\n  an old\n  folded blurb\ncourse_code: 'y'\n",
@@ -1842,7 +1840,7 @@ def test_team_people_never_renders_the_syncs_own_bot_account(monkeypatch, capsys
 
 
 def _bad_indent_error() -> yaml.YAMLError:
-    """The REAL exception a bad indent in instructors.yml produces. load_yaml_config re-raises
+    """The REAL exception a bad indent in semester.yml produces. load_yaml_config re-raises
     it untouched, and yaml.YAMLError is NOT a RuntimeError - a stub that raised
     RuntimeError instead is exactly why the boundaries below went uncaught."""
     try:
@@ -1855,28 +1853,27 @@ def _bad_indent_error() -> yaml.YAMLError:
 def test_yaml_file_raises_on_a_malformed_file_rather_than_wiping_what_it_feeds(
     monkeypatch,
 ):
-    # A semester's instructors.yml with one bad indent used to parse to `{}` - "nothing declared" -
+    # A semester's semester.yml with one bad indent used to parse to `{}` - "nothing declared" -
     # and republish the site with every teaching-team card gone, green.
     err = _bad_indent_error()
     monkeypatch.setattr(
         site_repo, "load_yaml_config", lambda *a: (_ for _ in ()).throw(err)
     )
     with pytest.raises(yaml.YAMLError):
-        site_repo.yaml_file("Semester-f2026", "semester-config", "instructors.yml")
+        site_repo.yaml_file("Semester-f2026", "semester-config", "semester.yml")
 
 
 def test_yaml_file_reads_an_absent_file_as_nothing_declared(monkeypatch):
     monkeypatch.setattr(site_repo, "load_yaml_config", lambda *a: None)
     assert (
-        site_repo.yaml_file("Semester-f2026", "semester-config", "instructors.yml")
-        == {}
+        site_repo.yaml_file("Semester-f2026", "semester-config", "semester.yml") == {}
     )
 
 
 def test_main_reports_a_malformed_config_as_one_line_not_a_traceback(
     monkeypatch, capsys
 ):
-    # instructors.yml is web-editable, so faculty author bad indents directly. yaml.YAMLError
+    # semester.yml is web-editable, so faculty author bad indents directly. yaml.YAMLError
     # is not a RuntimeError, so it used to walk straight through main()'s guard and out as
     # a traceback in the Actions log.
     err = _bad_indent_error()
@@ -2105,7 +2102,7 @@ def test_the_config_header_names_the_identity_keys_the_sync_overwrites():
         ["course_code", "course_name"],
     )
     assert "`course_code`, `course_name`" in cfg
-    assert "dsl-course.yml" in cfg
+    assert "course.yml" in cfg
     assert "course_name: x" in cfg
 
 

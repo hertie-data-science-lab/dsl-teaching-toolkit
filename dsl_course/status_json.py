@@ -64,10 +64,10 @@ from . import (
 from .course import (
     COURSE_ADMIN_TEAM,
     COURSE_CONFIG,
-    DEFAULTS_BLOCK,
     INSTRUCTORS_TEAM,
     JOIN_REPO,
     NO_STARTER,
+    PEOPLE_BLOCK,
     SELF_SELECT,
     SEMESTER_FILE,
     SOLUTION_BRANCH,
@@ -232,7 +232,7 @@ class CourseFacts:
     # `.github`'s tree, `{path: sha}`; None when the org could not be read at all.
     github_paths: dict[str, str] | None = None
     registry: list[str] = field(default_factory=list)
-    # What is wrong with dsl-course.yml and the semester registry - the COURSE digest's list.
+    # What is wrong with course.yml and the semester registry - the COURSE digest's list.
     faults: list[ConfigFault] = field(default_factory=list)
     materials: list[MaterialsFacts] = field(default_factory=list)
     templates: list[TemplateFacts] = field(default_factory=list)
@@ -286,7 +286,7 @@ class SemesterFacts:
     site_home: str | None = None
     site_last_update: datetime | None = None
     config_last_update: datetime | None = None
-    # Whether the instructors team holds exactly who instructors.yml grants. None = unread.
+    # Whether the instructors team holds exactly who semester.yml grants. None = unread.
     staff_synced: bool | None = None
     outcomes: list[dict] = field(default_factory=list)  # parsed dsl.outcome/1 files
 
@@ -533,7 +533,9 @@ def _where_filed(fault: ConfigFault) -> _Where:
         return _MARKS_DUE
     if fault.per_semester and fault.file == SEMESTER_FILE:
         return _HANDED_OUT_SETTING
-    if fault.file == SEMESTER_FILE and fault.where.startswith(DEFAULTS_BLOCK):
+    if fault.file == SEMESTER_FILE and not (
+        fault.where.startswith(PEOPLE_BLOCK) or fault.field == PEOPLE_BLOCK
+    ):
         return _DEFAULTS
     if fault.per_semester and fault.file == grading_spec.GRADING_FILE:
         return _SEMESTER_TEMPLATE
@@ -1457,14 +1459,14 @@ def render_course(
 
     Stage predicates (lifecycle, course stages):
     - C1 the org resolves;
-    - C2 `.github` holds dsl-course.yml and its seeded workflows;
-    - C3 dsl-course.yml names the course and its code, and one course admin;
+    - C2 `.github` holds course.yml and its seeded workflows;
+    - C3 course.yml names the course and its code, and one course admin;
     - C4 any materials repo `ready` (decision 0022: the others are to-dos);
     - C5 any template `ready`;
     - C6 `opencourse.yml` turns the public website on and its repo exists.
     C1-C3 are needed, C4-C6 suggested (`stage_need`, decision 0034); the description is a
     suggested to-do. `verdict` rolls them up with the `now`/`soon` course problems and the
-    to-dos; `ready` is its `ready`. A suggested stage may be set aside in `dsl-course.yml`'s
+    to-dos; `ready` is its `ready`. A suggested stage may be set aside in `course.yml`'s
     `set_aside:` (decision 0032), and `stage_set_aside` marks those still not done."""
     problems = [problem_from_fault(f, facts.org, now) for f in facts.faults]
     if facts.website_unusable and facts.website_on:
@@ -2298,7 +2300,7 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
     Stage predicates (lifecycle, semester stages):
     - K1 the org resolves;
     - K2 semester-config, join and the site repo exist, and the course registry lists it;
-    - K3 instructors.yml is read and grants at least one instructor;
+    - K3 semester.yml is read and grants at least one instructor;
     - K4 schedule.yml parses, the term's start and end are set, and it plans something;
     - K5 the roster has rows;
     - K6 the site repo exists.

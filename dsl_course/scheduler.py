@@ -894,7 +894,7 @@ def _preflight_sources(
     # Who to tell, asked ONCE and only if asked at all: the digest @mentions them and the
     # mail is addressed to them, so asking git twice would be two reads and two chances to
     # disagree - and `sync` calls this only on a tick with something to say, because the
-    # answer costs a blame query, a instructors.yml read and a commit lookup per repo.
+    # answer costs a blame query, a semester.yml read and a commit lookup per repo.
     routing = notify.Routing()
 
     def whom() -> list[str]:
@@ -1071,7 +1071,7 @@ def _sync_config_digest(
 
     `route` is who to tell, for a digest that answers that differently: the COURSE-level
     one is addressed to the course admins out of an org secret rather than to a semester's
-    teaching team out of its instructors.yml. Everything else about the two is identical, which
+    teaching team out of its semester.yml. Everything else about the two is identical, which
     is why it is one function and one parameter."""
     routing = notify.Routing()
     ask = route or (lambda: notify.route(semester_org, course_org, faults, local))
@@ -1129,7 +1129,7 @@ def _preflight_configs(
     The hourly floor under the push fast path. An edit that leaves students.csv unreadable
     fires the dispatcher and is mailed within the minute; this is what catches the one
     that was pushed before any of this existed, the one whose dispatch failed, and the
-    instructors.yml entry whose `end:` date lapsed while nobody was pushing anything.
+    semester.yml entry whose `end:` date lapsed while nobody was pushing anything.
 
     Nothing here fails the run, at any rung, for the reason `_preflight_sources` does not:
     a file faculty have to fix is a CONTENT fault, and the exit code belongs to the run
@@ -1152,7 +1152,7 @@ def _course_faults(course_org: str) -> tuple[list | None, set[str]]:
 
     None is not "no faults", for the reason `_config_faults` gives: syncing the digest with
     an empty list closes its issue and tells the course its config is fine, and a rate
-    limit on dsl-course.yml is not that. A file that is MISSING or MALFORMED is a fault and
+    limit on course.yml is not that. A file that is MISSING or MALFORMED is a fault and
     comes back in the list - both readers draw that line themselves.
 
     The handles ride along because the degraded-mode log line counts them (see
@@ -1179,7 +1179,7 @@ def _preflight_course(course_org: str, now: datetime, dry_run: bool) -> int:
     """Check the COURSE org's own hand-edited config and keep its digest issue in step.
     Always returns 0.
 
-    ONCE PER RUN, not once per semester: `dsl-course.yml` and the semester registry belong to
+    ONCE PER RUN, not once per semester: `course.yml` and the semester registry belong to
     the course, and a course admin asked to fix one of them wants one issue, not one per
     semester saying the same thing.
 
@@ -1344,7 +1344,7 @@ def _archive_notice_body(
     the docs its own workflows are checked out at rather than on whatever `release`
     happens to hold."""
     # The mark goes in ONLY when a mail actually went. It is the whole of this issue's
-    # state, so stamping it on a tick that sent nothing - no address in instructors.yml, no
+    # state, so stamping it on a tick that sent nothing - no address in semester.yml, no
     # mail transport wired up - would record a mail that never happened and every later
     # tick would read it and stay quiet. Unstamped, the fortnight goes on offering it, and
     # the tick after somebody fixes the transport sends it.
@@ -1447,7 +1447,7 @@ def _archive_notice(
         central_ref = discovery.central_ref_for(course_org)
     except Exception:
         # Every exception, not just the RuntimeError a bad ref raises: this reads the
-        # course org's `dsl-course.yml`, and a notice that failed over one unreadable
+        # course org's `course.yml`, and a notice that failed over one unreadable
         # line in it would leave a semester with no warning that it freezes in a
         # fortnight. The default tier is the right guess, and the link still resolves.
         central_ref = CENTRAL_REF
@@ -1780,7 +1780,7 @@ def _release_phase(
         ],
     )
     # The same treatment for every other file faculty edit by hand: a roster nobody can be
-    # enrolled from, a instructors.yml entry that grants nothing, a teams.csv row that will not
+    # enrolled from, a semester.yml entry that grants nothing, a teams.csv row that will not
     # materialise. Each has its own digest issue and its own mail, and none of them can
     # red this run either.
     errors += _preflight_configs(course_org, semester_org, sched, now, dry_run)
@@ -1855,7 +1855,7 @@ def _release_phase(
     # mean carrying "the site owes a render" somewhere durable, which is a second piece of
     # semester state to write, read and get wrong for a page that is a day stale at worst.
     if (release_changed or lock_changed) and defer_site_sync:
-        # A run fired by a semester-config push, which (for schedule.yml, instructors.yml or
+        # A run fired by a semester-config push, which (for schedule.yml, semester.yml or
         # teams.csv) started Sync site too: rendering here as well pushed the site repo
         # alongside it and lost the race. Queued behind Sync site's own concurrency group
         # instead, so the render lands after this release.
@@ -2133,7 +2133,7 @@ def main() -> int:
     parser.add_argument(
         "--check-course-config",
         action="store_true",
-        help="Pre-flight the COURSE org's own dsl-course.yml and semester registry, keep "
+        help="Pre-flight the COURSE org's own course.yml and semester registry, keep "
         "its digest issue in step, and exit 0. What Sync membership runs on a push to "
         "either file - the fast path under this cron's own hourly floor.",
     )

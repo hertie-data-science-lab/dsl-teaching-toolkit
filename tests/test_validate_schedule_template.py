@@ -42,14 +42,14 @@ def _step(name_starts: str) -> dict:
 
 
 def test_an_unreadable_course_org_is_a_failure_not_a_skipped_check():
-    # A semester's dsl-course.yml is SYSTEM-OWNED and always names `course:`, so an empty
+    # A semester's course.yml is SYSTEM-OWNED and always names `course:`, so an empty
     # answer is an API error or a token that lost its scope. Swallowed, the source check
     # silently stopped running and every push looked clean.
     resolve = _step("Resolve the course org")
     assert "continue-on-error" not in resolve
     fail = _step("Fail the run because the course org")
     assert fail["if"] == "steps.course.outputs.org == ''"
-    assert "::error::could not read this semester's dsl-course.yml" in fail["run"]
+    assert "::error::could not read this semester's course.yml" in fail["run"]
     assert "exit 1" in fail["run"]
     # ...and it says whose problem it is. Faculty reading a red X on their own push will
     # otherwise go looking through a file that is perfectly fine.

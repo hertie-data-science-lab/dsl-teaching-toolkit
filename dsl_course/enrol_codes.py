@@ -203,7 +203,7 @@ def code_message(
     `course_name` names the course in the subject and the opening line - a student
     reading several of these in one week needs to know which one this is, and the inbox
     list is where they tell them apart. It is optional because the name is
-    read live from the course org's dsl-course.yml, which a half-configured course may
+    read live from the course org's course.yml, which a half-configured course may
     not carry yet; the wording then falls back to "the course" rather than emailing a
     blank."""
     course = course_phrase(course_name)

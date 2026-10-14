@@ -1,7 +1,7 @@
 """list-orgs -- the DSL course and semester orgs, as an inventory.
 
 COURSE orgs are the ones the toolkit's `orgs.yml` names (`org_registry`), each read off its
-`.github/dsl-course.yml`: the tier fan-out reads this list, and a topic is anyone's to set.
+`.github/course.yml`: the tier fan-out reads this list, and a topic is anyone's to set.
 SEMESTER orgs are still found by their `dsl-semester` topic, best effort, for the report
 only. The output is a JSON / Markdown / YAML inventory of the two tiers separately.
 
@@ -161,7 +161,7 @@ def discover_semester_orgs() -> list[dict]:
 
 
 def _metadata_or_none(org: str) -> dict | None:
-    """`org`'s `.github/dsl-course.yml`, or None when it could not be READ.
+    """`org`'s `.github/course.yml`, or None when it could not be READ.
 
     `discovery.org_meta` gives `{}` only for an org that genuinely carries none (a 404 or
     an empty file) and RAISES on anything else, which matters here more than anywhere: the

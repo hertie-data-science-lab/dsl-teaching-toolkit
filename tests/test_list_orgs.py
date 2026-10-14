@@ -171,7 +171,7 @@ def test_metadata_is_empty_only_for_an_org_that_carries_none(monkeypatch):
     monkeypatch.setattr(
         gh_contents, "gh", lambda *a, **k: (1, "gh: HTTP 403 - forbidden")
     )
-    with pytest.raises(RuntimeError, match="Semester-f2026/.github/dsl-course.yml"):
+    with pytest.raises(RuntimeError, match="Semester-f2026/.github/course.yml"):
         list_orgs.org_meta("Semester-f2026")
 
 
@@ -279,14 +279,14 @@ def test_each_course_org_reports_the_toolkit_tier_it_runs(monkeypatch):
 
 def test_one_unreadable_org_does_not_hide_every_other_one(monkeypatch, capsys):
     # Promote's fan-out reads this listing to decide which orgs to refresh. It used to
-    # abort on the first malformed dsl-course.yml, so one org's typo left the whole
+    # abort on the first malformed course.yml, so one org's typo left the whole
     # estate un-refreshed. The bad org comes back with a null tier instead - which the
     # tier filter cannot match, so it is skipped and the others still go.
     _registry(monkeypatch, "Bad", "Good")
 
     def meta(org):
         if org == "Bad":
-            raise RuntimeError("Bad/.github/dsl-course.yml is not a YAML mapping")
+            raise RuntimeError("Bad/.github/course.yml is not a YAML mapping")
         return {"central_ref": "main"}
 
     monkeypatch.setattr(list_orgs, "org_meta", meta)
@@ -325,7 +325,7 @@ def test_an_unreadable_org_is_shown_on_the_tree_not_dropped_from_it(monkeypatch)
             }
         ],
     )
-    assert "**dsl-course.yml unreadable**" in out
+    assert "**course.yml unreadable**" in out
     assert "Loose-f2026" in out
 
 

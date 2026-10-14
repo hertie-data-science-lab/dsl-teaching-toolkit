@@ -107,7 +107,7 @@ def slug(text: str) -> str:
 def q(value: str) -> str:
     """Quote-safe a value for a ONE-LINE double-quoted YAML scalar: escape the two
     characters that are special inside one (`\\` and `"`), and fold newlines away - a
-    multi-line value (a faculty `>` block in dsl-course.yml, say) would otherwise write a
+    multi-line value (a faculty `>` block in course.yml, say) would otherwise write a
     raw newline mid-scalar and break the file it lands in."""
     return " ".join(value.replace("\\", "\\\\").replace('"', "'").split())
 
@@ -165,10 +165,10 @@ def site_readme(org: str, semester: bool) -> str:
     # page this site does not have - or omit one it rewrites.
     tab_pages = ", ".join(f"`{pg.file}`" for pg in _site_pages(semester))
     source = (
-        "the semester's `semester-config/` files (`schedule.yml`, `instructors.yml`) and what "
+        "the semester's `semester-config/` files (`schedule.yml`, `semester.yml`) and what "
         "the course org actually releases"
         if semester
-        else "the course org's `.github/dsl-course.yml` and the materials repo it publishes"
+        else "the course org's `.github/course.yml` and the materials repo it publishes"
     )
     return (
         f"<!-- SYSTEM-OWNED - do not edit. Generated and redeployed by the DSL course "
@@ -223,7 +223,7 @@ def _stamp_config(text: str, keys: list[str]) -> str:
     """Correct `_config.yml`'s "Edit the fields below" header for the keys the sync owns.
 
     The template's header invites faculty to edit the fields under it - true of most of
-    them, but not of the course-identity keys this sync overwrites from `dsl-course.yml`
+    them, but not of the course-identity keys this sync overwrites from `course.yml`
     every run. Naming exactly which keys are machine-written keeps the rest of the header's
     invitation honest. A template that has dropped the line is left alone: the header is
     theme text, not a contract, and a missing line is not worth a failed sync."""
@@ -235,7 +235,7 @@ def _stamp_config(text: str, keys: list[str]) -> str:
         line,
         "# Edit the fields below for your course - EXCEPT the course-identity keys the DSL\n"
         f"# course sync owns and rewrites on every run: {owned}.\n"
-        "# Change those in the course org's .github/dsl-course.yml instead.\n",
+        "# Change those in the course org's .github/course.yml instead.\n",
         1,
     )
 
@@ -591,7 +591,7 @@ def yaml_file(org: str, repo: str, path: str) -> dict:
 
     A file that exists but does NOT parse - or parses to a list/scalar - raises out of
     here (via load_yaml_config), to the per-semester isolation the callers already have. It
-    used to be coerced to `{}`, so one bad indent in a semester's instructors.yml republished the
+    used to be coerced to `{}`, so one bad indent in a semester's semester.yml republished the
     site with the whole teaching team's cards wiped, green - exactly the failure
     `_team_people` next door is hardened against."""
     return load_yaml_config(org, repo, path) or {}
@@ -700,15 +700,15 @@ def people_cards(
     meta: dict, *, semester: bool = False
 ) -> tuple[list[dict], list[dict]] | None:
     """Declared people from a `people:` block - either the COURSE org's
-    `.github/dsl-course.yml` (course site: instructors only, TAs are never declared
-    there) or a semester's own `semester-config/instructors.yml` (semester site: instructors
+    `.github/course.yml` (course site: instructors only, TAs are never declared
+    there) or a semester's own `semester-config/semester.yml` (semester site: instructors
     AND TAs). Same schema either way.
 
     Returns `(instructors, teaching_assistants)` as lists of **card dicts** keyed the way
     the Jekyll theme reads them, for entries active today (per optional start/end dates)
     that also declare a display `name`; or None when there is no `people:` block at all
     (then fall back to the GitHub teams). Schema (templates/course/people-header.yml +
-    people-cards.yml for the course org's block, templates/semester-config/instructors.yml
+    people-cards.yml for the course org's block, templates/semester-config/semester.yml
     for a semester's):
 
         people:
@@ -768,8 +768,8 @@ def people_yaml(
     semester: bool = False,
 ) -> str:
     """Build _data/people.yml. Prefer the declared `people:` block in the supplied meta
-    (the course org's dsl-course.yml for the course site, a semester's semester-config/
-    instructors.yml for the semester site); else fall back to the GitHub `instructors` team of
+    (the course org's course.yml for the course site, a semester's semester-config/
+    semester.yml for the semester site); else fall back to the GitHub `instructors` team of
     `org` (GitHub display name + avatar + profile link).
 
     `edit_at` names the file a human should edit instead - every sync rewrites this one,
@@ -958,7 +958,7 @@ _BROWSE_ALL = "browse the folder"
 
 
 def link_extensions(meta: dict) -> frozenset[str]:
-    """`site_link_extensions` from a course's `dsl-course.yml`, lowercased and dot-stripped.
+    """`site_link_extensions` from a course's `course.yml`, lowercased and dot-stripped.
 
     The OPTIONAL allowlist narrowing what a session row links (see `shape_links`); absent
     or empty means the default folder-shaped listing. A bare string
@@ -1245,9 +1245,9 @@ def _notify_overwritten_edits(
         + "\n\nNothing is lost - each link above is the commit that was overwritten, so "
         "the change can be copied back out of it.\n\nMake the edit at the source "
         "instead, and it survives every sync:\n\n"
-        "- **Instructor cards** - the semester's `semester-config/instructors.yml` (for a public "
+        "- **Instructor cards** - the semester's `semester-config/semester.yml` (for a public "
         "course site, the `people:` block of the course org's "
-        "`.github/dsl-course.yml`).\n"
+        "`.github/course.yml`).\n"
         "- **Schedule rows, sessions, assignments** - the org structure and the semester's "
         "`semester-config/schedule.yml`.\n\n"
         "The sync owns `_lectures/`, `_assignments/`, `_events/`, `_data/people.yml` and "
@@ -1286,7 +1286,7 @@ def _notify_overwritten_edits(
     else:
         log(f"  (manual edits to {len(rows)} file(s) were overwritten - issue filed)")
     # The mail, beside the issue and never instead of it: a course org's site has no
-    # instructors.yml to address, and a semester whose transport is unset gets the issue alone.
+    # semester.yml to address, and a semester whose transport is unset gets the issue alone.
     # `course_org_for_semester` is "" for the course org itself, which IS the course org.
     notify.notify_overwritten_edits(
         org,

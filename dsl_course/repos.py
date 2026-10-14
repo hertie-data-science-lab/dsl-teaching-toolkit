@@ -490,7 +490,7 @@ SUPERSEDED_DESCRIPTIONS: dict[str, str] = {}
 
 # Per TIER, because one old wording wants two different new ones. A semester org's `.github`
 # is machine-owned scaffolding faculty never open; a COURSE org's is where they actually
-# work - it holds dsl-course.yml and every workflow they run. A flat old -> new mapping
+# work - it holds course.yml and every workflow they run. A flat old -> new mapping
 # cannot tell those apart, so the tier picks the table. Same forcing function as above: a
 # reworded literal must be added here or convergence silently stops.
 SUPERSEDED_SEMESTER_DESCRIPTIONS: dict[str, str] = {}

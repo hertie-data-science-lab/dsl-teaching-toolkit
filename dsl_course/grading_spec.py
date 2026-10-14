@@ -313,7 +313,7 @@ def load_grading_spec(
 
     A template with no solution branch, no definition file, or one that does not parse
     leaves the rest of the tick running on the defaults rather than taking the semester
-    down with it. A failed read of a CASCADE layer (the course's `dsl-course.yml`, the
+    down with it. A failed read of a CASCADE layer (the course's `course.yml`, the
     semester's `assignments.yml`) does raise (`settings.course_defaults`): those decide
     what the defaults are."""
     spec = declared_grading_spec(
@@ -352,7 +352,7 @@ def _spec_fault(
 
     The fault is in the COURSE org, on the template's `solution` branch, and the digest
     that carries it is the SEMESTER's - the semester is what the grading happens to, and the
-    people who can fix it are the ones in its instructors.yml. So the file's own address rides
+    people who can fix it are the ones in its semester.yml. So the file's own address rides
     on the fault (`in_org`, `in_repo`, `ref`), which is what the deep link and the blame
     query both go by."""
     return ConfigFault(

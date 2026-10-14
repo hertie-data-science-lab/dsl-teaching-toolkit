@@ -1461,7 +1461,7 @@ def _email_updates(
             by_handle.setdefault(s.github_handle.casefold(), s)
     # Name the course in the body - a student taking several of these can't tell one
     # "your grades have been updated" from another. Read live from the course org's
-    # dsl-course.yml; a course that carries no name yet keeps the generic wording rather
+    # course.yml; a course that carries no name yet keeps the generic wording rather
     # than emailing a blank.
     course_name = course_name_or(semester_org=semester_org)
     messages = []

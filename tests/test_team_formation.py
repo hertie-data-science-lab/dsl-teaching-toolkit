@@ -92,7 +92,7 @@ def semester(monkeypatch):
         )
         # The cap the window carries and the mail prints: `team_formation.team_cap` falls back to
         # the COURSE org's assignment_defaults when the template names no size, and that
-        # is a live read of its dsl-course.yml.
+        # is a live read of its course.yml.
         monkeypatch.setattr(
             settings,
             "course_defaults",
@@ -665,7 +665,7 @@ def post(monkeypatch):
         monkeypatch.setattr(team_formation.mailer, "send_indexed", sender.send_indexed)
         monkeypatch.setattr(team_formation.mailer, "preflight", sender.preflight)
         monkeypatch.setattr(discovery, "course_name_of", lambda org: "Deep Learning")
-        # The course's dsl-course.yml, as `student_console_for` reads it.
+        # The course's course.yml, as `student_console_for` reads it.
         monkeypatch.setattr(
             discovery, "org_meta", lambda org: {"student_console": console}
         )

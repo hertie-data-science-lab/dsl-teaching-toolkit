@@ -1468,8 +1468,8 @@ def sync_site(course_org: str, semester_org: str) -> int:
         meta = org_meta(course_org)
         # Schedule is semester-specific (it varies by year), so it comes from the semester's
         # own semester-config/schedule.yml. So do this semester's instructors/TAs - read
-        # from its own semester-config/instructors.yml below, NOT the course org (whose
-        # dsl-course.yml carries only the multi-year instructor cards).
+        # from its own semester-config/semester.yml below, NOT the course org (whose
+        # course.yml carries only the multi-year instructor cards).
         sched = schedule.load(semester_org)
         # Every datetime on `sched` is already the semester's wall clock (the parser converts
         # a written offset into the semester timezone), so the renderers below just print it.
@@ -1604,9 +1604,9 @@ def sync_site(course_org: str, semester_org: str) -> int:
         instructors_meta, instructors_path = _instructors_meta(semester_org)
         return SitePlan(
             config=config,
-            # People: this semester's own semester-config/instructors.yml (instructors AND TAs -
+            # People: this semester's own semester-config/semester.yml (instructors AND TAs -
             # the per-semester teaching team; schema in
-            # templates/semester-config/instructors.yml), else its instructors team.
+            # templates/semester-config/semester.yml), else its instructors team.
             files={
                 "README.md": site_readme(semester_org, semester=True),
                 "_data/people.yml": people_yaml(
@@ -1692,7 +1692,7 @@ def main() -> int:
     ps.add_argument(
         "--all-semesters",
         action="store_true",
-        help="Sync every registered semester (a course-level change, e.g. dsl-course.yml)",
+        help="Sync every registered semester (a course-level change, e.g. course.yml)",
     )
     pp = sub.add_parser("public-sync")
     pp.add_argument("--course-org", required=True)
@@ -1707,7 +1707,7 @@ def main() -> int:
         log_err("pass --semester-org or --all-semesters.")
         return 1
     # A read helper that couldn't reach the API raises RuntimeError; a config file with
-    # one bad indent raises yaml.YAMLError out of load_yaml_config (instructors.yml is
+    # one bad indent raises yaml.YAMLError out of load_yaml_config (semester.yml is
     # web-editable, so faculty author that fault directly). In an Actions log a one-line
     # error beats a traceback either way, and the run still goes red.
     try:
@@ -1716,7 +1716,7 @@ def main() -> int:
         if args.all_semesters:
             rc = 0
             for semester in live_semesters(args.course_org):
-                # One semester's raised failure (an unreachable API, a instructors.yml that
+                # One semester's raised failure (an unreachable API, a semester.yml that
                 # doesn't parse) must not skip every LATER semester's site on the 06:00
                 # cron - log it, mark the batch failed, and carry on. The same per-semester
                 # isolation PR #151/#146 applied to the nightly refresh and the scheduler.

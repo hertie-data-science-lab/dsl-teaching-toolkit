@@ -191,7 +191,7 @@ def _declared_tier() -> str:
     `MissingCentralRef` traceback out of here says neither what the org runs nor that it is
     the wrong thing, and the preflight assertion below says both. `staging` after
     2026-09-07 is exactly that case."""
-    text = gh_contents.get_file_content(COURSE_ORG, ".github", "dsl-course.yml")
+    text = gh_contents.get_file_content(COURSE_ORG, ".github", "course.yml")
     declared = (yaml.safe_load(text or "") or {}).get("central_ref")
     try:
         return central.resolve_central_ref(declared, source=f"{COURSE_ORG}/.github")

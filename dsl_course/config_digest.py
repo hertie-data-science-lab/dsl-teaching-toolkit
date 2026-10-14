@@ -139,7 +139,7 @@ class Digest:
 PEOPLE = Digest(
     title="semester.yml people has entries the sync cannot use",
     older_titles=(
-        "instructors.yml has entries the sync cannot use",
+        "semester.yml has entries the sync cannot use",
         "people.yml has entries the sync cannot use",
     ),
     file=SEMESTER_PEOPLE_PATH,
@@ -165,7 +165,7 @@ GRADING_SHEETS = Digest(
 )
 # The SEMESTER's issue about a file in the COURSE org: the assignment is defined once and
 # graded per semester, and the people who can act on it are the ones in this semester's
-# instructors.yml. Every fault in it carries its own template's address, so the line links the
+# semester.yml. Every fault in it carries its own template's address, so the line links the
 # template it is in - see `ConfigFault.in_org`.
 GRADING_CONFIG = Digest(
     title="assignment grading_config.yml has values that will not grade as written",
@@ -194,8 +194,8 @@ ASSIGNMENTS = Digest(
 COURSE = Digest(
     title="course.yml / semester registry has entries the sync cannot use",
     older_titles=(
-        "dsl-course.yml / semester registry has entries the sync cannot use",
-        "dsl-course.yml / cohort registry has entries the sync cannot use",
+        "course.yml / semester registry has entries the sync cannot use",
+        "course.yml / cohort registry has entries the sync cannot use",
     ),
     file=COURSE_CONFIG,
     doc="docs/01-new-course-org.md",
@@ -349,7 +349,7 @@ def _mention(digest: Digest, ctx: Context) -> str:
     """`cc @who`, falling back to the semester's instructors team.
 
     A team mention reaches everybody and is therefore what nobody reads; the fallback is
-    for a line git could not attribute to anyone in instructors.yml."""
+    for a line git could not attribute to anyone in semester.yml."""
     if ctx.mention:
         return "cc " + " ".join(f"@{login}" for login in ctx.mention)
     return f"cc @{ctx.semester_org}/{digest.cc_team}"
@@ -930,7 +930,7 @@ def sync(
     called ONLY on a tick that has something to say: a comment to post, an issue to open,
     or a mail owed. An hourly tick with a standing fault has none of those, so it reuses
     the logins the last body recorded and spends no API call at all - which matters,
-    because the answer costs a blame query, a instructors.yml read and a commit lookup per
+    because the answer costs a blame query, a semester.yml read and a commit lookup per
     repo, every fifteen minutes for as long as the fault stands.
 
     `absorb` is the title of an issue this one has TAKEN OVER: its recorded state is read
@@ -1035,7 +1035,7 @@ def sync(
         ref = central_ref_for(course_org)
     except Exception:
         # Every exception, not just the RuntimeError a bad ref raises: this reads the
-        # course org's `dsl-course.yml`, which is one of the files the COURSE digest is
+        # course org's `course.yml`, which is one of the files the COURSE digest is
         # written ABOUT. A malformed one raises `yaml.YAMLError` from the loader, and
         # letting that out of here would silence the digest reporting exactly that.
         ref = CENTRAL_REF

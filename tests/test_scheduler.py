@@ -3243,7 +3243,7 @@ ARCHIVES = date(2027, 2, 16)
 def _preflight(monkeypatch, faults, now=WHEN, dry_run=False, digest=None, extra=()):
     """Drive _preflight_sources with a fixed fault list, capturing every call it makes.
 
-    Routing is stubbed too: it reads blame and instructors.yml over the API, and what these
+    Routing is stubbed too: it reads blame and semester.yml over the API, and what these
     tests are about is the exit code and what the phases are handed."""
     seen: dict = {}
     monkeypatch.setattr(scheduler.schedule, "source_faults", lambda sched, org: faults)
@@ -3885,7 +3885,7 @@ def test_the_config_preflight_checks_every_hand_edited_file(monkeypatch):
     rc, synced, mailed = _config_preflight(monkeypatch)
     assert rc == 0
     everything = {
-        "instructors.yml",
+        "semester.yml",
         "students.csv",
         "teams.csv",
         "grading_sheets/",
@@ -3950,7 +3950,7 @@ def test_a_file_that_could_not_be_read_is_left_exactly_as_it_was(monkeypatch):
         monkeypatch, roster_raises=RuntimeError("rate limited")
     )
     assert "students.csv" not in synced and "students.csv" not in mailed
-    assert "instructors.yml" in synced  # the others are still checked
+    assert "semester.yml" in synced  # the others are still checked
 
 
 def test_an_unreadable_header_is_a_content_fault_not_a_read_failure(monkeypatch):
@@ -4007,7 +4007,7 @@ def test_a_digest_that_cannot_be_written_never_touches_the_exit_code(monkeypatch
 
 # ---------------------------------------------- the COURSE org's own config (unattended)
 #
-# dsl-course.yml and the semester registry belong to the course, not to a semester: one issue
+# course.yml and the semester registry belong to the course, not to a semester: one issue
 # for the whole course, once per tick, addressed to the admins rather than to a teaching
 # team. What matters is that it never reds the tick, that it is reported BEFORE the semester
 # listing a malformed registry makes raise, and that "we could not look" leaves the issue
@@ -4053,7 +4053,7 @@ def _course_preflight(
     return rc, seen
 
 
-def _course_fault(file: str = "dsl-course.yml"):
+def _course_fault(file: str = "course.yml"):
     return ConfigFault(
         file, "this file is not valid YAML", file=file, field="", in_repo=".github"
     )
@@ -4154,7 +4154,7 @@ def test_the_grading_matrix_leg_is_not_the_courses_own_tick(monkeypatch):
 
 
 def test_the_sync_membership_fast_path_checks_and_exits_green(monkeypatch):
-    # What a push to dsl-course.yml or the registry runs. Never red: a config faculty have
+    # What a push to course.yml or the registry runs. Never red: a config faculty have
     # to fix is a content fault, and Sync membership must not go red for one.
     called: list = []
     monkeypatch.setattr(
@@ -4433,7 +4433,7 @@ def test_the_mail_goes_once_however_many_ticks_the_fortnight_has(monkeypatch):
 
 
 def test_a_notice_whose_mail_never_went_offers_it_again(monkeypatch):
-    # An org with no address in instructors.yml, or with no mail transport wired up, gets a
+    # An org with no address in semester.yml, or with no mail transport wired up, gets a
     # `False` - and that must NOT be recorded as "mailed", or the tick after somebody
     # fixes the transport would read the mark and stay quiet for the rest of the
     # fortnight. The issue is filed either way; only the mark waits for a real send.
@@ -4527,11 +4527,11 @@ def test_the_notice_says_what_the_freeze_does_and_links_the_runbook(monkeypatch)
 
 
 def test_an_unreadable_central_ref_still_files_the_notice(monkeypatch):
-    # The ref is read from the course org's own `dsl-course.yml`. A semester must still be
+    # The ref is read from the course org's own `course.yml`. A semester must still be
     # warned that it freezes in a fortnight when that file cannot be read, so the link
     # falls back to the default tier rather than the notice failing.
     def boom(org):
-        raise RuntimeError("no dsl-course.yml")
+        raise RuntimeError("no course.yml")
 
     when = date(2027, 2, 16)
     rc, seen = _archive(

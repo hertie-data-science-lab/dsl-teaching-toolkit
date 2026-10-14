@@ -2,7 +2,7 @@
 
 Every workflow in every bootstrapped org checks this repo out at run time, so the ref in
 its checkout step IS the deployment tier that org is on. These tests hold the two halves
-together: what `central_ref:` in a course org's dsl-course.yml resolves to, and that the
+together: what `central_ref:` in a course org's course.yml resolves to, and that the
 resolved value reaches every file the toolkit writes into an org.
 """
 
@@ -26,7 +26,7 @@ SHA = "0" * 40
 
 
 def _configs(monkeypatch, files: dict[str, dict]) -> None:
-    """Stand in for every org's `dsl-course.yml`, keyed by org: a course org's in its
+    """Stand in for every org's `course.yml`, keyed by org: a course org's in its
     `.github`, a semester's pointer (a mapping with `course:`) in its config repo."""
 
     def load(org, repo, path):
@@ -97,7 +97,7 @@ def test_junk_is_refused_and_names_the_file(monkeypatch):
     with pytest.raises(central.MissingCentralRef) as exc:
         discovery.central_ref_for("Course")
     assert "stagign" in str(exc.value)
-    assert "Course/.github/dsl-course.yml" in str(exc.value)
+    assert "Course/.github/course.yml" in str(exc.value)
 
 
 def test_the_retired_staging_tier_is_junk_like_any_other(monkeypatch):
