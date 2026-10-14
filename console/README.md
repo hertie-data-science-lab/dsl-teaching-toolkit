@@ -301,10 +301,14 @@ opens (not pdf, pptx, docx, xlsx, zip); the editor only once Profile has a folde
 an editor link with `{path}` (GitHub Desktop opens repos, not files), and until then a "Set up
 your editor in Profile" item in its place. The menu is the instructor Open button's
 (`ui/OpenButton.tsx` `useMenu`): it closes on a click outside, on Escape, and on Tab, so one is
-open at a time. The instructor screens' file lists keep their own rows. Whether the student forked a repo is
+open at a time. The row is `ui/FileRow.tsx`, the one the course materials tree draws too
+(decision 0040 rule 6). Whether the student forked a repo is
 read once per session, when a row first needs it, and Profile's fork check refreshes it.
 
-**Materials** open inside the console from the private copy: markdown and notebooks through
+**Materials** open inside the console (`ui/Viewer.tsx`, both consoles; no selection or hosted
+copy gates it, decision 0040 rule 6) from the private copy, the header carrying the file's
+GitHub link and a **Full screen** toggle (the panel covers the window and, where the browser
+allows, the screen; Escape or the button leaves): markdown and notebooks through
 GitHub's markdown endpoint (one call; its HTML is sanitised by GitHub), notebook outputs as
 text and images; an HTML page with its `<stem>_files/` bundle inlined (stylesheets as
 `<style>`, images and fonts as data: URLs) in a frame sandboxed with no permissions. The
@@ -380,8 +384,10 @@ a first visit, mostly free 304s after).
   last changes; a materials repo's recursive tree, badged from its `.releaseignore` on its
   settings page. The index lists each materials repo's files under its row as a read-only folder
   tree (`ui/MaterialsTree.tsx`): every folder collapsed, "N files" beside it while it is, a
-  GitHub link to its tree page; a file opens its blob page on GitHub. The folders a viewer opens
-  are kept per repo in sessionStorage; `?folder=<repo>/<path>#materials` opens that folder.
+  GitHub link to its tree page; each file is the student screens' file row (`ui/FileRow.tsx`),
+  its name opening the file in the console's viewer, `?file=<repo>/<path>#materials`, its repo's
+  tree beside it with the file marked. The folders a viewer opens are kept per repo in
+  sessionStorage; `?folder=<repo>/<path>#materials` opens that folder.
 
 ## What it changes
 

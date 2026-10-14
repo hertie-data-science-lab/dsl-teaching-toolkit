@@ -39,6 +39,8 @@ export interface CourseProps {
   entry?: string;
   /** A folder to open on the course materials index (`?folder=<repo>/<path>`). */
   folder?: string;
+  /** A file open in the viewer on the course materials index (`?file=<repo>/<path>`). */
+  file?: string;
 }
 
 export interface HomeProps {

@@ -68,6 +68,20 @@ export function createDeps(): AppDeps {
   return { auth, client };
 }
 
+/**
+ * The console route a click follows in place (`?...` links), or null to leave it to the
+ * browser: a link with a target (`View here` opens a new tab), and a modifier or non-primary
+ * click (new tab or window), keep the browser's own behaviour.
+ */
+export function inAppHref(e: MouseEvent): string | null {
+  const a = (e.target as Element)?.closest?.('a');
+  const href = a?.getAttribute('href');
+  if (!a || !href || !href.startsWith('?')) return null;
+  if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return null;
+  const target = a.getAttribute('target');
+  return target && target !== '_self' ? null : href;
+}
+
 export function App({ state: s }: { state: AppState }) {
   const auth = s.auth;
 
@@ -77,9 +91,8 @@ export function App({ state: s }: { state: AppState }) {
       s.search.value = location.search;
     };
     const onClick = (e: MouseEvent) => {
-      const a = (e.target as Element)?.closest?.('a');
-      const href = a?.getAttribute('href');
-      if (!a || !href || !href.startsWith('?') || e.metaKey || e.ctrlKey || e.shiftKey) return;
+      const href = inAppHref(e);
+      if (!href) return;
       e.preventDefault();
       history.pushState(null, '', href);
       sync();
@@ -268,7 +281,7 @@ export function App({ state: s }: { state: AppState }) {
         name={ctx.course.name} semester={ctx.cohort ? { org: ctx.cohort.org, termLabel: ctx.cohort.termLabel } : undefined} />
     );
   } else if (wiz || screen in COURSE_SCREENS || !ctx.cohort) {
-    const cp: CourseProps = { migrated: courseMigrated, course: ctx.course, loaded: s.statuses.course(ctx.course.org).value, cohortStates, files: s.files, now: s.now.value, entry: route.entry, folder: sel.folder };
+    const cp: CourseProps = { migrated: courseMigrated, course: ctx.course, loaded: s.statuses.course(ctx.course.org).value, cohortStates, files: s.files, now: s.now.value, entry: route.entry, folder: sel.folder, file: sel.file };
     body = wiz?.name === 'new-semester' ? <NewCohortScreen {...cp} step={wiz.step} />
       : wiz?.name === 'new-assignment' ? <NewAssignmentScreen {...cp} step={wiz.step} />
       : wiz?.name === 'new-materials' ? <NewMaterialsScreen {...cp} />

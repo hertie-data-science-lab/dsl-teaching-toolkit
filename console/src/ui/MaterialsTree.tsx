@@ -1,14 +1,18 @@
 // A materials repo's files as a folder tree, to look at, not to edit (the course materials
 // index): every folder starts collapsed, with "N files" beside it while it is, and a GitHub link
-// to its tree page; a file's name opens its blob page on GitHub. The folders a viewer opened are
-// kept per repo in sessionStorage, a convenience only. `focus` (`?folder=<repo>/<path>`) opens
-// that folder and its parents, and scrolls it into view.
+// to its tree page; each file is the file row both consoles share (`FileRow.tsx`), its name
+// opening the file in the console's viewer (`?file=<repo>/<path>`, decision 0040 rule 6). The
+// folders a viewer opened are kept per repo in sessionStorage, a convenience only. `focus`
+// (`?folder=<repo>/<path>`) opens that folder and its parents, and scrolls it into view;
+// `current`, the file open beside the tree, is marked and its folders opened.
 
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { readJson, safeStorage, writeJson } from '../auth/types';
 import { buildTree, type TreeNode } from '../edit/badges';
 import { plural } from '../model/format';
+import { profileHref } from '../model/open';
 import { ghUrl } from './bits';
+import { FileRow, useYourSetup } from './FileRow';
 import { FileHead, FolderHead } from './FileTree';
 import { Ext } from './icons';
 
@@ -34,10 +38,17 @@ function treeOf(paths: { path: string; dir: boolean }[]): { tree: TreeNode[]; co
 /** The link that opens `?folder=<repo>/<path>` on the course materials index. */
 export const folderHref = (org: string, repo: string, path: string) => `?course=${org}&folder=${encodeURIComponent(`${repo}/${path}`)}#materials`;
 
-export function MaterialsTree({ org, repo, paths, focus }: { org: string; repo: string; paths: { path: string; dir: boolean }[]; focus?: string }) {
+/** The link that opens a file in the viewer on the course materials index, `?file=<repo>/<path>`. */
+export const fileViewHref = (org: string, repo: string, path: string) => `?course=${org}&file=${encodeURIComponent(`${repo}/${path}`)}#materials`;
+
+/** The folders above `path`. */
+const parentsOf = (path: string) => withParents(path).slice(0, -1);
+
+export function MaterialsTree({ org, repo, paths, focus, current }: { org: string; repo: string; paths: { path: string; dir: boolean }[]; focus?: string; current?: string }) {
+  const setup = useYourSetup();
   const [open, setOpen] = useState<Set<string>>(() => {
     const kept = readJson<string[]>(safeStorage('session'), storeKey(org, repo));
-    return new Set([...(Array.isArray(kept) ? kept : []), ...(focus ? withParents(focus) : [])]);
+    return new Set([...(Array.isArray(kept) ? kept : []), ...(focus ? withParents(focus) : []), ...(current ? parentsOf(current) : [])]);
   });
   const list = useRef<HTMLUListElement>(null);
   const { tree, counts } = useMemo(() => treeOf(paths), [paths]);
@@ -62,8 +73,10 @@ export function MaterialsTree({ org, repo, paths, focus }: { org: string; repo: 
   const node = (n: TreeNode) => {
     if (!n.children) {
       return (
-        <li class="ft-file">
-          <FileHead name={n.name}><a class="ft-name" href={ghUrl(org, repo, n.path, 'HEAD')} target="_blank" rel="noopener">{n.name}</a></FileHead>
+        <li class={`ft-file${current === n.path ? ' current' : ''}`}>
+          <FileHead name={n.name}>
+            <FileRow org={org} link={{ name: n.name, repo, path: n.path, url: ghUrl(org, repo, n.path, 'HEAD') }} here={fileViewHref(org, repo, n.path)} setup={setup} profile={profileHref(org)} cls="ft-name" current={current === n.path} />
+          </FileHead>
         </li>
       );
     }

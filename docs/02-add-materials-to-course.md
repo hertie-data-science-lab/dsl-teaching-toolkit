@@ -5,7 +5,8 @@ later copies files and folders from here into a semester. One repo per year: `co
 by default. What makes a repo a materials repo is its `dsl-materials` topic, which the scaffold sets;
 add the topic to a repo you made by hand to have it listed as one (the console's **Handout
 materials** page does it: **Treat as course materials** on the repo's row). The same page shows each materials repo's
-files as a folder tree: open a folder to see inside it; every file and folder links to GitHub.
+files as a folder tree: open a folder to see inside it; a folder links to GitHub, and a file opens in
+the console (its GitHub link and a **Full screen** button in its header, for presenting).
 
 ## Prerequisites
 

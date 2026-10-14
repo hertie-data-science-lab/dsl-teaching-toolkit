@@ -117,6 +117,8 @@ export interface Selection {
   template?: string;
   /** A folder to open on the course materials index, `<repo>/<path>`. */
   folder?: string;
+  /** A file to open in the viewer on the course materials index, `<repo>/<path>`. */
+  file?: string;
 }
 
 export function parseSearch(search: string): Selection {
@@ -130,6 +132,7 @@ export function parseSearch(search: string): Selection {
     wizard: wizard && WIZARD_RE.test(wizard) ? wizard : undefined,
     template: q.get('template') ?? undefined,
     folder: q.get('folder') ?? undefined,
+    file: q.get('file') ?? undefined,
   };
 }
 

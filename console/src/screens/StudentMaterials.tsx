@@ -1,7 +1,7 @@
 // Materials for a student: the released `materials` repo as a tree (one recursive tree read),
-// a file opened in the console from the private copy with the student's own token, and the
-// readings of each session. Nothing is published anywhere; see model/materials.ts for how
-// each kind is shown. Top folders that only support the rest (data, images, code a notebook
+// a file opened in the console from the private copy with the student's own token (the viewer
+// both consoles share, `ui/Viewer.tsx`), and the readings of each session. Nothing is published
+// anywhere. Top folders that only support the rest (data, images, code a notebook
 // loads) come last, folded, as "Supporting files" (decision 0029 rule 6). The tree stays on
 // screen while a file is open (decision 0035 rule 11): in a left column on wide screens, above
 // the file on narrow ones, the open file marked; each file row carries the menu
@@ -9,21 +9,18 @@
 // its own list in the left column.
 
 import { DEFAULT_TIMEZONE } from '../model/policy';
-import { useEffect, useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import type { TreeEntry } from '../github/client';
 import { buildTree, type TreeNode } from '../edit/badges';
-import { openDeck } from '../model/deckTab';
 import { fmtDay } from '../model/format';
 import { ASSETS_KIND, aliasKind } from '../model/materialsRules';
-import { showFile, type Shown } from '../model/materials';
 import { sortedRows, type SemesterFacts } from '../model/student';
-import { dataUrl } from '../model/viewer';
 import { CheckLine, Loading, Md, ghUrl } from '../ui/bits';
 import { FileHead, FolderHead } from '../ui/FileTree';
-import { Ext } from '../ui/icons';
 import { useLoad } from '../ui/load';
-import { FileLinkItem, FileList, useYourSetup } from './StudentFiles';
+import { OpenFile, RepoFile, Split } from '../ui/Viewer';
+import { useYourSetup } from '../ui/FileRow';
+import { FileLinkItem, FileList } from './StudentFiles';
 
 /** `<repo>/<path>` back into its parts, for a repo among `repos`. */
 export function splitEntry(entry: string, repos: string[]): { repo: string; path: string } | null {
@@ -52,35 +49,11 @@ export function MaterialsView({ org, repos, entry }: { org: string; repos: strin
   return <MaterialsTree org={org} trees={trees.value} />;
 }
 
-/** `side` (labelled `label`) in a left column on wide screens, above the file on narrow ones, and the file beside it (decision 0035 rule 11). */
-function Split({ label, side, children }: { label: string; side: preact.ComponentChildren; children: preact.ComponentChildren }) {
-  return (
-    <div class="materials-split">
-      <nav class="materials-tree" aria-label={label}>{side}</nav>
-      <div class="materials-file">{children}</div>
-    </div>
-  );
-}
-
-/** The file `at` from its repo's tree, or a note when the tree has no such file. */
-function OpenFile({ org, at, tree }: { org: string; at: { repo: string; path: string }; tree: TreeEntry[] }) {
-  const e = tree.find((t) => t.path === at.path && t.type === 'blob');
-  return e ? <FileView org={org} repo={at.repo} entry={e} tree={tree} /> : <p class="footnote">{at.path} is not in {at.repo}.</p>;
-}
-
 /** `children` (a kind tab's list) with the file `entry` names open beside it, its repo's tree read for it; `children` alone for an entry in none of `repos`. */
 export function FileBeside({ org, repos, entry, label, children }: { org: string; repos: string[]; entry: string; label: string; children: preact.ComponentChildren }) {
-  const env = useEnv();
   const at = splitEntry(entry, repos);
-  const tree = useLoad(env && at ? () => env.client.listTree(org, at.repo, 'HEAD', true) : null, [org, entry]);
   if (!at) return <>{children}</>;
-  return (
-    <Split label={label} side={children}>
-      {tree.kind === 'loading' ? <Loading what="Reading the materials" />
-        : tree.kind === 'failed' ? <CheckLine cls="bad">The materials could not be read: {tree.error}</CheckLine>
-        : <OpenFile org={org} at={at} tree={tree.value?.tree ?? []} />}
-    </Split>
-  );
+  return <Split label={label} side={children}><RepoFile org={org} at={at} /></Split>;
 }
 
 /**
@@ -126,72 +99,6 @@ export function MaterialsTree({ org, trees, current }: { org: string; trees: (re
       {current ? null : <p class="footnote">Every file opens here, read with your own account: nothing is published.</p>}
     </div>
   );
-}
-
-/** An object URL for bytes, revoked when the view goes. */
-function useObjectUrl(bytes: Uint8Array | string | null, mime: string): string | null {
-  const [url, setUrl] = useState<string | null>(null);
-  useEffect(() => {
-    if (bytes === null || typeof URL === 'undefined' || !URL.createObjectURL) return;
-    const u = URL.createObjectURL(new Blob([bytes as BlobPart], { type: mime }));
-    setUrl(u);
-    return () => URL.revokeObjectURL(u);
-  }, [bytes, mime]);
-  return url;
-}
-
-function FileView({ org, repo, entry, tree }: { org: string; repo: string; entry: TreeEntry; tree: TreeEntry[] }) {
-  const env = useEnv();
-  const shown = useLoad(env ? () => showFile(env.client, org, repo, entry, tree) : null, [org, repo, entry.sha]);
-  const name = entry.path.split('/').pop() ?? entry.path;
-  return (
-    <section class="panel section" aria-label={name}>
-      <div class="a-head"><h2 class="mono">{entry.path}</h2><a class="textlink" href={ghUrl(org, repo, entry.path, 'HEAD')} target="_blank" rel="noopener">On GitHub <Ext /></a></div>
-      {shown.kind === 'loading' ? <Loading what={`Reading ${name}`} /> : shown.kind === 'failed' ? <CheckLine cls="bad">{name} could not be read: {shown.error}</CheckLine> : <ShownView shown={shown.value} name={name} />}
-    </section>
-  );
-}
-
-export function ShownView({ shown, name }: { shown: Shown; name: string }) {
-  const bytes = shown.kind === 'file' || shown.kind === 'image' ? shown.bytes : shown.kind === 'page' || shown.kind === 'deck' ? shown.file : null;
-  const mime = shown.kind === 'file' || shown.kind === 'image' ? shown.mime : 'text/html';
-  const url = useObjectUrl(bytes, mime);
-  const save = url ? <a class="btn outline small" href={url} download={name}>Download</a> : null;
-  switch (shown.kind) {
-    case 'too_large':
-      return <p class="footnote">This file is over GitHub’s 100 MB limit for reading it this way; open it on GitHub.</p>;
-    case 'rendered':
-      return <div class="md-body" dangerouslySetInnerHTML={{ __html: shown.html }} />;
-    case 'text':
-      return <pre class="file-text">{shown.text}</pre>;
-    case 'image':
-      // A data: URL, as instructor pictures are: the page's CSP allows no blob: image.
-      return <><img class="file-img" src={dataUrl(name, shown.bytes)} alt={name} /><p>{save}</p></>;
-    case 'page':
-      return (
-        <>
-          <iframe class="page-frame" title={name} sandbox="" srcdoc={shown.srcdoc} />
-          <p class="footnote">{save} {shown.missing ? `${shown.missing} of its files could not be read. ` : ''}Links inside the page do not open here.</p>
-        </>
-      );
-    case 'deck':
-      return (
-        <div class="stack">
-          <p class="actions">
-            <button class="btn small" type="button" onClick={() => openDeck(shown.file, name)}>Open the deck</button>
-            {save}
-          </p>
-          <p class="footnote">It opens in a new tab, in the console’s deck viewer, where its scripts run shut off from your account.{shown.missing ? ` ${shown.missing} of its files could not be read.` : ''}</p>
-        </div>
-      );
-    case 'file':
-      return (
-        <p class="actions">
-          {shown.pdf && url ? <a class="btn small" href={url} target="_blank" rel="noopener">Open in a new tab</a> : null}
-          {save}
-        </p>
-      );
-  }
 }
 
 /** The readings of every session: its reading files (opened here, each with its menu, decision 0035 rule 10), its reading list, or "to come" while they are planned but not out. */
