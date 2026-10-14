@@ -44,7 +44,6 @@ sys.path.insert(0, str(ROOT))
 
 from dsl_course import (
     grading_spec,
-    materials,
     schedule,
     schedule_plan,
     site,
@@ -580,11 +579,10 @@ def generated(
     link. Without one the mirror still runs, into a throwaway directory: what the rows say
     is hosted has to come from the REAL `_mirror_public` either way."""
     real_tree, real_content = site._repo_tree, site.get_file_content
-    real_spec, real_materials = site.load_grading_spec, site.read_materials
+    real_spec = site.load_grading_spec
     real_clone, real_teams = site.clone, site._formed_teams
     site._repo_tree, site.get_file_content = _repo_tree, _get_file_content
     site.load_grading_spec = _grading_spec
-    site.read_materials = lambda _org, _repo: materials.Declared()
     site.clone, site._formed_teams = _clone, _formed_teams
     try:
         with tempfile.TemporaryDirectory() as work:
@@ -600,7 +598,7 @@ def generated(
         }
     finally:
         site._repo_tree, site.get_file_content = real_tree, real_content
-        site.load_grading_spec, site.read_materials = real_spec, real_materials
+        site.load_grading_spec = real_spec
         site.clone, site._formed_teams = real_clone, real_teams
 
 

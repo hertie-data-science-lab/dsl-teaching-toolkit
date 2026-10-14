@@ -98,7 +98,7 @@ def test_file_schema_enums_are_the_engine_constants():
     assert schemas.roster_schema()["columns"] == list(roster.SYSTEM_FIELDS)
 
     defaults = schemas.course_schema()["properties"]["defaults"]["properties"]
-    assert set(defaults) == {*settings.DEFAULT_FILE_KEYS, *settings.COURSE_ASKED_KEYS}
+    assert set(defaults) == set(settings.DEFAULT_FILE_KEYS)
 
 
 def test_op_arg_enums_are_the_engine_constants():

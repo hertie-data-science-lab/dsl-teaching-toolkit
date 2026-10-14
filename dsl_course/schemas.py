@@ -90,7 +90,6 @@ from .schedule import (
     SEMESTER_TYPES,
 )
 from .settings import (
-    COURSE_ASKED_KEYS,
     DEFAULT_FILE_KEYS,
     INLINE_NAMES,
     RUN_KEYS,
@@ -763,7 +762,7 @@ def course_schema() -> dict:
     top = {
         COURSE_BLOCK: course,
         PEOPLE_BLOCK: _obj({"course_admins": {"type": "array", "items": admin}}),
-        DEFAULTS_BLOCK: _defaults((*DEFAULT_FILE_KEYS, *COURSE_ASKED_KEYS)),
+        DEFAULTS_BLOCK: _defaults(DEFAULT_FILE_KEYS),
         OPEN_SITE_BLOCK: site,
         # Optional setup steps and to-dos set aside (decision 0032): ids, unknown ones ignored.
         "set_aside": {"type": "array", "items": _str()},

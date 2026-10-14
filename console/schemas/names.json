@@ -293,6 +293,14 @@
       "where": "toolkit root"
     },
     {
+      "cost": "it is not read: the syllabus is the semester's `student_site.syllabus` and a folder's kind is the institution's",
+      "fault_code": null,
+      "new": "semester.yml student_site.syllabus",
+      "old": "materials.yml",
+      "since": "0.11.0",
+      "where": "materials repo root"
+    },
+    {
       "cost": "",
       "fault_code": null,
       "new": "course.name",

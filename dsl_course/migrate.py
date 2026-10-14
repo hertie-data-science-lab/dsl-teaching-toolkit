@@ -132,8 +132,8 @@ from .materials import (
     alias_kind,
     infer_kind,
     is_materials_repo,
+    known_kind,
 )
-from .materials import read as read_materials
 from .opencourse import READINGS_MODES, OpenCourse
 from .opencourse import seed_text as opencourse_text
 from .profile_readme import profile_files, update_profile_readme
@@ -1796,23 +1796,11 @@ def _stated(block: dict, where: str) -> tuple[dict, list[str]]:
     setting, and a line for each value a reader refuses: the fold never drops one
     silently."""
     dropped: list = []
-    values = settings.read_defaults(
-        block, where, dropped, (*settings.DEFAULT_KEYS, *settings.COURSE_ASKED_KEYS)
-    )
+    values = settings.read_defaults(block, where, dropped)
     return (
         {k: v for k, v in values.items() if v is not None},
         [getattr(d, "what", str(d)) for d in dropped],
     )
-
-
-def _defaults_text(inherited: list, stated: dict) -> str:
-    """A `defaults:` skeleton with `stated` live; a stated `submit_via` (not in the fixed
-    key set, kept readable at the course level) after it."""
-    text = settings.defaults_skeleton(inherited, stated)
-    for key in settings.COURSE_ASKED_KEYS:
-        if key in stated:
-            text += f"  {key}: {_scalar_text(stated[key])}\n"
-    return text
 
 
 def old_opencourse_text(oc: OpenCourse) -> str:
@@ -1859,7 +1847,16 @@ def course_layer(
         f"assignment wizard asks)"
         for key in gone
     ]
-    stated, refused = _stated(defaults, f"{COURSE_CONFIG} {ASSIGNMENT_DEFAULTS_KEY}")
+    homeless = [k for k in defaults if k not in settings.DEFAULT_FILE_KEYS]
+    stops += [
+        f"{COURSE_CONFIG}: `{ASSIGNMENT_DEFAULTS_KEY}.{key}:` has no place in "
+        f"{NEW_COURSE_FILE} `{DEFAULTS_BLOCK}:` - move or delete it by hand, then run again"
+        for key in homeless
+    ]
+    stated, refused = _stated(
+        {k: v for k, v in defaults.items() if k not in homeless},
+        f"{COURSE_CONFIG} {ASSIGNMENT_DEFAULTS_KEY}",
+    )
     stops += [f"{COURSE_CONFIG}: {line} - fix it first" for line in refused]
     try:
         oc = opencourse.parse(_yaml(oc_text), OPENCOURSE_FILE) if oc_text else None
@@ -1876,7 +1873,9 @@ def course_layer(
     out = "\n".join(lines) + "\n\n"
     if admins:
         out += f"{PEOPLE_BLOCK}:\n  course_admins:\n" + _emit(admins, 4) + "\n\n"
-    out += _defaults_text([("institution", settings.institution_defaults())], stated)
+    out += settings.defaults_skeleton(
+        [("institution", settings.institution_defaults())], stated
+    )
     out += "\n" + opencourse_text(oc or OpenCourse(), str(meta.get("contact") or ""))
     for key in COURSE_KEPT_KEYS:
         if meta.get(key):
@@ -1930,6 +1929,24 @@ def course_layer_kept(
     return out
 
 
+OLD_MATERIALS_FILE = legacy.old_name(
+    f"{SEMESTER_FILE} student_site.syllabus", legacy.MATERIALS_ROOT
+)
+
+
+def old_materials(org: str, repo: str) -> tuple[str, dict[str, str]]:
+    """A materials repo's 0.10 `materials.yml`: `(declared syllabus or "", {folder:
+    kind})`. Absent, or not a mapping, declares nothing (the 0.10 engine refused such a
+    file and looked for the default)."""
+    data = _yaml(get_file_content(org, repo, OLD_MATERIALS_FILE))
+    syllabus = str(data.get("syllabus") or "").strip().strip("/")
+    kinds = data.get("kinds") if isinstance(data.get("kinds"), dict) else {}
+    return syllabus, {
+        str(folder).strip().strip("/").lower(): known_kind(str(kind))
+        for folder, kind in kinds.items()
+    }
+
+
 def _top_block(text: str, key: str) -> list[str] | None:
     """The lines of `text`'s top-level `key:` block, its own line first, through its last
     indented line (comments and blank lines after it left out); None when it has none."""
@@ -1947,6 +1964,22 @@ def _top_block(text: str, key: str) -> list[str] | None:
     return lines[start:end]
 
 
+def carried_defaults(course: Mapping, semester: Mapping) -> dict:
+    """What a semester relied on the 0.10 institution for and 0.11 no longer gives it:
+    `team_formation`, which left the institution's file (decision 0039 rule 2, absent
+    everywhere = no team). The 0.10 default is carried into the semester's own
+    `defaults:` when neither its course nor the semester states one. Keyed by setting."""
+    old = (yaml.safe_load(old_template("policy.default.yml")) or {}).get("defaults", {})
+    value = old.get("team_formation")
+    if (
+        value
+        and not course.get("team_formation")
+        and not semester.get("team_formation")
+    ):
+        return {"team_formation": value}
+    return {}
+
+
 def semester_layer(
     org: str,
     ref: str,
@@ -1954,11 +1987,13 @@ def semester_layer(
     assignments: str | None,
     syllabus: str,
     inherited: list,
+    carried: Mapping | None = None,
 ) -> tuple[str, list[str]]:
     """`(semester.yml, stops)` folded out of a 0.10 `instructors.yml` (its list becomes
     `people:`, faculty's lines and comments as written), `assignments.yml` `defaults:` (the
-    skeleton's live keys; every other key commented with what it inherits from
-    `inherited`) and the declared `syllabus` (`student_site.syllabus`; "" = none). Pure."""
+    skeleton's live keys, with `carried` - `carried_defaults` - live beside them; every
+    other key commented with what it inherits from `inherited`) and the declared
+    `syllabus` (`student_site.syllabus`; "" = none). Pure."""
     stops: list[str] = []
     meta = _yaml(instructors)
     extra = [k for k in meta if k != "instructors"]
@@ -1981,7 +2016,9 @@ def semester_layer(
     text = pin_central_ref(template(f"semester-config/{SEMESTER_FILE}"), ref).format(
         year=year,
         year_next=year + 1,
-        defaults=settings.defaults_skeleton(inherited, old.defaults),
+        defaults=settings.defaults_skeleton(
+            inherited, {**old.defaults, **(carried or {})}
+        ),
     )
     people = _top_block(instructors or "", "instructors") if instructors else None
     if people and isinstance(meta.get("instructors"), list) and meta["instructors"]:
@@ -2001,7 +2038,11 @@ def semester_layer(
 
 
 def semester_layer_kept(
-    instructors: str | None, assignments: str | None, syllabus: str, new: str
+    instructors: str | None,
+    assignments: str | None,
+    syllabus: str,
+    new: str,
+    carried: Mapping | None = None,
 ) -> list[str]:
     """What `new` (a semester.yml) says differently from the old files; `[]` when every
     value is kept."""
@@ -2009,10 +2050,10 @@ def semester_layer_kept(
     now = _yaml(new)
     if (now.get(PEOPLE_BLOCK) or []) != (_yaml(instructors).get("instructors") or []):
         out.append(f"{INSTRUCTORS_FILE} -> `{PEOPLE_BLOCK}`")
-    if (
-        settings.parse_instance(new).defaults
-        != settings.parse_legacy_assignments(assignments).defaults
-    ):
+    if settings.parse_instance(new).defaults != {
+        **settings.parse_legacy_assignments(assignments).defaults,
+        **(carried or {}),
+    }:
         out.append(f"{ASSIGNMENTS_FILE} `defaults:` -> `{DEFAULTS_BLOCK}`")
     site = now.get(STUDENT_SITE_BLOCK) or {}
     if str(site.get("syllabus") or "") != syllabus:
@@ -3460,10 +3501,7 @@ class Semester:
     # schedule shape ----------------------------------------------------------
     def _aliases(self, repo: str) -> Mapping[str, str]:
         """A source repo's `materials.yml` folder aliases, as 0.10 inferred kinds by."""
-        try:
-            return read_materials(self.course, repo).kinds
-        except Unusable:
-            return {}
+        return old_materials(self.course, repo)[1]
 
     def _reading_list(self, repo: str, path: str) -> str:
         """The READINGS.md (or .txt/.bib) text a copy of `path` from the course's `repo`
@@ -3555,6 +3593,22 @@ class Semester:
         live = _files(self.org, self.config())
         return SEMESTER_FILE in live and not set(OLD_SEMESTER_FILES) & set(live)
 
+    def _syllabus(self) -> tuple[str, list[str]]:
+        """The syllabus the semester's source repos declare in a 0.10 `materials.yml`
+        (folded into `student_site.syllabus`), and a stop when they declare two."""
+        text = get_file_content(self.org, self.config(), schedule.SCHEDULE_PATH)
+        sched = schedule.parse(load_yaml_lines(text or "") or {})
+        repos = sorted({d.course_source_repo for r in sched.releases for d in r.deploy})
+        found = {old_materials(self.course, repo)[0] for repo in repos} - {""}
+        if len(found) > 1:
+            stop = (
+                f"the source repos' {OLD_MATERIALS_FILE} declare {len(found)} syllabuses "
+                f"({', '.join(sorted(found))}) - {SEMESTER_FILE} names one: set "
+                f"`{STUDENT_SITE_BLOCK}.syllabus` by hand, then run again"
+            )
+            return "", [stop]
+        return (found.pop() if found else ""), []
+
     def layers_work(self) -> dict:
         """Everything the step reads and would write: the old texts, `files` (path ->
         bytes), `delete`, `notes` and `stops`. Empty `files` and `delete` = done."""
@@ -3585,10 +3639,18 @@ class Semester:
                     f"{SEMESTER_FILE} is already there beside the files it replaces - "
                     f"fold them into it by hand, then delete them"
                 )
-            # `materials.yml` `syllabus:` stays where it is until the maintainer rules
-            # where a semester's syllabus is declared (its fold is not written).
-            syllabus = ""
+            syllabus, more = self._syllabus()
+            stops += more
             inherited = settings.layers(self.course)[2:]
+            carried = carried_defaults(
+                inherited[0][1],
+                settings.parse_legacy_assignments(old.get(ASSIGNMENTS_FILE)).defaults,
+            )
+            notes += [
+                f"{SEMESTER_FILE} `{DEFAULTS_BLOCK}:` states `{key}: {value}`: the 0.10 "
+                f"institution default this semester ran on (decision 0039 rule 2)"
+                for key, value in carried.items()
+            ]
             text, more = semester_layer(
                 self.org,
                 central_ref_for(self.course),
@@ -3596,10 +3658,15 @@ class Semester:
                 old.get(ASSIGNMENTS_FILE),
                 syllabus,
                 inherited,
+                carried,
             )
             stops += more
             lost = semester_layer_kept(
-                old.get(INSTRUCTORS_FILE), old.get(ASSIGNMENTS_FILE), syllabus, text
+                old.get(INSTRUCTORS_FILE),
+                old.get(ASSIGNMENTS_FILE),
+                syllabus,
+                text,
+                carried,
             )
             stops += [f"{SEMESTER_FILE} would lose {what}" for what in lost]
             files[SEMESTER_FILE] = text.encode()

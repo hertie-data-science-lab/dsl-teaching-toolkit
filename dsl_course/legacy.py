@@ -42,6 +42,7 @@ OLD_OPENCOURSE_FILE = "opencourse.yml"
 OLD_INSTRUCTORS_FILE = "instructors.yml"
 OLD_ASSIGNMENTS_FILE = "assignments.yml"
 OLD_POLICY_FILE = "policy.yml"
+OLD_MATERIALS_FILE = "materials.yml"
 
 # The surfaces old names were spelt in.
 SCHEDULE_TOP = "schedule.yml top level"
@@ -58,6 +59,7 @@ DEFAULTS_KEYS = "a defaults: block"
 COURSE_GITHUB = "course .github"
 SEMESTER_CONFIG = "semester-config"
 TOOLKIT_ROOT = "toolkit root"
+MATERIALS_ROOT = "materials repo root"
 SEMESTER_ORG = "semester org"
 SEMESTER_TOPICS = "semester .github topics"
 COURSE_REPOS = "course org repos"
@@ -237,6 +239,17 @@ ROWS: tuple[Old, ...] = (
         "0.11.0",
     ),
     Old(OLD_POLICY_FILE, "institution.yml", TOOLKIT_ROOT, "0.11.0"),
+    # Not read by the engine since 0.11.0 (ruling of 14 Oct 2026): its `syllabus:` folds
+    # into each semester's `student_site.syllabus`, its `kinds:` give way to the
+    # institution's kinds. `migrate` reads it once, for both.
+    Old(
+        OLD_MATERIALS_FILE,
+        f"{SEMESTER_FILE} student_site.syllabus",
+        MATERIALS_ROOT,
+        "0.11.0",
+        cost="it is not read: the syllabus is the semester's `student_site.syllabus` "
+        "and a folder's kind is the institution's",
+    ),
     # A 0.10 `dsl-course.yml`'s top-level keys -> their `course.yml` place ("" = dropped).
     Old("course_name", "course.name", COURSE_FILE_KEYS, "0.11.0"),
     Old("course_code", "course.code", COURSE_FILE_KEYS, "0.11.0"),

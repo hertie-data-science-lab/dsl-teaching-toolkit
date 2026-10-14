@@ -20,7 +20,6 @@ from dsl_course import (
     discovery,
     ghcli,
     grading_spec,
-    materials,
     roster,
     settings,
     site,
@@ -1316,13 +1315,11 @@ def _plan(
     sources=(),
     trees=None,
     handed_out=(),
-    declared=None,
     content=lambda *a, **k: "",
     yaml_file=lambda *a: {},
 ):
     """Run sync_site against a faked org and return the SitePlan it built. `trees` is each
-    semester content repo's released tree (`{repo: (path, ...)}`, default: none);
-    `declared` each source repo's `materials.yml` (default: absent)."""
+    semester content repo's released tree (`{repo: (path, ...)}`, default: none)."""
     trees = trees or {}
     captured: dict = {}
     monkeypatch.setattr(
@@ -1344,11 +1341,6 @@ def _plan(
     fake_config(monkeypatch, site.yaml_file)
     monkeypatch.setattr(site.schedule, "load", lambda org: sched)
     monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
-    monkeypatch.setattr(
-        site,
-        "read_materials",
-        lambda org, repo: (declared or {}).get(repo, materials.Declared()),
-    )
     monkeypatch.setattr(
         site,
         "_repo_tree",
@@ -2528,34 +2520,6 @@ def _reaches(linked: set[str], org: str, repo: str, path: str) -> bool:
         for i in range(1, len(parts))
     }
     return blob in linked or bool(folders & linked)
-
-
-def test_an_unusable_materials_yml_never_stops_the_site(monkeypatch, tmp_path, capsys):
-    # Faculty edit materials.yml by hand. One that fails its schema raised out of the kind
-    # inference and the syllabus lookup, so every semester's site froze and every release
-    # run went red. Now: the built-in folder names and the default syllabus, and ONE line
-    # naming the file.
-    class Unusable_(dict):  # non-empty, so the harness reads it
-        def get(self, repo, default=None):
-            raise Unusable(f"{repo}/materials.yml.kinds: must be object")
-
-    sched = Schedule(
-        releases=[
-            Release(
-                "lecture-3",
-                _at(9, 15),
-                [_copy("lectures/03")],
-                kind="lecture",
-                number=3,
-            )
-        ]
-    )
-    trees = {"materials": ("lectures/03/a.pdf",)}
-    plan = _plan(monkeypatch, tmp_path, sched, trees=trees, declared=Unusable_(x=None))
-    (row,) = _rows(plan).values()
-    assert [(x["section"], x["name"]) for x in row["links"]] == [("lecture", "a.pdf")]
-    err = capsys.readouterr().err
-    assert err.count("course-materials-f2026/materials.yml.kinds: must be object") == 1
 
 
 def test_a_file_the_toolkit_no_longer_ships_is_retired(monkeypatch, tmp_path):

@@ -100,7 +100,6 @@ from .faults import ConfigFault, FaultKind, Unusable
 from .gh_commits import last_commit_at
 from .gh_contents import (
     WITHHELD_ROOT_STUBS,
-    file_exists,
     get_file_content,
     is_untouched_stub,
     line_of,
@@ -114,10 +113,8 @@ from .log import log_err, plural
 from .materials import (
     DEFAULT_SYLLABUS,
     PLAN_START,
-    Declared,
     is_materials_repo,
 )
-from .materials import read as read_materials
 from .opencourse import OPENCOURSE_FILE, OPENCOURSE_REPO
 from .opencourse import load as load_opencourse
 from .opencourse import parse as parse_opencourse
@@ -2409,28 +2406,28 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
 # ---------------------------------------------------------------------- gh/git wiring
 
 
-def _declaration(org: str, repo: str) -> Declared:
-    """`repo`'s `materials.yml`, or the defaults when it does not parse: the status is no
-    place to stop over it, and the site sync names the fault."""
-    try:
-        return read_materials(org, repo)
-    except Unusable:
-        return Declared()
+def _syllabus_path(top: Collection[str]) -> str:
+    """The syllabus a materials repo carries at its root: `SYLLABUS.md`, else the first root
+    file whose name says syllabus. The course reads no declaration of its own (decision
+    0039: a semester's `semester.yml` names the file its site pins)."""
+    if DEFAULT_SYLLABUS in top:
+        return DEFAULT_SYLLABUS
+    named = sorted(p for p in top if "/" not in p and "syllab" in p.lower())
+    return named[0] if named else DEFAULT_SYLLABUS
 
 
 def _materials_facts(course_org: str, repo: str) -> MaterialsFacts:
-    """A materials repo's C4 facts: its declared syllabus (markdown read, anything else
-    only looked for) and its `.releaseignore`. The top is listed, never the whole tree: a
-    repo too large for one recursive listing must not fail the course's status."""
-    declared = _declaration(course_org, repo)
-    path = declared.syllabus
+    """A materials repo's C4 facts: its syllabus (markdown read, anything else only looked
+    for) and its `.releaseignore`. The top is listed, never the whole tree: a repo too
+    large for one recursive listing must not fail the course's status."""
     top = top_level(course_org, repo)
-    if path.lower().endswith((".md", ".markdown")):
+    path = _syllabus_path(top)
+    if path not in top:
+        syllabus = None
+    elif path.lower().endswith((".md", ".markdown")):
         syllabus = get_file_content(course_org, repo, path)
-    elif "/" in path:
-        syllabus = "" if file_exists(course_org, repo, path) else None
     else:
-        syllabus = "" if path in top else None
+        syllabus = ""
     releaseignore = (
         get_file_content(course_org, repo, RELEASEIGNORE)
         if RELEASEIGNORE in top

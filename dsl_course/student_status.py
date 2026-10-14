@@ -58,10 +58,8 @@ from .course import (
     shape_note,
 )
 from .discovery import handed_out_assignments
-from .faults import Unusable
 from .gh_contents import get_file_content, repo_tree
-from .materials import publishable
-from .materials import read as read_materials
+from .materials import publishable, semester_syllabus
 from .readings import demote_headings
 from .repos import default_branch
 from .schedule_plan import (
@@ -865,16 +863,14 @@ def gather(course: CourseFacts, facts: SemesterFacts, now: datetime) -> StudentF
         for row in [*own, *sr.readings]:
             for repo, path in _landed(facts, row, True, frozenset())[1]:
                 extra.overlays[(repo, path)] = get_file_content(org, repo, path) or ""
-    try:
-        extra.syllabus = declared_syllabus(
-            sched,
-            frozenset(facts.dest_paths),
-            lambda repo: facts.dest_paths.get(repo, set()),
-            lambda repo: read_materials(course.org, repo),
-        )
-    except Unusable:
-        extra.syllabus = None  # the site sync names the bad materials.yml
-    extra.cards = people_cards(read_semester(org).semester.meta(), semester=True)
+    semester_meta = read_semester(org).semester.meta()
+    extra.syllabus = declared_syllabus(
+        sched,
+        frozenset(facts.dest_paths),
+        lambda repo: facts.dest_paths.get(repo, set()),
+        semester_syllabus(semester_meta),
+    )
+    extra.cards = people_cards(semester_meta, semester=True)
     site = pages_repo(org)
     if site in facts.listing:
         extra.home = facts.site_home or ""

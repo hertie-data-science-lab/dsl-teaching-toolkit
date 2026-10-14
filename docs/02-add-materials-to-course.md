@@ -61,11 +61,17 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
 
 <a id="materialsyml"></a>
 
-   *NB: an optional `materials.yml` at the repo root names the syllabus the home page pins:*
+   *NB: the syllabus a semester's home page pins is `SYLLABUS.md`, else the file that
+   semester names in `semester-config/semester.yml`:*
 
    ```yaml
-   syllabus: E1282_syllabus.pdf   # default SYLLABUS.md
+   student_site:
+     syllabus: E1282_syllabus.pdf   # default SYLLABUS.md
    ```
+
+   *A `materials.yml` in this repo is not read. A folder's kind on the public site is its
+   name in the institution's kinds (`lectures/`, `labs/`); any other folder is supporting
+   files.*
 
    *NB: the console's **Weekly plan** writes every session with its date and readings into
    your Markdown syllabus, between `<!-- dsl:weekly-plan -->` and `<!-- /dsl:weekly-plan -->`

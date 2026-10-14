@@ -28,7 +28,8 @@ before the term starts, when nothing has shipped yet). Any other readings entry 
 list under "Further readings".
 
 `--course-source-repo` names the materials repo holding the syllabus; `--syllabus` the file
-in it (default: the one its `materials.yml` declares, else SYLLABUS.md). Neither limits
+in it (default: the one the semester's `semester.yml` `student_site.syllabus` names, else
+SYLLABUS.md). Neither limits
 where readings are read from.
 
 Usage:
@@ -41,7 +42,10 @@ from __future__ import annotations
 import re
 import sys
 
+import yaml
+
 from . import policy, schedule
+from .config import read_semester
 from .faults import Unusable
 from .gh_contents import (
     blob_sha,
@@ -59,8 +63,7 @@ from .log import (
     log_step,
     plural,
 )
-from .materials import PLAN_END, PLAN_START
-from .materials import read as read_materials
+from .materials import DEFAULT_SYLLABUS, PLAN_END, PLAN_START, semester_syllabus
 from .readings import demote_headings
 from .repos import default_branch
 from .schedule_plan import READINGS_KIND, PlannedRow, planned_rows, site_rows
@@ -211,8 +214,9 @@ def build(course_org: str, semester_org: str) -> tuple[str, int]:
 
 
 def _unusable(exc: Unusable, counts: dict | None = None, body: str = "") -> Summary:
-    """A refusal for a source repo's `materials.yml` that does not parse: its syllabus is
-    not known, so nothing is written on a guess."""
+    """A refusal for a file the syllabus is declared in that does not parse (`semester.yml`
+    since decision 0039; the code keeps its 0.10 name): its syllabus is not known, so
+    nothing is written on a guess."""
     text = f"{exc}. Fix it and run this again."
     log_err(text)
     return Summary(
@@ -269,12 +273,10 @@ def main() -> int:
         return Summary(text, counts, [{"code": code, "text": text}], code=1, block=body)
 
     try:
-        path = (
-            a.syllabus.strip().strip("/")
-            or read_materials(a.course_org, a.course_source_repo).syllabus
-        )
-    except Unusable as exc:
-        return _unusable(exc, counts, body)
+        declared = semester_syllabus(read_semester(a.semester_org).semester.meta())
+    except (yaml.YAMLError, Unusable) as exc:
+        return _unusable(Unusable(str(exc)), counts, body)
+    path = a.syllabus.strip().strip("/") or declared or DEFAULT_SYLLABUS
     target = f"{a.course_source_repo}/{path}"
     if not path.lower().endswith((".md", ".markdown")):
         return refuse(

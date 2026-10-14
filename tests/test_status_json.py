@@ -35,7 +35,7 @@ from dsl_course import (
 )
 from dsl_course.faults import ConfigFault, FaultKind, header_fault
 from dsl_course.gh_contents import load_yaml_lines
-from dsl_course.materials import PLAN_END, PLAN_START, Declared
+from dsl_course.materials import PLAN_END, PLAN_START
 from dsl_course.ops.request import validate
 from dsl_course.schedule_plan import planned_rows
 from tests.conftest import repo_row, run_settings
@@ -661,16 +661,11 @@ def test_a_release_carries_the_number_the_site_gives_it():
     assert {r["id"]: r["number"] for r in doc["releases"]} == {"s3": 3, "s5": 5}
 
 
-def test_a_declared_pdf_syllabus_counts_once_it_is_there(monkeypatch):
-    monkeypatch.setattr(
-        status_json,
-        "read_materials",
-        lambda org, repo: Declared(syllabus="E1282_syllabus.pdf"),
-    )
+def test_a_pdf_syllabus_at_the_root_counts_once_it_is_there(monkeypatch):
+    # No materials.yml is read (decision 0039): a root file named as a syllabus is it.
     monkeypatch.setattr(
         status_json, "get_file_content", lambda org, repo, path, ref="": None
     )
-    monkeypatch.setattr(status_json, "file_exists", lambda org, repo, path: False)
     present = {"E1282_syllabus.pdf": "file", "lectures": "dir"}
     monkeypatch.setattr(status_json, "top_level", _repo_tree({"": present}))
     facts = status_json._materials_facts(COURSE, "nlp-materials")
@@ -683,7 +678,7 @@ def test_a_declared_pdf_syllabus_counts_once_it_is_there(monkeypatch):
     assert status_json.materials_state(facts, checks) == "ready"
     (syllabus,) = [c for c in checks if c["id"] == "syllabus"]
     assert (syllabus["done"], syllabus["need"]) == (False, "suggested")
-    assert syllabus["why"] == "There is no E1282_syllabus.pdf yet."
+    assert syllabus["why"] == "There is no SYLLABUS.md yet."
 
 
 def test_an_archived_semester_is_not_live_and_asks_for_no_archive_date():
@@ -789,11 +784,12 @@ def test_a_shape_with_no_repo_per_unit_is_open_once_handed_out(via, kind):
     assert row["state"] == "declared"
 
 
-def test_a_group_assignment_nobody_declared_a_formation_for_is_forming_teams(
+def test_a_group_assignment_nobody_declared_a_formation_for_is_blocked(
     monkeypatch,
 ):
-    # The spec as the engine reads it (the cascade, every layer empty): the institution's
-    # `self_select` answers, so the state is teams_forming, never blocked.
+    # The spec as the engine reads it (the cascade, every layer empty): no formation
+    # (decision 0039), so no team can form and the assignment is blocked until a layer
+    # sets one.
     run_settings(monkeypatch, lambda org: None)
     monkeypatch.setattr(settings, "org_meta", lambda org: {})
     group = grading_spec.with_run_settings(
@@ -801,7 +797,7 @@ def test_a_group_assignment_nobody_declared_a_formation_for_is_forming_teams(
     )
     doc = _render(semester=_semester(specs={"assignment-2": group}))
     row = next(a for a in doc["assignments"] if a["slug"] == "assignment-2")
-    assert row["state"] == "teams_forming"
+    assert row["state"] == "blocked"
 
 
 def test_marks_are_counted_off_the_sheet_and_returned_once_every_unit_is():
@@ -1191,7 +1187,6 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
     }
     for module in (status_json, schedule, grading_spec, distribute):
         monkeypatch.setattr(module, "get_file_content", content)
-    monkeypatch.setattr(status_json, "read_materials", lambda org, repo: Declared())
     monkeypatch.setattr(status_json, "load_opencourse", lambda org: None)
     schedule._schedule_text.cache_clear()
     monkeypatch.setattr(status_json, "list_org_repos", lambda org: listings[org])
@@ -1240,7 +1235,6 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
         "top_level",
         _repo_tree({"": {"SYLLABUS.md": "file", "lectures": "dir", ".system": "dir"}}),
     )
-    monkeypatch.setattr(status_json, "file_exists", lambda org, repo, path: False)
     monkeypatch.setattr(gh_commits, "gh", lambda *a: (0, "2026-09-22T06:02:00Z"))
     monkeypatch.setattr(status_json, "get_team_members", lambda org, team: {"prof"})
     monkeypatch.setattr(grading_spec, "_org_settings_faults", lambda org: [])

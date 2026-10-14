@@ -1,30 +1,22 @@
-"""A materials repo's optional `materials.yml`.
+"""Materials repos: the topic that makes one, the syllabus default, and the folder kinds.
 
 A materials repo is any course-org repo carrying the `dsl-materials` topic; the name
 `course-materials-<tag>` is only the default the scaffold picks. Nothing about its layout is
-required, and no folder name means anything (decision 0038: the schedule says what each
-entry is). `materials.yml` at its root names the syllabus when it is not `SYLLABUS.md`:
-
-    syllabus: E1282_syllabus.pdf
-
-Its `kinds:` folder map, and the folder-name kinds below it, are no longer read by the
-semester side: the open site still reads them (`public_site`, until WP-P rebuilds it on
-the schedule), the console's `materials.json` still exports them (until WP-C), and
-`migrate` reads them once, to write each 0.10 entry's kind into its block.
+required, and no folder name means anything to the semester side (decision 0038: the
+schedule says what each entry is). The engine reads no `materials.yml` (decision 0039 and
+the maintainer's ruling of 14 Oct 2026): a semester's syllabus is `semester.yml`
+`student_site.syllabus` (`semester_syllabus`), and a folder's kind on the open site is the
+institution's kind model (`folder_kind`). `SCHEMA` and the built-in aliases are still
+exported to the console's Folder kinds panel (`schemas.materials_json`, until WP-C2), and
+`migrate` reads an old `materials.yml` once.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
 
-import yaml
-
-from . import config, policy, run
-from .config import ConfigFile
-from .faults import Unusable
+from . import policy
 from .repos import has_denied_component, has_never_material_component
-from .schema_check import validate
 
 MATERIALS_TOPIC = "dsl-materials"
 MATERIALS_FILE = "materials.yml"
@@ -83,50 +75,22 @@ SCHEMA = {
 }
 
 
-@dataclass(frozen=True)
-class Declared:
-    """What one repo's `materials.yml` declares, defaults filled in. `declared` says
-    whether `syllabus:` was written (else it is the default)."""
-
-    syllabus: str = DEFAULT_SYLLABUS
-    kinds: Mapping[str, str] = field(default_factory=dict)
-    declared: bool = False
+def semester_syllabus(meta: object) -> str:
+    """A parsed `semester.yml`'s `student_site.syllabus` (decision 0039): the released path
+    the home page pins, "" when it declares none (`DEFAULT_SYLLABUS` is looked for)."""
+    site = meta.get("student_site") if isinstance(meta, dict) else None
+    value = site.get("syllabus") if isinstance(site, dict) else None
+    return str(value or "").strip().strip("/")
 
 
-def parse(data: object, where: str = MATERIALS_FILE) -> Declared:
-    """`materials.yml` as parsed YAML (None or {} = absent). Raises `Unusable` naming every
-    problem: the file is instructor-owned, and a guess at what it meant would place rows in
-    the wrong tab without a word. Folder keys are lowercased (matched case-insensitively)."""
-    if not data:
-        return Declared()
-    problems = validate(data, SCHEMA, where)
-    if problems:
-        raise Unusable("; ".join(problems))
-    syllabus = str(data.get("syllabus") or "").strip().strip("/")
-    kinds = {
-        str(folder).strip().strip("/").lower(): known_kind(str(kind))
-        for folder, kind in (data.get("kinds") or {}).items()
-    }
-    return Declared(syllabus or DEFAULT_SYLLABUS, kinds, bool(syllabus))
-
-
-@run.per_run(lambda org, repo: run.scope(org, repo, MATERIALS_FILE))
-def read(org: str, repo: str) -> Declared:
-    """`repo`'s declaration, read once per run. Absent is the defaults; a file that does
-    not parse or does not validate raises `Unusable`."""
-    return declared(config.read(org, repo, MATERIALS_FILE))
-
-
-def declared(file: ConfigFile, quiet: bool = False) -> Declared:
-    """THE parse of a `materials.yml`, from the API (`read`) or a clone
-    (`public_site`). Absent is the defaults; a file that does not parse or does not
-    validate raises `Unusable`. `quiet` leaves the file's own problem unlogged."""
-    where = f"{file.repo}/{MATERIALS_FILE}"
-    try:
-        data = file.data() if quiet else file.mapping()
-    except yaml.YAMLError as exc:
-        raise Unusable(f"{where} is not valid YAML") from exc
-    return parse(data, where)
+def folder_kind(section: str) -> str:
+    """The kind a top-level folder names in the institution's kind model: its plural
+    (`labs`) or its key (`lab`), else supporting files."""
+    name = section.strip("/").lower()
+    found = policy.kind_for_plural(name) or (
+        name if name in policy.content_kinds() else None
+    )
+    return found or DEFAULT_KIND
 
 
 def known_kind(kind: str) -> str:

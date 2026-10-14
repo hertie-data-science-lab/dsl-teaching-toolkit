@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from dsl_course import discovery, gh_contents, ghcli, materials, settings, status_json
+from dsl_course import discovery, gh_contents, ghcli, settings, status_json
 
 # The real reads, captured before conftest's autouse stubs replace them.
 _REAL = {
@@ -328,13 +328,11 @@ def counted(monkeypatch):
     for (module, name), real in _REAL.items():
         monkeypatch.setattr(module, name, real)
     monkeypatch.setattr(ghcli, "_run_gh", gh)
-    materials.read.cache_clear()
     gh_contents.read_once(True)
     discovery.hold_listings(True)
     yield gh
     gh_contents.read_once(False)
     discovery.hold_listings(False)
-    materials.read.cache_clear()
 
 
 def _reads_of(gh: FakeGitHub, org: str) -> list[str]:
@@ -350,7 +348,8 @@ def test_the_semester_tick_costs_what_it_did(counted):
     # is the course gather's own read, so the memo answers it. Decision 0039: one
     # semester.yml where instructors.yml and assignments.yml were two, and teams.csv folded
     # into students.csv (.system/roster.csv is the one new read): -2.
-    assert len(gh.calls) == 41
+    # The materials repo's materials.yml is not read since 0.11.0 (-1).
+    assert len(gh.calls) == 40
     assert doc["semester"]["template_moments"]["assignment-a2"] == (
         "2026-10-20T10:00:00+02:00"
     )
@@ -362,7 +361,8 @@ def test_the_course_tick_reads_one_file_per_semester(counted):
     # origin/main: 18. Decision 0034 adds one status.json read per registered semester
     # (semesters.yml lists names only, so the two archived ones cost theirs too).
     # Decision 0039: course.yml where dsl-course.yml and opencourse.yml were two (-1).
-    assert len(gh.calls) == 18 + 3 - 1
+    # ... and no materials.yml (-1).
+    assert len(gh.calls) == 18 + 3 - 2
     for org in (LIVE, OLD1, OLD2):
         assert _reads_of(gh, org) == [
             f"repos/{org}/semester-config/contents/.system/status.json"

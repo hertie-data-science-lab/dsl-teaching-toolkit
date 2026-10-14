@@ -32,17 +32,18 @@ def _oc(**kwargs) -> OpenCourse:
 
 
 def _seed_source(root: Path) -> None:
-    """A materials repo with NO `lectures/` at all: labs + readings + a faq section,
+    """A materials repo with NO `lectures/` at all: labs + readings + a `lecture/` section,
     plus a session (3) that exists only under `readings/`, so it has nothing to publish
     whenever readings are off."""
     files = {
         "labs/01_first-lab/lab.ipynb": "notebook",
         "labs/01_first-lab/data/rows.csv": "a,b",  # nested - must still be published
         "labs/02_second-lab/lab.ipynb": "notebook",
-        "faq/02_second-lab/faq.md": "Q: why? A: because.",
-        # faq/ is no kind's name: published as lecture-row files only because it is
-        # declared so (decision 0031 rule 10).
-        "materials.yml": "kinds:\n  faq: lecture\n",
+        "lecture/02_second-lab/faq.md": "Q: why? A: because.",
+        # `lecture/` is the kind's key, not its plural: a kind of the institution's names
+        # it all the same (kinds from institution.yml only, ruling of 14 Oct 2026). A
+        # materials.yml is not read.
+        "materials.yml": "kinds:\n  code: lecture\n",
         # A numbered section no kind names: supporting files, never a row.
         "code/02_second-lab/run.py": "print(1)",
         "readings/01_first-lab/READINGS.md": "- Smith 2020, ch.1",
@@ -141,10 +142,10 @@ def published(monkeypatch):
 
 def test_publishes_every_discovered_section_not_just_lectures(published):
     files = published(readings_mode="none")
-    # labs/ and faq/ are hosted and linked, though neither is named "lectures"
+    # labs/ and lecture/ are hosted and linked, though neither is named "lectures"
     assert f"{SERVED}/session-1/labs/lab.ipynb" in files
     assert f"{SERVED}/session-1/labs/data/rows.csv" in files  # nested file too
-    assert f"{SERVED}/session-2/faq/faq.md" in files
+    assert f"{SERVED}/session-2/lecture/faq.md" in files
     lab1 = files["_lectures/lab-01.md"]
     assert ("lab", "lab.ipynb") in entry_links(lab1)
     # A nested file is still SERVED (asserted above) but not listed: a rendered deck's
@@ -152,7 +153,7 @@ def test_publishes_every_discovered_section_not_just_lectures(published):
     # put 1,641 links on a live site. Jekyll serves no directory index, so - unlike the
     # semester site - there is no folder link to offer here either.
     assert ("lab", "data/rows.csv") not in entry_links(lab1)
-    assert ("faq", "faq.md") in entry_links(files["_lectures/session-02.md"])
+    assert ("lecture", "faq.md") in entry_links(files["_lectures/session-02.md"])
 
 
 def test_labs_are_their_own_rows_not_part_of_the_session_row(published):
@@ -162,7 +163,7 @@ def test_labs_are_their_own_rows_not_part_of_the_session_row(published):
     assert "kind: lab" in files["_lectures/lab-02.md"]
     assert "type:" not in files["_lectures/lab-02.md"]
     assert 'title: "Lab 2"' in files["_lectures/lab-02.md"]
-    session2 = files["_lectures/session-02.md"]  # session 2 also has a faq section
+    session2 = files["_lectures/session-02.md"]  # session 2 also has a lecture section
     assert "kind: lecture" in session2
     assert not [s for s, _n in entry_links(session2) if s == "lab"]
     # session 1 has ONLY labs (and readings, off here) - so no lecture row at all
@@ -197,8 +198,8 @@ def test_actual_readings_mode_hosts_and_links_readings(published):
 def test_readings_only_when_file_sections_are_off(published):
     files = published(readings_mode="actual-readings", include_lectures=False)
     assert f"{SERVED}/session-1/readings/paper.pdf" in files
-    assert not [p for p in files if "/labs/" in p or "/faq/" in p]
-    # session 2 has labs + faq but no readings -> nothing to publish for it
+    assert not [p for p in files if "/labs/" in p or "/lecture/" in p]
+    # session 2 has labs + lecture but no readings -> nothing to publish for it
     assert "_lectures/session-02.md" not in files
 
 
@@ -388,20 +389,24 @@ def test_a_symlink_cannot_smuggle_a_denied_file_onto_the_public_site(published):
 def test_supporting_files_sections_are_no_row(published):
     files = published(readings_mode="none")
     assert not [p for p in files if p.startswith(f"{SERVED}/session-1/data/")]
-    # An unkinded section is supporting files too (decision 0031 rule 10).
+    # An unkinded section is supporting files too (decision 0031 rule 10), whatever a
+    # materials.yml says.
     assert not [p for p in files if "/code/" in p]
     assert ("code", "run.py") not in entry_links(files["_lectures/session-02.md"])
     # Session 1 has labs and data only: still no lecture row.
     assert "_lectures/session-01.md" not in files
-    assert public_site.shown_sections(
-        ["labs", "Data", "quiz", "code", "faq"], {"quiz": "assets", "faq": "lecture"}
-    ) == ["labs", "faq"]
+    assert public_site.shown_sections(["labs", "Data", "quiz", "code", "lecture"]) == [
+        "labs",
+        "lecture",
+    ]
 
 
 def test_a_lab_kind_section_makes_lab_rows():
-    assert public_site.row_kind("tutorials", {}) == "lab"
-    assert public_site.row_kind("seminars", {"seminars": "lab"}) == "lab"
-    assert public_site.row_kind("lectures", {}) == "lecture"
+    assert public_site.row_kind("labs") == "lab"
+    assert public_site.row_kind("Lab") == "lab"
+    # No folder alias any more: `tutorials/` names no kind, so it is a session row.
+    assert public_site.row_kind("tutorials") == "lecture"
+    assert public_site.row_kind("lectures") == "lecture"
 
 
 def test_the_course_description_contact_and_licence_reach_the_public_site(

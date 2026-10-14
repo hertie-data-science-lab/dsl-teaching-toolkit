@@ -154,15 +154,17 @@ def test_a_run_setting_in_the_template_is_refused(key):
 
 def test_the_group_shape_reads_off_type_and_team_formation():
     # `none` is the answer an INDIVIDUAL assignment gives, and not a value anyone writes:
-    # the Join-team form refuses a slug on it, so a group assignment that forgot the key
-    # must not fall into it.
+    # the Join-team form refuses a slug on it. A group assignment no layer gives a
+    # formation falls into it too (decision 0039: absent everywhere forms no team).
     individual = dataclasses.replace(
         collect.parse_grading_spec(""), team_formation="assigned"
     )
     assert not individual.is_group
     assert individual.team_formation_resolved == "none"
     group = collect.parse_grading_spec("type: group\n")
-    assert group.is_group and group.team_formation_resolved == "self_select"
+    assert group.is_group and group.team_formation_resolved == "none"
+    group = dataclasses.replace(group, team_formation="self_select")
+    assert group.team_formation_resolved == "self_select"
     assigned = dataclasses.replace(group, team_formation="assigned")
     assert assigned.team_formation_resolved == "assigned"
 

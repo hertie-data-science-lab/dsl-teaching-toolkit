@@ -23,7 +23,6 @@ from urllib.parse import quote
 import yaml
 
 from . import policy
-from .config import read_local
 from .course import (
     OPEN_SITE_BLOCK,
     course_block,
@@ -37,8 +36,7 @@ from .faults import Unusable
 from .fs import copy_tree, union_deny
 from .ghcli import clone
 from .log import Summary, log, log_err, log_step
-from .materials import MATERIALS_FILE, Declared, infer_kind
-from .materials import declared as declared_materials
+from .materials import folder_kind
 from .opencourse import OPENCOURSE_FILE, OpenCourse
 from .opencourse import read as read_opencourse
 from .readings import readings_block
@@ -97,26 +95,18 @@ def course_facts(meta: dict) -> str:
     return yaml.safe_dump(facts, sort_keys=False, allow_unicode=True)
 
 
-def _declared(src: Path) -> Declared:
-    """The clone's own `materials.yml`; none, or one that does not parse, is the defaults
-    (its problem is reported on the course page, not here)."""
-    try:
-        return declared_materials(read_local(src, MATERIALS_FILE), quiet=True)
-    except (OSError, Unusable):
-        return Declared()
+def shown_sections(sections: list[str]) -> list[str]:
+    """The sections that get rows: one whose name is a shown kind of the institution's
+    (`lectures/`, `labs/`); a supporting-files one (`data/`, and any folder no kind
+    names) never does (decisions 0026 rule 3, 0031 rule 10; kinds from the institution
+    file only, ruling of 14 Oct 2026)."""
+    return [s for s in sections if folder_kind(s) in policy.shown_kinds()]
 
 
-def shown_sections(sections: list[str], kinds: dict[str, str]) -> list[str]:
-    """The sections that get rows: a supporting-files one (`data/`, `img/`, and any
-    folder no alias names) never does (decisions 0026 rule 3, 0031 rule 10)."""
-    return [s for s in sections if infer_kind(s, kinds) in policy.shown_kinds()]
-
-
-def row_kind(section: str, kinds: dict[str, str]) -> str:
+def row_kind(section: str) -> str:
     """The open site's row for a section: its kind when the open site has a row of that
-    kind (`ROW_NOUN`: a lab-kind one, `labs/`, `tutorials/` or so declared), else
-    'lecture' (the session row)."""
-    kind = infer_kind(section, kinds)
+    kind (`ROW_NOUN`: a lab-kind one, `labs/`), else 'lecture' (the session row)."""
+    kind = folder_kind(section)
     return kind if kind in ROW_NOUN else "lecture"
 
 
@@ -306,13 +296,11 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
             # use), not a hardcoded lectures/readings pair - a course whose content lives
             # in `labs/` publishes labs. `readings` is the one section with special
             # semantics (`readings_mode`, below); `include_lectures` gates all the others.
-            # Supporting-files sections (any folder no alias names) are never rows here
+            # Supporting-files sections (any folder no kind names) are never rows here
             # either.
-            kinds = dict(_declared(src).kinds)
             file_sections = (
                 shown_sections(
-                    [sec for sec in discover_sections(src) if sec != READINGS_SECTION],
-                    kinds,
+                    [sec for sec in discover_sections(src) if sec != READINGS_SECTION]
                 )
                 if include_lectures
                 else []
@@ -341,9 +329,7 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
                     links = _public_links(dest, f"{url_base}/{section}")
                     if links:
                         rows = (
-                            lab_links
-                            if row_kind(section, kinds) == "lab"
-                            else section_links
+                            lab_links if row_kind(section) == "lab" else section_links
                         )
                         rows.append((section, links))
 
