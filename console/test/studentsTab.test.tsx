@@ -91,11 +91,28 @@ describe('the Students roster meter', () => {
 });
 
 describe('the Students action row', () => {
-  it('is Edit roster, Replace from CSV, Send codes, Sync now, with no Preview of its own', async () => {
+  it('leads with Send codes on its own row, then Replace from CSV and Sync now, with no Preview of its own', async () => {
     await mount();
-    const row = [...q('.page-head .actions').children].map((c) => c.textContent?.trim());
-    expect(row).toEqual(['Edit roster', 'Replace from CSV', 'Send codes', 'Sync now']);
+    const main = q('.students-actions .main-action');
+    expect(main.querySelector('button.btn.big')!.textContent).toBe('Send codes');
+    expect(main.querySelector('.hint-btn')!.getAttribute('aria-label')).toBe('About Send codes');
+    expect(main.querySelector('.hint-pop')!.textContent).toBe('About Send codesEvery student on the roster gets a private enrolment code by email the moment their row is saved; they paste it on the semester’s join form to get their repos. This button sends a NEW code to everyone who has not joined yet (their old code stops working) and emails it again. Preview first to see how many that is.');
+    const row = q('.students-actions .actions');
+    expect([...row.querySelectorAll('button.btn, a.btn')].map((c) => c.textContent?.trim())).toEqual(['Replace from CSV', 'Sync now']);
+    expect(row.querySelector('.hint-btn')!.getAttribute('aria-label')).toBe('About Replace from CSV');
+    expect(row.querySelector('.hint-pop')!.textContent).toBe('Upload a CSV from the registrar to replace the roster in one go: you see a diff of added, removed and changed rows before anything is saved. Columns the toolkit fills (GitHub handle, code, when it was sent) are kept for rows that stay.');
     expect(button('Preview')).toBeUndefined();
+  });
+
+  it('puts Edit roster as a pencil on the table’s corner, a tick while editing', async () => {
+    await mount();
+    const icon = () => q<HTMLButtonElement>('.roster-box > button.roster-edit');
+    expect([icon().getAttribute('aria-label'), icon().title, icon().textContent, icon().getAttribute('aria-pressed')]).toEqual(['Edit roster', 'Edit roster', '✎', 'false']);
+    expect(root!.querySelector('.page-head button[aria-label="Edit roster"]')).toBeNull();
+    await click(icon());
+    expect([icon().getAttribute('aria-label'), icon().textContent, icon().getAttribute('aria-pressed')]).toEqual(['Done editing', '✓', 'true']);
+    await click(icon());
+    expect(icon().getAttribute('aria-label')).toBe('Edit roster');
   });
 
   it('opens the send-new-codes panel, where Preview and the verb live', async () => {
@@ -103,7 +120,8 @@ describe('the Students action row', () => {
     await click(button('Send codes'));
     const drawer = q('aside.drawer');
     expect(drawer.querySelector('#drawer-title')!.textContent).toBe('Students who have not joined');
-    expect([...drawer.querySelectorAll('.drawer-foot button')].map((b) => b.textContent)).toEqual(['Preview', 'Send 1 new code']);
+    expect([...drawer.querySelectorAll('.drawer-foot button.btn')].map((b) => b.textContent)).toEqual(['Preview', 'Send 1 new code']);
+    expect(drawer.querySelector('.drawer-foot .hint-btn')!.getAttribute('aria-label')).toBe('About Send codes');
   });
 
   it('opens Sync membership on GitHub for Sync now', async () => {
@@ -120,7 +138,7 @@ describe('Edit roster: add and remove', () => {
   it('marks a removed row struck through, with Undo, and deletes nothing until Save', async () => {
     const gh = await mount();
     expect(root!.querySelector('button[aria-label="Remove line 3"]')).toBeNull(); // read view: no control
-    await click(button('Edit roster'));
+    await click(q('button[aria-label="Edit roster"]'));
     await click(q('button[aria-label="Remove line 3"]'));
     expect(q('#line-3').className).toContain('removed');
     // Its cells are text now, not inputs.

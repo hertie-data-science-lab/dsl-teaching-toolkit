@@ -602,6 +602,15 @@ def test_a_score_that_is_not_a_FINITE_number_gets_no_arithmetic(typed):
     assert final_grade(typed, penalty_rate("10%"), 2, None) is None
 
 
+@pytest.mark.parametrize("typed", ["1_0", "1_000", "\u0661\u0662", "\uff11\uff12"])
+def test_a_score_python_alone_reads_as_a_number_is_held_as_the_console_holds_it(typed):
+    # `Decimal` reads `1_0` as 10 and Arabic-Indic or full-width digits as 12; the
+    # console's number rule does not, so it said "held" while the engine sent the mark.
+    assert score_total(typed) is None
+    assert final_grade(typed, penalty_rate("10%"), 2, None) is None
+    assert grades._is_typo(typed)
+
+
 def test_a_non_numeric_grade_gets_no_arithmetic():
     # `pass`, `A-` and a marker's note are distributed verbatim; None is how the caller is
     # told to pass them through rather than publish a computed number nobody typed.

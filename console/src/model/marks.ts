@@ -4,7 +4,8 @@
 // `total x (1 - penalty) + adjustment`, floored at 0, the penalty `rate x days_late` unless the
 // unit's `late_penalty` waives or sets it. Never stored in the sheet.
 
-import { blank, isObj, obj, type Path } from '../edit/yamlText';
+import { YamlText, blank, deepEqual, isObj, obj, type Path } from '../edit/yamlText';
+import { plural } from './format';
 import { penaltyRate } from './policy';
 
 export const NOTES_KEY = 'notes_not_shared_with_students';
@@ -33,6 +34,9 @@ export interface Unit {
   questionFeedbackPath: Path;
   latePenalty: unknown;
   latePenaltyPath: Path;
+  /** The team's own private notes (a group sheet; a person's notes are on the person). */
+  notes: unknown;
+  notesPath: Path | null;
   people: Person[];
 }
 
@@ -42,12 +46,17 @@ export interface Sheet {
   units: Unit[];
 }
 
-export function readSheet(text: string, doc: unknown): Sheet {
+/** A sheet's units by key: its `teams:` on a group sheet, else its `submissions:`. */
+export function sheetUnits(doc: unknown): Record<string, unknown> {
   const d = obj(doc);
-  const group = 'teams' in d;
+  return obj('teams' in d ? d.teams : d.submissions);
+}
+
+export function readSheet(text: string, doc: unknown): Sheet {
+  const group = 'teams' in obj(doc);
   const container = group ? 'teams' : 'submissions';
   const frozen = /^# Status: FROZEN/m.test(text.split(/\n(?!#)/)[0] ?? '');
-  const units: Unit[] = Object.entries(obj(d[container])).map(([key, raw]) => {
+  const units: Unit[] = Object.entries(sheetUnits(doc)).map(([key, raw]) => {
     const u = obj(raw);
     const info = u.info && typeof u.info === 'object' ? obj(u.info) : null;
     if (group)
@@ -55,6 +64,7 @@ export function readSheet(text: string, doc: unknown): Sheet {
         key, info, score: u.score_group ?? null, scorePath: [container, key, 'score_group'], feedback: u.feedback_group ?? null, feedbackPath: [container, key, 'feedback_group'],
         questionFeedback: obj(u[QUESTION_FEEDBACK_KEY]), questionFeedbackPath: [container, key, QUESTION_FEEDBACK_KEY],
         latePenalty: u[LATE_PENALTY_KEY] ?? null, latePenaltyPath: [container, key, LATE_PENALTY_KEY],
+        notes: u[NOTES_KEY] ?? null, notesPath: [container, key, NOTES_KEY],
         people: Object.entries(obj(u.members)).map(([handle, m]) => {
           const mm = obj(m);
           return { handle, adjustment: mm.adjustment_individual ?? null, feedback: mm.feedback_individual ?? null, notes: mm[NOTES_KEY] ?? null, base: [container, key, 'members', handle] };
@@ -64,6 +74,7 @@ export function readSheet(text: string, doc: unknown): Sheet {
       key, info, score: u.score_individual ?? null, scorePath: [container, key, 'score_individual'], feedback: null, feedbackPath: null,
       questionFeedback: obj(u[QUESTION_FEEDBACK_KEY]), questionFeedbackPath: [container, key, QUESTION_FEEDBACK_KEY],
       latePenalty: u[LATE_PENALTY_KEY] ?? null, latePenaltyPath: [container, key, LATE_PENALTY_KEY],
+      notes: null, notesPath: null,
       people: [{ handle: key, adjustment: u.adjustment_individual ?? null, feedback: u.feedback_individual ?? null, notes: u[NOTES_KEY] ?? null, base: [container, key] }],
     };
   });
@@ -77,6 +88,16 @@ export function num(v: unknown): number | null {
   if (!t) return null;
   const n = Number(t);
   return Number.isFinite(n) ? n : null;
+}
+
+/** How many units (teams or students) differ between two texts of one sheet, added or removed ones included: what someone else changed under a save. */
+export function rowsChanged(before: string, after: string): number {
+  const units = (text: string) => {
+    const y = new YamlText(text);
+    return y.errors.length ? {} : sheetUnits(y.toJS());
+  };
+  const a = units(before), b = units(after);
+  return [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((k) => !deepEqual(a[k], b[k])).length;
 }
 
 /** One `questions:` entry's maximum: `Q1: 15`, or `Q1: {points: 15, file: report.tex}`. */
@@ -167,7 +188,8 @@ export function finalGrade(total: number | null, penalty: Penalty, adjustment: u
 }
 
 const percent = (fraction: number) => Math.round(fraction * 1000) / 10;
-const percentOff = (fraction: number) => `−${percent(fraction)}%`;
+/** What a penalty takes off, as the grid shows it in front of its switch: "−20%". */
+export const percentOff = (fraction: number) => `−${percent(fraction)}%`;
 
 /** The penalty as the grid shows it: "−20%", "waived" or "−25% (set by hand)"; '' when not late,
  *  or when no late rule gives one. */
@@ -214,4 +236,156 @@ export function cellValue(raw: string): string | number | null {
   if (!t) return null;
   const n = Number(t);
   return Number.isFinite(n) && /^-?\d+(\.\d+)?$/.test(t) ? n : raw;
+}
+
+/**
+ * The late rule in one wording, for the Marks tab's lede, its Penalty `?` and the Return marks
+ * pop-up alike: "<rate> of the total per day started, up to <window> days"; null with no late penalty.
+ * `windowDays` is the late window (`late_window_days`), which caps the days counted.
+ */
+export function lateRule(rate: number | null, windowDays?: unknown): string | null {
+  if (rate === null) return null;
+  const days = num(windowDays);
+  return `${percent(rate)}% of the total per day started${days ? `, up to ${plural(days, 'day')}` : ''}`;
+}
+
+/** Why Return marks holds a mark back (grades.HOLD_REASONS; `returned` is the run's own and not here). */
+export type HoldReason = 'penalty' | 'score' | 'adjustment' | 'late_penalty' | 'question' | 'duplicate';
+
+/** Each reason as the grid's held chip says it (grades._HOLD_PREVIEW, in the grader's words). */
+export const HOLD_WORDS: Record<HoldReason, string> = {
+  penalty: 'late, and the mark is not a number a late penalty can come off',
+  score: 'a question mark that is not a number',
+  adjustment: 'an adjustment that is not a number',
+  late_penalty: 'a late penalty that is not apply, waive or a percentage',
+  question: 'a mark for a question the assignment does not have',
+  duplicate: 'in more than one team',
+};
+
+/** A cell as the engine's `as_decimal` reads it: a plain decimal number, else null (`0x10`, `−3`, `14/15` are not numbers). */
+function decimal(v: unknown): number | null {
+  if (v === null || v === undefined || typeof v === 'boolean') return null;
+  const t = String(v).trim();
+  if (!/^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i.test(t)) return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}
+
+const typo = (v: unknown) => !blank(v) && decimal(v) === null;
+
+/** One unit as the hold rules read it: what the sheet says, with the grid's edits over it. */
+export interface HoldUnit {
+  score: unknown;
+  daysLate: unknown;
+  latePenalty: unknown;
+  people: { handle: string; adjustment: unknown }[];
+}
+
+/** What is wrong with a unit's score cell (grades._score_fault): a scalar is free text by design. */
+function scoreFault(score: unknown, questions: Record<string, unknown> | null): HoldReason | null {
+  if (!isObj(score)) return null;
+  if (questions && Object.keys(questions).length && Object.keys(score).some((k) => !(k in questions))) return 'question';
+  return Object.values(score).some(typo) ? 'score' : null;
+}
+
+/** A word for a score under a penalty that takes something off (grades.needs_hand_decision). */
+export function needsHandDecision(u: HoldUnit, questions: Record<string, unknown> | null, rate: number | null): boolean {
+  if (scoreTotal(u.score, questions) !== null || isObj(u.score) || blank(u.score)) return false;
+  return effectivePenalty(rate, u.daysLate, u.latePenalty).fraction > 0;
+}
+
+/**
+ * Every handle whose mark Return marks holds back, and why: grades.sheet_hold_reasons (what a
+ * grader typed) over grades.undecided_marks (what the arithmetic cannot do), one reason each.
+ */
+export function holdReasons(units: HoldUnit[], questions: Record<string, unknown> | null, rate: number | null): Record<string, HoldReason> {
+  const held: Record<string, HoldReason> = {};
+  for (const u of units) if (needsHandDecision(u, questions, rate)) for (const pr of u.people) held[pr.handle] = 'penalty';
+  const seen = new Set<string>();
+  for (const u of units) {
+    const days = decimal(u.daysLate);
+    const fault = scoreFault(u.score, questions) ?? (rate !== null && days !== null && days > 0 && lateChoice(u.latePenalty).mode === 'bad' ? 'late_penalty' : null);
+    for (const pr of u.people) {
+      const folded = pr.handle.toLowerCase();
+      if (seen.has(folded)) {
+        held[pr.handle] = 'duplicate';
+        continue;
+      }
+      seen.add(folded);
+      const reason = fault ?? (typo(pr.adjustment) ? 'adjustment' : null);
+      if (reason) held[pr.handle] = reason;
+    }
+  }
+  return held;
+}
+
+/** The final grades in one line, for the Return marks pop-up: "Final: median 38, range 22–47, 2 held". */
+export function spread(finals: number[], held: number): string {
+  const parts: string[] = [];
+  if (finals.length) {
+    const s = [...finals].sort((x, y) => x - y);
+    const mid = Math.floor(s.length / 2);
+    const median = s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+    parts.push(`median ${round(median)}`, `range ${round(s[0])}–${round(s[s.length - 1])}`);
+  } else parts.push('nothing marked yet');
+  if (held) parts.push(`${held} held`);
+  return `Final: ${parts.join(', ')}`;
+}
+
+/** What one student's marks page shows of one assignment: the whole breakdown, never the private notes. */
+export interface StudentMarks {
+  final: string;
+  max: number | null;
+  /** The marks per question (a flat score as `{ '': score }`). */
+  score: Record<string, unknown>;
+  /** The score before the late penalty and the adjustment; '' when there is none. */
+  total: string;
+  /** The student's own adjustment as typed ("+3", "-2"); '' when none is set. */
+  adjustment: string;
+  daysLate: number | null;
+  penalty: string;
+  feedback: string;
+  team: string | null;
+  teamFeedback: string;
+  questionFeedback: [string, string][];
+}
+
+/**
+ * One student's view of a unit: the marks per question, the score, the late penalty, their own
+ * adjustment where one is set, and the final grade (score total, the late penalty, then the
+ * adjustment), with the team's feedback beside their own on a team assignment.
+ */
+export function studentMarks(o: {
+  group: boolean;
+  team: string;
+  score: unknown;
+  questions: Record<string, unknown> | null;
+  max: number | null;
+  rate: number | null;
+  daysLate: unknown;
+  latePenalty: unknown;
+  adjustment: unknown;
+  feedback: unknown;
+  teamFeedback: unknown;
+  questionFeedback: Record<string, unknown>;
+}): StudentMarks {
+  const pen = effectivePenalty(o.rate, o.daysLate, o.latePenalty);
+  const final = finalGrade(scoreTotal(o.score, o.questions), pen, o.adjustment);
+  const verbatim = isObj(o.score) || blank(o.score) ? '' : String(o.score).trim();
+  const marked = isObj(o.score) ? Object.fromEntries(Object.entries(o.score).filter(([, v]) => !blank(v))) : blank(o.score) ? {} : { '': o.score };
+  const text = (v: unknown) => (blank(v) ? '' : String(v).trim());
+  const adj = num(o.adjustment);
+  return {
+    final: final !== null ? round(final) : verbatim,
+    max: o.max,
+    score: marked,
+    total: round(scoreTotal(o.score, o.questions)),
+    adjustment: adj === null || adj === 0 ? '' : `${adj > 0 ? '+' : '−'}${round(Math.abs(adj))}`,
+    daysLate: num(o.daysLate),
+    penalty: penaltyText(pen, o.rate),
+    feedback: text(o.feedback),
+    team: o.group ? o.team : null,
+    teamFeedback: o.group ? text(o.teamFeedback) : '',
+    questionFeedback: Object.entries(o.questionFeedback).filter(([, v]) => !blank(v)).map(([q, v]) => [q, text(v)]),
+  };
 }

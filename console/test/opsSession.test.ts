@@ -87,3 +87,19 @@ describe('a confirm-in-panel verb', () => {
     expect(s.runs.value.map((r) => r.run_id)).toEqual([5]);
   });
 });
+
+describe('the same operation opened again', () => {
+  it('takes the new figures and keeps the options and the preview', async () => {
+    const a = new Flaky(0);
+    const s = new OpsSession(a, { pollMs: 0, sleep: tick, outcomeTries: 1 });
+    const def = defs.checkNow(scope);
+    s.open({ ...def, facts: ['2 students get marks'] });
+    await s.start('preview');
+    s.setValues({ kept: true });
+    s.minimise();
+    s.open({ ...def, facts: ['3 students get marks'] });
+    expect(s.current.value?.def.facts).toEqual(['3 students get marks']);
+    expect(s.current.value).toMatchObject({ min: false, values: { kept: true }, phase: 'ready' });
+    expect(s.current.value?.dry).not.toBeNull();
+  });
+});

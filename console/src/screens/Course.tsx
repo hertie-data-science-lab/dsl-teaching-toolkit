@@ -579,10 +579,13 @@ export function CourseScreen(p: CourseProps) {
       <p class="page-note">Materials and assignment templates are prepared here, for every semester. Students get only what a semester releases or hands out, from that semester’s page.</p>
       <Verdict v={ready?.verdict ?? null} onOpen={() => showTab(setTab, verdictTab(ready?.verdict ?? null))} />
       {!course.write ? <div class="ro-banner"><b>Read only.</b><span>You cannot change this course on GitHub, so the console shows what your account can see and offers no buttons.</span></div> : null}
-      <CourseTabs items={ready?.items ?? null} problems={v.problems} aside={aside} tab={tab} onTab={setTab} />
-      <div class="grid-2 cols">
-        <div class="stack">{left.map((k) => <Fragment key={k}>{panels[k]}</Fragment>)}</div>
-        <div class="stack">{right.map((k) => <Fragment key={k}>{panels[k]}</Fragment>)}</div>
+      {/* One stack, as the semester dashboard has, so the tabs panel sits the same 20px above the columns as the panels sit apart. */}
+      <div class="stack">
+        <CourseTabs items={ready?.items ?? null} problems={v.problems} aside={aside} tab={tab} onTab={setTab} />
+        <div class="grid-2 cols">
+          <div class="stack">{left.map((k) => <Fragment key={k}>{panels[k]}</Fragment>)}</div>
+          <div class="stack">{right.map((k) => <Fragment key={k}>{panels[k]}</Fragment>)}</div>
+        </div>
       </div>
     </>
   );

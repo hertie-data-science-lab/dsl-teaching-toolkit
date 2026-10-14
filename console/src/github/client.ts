@@ -634,6 +634,21 @@ export class GitHubClient {
     return (await this.getOrNull<GhIssue[]>(`/repos/${owner}/${repo}/issues?${query}&per_page=30`)) ?? [];
   }
 
+  /**
+   * The first issue of a listing `match` picks, read 100 a page until it is found or the listing
+   * ends (up to 1,900, as `listPages`); null when none matches. For an issue rewritten in place,
+   * whose creation date drops it off the newest page.
+   */
+  async findIssue(owner: string, repo: string, query: string, match: (i: GhIssue) => boolean): Promise<GhIssue | null> {
+    for (let page = 1; page < 20; page++) {
+      const batch = (await this.getOrNull<GhIssue[]>(`/repos/${owner}/${repo}/issues?${query}&per_page=100&page=${page}`)) ?? [];
+      const hit = batch.find(match);
+      if (hit) return hit;
+      if (batch.length < 100) break;
+    }
+    return null;
+  }
+
   /** An issue's comments, oldest first (up to 100: a Submission receipts issue stays well under). */
   async listIssueComments(owner: string, repo: string, issue: number): Promise<GhComment[]> {
     return (await this.getOrNull<GhComment[]>(`/repos/${owner}/${repo}/issues/${issue}/comments?per_page=100`)) ?? [];

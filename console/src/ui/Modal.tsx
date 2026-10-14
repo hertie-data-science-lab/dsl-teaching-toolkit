@@ -23,7 +23,11 @@ export function Modal({ title, onClose, children, small = false, fallback }: { t
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     box.current?.focus();
     const key = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') return onClose();
+      // Handled here: a full screen behind the dialog stays (it ignores a prevented Escape).
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        return onClose();
+      }
       if (e.key !== 'Tab' || !box.current) return;
       const all = [...box.current.querySelectorAll<HTMLElement>(FOCUSABLE)];
       if (!all.length) return;

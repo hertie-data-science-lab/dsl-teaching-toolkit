@@ -285,7 +285,8 @@ describe('the Open button', () => {
     expect(document.activeElement?.textContent).toBe('Open in GitHub Desktop');
     // Hover still opens it.
     await act(() => void rows[0].querySelector('.hint-wrap')!.dispatchEvent(new MouseEvent('mouseenter')));
-    expect(rows[0].querySelector<HTMLElement>('.hint-pop')!.hidden).toBe(false);
+    // Open, it sits at the end of the page, fixed above the menu.
+    expect(document.querySelector<HTMLElement>('.hint-host .hint-pop')!.hidden).toBe(false);
   });
 
   it('without a folder, the Clone ? names no course folder', async () => {

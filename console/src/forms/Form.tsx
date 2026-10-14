@@ -145,7 +145,7 @@ export function Field({ id, k, t, value, values, error, set, readOnly, shown = (
       <div class="field">
         <label class="check">
           <input type="checkbox" id={id} checked={value === true} disabled={readOnly} onChange={(e) => set(k, (e.target as HTMLInputElement).checked)} />
-          <span>{t.label}{t.defaultLabel ? <span class="default"> {t.defaultLabel}</span> : null}{t.proposed ? <Prop /> : null}</span>
+          <span>{t.label}{t.hint ? <Hint label={`About ${t.label}`} doc={t.hint.doc}>{t.hint.text}</Hint> : null}{t.defaultLabel ? <span class="default"> {t.defaultLabel}</span> : null}{t.proposed ? <Prop /> : null}</span>
         </label>
         {why}
         {err}

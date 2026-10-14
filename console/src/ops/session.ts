@@ -26,7 +26,13 @@ export interface OpDef {
   title: string;
   intro: string;
   confirm?: string; // a warning line under the intro ("Their old codes stop working.")
+  /** Lines of figures under the intro ("Final: median 38, range 22–47, 2 held"). */
+  facts?: string[];
+  /** Shown under a preview's outcome, read afresh after each preview (who would be emailed). */
+  dryExtra?: ComponentChildren;
   verb: string;
+  /** A `?` beside the verb, wherever it shows: its name, and one paragraph per string. */
+  verbHint?: { label: string; text: string[] };
   running: string;
   cancel: string;
   args: Record<string, unknown>;
@@ -163,8 +169,9 @@ export class OpsSession {
     if (c && c.phase === 'ready' && this.opKey(c.def) === this.opKey(def) && !def.info) {
       // The same operation again (the page's verb after the panel's preview): keep its
       // options and its preview rather than starting over. A confirm-in-panel verb still only
-      // focuses the panel: the panel's own verb is the one that runs it.
-      this.patch({ min: false });
+      // focuses the panel: the panel's own verb is the one that runs it. The def is the new
+      // one: its figures (facts, the verb's count) may have moved since (a save).
+      this.patch({ def, min: false });
       if (start === 'run' && !def.confirmInPanel && this.canRun(this.current.value!)) void this.start(c.mode === 'previewOnly' ? 'preview' : 'run');
       else if (start === 'preview' && c.mode === 'preview') void this.start('preview');
       return;

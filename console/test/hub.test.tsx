@@ -34,6 +34,10 @@ describe('the assignment hub', () => {
   it('parses tabs, and the retired Teams and Marks hashes, to the hub', () => {
     expect(parseHash('#assignment-assignment-2')).toEqual({ screen: 'assignment', entry: 'assignment-2' });
     expect(parseHash('#assignment-assignment-2/marks')).toEqual({ screen: 'assignment', entry: 'assignment-2', tab: 'marks' });
+    // The Overview's Return marks buttons: the Marks tab opens the panel on arrival, a reload too.
+    expect(parseHash('#assignment-assignment-2/marks/return-preview')).toEqual({ screen: 'assignment', entry: 'assignment-2', tab: 'marks', open: 'return-preview' });
+    expect(hashOf(parseHash('#assignment-assignment-2/marks/return-run'))).toBe('#assignment-assignment-2/marks/return-run');
+    expect(parseHash('#assignment-assignment-2/overview/return-run')).toEqual({ screen: 'assignment', entry: 'assignment-2', tab: 'overview' });
     expect(parseHash('#teams-assignment-3')).toEqual({ screen: 'assignment', entry: 'assignment-3', tab: 'teams' });
     expect(parseHash('#marks-assignment-2')).toEqual({ screen: 'assignment', entry: 'assignment-2', tab: 'marks' });
     expect(parseHash('#teams')).toEqual({ screen: 'assignments' });

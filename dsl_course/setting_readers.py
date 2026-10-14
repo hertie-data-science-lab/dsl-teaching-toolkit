@@ -40,7 +40,9 @@ def as_decimal(value: object) -> Decimal | None:
     if isinstance(value, Decimal):
         return value
     text = str(value).strip()
-    if not text:
+    # `Decimal` also reads `1_0` as 10 and non-ASCII digits (`١٢`) as 12; the console's
+    # number rule does not, so it would hold a mark the engine sends.
+    if not text or "_" in text or not text.isascii():
         return None
     try:
         number = Decimal(text)
