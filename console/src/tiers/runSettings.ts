@@ -1,9 +1,9 @@
-// The run settings as form fields, at one layer of the cascade (model/cascade.ts): the
+// The run settings as form fields, at one layer of the cascade (the engine resolves it; status.json carries each answer, model/settings.ts): the
 // course's `assignment_defaults`, a semester's `defaults:`, or one assignment's block. Each
 // field shows, in grey, what applies when it is left empty: the value the next layer down
 // gives and where that comes from.
 
-import { RUN_KEYS, SOURCE_WORD, TEAM_FORMATION, VISIBILITY, valueWord, type Effective, type RunKey } from '../model/cascade';
+import { RUN_KEYS, SOURCE_WORD, TEAM_FORMATION, VISIBILITY, valueWord, type Effective, type RunKey } from '../model/settings';
 import { blank } from '../edit/yamlText';
 import { penaltyError } from '../model/policy';
 import { defaultFirst, opt, type FieldTier, type Tiers, type Values } from './types';

@@ -26,10 +26,22 @@ const STATUS = example as unknown as Status;
 const cohort = { org: COHORT_ORG, term: 'f2026', termLabel: 'Fall 2026' };
 const course: Course = { org: COURSE_ORG, name: 'Machine Learning', code: 'E1234', description: '', write: true, admins: [], cohorts: [cohort], meta: {} };
 
-// The semester sets a 5% late penalty; status states each assignment's effective settings.
-const solo: Assignment = { ...STATUS.assignments![0], settings: { late_penalty_per_day: { value: '5%', source: 'semester' } } };
+// status.json carries every effective value with its source (decision 0039): the course sets
+// teams of 4, the semester a 5-day window at 5%, the institution the rest.
+const E = (value: string | number | boolean | null, source: 'entry' | 'semester' | 'course' | 'institution') => ({ value, source });
+const COURSE_DEFAULTS = {
+  max_team_size: E(4, 'course'), late_window_days: E(10, 'institution'), late_penalty_per_day: E('10%', 'institution'),
+  team_formation: E('self_select', 'institution'), assignment_repo_visibility: E('private', 'institution'), marks_per_question: E(true, 'institution'),
+};
+const SEMESTER_DEFAULTS = { ...COURSE_DEFAULTS, late_window_days: E(5, 'semester'), late_penalty_per_day: E('5%', 'semester') };
+const solo: Assignment = { ...STATUS.assignments![0], settings: { ...SEMESTER_DEFAULTS, submit_url: E(null, 'institution') } };
 const team: Assignment = { ...solo, slug: 'assignment-3', title: 'Group project', template: 'assignment-3-f2026', state: 'marking', units: 1, submissions: 1, teams: 1, marks: { filled: 0, total: 1 } };
-const status: Status = { ...STATUS, assignments: [solo, team] };
+const status: Status = {
+  ...STATUS,
+  course: { ...STATUS.course!, defaults: COURSE_DEFAULTS },
+  semester: { ...STATUS.semester!, defaults: SEMESTER_DEFAULTS },
+  assignments: [solo, team],
+};
 const ready: Loaded = { kind: 'ready', status, sha: 's', stale: [] };
 
 const SCHEDULE = [
@@ -219,7 +231,9 @@ describe('the semester’s defaults', () => {
   });
 
   it('print the penalty as a percentage however the file writes it', () => {
-    const out = html(<AssignmentsScreen {...props({ files: filesWith({ [`${COHORT_ORG}/semester-config/assignments.yml`]: 'defaults:\n  late_window_days: 3\n  late_penalty_per_day: 0.05\n' }) })} />);
+    const defaults = { ...SEMESTER_DEFAULTS, late_window_days: E(3, 'semester'), late_penalty_per_day: E('0.05', 'semester') };
+    const loaded: Loaded = { ...ready, status: { ...status, semester: { ...status.semester!, defaults } } };
+    const out = html(<AssignmentsScreen {...props({ loaded })} />);
     expect(out).toContain('Defaults: 3 days, 5%, teams of 4.');
   });
 
@@ -260,7 +274,7 @@ describe('the marks grid: teams > students > questions', () => {
     expect(out).not.toContain('qfb-count');
     expect(out).not.toContain('Feedback on Q1 for carla-c');
     // The penalty is the one status states (the semester's), not a literal.
-    expect(out).toContain('late penalties (5% of the total per day started)');
+    expect(out).toContain('late penalties (5% of the total per day started, up to 5 days)');
   });
 
   it('reads a renamed entry’s mark sheet by its semester-side name', () => {

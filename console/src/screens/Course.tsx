@@ -14,7 +14,7 @@ import {
 import { checkNow, derive, publishWebsite } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
 import { FormatPicker } from '../forms/FormatPicker';
-import { courseBlock, institutionLayer, lateWord, resolve, validGrading, valueWord, type Layers } from '../model/cascade';
+import { effectiveOf, lateWord, validGrading, valueWord } from '../model/settings';
 import { CONTACT, POLICY } from '../model/policy';
 import { fromConfig, handsOutStarter, questionFileError, questionRows, questionsValue, settingsTiers, toConfig, type QuestionRow } from '../tiers/grading';
 import { pick, type Values } from '../tiers/types';
@@ -372,10 +372,6 @@ export function RecentActivity({ p, lists, newest }: { p: CourseProps; lists: Ac
   );
 }
 
-/** The course layer over the institution's: what an assignment gets when its semester says nothing. */
-export function courseLayers(p: Pick<CourseProps, 'course' | 'files'>): Layers {
-  return { assignment: {}, semester: {}, course: courseBlock(p.files, p.course.org, p.course.meta), institution: institutionLayer() };
-}
 
 /** Where a course-level default comes from, in plain words. */
 const whose = (s: string) => (s === 'course' ? 'this course' : 'institution');
@@ -472,9 +468,10 @@ export function CourseScreen(p: CourseProps) {
   const lastPublish = recentActivity(ops.map((l) => l.filter((o) => o.op === 'course.publish_website' && o.conclusion !== 'previewed')), 1)[0];
   const cur = env?.ops.current.value;
   const publishing = cur?.phase === 'running' && cur.def.op === 'course.publish_website' && cur.def.courseOrg === course.org;
-  const layers = courseLayers(p);
-  const lateDays = resolve('late_window_days', layers), latePen = resolve('late_penalty_per_day', layers);
-  const team = resolve('max_team_size', layers);
+  // The course's effective defaults, course over institution, as the engine resolved them (status.json).
+  const defaults = v.course?.defaults;
+  const lateDays = effectiveOf(defaults, 'late_window_days'), latePen = effectiveOf(defaults, 'late_penalty_per_day');
+  const team = effectiveOf(defaults, 'max_team_size');
   const pub = v.course?.stages?.C6 === 'done';
   const about = detailsOf(course.meta ?? {}).about;
   const description = typeof about.course_description === 'string' ? about.course_description.trim() : '';

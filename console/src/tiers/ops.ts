@@ -2,7 +2,7 @@
 // tables). Keys are the op's args-schema properties; anything not listed is Derived or
 // Hidden and never a field.
 
-import { SOURCE_WORD, type Source } from '../model/cascade';
+import { SOURCE_WORD, type Source } from '../model/settings';
 import { SOLUTION_WARNING } from '../model/labels';
 import { DEFAULT_DEST_REPO } from '../model/policy';
 import { opt, type Tiers } from './types';

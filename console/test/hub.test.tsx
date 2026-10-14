@@ -115,7 +115,9 @@ describe('the assignment hub', () => {
       [`${COHORT_ORG}/semester-config/teams.csv`]: 'assignment,team,github_handle\n',
       [`${COHORT_ORG}/semester-config/assignments.yml`]: 'assignments:\n  assignment-3:\n    team_formation: assigned\n',
     });
-    const out = render(<AssignmentScreen {...props({ entry: 'assignment-3', tab: 'teams', files: assigned })} />);
+    const assignedTeam: Assignment = { ...team, settings: { team_formation: { value: 'assigned', source: 'entry' } } };
+    const loaded: Loaded = { ...ready, status: { ...status, assignments: [solo, assignedTeam] } };
+    const out = render(<AssignmentScreen {...props({ entry: 'assignment-3', tab: 'teams', files: assigned, loaded })} />);
     expect(out).toContain('You assign every team here; students cannot form their own.');
     expect(out).not.toContain('Students can form and join teams');
     expect(out).not.toContain('Email ');
