@@ -55,8 +55,7 @@ from time import time as clock
 import yaml
 
 from . import cadence, legacy, policy, records, schedule, seed, settings, status
-from .bootstrap_course import semester_scaffold
-from .central import CENTRAL
+from .central import CENTRAL, pin_central_ref
 from .config import read_course, read_semester
 from .course import (
     CONFIG_REPO,
@@ -71,6 +70,7 @@ from .course import (
     SYLLABUS_SAMPLE_FILE,
     SYLLABUS_SESSIONS_FILE,
     pages_repo,
+    semester_of,
 )
 from .derive import derivable_sources, starter_mode
 from .discovery import (
@@ -194,6 +194,32 @@ MATERIALS_MOVES = {
 }
 # The semester's pointer to its course org, before it moved into semester-config.
 OLD_POINTER_REPO = ".github"
+# ... and where 0.10 put it in semester-config, before decision 0039 renamed it.
+OLD_SEMESTER_POINTER = legacy.old_name(records.path("pointer"), legacy.SEMESTER_CONFIG)
+# The 0.10 seeds the 0.10 steps compare against and write (decision 0039 replaced them):
+# kept beside this module, and removed with it.
+LEGACY_TEMPLATES = "legacy-0.10"
+
+
+def old_template(rel: str) -> str:
+    """A 0.10 seed, by its path under `templates/`."""
+    return template(f"{LEGACY_TEMPLATES}/{rel}")
+
+
+def old_scaffold(org: str, path: str, ref: str) -> str:
+    """A 0.10 semester-config skeleton (`instructors.yml`, `assignments.yml`) exactly as
+    Bootstrap semester seeded it for `org`, the institution's defaults filled in."""
+    tag = semester_of(org) or "f2026"
+    year = int(tag[1:])
+    ours = settings.institution_defaults()
+    return pin_central_ref(old_template(f"semester-config/{path}"), ref).format(
+        tag=tag,
+        year=year,
+        year_next=year + 1,
+        **{key: ours[key] for key in settings.RUN_KEYS if key in ours},
+    )
+
+
 # The course's `.github`: the run settings the template-keys step took out of each
 # template, `{template: {key: value}}` - what its semesters' keys steps write into their
 # `assignments.yml`, since the course is migrated first. Public, like the repo: run
@@ -1040,7 +1066,7 @@ OLD_PEOPLE_HEADER = """\
 
 def seeded_blocks() -> list[tuple[list[str], str]]:
     """`[(the old block's lines, the new template's block)]`, each old spelling once."""
-    new = template("course/people-header.yml")
+    new = old_template("course/people-header.yml")
     old = OLD_PEOPLE_HEADER.rstrip("\n")
     return [
         (variant.split("\n"), new)
@@ -2700,7 +2726,7 @@ class Semester:
             return None
         if parsed is None:
             # The seeded skeleton, all comments: the current skeleton replaces it.
-            return semester_scaffold(self.org, INSTRUCTORS_FILE, ref)
+            return old_scaffold(self.org, INSTRUCTORS_FILE, ref)
         new = people_to_instructors(old)
         if new is None:
             return None
@@ -2774,13 +2800,19 @@ class Semester:
             if INSTRUCTORS_FILE not in live:
                 old = get_file_content(self.org, repo, OLD_PEOPLE_FILE) or ""
                 files[INSTRUCTORS_FILE] = (self.instructors_text(old) or "").encode()
-        if live and records.path("pointer") not in live:
-            files[records.path("pointer")] = self.pointer()
+        if live and not {OLD_SEMESTER_POINTER, records.path("pointer")} & set(live):
+            files[OLD_SEMESTER_POINTER] = self.old_pointer()
         old_pointer = COURSE_CONFIG in _files(self.org, OLD_POINTER_REPO)
         return moves, files, deletes, old_pointer
 
     def pointer(self) -> bytes:
         return template("semester/course.yml").format(course=self.course).encode()
+
+    def old_pointer(self) -> bytes:
+        """The pointer as the 0.10 layout wrote it (`OLD_SEMESTER_POINTER`)."""
+        return (
+            old_template("semester/dsl-course.yml").format(course=self.course).encode()
+        )
 
     def layout_done(self) -> bool:
         if not self.renamed():
@@ -2802,8 +2834,8 @@ class Semester:
             out.append(
                 f"{OLD_PEOPLE_FILE} -> {INSTRUCTORS_FILE} (one list, a role each)"
             )
-        if records.path("pointer") in files:
-            out.append(f"write the course pointer to {records.path('pointer')}")
+        if OLD_SEMESTER_POINTER in files:
+            out.append(f"write the course pointer to {OLD_SEMESTER_POINTER}")
         outcomes = self.outcome_work(_files(self.org, repo))
         if outcomes:
             out.append(
@@ -2963,7 +2995,7 @@ class Semester:
         base = current
         if base is None:
             ref = central_ref_for(self.course)
-            base = semester_scaffold(self.org, ASSIGNMENTS_FILE, ref)
+            base = old_scaffold(self.org, ASSIGNMENTS_FILE, ref)
         new = with_instance_keys(base, additions) if additions else base
         return (None if new == current else new), notes
 
@@ -3026,7 +3058,7 @@ class Semester:
             seeded = current is None
             if seeded:
                 ref = central_ref_for(self.course)
-                current = semester_scaffold(self.org, ASSIGNMENTS_FILE, ref)
+                current = old_scaffold(self.org, ASSIGNMENTS_FILE, ref)
             out.append(
                 f"{CONFIG_REPO}/{ASSIGNMENTS_FILE}: "
                 + ("seed the skeleton, and " if seeded else "")
@@ -3921,6 +3953,8 @@ def _pointer_course(org: str, listing: dict[str, dict]) -> str:
     """The course org a semester points at, from whichever pointer it has now."""
     if CONFIG_REPO in listing:
         text = read_semester(org).pointer.text
+        if text is None:
+            text = get_file_content(org, CONFIG_REPO, OLD_SEMESTER_POINTER)
         if text is not None:
             return str(_yaml(text).get("course") or "")
     old = get_file_content(org, OLD_POINTER_REPO, COURSE_CONFIG)

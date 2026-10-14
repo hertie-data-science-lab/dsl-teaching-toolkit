@@ -1,0 +1,48 @@
+# INSTRUCTOR-OWNED - yours to edit freely; edits here are not overwritten.
+#
+course_name: {course_name}
+course_code: {course_code}
+# central_ref: <40-character commit SHA>   # OPTIONAL: pin this course to one known
+#   # commit of the central toolkit - the way to hold a course still, or back, while
+#   # something is fixed. Unset means `release`, which is where every real course belongs.
+#   # (`main` is the trunk and is also accepted, but only the demo course runs it: an org
+#   # on `main` takes every merge the moment it lands. `preview` is a PR tip the maintainer
+#   # force-pushes, for looking at a feature before it merges - the demo course and nothing
+#   # else.) Semesters inherit this; setting it in a semester's own file does nothing.
+# course_description: One or two sentences, on ONE line - the blurb on every semester site.
+# contact: course@example.edu   # OPTIONAL: the public website's contact; unset = the lab's
+# licence: CC BY 4.0            # OPTIONAL: one of policy.yml's licences; unset = its first
+# site_link_extensions: [pdf, html, ipynb]   # OPTIONAL: on the SEMESTER sites, link ONLY
+#   # these file types. Default (unset): each session's root files, plus one link per
+#   # subfolder - so a rendered deck lists the deck, not its hundreds of assets. Either way
+#   # everything you release still ships, and the folder itself is always one click away.
+#   # (The public open-courseware site always lists root files - it hosts what it lists.)
+#   # WHICH files the public website shows, and how, is `opencourse.yml` beside this
+#   # file - not here.
+# student_console: true   # OPTIONAL: point students at the student console - the sites'
+#   # banner and the team-formation links. Unset, they use the semester sites alone.
+
+# Defaults for this course's assignments (all OPTIONAL). Each run setting resolves
+# nearest-first: the assignment's block in a semester's `semester-config/assignments.yml`,
+# that file's `defaults:`, this block, then the institution's policy - the values shown are
+# the institution's, so an unset line changes nothing. A line set here applies to every
+# assignment that does not set its own, from the next run on. `formats` and `submit_via`
+# answer New assignment's boxes of the same name when they are left at "(course default)".
+# A late line alone is a whole rule: the other half is then none.
+assignment_defaults:
+  # max_team_size: 5            # group assignments only
+  # late_window_days: 10        # 0 = nothing after the due date is accepted
+  # late_penalty_per_day: 10%   # of the EARNED grade, per day started
+  # formats: [ipynb]            # ipynb | py | rmd | qmd | latex | none - starters, first runnable
+  # submit_via: assignment_repo # assignment_repo | external | shared_dropbox_repo
+  # team_formation: self_select # self_select | assigned - group assignments only
+  # visibility: private         # private | public | student_choice
+
+# `course_name`, `course_code` and `course_description` are what reach the semester
+# websites. Editing them here re-syncs every semester site already bootstrapped from this
+# course org. The public website shows those three plus `contact` and `licence` from its
+# next publish.
+#
+# This is the persistent COURSE org - it spans many semesters (years). Semesters are
+# registered separately in .github/semesters.yml.
+
