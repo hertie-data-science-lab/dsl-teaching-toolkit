@@ -1078,6 +1078,10 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .file-tree .ft-file.current { background: var(--sunk); border-radius: 6px; }
 .file-tree .ft-file a[aria-current], .session-files a[aria-current] { font-weight: 700; }
 @media (max-width: 860px) { .materials-split { grid-template-columns: minmax(0, 1fr); } }
+/* The viewer in full screen (decision 0040 rule 6, the projector case): the panel covers the window, the file fills what the header leaves. */
+.viewer-full { position: fixed; inset: 0; z-index: 70; border-radius: 0; overflow: auto; display: flex; flex-direction: column; }
+.viewer-full .page-frame { flex: 1; height: auto; min-height: 0; }
+.viewer-full .file-img { max-height: calc(100vh - 120px); width: auto; margin-inline: auto; display: block; }
 
 /* The course materials index: each repo's files as a read-only folder tree under its row. */
 .rows .r-files { grid-column: 1 / -1; margin-top: 6px; }
