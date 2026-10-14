@@ -4,7 +4,8 @@
 // `total x (1 - penalty) + adjustment`, floored at 0, the penalty `rate x days_late` unless the
 // unit's `late_penalty` waives or sets it. Never stored in the sheet.
 
-import { YamlText, blank, isObj, obj, type Path } from '../edit/yamlText';
+import { YamlText, blank, deepEqual, isObj, obj, type Path } from '../edit/yamlText';
+import { plural } from './format';
 import { penaltyRate } from './policy';
 
 export const NOTES_KEY = 'notes_not_shared_with_students';
@@ -45,12 +46,17 @@ export interface Sheet {
   units: Unit[];
 }
 
-export function readSheet(text: string, doc: unknown): Sheet {
+/** A sheet's units by key: its `teams:` on a group sheet, else its `submissions:`. */
+export function sheetUnits(doc: unknown): Record<string, unknown> {
   const d = obj(doc);
-  const group = 'teams' in d;
+  return obj('teams' in d ? d.teams : d.submissions);
+}
+
+export function readSheet(text: string, doc: unknown): Sheet {
+  const group = 'teams' in obj(doc);
   const container = group ? 'teams' : 'submissions';
   const frozen = /^# Status: FROZEN/m.test(text.split(/\n(?!#)/)[0] ?? '');
-  const units: Unit[] = Object.entries(obj(d[container])).map(([key, raw]) => {
+  const units: Unit[] = Object.entries(sheetUnits(doc)).map(([key, raw]) => {
     const u = obj(raw);
     const info = u.info && typeof u.info === 'object' ? obj(u.info) : null;
     if (group)
@@ -88,12 +94,10 @@ export function num(v: unknown): number | null {
 export function rowsChanged(before: string, after: string): number {
   const units = (text: string) => {
     const y = new YamlText(text);
-    if (y.errors.length) return {};
-    const d = obj(y.toJS());
-    return obj('teams' in d ? d.teams : d.submissions);
+    return y.errors.length ? {} : sheetUnits(y.toJS());
   };
   const a = units(before), b = units(after);
-  return [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k])).length;
+  return [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((k) => !deepEqual(a[k], b[k])).length;
 }
 
 /** One `questions:` entry's maximum: `Q1: 15`, or `Q1: {points: 15, file: report.tex}`. */
@@ -184,7 +188,8 @@ export function finalGrade(total: number | null, penalty: Penalty, adjustment: u
 }
 
 const percent = (fraction: number) => Math.round(fraction * 1000) / 10;
-const percentOff = (fraction: number) => `−${percent(fraction)}%`;
+/** What a penalty takes off, as the grid shows it in front of its switch: "−20%". */
+export const percentOff = (fraction: number) => `−${percent(fraction)}%`;
 
 /** The penalty as the grid shows it: "−20%", "waived" or "−25% (set by hand)"; '' when not late,
  *  or when no late rule gives one. */
@@ -233,11 +238,6 @@ export function cellValue(raw: string): string | number | null {
   return Number.isFinite(n) && /^-?\d+(\.\d+)?$/.test(t) ? n : raw;
 }
 
-/** What a late unit loses, as the penalty cell shows it in front of its switch: "−20%"; '' when not late. */
-export function penaltyFigure(p: Penalty): string {
-  return p.late ? percentOff(p.fraction) : '';
-}
-
 /**
  * The late rule in one wording, for the Marks tab's lede, its Penalty `?` and the Return marks
  * pop-up alike: "<rate> of the total per day started, up to <window> days"; null with no late penalty.
@@ -246,7 +246,7 @@ export function penaltyFigure(p: Penalty): string {
 export function lateRule(rate: number | null, windowDays?: unknown): string | null {
   if (rate === null) return null;
   const days = num(windowDays);
-  return `${percent(rate)}% of the total per day started${days ? `, up to ${days} day${days === 1 ? '' : 's'}` : ''}`;
+  return `${percent(rate)}% of the total per day started${days ? `, up to ${plural(days, 'day')}` : ''}`;
 }
 
 /** Why Return marks holds a mark back (grades.HOLD_REASONS; `returned` is the run's own and not here). */
@@ -371,8 +371,8 @@ export function studentMarks(o: {
 }): StudentMarks {
   const pen = effectivePenalty(o.rate, o.daysLate, o.latePenalty);
   const final = finalGrade(scoreTotal(o.score, o.questions), pen, o.adjustment);
-  const verbatim = o.score && typeof o.score === 'object' ? '' : blank(o.score) ? '' : String(o.score).trim();
-  const marked = o.score && typeof o.score === 'object' ? Object.fromEntries(Object.entries(o.score as Record<string, unknown>).filter(([, v]) => !blank(v))) : blank(o.score) ? {} : { '': o.score };
+  const verbatim = isObj(o.score) || blank(o.score) ? '' : String(o.score).trim();
+  const marked = isObj(o.score) ? Object.fromEntries(Object.entries(o.score).filter(([, v]) => !blank(v))) : blank(o.score) ? {} : { '': o.score };
   const text = (v: unknown) => (blank(v) ? '' : String(v).trim());
   const adj = num(o.adjustment);
   return {

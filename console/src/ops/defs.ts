@@ -4,6 +4,7 @@
 // GitHub the change shows, for the panel's "See on GitHub" once the run ends; an op that
 // changes nothing on GitHub (a check, an email) has none.
 
+import { plural } from '../model/format';
 import { COURSE_REPO } from '../model/names';
 import { ghUrl } from '../ui/bits';
 import { DEFAULT_DEST_REPO } from '../model/policy';
@@ -166,8 +167,8 @@ export interface LateReturn {
  * `dryExtra`: shown under a preview, who would be emailed (the Marks tab reads the preview issue).
  */
 export function returnMarks(s: Scope, a: AsgRef, marked: number, name: string, late?: LateReturn | null, facts?: string[], dryExtra?: ComponentChildren): OpDef {
-  const units = `${a.units} ${a.group ? 'team' : 'student'}${a.units === 1 ? '' : 's'}`;
   const unit = a.group ? 'team' : 'student';
+  const units = plural(a.units, unit);
   return {
     ...base(s, 'grades.return', a.slug), confirmInPanel: true, name: 'Return marks', title: a.title, where: 'Marking',
     intro: 'Sends each student their marks and feedback for this assignment, beside the ones already returned. Your private notes stay private.',
@@ -175,7 +176,7 @@ export function returnMarks(s: Scope, a: AsgRef, marked: number, name: string, l
       ? `The deadline was ${late.due}, but ${units} can still submit late until ${late.until} (the late cutoff: due date plus the late window).${late.rule ? ` A late submission updates that ${unit}’s penalty (${late.rule}) and final grade.` : ''} Return marks again afterwards: only students whose marks changed are updated and emailed.`
       : undefined,
     facts, dryExtra,
-    verb: `Return marks to ${marked} ${a.group ? 'team' : 'student'}${marked === 1 ? '' : 's'}`, verbHint: RETURN_MARKS_ABOUT, running: 'Returning marks', cancel: 'Stop; marks already returned stay returned',
+    verb: `Return marks to ${plural(marked, unit)}`, verbHint: RETURN_MARKS_ABOUT, running: 'Returning marks', cancel: 'Stop; marks already returned stay returned',
     args: { assignment: name }, options: RETURN_MARKS, fixed: RETURN_MARKS_ALWAYS,
     target: reposLike(s.cohortOrg ?? s.courseOrg, 'grades-'),
   };

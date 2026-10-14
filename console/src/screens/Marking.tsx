@@ -10,7 +10,7 @@ import { YamlText, blank, isObj, type Path } from '../edit/yamlText';
 import { Invalid } from '../forms/Form';
 import { assignmentTitle, fmtDay, fmtWhen, plural, str } from '../model/format';
 import {
-  HOLD_WORDS, NOTES_KEY, cellValue, effectivePenalty, finalGrade, holdReasons, lateRule, num, overrideText, overrideValue, penaltyFigure, questionFile,
+  HOLD_WORDS, NOTES_KEY, cellValue, effectivePenalty, finalGrade, holdReasons, lateRule, num, overrideText, overrideValue, percentOff, questionFile,
   questionPoints, readSheet, round, rowsChanged, scoreTotal, spread, studentMarks, type HoldReason, type HoldUnit, type Penalty, type Person, type Unit,
 } from '../model/marks';
 import { SOURCE_WORD, resolve, valueWord } from '../model/cascade';
@@ -59,6 +59,8 @@ function asgRef(a: Assignment, group: boolean): AsgRef {
 // --------------------------------------------------------------------------- marks
 
 const key = (path: Path) => JSON.stringify(path);
+/** How many units (rows) a set of cell edits touches: a cell's path is `[container, unit, ...]`. */
+const rowsIn = (edits: Record<string, unknown>) => new Set(Object.keys(edits).map((k) => String((JSON.parse(k) as Path)[1]))).size;
 
 /** " (out of 5)" for a question with a maximum, nothing for one without (a `{file}`-only entry). */
 function outOf(m: unknown): string {
@@ -305,7 +307,8 @@ export function MarksTab(p: TabProps) {
     setEdits({ ...edits, [key(pth)]: typed ? cellValue(raw) : raw.trim() ? raw : null });
     if (save.kind !== 'busy') setSave({ kind: 'idle' });
   };
-  const changed = new Set(Object.keys(edits).map((k) => (JSON.parse(k) as Path)[1] as string)).size;
+  const changed = rowsIn(edits);
+  const noun = sheet.group ? 'team' : 'student';
   const scoreOf = (u: Unit) => {
     if (qs.length) {
       const base = u.score && typeof u.score === 'object' ? (u.score as Record<string, unknown>) : {};
@@ -397,7 +400,7 @@ export function MarksTab(p: TabProps) {
     // No late rule: nothing to waive or override, so no controls (the engine ignores the key).
     if (!pen.late || days === null || rate === null) return <td class="pen" />;
     const waived = pen.mode === 'waive';
-    const figure = penaltyFigure(waived ? effectivePenalty(rate, days) : pen);
+    const figure = percentOff((waived ? effectivePenalty(rate, days) : pen).fraction);
     const box = typed[u.key] ?? overrideText(lateOf(u));
     return (
       <td class="pen">
@@ -497,7 +500,7 @@ export function MarksTab(p: TabProps) {
   const doSave = async () => {
     if (!env) return setSave({ kind: 'bad', text: 'Sign in to save.' });
     const target = { owner: org, repo: CONFIG_REPO, path };
-    const opts = { message: `marks: ${a.slug}, ${changed} ${sheet.group ? 'team' : 'student'}${changed === 1 ? '' : 's'}, from the DSL Teaching Console`, statusRepo: [org, CONFIG_REPO] as [string, string] };
+    const opts = { message: `marks: ${a.slug}, ${plural(changed, noun)}, from the DSL Teaching Console`, statusRepo: [org, CONFIG_REPO] as [string, string] };
     const seen: { last: SaveState | null } = { last: null };
     const report = (s: SaveState) => {
       seen.last = s;
@@ -510,7 +513,7 @@ export function MarksTab(p: TabProps) {
       if (!fresh) return report({ kind: 'bad', text: CONFLICT, conflict: true });
       const n = rowsChanged(file.text, fresh.text);
       env.files.put(org, CONFIG_REPO, path, undefined, fresh.text, fresh.sha);
-      const told = `${n} ${n === 1 ? 'row' : 'rows'} changed by someone else; your edits kept.`;
+      const told = `${plural(n, 'row')} changed by someone else; your edits kept.`;
       ok = await saveText(env, target, applyTo(fresh.text), fresh.sha, opts, (s) => report(s.kind === 'busy' || s.kind === 'idle' ? s : { ...s, text: `${told} ${s.text}` }));
     }
     if (ok) {
@@ -540,10 +543,9 @@ export function MarksTab(p: TabProps) {
     const pen = effectivePenalty(rate, u.info?.days_late, u.latePenalty);
     return u.people.filter((pr) => !savedHeld[pr.handle]).map((pr) => finalGrade(scoreTotal(u.score, questions), pen, pr.adjustment)).filter((f): f is number => f !== null);
   });
-  const noun = sheet.group ? 'team' : 'student';
   const facts = [
-    ...(changed ? [`${changed} unsaved ${changed === 1 ? 'row is' : 'rows are'} not counted until you save`] : []),
-    `${sending} ${noun}${sending === 1 ? ' gets' : 's get'} marks · ${skipped} not marked yet (skipped) · ${heldUnits} held (fix first)`,
+    ...(changed ? [`${plural(changed, 'unsaved row')} ${changed === 1 ? 'is' : 'are'} not counted until you save`] : []),
+    `${plural(sending, noun)} ${sending === 1 ? 'gets' : 'get'} marks · ${skipped} not marked yet (skipped) · ${heldUnits} held (fix first)`,
     spread(finals, Object.keys(savedHeld).length),
   ];
   const people = sheet.units.flatMap((u) => u.people.map((pr) => ({ u, pr })));
@@ -571,7 +573,7 @@ export function MarksTab(p: TabProps) {
         <button class="icon-btn full-toggle" type="button" ref={fullBtn} aria-label={full ? 'Exit full screen' : 'Full screen'} title={full ? 'Exit full screen (Esc)' : 'Full screen'} onClick={() => setFull(!full)}>{full ? '⤡' : '⤢'}</button>
       </div>
       <div class="marks-tools">
-        <SaveBar state={save} onSave={() => void doSave()} label="Save marks" disabled={!changed} small file={{ org, repo: CONFIG_REPO, path }} note={changed ? `${changed} ${noun}${changed > 1 ? 's' : ''} changed` : 'No unsaved changes'} />
+        <SaveBar state={save} onSave={() => void doSave()} label="Save marks" disabled={!changed} small file={{ org, repo: CONFIG_REPO, path }} note={changed ? `${plural(changed, noun)} changed` : 'No unsaved changes'} />
       </div>
     </div>
   );
@@ -677,7 +679,7 @@ export function MarksTab(p: TabProps) {
       {sheet.frozen ? <p class="note" style="margin-bottom:12px"><b>Frozen at the late cutoff.</b> The submission details no longer change; your marks and feedback are still yours to edit.</p> : null}
       {pending ? (
         <p class="note draft-offer">
-          Unsaved draft from {fmtWhen(new Date(pending.at).toISOString(), tz, year)} ({plural(new Set(Object.keys(pending.edits).map((k) => String((JSON.parse(k) as Path)[1]))).size, 'row')}){pending.sha && pending.sha !== sha ? ', made before the sheet last changed: restoring puts your edits over the current marks cell by cell' : ''}:{' '}
+          Unsaved draft from {fmtWhen(new Date(pending.at).toISOString(), tz, year)} ({plural(rowsIn(pending.edits), 'row')}){pending.sha && pending.sha !== sha ? ', made before the sheet last changed: restoring puts your edits over the current marks cell by cell' : ''}:{' '}
           <button class="btn small" type="button" onClick={restore}>Restore</button> <button class="btn small quiet" type="button" onClick={() => setPending(null)}>Discard</button>
         </p>
       ) : null}
