@@ -134,6 +134,7 @@ from .log import (
 )
 from .materials import kinds_reader
 from .repos import listed_is_private, set_visibility
+from .run import current as current_run
 from .schedule import Release, grading_cutoff_datetime
 from .schedule_plan import deploy_dest
 from .team_formation import sync_team_lock
@@ -317,12 +318,17 @@ def _stub_decisions(
     return out
 
 
+def _listing(semester_org: str) -> dict[str, dict] | None:
+    """This tick's ONE listing of the semester (`run`), held by the run while the tick's
+    release pass runs: None when it could not be read, and outside a tick."""
+    return current_run().listing(semester_org)
+
+
 def _handout_decisions(
     course_org: str,
     semester_org: str,
     sched: schedule.Schedule,
     due: list[Release],
-    listing: dict[str, dict] | None,
 ) -> list[Decision]:
     """`TEAMS_INCOMPLETE` for a due group handout with no teams yet, and `ALREADY_DONE`
     for a due handout whose every repo is already in the semester."""
@@ -330,6 +336,7 @@ def _handout_decisions(
     handouts = [r for r in due if r.assignment and r.assignment_slug]
     if not handouts:
         return out
+    listing = _listing(semester_org)
     per_team = teams.load(semester_org)
     students = roster.load(semester_org) or []
     onboarded = [s.github_handle for s in roster.enrolled(students) if s.onboarded]
@@ -373,7 +380,6 @@ def dry_run_decisions(
     sched: schedule.Schedule,
     due: list[Release],
     now: datetime,
-    listing: dict[str, dict] | None,
 ) -> list[Decision]:
     """Every decision the dry run can name for this semester. Guarded: a read that fails
     costs its decisions, never the preview."""
@@ -381,7 +387,7 @@ def dry_run_decisions(
     for decide in (
         lambda: source_decisions(schedule.source_faults(sched, course_org), now),
         lambda: _stub_decisions(course_org, due, now),
-        lambda: _handout_decisions(course_org, semester_org, sched, due, listing),
+        lambda: _handout_decisions(course_org, semester_org, sched, due),
     ):
         try:
             out += decide()
@@ -400,7 +406,6 @@ def _execute_nondeploy(
     course_org: str,
     semester_org: str,
     release: Release,
-    listing: dict[str, dict] | None,
 ) -> tuple[int, bool]:
     """Run one release's non-deploy action (an assignment handout, and once its
     `solution_datetime` has passed, the model solution with it). Deploys are batched
@@ -429,7 +434,7 @@ def _execute_nondeploy(
             # The tick's ONE listing of the semester, which this handout both reads
             # and adds every repo it creates to - so the next release in this same tick
             # sees them (see `assign.provision_all`).
-            listing=listing,
+            listing=_listing(semester_org),
             # The tick syncs the site once after every release it fired (`run`).
             sync=False,
         )
@@ -451,7 +456,6 @@ def _snapshot_passed_deadlines(
     sched: schedule.Schedule,
     now: datetime,
     dry_run: bool,
-    listing: dict[str, dict] | None,
     templates: dict[str, str | None] | None = None,
     fired: set[str] | None = None,
 ) -> int:
@@ -463,7 +467,7 @@ def _snapshot_passed_deadlines(
     What was frozen is NOT returned: the snapshot file itself is the handoff to the
     autograde phase, which runs in another job (and so another process) entirely.
 
-    `listing` is the tick's own (see `run`), read for `pushed_at`. None is "it could not
+    The tick's own listing (`_listing`) is read for `pushed_at`. None is "it could not
     be read", handed down as None rather than as an empty org: every reader has its own
     answer to not knowing, and the freeze's is to take a listing of its own."""
     errors = 0
@@ -501,7 +505,7 @@ def _snapshot_passed_deadlines(
             is_group=is_group,
             teams_key=slug,
             tz=sched.timezone,
-            listing=listing,
+            listing=_listing(semester_org),
             shared=gspec is not None and gspec.submit_shared,
         )
         if result is SnapshotResult.FAILED:
@@ -610,7 +614,6 @@ def _run_releases(
     semester_org: str,
     due: list[Release],
     now: datetime,
-    listing: dict[str, dict] | None,
 ) -> tuple[int, bool]:
     """Fire every due release's due actions. Returns `(errors, site_changed)`. `now` gates
     each action individually: a deploy with its own deploy_datetime fires on its own clock,
@@ -640,7 +643,7 @@ def _run_releases(
                 + (" + solution" if release.assignment_solution else "")
             )
             handout_errors, handout_changed = _execute_nondeploy(
-                course_org, semester_org, release, listing
+                course_org, semester_org, release
             )
             errors += handout_errors
             # Only a handout that PROVISIONED something has anything new to show the site.
@@ -966,7 +969,6 @@ def _config_faults(
     course_org: str,
     semester_org: str,
     sched: schedule.Schedule,
-    listing: dict[str, dict] | None,
 ) -> dict:
     """Every hand-edited file in this semester's semester-config EXCEPT schedule.yml, and
     what is wrong with each. `{digest: faults}`, and a file left OUT of it is one this tick
@@ -1041,7 +1043,7 @@ def _config_faults(
     collect(
         config_digest.GRADING_CONFIG,
         lambda found: grading_config_faults(
-            course_org, semester_org, sched, found, listing
+            course_org, semester_org, sched, found, _listing(semester_org)
         ),
     )
     # The same pass checks the semester's own run settings against the handed-out repos:
@@ -1122,7 +1124,6 @@ def _preflight_configs(
     sched: schedule.Schedule,
     now: datetime,
     dry_run: bool,
-    listing: dict[str, dict] | None,
 ) -> int:
     """Check every hand-edited file in this semester's semester-config and keep one digest
     issue per file in step. Always returns 0.
@@ -1137,9 +1138,7 @@ def _preflight_configs(
     itself. The signature keeps its int so the caller's `errors +=` reads the same as
     every other phase."""
     local = schedule.in_semester_zone(sched, now)
-    for spec, faults in _config_faults(
-        course_org, semester_org, sched, listing
-    ).items():
+    for spec, faults in _config_faults(course_org, semester_org, sched).items():
         if faults:
             log_step(
                 f"{len(faults)} entr(y/ies) in {semester_org}'s {spec.cite_file()} the "
@@ -1222,7 +1221,6 @@ def _refresh_sheets(
     sched: schedule.Schedule,
     now: datetime,
     dry_run: bool,
-    listing: dict[str, dict] | None,
     templates: dict[str, str | None] | None = None,
 ) -> int:
     """Keep every open assignment's grading sheet current: one pass, after the freeze.
@@ -1236,8 +1234,8 @@ def _refresh_sheets(
     shipped (or one whose handout ran before the sheet had rows) gets one on the next
     tick rather than never.
 
-    `listing` is the tick's own (see `run`): every sheet refreshed in one pass reads the
-    same rows, where each used to take a listing of its own."""
+    Every sheet refreshed in one pass reads the tick's own listing (`_listing`), where
+    each used to take a listing of its own."""
     sealed = {
         schedule.semester_name(slug, sched.assignments[slug])
         for slug, _ in due_snapshots(course_org, sched, now)
@@ -1268,7 +1266,7 @@ def _refresh_sheets(
             template,
             is_group=is_group,
             now=now,
-            listing=listing,
+            listing=_listing(semester_org),
         ).written:
             errors += 1
     return errors
@@ -1521,7 +1519,6 @@ def _reprivatise_student_repos(
     sched: schedule.Schedule,
     now: datetime,
     dry_run: bool,
-    listing: dict[str, dict] | None,
 ) -> int:
     """Put every `visibility: student_choice` repo back to private that has been published
     BEFORE its grading cutoff. Returns the error count.
@@ -1534,12 +1531,13 @@ def _reprivatise_student_repos(
     this pass never touches a visibility again, which is what makes the promise on the
     assignment page true.
 
-    Off the tick's OWN listing (`run`), which already carries each row's `visibility`: one
+    Off the tick's OWN listing (`_listing`), which already carries each row's `visibility`: one
     PATCH per offending repo and no read of its own. A listing that could not be taken is
     "we could not look", and nothing is flipped on the strength of that.
 
     `repos.listed_is_private` is optimistic - an unknown row answers private - so a row
     that does not say `public` is left alone rather than PATCHed on a guess."""
+    listing = _listing(semester_org)
     if not listing:
         return 0
     errors = 0
@@ -1676,7 +1674,6 @@ def _release_phase(
     now: datetime,
     dry_run: bool,
     verdict: cadence.Verdict | None,
-    listing: dict[str, dict] | None,
     defer_site_sync: bool = False,
     fired: set[str] | None = None,
 ) -> int:
@@ -1687,8 +1684,8 @@ def _release_phase(
     `verdict` is the cadence reading `main` took once for the whole course; None means this
     invocation does not report lateness at all (see `main`).
 
-    `listing` is this tick's one listing of the semester (see `run`), handed to each pass
-    below in the order they already run in. None means it could not be read.
+    Every pass below reads this tick's one listing of the semester (`_listing`). None
+    means it could not be read.
 
     `fired` gets `semester_org` when this pass released, handed out, froze or asked for
     marks to go back (see `run`)."""
@@ -1739,21 +1736,17 @@ def _release_phase(
     # snapshot. Independent of the release plan - a semester can pin due dates without
     # scheduling a single release.
     errors += _snapshot_passed_deadlines(
-        course_org, semester_org, sched, now, dry_run, listing, templates, fired
+        course_org, semester_org, sched, now, dry_run, templates, fired
     )
     # Then the sheets, in the same pass and straight after: the freeze has just settled
     # every assignment past its cutoff, and everything else that is past its DUE date
     # gets its `info:` refreshed here.
-    errors += _refresh_sheets(
-        course_org, semester_org, sched, now, dry_run, listing, templates
-    )
+    errors += _refresh_sheets(course_org, semester_org, sched, now, dry_run, templates)
     # And then the one shape whose visibility the toolkit does not own: a `student_choice`
     # repo published before its cutoff is closed again here. After the freeze above, so a
     # repo made public on the morning of the deadline is still snapshotted from the work
     # in it; before the releases below, because nothing a handout does depends on it.
-    errors += _reprivatise_student_repos(
-        course_org, semester_org, sched, now, dry_run, listing
-    )
+    errors += _reprivatise_student_repos(course_org, semester_org, sched, now, dry_run)
     # WHO is still waiting for a team, read ONCE for the whole tick and handed to both
     # passes that want it. Above the pre-flight because the fault it produces belongs in
     # the schedule.yml digest that pass already syncs - the entry a reader would edit is in
@@ -1792,7 +1785,7 @@ def _release_phase(
     # enrolled from, a instructors.yml entry that grants nothing, a teams.csv row that will not
     # materialise. Each has its own digest issue and its own mail, and none of them can
     # red this run either.
-    errors += _preflight_configs(course_org, semester_org, sched, now, dry_run, listing)
+    errors += _preflight_configs(course_org, semester_org, sched, now, dry_run)
     # Last before the releases, and ABOVE the dry-run return so a preview says what it
     # would write: the team-formation window is pure datetime arithmetic, so this is the
     # pass that makes one open and shut on its own clock rather than whenever something
@@ -1812,9 +1805,7 @@ def _release_phase(
             log(
                 f"    PREVIEW  [{key}] return {key}'s marks (marks_return_datetime reached)"
             )
-        decisions = dry_run_decisions(
-            course_org, semester_org, sched, due, now, listing
-        )
+        decisions = dry_run_decisions(course_org, semester_org, sched, due, now)
         decisions += [
             Decision(ref, schedule_plan.NOT_NUMBERED, schedule_plan.give_a_number(ref))
             for ref in (r.assignment_slug or r.label for r in held)
@@ -1839,7 +1830,7 @@ def _release_phase(
         log_ok("nothing due.")
     else:
         release_errors, release_changed = _run_releases(
-            course_org, semester_org, due, now, listing
+            course_org, semester_org, due, now
         )
         errors += release_errors
     return_errors = _return_marks(course_org, semester_org, sched, marks_ready)
@@ -1994,28 +1985,34 @@ def run(
         # every handout. Each used to take one of its own, so the cost grew with the number
         # of ASSIGNMENTS a semester carries rather than with the number of semesters.
         #
+        # It is held by the run (`Run.listings`, read through `_listing`) for exactly this
+        # tick, rather than handed down through every pass.
+        #
         # It is MUTABLE, and the handouts write back into it every repo and gradebook they
         # create (`discovery.listing_row`): a tick fires every handed-out release, so the
         # second one has to see what the first just made or it makes it again and counts
         # GitHub's refusals as failures. That is what keeps this at one listing per tick.
         #
-        # None is "we could not look", and it is handed down AS None - never as an empty
+        # None is "we could not look", and it is held AS None - never as an empty
         # org - because each pass reads it in its own way: the digest reports nothing, the
         # freeze and the sheets take a listing of their own, the re-privatise flips
         # nothing, and no receipt is posted on a repo nobody could confirm is private.
         # Not taken for the autograde phase, which asks the org nothing.
-        listing = discovery.listing_by_name(semester_org)
-        phase = _release_phase(
-            course_org,
-            semester_org,
-            sched,
-            now,
-            dry_run,
-            verdict,
-            listing,
-            defer_site_sync,
-            fired,
-        )
+        listings = current_run().listings
+        listings[semester_org.casefold()] = discovery.listing_by_name(semester_org)
+        try:
+            phase = _release_phase(
+                course_org,
+                semester_org,
+                sched,
+                now,
+                dry_run,
+                verdict,
+                defer_site_sync,
+                fired,
+            )
+        finally:
+            listings.pop(semester_org.casefold(), None)
         errors += phase
         if isinstance(phase, Summary):
             preview = phase

@@ -11,6 +11,7 @@ from dsl_course import (
     gh_contents,
     grading_spec,
     roster,
+    run,
     schedule,
     scheduler,
 )
@@ -131,7 +132,9 @@ def _handout(monkeypatch, *, group: bool, teams_csv: dict, listing: dict | None)
     release = Release(
         label="a1-handout", when=PAST, assignment="a1-f2026", assignment_slug="a1"
     )
-    return scheduler._handout_decisions("Course", "Semester", sched, [release], listing)
+    if listing is not None:
+        run.current().listings["semester"] = listing
+    return scheduler._handout_decisions("Course", "Semester", sched, [release])
 
 
 def test_a_group_handout_with_no_teams_waits_for_them(monkeypatch):
@@ -160,5 +163,5 @@ def test_a_read_that_fails_costs_its_decisions_not_the_preview(monkeypatch, caps
 
     monkeypatch.setattr(scheduler.schedule, "source_faults", boom)
     sched = schedule.parse({})
-    assert scheduler.dry_run_decisions("Course", "Semester", sched, [], NOW, {}) == []
+    assert scheduler.dry_run_decisions("Course", "Semester", sched, [], NOW) == []
     assert "could not work out every decision" in capsys.readouterr().err
