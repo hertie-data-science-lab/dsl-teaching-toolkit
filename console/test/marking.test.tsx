@@ -425,11 +425,11 @@ describe('Return marks from the marking screen', () => {
     const live: Loaded = { ...ready, status: { ...ready.status!, assignments: [{ ...solo, marks: { filled: 1, total: 3 } }] } } as Loaded;
     await mount(env, <AssignmentScreen {...props(f, { tab: 'overview', loaded: live })} />);
     const verb = [...root!.querySelectorAll<HTMLAnchorElement>('a.btn')].find((x) => x.textContent === 'Return marks')!;
-    expect(verb.getAttribute('href')).toBe('#assignment-assignment-2/marks');
+    expect(verb.getAttribute('href')).toBe('#assignment-assignment-2/marks/return-run');
     await click(verb);
     expect(env.ops.current.value).toBeNull(); // nothing opens until the Marks tab has read the sheet
     render(null, root!);
-    await act(() => render(<EnvCtx.Provider value={env}><AssignmentScreen {...props(f, { loaded: live })} /><OpPanel /></EnvCtx.Provider>, root!));
+    await act(() => render(<EnvCtx.Provider value={env}><AssignmentScreen {...props(f, { loaded: live, open: 'return-run' })} /><OpPanel /></EnvCtx.Provider>, root!));
     expect(env.ops.current.value?.def.verb).toBe('Return marks to 1 student');
     expect(q('.op-facts').textContent).toContain('1 held (fix first)');
   });

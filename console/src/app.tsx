@@ -287,7 +287,7 @@ export function App({ state: s }: { state: AppState }) {
     );
   } else {
     const cp: CohortProps = {
-      course: ctx.course, cohort: ctx.cohort, loaded: cohortLoaded ?? { kind: 'loading' }, files: s.files, now: s.now.value, entry: route.entry, tab: route.tab,
+      course: ctx.course, cohort: ctx.cohort, loaded: cohortLoaded ?? { kind: 'loading' }, files: s.files, now: s.now.value, entry: route.entry, tab: route.tab, open: route.open,
       heartbeat: s.heartbeat(ctx.course.org), prefill: sel.template, courseMigrated,
     };
     const screens: Record<string, () => preact.JSX.Element> = {

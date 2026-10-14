@@ -21,6 +21,7 @@ import { parseRoster, sameHandle } from '../model/people';
 import type { Assignment } from '../model/types';
 import { returnMarks, teamsWindow, type AsgRef, type LateReturn } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
+import type { OpDef } from '../ops/session';
 import { assignmentHref, tabHref } from '../router';
 import { CheckLine, Loading } from '../ui/bits';
 import { Modal } from '../ui/Modal';
@@ -69,12 +70,15 @@ const FILTER_WORD: Record<Filter, string> = { all: 'All', unmarked: 'Unmarked', 
 const PREVIEW_TITLE = 'Distribute grades preview';
 
 /**
- * Return marks asked for from another tab (the Overview): the Marks tab opens the panel once its
- * sheet is read, so the pop-up always carries the sheet's figures. One path, whichever page asks.
+ * Return marks asked for from the Overview (the route's `open`): the Marks tab mounts this once its
+ * sheet is read, so the panel always carries the sheet's figures, and it opens it once.
  */
-let pendingReturn: { slug: string; start: 'preview' | 'run' } | null = null;
-export function requestReturnMarks(slug: string, start: 'preview' | 'run'): void {
-  pendingReturn = { slug, start };
+function OpenOnArrival({ def, start }: { def: OpDef; start: 'preview' | 'run' }) {
+  const env = useEnv();
+  useEffect(() => {
+    env?.ops.open(def, start);
+  }, []);
+  return null;
 }
 
 /** Whether the browser grows a textarea with its text by itself (CSS `field-sizing`, Chromium only). */
@@ -224,14 +228,6 @@ export function MarksTab(p: TabProps) {
   const setSubFolded = (fold: boolean) => setWidths((cur) => ({ ...cur, [FOLD_KEY]: fold ? 1 : 0 }));
   const fullBtn = useRef<HTMLButtonElement>(null);
   const wasFull = useRef(false);
-  // The Return marks def as this render built it, for a request from the Overview.
-  const returnDef = useRef<ReturnType<typeof returnMarks> | null>(null);
-  useEffect(() => {
-    if (!pendingReturn || pendingReturn.slug !== a.slug || !returnDef.current || !env) return;
-    const { start } = pendingReturn;
-    pendingReturn = null;
-    env.ops.open(returnDef.current, start);
-  });
   // Textareas grow with their text where the browser cannot do it in CSS.
   useEffect(() => {
     table.current?.querySelectorAll('textarea').forEach(grow);
@@ -550,11 +546,11 @@ export function MarksTab(p: TabProps) {
     setEdits({ ...pending.edits, ...edits });
     setPending(null);
   };
-  const returnDef_ = (returnDef.current = returnMarks(scope, asgRef(a, group), sending, name, late, facts, <PreviewEmails org={org} slug={name} />));
+  const returnDef = returnMarks(scope, asgRef(a, group), sending, name, late, facts, <PreviewEmails org={org} slug={name} />);
   // Returning is its own block above the grid: the panel it opens holds the figures and Preview.
   const returnBlock = (
     <div class="return-block">
-      <span class="return-main"><OpOpen def={returnDef_} cls="btn big" label={returnDef_.verb} /></span>
+      <span class="return-main"><OpOpen def={returnDef} cls="btn big" label={returnDef.verb} />{p.open ? <OpenOnArrival def={returnDef} start={p.open === 'return-run' ? 'run' : 'preview'} /> : null}</span>
       <button class="btn small quiet" type="button" onClick={() => setViewing('')}>Student view</button>
     </div>
   );
