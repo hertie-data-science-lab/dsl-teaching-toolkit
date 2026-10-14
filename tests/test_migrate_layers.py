@@ -94,11 +94,14 @@ def test_each_live_semester_folds_into_semester_yml_and_loses_nothing(course, se
         ),
         ("institution", settings.institution_defaults()),
     ]
+    carried = migrate.carried_defaults(
+        inherited[0][1], settings.parse_legacy_assignments(assignments).defaults
+    )
     new, stops = migrate.semester_layer(
-        semester, "release", instructors, assignments, "", inherited
+        semester, "release", instructors, assignments, "", inherited, carried
     )
     assert stops == [], stops
-    assert migrate.semester_layer_kept(instructors, assignments, "", new) == []
+    assert migrate.semester_layer_kept(instructors, assignments, "", new, carried) == []
     read = settings.parse_instance(new)
     assert read.faults == ()
     found: list = []
@@ -184,3 +187,52 @@ def test_a_roster_value_the_split_would_lose_is_counted_never_quoted():
     )
     assert lost == ["1 roster value(s) would not survive the split"]
     assert "Ana" not in lost[0]
+
+
+@pytest.mark.parametrize(
+    ("course", "semester"),
+    [
+        ("hertie-maths-data-science-C23", "hertie-maths-data-science-f2026"),
+        ("hertie-nlp-e1282", "hertie-nlp-f2026"),
+    ],
+)
+def test_a_semester_that_ran_on_the_institutions_team_formation_keeps_it(
+    course, semester
+):
+    # Neither the course nor the semester states `team_formation`: 0.10 answered
+    # `self_select` from the institution, which 0.11 no longer does (absent everywhere =
+    # no team, decision 0039). Maths' assignment-2 forms teams on it, so the fold writes
+    # it into the semester's own defaults, live.
+    _, _, course_text = _course(course)
+    course_defaults = settings.parse_course_defaults(
+        yaml.safe_load(course_text)["defaults"]
+    )
+    assignments = _read(semester, "assignments.yml")
+    assignments = migrate._without_block(assignments, "assignments") or assignments
+    old = settings.parse_legacy_assignments(assignments).defaults
+    carried = migrate.carried_defaults(course_defaults, old)
+    assert carried == {"team_formation": "self_select"}
+    inherited = [
+        ("course", course_defaults),
+        ("institution", settings.institution_defaults()),
+    ]
+    new, stops = migrate.semester_layer(
+        semester,
+        "release",
+        _read(semester, "instructors.yml"),
+        assignments,
+        "",
+        inherited,
+        carried,
+    )
+    assert stops == []
+    assert yaml.safe_load(new)["defaults"]["team_formation"] == "self_select"
+    # ... and the cascade answers it from the semester, as 0.10 did from the institution.
+    read = settings.parse_instance(new)
+    stack = [("semester", read.defaults), *inherited]
+    assert settings.resolve("team_formation", stack) == ("self_select", "semester")
+
+
+def test_nothing_is_carried_where_the_course_or_semester_states_a_formation():
+    assert migrate.carried_defaults({"team_formation": "assigned"}, {}) == {}
+    assert migrate.carried_defaults({}, {"team_formation": "assigned"}) == {}

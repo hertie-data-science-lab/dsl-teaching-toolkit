@@ -1946,6 +1946,22 @@ def _top_block(text: str, key: str) -> list[str] | None:
     return lines[start:end]
 
 
+def carried_defaults(course: Mapping, semester: Mapping) -> dict:
+    """What a semester relied on the 0.10 institution for and 0.11 no longer gives it:
+    `team_formation`, which left the institution's file (decision 0039 rule 2, absent
+    everywhere = no team). The 0.10 default is carried into the semester's own
+    `defaults:` when neither its course nor the semester states one. Keyed by setting."""
+    old = (yaml.safe_load(old_template("policy.default.yml")) or {}).get("defaults", {})
+    value = old.get("team_formation")
+    if (
+        value
+        and not course.get("team_formation")
+        and not semester.get("team_formation")
+    ):
+        return {"team_formation": value}
+    return {}
+
+
 def semester_layer(
     org: str,
     ref: str,
@@ -1953,11 +1969,13 @@ def semester_layer(
     assignments: str | None,
     syllabus: str,
     inherited: list,
+    carried: Mapping | None = None,
 ) -> tuple[str, list[str]]:
     """`(semester.yml, stops)` folded out of a 0.10 `instructors.yml` (its list becomes
     `people:`, faculty's lines and comments as written), `assignments.yml` `defaults:` (the
-    skeleton's live keys; every other key commented with what it inherits from
-    `inherited`) and the declared `syllabus` (`student_site.syllabus`; "" = none). Pure."""
+    skeleton's live keys, with `carried` - `carried_defaults` - live beside them; every
+    other key commented with what it inherits from `inherited`) and the declared
+    `syllabus` (`student_site.syllabus`; "" = none). Pure."""
     stops: list[str] = []
     meta = _yaml(instructors)
     extra = [k for k in meta if k != "instructors"]
@@ -1980,7 +1998,9 @@ def semester_layer(
     text = pin_central_ref(template(f"semester-config/{SEMESTER_FILE}"), ref).format(
         year=year,
         year_next=year + 1,
-        defaults=settings.defaults_skeleton(inherited, old.defaults),
+        defaults=settings.defaults_skeleton(
+            inherited, {**old.defaults, **(carried or {})}
+        ),
     )
     people = _top_block(instructors or "", "instructors") if instructors else None
     if people and isinstance(meta.get("instructors"), list) and meta["instructors"]:
@@ -2000,7 +2020,11 @@ def semester_layer(
 
 
 def semester_layer_kept(
-    instructors: str | None, assignments: str | None, syllabus: str, new: str
+    instructors: str | None,
+    assignments: str | None,
+    syllabus: str,
+    new: str,
+    carried: Mapping | None = None,
 ) -> list[str]:
     """What `new` (a semester.yml) says differently from the old files; `[]` when every
     value is kept."""
@@ -2008,10 +2032,10 @@ def semester_layer_kept(
     now = _yaml(new)
     if (now.get(PEOPLE_BLOCK) or []) != (_yaml(instructors).get("instructors") or []):
         out.append(f"{INSTRUCTORS_FILE} -> `{PEOPLE_BLOCK}`")
-    if (
-        settings.parse_instance(new).defaults
-        != settings.parse_legacy_assignments(assignments).defaults
-    ):
+    if settings.parse_instance(new).defaults != {
+        **settings.parse_legacy_assignments(assignments).defaults,
+        **(carried or {}),
+    }:
         out.append(f"{ASSIGNMENTS_FILE} `defaults:` -> `{DEFAULTS_BLOCK}`")
     site = now.get(STUDENT_SITE_BLOCK) or {}
     if str(site.get("syllabus") or "") != syllabus:
@@ -3588,6 +3612,15 @@ class Semester:
             # where a semester's syllabus is declared (its fold is not written).
             syllabus = ""
             inherited = settings.layers(self.course)[2:]
+            carried = carried_defaults(
+                inherited[0][1],
+                settings.parse_legacy_assignments(old.get(ASSIGNMENTS_FILE)).defaults,
+            )
+            notes += [
+                f"{SEMESTER_FILE} `{DEFAULTS_BLOCK}:` states `{key}: {value}`: the 0.10 "
+                f"institution default this semester ran on (decision 0039 rule 2)"
+                for key, value in carried.items()
+            ]
             text, more = semester_layer(
                 self.org,
                 central_ref_for(self.course),
@@ -3595,10 +3628,15 @@ class Semester:
                 old.get(ASSIGNMENTS_FILE),
                 syllabus,
                 inherited,
+                carried,
             )
             stops += more
             lost = semester_layer_kept(
-                old.get(INSTRUCTORS_FILE), old.get(ASSIGNMENTS_FILE), syllabus, text
+                old.get(INSTRUCTORS_FILE),
+                old.get(ASSIGNMENTS_FILE),
+                syllabus,
+                text,
+                carried,
             )
             stops += [f"{SEMESTER_FILE} would lose {what}" for what in lost]
             files[SEMESTER_FILE] = text.encode()
