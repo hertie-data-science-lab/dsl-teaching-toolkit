@@ -12,8 +12,7 @@ schedule keeps rendering.
 
 Date: a `dateless` row (`event_datetime: tbc`) has no `date:` and prints "TBC"; a
 `hide_time` row (a whole-day row) prints its day and no clock time; `tbc` marks a
-provisional date. The two typographic differences below (a special event's bold TBC, an
-`events:` exam's plain "(TBC)") are what the per-kind rows printed and are kept as they were.
+provisional date "(TBC)".
 
 Title: `title` is the row's IDENTIFIER - a session's kind and number, an assignment's name -
 and `subtitle` its NAME, under it. The identifier stays, because it is what ties the row to
@@ -45,13 +44,13 @@ what the row generates:
 {%- endif %}
 <div class="col col-1-2" data-label="Date">
     {% if include.event.dateless %}
-    {% if include.event.kind == "special_event" %}<b>TBC</b>{% else %}TBC{% endif %}
+    TBC
     {% else %}
     {{ include.event.date | date: site.dateformat }}
     {% unless include.event.hide_time %}
     {{ include.event.date | date: "%H:%M" }}
     {% endunless %}
-    {% if include.event.tbc %}{% if include.event.kind == "exam" and include.event.collection == "events" %}(TBC){% else %}<b>(TBC)</b>{% endif %}{% endif %}
+    {% if include.event.tbc %}<b>(TBC)</b>{% endif %}
     <br class="date-spliter"/>{{ include.event.date | date: "%A" }}
     {% endif %}
 </div>

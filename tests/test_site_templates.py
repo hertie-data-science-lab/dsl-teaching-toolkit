@@ -409,7 +409,9 @@ def test_every_row_that_can_carry_a_provisional_date_marks_it():
     # date provisional and the deployed schedule went on showing it as settled.
     body = _strip_comments(_liquid_templates()["_includes/schedule_row.html"])
     assert "include.event.tbc" in body
-    assert "(TBC)" in body
+    # One typography for every kind: a provisional date bold, a dateless row plain.
+    assert "<b>(TBC)</b>" in body
+    assert "<b>TBC</b>" not in body
 
 
 @pytest.mark.parametrize("rel", sorted(_liquid_templates()))
