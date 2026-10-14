@@ -480,8 +480,8 @@ they only resolve for enrolled members (deliberate).
 
 **The public course website** (optional) - `Publish course website` builds `{org}.github.io`, a public
 open-courseware site for the course as a whole. Unlike the semester sites it **hosts** the shared lecture
-files (the source repos are private, so links would 404); readings are published either as a text-only
-reading list or as hosted files. It is off by default and driven by `.github/course.yml` `open_course_site:` (the
+files (the source repos are private, so links would 404); readings are published as a text-only reading
+list unless the course lists them as files to publish. It is off by default and driven by `.github/course.yml` `open_course_site:` (the
 console's Public website section) - releases and refresh never touch it - and once on, a daily cron
 re-syncs it, so later materials edits reach it on their own.
 

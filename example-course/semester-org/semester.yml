@@ -43,3 +43,4 @@ defaults:   # every key present; uncomment to override. The comment shows the in
 
 student_site:
   syllabus: SYLLABUS.md
+  host: {kinds: [lectures, labs, exams, events], types: [html, pdf]}   # viewable copies on the public site; readings left out (copyright)

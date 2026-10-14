@@ -1534,8 +1534,8 @@ def test_naming_an_excluded_path_outright_releases_nothing_and_stays_green(
     staged: list[str] = []
     errors, changed = _release(
         monkeypatch,
-        {".releaseignore": "solutions/\n", "solutions/01.ipynb": "THE ANSWERS"},
-        [Deploy("cm", "solutions", "materials", "week01")],
+        {".releaseignore": "drafts/\n", "drafts/01.ipynb": "NOT YET"},
+        [Deploy("cm", "drafts", "materials", "week01")],
         staged,
     )
     assert (errors, changed) == (0, False)

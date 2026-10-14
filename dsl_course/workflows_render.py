@@ -1509,8 +1509,8 @@ def render_publish_site() -> str:
     return f"""name: Publish course website
 
 # Build/refresh the PUBLIC course site <course-org>.github.io (open courseware) from
-# course.yml `open_course_site:` in this repo: which materials repo, readings mode, lecture files and
-# what to withhold. Edit that block (or the console's Public website tab), then run this;
+# course.yml `open_course_site:` in this repo: which materials repo and which of its files
+# (`publish:`). Edit that block (or the console's Public website tab), then run this;
 # the daily cron re-publishes from it, and does nothing while it says enabled: false.
 
 on:

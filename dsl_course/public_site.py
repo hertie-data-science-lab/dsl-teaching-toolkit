@@ -5,8 +5,10 @@ repos it publishes are private, so linking into them would 404 for the public; i
 this HOSTS the chosen repo's files in the site repo (Jekyll serves any path not starting
 with `_`) and links to site-relative URLs. Session materials only - no assignments, no
 events, no semester repos. What it publishes is the course's `course.yml`
-`open_course_site:` (`opencourse`): the Publish website operation and the daily update both read it,
-and `enabled: false` stops both.
+`open_course_site:` (`opencourse`), its `publish:` Selection run through `selection` (the
+institution denylist, the repo's `.releaseignore`, then the selection and the institution's
+floor): the Publish website operation and the daily update both read it, and `enabled:
+false` stops both.
 
 Driven through `python3 -m dsl_course.site public-sync`, which delegates here.
 """
@@ -33,20 +35,15 @@ from .course import (
 )
 from .discovery import org_meta
 from .faults import Unusable
-from .fs import copy_tree, union_deny
+from .fs import copy_tree
 from .ghcli import clone
 from .log import Summary, log, log_err, log_step
 from .materials import folder_kind
 from .opencourse import OPENCOURSE_FILE, OpenCourse
 from .opencourse import read as read_opencourse
 from .readings import readings_block
-from .releaseignore import deny_for, deny_lines, excludes
-from .repos import (
-    has_denied_component,
-    has_never_material_component,
-    is_denied_publication,
-    is_never_material,
-)
+from .selection import PUBLISH, Selection, denied, deny, floor, kept
+from .selection import releaseignored as releaseignored_in
 from .site_repo import (
     ROW_NOUN,
     Link,
@@ -68,9 +65,9 @@ from .site_repo import (
 PUBLIC_MATERIALS_DIR = "public-materials"
 
 # The open site is still built from one repo's folders (its own design, `openware`, is
-# not written yet): `readings` is the section `open_course_site.readings_mode` governs,
-# and a lab-kind section makes a lab row (`row_kind`). The semester site reads kinds from
-# the schedule.
+# not written yet): `readings` is the section `publish.reading_lists` speaks for, and a
+# lab-kind section makes a lab row (`row_kind`). The semester site reads kinds from the
+# schedule.
 READINGS_SECTION = "readings"
 
 
@@ -110,39 +107,9 @@ def row_kind(section: str) -> str:
     return kind if kind in ROW_NOUN else "lecture"
 
 
-def _publication_ignore(dirpath: str, names: list[str]) -> set[str]:
-    """A `copytree` ignore filter for the PUBLIC site: drop every denylisted name and every
-    name that is never course material, at any depth (repos.PUBLICATION_DENYLIST and
-    repos.NEVER_MATERIAL - two lists because one is what must not leak and the other is
-    only clutter).
-
-    At any depth, unlike `deploy._copy_ignore`, which anchors its exclusions to the repo
-    root: the release path excludes plumbing that only ever lives at the root, while the
-    thing this exists to stop - a `solution/` beside the lab it answers - is precisely a
-    nested folder.
-
-    It filters NAMES, which is why `fs.copy_tree` never follows a symlink: a
-    `notes.pdf -> ../solution/answers.pdf` would otherwise be copied in as the answers
-    themselves, under a name this filter has no reason to deny."""
-    return {n for n in names if is_denied_publication(n) or is_never_material(n)}
-
-
-def _withheld_from_site(root: Path, path: Path, withhold: tuple[str, ...] = ()) -> bool:
-    """Whether one path under the clone at `root` must not reach the public site.
-
-    The same rules `copy_tree`'s filter applies, as a PREDICATE - because the listing
-    paths cannot use a copytree filter. `reading-list` mode (the DEFAULT) hosts nothing, so
-    it never calls `copy_tree` and the `ignore` hook never runs: it publishes filenames,
-    and inlines the overlay's prose verbatim. Without this, a withheld reading was named on
-    the open web and a withheld OVERLAY had its full text published there. `withhold` is
-    `open_course_site:`'s list, judged from the clone's root."""
-    rel = path.relative_to(root).as_posix()
-    return (
-        has_denied_component(rel)
-        or has_never_material_component(rel)
-        or excludes(root, path)
-        or excludes(root, path, withhold)
-    )
+def _section_kind(section: str) -> str:
+    """A section's kind as `publish.kinds` names it (`lectures`), from its folder name."""
+    return policy.plural_of(folder_kind(section))
 
 
 def _public_links(local_dir: Path, url_prefix: str) -> list[Link]:
@@ -170,13 +137,13 @@ def _public_links(local_dir: Path, url_prefix: str) -> list[Link]:
     the allowlist excluded would be served and unreachable. The semester site takes the extra
     narrowing because it CAN offer a folder link; this one keeps every file reachable."""
     files = sorted(q for q in local_dir.rglob("*") if q.is_file())
-    # Denylisted paths are already absent from a folder THIS run copied
-    # (`_publication_ignore`), so this is the second lock on the same door - and the one
-    # that holds if a file ever reaches the served tree by another route.
+    # Denylisted paths are already absent from a folder THIS run copied (`selection`),
+    # so this is the second lock on the same door - and the one that holds if a file
+    # ever reaches the served tree by another route.
     rels = [
         rel
         for rel in (q.relative_to(local_dir).as_posix() for q in files)
-        if not has_denied_component(rel)
+        if not denied(rel)
     ]
     if any("/" not in rel for rel in rels):
         rels = [rel for rel in rels if "/" not in rel]
@@ -241,20 +208,19 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
     """Build/refresh the PUBLIC course site `<course-org>.github.io` (open courseware)
     from `oc`, the course's `open_course_site:`.
 
-    The first run scaffolds the site (Pages), later runs re-sync it. Hosts the declared
-    `source_repo`'s files - every section it
-    actually has (see course.discover_sections), plus, in `actual-readings` mode, `readings`
-    - in the public site repo and links to them with site-relative URLs. `reading-list` mode
-    publishes the citation text only. `include_lectures` toggles the file sections as a
-    group (its name predates generic sections). `withhold` keeps its paths off the site,
-    on top of the repo's `.releaseignore` and the denylist. Session materials only - no
+    The first run scaffolds the site (Pages), later runs re-sync it. Hosts the files of
+    the declared `source_repo`'s sections (see course.discover_sections) that `publish:`
+    keeps - a section's kind from its folder, each file through `selection`'s layers -
+    in the public site repo, and links to them with site-relative URLs. `reading_lists`
+    publishes the readings' citation text; the readings themselves only when `readings`
+    is a published kind or an `include` names them. Session materials only - no
     assignments/events. Served files are namespaced per source repo so several years can
     coexist on one site."""
-    source_repo, readings_mode = oc.source_repo, oc.readings_mode
-    include_lectures = oc.include_lectures
-    if not include_lectures and readings_mode == "none":
-        log_err("nothing to publish - file sections off and readings set to none.")
+    source_repo, sel = oc.source_repo, oc.selection
+    if not sel.kinds and not sel.include and not oc.reading_lists:
+        log_err("nothing to publish - no kinds, no includes and no reading lists.")
         return 1
+    limit = floor(PUBLISH)
 
     def build(site_wd: Path) -> SitePlan | None:
         meta = org_meta(course_org)
@@ -274,13 +240,18 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
             if not clone(course_org, source_repo, src):
                 log_err(f"could not clone {spec}")
                 return None
-            # Three filters unioned, not one list: the denylist is what this toolkit
-            # refuses to publish, `.releaseignore` is faculty's own for every copy, and
-            # `open_course_site:`'s `withhold` theirs for this site alone. Anchored at the
+
+            # One rule (`selection`): the institution denylist, faculty's
+            # `.releaseignore`, `publish:` and the institution's floor, anchored at the
             # CLONE root even though what gets copied is a session folder deep inside it.
-            withhold = union_deny(
-                _publication_ignore, deny_for(src), deny_lines(src, oc.withhold)
-            )
+            def withhold(section: str):
+                kind = _section_kind(section)
+                return deny(src, use=sel, kind_of=lambda _rel: kind, limit=limit)
+
+            withheld = releaseignored_in(src)
+            # A reading list NAMES files, so it is a copy of a kind too: the denylist,
+            # `.releaseignore` and `publish.exclude` hold for it as for the files.
+            listed_names = Selection(exclude=sel.exclude)
 
             # Both readings of the source's structure come off THE CLONE - which every
             # session below is copied out of anyway. The session list used to be a
@@ -288,22 +259,17 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
             sessions = discover_local_sessions(src)
             log_step(
                 f"Publishing {course_org}/{pages_repo(course_org)} from {source_repo}: "
-                f"{len(sessions)} session(s), readings={readings_mode}, "
-                f"file sections={'on' if include_lectures else 'off'}"
+                f"{len(sessions)} session(s), kinds={', '.join(sel.kinds or ()) or '(none)'}, "
+                f"reading lists={'on' if oc.reading_lists else 'off'}"
             )
 
             # Sections are whatever THIS repo has (the same discovery the release workflows
             # use), not a hardcoded lectures/readings pair - a course whose content lives
             # in `labs/` publishes labs. `readings` is the one section with special
-            # semantics (`readings_mode`, below); `include_lectures` gates all the others.
-            # Supporting-files sections (any folder no kind names) are never rows here
-            # either.
-            file_sections = (
-                shown_sections(
-                    [sec for sec in discover_sections(src) if sec != READINGS_SECTION]
-                )
-                if include_lectures
-                else []
+            # semantics (`reading_lists`, below). Supporting-files sections (any folder no
+            # kind names) are never rows here either.
+            file_sections = shown_sections(
+                [sec for sec in discover_sections(src) if sec != READINGS_SECTION]
             )
             log(
                 f"  sections published as files: {', '.join(file_sections) or '(none)'}"
@@ -325,7 +291,7 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
                     if sec_src is None:
                         continue
                     dest = site_session / section
-                    copy_tree(sec_src, dest, withhold)
+                    copy_tree(sec_src, dest, withhold(section))
                     links = _public_links(dest, f"{url_base}/{section}")
                     if links:
                         rows = (
@@ -335,16 +301,19 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
 
                 read_src = find_session_dir(src / READINGS_SECTION, s)
                 if read_src is not None:
-                    if readings_mode == "actual-readings":
-                        dest = site_session / READINGS_SECTION
-                        copy_tree(read_src, dest, withhold)
-                        links = _public_links(dest, f"{url_base}/{READINGS_SECTION}")
-                        if links:
-                            section_links.append((READINGS_SECTION, links))
-                    elif readings_mode == "reading-list":
+                    dest = site_session / READINGS_SECTION
+                    copy_tree(read_src, dest, withhold(READINGS_SECTION))
+                    links = _public_links(dest, f"{url_base}/{READINGS_SECTION}")
+                    if links:
+                        section_links.append((READINGS_SECTION, links))
+                    if oc.reading_lists:
                         reading_list_md = _reading_list_md(
                             read_src,
-                            lambda p: not _withheld_from_site(src, p, oc.withhold),
+                            lambda p: kept(
+                                p.relative_to(src).as_posix(),
+                                use=listed_names,
+                                withheld=withheld,
+                            ),
                         )
 
                 # A row with nothing published gets no page at all, rather than an empty

@@ -46,6 +46,7 @@ from dsl_course import (
     grading_spec,
     schedule,
     schedule_plan,
+    selection,
     site,
     site_repo,
 )
@@ -119,11 +120,13 @@ TREE = (
     "labs/02_week-2/Lab_Session_2.ipynb",
 )
 
-# What this course's `publish.yml` declares, through the real parser: rendered decks and
-# nothing else - the shape a Quarto course takes. Lecture 1 therefore carries BOTH link
-# shapes, a published `slides.html` (whose `slides_files/` bundle follows it) beside an
-# unpublished `slides.pdf`, which is the pair the templates have to tell apart.
-PUBLISH_POLICY = {MATERIALS: (site.parse_patterns("lectures/**/*.html"),)}
+# What this semester's `student_site.host` says (decision 0040): the default kinds, as
+# rendered decks only - the shape a Quarto course takes. Lecture 1 therefore carries BOTH
+# link shapes, a hosted `slides.html` (whose `slides_files/` bundle follows it) beside an
+# unhosted `slides.pdf`, which is the pair the templates have to tell apart.
+HOST = selection.with_defaults(
+    selection.Selection(types=("html",)), selection.host_default()
+)
 
 READINGS_MD = """# Session 1 readings
 
@@ -587,7 +590,11 @@ def generated(
     try:
         with tempfile.TemporaryDirectory() as work:
             hosted = site._mirror_public(
-                site_wd or Path(work), SEMESTER_ORG, PUBLISH_POLICY
+                site_wd or Path(work),
+                SEMESTER_ORG,
+                [MATERIALS],
+                HOST,
+                site._landings(SCHEDULE),
             )
         return {
             "collections": collections(hosted),

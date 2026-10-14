@@ -3474,3 +3474,30 @@ def test_supporting_files_default_off_the_site():
     )
     shown = {r.label: r.show_on_site for r in sched.releases}
     assert shown == {"data": False, "l1": True}
+
+
+def test_a_denylisted_source_is_a_fault_at_commit_time(monkeypatch):
+    # Decision 0040: the institution denylist is a release's first layer, so a copy named
+    # `solutions/` ships nothing - said here rather than only on a green release run.
+    _org(monkeypatch, {"cm": ["labs", "labs/solutions", "labs/solutions/a.ipynb"]})
+    s = Schedule(releases=[_release("lab-1", "labs/solutions")])
+    faults = schedule.source_faults(s, "Course-Org")
+    assert len(faults) == 1 and "never reach students" in faults[0].line()
+    assert (
+        faults[0].severity(datetime(2026, 9, 8, 9, 0, tzinfo=BERLIN))
+        is Severity.WARNING
+    )
+
+
+def test_a_copy_may_be_made_public_and_anything_else_is_flagged():
+    # `public: true` (the console's per-file toggle on a readings entry) hosts the copy
+    # on the semester site whatever `student_site.host` says (decision 0040).
+    files = [
+        {"from_course_repo": "cm", "from_path": "readings/01/a.pdf", "public": True},
+        {"from_course_repo": "cm", "from_path": "readings/01/b.pdf"},
+        {"from_course_repo": "cm", "from_path": "readings/01/c.pdf", "public": "yes"},
+    ]
+    drops = schedule.Drops()
+    out = schedule._parse_files(files, BERLIN, drops, "readings.r1")
+    assert [d.public for d in out] == [True, False, False]
+    assert len(drops.report) == 1 and "public" in drops.report[0]

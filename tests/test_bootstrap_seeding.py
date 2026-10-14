@@ -58,6 +58,7 @@ from dsl_course.central import CENTRAL
 from dsl_course.course import SEMESTER_TOPIC
 from dsl_course.faults import NOT_MIGRATED
 from dsl_course.repos import Converged
+from dsl_course.selection import Selection
 from dsl_course.team_formation import LockWrite
 from tests.conftest import repo_row, stub_bootstrap
 
@@ -728,7 +729,7 @@ def test_a_new_course_gets_its_public_website_settings_seeded_off(fake, monkeypa
     seeded = fake.files[(".github", "course.yml")]
     assert seeded.startswith("# INSTRUCTOR-OWNED")
     assert opencourse.parse(opencourse.block(yaml.safe_load(seeded))) == (
-        opencourse.OpenCourse(withhold=opencourse.DEFAULT_WITHHOLD)
+        opencourse.OpenCourse(publish=Selection(kinds=("lectures", "labs")))
     )
 
 

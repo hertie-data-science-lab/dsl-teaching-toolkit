@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from dsl_course import course, ghcli, public_site, site, site_repo
+from dsl_course import course, ghcli, public_site, selection, site, site_repo
 from dsl_course.opencourse import OpenCourse
 from tests.conftest import fake_config
 
@@ -503,9 +503,9 @@ def semester_plan(monkeypatch, tmp_path):
         lambda org, build: captured.update(plan=build(tmp_path)) or 0,
     )
     monkeypatch.setattr(site, "list_org_repos", lambda org: [])
-    monkeypatch.setattr(site, "yaml_file", lambda *a: {})
+    monkeypatch.setattr(site, "yaml_file", lambda *a: {}, raising=False)
     fake_config(monkeypatch, site.yaml_file)
-    monkeypatch.setattr(site, "read_opencourse", lambda org: None)
+    monkeypatch.setattr(site, "host_selection", lambda org: selection.host_default())
     monkeypatch.setattr(site.schedule, "load", lambda org: site.schedule.Schedule())
     monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
     monkeypatch.setattr(site, "_repo_tree", cache(lambda org, repo: ("main", ())))

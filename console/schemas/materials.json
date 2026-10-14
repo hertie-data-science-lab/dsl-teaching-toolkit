@@ -448,16 +448,6 @@
   ],
   "default_kind": "assets",
   "default_syllabus": "SYLLABUS.md",
-  "denylist": [
-    "solution",
-    "solutions",
-    "grading_config.yml",
-    "grading.yml",
-    "tests",
-    ".env",
-    ".env.*",
-    ".git"
-  ],
   "empty_entry_kind": "lecture",
   "fallback_kind": "other",
   "file": "materials.yml",
@@ -466,14 +456,6 @@
     "lab",
     "readings",
     "assets"
-  ],
-  "never_material": [
-    ".DS_Store",
-    ".gitkeep",
-    ".ipynb_checkpoints",
-    "Thumbs.db",
-    "__pycache__",
-    "desktop.ini"
   ],
   "reviewed_mark": "# Reviewed: nothing withheld.",
   "topic": "dsl-materials"

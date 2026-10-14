@@ -8,9 +8,11 @@ batching itself is exercised in test_scheduler.py, which drives the same
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from dsl_course import access, course, deploy, ghcli, records, repos
+from dsl_course import access, course, deploy, ghcli, records, repos, selection
 from dsl_course import repos as repo_mod
 from dsl_course.schedule import Deploy, Release, Schedule
 
@@ -487,29 +489,58 @@ def test_a_normal_subpath_still_resolves_under_the_clone(tmp_path):
     assert deploy._resolve_within(tmp_path, "labs/") == (tmp_path / "labs").resolve()
 
 
+# The folders among the names these tests hand the filter; every other name is a file.
+_DIRS = {".git", ".github", ".system", "labs", "solutions", "Tests", "__pycache__"}
+
+
+def _release_filter(root: Path, names: list[str], whole: bool, at: Path | None = None):
+    """What a release's copy filter skips of `names` in `at` (default `root`), made real
+    on disk first: the filter asks the disk whether a name is a folder."""
+    here = at or root
+    here.mkdir(parents=True, exist_ok=True)
+    for n in names:
+        if n in _DIRS or n == ".ipynb_checkpoints":
+            (here / n).mkdir()
+        else:
+            (here / n).write_text("x")
+    ignore = selection.deny(root, use=deploy._release_use(whole))
+    return ignore(str(here), names)
+
+
 def test_a_whole_repo_release_skips_the_faculty_side_of_the_repo(tmp_path):
-    # `.system/` is written into every materials repo by scaffold as "never released";
-    # `.github` is the Release buttons and their bot-token wiring. Both are faculty-side, so
-    # neither may ride along with "give me everything".
-    ignore = deploy._copy_ignore(tmp_path)
+    # `.system/` is written into every materials repo by scaffold as "never released"
+    # (the institution denylist, at every depth); `.github` is the Release buttons and
+    # their bot-token wiring, skipped at the root of "give me everything".
     names = [".git", ".github", ".system", "labs", "SYLLABUS.md"]
-    assert ignore(str(tmp_path), names) == {".git", ".github", ".system"}
+    assert _release_filter(tmp_path, names, whole=True) == {
+        ".git",
+        ".github",
+        ".system",
+    }
 
 
 def test_the_faculty_side_is_skipped_only_at_the_repo_root(tmp_path):
-    # The exclusion is root-ANCHORED, not a basename glob: a faculty member's own
+    # `.github` is root-ANCHORED, not a basename glob: a faculty member's own
     # `labs/.github/` or `labs/MAINTAINING.md` is content, not release plumbing, and must
     # travel. `.git` is the exception - it is never copyable, at any depth.
-    ignore = deploy._copy_ignore(tmp_path)
     names = [".git", ".github", "MAINTAINING.md", "01.md"]
-    assert ignore(str(tmp_path / "labs"), names) == {".git"}
+    skipped = _release_filter(tmp_path, names, whole=True, at=tmp_path / "labs")
+    assert skipped == {".git"}
 
 
 def test_naming_the_faculty_side_explicitly_still_releases_it(tmp_path):
-    # The skip is what "everything" means, not a ban: releasing `.github` as a named
-    # course_source_path is a subpath copy, which excludes nothing but `.git`.
-    ignore = deploy._copy_ignore(None)
-    assert ignore(str(tmp_path), [".git", ".github", "MAINTAINING.md"]) == {".git"}
+    # The `.github` skip is what "everything" means, not a ban: releasing it as a named
+    # course_source_path is a subpath copy, which excludes nothing but the denylist.
+    names = [".git", ".github", "MAINTAINING.md"]
+    assert _release_filter(tmp_path, names, whole=False) == {".git"}
+
+
+def test_the_denylist_never_travels_with_a_release(tmp_path):
+    # Decision 0040 rule 3: the institution denylist is the first layer of every outbound
+    # copy, the release included - a `solutions/` beside the lab it answers stays behind.
+    names = ["solutions", "Tests", "grading_config.yml", ".env.local", "lab.ipynb"]
+    skipped = _release_filter(tmp_path, names, whole=False, at=tmp_path / "labs" / "01")
+    assert skipped == {"solutions", "Tests", "grading_config.yml", ".env.local"}
 
 
 # ------------------------------------------ what is never course material, wherever it is
@@ -522,7 +553,6 @@ def test_naming_the_faculty_side_explicitly_still_releases_it(tmp_path):
 def test_junk_never_travels_with_a_release_at_any_depth(tmp_path):
     # Unlike the faculty-side exclusions, this one is NOT root-anchored: the junk is in the
     # session folder, several levels below any root a release names.
-    ignore = deploy._copy_ignore(None)
     names = [
         ".DS_Store",
         ".gitkeep",
@@ -533,19 +563,17 @@ def test_junk_never_travels_with_a_release_at_any_depth(tmp_path):
         "lab.ipynb",
         ".Rprofile",
     ]
-    skipped = ignore(str(tmp_path / "labs" / "01_session-1"), names)
+    skipped = _release_filter(
+        tmp_path, names, whole=False, at=tmp_path / "labs" / "01_session-1"
+    )
     # `.Rprofile` is course material an R course's students need - the rule is a closed
     # list of names, never a rule about dots.
     assert skipped == set(names) - {"lab.ipynb", ".Rprofile"}
 
 
 def test_junk_is_matched_however_the_machine_that_wrote_it_spelled_it(tmp_path):
-    ignore = deploy._copy_ignore(None)
-    assert ignore(str(tmp_path), [".ds_store", "THUMBS.DB", "Desktop.ini"]) == {
-        ".ds_store",
-        "THUMBS.DB",
-        "Desktop.ini",
-    }
+    names = [".ds_store", "THUMBS.DB", "Desktop.ini"]
+    assert _release_filter(tmp_path, names, whole=False) == set(names)
 
 
 # The end-to-end half of this - a session folder copied through clone -> copytree ->
@@ -621,8 +649,9 @@ def test_an_unwritten_syllabus_stub_is_withheld_too():
 
 
 def test_the_excluded_root_files_are_named_from_one_place():
-    # Excluded as ONE folder, so no file the toolkit writes there can lapse out of it.
-    assert records.SYSTEM_DIR in deploy.ROOT_RELEASE_EXCLUDED
+    # Excluded as ONE folder (the institution denylist), so no file the toolkit writes
+    # there can lapse out of it.
+    assert records.SYSTEM_DIR in selection.DENYLIST
     for path in (
         course.SYLLABUS_SAMPLE_FILE,
         course.SYLLABUS_SESSIONS_FILE,

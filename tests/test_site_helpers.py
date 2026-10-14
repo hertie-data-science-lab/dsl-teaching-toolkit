@@ -20,8 +20,8 @@ from dsl_course import (
     gh_contents,
     policy,
     public_site,
-    repos,
     schedule_plan,
+    selection,
     site,
     site_repo,
 )
@@ -953,12 +953,12 @@ def test_a_denylisted_file_is_never_linked_from_a_public_page(tmp_path):
 
 
 def test_the_denylist_matches_by_name_at_any_depth_and_ignores_case():
-    assert repos.has_denied_component("labs/01_lab/Solution/answers.ipynb")
-    assert repos.has_denied_component("tests/test_x.py")
-    assert repos.has_denied_component("a/.env.local")
+    assert selection.denied("labs/01_lab/Solution/answers.ipynb")
+    assert selection.denied("tests/test_x.py")
+    assert selection.denied("a/.env.local")
     # ...and does not swallow a file that merely contains a denylisted word.
-    assert not repos.has_denied_component("labs/01_lab/solutions-discussion.md")
-    assert not repos.has_denied_component("labs/testing-guide.md")
+    assert not selection.denied("labs/01_lab/solutions-discussion.md")
+    assert not selection.denied("labs/testing-guide.md")
 
 
 # ----------------------------------------------------- the All Materials index

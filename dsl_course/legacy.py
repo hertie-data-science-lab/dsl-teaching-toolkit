@@ -66,6 +66,8 @@ COURSE_REPOS = "course org repos"
 MEMBERSHIP_DISPATCH = "sync-membership dispatch payload"
 STATUS_TODO_CHECK = "status.json to-do check"
 ROSTER_FILES = "semester-config students.csv / teams.csv"
+OPEN_SITE_KEYS = "course.yml open_course_site"
+MATERIALS_REPO = "course materials repo"
 
 _BLOCKS = "a block per kind (`lectures:`, `labs:`, `readings:`, `exams:`, `events:`, `assets:`)"
 _MIGRATE = "run the 0.11.0 migration (`python3 -m dsl_course.migrate`)"
@@ -264,6 +266,39 @@ ROWS: tuple[Old, ...] = (
     # A 0.10 defaults block's keys (`assignment_defaults:`, `assignments.yml defaults:`).
     Old("visibility", "assignment_repo_visibility", DEFAULTS_KEYS, "0.11.0"),
     Old("formats", "", DEFAULTS_KEYS, "0.11.0"),
+    # Decision 0040: the open site's selection keys fold into one `publish:` Selection, and
+    # a materials repo's `publish.yml` into each semester's `student_site.host`. Read by
+    # `opencourse.parse` (refused: run the migration) and folded by `migrate`.
+    Old(
+        "readings_mode",
+        "publish.kinds (readings) and publish.reading_lists",
+        OPEN_SITE_KEYS,
+        "0.11.0",
+        NOT_MIGRATED,
+        f"the public website does not publish - {_MIGRATE}",
+    ),
+    Old(
+        "include_lectures",
+        "publish.kinds",
+        OPEN_SITE_KEYS,
+        "0.11.0",
+        NOT_MIGRATED,
+        f"the public website does not publish - {_MIGRATE}",
+    ),
+    Old(
+        "withhold",
+        "publish.exclude",
+        OPEN_SITE_KEYS,
+        "0.11.0",
+        NOT_MIGRATED,
+        f"the public website does not publish - {_MIGRATE}",
+    ),
+    Old(
+        "publish.yml",
+        f"{SEMESTER_FILE} student_site.host include",
+        MATERIALS_REPO,
+        "0.11.0",
+    ),
     # The roster before decision 0039 rule 4: one students.csv carrying the engine's
     # columns too, and teams.csv beside it. Read by `roster.split_legacy`, which the 0.11.0
     # migration folds them with.

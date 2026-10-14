@@ -16,7 +16,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from . import policy
-from .repos import has_denied_component, has_never_material_component
 
 MATERIALS_TOPIC = "dsl-materials"
 MATERIALS_FILE = "materials.yml"
@@ -120,9 +119,3 @@ def alias_kind(section: str, aliases: Mapping[str, str] | None = None) -> str | 
 def is_materials_repo(row: dict) -> bool:
     """Whether a repo listing row is a materials repo: it carries the topic."""
     return MATERIALS_TOPIC in (row.get("topics") or [])
-
-
-def publishable(path: str) -> bool:
-    """Whether a path may be hosted at all, whatever a pattern says: not on the denylist
-    (`solution/`, `tests/`, grading files, `.env`) and not a never-material name."""
-    return not has_denied_component(path) and not has_never_material_component(path)
