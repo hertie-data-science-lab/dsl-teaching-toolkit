@@ -7,6 +7,18 @@ import policy from '../../schemas/policy.json';
 import requestSchema from '../../schemas/request.schema.json';
 import gradingSchema from '../../schemas/grading_config.schema.json';
 
+/** One row kind (`policy.kinds`): `plural` is its block and tab name, `numbered` whether its entries are, `shown` false for one that is released but never a row or a tab. */
+export interface Kind {
+  key: string;
+  plural: string;
+  numbered: boolean;
+  shown: boolean;
+  label: string;
+  colour: string;
+  background: string;
+  system: boolean;
+}
+
 export interface Policy {
   contact: string;
   defaults: {
@@ -21,12 +33,27 @@ export interface Policy {
     visibility: string;
   };
   institution: Record<string, string>;
-  kinds: { key: string; label: string; colour: string; background: string; system: boolean }[];
+  kinds: Kind[];
   licences: { name: string; url: string }[];
 }
 
 export const POLICY: Policy = policy;
 export const DEFAULTS = POLICY.defaults;
+
+/** The row kinds, in display order: the console's only kind vocabulary. */
+export const KINDS = POLICY.kinds;
+/** A kind's block and tab name (`lecture` -> `lectures`); the key itself when unknown (`policy.plural_of`). */
+export const pluralOf = (key: string): string => KINDS.find((k) => k.key === key)?.plural ?? key;
+/** The kind a block or tab name names (`labs` -> `lab`), or null (`policy.kind_for_plural`). */
+export const kindForPlural = (name: string): string | null => KINDS.find((k) => k.plural === name)?.key ?? null;
+/** The kinds whose entries are numbered, in display order (`policy.numbered_kinds`). */
+export const NUMBERED_KINDS: string[] = KINDS.filter((k) => k.numbered).map((k) => k.key);
+/** The kinds that are rows and tabs (not supporting files), in display order (`policy.shown_kinds`). */
+export const SHOWN_KINDS: string[] = KINDS.filter((k) => k.shown).map((k) => k.key);
+/** The kinds the engine makes rows for itself (assignment, semester, archive). */
+export const SYSTEM_KINDS: string[] = KINDS.filter((k) => k.system).map((k) => k.key);
+/** A kind's tab title: its plural, capitalised (`site_repo.kind_tab`): Lectures, Drop-ins. */
+export const tabTitle = (plural: string): string => plural.charAt(0).toUpperCase() + plural.slice(1);
 
 /** The semester's timezone when its schedule names none. */
 export const DEFAULT_TIMEZONE = DEFAULTS.timezone;

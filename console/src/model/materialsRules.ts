@@ -14,6 +14,8 @@ export const DEFAULT_SYLLABUS = rules.default_syllabus;
 export const DEFAULT_KIND = rules.default_kind;
 /** Supporting files: released, never a row or a page. */
 export const ASSETS_KIND = rules.assets_kind;
+/** The kind an unknown kind lands on (`policy.FALLBACK_KIND`); the site labels it Event. */
+export const FALLBACK_KIND = rules.fallback_kind;
 /** The kind of a release entry that names none and copies nothing yet (`schedule_plan.entry_kind`). */
 export const EMPTY_ENTRY_KIND = rules.empty_entry_kind;
 /** The kinds a folder may be set to (decision 0031 rule 10), in row order: the rest are schedule kinds. */
@@ -35,8 +37,8 @@ export function withMark(text: string): string {
 
 /** The kinds a release entry or a folder may be: the policy's non-system kinds, in its order. */
 export const CONTENT_KINDS: string[] = POLICY.kinds.filter((k) => !k.system).map((k) => k.key);
-/** `materials.known_kind`: a content kind, else `other`. */
-const known = (kind: string) => (CONTENT_KINDS.includes(kind.trim().toLowerCase()) ? kind.trim().toLowerCase() : 'other');
+/** `materials.known_kind`: a content kind, else the fallback (`other`). */
+const known = (kind: string) => (CONTENT_KINDS.includes(kind.trim().toLowerCase()) ? kind.trim().toLowerCase() : FALLBACK_KIND);
 
 /** What one repo's `materials.yml` declares, defaults filled in. */
 export interface Declared {

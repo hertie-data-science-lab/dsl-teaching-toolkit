@@ -130,7 +130,7 @@ describe('the student schedule says what the site says', () => {
   it('words a kind the site declares by the site’s own label', () => {
     const f = facts();
     const base = f.rows.find((r) => r.id === 'lecture_02')!;
-    const own = { ...f, rows: [...f.rows, { ...base, id: 'clinic_1', kind: 'clinic', title: 'Clinic 1' }], kinds: { ...f.kinds, clinic: { label: 'Coding clinic', colour: '', background: '', tab: false } } };
+    const own = { ...f, rows: [...f.rows, { ...base, id: 'clinic_1', kind: 'clinic', title: 'Clinic 1' }], kinds: { ...f.kinds, clinic: { label: 'Coding clinic', plural: 'clinics', colour: '', background: '', tab: false } } };
     expect(text(<ScheduleView facts={own} mine={null} now={NOW} org={ORG} />)).toMatch(/Coding clinic .*Clinic 1/);
   });
 });

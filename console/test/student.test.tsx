@@ -59,7 +59,7 @@ describe('the site source behind StudentData', () => {
     expect(kinds).toContain('session-01:lecture');
     expect(kinds).toContain('lab-03:lab');
     expect(kinds).toContain('01-midterm-exam:exam');
-    expect(kinds).toContain('term-start:term_date');
+    expect(kinds).toContain('term-start:semester');
     expect(kinds).toContain('02-assignment-2:handout:assignment');
     expect(kinds).toContain('02-assignment-2:due:due');
     const s1 = f.rows.find((r) => r.id === 'session-01')!;
@@ -234,7 +234,7 @@ describe('the screens', () => {
     expect(out).toContain('Week 1 <span>from Mon 3 Aug</span>');
     expect(out).toMatch(/trow lec/);
     expect(out).toMatch(/trow lab/);
-    expect(out).toMatch(/trow term/);
+    expect(out).toMatch(/trow semester/);
     expect(out).toMatch(/trow asg mine/);
     expect(out).toContain('not released yet');
     expect(out).toContain('today-line');

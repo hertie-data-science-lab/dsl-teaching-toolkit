@@ -31,8 +31,8 @@ import { SOURCE_WORD, assignmentsFile, lateWord, resolve, usableBlock, validAssi
 import { parse } from 'yaml';
 import { RunRows, SolutionNote, applicableKeys, assignmentsAfterSchedule, cutoffOf, forcedVisibility, runErrors, semesterLayers } from './RunSettings';
 import type { Values } from '../tiers/types';
-import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO, DEFAULT_TIMEZONE } from '../model/policy';
-import { CONTENT_KINDS, EMPTY_ENTRY_KIND, MATERIALS_FILE, inferKind, landingSection, readDeclared } from '../model/materialsRules';
+import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO, DEFAULT_TIMEZONE, SHOWN_KINDS } from '../model/policy';
+import { CONTENT_KINDS, EMPTY_ENTRY_KIND, FOLDER_KINDS, MATERIALS_FILE, inferKind, landingSection, readDeclared } from '../model/materialsRules';
 import { otherRepos } from './CourseIndex';
 
 const LABELS: Record<Block, string> = { releases: 'Releases', assignments: 'Assignments', events: 'Events' };
@@ -408,8 +408,9 @@ function ArchiveHelp({ org }: { org: string }) {
   );
 }
 
-// The New entry picker: [draft type, label, row colour]. An assignment's draft type stays `handout`.
-const NEW_TYPES: [string, string, string][] = [['lecture', 'Lecture', 'lec'], ['lab', 'Lab', 'lab'], ['readings', 'Readings', 'lec'], ['handout', 'Assignment', 'asg'], ['exam', 'Exam', 'exam'], ['special_event', 'Event', 'evt']];
+// The New entry picker: [draft type, label, row colour]: the shown folder kinds, then an assignment
+// (its draft type stays `handout`), an exam and an event, labelled as the student site labels them.
+const NEW_TYPES: [string, string, string][] = [...FOLDER_KINDS.filter((k) => SHOWN_KINDS.includes(k)), 'handout', 'exam', 'special_event'].map((t) => [t, t === 'handout' ? KIND_LABEL.assignment : siteRowWord(t), TYPE_CLASS[t] ?? 'evt']);
 
 /** The New entry picker's `?`: what each kind is for, what students see, and what automation does with it. */
 function KindHelp() {

@@ -7,7 +7,7 @@ import { render } from 'preact-render-to-string';
 import { describe, expect, it } from 'vitest';
 import type { Estate, Semester } from '../src/model/discovery';
 import { factsFromStatus } from '../src/model/student';
-import { kindTabs, movedHash, parseHash, studentHref, studentLanding, studentScreens, tabWord } from '../src/router';
+import { kindTabs, movedHash, parseHash, studentHref, studentLanding, studentScreens } from '../src/router';
 import { materialHref } from '../src/screens/StudentFiles';
 import { StudentNav } from '../src/ui/shell';
 
@@ -49,10 +49,10 @@ describe('the student status’s tab fields', () => {
     expect(f.rows.find((r) => r.id === 'lecture_01')!.tabs).toEqual(['lecture', 'readings']);
   });
 
-  it('defaults an older file: a row on its own kind’s tab, only lectures, labs and readings with tabs, nothing else', () => {
+  it('defaults an older file: a row on its own kind’s tab, and no kind has a tab the file does not give it', () => {
     const f = factsFromStatus(older());
     expect(f.rows.find((r) => r.id === 'lecture_02')!.tabs).toEqual(['lecture']);
-    expect(Object.entries(f.kinds!).filter(([, v]) => v.tab).map(([k]) => k)).toEqual(['lecture', 'lab', 'readings']);
+    expect(Object.entries(f.kinds!).filter(([, v]) => v.tab).map(([k]) => k)).toEqual([]);
     expect(f.courseDescription ?? '').toBe('');
     expect(f.previousOfferings ?? []).toEqual([]);
   });
@@ -73,10 +73,14 @@ describe('the student screens', () => {
     expect(studentScreens(f).map(([k]) => k)).toEqual(['home', 'week', 'schedule', 'kind-lecture', 'kind-lab', 'kind-readings', 'kind-drop-in', 'assignments', 'materials', 'instructors']);
     // A kind no row names has no tab (no lab, drop-in or supporting files here); the exam's own row gives Exams one.
     expect(kindTabs(factsFromStatus(DOC))).toEqual([['kind-lecture', 'Lectures'], ['kind-readings', 'Readings'], ['kind-exam', 'Exams']]);
-    expect(kindTabs(factsFromStatus(older()))).toEqual([['kind-lecture', 'Lectures']]);
+    // A file that does not say which kinds have a tab has none.
+    expect(kindTabs(factsFromStatus(older()))).toEqual([]);
     // The fixed tabs alone while the facts are read.
     expect(studentScreens(null).map(([, t]) => t)).toEqual(['Home', 'This week', 'Schedule', 'Assignments', 'All materials', 'Instructors']);
-    expect([tabWord('Lab'), tabWord('Readings')]).toEqual(['Labs', 'Readings']);
+    // A tab is named by its kind's plural, capitalised.
+    const renamed = doc();
+    renamed.kinds.lab.plural = 'practicals';
+    expect(kindTabs(factsFromStatus(renamed))[1]).toEqual(['kind-lab', 'Practicals']);
   });
 
   it('route a kind tab and Home, and move the old Marks, Join and Set up hashes', () => {

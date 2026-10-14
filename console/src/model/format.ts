@@ -2,10 +2,10 @@
 // will_be_skipped, release.entry) never reach the screen except through these maps.
 
 import { hostOf } from './cascade';
-import { DEFAULT_TIMEZONE } from './policy';
+import { DEFAULT_TIMEZONE, KINDS } from './policy';
+import { FALLBACK_KIND } from './materialsRules';
 import type { Assignment, AssignmentState, Bites, Need, Release, ReleaseState } from './types';
 import type { ItemState, ReleaseMark, RepoReadiness, Verdict } from './readiness';
-import policy from '../../schemas/policy.json';
 
 /** `v` as text, blank for null and undefined. */
 export function str(v: unknown): string {
@@ -290,9 +290,7 @@ export function assignmentTitle(a: Pick<Assignment, 'slug' | 'title' | 'number'>
   return a.title && id !== a.title ? `${id}: ${a.title}` : id;
 }
 
-export const KIND_LABEL: Record<string, string> = Object.fromEntries(
-  (policy.kinds as { key: string; label: string }[]).map((k) => [k.key, k.label]),
-);
+export const KIND_LABEL: Record<string, string> = Object.fromEntries(KINDS.map((k) => [k.key, k.label]));
 
 /** The number a key carries, as the engine reads it (`schedule.label_number`): `lecture_03` 3, `01_lab` 1, else null. */
 export function labelNumber(key: string): number | null {
@@ -322,24 +320,35 @@ export function kindIdent(kind: string, n: number | null): string {
   return n === null ? word : `${word} ${n}`;
 }
 
+/** The console's hue class for each status type (its own palette, light and dark, in `tokens.css`). */
 export const TYPE_CLASS: Record<string, string> = {
   lecture: 'lec', lab: 'lab', readings: 'lec', handout: 'asg', due: 'asg', exam: 'exam',
-  special_event: 'evt', event: 'evt', term: 'term', archive: 'term', release: 'term',
-};
-export const TYPE_LABEL: Record<string, string> = {
-  lecture: 'lecture', lab: 'lab', readings: 'readings', handout: 'hand out', due: 'due', exam: 'exam',
-  special_event: 'event', event: 'event', term: 'semester', archive: 'archive', release: 'release',
+  special_event: 'evt', event: 'evt', semester: 'semester', archive: 'semester', release: 'semester',
 };
 
 /**
- * The schedule's first column as the student site words it (`templates/site/_includes/schedule_row_*.html`):
- * an assignment's two rows, an exam, an event, a semester date; a release takes its kind's label from
- * policy (as `schedule_row_lecture.html` does). `assignment` and `term_date` are the student facts' names
- * for a hand out and a semester date. The archive has no site row; the console calls it Archive.
+ * The policy kind a status type is labelled as, where the type is not a kind itself: an
+ * assignment's two rows are the `assignment` kind's, a special event the fallback kind's
+ * (the site's `schedule.html` maps them the same way).
+ */
+const TYPE_KIND: Record<string, string> = { handout: 'assignment', due: 'assignment', special_event: FALLBACK_KIND, event: FALLBACK_KIND };
+const lower = (s: string) => s.toLowerCase();
+
+/** A status type's word: its policy kind's label in lower case (`lecture`, `semester`), with the assignment rows' own words. */
+export const TYPE_LABEL: Record<string, string> = {
+  ...Object.fromEntries(Object.entries(KIND_LABEL).map(([k, v]) => [k, lower(v)])),
+  ...Object.fromEntries(Object.entries(TYPE_KIND).map(([t, k]) => [t, lower(KIND_LABEL[k])])),
+  handout: 'hand out', due: 'due', release: 'release',
+};
+
+/**
+ * The schedule's first column as the student site words it (`templates/site/_includes/schedule_row.html`):
+ * a row's policy kind's label, an assignment's two rows "<label> out" and "<label> due". `assignment`
+ * is the student facts' name for a hand out.
  */
 const SITE_ROW_WORD: Record<string, string> = {
-  handout: 'Assignment out', assignment: 'Assignment out', due: 'Assignment due', exam: 'Exam',
-  special_event: 'Event', event: 'Event', term: 'Semester', term_date: 'Semester', archive: 'Archive',
+  handout: `${KIND_LABEL.assignment} out`, assignment: `${KIND_LABEL.assignment} out`, due: `${KIND_LABEL.assignment} due`,
+  special_event: KIND_LABEL[FALLBACK_KIND], event: KIND_LABEL[FALLBACK_KIND],
 };
 /** `own`: the site's own label for a kind the semester's file declares (`kinds[type].label`), ahead of the policy's. */
 export const siteRowWord = (type: string, own?: string): string => SITE_ROW_WORD[type] || own || KIND_LABEL[type] || type;
@@ -348,7 +357,7 @@ export const siteRowWord = (type: string, own?: string): string => SITE_ROW_WORD
 export type SubmitShape = 'assignment-repo-private' | 'assignment-repo-public' | 'assignment-repo-student-choice' | 'shared-dropbox-repo' | 'external';
 
 /**
- * The due row's sentence on the student site (`schedule_row_due.html`), in parts: `lead`, then a repo
+ * The due row's sentence on the student site (`schedule_row.html`), in parts: `lead`, then a repo
  * name in `code`, then `tail`; or, handed in outside GitHub, a `link` to where once the brief names one.
  * Null for a shape the console does not know (an older status), so no sentence is guessed.
  */

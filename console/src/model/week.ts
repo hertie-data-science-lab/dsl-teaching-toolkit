@@ -43,15 +43,15 @@ export interface WeekLine {
 export const DAY = 864e5;
 
 /** The kinds a site row has that the status types share (the schedule's palette and words). */
-const SHARED_ROW_KINDS = ['lecture', 'lab', 'due', 'exam', 'special_event'];
+const SHARED_ROW_KINDS = ['lecture', 'lab', 'due', 'exam', 'special_event', 'semester'];
 const shared = (map: Record<string, string>) => Object.fromEntries(SHARED_ROW_KINDS.map((k) => [k, map[k]]));
 /**
  * A site row's colour class and word: the status types' (`format.TYPE_CLASS`/`TYPE_LABEL`), with
- * the site's own names for a hand out (`assignment`) and a semester date (`term_date`). A policy
- * kind with neither (readings, drop-in) takes its policy colours.
+ * the site's own name for a hand out (`assignment`). A policy kind with neither (readings,
+ * drop-in) takes its policy colours.
  */
-export const ROW_CLASS: Record<string, string> = { ...shared(TYPE_CLASS), assignment: TYPE_CLASS.handout, term_date: TYPE_CLASS.term };
-export const ROW_WORD: Record<string, string> = { ...shared(TYPE_LABEL), assignment: TYPE_LABEL.handout, term_date: 'semester date' };
+export const ROW_CLASS: Record<string, string> = { ...shared(TYPE_CLASS), assignment: TYPE_CLASS.handout };
+export const ROW_WORD: Record<string, string> = { ...shared(TYPE_LABEL), assignment: TYPE_LABEL.handout, semester: 'semester date' };
 
 type Formation = SemesterFacts['assignments'][number]['teamFormation'];
 
@@ -102,7 +102,7 @@ export function weekItems(facts: SemesterFacts, mine: Mine | null, now: number, 
     else if (session && ahead) add({ at, when: r.when, kind: 'release', ...look, text: shipped ? `${what}: materials released` : what, screen: shipped ? 'materials' : 'schedule' });
     else if (session && shipped && at >= recent && at < start) add({ at, when: r.when, kind: 'release', ...look, text: `${what}: materials released`, screen: 'materials' });
     else if (r.kind === 'exam' && ahead) add({ at, when: r.when, kind: 'exam', text: what, screen: 'schedule' });
-    else if ((r.kind === 'special_event' || r.kind === 'term_date') && ahead) add({ at, when: r.when, kind: 'event', text: what, screen: 'schedule', ...(r.kind === 'term_date' ? { cls: ROW_CLASS.term_date, label: ROW_WORD.term_date } : {}) });
+    else if ((r.kind === 'special_event' || r.kind === 'semester') && ahead) add({ at, when: r.when, kind: 'event', text: what, screen: 'schedule', ...(r.kind === 'semester' ? { cls: ROW_CLASS.semester, label: ROW_WORD.semester } : {}) });
   }
   for (const n of facts.announcements) {
     const at = instant(n.when, tz);
@@ -141,7 +141,7 @@ const WORD: Record<WeekKind, string> = {
   due: 'due', hand_out: 'hand out', release: 'session', exam: 'exam', event: 'event', marks: 'marks', teams: 'teams', news: 'news', patch: 'update',
 };
 const CLASS: Record<WeekKind, string> = {
-  due: 'asg', hand_out: 'asg', release: 'lec', exam: 'exam', event: 'evt', marks: 'asg', teams: 'term', news: 'evt', patch: 'asg',
+  due: 'asg', hand_out: 'asg', release: 'lec', exam: 'exam', event: 'evt', marks: 'asg', teams: 'semester', news: 'evt', patch: 'asg',
 };
 
 /** The semester's weeks from its dates, as the Dashboard counts them; null while either is unknown. */

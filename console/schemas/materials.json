@@ -459,6 +459,7 @@
     ".git"
   ],
   "empty_entry_kind": "lecture",
+  "fallback_kind": "other",
   "file": "materials.yml",
   "folder_kinds": [
     "lecture",
