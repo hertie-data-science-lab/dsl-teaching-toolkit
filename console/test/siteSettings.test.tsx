@@ -28,7 +28,7 @@ const cohort = { org: ORG, term: 'f2026', termLabel: 'Fall 2026' };
 const course: Course = { org: COURSE_ORG, name: 'Machine Learning', code: 'E1234', description: '', write: true, admins: [], cohorts: [cohort], meta: {} };
 const loaded: Loaded = { kind: 'ready', status: example as unknown as Status, sha: 's', stale: [] };
 const COURSE_YML = '# INSTRUCTOR-OWNED\ncourse_name: Machine Learning\ncourse_code: E1234\npeople:\n  course_admins:\n    - github_handle: a-example\n      email: a@staff.example.org\n';
-const SCHEDULE = '# INSTRUCTOR-OWNED\ntimezone: Europe/Berlin\nsemester_start: 2026-09-07\nsemester_end: 2026-12-18\n';
+const SCHEDULE = '# INSTRUCTOR-OWNED\ntimezone: Europe/Berlin\nsemester:\n  start: {type: start, event_datetime: 2026-09-07}\n  end: {type: end, event_datetime: 2026-12-18}\n';
 const CONFIG = '# INSTRUCTOR-OWNED\ncourse_name: "Machine Learning"\n\n# --- Institution ---\nschoolname: "Hertie School"\nschoolurl: "https://hertie-school.org/en/datasciencelab"\ndsl_org_url: "https://github.com/hertie-data-science-lab"\naddress: |\n    Data Science Lab\n    Hertie School\n\nplugins:\n  - jekyll-remote-theme\n';
 
 const HOME = 'Welcome to {{ site.course_name }}.\n\n{% if site.content_repo %}Materials live in {{ site.content_repo }}.{% endif %}\n';
@@ -105,7 +105,7 @@ describe('Site settings', () => {
     await type('#e-te', '2026-12-20');
     await act(() => saveIn(sem).click());
     await settle(() => puts(gh, 'schedule.yml').length > 0);
-    expect(parse(body(puts(gh, 'schedule.yml')[0])).semester_end).toBe('2026-12-20');
+    expect(parse(body(puts(gh, 'schedule.yml')[0])).semester.end).toEqual({ type: 'end', event_datetime: '2026-12-20' });
   });
 
   it('shows the semester label and org as what they are, not as fields', async () => {

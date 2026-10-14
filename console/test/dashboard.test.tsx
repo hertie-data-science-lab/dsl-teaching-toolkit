@@ -24,30 +24,32 @@ const cohort = { org: COHORT_ORG, term: 'f2026', termLabel: 'Fall 2026' };
 const course: Course = { org: COURSE_ORG, name: 'Machine Learning', code: 'E1234', description: '', write: true, admins: [], cohorts: [cohort], meta: {} };
 
 const SCHEDULE = `timezone: Europe/Berlin
-semester_start: 2026-09-07
-semester_end: 2026-12-18
-releases:
+semester:
+  start: {type: start, event_datetime: 2026-09-07}
+  end: {type: end, event_datetime: 2026-12-18}
+lectures:
   s5:
+    session: 5
     event_datetime: 2026-10-08T10:00
     title: Trees and ensembles
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: lectures/05_trees
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: lectures/05_trees
 assignments:
   assignment-2:
-    course_source_repo: assignment-2-f2026
+    number: 2
+    template: assignment-2-f2026
     handout_datetime: 2026-09-15T10:00
     due_datetime: 2026-09-27T23:59
 events:
   orientation:
     title: Orientation
     event_datetime: 2026-09-01T09:00
+exams:
   midterm:
-    kind: exam
     title: Midterm
     event_datetime: 2026-10-22T10:00
   final:
-    kind: exam
     title: Final
     event_datetime: 2026-12-15T10:00
 `;

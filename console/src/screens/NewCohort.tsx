@@ -57,7 +57,7 @@ export function cardsDone(files: Files, org: string): { staff: boolean; schedule
   const sched = parseSchedule(f('schedule.yml'));
   return {
     staff: parseInstructors(f(INSTRUCTORS_FILE)).length > 0,
-    schedule: !!sched && Object.keys(sched.releases).length + Object.keys(sched.assignments).length > 0,
+    schedule: !!sched && Object.keys(sched.entries).length + Object.keys(sched.assignments).length > 0,
     students: parseRoster(f('students.csv')).rows.length > 0,
     defaults: Object.keys(obj(obj(yamlDoc(f(ASSIGNMENTS_FILE))).defaults)).length > 0,
   };

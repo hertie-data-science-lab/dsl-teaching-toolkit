@@ -4,7 +4,6 @@
 import { render } from 'preact-render-to-string';
 import { parse } from 'yaml';
 import { describe, expect, it } from 'vitest';
-import SEEDED from '../../templates/semester-config/schedule.yml?raw';
 import { EnvCtx, type Env } from '../src/env';
 import { CONFLICT, saveText, type SaveState } from '../src/edit/save';
 import { YamlText, obj } from '../src/edit/yamlText';
@@ -14,11 +13,7 @@ import { GitHubClient } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
 import { StaticFiles } from './staticFiles';
 import { POLICY, penaltyRate } from '../src/model/policy';
-import { labelNumber, sessionNumber } from '../src/model/format';
 import { effectivePenalty, finalGrade, lateChoice, overrideText, overrideValue, penaltyText, questionFile, questionPoints, questionsFromRows, readSheet, scoreTotal } from '../src/model/marks';
-import { assignmentKey, blankDeploy, blankDraft, defaultDeployAt, deployAt, draftErrors, entryKey, freshId, needsNumber, nextNumber, readDraft, sessionBlock, unnumberedId, withNumber, writeDraft, type ArchiveDraft, type AssignmentDraft, type ReleaseDraft } from '../src/model/scheduleEdit';
-import { cutoffOf } from '../src/screens/RunSettings';
-import { validSchedule } from '../src/model/cascade';
 import { StatusStore, type Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
 import { DispatchAdapter } from '../src/ops/adapter';
@@ -94,292 +89,6 @@ describe('saving a file', () => {
     const seen: SaveState[] = [];
     await saveText(saveEnv(gh), T, 'x: 1\n', 's', { message: 'm' }, (s) => seen.push(s));
     expect(seen.pop()).toEqual({ kind: 'bad', text: 'Saved, but Validate schedule failed: Session 5 cites a folder that is not there.' });
-  });
-});
-
-// ------------------------------------------------------------------ schedule model
-
-describe('the schedule entry sheet model', () => {
-  it('proposes assignment-<n> for a template joining the schedule: one more than the highest number, past any key taken', () => {
-    expect(nextNumber({}, 'assignment')).toBe(1);
-    expect(nextNumber({ assignments: { 'assignment-1': {}, 'assignment-2': {} } }, 'assignment')).toBe(3);
-    // The highest number decides, not the count: a gap is not filled.
-    expect(nextNumber({ assignments: { 'assignment-4': {} } }, 'assignment')).toBe(5);
-    // An entry's own number: counts too.
-    expect(nextNumber({ assignments: { trees: { number: 6 }, 'assignment-2': {} } }, 'assignment')).toBe(7);
-    // A key with no number adds nothing; one used in another block is stepped past.
-    expect(nextNumber({ assignments: { trees: {}, 'assignment-3d-vision': {} } }, 'assignment')).toBe(1);
-    expect(nextNumber({ assignments: { x: {} }, releases: { 'assignment-1': {} } }, 'assignment')).toBe(2);
-    expect(nextNumber({ assignments: { lab_03: {} } }, 'assignment')).toBe(4);
-    expect(assignmentKey(4)).toBe('assignment-4');
-    const d = { ...blankDraft('handout', { repo: '' }), template: 'assignment-regression' } as AssignmentDraft;
-    const doc = { assignments: { 'assignment-1': {} } };
-    expect(withNumber(d, doc).number).toBe(2);
-    // A number typed (or emptied) stays as it is; a saved entry keeps its key.
-    expect(withNumber({ ...d, number: 7 }, doc).number).toBe(7);
-    expect(withNumber({ ...d, number: '' }, doc).number).toBe('');
-    expect(withNumber({ ...d, id: 'assignment-1' }, doc).number).toBeUndefined();
-    // Supporting files are no row: a new one gets no number, and none is asked of it.
-    const data = { ...blankDraft('lecture', { repo: 'cm' }), number: 3 } as ReleaseDraft;
-    expect(withNumber(data, { releases: {} }, undefined, 'assets').number).toBeUndefined();
-    expect(needsNumber(data, 'assets')).toBe(false);
-    expect(needsNumber(data, 'lecture')).toBe(true);
-    const ok = { ...d, dueDate: '2026-10-01', handoutDate: '2026-09-01' };
-    expect(draftErrors({ ...ok, number: 2 }, { doc })).toEqual({});
-    expect(draftErrors({ ...ok, number: 1 }, { doc }).number).toBe('assignment-1 is already in this schedule.');
-    expect(draftErrors({ ...ok, number: '' }, { doc }).number).toBe('A number is needed.');
-    expect(draftErrors({ ...ok, number: 2.5 }, { doc }).number).toBe('A whole number from 1 to 999.');
-  });
-
-  it('adds a release to the seeded file and keeps every comment', () => {
-    const y = new YamlText(SEEDED);
-    const doc = y.toJS() as Record<string, unknown>;
-    const blank = { ...(blankDraft('lecture', { repo: 'course-materials-f2026' }) as ReleaseDraft), title: 'Intro', date: '2026-09-10' };
-    blank.deploys[0].folder = 'lectures/01_intro';
-    // Required, and prefilled with the next lecture's number (decision 0020).
-    expect(draftErrors(blank, { templateUsers: () => 0 }).number).toBe('A number is needed.');
-    const d = withNumber(blank, doc);
-    expect(d.number).toBe(1);
-    expect(draftErrors(d, { templateUsers: () => 0 })).toEqual({});
-    const id = freshId(doc, 'releases', 'lecture-1');
-    expect(id).toBe('lecture-1');
-    writeDraft(y, { ...d, id }, doc);
-    const out = parse(y.text);
-    expect(out.releases['lecture-1']).toEqual({ event_datetime: '2026-09-10T10:00', kind: 'lecture', number: 1, title: 'Intro', deploy: [{ course_source_repo: 'course-materials-f2026', course_source_path: 'lectures/01_intro' }] });
-    expect(y.text.split('\n').filter((l) => l.trim().startsWith('#'))).toEqual(SEEDED.split('\n').filter((l) => l.trim().startsWith('#')));
-  });
-
-  it('keys an unnumbered release with no digit, so a readings pack joins no lecture', () => {
-    const doc = { releases: { readings: {}, 'readings-week': {}, 'lecture-1': {} }, events: { 'readings-week-b': {} } };
-    expect(unnumberedId({}, 'readings', '')).toBe('readings');
-    expect(unnumberedId(doc, 'readings', '')).toBe('readings-b');
-    expect(unnumberedId(doc, 'readings', 'Week 3')).toBe('readings-week-c');
-    expect(unnumberedId(doc, 'readings', 'Week 3, part A')).toBe('readings-week-3-part-a');
-    expect(unnumberedId({}, 'lecture', '')).toBe('lecture');
-    expect(freshId({ releases: { 'lecture-3': {} } }, 'releases', 'lecture-3')).toBe('lecture-3-b');
-    expect(freshId({ events: { 'midterm-exam': {} } }, 'events', 'Midterm exam')).toBe('midterm-exam-b');
-  });
-
-  it('edits an entry in place, keeping the keys the sheet does not show', () => {
-    const src = 'releases:\n  s5:\n    event_datetime: 2026-10-08T10:00   # moved once\n    assignment: assignment-2\n    deploy:\n      - course_source_repo: course-materials-f2026\n        course_source_path: lectures/05_trees\n';
-    const y = new YamlText(src);
-    const doc = y.toJS() as Record<string, unknown>;
-    const d = readDraft(doc, 's5') as ReleaseDraft;
-    expect(d.deploys[0].folder).toBe('lectures/05_trees');
-    writeDraft(y, { ...d, deploys: [{ ...d.deploys[0], folder: 'lectures/05_trees_and_ensembles' }] }, doc);
-    expect(y.text).toBe(src.replace('lectures/05_trees\n', 'lectures/05_trees_and_ensembles\n'));
-  });
-
-  it('edits each line of what to release on its own, keeping untouched lines byte for byte', () => {
-    // Maths-style: the lab files at the session, the solutions days later.
-    const src =
-      'releases:\n  lab-3:\n    event_datetime: 2026-10-08T10:00\n    deploy:\n' +
-      '      - course_source_repo: m   # the lab\n        course_source_path: labs/03\n' +
-      '      - course_source_repo: m\n        course_source_path: labs/03_solutions   # later\n        deploy_datetime: 2026-10-12T18:00\n';
-    const y = new YamlText(src);
-    const doc = y.toJS() as Record<string, unknown>;
-    const d = readDraft(doc, 'lab-3') as ReleaseDraft;
-    expect(d.deploys.map((x) => [x.folder, x.atDate, x.atTime])).toEqual([['labs/03', '', ''], ['labs/03_solutions', '2026-10-12', '18:00']]);
-    // Untouched: nothing changes.
-    writeDraft(y, d, doc);
-    expect(y.text).toBe(src);
-    // Removing the first line leaves the second exactly as written.
-    writeDraft(y, { ...d, deploys: [d.deploys[1]] }, doc);
-    expect(y.text).toBe('releases:\n  lab-3:\n    event_datetime: 2026-10-08T10:00\n    deploy:\n      - course_source_repo: m\n        course_source_path: labs/03_solutions   # later\n        deploy_datetime: 2026-10-12T18:00\n');
-  });
-
-  it('moves a session with nothing left to release to events, and back when it gains a line', () => {
-    const src = 'releases:\n  s5:\n    event_datetime: 2026-10-08T10:00\n    kind: lecture\n    title: Trees\n    deploy:\n      - course_source_repo: m\n        course_source_path: l\n';
-    const y = new YamlText(src);
-    const doc = y.toJS() as Record<string, unknown>;
-    const d = { ...(readDraft(doc, 's5') as ReleaseDraft), deploys: [] };
-    // No number is asked of it: an event takes its key's (s5), as on a release.
-    expect(draftErrors(d, { kind: 'lecture' })).toEqual({});
-    writeDraft(y, d, doc);
-    const out = parse(y.text);
-    expect(out.releases).toEqual({});
-    expect(validSchedule(out)).toBe(true);
-    expect(out.events.s5).toEqual({ event_datetime: '2026-10-08T10:00', kind: 'lecture', title: 'Trees' });
-    // Read back it is the same sheet, with nothing to release; a line moves it back.
-    const doc2 = y.toJS() as Record<string, unknown>;
-    const back = readDraft(doc2, 's5') as ReleaseDraft;
-    expect(back).toEqual({ ...d, block: 'events' });
-    writeDraft(y, { ...back, deploys: [{ ...blankDeploy('m'), folder: 'l' }] }, doc2);
-    const again = parse(y.text);
-    expect(again.events).toEqual({});
-    expect(again.releases.s5).toEqual({ event_datetime: '2026-10-08T10:00', kind: 'lecture', title: 'Trees', deploy: [{ course_source_repo: 'm', course_source_path: 'l' }] });
-  });
-
-  it('numbers a session by the first number in its label, as the engine does', () => {
-    expect(sessionNumber('lab-01-group-2')).toBe(1);
-    expect(labelNumber('lab-01-group-2')).toBe(2);
-    const y = new YamlText('events:\n  lab-01-group-2:\n    event_datetime: 2026-09-17T18:00\n    kind: lab\n');
-    const doc = y.toJS() as Record<string, unknown>;
-    const d = readDraft(doc, 'lab-01-group-2') as ReleaseDraft;
-    expect(d.number).toBe(1);
-    // Its own number is the label's: nothing is written for it.
-    writeDraft(y, { ...d, details: 'Group 2' }, doc);
-    expect(parse(y.text).events['lab-01-group-2']).toEqual({ event_datetime: '2026-09-17T18:00', kind: 'lab', details: 'Group 2' });
-  });
-
-  it('edits the events: session when a release shares its label, and never deletes the release', () => {
-    const src = 'releases:\n  lab-01:\n    event_datetime: 2026-09-16T08:00\n    kind: lab\n    deploy:\n      - course_source_repo: m\n        course_source_path: labs/01\nevents:\n  lab-01:\n    event_datetime: 2026-09-17T18:00\n    kind: lab\n    details: Group 2\n';
-    const y = new YamlText(src);
-    const doc = y.toJS() as Record<string, unknown>;
-    // The events row opens under its own key, and reads the session, not the release.
-    expect(entryKey(doc, 'events', 'lab-01')).toBe('events:lab-01');
-    expect(entryKey(doc, 'releases', 'lab-01')).toBe('lab-01');
-    const d = readDraft(doc, entryKey(doc, 'events', 'lab-01')) as ReleaseDraft;
-    expect([d.id, d.block, d.details, d.deploys]).toEqual(['lab-01', 'events', 'Group 2', []]);
-    // The label under both blocks is refused, either way round.
-    expect(draftErrors(d, { doc, kind: 'lab' }).block).toBe('lab-01 is already a release in schedule.yml. Rename one of them there.');
-    expect(draftErrors(readDraft(doc, 'lab-01') as ReleaseDraft, { doc, kind: 'lab' }).block).toBe('lab-01 is already a session in schedule.yml. Rename one of them there.');
-    // Even written, the session's edit stays under events: and the release is untouched.
-    writeDraft(y, { ...d, details: 'Group 2, room B' }, doc);
-    const out = parse(y.text);
-    expect(out.events['lab-01'].details).toBe('Group 2, room B');
-    expect(out.releases['lab-01'].deploy).toHaveLength(1);
-  });
-
-  it('writes a new session with nothing to release under events: its kind, its number, TBC without a date', () => {
-    const y = new YamlText('releases:\n  lab-1:\n    event_datetime: 2026-09-16T08:00\n    kind: lab\n    title: Intro\n    deploy:\n      - course_source_repo: m\n        course_source_path: labs/01\n');
-    const doc = y.toJS() as Record<string, unknown>;
-    const d = { ...(blankDraft('lab', { repo: 'm' }) as ReleaseDraft), deploys: [], number: 1 as const, details: 'Group 2', date: '2026-09-17', time: '18:00' };
-    expect(draftErrors(d, { kind: 'lab' })).toEqual({});
-    expect(sessionBlock(d)).toBe('events');
-    const id = freshId(doc, sessionBlock(d), 'lab-1');
-    expect(id).toBe('lab-1-b');
-    writeDraft(y, { ...d, id }, doc);
-    expect(parse(y.text).events[id]).toEqual({ event_datetime: '2026-09-17T18:00', kind: 'lab', number: 1, details: 'Group 2' });
-    expect(validSchedule(parse(y.text))).toBe(true);
-    expect(parse(y.text).releases['lab-1'].deploy).toHaveLength(1);
-    // Without a date it is TBC; a release still needs one.
-    const tbc = { ...d, date: '', time: '' };
-    expect(draftErrors(tbc, { kind: 'lab' })).toEqual({});
-    writeDraft(y, { ...tbc, id: 'lab-2' }, doc);
-    expect(parse(y.text).events['lab-2'].event_datetime).toBe('tbc');
-    expect(draftErrors({ ...tbc, deploys: [{ ...blankDeploy('m'), folder: 'l' }] }, { kind: 'lab' }).date).toBe('When is needed.');
-  });
-
-  it('keeps an exam or a special event on its own sheet, and an unknown kind is a special event', () => {
-    const doc = { events: { mid: { kind: 'exam', event_datetime: '2026-11-03' }, clinic: { event_datetime: '2026-11-04' }, odd: { kind: 'assets', event_datetime: '2026-11-05' }, lab: { kind: 'lab', event_datetime: '2026-11-06' }, talk: { kind: 'lecture', event_datetime: '2026-11-07T10:00' } } };
-    expect(readDraft(doc, 'mid')?.kind).toBe('events');
-    // A session kind is a session's sheet, whichever block holds it: a lab, a lecture.
-    expect(readDraft(doc, 'lab')?.kind).toBe('session');
-    expect(readDraft(doc, 'talk')).toMatchObject({ kind: 'session', type: 'lecture', deploys: [] });
-    expect(readDraft(doc, 'clinic')).toMatchObject({ kind: 'events', type: 'special_event' });
-    expect(readDraft(doc, 'odd')?.kind).toBe('events');
-  });
-
-  it('defaults a line’s release time to an hour before a timed session, the day’s start for a whole-day one', () => {
-    expect(defaultDeployAt('2026-10-08', '10:00')).toEqual(['2026-10-08', '09:00']);
-    expect(defaultDeployAt('2026-10-08', '00:30')).toEqual(['2026-10-07', '23:30']);
-    expect(defaultDeployAt('2026-10-08', '')).toEqual(['2026-10-08', '']);
-    expect(defaultDeployAt('', '10:00')).toEqual(['', '']);
-    const session = { date: '2026-10-08', time: '10:00' };
-    // Back at the default, or the date emptied: blank, so nothing is written.
-    expect(deployAt(session, '2026-10-08', '09:00')).toEqual({ atDate: '', atTime: '' });
-    expect(deployAt(session, '', '09:00')).toEqual({ atDate: '', atTime: '' });
-    expect(deployAt(session, '2026-10-08', '08:00')).toEqual({ atDate: '2026-10-08', atTime: '08:00' });
-    expect(deployAt(session, '2026-10-08', '')).toEqual({ atDate: '2026-10-08', atTime: '' });
-  });
-
-  it('writes a line’s own release time only when given; blank ships at the default', () => {
-    const src = 'releases:\n  s5:\n    event_datetime: 2026-10-08T10:00\n    deploy:\n      - course_source_repo: m\n        course_source_path: l\n        deploy_datetime: 2026-10-07T09:00\n';
-    const y = new YamlText(src);
-    const doc = y.toJS() as Record<string, unknown>;
-    const d = readDraft(doc, 's5') as ReleaseDraft;
-    writeDraft(y, { ...d, deploys: [{ ...d.deploys[0], atDate: '', atTime: '' }, { ...blankDeploy('m'), folder: 'l2', atDate: '2026-10-10', atTime: '' }] }, doc);
-    expect(parse(y.text).releases.s5.deploy).toEqual([{ course_source_repo: 'm', course_source_path: 'l' }, { course_source_repo: 'm', course_source_path: 'l2', deploy_datetime: '2026-10-10' }]);
-    expect(draftErrors({ ...d, deploys: [{ ...d.deploys[0], atDate: '', atTime: '09:00' }] }, { kind: 'lecture' })['deploy0.at']).toBe('Give the date too, or clear the time.');
-  });
-
-  it('keeps a moment as the file spells it when only the title changes', () => {
-    const src =
-      'releases:\n  s5:\n    event_datetime: "2026-10-08T10:00:00+01:00"\n    title: Trees\n    deploy:\n      - course_source_repo: m\n        course_source_path: l\n' +
-      'assignments:\n  a2:\n    course_source_repo: assignment-2-f2026\n    handout_datetime: 2026-09-15 10:00\n    due_datetime: 2026-09-27T23:59:00+02:00\n';
-    const y = new YamlText(src);
-    const doc = y.toJS() as Record<string, unknown>;
-    writeDraft(y, { ...(readDraft(doc, 's5') as ReleaseDraft), title: 'Trees and ensembles' }, doc);
-    writeDraft(y, { ...(readDraft(doc, 'a2') as never as object), title: 'Regression' } as never, doc);
-    // An assignment's title is its template's (decision 0009): never written here.
-    expect(y.text).toBe(src.replace('title: Trees\n', 'title: Trees and ensembles\n'));
-  });
-
-  it('turns automatic archiving off by removing the block, and checks an assignment’s dates', () => {
-    const y = new YamlText(SEEDED);
-    const doc = y.toJS() as Record<string, unknown>;
-    writeDraft(y, { ...(readDraft(doc, 'archive') as never as object), kind: 'archive', on: false } as never, doc);
-    expect(parse(y.text)?.archive).toBeUndefined();
-    const a = { ...blankDraft('handout', { repo: '' }), template: 'assignment-2-f2026', handoutDate: '2026-09-15', dueDate: '2026-09-10', solutionOn: true, solutionDate: '2026-09-14' };
-    const e = draftErrors(a as never, { templateUsers: () => 2 });
-    expect(e.due).toBe('Due must come after the hand out.');
-    expect(e.solution).toBe('Must be after the hand out.');
-    // The repo name is assignments.yml's now: nothing here asks for it.
-    expect(e.semesterRepo).toBeUndefined();
-  });
-
-  it('refuses a solution shown before the late cutoff, in the engine’s words', () => {
-    const a = { ...blankDraft('handout', { repo: '' }), id: 'assignment-1', number: 1, template: 'assignment-1-f2026', handoutDate: '2026-09-15', dueDate: '2026-10-13', dueTime: '', solutionOn: true, solutionDate: '2026-10-16', solutionTime: '09:00' };
-    // due + 5 days, a bare due date closing at the end of its day, as the engine reads it
-    expect(draftErrors(a as never, undefined, cutoffOf('2026-10-13', '', 5)).solution).toBe(
-      'The solution for assignment-1 is set to be shown on 2026-10-16 09:00, before its late cutoff on 2026-10-18 23:59. Students can still hand in until the late cutoff, so the solution must be shown on or after it.',
-    );
-    // on or after the cutoff, or with no late window past the date: saved
-    expect(draftErrors({ ...a, solutionDate: '2026-10-18', solutionTime: '23:59' } as never, undefined, cutoffOf('2026-10-13', '23:59', 5))).toEqual({});
-    expect(draftErrors(a as never, undefined, cutoffOf('2026-10-13', '', 2))).toEqual({});
-    // a new entry is named by its number, not its template
-    expect(draftErrors({ ...a, id: '', number: 3 } as never, undefined, cutoffOf('2026-10-13', '', 5)).solution).toMatch(/^The solution for assignment-3 is/);
-  });
-
-  it('leaves a retired key an unmigrated entry still carries exactly as it is', () => {
-    const src = 'assignments:\n  a2:\n    course_source_repo: assignment-2-f2026\n    semester_dest_repo: homework-2\n    title: Regression\n    due_datetime: 2026-09-27T23:59:00+02:00\n    grading_datetime: 2026-10-07\n';
-    const y = new YamlText(src);
-    const doc = y.toJS() as Record<string, unknown>;
-    writeDraft(y, { ...(readDraft(doc, 'a2') as never as object), details: 'Fit it.' } as never, doc);
-    const a2 = (parse(y.text).assignments as Record<string, Record<string, unknown>>).a2;
-    expect(a2).toMatchObject({ semester_dest_repo: 'homework-2', title: 'Regression', grading_datetime: '2026-10-07', details: 'Fit it.' });
-  });
-
-  it('edits the archive grace days, writing the key only once it differs from 60', () => {
-    const y = new YamlText(SEEDED);
-    const doc = y.toJS() as Record<string, unknown>;
-    const d = readDraft(doc, 'archive') as ArchiveDraft;
-    expect(d.graceDays).toBe(60);
-    writeDraft(y, { ...d, title: 'Frozen' }, doc);
-    expect(parse(y.text).archive).not.toHaveProperty('grace_days');
-    writeDraft(y, { ...d, graceDays: 90 }, doc);
-    expect(parse(y.text).archive.grace_days).toBe(90);
-    expect(y.text.split('\n').filter((l) => l.trim().startsWith('#'))).toEqual(SEEDED.split('\n').filter((l) => l.trim().startsWith('#')));
-    const y2 = new YamlText(y.text);
-    const doc2 = y2.toJS() as Record<string, unknown>;
-    const d2 = readDraft(doc2, 'archive') as ArchiveDraft;
-    expect(d2.graceDays).toBe(90);
-    writeDraft(y2, { ...d2, graceDays: '' }, doc2);
-    expect(parse(y2.text).archive).not.toHaveProperty('grace_days');
-    expect(draftErrors({ ...d, graceDays: -1 }, { templateUsers: () => 0 }).graceDays).toBe('A whole number of days, 0 or more.');
-    expect(draftErrors({ ...d, graceDays: 1.5 }, { templateUsers: () => 0 }).graceDays).toBeDefined();
-    expect(draftErrors({ ...d, graceDays: 0 }, { templateUsers: () => 0 })).toEqual({});
-  });
-
-  it('writes only the archive alternative chosen: a date, or the days after the semester ends', () => {
-    const y = new YamlText(SEEDED);
-    const doc = y.toJS() as Record<string, unknown>;
-    const d = readDraft(doc, 'archive') as ArchiveDraft;
-    expect(d.when).toBe('days');
-    writeDraft(y, { ...d, when: 'date', date: '2027-02-15', graceDays: 90 }, doc);
-    const dated = parse(y.text).archive;
-    expect(String(dated.event_datetime)).toContain('2027-02-15');
-    expect(dated).not.toHaveProperty('grace_days');
-    const y2 = new YamlText(y.text);
-    const doc2 = y2.toJS() as Record<string, unknown>;
-    const d2 = readDraft(doc2, 'archive') as ArchiveDraft;
-    expect(d2.when).toBe('date');
-    writeDraft(y2, { ...d2, when: 'days', graceDays: 90 }, doc2);
-    const days = parse(y2.text).archive;
-    expect(days.event_datetime ?? null).toBeNull();
-    expect(days.grace_days).toBe(90);
-    expect(draftErrors({ ...d, when: 'date', date: '' }, { templateUsers: () => 0 }).date).toBeDefined();
   });
 });
 
@@ -525,7 +234,7 @@ const course: Course = {
 };
 const groupStatus: Status = {
   ...STATUS,
-  assignments: [...(STATUS.assignments ?? []), { slug: 'assignment-3', title: 'Group project', template: 'assignment-3-f2026', state: 'teams_forming', handout: '2026-09-20T10:00:00+02:00', due: '2026-10-20T23:59:00+02:00', grading_cutoff_datetime: '2026-10-30T23:59:00+02:00', solution_shown: null, units: 12, submissions: 0, teams: 1, marks: { filled: 0, total: 12 }, returned: false, problem: true }],
+  assignments: [...(STATUS.assignments ?? []), { slug: 'assignment-3', number: 3, title: 'Group project', template: 'assignment-3-f2026', state: 'teams_forming', handout: '2026-09-20T10:00:00+02:00', due: '2026-10-20T23:59:00+02:00', grading_cutoff_datetime: '2026-10-30T23:59:00+02:00', solution_shown: null, units: 12, submissions: 0, teams: 1, marks: { filled: 0, total: 12 }, returned: false, problem: true }],
 };
 const ready: Loaded = { kind: 'ready', status: groupStatus, sha: 's', stale: [] };
 const FILES: Record<string, string> = {
@@ -602,7 +311,7 @@ describe('editing screens', () => {
     expect(out).not.toContain('[object Object]');
   });
   it('the schedule’s archive entry explains archiving and offers Preview and the verb', () => {
-    const withSched = new StaticFiles({ ...FILES, [`${COHORT_ORG}/semester-config/schedule.yml`]: SEEDED }, {}, TREES);
+    const withSched = new StaticFiles({ ...FILES, [`${COHORT_ORG}/semester-config/schedule.yml`]: 'semester:\n  archive: {type: archive, event_datetime: 2027-02-16}\n' }, {}, TREES);
     const out = html(<ScheduleScreen {...props({ entry: 'archive', files: withSched })} />);
     expect(out).toContain('aria-label="About archiving"');
     expect(out).toContain('Students and instructors keep read access; nothing is deleted');
@@ -708,73 +417,5 @@ describe('editing screens', () => {
     expect(out).toContain('Keep the website updated');
     expect(out).not.toContain('Lives in');
     expect(out).toContain('href="#details"');
-  });
-});
-
-describe('explicit numbers in the entry sheet (decision 0020)', () => {
-  const doc = {
-    releases: {
-      'lecture-1': { kind: 'lecture' },
-      guest: { kind: 'lecture', number: 7 },
-      'lab_03': {},
-      intro: {},
-      reading: { kind: 'readings' },
-    },
-    assignments: { 'assignment-2': {}, project: {} },
-  };
-  const kindOf = (k: string, e: unknown) => ({ lab_03: 'lab' })[k] ?? (((e as { kind?: string }).kind) || 'lecture');
-
-  it('prefills 1 + the highest number of the kind, never a count', () => {
-    expect(nextNumber(doc, 'lecture', kindOf)).toBe(8);
-    expect(nextNumber(doc, 'lab', kindOf)).toBe(4);
-    expect(nextNumber(doc, 'drop-in', kindOf)).toBe(1);
-    // Readings and supporting files carry no number of their own: nothing is proposed.
-    expect(nextNumber(doc, 'readings', kindOf)).toBeNull();
-    expect(nextNumber(doc, 'assets', kindOf)).toBeNull();
-    expect(nextNumber(doc, 'assignment')).toBe(3);
-    const lab = blankDraft('lab', { repo: 'm' }) as ReleaseDraft;
-    expect(withNumber(lab, doc, kindOf).number).toBe(4);
-    // A session with nothing to ship is proposed no number: the next release's is not its own.
-    expect(withNumber({ ...lab, deploys: [] }, doc, kindOf).number).toBeUndefined();
-    expect(withNumber({ ...lab, deploys: [], number: 2 }, doc, kindOf).number).toBe(2);
-    // Readings are numbered only to join a lecture: nothing is proposed.
-    expect(withNumber(blankDraft('readings', { repo: 'm' }) as ReleaseDraft, doc, kindOf).number).toBeUndefined();
-    // A draft whose kind is inferred takes that kind's number; readings keep only one typed in.
-    const inferred = { ...(blankDraft('lecture', { repo: 'm' }) as ReleaseDraft), type: '' };
-    expect(withNumber(inferred, doc, kindOf, 'lab').number).toBe(4);
-    expect(withNumber({ ...inferred, number: 3 }, doc, kindOf, 'readings').number).toBe(3);
-    expect(withNumber({ ...inferred, number: '' }, doc, kindOf, 'readings').number).toBe('');
-  });
-
-  it('shows a saved entry its number, and requires one where the site shows the row', () => {
-    expect((readDraft(doc, 'guest') as ReleaseDraft).number).toBe(7);
-    expect((readDraft(doc, 'lab_03') as ReleaseDraft).number).toBe(3);
-    const intro = readDraft(doc, 'intro') as ReleaseDraft;
-    expect(intro.number).toBe('');
-    const ok = { ...intro, date: '2026-09-10', deploys: [{ ...blankDeploy('m'), folder: 'l' }] };
-    expect(draftErrors(ok, { kind: 'lecture' }).number).toBe('A number is needed.');
-    // With nothing to release it is an `events:` session: no number is asked of it.
-    expect(draftErrors({ ...ok, deploys: [] }, { kind: 'lecture' }).number).toBeUndefined();
-    expect(draftErrors({ ...ok, show: false }, { kind: 'lecture' }).number).toBeUndefined();
-    expect(draftErrors(ok, { kind: 'readings' }).number).toBeUndefined();
-    // A readings key that carries a number joins that lecture: clearing the field cannot undo it.
-    expect(draftErrors({ ...ok, id: 'readings-3', number: '' }, { kind: 'readings' }).number).toBe('The key readings-3 carries the number 3. Rename the key in schedule.yml to make this a row of its own.');
-    expect((readDraft(doc, 'project') as AssignmentDraft).number).toBe('');
-  });
-
-  it('writes number: when typed, and leaves a label-numbered entry as it is written', () => {
-    const copy = '    deploy:\n      - course_source_repo: m\n        course_source_path: l\n';
-    const src = `releases:\n  intro:\n    event_datetime: 2026-09-10T10:00\n    kind: lecture\n${copy}  lecture-2:\n    event_datetime: 2026-09-17T10:00\n${copy}`;
-    const y = new YamlText(src);
-    const d0 = y.toJS() as Record<string, unknown>;
-    writeDraft(y, { ...(readDraft(d0, 'intro') as ReleaseDraft), number: 1 }, d0);
-    writeDraft(y, { ...(readDraft(d0, 'lecture-2') as ReleaseDraft), title: 'Two' }, d0);
-    const out = parse(y.text);
-    expect(out.releases.intro.number).toBe(1);
-    expect(out.releases['lecture-2'].number).toBeUndefined();
-    const y2 = new YamlText(y.text);
-    const d1 = y2.toJS() as Record<string, unknown>;
-    writeDraft(y2, { ...(readDraft(d1, 'lecture-2') as ReleaseDraft), number: 3 }, d1);
-    expect(parse(y2.text).releases['lecture-2'].number).toBe(3);
   });
 });
