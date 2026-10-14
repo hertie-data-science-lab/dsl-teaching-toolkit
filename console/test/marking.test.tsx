@@ -20,7 +20,7 @@ import { OpPanel } from '../src/ops/Panel';
 import { OpsSession } from '../src/ops/session';
 import { parseHash } from '../src/router';
 import { AssignmentScreen } from '../src/screens/Assignments';
-import { previewEmails, templateChecks } from '../src/screens/Marking';
+import { PreviewEmails, previewEmails, templateChecks } from '../src/screens/Marking';
 import type { CohortProps } from '../src/screens/types';
 import example from './fixtures/status.example.json';
 import { FakeGitHub, fileBody, json, type Seen } from './fake';
@@ -472,6 +472,23 @@ describe('Return marks from the marking screen', () => {
     await arrive();
     expect(opened).toHaveBeenCalledTimes(1);
     location.hash = '';
+  });
+
+  it('finds the preview issue past the first page of open issues, and says so when there is none', async () => {
+    const PREVIEW = { title: 'Distribute grades preview', body: '### Students who would be emailed (1)\n- `cy-d` - their first grades email.' };
+    const page = (n: number, extra: object[] = []) => [...Array.from({ length: n }, (_, i) => ({ number: i + 1, title: `Question ${i}` })), ...extra];
+    const shown = async (pages: Record<string, object[]>) => {
+      const gh = new FakeGitHub().on('GET', /\/semester-config\/issues\?/, (r: Seen) => json(pages[new URL(r.url).searchParams.get('page') ?? '1'] ?? []));
+      const env = envOf(gh, files());
+      await mount(env, <PreviewEmails org={COHORT_ORG} slug="assignment-2" />);
+      await settle(() => !root!.textContent!.includes('Reading'));
+      const said = root!.textContent;
+      render(null, root!);
+      root!.remove();
+      return said;
+    };
+    expect(await shown({ 1: page(100), 2: page(3, [PREVIEW]) })).toBe('Email to: cy-d (first marks email).');
+    expect(await shown({ 1: page(100), 2: page(3) })).toBe('Could not find the preview issue in semester-config, so who would be emailed is not shown.');
   });
 
   it('names who a preview would email, from the private preview issue', () => {

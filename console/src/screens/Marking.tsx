@@ -194,16 +194,16 @@ export function previewEmails(body: string, slug: string): string[] | null {
 }
 
 /** Under a Return marks preview: who would be emailed, read from the private preview issue. */
-function PreviewEmails({ org, slug }: { org: string; slug: string }) {
+export function PreviewEmails({ org, slug }: { org: string; slug: string }) {
   const env = useEnv();
   const [said, setSaid] = useState<string | null>('Reading who would be emailed…');
   useEffect(() => {
     let live = true;
     (async () => {
       try {
-        const issue = (await env!.client.listIssues(org, CONFIG_REPO, 'state=open')).find((i) => i.title === PREVIEW_TITLE);
+        const issue = await env!.client.findIssue(org, CONFIG_REPO, 'state=open', (i) => i.title === PREVIEW_TITLE);
         const who = issue?.body ? previewEmails(issue.body, slug) : null;
-        if (live) setSaid(who === null ? null : `Email to: ${who.length ? who.join(', ') : 'nobody'}.`);
+        if (live) setSaid(who === null ? 'Could not find the preview issue in semester-config, so who would be emailed is not shown.' : `Email to: ${who.length ? who.join(', ') : 'nobody'}.`);
       } catch {
         if (live) setSaid('Could not read who would be emailed; the preview issue in semester-config lists them.');
       }
