@@ -18,7 +18,7 @@ import { DispatchAdapter } from '../src/ops/adapter';
 import { OpPanel } from '../src/ops/Panel';
 import { OpsSession } from '../src/ops/session';
 import { AssignmentScreen } from '../src/screens/Assignments';
-import { previewEmails } from '../src/screens/Marking';
+import { previewEmails, templateChecks } from '../src/screens/Marking';
 import type { CohortProps } from '../src/screens/types';
 import example from './fixtures/status.example.json';
 import { FakeGitHub, fileBody, json, type Seen } from './fake';
@@ -174,10 +174,11 @@ const SHEET = [
   '',
 ].join('\n');
 
-function files(sheet = SHEET) {
+const CONFIG = 'type: individual\nautograde: true\nformats: [py]\nquestions:\n  Q1: 10\n  Q2: 10\n';
+function files(sheet = SHEET, config = CONFIG) {
   return new StaticFiles({
     [`${COHORT_ORG}/semester-config/schedule.yml`]: 'timezone: Europe/Berlin\nassignments:\n  assignment-2:\n    course_source_repo: assignment-2-f2026\n',
-    [`${COURSE_ORG}/assignment-2-f2026/grading_config.yml`]: 'type: individual\nquestions:\n  Q1: 10\n  Q2: 10\n',
+    [`${COURSE_ORG}/assignment-2-f2026/grading_config.yml`]: config,
     [SHEET_PATH]: sheet,
   });
 }
@@ -233,6 +234,30 @@ const props = (f: StaticFiles, over: Partial<CohortProps> = {}): CohortProps => 
 const marks = (f = files(), gh = github()) => mount(envOf(gh, f), <AssignmentScreen {...props(f)} />);
 const filter = (word: string) => [...root!.querySelectorAll<HTMLButtonElement>('.chip.filter')].find((b) => b.textContent?.startsWith(word))!;
 
+describe('what a template runs at the cutoff (grades.GradingSpec)', () => {
+  it('runs the tests only with autograde on, and the completion check as declared, else for a notebook', () => {
+    expect(templateChecks({})).toEqual({ tests: false, completion: false });
+    expect(templateChecks({ autograde: true, formats: ['py'] })).toEqual({ tests: true, completion: false });
+    expect(templateChecks({ formats: ['ipynb', 'pdf'] })).toEqual({ tests: false, completion: true });
+    expect(templateChecks({ formats: 'pdf, ipynb' })).toEqual({ tests: false, completion: false });
+    expect(templateChecks({ formats: ['ipynb'], completion_check: false })).toEqual({ tests: false, completion: false });
+    expect(templateChecks({ formats: ['py'], completion_check: true })).toEqual({ tests: false, completion: true });
+    expect(templateChecks({ submit_via: 'shared_dropbox_repo', autograde: true, formats: ['ipynb'] })).toEqual({ tests: false, completion: false });
+  });
+});
+
+describe('the column help', () => {
+  it('words Penalty, Adjustment, Feedback and Completion as approved', async () => {
+    await marks(files(SHEET.replace('      autograde: 8/10\n', '      autograde: 8/10\n      completion: Completed\n'), CONFIG.replace('formats: [py]', 'formats: [ipynb]')));
+    const pop = (col: string) => q(`button[aria-label="About ${col}"]`).nextElementSibling!.textContent;
+    expect(pop('Penalty')).toBe('10% of the total per day started, up to 10 days. Switch it off to waive it, or type your preferred penalty as a percentage to override it.');
+    expect(pop('Feedback')).toBe('Students see this with their marks.');
+    expect(pop('Completion')).toBe('At the late cutoff the toolkit runs the submitted notebook top to bottom in a clean sandbox and records whether it reached the end. “Completed” means every cell ran without an error; otherwise the first error is named. Information for you, never a mark: a notebook can run through and still be wrong, or stop on a missing package and still be right. “—” where the template has no check.');
+    await click(q('button.adj-chip'));
+    expect(pop('Adjustment')).toBe('Added to this person’s final grade (plus or minus points).');
+  });
+});
+
 describe('the marking screen', () => {
   it('counts All, Unmarked, Late and Held, and marks a held row with its reason', async () => {
     await marks();
@@ -246,6 +271,25 @@ describe('the marking screen', () => {
     await click(filter('All'));
     await type('input[aria-label="Q1 (out of 10) for ben-k"]', '7');
     expect(filter('Held').textContent).toBe('Held 0');
+  });
+
+  it('prints “—” for a check the template does not run, even where the sheet still carries its key', async () => {
+    // Every unit has `completion:`, but the template is not a notebook and does not declare the check.
+    const withKey = SHEET.replace(/( {6}autograde:.*\n)/g, '$1      completion:\n');
+    await marks(files(withKey));
+    const col = [...q('thead').querySelectorAll('th')].map((h) => h.firstChild?.textContent?.trim());
+    expect(col).toContain('Completion');
+    const cells = [...root!.querySelectorAll('tr.unit-row')].map((r) => r.querySelectorAll('td.sys')[3].textContent);
+    expect(cells).toEqual(['—', '—', '—']);
+    root!.remove();
+    // Tests the template no longer runs: a dash too, and no tint.
+    await marks(files(SHEET, CONFIG.replace('autograde: true', 'autograde: false')));
+    expect([...root!.querySelectorAll('tr.unit-row')].map((r) => r.querySelectorAll('td.sys')[2].textContent)).toEqual(['—', '—', '—']);
+    expect(root!.querySelector('td.sys.auto')).toBeNull();
+    root!.remove();
+    // A notebook template runs the check: blank until the cutoff fills it.
+    await marks(files(withKey, CONFIG.replace('formats: [py]', 'formats: [ipynb]')));
+    expect([...root!.querySelectorAll('tr.unit-row')].map((r) => r.querySelectorAll('td.sys')[3].textContent)).toEqual(['', '', '']);
   });
 
   it('keeps Tests with a light tint where the template runs them, and hides both columns where nothing does', async () => {
