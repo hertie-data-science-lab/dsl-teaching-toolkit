@@ -1046,7 +1046,7 @@ def test_every_kind_of_dropped_entry_is_recorded_with_its_cost():
     assert "never ships" in said["lectures.ok.files[1]"]
     assert "`event_datetime`" in said["lectures.typo"]
     assert "nothing deploys" in said["lectures.typo"]
-    assert "`due_datetime`" in said["assignments.a2"]
+    assert "`template`" in said["assignments.a2"]
     assert "no autograding" in said["assignments.a2"]
     assert "`event_datetime`" in said["exams.mid-term"]
 
@@ -1210,7 +1210,7 @@ def test_load_logs_every_dropped_entry_loudly(monkeypatch, capsys):
         S,
         "get_file_content",
         lambda org, repo, path: (
-            "assignments:\n  assignment-2:\n    due_date: 2026-11-13\n"
+            "assignments:\n  assignment-2:\n    number: 2\n    due_datetime: 2026-11-13\n"
         ),
     )
 
@@ -1222,7 +1222,7 @@ def test_load_logs_every_dropped_entry_loudly(monkeypatch, capsys):
     assert "Semester-f2026/semester-config/schedule.yml" in err
     assert "DROPPED" in err
     assert "assignments.assignment-2" in err
-    assert "`due_datetime`" in err
+    assert "`template`" in err
     assert "no autograding" in err
 
 

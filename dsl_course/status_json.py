@@ -129,6 +129,7 @@ from .schedule_plan import (
     deploy_dest,
     duplicate_numbers,
     duplicate_text,
+    give_a_due_date,
     planned_rows,
     site_rows,
     unnumbered,
@@ -1165,6 +1166,28 @@ def empty_week_problems(
 NO_FILES_TODO = "has no files yet."
 
 
+def no_due_date_todo(
+    facts: SemesterFacts, aside: frozenset[str] = frozenset()
+) -> list[dict]:
+    """`schedule:due:<key>` for each assignment written with no `due_datetime`: it parses
+    as TBC and nothing fires for it until it has one - a quiet (suggested) to-do."""
+    return [
+        _todo(
+            SUGGESTED,
+            aside,
+            id=f"schedule:due:{key}",
+            kind="schedule",
+            check="due",
+            repo=schedule.CONFIG_REPO,
+            text=give_a_due_date(key),
+            screen="schedule",
+            entry=key,
+        )
+        for key, entry in facts.sched.assignments.items()
+        if entry.due_datetime is None
+    ]
+
+
 def no_files_todo(
     facts: SemesterFacts, now: datetime, aside: frozenset[str] = frozenset()
 ) -> list[dict]:
@@ -1726,7 +1749,7 @@ def assignment_state(
         return "returned"
     if cutoff is not None and now >= cutoff:
         return "marking"
-    if now >= entry.due_datetime:
+    if entry.due_datetime is not None and now >= entry.due_datetime:
         return "late_window"
     if units > 0 or (out and not spec.creates_unit_repos):
         return "open"
@@ -2300,6 +2323,7 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
     why = stage_why(stages, checks, problems)
     todo = semester_todo(facts, today, set_aside_ids(course.meta))
     todo += no_files_todo(facts, now, set_aside_ids(course.meta))
+    todo += no_due_date_todo(facts, set_aside_ids(course.meta))
     week, weeks = semester_weeks(sched.semester_start, sched.semester_end, today)
     tag = semester_of(facts.org)
     assignments = render_assignments(facts, problems, now)

@@ -405,7 +405,10 @@ class AssignmentEntry:
     that said one thing while the template said another got repos of one kind graded as
     the other."""
 
-    due_datetime: datetime
+    # None = no due date yet (dates to be confirmed): nothing fires for the assignment -
+    # no hand-out, snapshot, autograde or solution - until it has one, and the status
+    # carries the quiet to-do "Give <key> a due date".
+    due_datetime: datetime | None
     # The COURSE-org repo this assignment hands out from - the template one repo per
     # student (or per team) is generated from. Required and named outright: it used to be
     # derived as `<slug>-<semester tag>`, which was right almost always and invisible in the
@@ -428,9 +431,8 @@ class AssignmentEntry:
     details: str = ""
     # `tbc: true` = a provisional deadline: the site marks both rows "(TBC)". DISPLAY-ONLY
     # and nothing else - the snapshot freeze, the late window and the grading cutoff all
-    # derive from `due_datetime`, which this does not touch. An assignment cannot be
-    # undated the way a release can (`due_datetime` is required), so there is no
-    # `event_datetime: tbc` twin here: this marks a real date as still moveable.
+    # derive from `due_datetime`, which this does not touch: this marks a real date as
+    # still moveable (an entry with no `due_datetime` at all is undated).
     tbc: bool = False
     # `show_on_site: false` = the assignment runs exactly as written - handed out, due,
     # snapshotted, graded - and the semester site says nothing about it: no schedule row, no
@@ -1280,10 +1282,18 @@ def _parse_assignments(
             continue
         lines = take_lines(entry)
         old = _old_keys(drops, entry, legacy.SCHEDULE_ASSIGNMENT, where, lines)
-        due = _coerce_datetime(entry.get("due_datetime"), tz, end_of_day=True)
-        if due is None:
-            _drop(drops, where, "no valid `due_datetime`", cost, lines, "due_datetime")
-            continue
+        raw_due = entry.get("due_datetime")
+        due = _coerce_datetime(raw_due, tz, end_of_day=True)
+        if due is None and raw_due is not None and not _is_tbc(raw_due):
+            # Written and unreadable: kept undated, and said so (a typo is not a TBC).
+            _flag_bad_value(
+                drops,
+                where,
+                "due_datetime",
+                raw_due,
+                "it has no due date, so nothing fires for it until it has one",
+                lines,
+            )
         source_repo = str(entry.get("template") or "").strip()
         if not source_repo:
             _drop(drops, where, "no `template`", cost, lines, "template")
@@ -1722,6 +1732,8 @@ def refuse_early_solutions(sched: Schedule, instance: settings.Instance) -> None
         days, _ = settings.resolve(
             "late_window_days", settings.instance_layers(instance, entry.settings)
         )
+        if entry.due_datetime is None:
+            continue
         cutoff = entry.due_datetime + timedelta(days=int(days or 0))
         if entry.solution_datetime >= cutoff:
             continue
@@ -1819,7 +1831,13 @@ def assignment_pages(sched: Schedule) -> list[AssignmentPage]:
 
     From the plan only: an assignment is handed out from a schedule entry or not at all.
     HIDDEN ones are included (`show_on_site: false`)."""
-    by_due = sorted(sched.assignments.items(), key=lambda kv: kv[1].due_datetime)
+    by_due = sorted(
+        sched.assignments.items(),
+        key=lambda kv: (
+            kv[1].due_datetime is None,
+            kv[1].due_datetime or datetime.min.replace(tzinfo=timezone.utc),
+        ),
+    )
     return [
         AssignmentPage(
             entry.number,
@@ -1918,7 +1936,7 @@ def grading_cutoff_datetime(sched: Schedule, slug: str) -> datetime | None:
     the autograder that fires off it, the sheet's header, the receipts that quote the
     policy to a student, the team-formation window, the cadence check, status.json."""
     entry = sched.assignments.get(slug)
-    if entry is None:
+    if entry is None or entry.due_datetime is None:
         return None
     days, _ = settings.effective(sched.org, slug, "late_window_days")
     return entry.due_datetime + timedelta(days=int(days or 0))

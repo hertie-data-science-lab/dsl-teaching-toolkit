@@ -226,6 +226,12 @@ def give_a_number(key: str) -> str:
     return f"Give {key} a number first."
 
 
+def give_a_due_date(key: str) -> str:
+    """The one sentence an assignment with no `due_datetime` earns: it parses as TBC and
+    nothing fires for it until it has one."""
+    return f"Give {key} a due date."
+
+
 def give_a_session(key: str) -> str:
     """The one sentence a lecture or lab with no session earns, wherever it is refused."""
     return f"Give {key} a session first."

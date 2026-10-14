@@ -138,7 +138,7 @@ Each assignment's dates and run settings.
 | `template` | **yes** | - | the course-org template each student's (or team's) repo is generated from |
 | `repo_name` | no | the key | what this semester's repos are called (`<repo_name>-<handle>`) |
 | `handout_datetime` | no | - | when repos are provisioned. Omit it to hand out by hand |
-| `due_datetime` | **yes** | - | the deadline students see; a bare date closes at **23:59:59** |
+| `due_datetime` | no | - | the deadline students see; a bare date closes at **23:59:59**. Absent: dates to be confirmed - nothing fires and the assignment is not on the site until it has one (a to-do: *Give assignment-2 a due date*) |
 | `solution_datetime` | no | - | when the template's `solution/` is pushed into every repo. **No default**; must be after `handout_datetime` (and needs it) and no earlier than the late cutoff. It cannot be undone |
 | `marks_return_datetime` | no | - | when marks go back automatically, once every unit is marked. `{event_datetime: ..., show_on_site: true}` also shows a "Marks expected" row |
 | `details`, `show_on_site`, `tbc` | no | - | as for any entry; on both its rows (out and due) |
@@ -159,7 +159,7 @@ assignments:
     late_penalty_per_day: 10%
 ```
 
-A `template:` that does not exist is reported and the assignment skipped; an entry without one, or without `due_datetime:`, is dropped. An assignment without `number:` is a problem (*Give assignment-2 a number*) and does not hand out until it has one. Two assignments off one template must each name their own `repo_name`; the hand-out, collect and patch ops refuse such a template and name both, and the schedule fires each on its own dates.
+A `template:` that does not exist is reported and the assignment skipped; an entry without one is dropped. An assignment without `number:` is a problem (*Give assignment-2 a number*) and does not hand out until it has one. Two assignments off one template must each name their own `repo_name`; the hand-out, collect and patch ops refuse such a template and name both, and the schedule fires each on its own dates.
 
 Adding or renaming an assignment wakes **Sync membership**, which rewrites `semester-config/.system/assignments.lock.yml` for the **Join team** form. The team-formation window runs from `handout_datetime` to the late cutoff ([09](09-release-assignment-to-cohort.md#group-assignments-creating-the-teams)).
 
@@ -290,11 +290,11 @@ An entry that is valid YAML but not a valid *schedule* entry is **dropped**: it 
 | Fault | What the semester loses |
 |---|---|
 | no valid `event_datetime` on an entry of any kind | nothing ships, and no row appears on the site |
-| no valid `due_datetime`, or no `template`, on an `assignments:` entry | no deadline, no submission snapshot, no autograding |
+| no `template` on an `assignments:` entry | no deadline, no submission snapshot, no autograding |
 | a `files` item missing `from_course_repo` or `from_path` | that one copy never ships |
 | a key used in two blocks | the second entry is dropped |
 
-Kept rather than dropped - the entry still runs on its documented fallback, and the fallback is reported alongside the drops (so `--validate` catches it): a malformed `handout_datetime` (**nothing is ever handed out**), `marks_return_datetime` (marks go back by hand) or `release_datetime` (the copy ships at its default); one unreadable slot of several (the others stand); a typo'd or unknown key at any level; and an unknown `timezone:` (falls back to `Europe/Berlin`). An assignment's `type` or `max_team_size` is noted with where it lives now.
+Kept rather than dropped - the entry still runs on its documented fallback, and the fallback is reported alongside the drops (so `--validate` catches it): a malformed `due_datetime` (the assignment is TBC: nothing fires), a malformed `handout_datetime` (**nothing is ever handed out**), `marks_return_datetime` (marks go back by hand) or `release_datetime` (the copy ships at its default); one unreadable slot of several (the others stand); a typo'd or unknown key at any level; and an unknown `timezone:` (falls back to `Europe/Berlin`). An assignment's `type` or `max_team_size` is noted with where it lives now.
 
 `solution_datetime` is the exception that is **dropped, not kept**: malformed, missing its `handout_datetime`, not after it, or (in the schedule check on a push) before the late cutoff, the value is discarded and the model solution waits for a human. Honouring a bad one could ship the answers with the questions, and nothing undoes that.
 

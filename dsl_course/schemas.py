@@ -257,6 +257,8 @@ TODO_CHECKS = (
     "home",
     "archive_date",
     "email",
+    # An assignment with no `due_datetime` (dates to be confirmed).
+    "due",
     # Plan 0.11.0 9b ruling 5: an entry written with `files: []`.
     "files",
 )

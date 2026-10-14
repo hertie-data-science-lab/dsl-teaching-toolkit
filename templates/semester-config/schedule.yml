@@ -92,7 +92,7 @@
 #     number: 1                     # REQUIRED - "Assignment 1" on the site
 #     template:                     # REQUIRED - the course-org template it hands out from
 #     handout_datetime:             # OPTIONAL - absent = handed out only by hand
-#     due_datetime:                 # REQUIRED - a bare date is the end of that day (23:59:59)
+#     due_datetime:                 # a bare date is the end of that day (23:59:59); absent = TBC, nothing fires
 #     solution_datetime:            # OPTIONAL - NO default: absent = the solution only goes out by hand. Not before the late cutoff
 #     marks_return_datetime:        # OPTIONAL - absent = marks returned by hand
 #     details:                      # OPTIONAL - on both its schedule rows

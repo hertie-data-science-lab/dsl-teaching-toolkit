@@ -472,6 +472,7 @@
                   "home",
                   "archive_date",
                   "email",
+                  "due",
                   "files"
                 ],
                 "type": "string"
@@ -904,6 +905,7 @@
                   "home",
                   "archive_date",
                   "email",
+                  "due",
                   "files"
                 ],
                 "type": "string"

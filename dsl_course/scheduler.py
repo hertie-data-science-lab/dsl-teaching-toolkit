@@ -800,6 +800,10 @@ def _handout_releases(
     for slug, entry in sched.assignments.items():
         if entry.handout_datetime is None:
             continue
+        if entry.due_datetime is None:
+            # Dates to be confirmed: nothing fires until it has a due date.
+            log(f"  [skip] handout {slug} - {schedule_plan.give_a_due_date(slug)}")
+            continue
         template = _template_for(templates, course_org, slug, entry)
         if template is None:
             log(f"  [skip] handout {slug} - no template repo for it in {course_org}")

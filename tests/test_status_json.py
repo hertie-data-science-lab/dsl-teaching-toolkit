@@ -3070,6 +3070,23 @@ def test_an_entry_written_with_no_files_is_a_quiet_to_do_dated_at_its_session():
     assert ids == ["schedule:files:lecture_9"]
 
 
+def test_an_assignment_with_no_due_date_is_a_quiet_to_do():
+    sched = _sched(
+        "assignments:\n"
+        "  project:\n    number: 2\n    template: assignment-project\n"
+        "  dated:\n    number: 1\n    template: assignment-dated\n"
+        "    due_datetime: 2026-10-13\n"
+    )
+    (todo,) = status_json.no_due_date_todo(_semester(sched=sched))
+    assert todo["id"] == "schedule:due:project"
+    assert (todo["kind"], todo["check"], todo["need"]) == (
+        "schedule",
+        "due",
+        "suggested",
+    )
+    assert todo["text"] == "Give project a due date."
+
+
 def test_an_entry_whose_copies_were_all_dropped_is_not_a_to_do():
     # Its file line is a parse fault, which is the problem; a Set aside must not hide it.
     text = NO_FILES.replace(

@@ -2385,6 +2385,12 @@ def test_handout_releases_synthesised_from_the_assignments_block(monkeypatch):
                 course_source_repo="a-f2026",
                 due_datetime=datetime(2026, 12, 1, 23, 59, tzinfo=BERLIN),
             ),
+            # no due date yet (TBC): nothing fires, its hand-out included
+            "undated": AssignmentEntry(
+                course_source_repo="u-f2026",
+                due_datetime=None,
+                handout_datetime=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
+            ),
         }
     )
     (r,) = scheduler._handout_releases("Course-Org", "Semester-f2026", sched, WHEN)

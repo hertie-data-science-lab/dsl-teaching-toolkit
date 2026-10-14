@@ -1635,7 +1635,9 @@ def sync_site(course_org: str, semester_org: str) -> int:
                         formed_teams=formed_teams,
                     )
                     for page in pages
-                    if shown(page.hit)
+                    # No due date yet (TBC): no page until it has one - nothing about
+                    # it is out, and the status carries the to-do.
+                    if shown(page.hit) and page.hit[1].due_datetime is not None
                 },
                 "_events": event_entries,
             },

@@ -130,6 +130,7 @@ ROW_KEYS = (
     "readings_pending",
     "tabs",
     "no_materials",
+    "repeat",
 )
 LINK_KEYS = ("name", "repo", "path", "url")
 ASSIGNMENT_KEYS = (
@@ -195,6 +196,7 @@ def json_schema() -> dict:
         "off_schedule": _B,
         "readings_pending": _B,
         "no_materials": _B,
+        "repeat": _B,
         "when": _SN,
         "sort_at": _SN,
         "assignment": _SN,
@@ -452,7 +454,12 @@ def _public_assignments(
 ) -> list[tuple[str, schedule.AssignmentEntry]]:
     """The plan's assignments the site may show: `show_on_site: false` keeps one out of
     every public surface."""
-    return [(k, e) for k, e in sched.assignments.items() if e.show_on_site]
+    # An assignment with no due date yet (TBC) shows nowhere until it has one, as on the site.
+    return [
+        (k, e)
+        for k, e in sched.assignments.items()
+        if e.show_on_site and e.due_datetime is not None
+    ]
 
 
 def event_rows(facts: SemesterFacts) -> list[dict]:
