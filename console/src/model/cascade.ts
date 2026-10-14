@@ -265,6 +265,20 @@ export function writeBlock(y: YamlText, path: Path, before: Block, after: Block,
   return changed;
 }
 
+/**
+ * assignments.yml's text with one run setting of assignment `key` set to `value`, or null when
+ * its block already says so. Throws when the file cannot be written as it stands.
+ */
+export function withRunSetting(f: YamlFile, key: string, setting: string, value: unknown): string | null {
+  if (f.error) throw new Error(`${ASSIGNMENTS_FILE} does not parse (${f.error}); nothing was saved`);
+  const path: Path = ['assignments', key];
+  const before = rawBlock(f.doc, path);
+  const y = new YamlText(f.text);
+  if (!writeBlock(y, path, before, { ...before, [setting]: value }, [setting])) return null;
+  if (!validAssignments(y.toJS() ?? {})) throw new Error(`${ASSIGNMENTS_FILE} would not be valid; nothing was saved`);
+  return y.text;
+}
+
 /** What a run-settings form edits at one layer: the block's own keys, as written. */
 export function rawBlock(doc: Block, path: Path): Block {
   let cur: unknown = doc;

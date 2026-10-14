@@ -13,13 +13,15 @@ import {
   HOLD_WORDS, NOTES_KEY, cellValue, effectivePenalty, finalGrade, holdReasons, lateRule, num, overrideText, overrideValue, penaltyFigure, questionFile,
   questionPoints, readSheet, round, rowsChanged, scoreTotal, spread, studentMarks, type HoldReason, type HoldUnit, type Penalty, type Person, type Unit,
 } from '../model/marks';
-import { SOURCE_WORD, resolve, valueWord } from '../model/cascade';
+import { SOURCE_WORD, assignmentsFile, resolve, valueWord, withRunSetting } from '../model/cascade';
+import type { Env } from '../env';
+import type { ReadyProps } from './types';
 import { assignmentSettings, sheetName } from './RunSettings';
 import { penaltyRate } from '../model/policy';
 import { marksDraft, marksWidths, saveMarksDraft, saveMarksWidths, type MarksDraft } from '../model/prefs';
 import { parseRoster, sameHandle } from '../model/people';
 import type { Assignment } from '../model/types';
-import { returnMarks, teamsWindow, type AsgRef, type LateReturn } from '../ops/defs';
+import { returnMarks, teamsWindow, type AsgRef, type LateReturn, type PerQuestion } from '../ops/defs';
 import { OpButtons, OpOpen, VerbHint } from '../ops/Panel';
 import { assignmentHref, tabHref } from '../router';
 import { CheckLine, Loading } from '../ui/bits';
@@ -29,7 +31,7 @@ import { SaveBar } from '../ui/edit';
 import { Check } from '../ui/icons';
 import type { TabProps } from './Assignments';
 import { cohortScope, todayOf, tzOf, useGradingConfig, yearOf } from './common';
-import { CONFIG_REPO } from '../model/names';
+import { ASSIGNMENTS_FILE, CONFIG_REPO } from '../model/names';
 import { formatsList } from '../tiers/grading';
 
 /** The late cutoff as the Return marks dialog names it, while it has not passed; null after it. */
@@ -50,6 +52,31 @@ export const lateRuleOf = (a: Assignment) => lateRule(penaltyOf(a), a.settings?.
 export function lateReturn(a: Assignment, now: number, tz: string, year: number): LateReturn | null {
   const until = lateUntil(a, now, tz, year);
   return until ? { due: fmtWhen(a.due, tz, year), until, rule: lateRuleOf(a) } : null;
+}
+
+/**
+ * "Include marks per question" for Return marks: the assignment's effective `marks_per_question`
+ * as status.json states it (on, from the institution, in a status written before the setting), and
+ * how a change is saved: into the assignment's block in assignments.yml, before the run goes.
+ */
+export function perQuestionOf(p: Pick<ReadyProps, 'files' | 'cohort'>, a: Assignment, env: Env | null): PerQuestion {
+  const s = a.settings?.marks_per_question;
+  return {
+    value: s ? s.value !== false : true,
+    source: s?.source ?? 'institution',
+    save: async (on) => {
+      if (!env) throw new Error('Sign in to save.');
+      const f = assignmentsFile(p.files, p.cohort.org);
+      if (f === 'loading' || f === null) throw new Error(`${ASSIGNMENTS_FILE} could not be read, so the setting was not saved and nothing was returned`);
+      const text = withRunSetting(f, a.slug, 'marks_per_question', on);
+      if (text === null) return;
+      let said = '';
+      const ok = await saveText(env, { owner: p.cohort.org, repo: CONFIG_REPO, path: ASSIGNMENTS_FILE }, text, f.sha,
+        { message: `assignments: ${a.slug} marks_per_question ${on}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] },
+        (st) => { if (st.kind === 'bad') said = st.text; });
+      if (!ok) throw new Error(`Include marks per question was not saved, so nothing was returned: ${said.replace(/^Not saved: /, '')}`);
+    },
+  };
 }
 
 function asgRef(a: Assignment, group: boolean): AsgRef {
@@ -289,7 +316,7 @@ export function MarksTab(p: TabProps) {
     <>
       <div class="page-head">
         <div>{title}{lede}</div>
-        <div class="actions"><OpButtons def={returnMarks(scope, asgRef(a, group), a.marks.filled, name, late)} /></div>
+        <div class="actions"><OpButtons def={returnMarks(scope, asgRef(a, group), a.marks.filled, name, late, undefined, undefined, perQuestionOf(p, a, env))} /></div>
       </div>
       {p.tabs}
     </>
@@ -553,7 +580,7 @@ export function MarksTab(p: TabProps) {
     setEdits({ ...pending.edits, ...edits });
     setPending(null);
   };
-  const returnDef_ = (returnDef.current = returnMarks(scope, asgRef(a, group), sending, name, late, facts, <PreviewEmails org={org} slug={name} />));
+  const returnDef_ = (returnDef.current = returnMarks(scope, asgRef(a, group), sending, name, late, facts, <PreviewEmails org={org} slug={name} />, perQuestionOf(p, a, env)));
   // Returning is its own block above the grid: the panel it opens holds the figures and Preview.
   const returnBlock = (
     <div class="return-block">
