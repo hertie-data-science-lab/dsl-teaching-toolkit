@@ -31,11 +31,13 @@ refuse is asked in the plan ("will stop here"): the preview fails there, and a r
 before its pause.
 
 Semester org, in order: preflight, pause, rename repos, layout, keys, schedule shape,
-topic, re-render, status, unpause. Course org: preflight, pause, registry, .system/,
-dsl-course.yml keys, template keys, seeded text, template starter (decision 0028:
+config layers, topic, re-render, status, unpause. Course org: preflight, pause, registry,
+.system/, dsl-course.yml keys, template keys, seeded text, template starter (decision 0028:
 `starter:` written into each live template's grading_config.yml, read from its answer
-markers), materials topic, materials files, public website, assignment topic, re-render,
-status, unpause.
+markers), materials topic, materials files, public website, assignment topic, config
+layers, re-render, status, unpause. The steps before "config layers" bring an org to the
+0.10 files (their seeds frozen in `templates/legacy-0.10/`); "config layers" folds those
+into one file per level (decision 0039).
 """
 
 from __future__ import annotations

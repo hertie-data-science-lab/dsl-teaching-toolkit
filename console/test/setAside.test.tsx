@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // Setting suggestions aside (decisions 0032 and 0034): only a suggestion has a circle; it asks,
-// writes the id into dsl-course.yml's set_aside: and moves the line to the Set aside fold, Bring
+// writes the id into course.yml's set_aside: and moves the line to the Set aside fold, Bring
 // back removes the id at once, and a read-only viewer gets neither.
 
 import { render } from 'preact';
@@ -26,7 +26,7 @@ const ORG = 'hertie-dsl-demo-course-e1234';
 const REPO = 'course-materials-f2026';
 const USER = { login: 'a-example', id: 1, name: 'A. Example', email: null, avatar_url: '' };
 const BASE = (example as unknown as Status).course!;
-const META = '# The course card.\ncourse_name: Machine Learning # shown everywhere\ncourse_code: E1234\n';
+const META = '# The course card.\ncourse:\n  name: Machine Learning # shown everywhere\n  code: E1234\n';
 const SYLLABUS = `materials:${REPO}:syllabus`;
 
 function envOf(gh: FakeGitHub, f: StaticFiles): Env {
@@ -34,7 +34,7 @@ function envOf(gh: FakeGitHub, f: StaticFiles): Env {
   return { client, user: USER, ops: new OpsSession(new DispatchAdapter(client, () => USER.login)), statuses: new StatusStore(client), files: f, pollMs: 0 };
 }
 const github = () => new FakeGitHub().on('PUT', /\/contents\//, () => json({ content: { sha: 'b1' }, commit: { sha: 'c1' } })).on('GET', /\/check-runs/, { check_runs: [] });
-const puts = (gh: FakeGitHub) => gh.seen.filter((s) => s.method === 'PUT' && s.url.endsWith('/contents/dsl-course.yml'));
+const puts = (gh: FakeGitHub) => gh.seen.filter((s) => s.method === 'PUT' && s.url.endsWith('/contents/course.yml'));
 const body = (s: Seen) => decodeBase64((s.body as { content: string }).content);
 
 let root: HTMLElement | null = null;
@@ -62,7 +62,7 @@ const show = (key: string) => act(() => root!.querySelector<HTMLButtonElement>(`
 async function settle(until: () => boolean) {
   for (let i = 0; i < 200 && !until(); i++) await act(() => new Promise((r) => setTimeout(r, 0)));
 }
-const files = (text = META) => new StaticFiles({ [`${ORG}/.github/dsl-course.yml`]: text });
+const files = (text = META) => new StaticFiles({ [`${ORG}/.github/course.yml`]: text });
 const circle = (label: string) => root!.querySelector<HTMLButtonElement>(`button.s-circle[aria-label="Set aside ${label}…"]`)!;
 const dialog = () => root!.querySelector<HTMLElement>('[role="dialog"]');
 const button = (t: string) => [...root!.querySelectorAll<HTMLElement>('[role="dialog"] .actions > *')].find((b) => b.textContent === t)!;
@@ -129,8 +129,8 @@ describe('the circle before a suggestion', () => {
     expect(aside()).toEqual(['Public website · Bring back']);
   });
 
-  it('saves on a course file as seeded: no code, and assignment_defaults holding only comments', async () => {
-    const seeded = 'course_name: ML\ncourse_code: \nassignment_defaults:\n  # max_team_size: 5\n';
+  it('saves on a course file as seeded: no code, and defaults holding only comments', async () => {
+    const seeded = 'course:\n  name: ML\n  code: \ndefaults:   # every key present\n  # max_team_size: 5\nopen_course_site:\n  enabled: false\n';
     const gh = await mount(BASE, files(seeded));
     await show('suggestions');
     await act(() => circle('Public website').click());
@@ -170,14 +170,14 @@ describe('the circle before a suggestion', () => {
 
   it('keeps the dialog open on a stale file and writes nothing', async () => {
     const f = files();
-    const stale = new FakeGitHub().on('PUT', /\/contents\//, () => json({ message: 'dsl-course.yml does not match static' }, 409));
+    const stale = new FakeGitHub().on('PUT', /\/contents\//, () => json({ message: 'course.yml does not match static' }, 409));
     await mount(BASE, f, stale);
     await show('suggestions');
     await act(() => circle('Public website').click());
     await act(() => button('Set aside').click());
     await settle(() => !!dialog()?.querySelector('.bad'));
     expect(dialog()!.textContent).toContain(CONFLICT);
-    expect(f.file(ORG, '.github', 'dsl-course.yml')).toMatchObject({ kind: 'ready', text: META });
+    expect(f.file(ORG, '.github', 'course.yml')).toMatchObject({ kind: 'ready', text: META });
     expect(counts()[2]).toBe('0');
     expect(button('Set aside')).toBeDefined();
   });
@@ -294,7 +294,7 @@ describe('an empty week on the semester dashboard', () => {
   const lecture9 = { id: 'lecture_9', when: '2026-09-29T10:00:00+02:00', kind: 'lecture', number: 9, title: '', state: 'planned' as const, source: null, dest: null, show_on_site: true, tbc: false };
   const status: Status = { ...base, releases: [...(base.releases ?? []), lecture9], problems: [week('2026-09-28', 'soon'), week('2026-10-12', 'later'), week('2026-10-05', 'soon', 'lab'), nothing] };
   async function mountCohort(meta: string, gh = github()) {
-    const f = new StaticFiles({ [`${ORG}/.github/dsl-course.yml`]: meta });
+    const f = new StaticFiles({ [`${ORG}/.github/course.yml`]: meta });
     root ??= document.body.appendChild(document.createElement('div'));
     await act(() => render(
       <EnvCtx.Provider value={envOf(gh, f)}>

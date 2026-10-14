@@ -374,7 +374,7 @@ describe('the wizard screens', () => {
   });
 
   it('New cohort counts the three cards from the cohort’s own files', () => {
-    const files = new StaticFiles({ [`${COHORT_ORG}/semester-config/instructors.yml`]: 'instructors:\n  - github_handle: a-example\n    role: instructor\n', [`${COHORT_ORG}/semester-config/students.csv`]: 'hertie_email,name,role\n' });
+    const files = new StaticFiles({ [`${COHORT_ORG}/semester-config/semester.yml`]: 'people:\n  - github_handle: a-example\n    role: instructor\n', [`${COHORT_ORG}/semester-config/students.csv`]: 'hertie_email,name,role\n' });
     expect(cardsDone(files, COHORT_ORG)).toEqual({ staff: true, schedule: false, students: false, defaults: false });
   });
 

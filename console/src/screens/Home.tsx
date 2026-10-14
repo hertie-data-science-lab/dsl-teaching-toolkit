@@ -16,7 +16,7 @@ import { cohortName, invitationUrl, semesterName, type Course, type CohortRef, t
 import { endedNow, loadCatalogue, runningNow, semesterOver, termRank, type CatalogueCourse } from '../model/catalogue';
 import type { Files } from '../model/files';
 import { fmtWhen } from '../model/format';
-import { CONFIG_REPO, INSTRUCTORS_FILE } from '../model/names';
+import { CONFIG_REPO, SEMESTER_FILE } from '../model/names';
 import { parseInstructors, sameHandle } from '../model/people';
 import { currentOnly, myCoursesOnly, saveCurrentOnly, saveMyCoursesOnly, type CatalogueSection } from '../model/prefs';
 import type { Loaded } from '../model/status';
@@ -60,15 +60,15 @@ function isPast(c: CohortRef, l: Loaded | undefined, now: number): boolean {
 const ROLE_SUB: Record<string, string> = { instructor: 'you are an instructor', teaching_assistant: 'you are a teaching assistant' };
 
 /**
- * The person's role on `course`: course admin from `dsl-course.yml`; else their entry in the
- * newest running semester's `instructors.yml` (the status carries no roles); else, while that
+ * The person's role on `course`: course admin from `course.yml`; else their entry in the
+ * newest running semester's `semester.yml` `people:` (the status carries no roles); else, while that
  * is unread or names no role, that they teach on it.
  */
 function roleSub(course: Course, user: GhUser, live: CohortRef | undefined, files: Files | undefined): string {
   if (course.admins.some((h) => sameHandle(h, user.login))) return 'you are a course admin';
-  // Read only: the card says so, and instructors.yml is not read.
+  // Read only: the card says so, and semester.yml is not read.
   if (!course.write) return '';
-  const f = live && files ? files.file(live.org, CONFIG_REPO, INSTRUCTORS_FILE) : undefined;
+  const f = live && files ? files.file(live.org, CONFIG_REPO, SEMESTER_FILE) : undefined;
   const me = f?.kind === 'ready' ? parseInstructors(f.text).find((p) => sameHandle(p.handle, user.login)) : undefined;
   return ROLE_SUB[me?.role ?? ''] ?? 'you teach on this course';
 }

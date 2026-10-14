@@ -240,7 +240,11 @@ describe('the semester’s defaults', () => {
   });
 
   it('are asked once in New semester, as an optional card', () => {
-    expect(cardsDone(filesWith(), COHORT_ORG).defaults).toBe(true);
+    const stated = new StaticFiles({ [`${COHORT_ORG}/semester-config/semester.yml`]: ASSIGNMENTS });
+    expect(cardsDone(stated, COHORT_ORG).defaults).toBe(true);
+    // The seeded skeleton states nothing: every key is a comment.
+    const seeded = new StaticFiles({ [`${COHORT_ORG}/semester-config/semester.yml`]: 'defaults:   # skeleton\n  # max_team_size: 5\n' });
+    expect(cardsDone(seeded, COHORT_ORG).defaults).toBe(false);
     expect(cardsDone(new StaticFiles({}), COHORT_ORG).defaults).toBe(false);
   });
 });

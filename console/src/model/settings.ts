@@ -10,6 +10,7 @@ import type { FileState, Files } from './files';
 import { ASSIGNMENTS_FILE, CONFIG_REPO } from './names';
 import assignmentsSchema from '../../schemas/assignments.schema.json';
 import courseSchema from '../../schemas/dsl_course.schema.json';
+import courseFileSchema from '../../schemas/course.schema.json';
 import gradingSchema from '../../schemas/grading_config.schema.json';
 // WP-C removes: the 0.10 assignments.yml / dsl-course.yml schemas the settings screens
 // still validate against, frozen.
@@ -230,6 +231,8 @@ export function scheduleFile(files: Files, semesterOrg: string): YamlFile | 'loa
 export const validAssignments = validator(assignmentsSchema);
 export const validSchedule = validator(scheduleSchema);
 export const validCourse = validator(courseSchema);
+/** `.github/course.yml` (decision 0039). */
+export const validCourseFile = validator(courseFileSchema);
 export const validGrading = validator(gradingSchema);
 
 /**

@@ -17,7 +17,7 @@ import { myCoursesOnly, saveMyCoursesOnly } from '../src/model/prefs';
 import type { KeyStore } from '../src/auth/types';
 import { HomeScreen } from '../src/screens/Home';
 import { StaticFiles } from './staticFiles';
-import { CONFIG_REPO, INSTRUCTORS_FILE } from '../src/model/names';
+import { CONFIG_REPO, SEMESTER_FILE } from '../src/model/names';
 import { FakeGitHub, fileBody, json } from './fake';
 
 const NOW = Date.parse('2026-10-01T12:00:00Z');
@@ -472,9 +472,9 @@ describe('All courses', () => {
 
   describe('the role on a course card', () => {
     const sem = { org: 'hertie-dsl-demo-f2026', term: 'f2026', termLabel: 'Fall 2026' };
-    const yml = (role: string) => new StaticFiles({ [`${sem.org}/${CONFIG_REPO}/${INSTRUCTORS_FILE}`]: `instructors:\n  - github_handle: Octo\n    name: Octo Cat\n    role: ${role}\n` });
+    const yml = (role: string) => new StaticFiles({ [`${sem.org}/${CONFIG_REPO}/${SEMESTER_FILE}`]: `people:\n  - github_handle: Octo\n    name: Octo Cat\n    role: ${role}\n` });
     const sub = (h: HTMLElement) => section(h, 'h-courses').querySelector('.cc-sub')!.textContent;
-    it('is course admin from dsl-course.yml', async () => {
+    it('is course admin from course.yml', async () => {
       const h = mount(catalogueFake(), { courses: [{ ...course, admins: ['octo'], cohorts: [sem] }], files: yml('teaching_assistant') });
       await flush();
       expect(sub(h)).toBe('you are a course admin');
@@ -484,7 +484,7 @@ describe('All courses', () => {
       await flush();
       expect(sub(h)).toBe('you are a course admin');
     });
-    it('is the role in the newest running semester’s instructors.yml otherwise', async () => {
+    it('is the role in the newest running semester’s semester.yml otherwise', async () => {
       const h = mount(catalogueFake(), { courses: [{ ...course, cohorts: [sem] }], files: yml('instructor') });
       await flush();
       expect(sub(h)).toBe('you are an instructor');

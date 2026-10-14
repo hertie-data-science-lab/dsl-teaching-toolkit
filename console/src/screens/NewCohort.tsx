@@ -20,7 +20,7 @@ import { Checks, OrgSteps, OrgWhy, Rail, StepCard, Verified, WizError } from '..
 import { authorOf } from '../github/client';
 import { registerSemester } from '../model/discovery';
 import type { CourseProps } from './types';
-import { ASSIGNMENTS_FILE, CONFIG_REPO, INSTRUCTORS_FILE, JOIN_REPO } from '../model/names';
+import { CONFIG_REPO, JOIN_REPO, SEMESTER_FILE } from '../model/names';
 import { YamlText, obj } from '../edit/yamlText';
 
 const STEPS = [
@@ -48,7 +48,7 @@ const yamlDoc = (text: string): unknown => {
   return y.errors.length ? null : y.toJS();
 };
 
-/** Which of the cards are done, from the semester's own files; `defaults` (optional) once assignments.yml states any. */
+/** Which of the cards are done, from the semester's own files; `defaults` (optional) once semester.yml states any. */
 export function cardsDone(files: Files, org: string): { staff: boolean; schedule: boolean; students: boolean; defaults: boolean } {
   const f = (path: string) => {
     const s = files.file(org, CONFIG_REPO, path);
@@ -56,10 +56,10 @@ export function cardsDone(files: Files, org: string): { staff: boolean; schedule
   };
   const sched = parseSchedule(f('schedule.yml'));
   return {
-    staff: parseInstructors(f(INSTRUCTORS_FILE)).length > 0,
+    staff: parseInstructors(f(SEMESTER_FILE)).length > 0,
     schedule: !!sched && Object.keys(sched.entries).length + Object.keys(sched.assignments).length > 0,
     students: parseRoster(f('students.csv')).rows.length > 0,
-    defaults: Object.keys(obj(obj(yamlDoc(f(ASSIGNMENTS_FILE))).defaults)).length > 0,
+    defaults: Object.values(obj(obj(yamlDoc(f(SEMESTER_FILE))).defaults)).some((v) => v != null),
   };
 }
 
