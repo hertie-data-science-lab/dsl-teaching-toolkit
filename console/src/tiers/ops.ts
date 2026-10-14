@@ -65,6 +65,14 @@ export const RETURN_MARKS_ABOUT = {
   ],
 };
 
+/** The `?` beside Send codes. */
+export const SEND_CODES_ABOUT = {
+  label: 'About Send codes',
+  text: [
+    'Every student on the roster gets a private enrolment code by email the moment their row is saved; they paste it on the semester’s join form to get their repos. This button sends a NEW code to everyone who has not joined yet (their old code stops working) and emails it again. Preview first to see how many that is.',
+  ],
+};
+
 /** `siteExists`: the website was published before, so turning it off leaves that version up. */
 export const WEBSITE_OFF_LIVE = 'Off: the site stays as last published and no longer updates.';
 

@@ -8,7 +8,7 @@ import { plural } from '../model/format';
 import { COURSE_REPO } from '../model/names';
 import { ghUrl } from '../ui/bits';
 import { DEFAULT_DEST_REPO } from '../model/policy';
-import { HANDOUT, RETURN_MARKS, RETURN_MARKS_ABOUT, RETURN_MARKS_ALWAYS, releaseAdhoc as adhocTiers, updateCopies as copiesTiers } from '../tiers/ops';
+import { HANDOUT, RETURN_MARKS, RETURN_MARKS_ABOUT, RETURN_MARKS_ALWAYS, SEND_CODES_ABOUT, releaseAdhoc as adhocTiers, updateCopies as copiesTiers } from '../tiers/ops';
 import type { ComponentChildren } from 'preact';
 import type { OpDef } from './session';
 
@@ -186,7 +186,7 @@ export function sendCodes(s: Scope, waiting: number): OpDef {
   return {
     ...base(s, 'roster.send_codes', 'roster'), confirmInPanel: true, name: 'Send new codes', title: 'Students who have not joined', where: s.where,
     intro: 'Sends a fresh code to each student who has a code but has not joined.', confirm: 'Their old codes stop working.',
-    verb: `Send ${waiting} new code${waiting === 1 ? '' : 's'}`, running: 'Sending new codes', cancel: 'Stop sending; codes already sent stay valid',
+    verb: `Send ${waiting} new code${waiting === 1 ? '' : 's'}`, verbHint: SEND_CODES_ABOUT, running: 'Sending new codes', cancel: 'Stop sending; codes already sent stay valid',
     args: {}, fixed: [{ label: `Everyone with a code who has not joined (${waiting})`, note: 'default' }],
   };
 }

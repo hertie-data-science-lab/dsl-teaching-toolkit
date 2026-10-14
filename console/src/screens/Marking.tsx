@@ -20,7 +20,7 @@ import { marksDraft, marksWidths, saveMarksDraft, saveMarksWidths, type MarksDra
 import { parseRoster, sameHandle } from '../model/people';
 import type { Assignment } from '../model/types';
 import { returnMarks, teamsWindow, type AsgRef, type LateReturn } from '../ops/defs';
-import { OpButtons, OpOpen, VerbHint } from '../ops/Panel';
+import { OpButtons, OpOpen } from '../ops/Panel';
 import { assignmentHref, tabHref } from '../router';
 import { CheckLine, Loading } from '../ui/bits';
 import { Modal } from '../ui/Modal';
@@ -554,7 +554,7 @@ export function MarksTab(p: TabProps) {
   // Returning is its own block above the grid: the panel it opens holds the figures and Preview.
   const returnBlock = (
     <div class="return-block">
-      <span class="return-main"><OpOpen def={returnDef_} cls="btn big" label={returnDef_.verb} /><VerbHint def={returnDef_} /></span>
+      <span class="return-main"><OpOpen def={returnDef_} cls="btn big" label={returnDef_.verb} /></span>
       <button class="btn small quiet" type="button" onClick={() => setViewing('')}>Student view</button>
     </div>
   );

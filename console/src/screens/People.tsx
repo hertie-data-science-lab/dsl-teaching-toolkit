@@ -151,7 +151,6 @@ function Students(p: ReadyProps) {
           {/* Send codes is the page's main action; Preview lives in its panel, not beside the button. */}
           <div class="main-action">
             <OpOpen def={sendCodes(scope, waiting)} cls="btn big" label="Send codes" />
-            <Hint label="About Send codes">{SEND_CODES_HINT}</Hint>
           </div>
           <div class="actions">
             <button class="btn quiet" type="button" aria-expanded={upload.open} onClick={() => setUpload({ ...upload, open: !upload.open })}>Replace from CSV</button>
@@ -445,8 +444,6 @@ function PhotoField({ p, values, set }: { p: ReadyProps; values: Record<string, 
   );
 }
 
-const SEND_CODES_HINT =
-  'Every student on the roster gets a private enrolment code by email the moment their row is saved; they paste it on the semester’s join form to get their repos. This button sends a NEW code to everyone who has not joined yet (their old code stops working) and emails it again. Preview first to see how many that is.';
 const REPLACE_CSV_HINT =
   'Upload a CSV from the registrar to replace the roster in one go: you see a diff of added, removed and changed rows before anything is saved. Columns the toolkit fills (GitHub handle, code, when it was sent) are kept for rows that stay.';
 

@@ -96,7 +96,7 @@ describe('the Students action row', () => {
     const main = q('.students-actions .main-action');
     expect(main.querySelector('button.btn.big')!.textContent).toBe('Send codes');
     expect(main.querySelector('.hint-btn')!.getAttribute('aria-label')).toBe('About Send codes');
-    expect(main.querySelector('.hint-pop')!.textContent).toBe('Every student on the roster gets a private enrolment code by email the moment their row is saved; they paste it on the semester’s join form to get their repos. This button sends a NEW code to everyone who has not joined yet (their old code stops working) and emails it again. Preview first to see how many that is.');
+    expect(main.querySelector('.hint-pop')!.textContent).toBe('About Send codesEvery student on the roster gets a private enrolment code by email the moment their row is saved; they paste it on the semester’s join form to get their repos. This button sends a NEW code to everyone who has not joined yet (their old code stops working) and emails it again. Preview first to see how many that is.');
     const row = q('.students-actions .actions');
     expect([...row.querySelectorAll('button.btn, a.btn')].map((c) => c.textContent?.trim())).toEqual(['Replace from CSV', 'Sync now']);
     expect(row.querySelector('.hint-btn')!.getAttribute('aria-label')).toBe('About Replace from CSV');
@@ -120,7 +120,8 @@ describe('the Students action row', () => {
     await click(button('Send codes'));
     const drawer = q('aside.drawer');
     expect(drawer.querySelector('#drawer-title')!.textContent).toBe('Students who have not joined');
-    expect([...drawer.querySelectorAll('.drawer-foot button')].map((b) => b.textContent)).toEqual(['Preview', 'Send 1 new code']);
+    expect([...drawer.querySelectorAll('.drawer-foot button.btn')].map((b) => b.textContent)).toEqual(['Preview', 'Send 1 new code']);
+    expect(drawer.querySelector('.drawer-foot .hint-btn')!.getAttribute('aria-label')).toBe('About Send codes');
   });
 
   it('opens Sync membership on GitHub for Sync now', async () => {
