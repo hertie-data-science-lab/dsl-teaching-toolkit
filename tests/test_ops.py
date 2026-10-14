@@ -189,6 +189,17 @@ def test_return_marks_runs_in_distribute_grades_queue():
         "assignment": "assignment-2",
         "preview": "false",
     }
+    # "Include marks per question": the box rides as this run's override either way (so a
+    # preview shows what it would send); absent, the assignment's setting decides.
+    for box, flag, value in ((False, "--no-per-question", "false"), (True, "--per-question", "true")):  # fmt: skip
+        for preview in (True, False):
+            req = Request(
+                op.name, "prof", COURSE, SEMESTER, {"per_question": box}, preview
+            )
+            assert flag in command(op, req)
+            assert op_inputs(op, command(op, req))["per_question"] == value
+    bare = Request(op.name, "prof", COURSE, SEMESTER, {}, False)
+    assert "per_question" not in op_inputs(op, command(op, bare))
 
 
 def test_a_real_run_of_a_default_on_dry_run_cli_says_no_dry_run():

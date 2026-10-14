@@ -205,10 +205,13 @@ its sheet refresh and Return marks until it is fixed. Untick `notify` to skip th
 
 The marks per question and the feedback per question go to the page unless the
 assignment's run setting `marks_per_question` is `false` (`assignments.yml`, see
-[the run settings](07-schedule-releases.md#assignmentsyml---how-this-semester-runs-each-assignment)),
-or one run withholds them (`--no-per-question` on `python3 -m dsl_course.grades
-distribute`, for the assignment it returns). The score, late penalty, adjustment and final
-grade go either way.
+[the run settings](07-schedule-releases.md#assignmentsyml---how-this-semester-runs-each-assignment)).
+Set it on the assignment's **How this semester runs it**, or with Return marks' **Include
+marks per question** box: the box starts at the setting, a preview follows the box, and the
+real run saves a changed box for the assignment before it goes, so the automatic return does
+the same. For one run only, the workflow's `per_question` input (`true` / `false`) or the
+CLI's `--per-question` / `--no-per-question` overrides it. The score, late penalty,
+adjustment and final grade go either way.
 
 Two options, both off by default. `include_feedback` puts the markers' feedback text into
 the email: the overall feedback, then each question's. `receipt_note` posts one line,

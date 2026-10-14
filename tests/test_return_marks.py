@@ -185,3 +185,16 @@ def test_the_button_offers_both_channels_off_by_default():
     run = workflow_jobs(rendered)["distribute-grades"]["steps"][-1]["run"]
     assert '[ "$RECEIPT_NOTE" = "true" ] && args+=(--receipt-note)' in run
     assert '[ "$INCLUDE_FEEDBACK" = "true" ] && args+=(--include-feedback)' in run
+
+
+def test_marks_per_question_is_the_setting_unless_a_run_overrides_it():
+    # Empty - the scheduler's dispatch, a bare manual run - leaves the assignment's own
+    # `marks_per_question` to decide; the Console passes its box either way.
+    rendered = workflows_render.render_distribute_grades([SEMESTER])
+    per_question = workflow_inputs(rendered)["per_question"]
+    assert (
+        per_question.get("type", "string") == "string" and per_question["default"] == ""
+    )
+    run = workflow_jobs(rendered)["distribute-grades"]["steps"][-1]["run"]
+    assert '[ "$PER_QUESTION" = "true" ] && args+=(--per-question)' in run
+    assert '[ "$PER_QUESTION" = "false" ] && args+=(--no-per-question)' in run

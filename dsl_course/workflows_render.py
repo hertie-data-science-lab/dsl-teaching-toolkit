@@ -1268,7 +1268,7 @@ def render_distribute_grades(semester_orgs: list[str]) -> str:
     return f"""name: Distribute grades
 
 # Reads the grading sheets in semester-config and sends what they hold: each student's
-# private grades-<handle> repo, the registrar export, and (unless silenced) an email saying
+# private grades-<handle> repo, the semester grades file, and (unless silenced) an email saying
 # there is something new to read. Nothing is posted into a submission repo, and nothing is
 # said twice - a re-run after one correction reaches one student.
 # `assignment` empty returns every sheet; named, it returns that assignment's marks only,
@@ -1305,6 +1305,10 @@ on:
         description: "Put the markers' feedback text into each student's email"
         type: boolean
         default: false
+      per_question:
+        description: "Marks per question for this run: true or false; empty = the assignment's marks_per_question setting"
+        required: false
+        default: ""
 
 {_DISTRIBUTE_CONCURRENCY}
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
@@ -1320,6 +1324,7 @@ on:
           NOTIFY: ${{{{ inputs.notify }}}}
           RECEIPT_NOTE: ${{{{ inputs.receipt_note }}}}
           INCLUDE_FEEDBACK: ${{{{ inputs.include_feedback }}}}
+          PER_QUESTION: ${{{{ inputs.per_question }}}}
           ASSIGNMENT: ${{{{ github.event_name == 'repository_dispatch' && github.event.client_payload.assignment || inputs.assignment }}}}
           DISPATCHED_BY: ${{{{ github.event_name == 'repository_dispatch' && github.repository_owner || '' }}}}
 {_MAIL_ENV}
@@ -1329,6 +1334,8 @@ on:
           [ "$NOTIFY" = "false" ] && args+=(--no-notify)
           [ "$RECEIPT_NOTE" = "true" ] && args+=(--receipt-note)
           [ "$INCLUDE_FEEDBACK" = "true" ] && args+=(--include-feedback)
+          [ "$PER_QUESTION" = "true" ] && args+=(--per-question)
+          [ "$PER_QUESTION" = "false" ] && args+=(--no-per-question)
           [ -n "$ASSIGNMENT" ] && args+=(--assignment "$ASSIGNMENT")
           [ -n "$DISPATCHED_BY" ] && args+=(--dispatched-by "$DISPATCHED_BY")
           python3 -m dsl_course.grades distribute "${{args[@]}}"

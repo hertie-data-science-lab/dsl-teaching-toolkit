@@ -7,7 +7,8 @@
 import { COURSE_REPO } from '../model/names';
 import { ghUrl } from '../ui/bits';
 import { DEFAULT_DEST_REPO } from '../model/policy';
-import { HANDOUT, RETURN_MARKS, RETURN_MARKS_ABOUT, RETURN_MARKS_ALWAYS, releaseAdhoc as adhocTiers, updateCopies as copiesTiers } from '../tiers/ops';
+import { HANDOUT, RETURN_MARKS, RETURN_MARKS_ABOUT, RETURN_MARKS_ALWAYS, releaseAdhoc as adhocTiers, returnMarksTiers, updateCopies as copiesTiers } from '../tiers/ops';
+import type { Source } from '../model/cascade';
 import type { ComponentChildren } from 'preact';
 import type { OpDef } from './session';
 
@@ -159,13 +160,22 @@ export interface LateReturn {
   rule: string | null;
 }
 
+/** The assignment's effective `marks_per_question` and its source, and how to save a change to it. */
+export interface PerQuestion {
+  value: boolean;
+  source: Source;
+  save: (on: boolean) => Promise<void>;
+}
+
 /**
  * `name`: the assignment's semester-side name (`semester_dest_repo`, else its key), what the engine returns by.
  * `late`: while the late cutoff has not passed, the dialog says late work can still change marks (decision 0037).
  * `facts`: the Marks tab's lines from the mark sheet: who gets marks, who is skipped or held, and the final grades (`marks.spread`).
  * `dryExtra`: shown under a preview, who would be emailed (the Marks tab reads the preview issue).
+ * `perQuestion`: prefills "Include marks per question"; a run whose box says otherwise saves the
+ * assignment's run setting before it is dispatched, so the scheduler's automatic returns follow it.
  */
-export function returnMarks(s: Scope, a: AsgRef, marked: number, name: string, late?: LateReturn | null, facts?: string[], dryExtra?: ComponentChildren): OpDef {
+export function returnMarks(s: Scope, a: AsgRef, marked: number, name: string, late?: LateReturn | null, facts?: string[], dryExtra?: ComponentChildren, perQuestion?: PerQuestion): OpDef {
   const units = `${a.units} ${a.group ? 'team' : 'student'}${a.units === 1 ? '' : 's'}`;
   const unit = a.group ? 'team' : 'student';
   return {
@@ -176,7 +186,14 @@ export function returnMarks(s: Scope, a: AsgRef, marked: number, name: string, l
       : undefined,
     facts, dryExtra,
     verb: `Return marks to ${marked} ${a.group ? 'team' : 'student'}${marked === 1 ? '' : 's'}`, verbHint: RETURN_MARKS_ABOUT, running: 'Returning marks', cancel: 'Stop; marks already returned stay returned',
-    args: { assignment: name }, options: RETURN_MARKS, fixed: RETURN_MARKS_ALWAYS,
+    args: { assignment: name, ...(perQuestion ? { per_question: perQuestion.value } : {}) },
+    options: perQuestion ? returnMarksTiers(perQuestion) : RETURN_MARKS, fixed: RETURN_MARKS_ALWAYS,
+    beforeRun: perQuestion
+      ? async (args) => {
+          const on = args.per_question !== false;
+          if (on !== perQuestion.value) await perQuestion.save(on);
+        }
+      : undefined,
     target: reposLike(s.cohortOrg ?? s.courseOrg, 'grades-'),
   };
 }
