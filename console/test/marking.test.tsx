@@ -208,10 +208,11 @@ let root: HTMLElement | null = null;
 const windowWidth = (w: number) => Object.defineProperty(window, 'innerWidth', { value: w, configurable: true, writable: true });
 beforeEach(() => windowWidth(1440));
 afterEach(() => {
-  localStorage.clear();
+  // Unmounted first: the screen keeps its unsaved marks as it goes.
   if (root) render(null, root);
   root?.remove();
   root = null;
+  localStorage.clear();
 });
 
 async function mount(env: Env, ui: preact.VNode) {
@@ -689,6 +690,20 @@ describe('text boxes', () => {
   it('gives every row shape a Private notes box: a student, a team with its members closed, and each member', async () => {
     await marks();
     for (const h of ['ada-l', 'ben-k', 'cy-d']) expect(root!.querySelector(`textarea[aria-label="Private notes for ${h}"]`)).not.toBeNull();
+  });
+
+  it('shows the large editor’s text in a box already typed in, and the next keystroke builds on it', async () => {
+    await marks();
+    const box = () => q<HTMLTextAreaElement>('textarea[aria-label="Feedback for ada-l"]');
+    await type('textarea[aria-label="Feedback for ada-l"]', 'Good. Typed');
+    await click(q('textarea[aria-label="Feedback for ada-l"] + button.area-open'));
+    await act(() => {
+      const big = q<HTMLTextAreaElement>('textarea.big-editor');
+      big.value = 'From the editor';
+      big.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await click(button('Save'));
+    expect(box().value).toBe('From the editor');
   });
 
   it('opens a box in a large editor whose Save is the same cell edit, and whose Cancel or Escape changes nothing', async () => {

@@ -461,7 +461,7 @@ export function MarksTab(p: TabProps) {
   const input = (pth: Path, orig: unknown, cls: string, label: string, col: string, typed = true, area = false) =>
     area ? (
       <span class="area-wrap">
-        <textarea class={cls} rows={1} aria-label={label} data-col={col} onInput={(e) => { grow([e.target as HTMLTextAreaElement]); set(pth, (e.target as HTMLTextAreaElement).value, false); }}>{str(v(pth, orig))}</textarea>
+        <textarea class={cls} rows={1} aria-label={label} data-col={col} onInput={(e) => { grow([e.target as HTMLTextAreaElement]); set(pth, (e.target as HTMLTextAreaElement).value, false); }} value={str(v(pth, orig))} />
         <button class="area-open" type="button" aria-label="Open editor" title={`Open editor: ${label}`} onClick={() => setEditor({ path: pth, title: label, text: str(v(pth, orig)) })}>⤢</button>
       </span>
     ) : (
