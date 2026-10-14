@@ -126,7 +126,6 @@ from .legacy import OLD_OPENCOURSE_FILE as OPENCOURSE_FILE
 from .log import CLIParser, add_preview_flag, log, log_err, log_ok, log_step
 from .materials import (
     EMPTY_ENTRY_KIND,
-    MATERIALS_FILE,
     MATERIALS_TOPIC,
     alias_kind,
     infer_kind,
@@ -3554,29 +3553,6 @@ class Semester:
         live = _files(self.org, self.config())
         return SEMESTER_FILE in live and not set(OLD_SEMESTER_FILES) & set(live)
 
-    def _syllabus(self) -> tuple[str, list[str]]:
-        """The syllabus the semester's source repos declare (`materials.yml`), and a stop
-        when they declare two."""
-        text = get_file_content(self.org, self.config(), schedule.SCHEDULE_PATH)
-        sched = schedule.parse(load_yaml_lines(text or "") or {})
-        repos = sorted({d.course_source_repo for r in sched.releases for d in r.deploy})
-        found = set()
-        for repo in repos:
-            try:
-                declared = read_materials(self.course, repo)
-            except Unusable as exc:
-                return "", [f"{repo}/{MATERIALS_FILE}: {exc} - fix it first"]
-            if declared.declared:
-                found.add(declared.syllabus)
-        if len(found) > 1:
-            stop = (
-                f"the source repos declare {len(found)} syllabuses "
-                f"({', '.join(sorted(found))}) - {SEMESTER_FILE} names one: set "
-                f"`{STUDENT_SITE_BLOCK}.syllabus` by hand, then run again"
-            )
-            return "", [stop]
-        return (found.pop() if found else ""), []
-
     def layers_work(self) -> dict:
         """Everything the step reads and would write: the old texts, `files` (path ->
         bytes), `delete`, `notes` and `stops`. Empty `files` and `delete` = done."""
@@ -3607,8 +3583,9 @@ class Semester:
                     f"{SEMESTER_FILE} is already there beside the files it replaces - "
                     f"fold them into it by hand, then delete them"
                 )
-            syllabus, more = self._syllabus()
-            stops += more
+            # `materials.yml` `syllabus:` stays where it is until the maintainer rules
+            # where a semester's syllabus is declared (its fold is not written).
+            syllabus = ""
             inherited = settings.layers(self.course)[2:]
             text, more = semester_layer(
                 self.org,
