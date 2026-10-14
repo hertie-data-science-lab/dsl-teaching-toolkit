@@ -85,7 +85,7 @@ def feedback_issues(monkeypatch):
 @pytest.fixture(autouse=True)
 def _team_lock_is_current(monkeypatch):
     """The Join-team form's mirror, refreshed beside `record_handout`. Its content has its
-    own tests (tests/test_grades.py); a handout test only needs it not to reach the API."""
+    own tests (tests/test_team_lock.py); a handout test only needs it not to reach the API."""
     monkeypatch.setattr(
         assign.team_formation,
         "sync_team_lock",

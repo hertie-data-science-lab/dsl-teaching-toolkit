@@ -4734,7 +4734,7 @@ def test_a_quiz_marked_after_the_fact_is_sent_from_a_sheet_that_is_not_frozen(
 ):
     # An in-class paper quiz: handed out after its due date, marks typed in later. Nothing
     # is collected, so nothing waits on the freeze - Distribute sends from an open sheet.
-    from tests.test_grades import ROSTER_ADA, _distribute
+    from tests.test_distribute import ROSTER_ADA, _distribute
 
     _EXTERNAL_GRADING = "title: Neural networks\nsubmit_via: external\n"
 

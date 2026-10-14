@@ -16,7 +16,7 @@ from dsl_course import (
     scaffold,
 )
 from tests.test_collect import _QUESTION_NB, _capture_archive, _checkout
-from tests.test_grades import ROSTER_ADA, _distribute, _schedule_with
+from tests.test_distribute import ROSTER_ADA, _distribute, _schedule_with
 from tests.test_scaffold import _solution_files, fake  # noqa: F401 - the fixture
 
 QUESTIONS = "questions:\n  Q1: 10\n  Q2: {points: 5, file: starter.tex}\n"

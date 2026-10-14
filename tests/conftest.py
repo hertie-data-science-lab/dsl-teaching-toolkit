@@ -44,6 +44,18 @@ from dsl_course import (
 ROSTER_HEADER = ",".join(roster.FIELDS)
 
 
+def split_grading(text: str | None) -> tuple[str | None, str | None]:
+    """A test's old-style grading config split where the keys live now: the template's
+    `grading_config.yml`, and the run settings as the semester's `assignments.yml`
+    `defaults:` (decision 0009)."""
+    if text is None:
+        return None, None
+    data = yaml.safe_load(text) or {}
+    run = {k: data.pop(k) for k in settings.RUN_KEYS if k in data}
+    template = yaml.safe_dump(data) if data else ""
+    return template, (yaml.safe_dump({"defaults": run}) if run else None)
+
+
 def repo_row(name: str, **extra) -> dict:
     """One row of a `discovery.list_org_repos` listing, carrying every field it really has.
 

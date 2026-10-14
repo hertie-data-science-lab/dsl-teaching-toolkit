@@ -16,10 +16,12 @@ import pytest
 from dsl_course import (
     course,
     ghcli,
+    grading_sheet,
     receipts,
     repos,
 )
 from dsl_course.grading_sheet import SheetSpec
+from tests.conftest import repo_row
 
 DUE_LONG = "Sunday 4 October 2026, 23:59 (Europe/Berlin)"
 CUTOFF_LONG = "Sunday 11 October 2026, 23:59 (Europe/Berlin)"
@@ -494,3 +496,70 @@ def test_every_write_is_spelt_so_the_pacer_can_see_it(monkeypatch, call):
     writes = [c for c in calls if any(f in c for f in ("--field", "-f"))]
     assert writes, "the call under test made no write at all"
     assert all(ghcli._is_mutating(c) for c in writes)
+
+
+@pytest.mark.parametrize(
+    "shape, listed, want",
+    [
+        # We could not look at all: find the thread the student was told to read, open
+        # nothing on an org nobody could list.
+        ({}, None, receipts.THREAD_FIND),
+        # There, and private: the one case a Submission receipts issue may be OPENED in.
+        ({}, {"assignment-1-ada": "private"}, receipts.THREAD_CREATE),
+        # There, and not private. Nothing about a student's marking goes where the world
+        # can read it - not even into a thread we used while it was still private.
+        ({}, {"assignment-1-ada": "public"}, receipts.THREAD_NONE),
+        (
+            {"visibility": "public"},
+            {"assignment-1-ada": "public"},
+            receipts.THREAD_NONE,
+        ),
+        # There and private, but a shape with no Submission receipts issue of its own: the thread a
+        # semester handed out before these shapes existed still gets its comment.
+        (
+            {"visibility": "public"},
+            {"assignment-1-ada": "private"},
+            receipts.THREAD_FIND,
+        ),
+        (
+            {"visibility": "student_choice"},
+            {"assignment-1-ada": "private"},
+            receipts.THREAD_FIND,
+        ),
+        (
+            {"submit_via": "external"},
+            {"assignment-1-ada": "private"},
+            receipts.THREAD_FIND,
+        ),
+        # Not in the listing. A `github` repo may have been created since it was taken,
+        # where a shape that creates no repos has none to find, and probing each would be
+        # an issues call per student for an answer already known.
+        ({}, {"grades-ada": "private"}, receipts.THREAD_FIND),
+        ({"submit_via": "external"}, {"grades-ada": "private"}, receipts.THREAD_NONE),
+    ],
+)
+def test_the_feedback_thread_policy_answers_every_shape(shape, listed, want):
+    # ONE question - may this run touch the issue here, and may it open one? - answered in
+    # one place, for the submission receipts, which are the whole of what is posted into
+    # a submission repo.
+    spec = grading_sheet.SheetSpec(
+        slug="assignment-1", title="A1", is_group=False, **shape
+    )
+    rows = (
+        None
+        if listed is None
+        else {name: repo_row(name, visibility=v) for name, v in listed.items()}
+    )
+    assert receipts.receipts_thread_policy(spec, rows, "assignment-1-ada") == want
+
+
+def test_a_spec_read_off_the_sheet_alone_never_opens_an_issue():
+    # No schedule entry, so no definition: `submit_via` and `visibility` are this spec's
+    # defaults rather than anybody's decision, and the one thing a guess may not do is
+    # open an issue in a student's repo. Its marks reach the gradebook either way.
+    spec = grading_sheet._spec_from_sheet("assignment-1", {"submissions": {}})
+    rows = {"assignment-1-ada": repo_row("assignment-1-ada")}
+    assert (
+        receipts.receipts_thread_policy(spec, rows, "assignment-1-ada")
+        is receipts.THREAD_FIND
+    )
