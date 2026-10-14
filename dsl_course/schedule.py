@@ -89,6 +89,7 @@ Usage:
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import re
@@ -2158,19 +2159,34 @@ def load(semester_org: str) -> Schedule:
     line/column, and an empty Schedule is returned. It must never raise: `load` sits under
     the hourly scheduler AND the site sync, and one semester's typo froze both. It is also
     a FAULT on the file - the one that costs the semester everything - so the digest issue
-    and the mail carry it like any other (see `Schedule.faults`)."""
+    and the mail carry it like any other (see `Schedule.faults`).
+
+    Parsed ONCE per run (`_parsed`, forgotten when this run writes the semester's config):
+    `grades`, `assign` and `collect` each ask again. Every caller still gets its own copy
+    (nothing shared to mutate) and the loud lines below, as each did when it parsed its
+    own."""
+    sched, said = _parsed(semester_org)
+    for line in said:
+        log_err(line)
+    return copy.deepcopy(sched)
+
+
+@run.per_run(lambda semester_org: run.scope(semester_org, CONFIG_REPO))
+def _parsed(semester_org: str) -> tuple[Schedule, tuple[str, ...]]:
+    """`load`'s Schedule and the lines it says about the file, parsed once per run."""
+    said: list[str] = []
     content = _schedule_text(semester_org)
     unparseable: list[ConfigFault] = []
     try:
         meta = load_yaml_lines(content) if content else {}
     except yaml.YAMLError as exc:
-        log_err(
+        said.append(
             f"{semester_org}/{CONFIG_REPO}/{SCHEDULE_PATH} is NOT valid YAML - the whole "
             f"schedule is ignored:"
         )
         # the parser's own message: it carries the line/column and the offending snippet
-        log_err(str(exc))
-        log_err(
+        said.append(str(exc))
+        said.append(
             f"fix {CONFIG_REPO}/{SCHEDULE_PATH} on main in {semester_org} - until then "
             f"NOTHING is scheduled for this semester (no releases, no handouts, no deadline "
             f"snapshots, no autograding) and the site builds without schedule data."
@@ -2187,7 +2203,7 @@ def load(semester_org: str) -> Schedule:
         # Valid YAML, but not a schedule: a bare list, or a stray document separator that
         # left a string at the top level. Same consequence as a parse failure - nothing in
         # the file is read - so it must not read as an empty plan either.
-        log_err(
+        said.append(
             f"{semester_org}/{CONFIG_REPO}/{SCHEDULE_PATH} parses as "
             f"{type(meta).__name__}, not a mapping - the whole schedule is ignored. "
             f"Its top level must be keys like `releases:` / `assignments:`."
@@ -2199,7 +2215,14 @@ def load(semester_org: str) -> Schedule:
                 f"ignored: nothing releases, hands out, snapshots or grades"
             )
         )
-    instance = settings.instance(semester_org)
+    try:
+        instance = settings.instance(semester_org)
+    except BaseException:
+        # A run settings read that failed raises out of `load`: what was said about the
+        # schedule is said first, as it always was.
+        for line in said:
+            log_err(line)
+        raise
     sched = parse(meta if isinstance(meta, dict) else {}, instance)
     sched.org = semester_org
     sched.instance_unparseable = instance.unparseable
@@ -2210,14 +2233,15 @@ def load(semester_org: str) -> Schedule:
         # the run goes green, but an entry they wrote is not in the plan. Every caller
         # comes through here - the hourly scheduler, the site sync, Check semester setup - so
         # saying it once here says it everywhere.
-        log_err(
+        said.append(
             f"{semester_org}/{CONFIG_REPO}/{SCHEDULE_PATH}: {len(sched.dropped)} entry/ies "
             f"DROPPED - they parse as YAML but not as schedule entries:"
         )
-        for line in sched.dropped:
-            log_err(f"  {line}")
-        log_err(f"fix them on main in {semester_org}; everything else is unaffected.")
-    return sched
+        said.extend(f"  {line}" for line in sched.dropped)
+        said.append(
+            f"fix them on main in {semester_org}; everything else is unaffected."
+        )
+    return sched, tuple(said)
 
 
 def load_file(path: str) -> tuple[Schedule | None, str | None]:
@@ -2762,6 +2786,7 @@ def record_handout(semester_org: str, slug: str, stamp: str | None = None) -> No
     # returns without writing or writes, and a memo cleared once too often only costs a
     # read, where one held too long hands the next caller a plan missing this handout.
     _schedule_text.cache_clear()
+    _parsed.cache_clear()
     if stamp is None:
         # the release moment, in the semester's own timezone (naive, like every other
         # schedule datetime - the parser reads it back in that same zone)

@@ -1402,6 +1402,24 @@ def test_load_never_raises_when_a_block_is_a_list(monkeypatch, capsys):
     assert "DROPPED" in capsys.readouterr().err
 
 
+def test_load_parses_once_per_run_and_every_caller_hears_and_owns_it(
+    monkeypatch, capsys
+):
+    reads = []
+
+    def get(org, repo, path):
+        reads.append(path)
+        return "releases:\n  - event_datetime: 2026-09-01\n"
+
+    monkeypatch.setattr(schedule, "get_file_content", get)
+    first = schedule.load("Semester-f2026")
+    first.releases.append("mutated by its caller")
+    second = schedule.load("Semester-f2026")
+    assert reads == ["schedule.yml"]
+    assert second.releases == []
+    assert capsys.readouterr().err.count("DROPPED") == 2
+
+
 # ------------------------------------------------- unknown/typo'd keys at every level
 # A typo'd or legacy key is silently ignored, so a file validates while meaning something
 # other than what faculty wrote. Flagged (but the entry itself is kept when it can parse).
