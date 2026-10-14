@@ -8,8 +8,9 @@
 - Old names live in one module, `legacy.py`, which every parser and the migration read. The
   0.10.0 recognition is gone (every live org migrated 13-14 Oct): retired `schedule.yml` and
   `dsl-course.yml` keys are unknown keys, `people.yml`, the old registry file, the `dsl-cohort`
-  topic, `submit_via: github`, `grading.yml`, the old CLI flags, request fields and
-  `cohort_org` dispatch are no longer recognised, and the console has no migration screen and
+  topic, `submit_via: github`, `format:`, the registry's `cohorts:` key, `grading.yml`,
+  `notified.csv`, `_publish-config.yml`, an untopicked materials repo, the old CLI flags,
+  request fields and `cohort_org` dispatch are no longer recognised, and the console has no migration screen and
   no old-hash redirects. ds01's `all_cohorts` stays an alias until ds01-infra switches.
 - `DSL_COURSE_ADMIN_EMAILS` is gone: a fault in a course's own config is mailed to the admins'
   `email:` in `dsl-course.yml`.

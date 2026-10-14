@@ -388,25 +388,6 @@ _SEMESTER_PAGES = (
     ),
 )
 
-# A page the sync wrote for a tab the PUBLIC site no longer has (its Assignments tab).
-_RETIRED_PAGES = re.compile(
-    r"\A---\nlayout: (assignments|materials|profile)\ntitle: .*\npermalink: /"
-)
-
-
-def retired_pages(site_wd: Path, names: Iterable[str]) -> tuple[str, ...]:
-    """Those of `names` that are a retired tab's page the sync wrote (never one somebody
-    wrote by hand)."""
-    pages = []
-    for name in names:
-        try:
-            text = (site_wd / name).read_text(encoding="utf-8")
-        except OSError:
-            continue
-        if _RETIRED_PAGES.match(text):
-            pages.append(name)
-    return tuple(pages)
-
 
 def console_yaml(semester_org: str, console: bool) -> str:
     """`_data/console.yml`: where the banner sends a reader - this semester's screens in

@@ -17,7 +17,6 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 
 from .course import ASSIGNMENTS_FILE, CONFIG_REPO, INSTRUCTORS_FILE, JOIN_REPO
-from .faults import NOT_MIGRATED
 
 
 @dataclass(frozen=True)
@@ -37,13 +36,11 @@ class Old:
 SCHEDULE_ASSIGNMENT = "schedule.yml assignments.<key>"
 GRADING_CONFIG = "grading_config.yml"
 SETTINGS = "assignment settings"
-SEMESTER_REGISTRY = "semesters.yml"
 COURSE_CONFIG = "dsl-course.yml"
 COURSE_GITHUB = "course .github"
 SEMESTER_ORG = "semester org"
 SEMESTER_TOPICS = "semester .github topics"
 COURSE_REPOS = "course org repos"
-PUBLIC_SITE = "public site repo"
 MEMBERSHIP_DISPATCH = "sync-membership dispatch payload"
 
 _GRADING_CONFIG_HOME = (
@@ -75,20 +72,14 @@ ROWS: tuple[Old, ...] = (
     # ds01's hourly membership timer (an EXTERNAL system, ds01-infra) still sends it: read
     # as `all_semesters` with a log line and no fault until ds01-infra switches.
     Old("all_cohorts", "all_semesters", MEMBERSHIP_DISPATCH, "0.10.0"),
-    # Decision 0012. Refused as NOT_MIGRATED by the setting readers.
-    Old("format", "formats", SETTINGS, "0.10.0", NOT_MIGRATED),
-    # Decision 0012: the registry's old key. Refused as NOT_MIGRATED.
-    Old("cohorts", "semesters", SEMESTER_REGISTRY, "0.10.0", NOT_MIGRATED),
-    # Decision 0016: the settings an older publish committed into the public site repo.
-    # `opencourse.yml` holds them now; every publish deletes this file.
-    Old("_publish-config.yml", "opencourse.yml", PUBLIC_SITE, "0.9.0"),
     # Read by `migrate` only: the names it rewrites.
+    Old("format", "formats", SETTINGS, "0.10.0"),
     Old("github", "assignment_repo", GRADING_CONFIG, "0.9.0"),
     Old("classroom-config", CONFIG_REPO, SEMESTER_ORG, "0.10.0"),
     Old("welcome", JOIN_REPO, SEMESTER_ORG, "0.10.0"),
     Old("people.yml", INSTRUCTORS_FILE, SEMESTER_ORG, "0.10.0"),
     Old("dsl-cohort", "dsl-semester", SEMESTER_TOPICS, "0.10.0"),
-    Old("cohort-courses-pages.yml", SEMESTER_REGISTRY, COURSE_GITHUB, "0.10.0"),
+    Old("cohort-courses-pages.yml", "semesters.yml", COURSE_GITHUB, "0.10.0"),
     Old("org", "", COURSE_CONFIG, "0.10.0"),
     Old("org_name", "", COURSE_CONFIG, "0.10.0"),
     Old("cohort_defaults", "", COURSE_CONFIG, "0.10.0"),

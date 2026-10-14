@@ -67,7 +67,6 @@ from .course import (
     COURSE_CONFIG,
     INSTRUCTORS_TEAM,
     JOIN_REPO,
-    MATERIALS_REPO_PREFIX,
     NO_STARTER,
     SELF_SELECT,
     SOLUTION_BRANCH,
@@ -96,7 +95,7 @@ from .discovery import (
     org_meta,
     read_semester_registry,
 )
-from .faults import NOT_MIGRATED, ConfigFault, FaultKind, Unusable
+from .faults import ConfigFault, FaultKind, Unusable
 from .gh_commits import last_commit_at
 from .gh_contents import (
     WITHHELD_ROOT_STUBS,
@@ -116,7 +115,6 @@ from .materials import (
     DEFAULT_SYLLABUS,
     FOLDER_KINDS,
     MATERIALS_FILE,
-    MATERIALS_TOPIC,
     PLAN_START,
     Declared,
     alias_kind,
@@ -227,8 +225,6 @@ class MaterialsFacts:
     repo: str
     syllabus: str | None = None
     syllabus_path: str = DEFAULT_SYLLABUS
-    # False for a `course-materials-*` repo without the `dsl-materials` topic yet.
-    topic: bool = True
     # The top-level folders (dot-folders left out), then each deeper folder a kind names:
     # by its own name one level down in an unkinded top folder, by a `kinds:` path at any
     # depth (`kind_folders`); and `materials.yml`'s `kinds`.
@@ -1023,10 +1019,8 @@ def materials_checks(m: MaterialsFacts) -> list[dict]:
 
 
 def materials_state(m: MaterialsFacts, checks: list[dict]) -> str:
-    """C4, per repo: `problem` until the migration gives it the topic; `ready` once every
-    needed check of `checks` (its `materials_checks`) is done."""
-    if not m.topic:
-        return PROBLEM
+    """C4, per repo: `ready` once every needed check of `checks` (its `materials_checks`)
+    is done."""
     needed = (c for c in checks if c["need"] == NEEDED)
     return "ready" if all(c["done"] for c in needed) else TODO
 
@@ -1040,7 +1034,6 @@ def _nearest_materials_why(
     unmet = {
         m.repo: [c for c in checks[m.repo] if c["need"] == NEEDED and not c["done"]]
         for m in materials
-        if m.topic
     }
     if not unmet:
         return "No materials repo is ready yet."
@@ -1052,29 +1045,6 @@ def _nearest_materials_why(
             return f"{repo} has no lectures/, labs/ or readings/ folder yet."
         return f"{repo} has only supporting files so far."
     return f"{repo} is not ready yet."
-
-
-def materials_problem(m: MaterialsFacts, org: str) -> dict:
-    """The NOT_MIGRATED problem of a materials repo that has no topic yet."""
-    return {
-        "id": f"materials:{_slugify(m.repo)}:{NOT_MIGRATED}",
-        "scope": "course",
-        "stage": "C4",
-        "kind": NOT_MIGRATED,
-        "text": (
-            f"{m.repo} is a materials repo by its old name only: it has no "
-            f"{MATERIALS_TOPIC} topic yet."
-        ),
-        "stops": "Run the migration, which adds the topic.",
-        "fix": {
-            "repo": f"{org}/{m.repo}",
-            "path": "",
-            "line": None,
-            "screen": None,
-            "entry": None,
-            "url": f"https://github.com/{org}/{m.repo}",
-        },
-    }
 
 
 # Decision 0031 rule 10: a folder no kind names is supporting files, where it used to be a
@@ -1664,9 +1634,6 @@ def render_course(
     problems = [problem_from_fault(f, facts.org, now) for f in facts.faults]
     if facts.website_unusable and facts.website_on:
         problems.append(website_problem(facts.org))
-    problems += [
-        materials_problem(m, facts.org) for m in facts.materials if not m.topic
-    ]
     problems += [p for m in facts.materials for p in kindless_problems(m, facts.org)]
     for t in facts.templates:
         problems += template_problems(t, facts.org, moments)
@@ -1759,8 +1726,6 @@ def course_todo(
             )
         )
     for m in facts.materials:
-        if not m.topic:
-            continue
         out += [
             _todo(
                 c["need"],
@@ -2518,9 +2483,6 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
     problems += nothing_to_release_problems(facts, now, aside)
     problems += kindless_entry_problems(facts)
     problems += unwritten_problems(facts, course.org, now)
-    problems += [
-        materials_problem(m, course.org) for m in course.materials if not m.topic
-    ]
     problems += [p for m in course.materials for p in kindless_problems(m, course.org)]
     for t in course.templates:
         problems += template_problems(t, course.org, moments)
@@ -2734,12 +2696,6 @@ def _course_facts(course_org: str) -> CourseFacts:
             continue
         if is_materials_repo(row):
             facts.materials.append(_materials_facts(course_org, name))
-        elif name.startswith(MATERIALS_REPO_PREFIX):
-            # A materials repo by its old mark, the name: listed, and NOT_MIGRATED until
-            # the migration's topic step gives it the topic (decision 0013).
-            m = _materials_facts(course_org, name)
-            m.topic = False
-            facts.materials.append(m)
         elif is_assignment_template(row):
             t = TemplateFacts(name, get_file_content(course_org, name, README_FILE))
             text = get_file_content(

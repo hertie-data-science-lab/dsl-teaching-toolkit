@@ -199,7 +199,7 @@ after one correction reaches one student. The emails are recorded just before th
 run that fails afterwards never mails anyone twice. If some emails fail, they are retried
 only when you press Return marks again; if every one fails, `marks_return_datetime` tries
 again on its own. It also keeps trying while any mark is held, and sends only what has not
-gone out. A refused `grading_config.yml` (`NOT_MIGRATED`, or `RUN_SETTING_IN_TEMPLATE`) stops
+gone out. A refused `grading_config.yml` (`RUN_SETTING_IN_TEMPLATE`) stops
 its sheet refresh and Return marks until it is fixed. Untick `notify` to skip the email.
 
 The marks per question and the feedback per question go to the page unless the

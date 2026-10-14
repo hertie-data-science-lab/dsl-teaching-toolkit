@@ -32,7 +32,7 @@ from dsl_course import (
     welcome,
 )
 from dsl_course.course import INSTRUCTOR_ROLES, people_by_role
-from dsl_course.faults import NOT_MIGRATED, NotMigrated
+from dsl_course.faults import NOT_MIGRATED
 from dsl_course.ops.registry import REGISTRY
 from dsl_course.ops.request import RequestError, parse_request
 from tests.plans import citing
@@ -64,15 +64,6 @@ def _registry(monkeypatch, files: dict[str, str]) -> list[tuple[str, bytes]]:
         lambda org, repo, path, body, msg: written.append((path, body)) or True,
     )
     return written
-
-
-def test_the_old_registry_key_is_refused(monkeypatch):
-    _registry(monkeypatch, {"semesters.yml": "cohorts:\n- Sem-f2026\n"})
-    with pytest.raises(NotMigrated):
-        discovery.discover_semesters("Course")
-    found: list = []
-    assert discovery.read_semester_registry("Course", found) == []
-    assert [f.code for f in found] == [NOT_MIGRATED]
 
 
 def test_registering_writes_the_new_registry_file(monkeypatch):
@@ -367,32 +358,6 @@ def test_the_hand_out_op_passes_solution_datetime_now():
 def test_formats_is_a_list_and_its_first_entry_is_the_runnable_one():
     spec = grading_spec.parse_grading_spec("formats: [py, ipynb]\n")
     assert (spec.formats, spec.format, spec.dropped) == (("py", "ipynb"), "py", ())
-
-
-def test_a_template_naming_only_format_is_refused_whole(monkeypatch, capsys):
-    from datetime import UTC, datetime
-
-    with pytest.raises(NotMigrated):
-        grading_spec.parse_grading_spec("type: group\nformat: ipynb\n")
-    # Beside `formats:` the old key is only a dropped line; the file is still read.
-    spec = grading_spec.parse_grading_spec("formats: [py]\nformat: ipynb\n")
-    assert spec.formats == ("py",)
-    assert [(d.field, d.code) for d in spec.dropped] == [("format", NOT_MIGRATED)]
-    # Loaded, it is flagged rather than read as the defaults, and the handout refuses it.
-    monkeypatch.setattr(
-        grading_spec, "_grading_text", lambda org, t, **_: "format: ipynb\n"
-    )
-    assert grading_spec.load_grading_spec("C", "a1").not_migrated
-    assert grading_spec.declared_grading_spec("C", "a1").not_migrated
-    student = assign.roster.Student("a@x", "A", "ada", "", "", "student")
-    monkeypatch.setattr(assign.roster, "load", lambda org: [student])
-    monkeypatch.setattr(assign.schedule, "load", lambda org: citing("a1"))
-    assert assign.provision_all("C", "a1", "S") == (1, False)
-    assert NOT_MIGRATED in capsys.readouterr().err
-    faults, parsed = grading_spec.grading_spec_faults(
-        "a1", "a1", "C", "format: ipynb\n", datetime.now(UTC)
-    )
-    assert parsed is None and [f.code for f in faults] == [NOT_MIGRATED]
 
 
 def test_a_course_default_under_the_old_format_key_is_not_read():

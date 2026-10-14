@@ -34,27 +34,11 @@
     },
     {
       "cost": "",
-      "fault_code": "NOT_MIGRATED",
+      "fault_code": null,
       "new": "formats",
       "old": "format",
       "since": "0.10.0",
       "where": "assignment settings"
-    },
-    {
-      "cost": "",
-      "fault_code": "NOT_MIGRATED",
-      "new": "semesters",
-      "old": "cohorts",
-      "since": "0.10.0",
-      "where": "semesters.yml"
-    },
-    {
-      "cost": "",
-      "fault_code": null,
-      "new": "opencourse.yml",
-      "old": "_publish-config.yml",
-      "since": "0.9.0",
-      "where": "public site repo"
     },
     {
       "cost": "",

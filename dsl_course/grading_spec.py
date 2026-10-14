@@ -30,7 +30,7 @@ from .course import (
 from .discovery import (
     assignment_rows,
 )
-from .faults import NOT_MIGRATED, ConfigFault, NotMigrated, RunSettingInTemplate
+from .faults import ConfigFault, RunSettingInTemplate
 from .gh_contents import (
     get_file_content,
     yaml_mark_line,
@@ -52,7 +52,6 @@ from .setting_readers import (
     as_decimal,
     question_files,
     read_settings,
-    refuse_renamed,
 )
 
 # ------------------------------------------------- the assignment's own definition
@@ -121,8 +120,8 @@ class GradingSpec(_Shape):
     # How `main`'s starter is written (decision 0028): `derived` | `handwritten`, or None
     # when the file predates the key - `derive.starter_mode` then reads the markers.
     starter: str | None = None
-    # The file still carries an old key (decision 0012) or a run setting (0009): refused
-    # whole, and nothing hands out or grades from it until it is fixed.
+    # The file carries a run setting (decision 0009): refused whole, and nothing hands out
+    # or grades from it until it is fixed.
     not_migrated: bool = False
     dropped: tuple[str, ...] = ()
     # `{run key: layer}` - where each run setting's value came from (`with_run_settings`).
@@ -207,8 +206,6 @@ def _cross_check(values: dict, dropped: list[str]) -> None:
 # are how ONE semester runs the assignment (decision 0009). A run key still written here
 # is RUN_SETTING_IN_TEMPLATE.
 TEMPLATE_KEYS = tuple(k for k in SPEC_KEYS if k not in settings.RUN_KEYS)
-# A refusal of the whole file: an old spelling, or a run setting.
-REFUSED = (NotMigrated, RunSettingInTemplate)
 
 
 def parse_grading_spec(text: str) -> GradingSpec:
@@ -222,18 +219,12 @@ def parse_grading_spec(text: str) -> GradingSpec:
     data = yaml.safe_load(text) if text.strip() else {}
     if not isinstance(data, dict):
         data = {}
-    # A file that still names its starters under the old key alone has not migrated, and
-    # is refused WHOLE: read without them, it would grade as an assignment with no
-    # starter at all - the completion check off, the runnable format gone - and say nothing.
-    if "format" in data and "formats" not in data:
-        raise NotMigrated("format", "formats", GRADING_FILE)
-    # A run setting here is refused WHOLE too: read without it, the assignment would run
+    # A run setting here is refused WHOLE: read without it, the assignment would run
     # on the semester's defaults instead of the rule this file wrote, and say nothing.
     for key in settings.RUN_KEYS:
         if key in data:
             raise RunSettingInTemplate(key, GRADING_FILE)
     dropped: list[str] = []
-    data = refuse_renamed(data, GRADING_FILE, dropped)
     values = read_settings(data, TEMPLATE_KEYS, GRADING_FILE, dropped)
     if values.get("questions"):
         values["question_files"] = (
@@ -297,7 +288,7 @@ def declared_grading_spec(
         return None
     try:
         spec = parse_grading_spec(text)
-    except REFUSED as exc:
+    except RunSettingInTemplate as exc:
         # Refused, and SAYS so: the lock reads it as no definition (its Join-team form
         # refuses), and the handout and the grader refuse to act on it.
         log_err(f"  ! {template}/{GRADING_FILE}: {exc} - refused")
@@ -415,7 +406,7 @@ def grading_spec_faults(
     created with, and the template alone would give the digest a second answer."""
     try:
         spec = parse_grading_spec(text)
-    except REFUSED as exc:
+    except RunSettingInTemplate as exc:
         return [
             _spec_fault(
                 slug,
@@ -426,11 +417,7 @@ def grading_spec_faults(
                 f"out or graded until it is",
                 field=exc.old,
                 lineno=key_lines(text).get((exc.old,)),
-                fix=(
-                    "run the migration, which rewrites it"
-                    if exc.code == NOT_MIGRATED
-                    else f"move `{exc.old}:` to the assignment's entry in schedule.yml"
-                ),
+                fix=f"move `{exc.old}:` to the assignment's entry in schedule.yml",
                 code=exc.code,
             )
         ], None
@@ -512,8 +499,6 @@ def _spec_fix(dropped: Dropped) -> str:
     "Correct the value" is not an instruction about a line whose KEY is the mistake: a
     setting that moved here from schedule.yml, or a plain misspelling, has no value to
     correct."""
-    if dropped.code == NOT_MIGRATED:
-        return "run the migration, which rewrites it to the new name"
     if dropped.field not in SPEC_KEYS:
         return f"remove the line above, or spell it as one of: {', '.join(SPEC_KEYS)}"
     allowed = f" (allowed: {'/'.join(dropped.allowed)})" if dropped.allowed else ""

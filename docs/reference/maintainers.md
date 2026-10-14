@@ -180,8 +180,7 @@ Things whose *literal spelling* is depended on from outside Python:
   it and nothing else (the semester site sync reads its `withhold` alone); `enabled:
   false` stops both. Seeded CREATE-ONLY and INSTRUCTOR-OWNED
   by Bootstrap Course Org (off), schema in `console/schemas/opencourse.schema.json`. A
-  site repo's `_publish-config.yml` is retired: the migration seeds `opencourse.yml` from it
-  and a publish deletes it. A materials repo's `publish.yml` is NOT the open site's: it is
+  site repo's `_publish-config.yml` is retired (none is left on a live site). A materials repo's `publish.yml` is NOT the open site's: it is
   the semester site's opt-in list of files to host publicly under `files/` (decision 0035;
   `site._mirror_public`), and `withhold` here is an extra deny filter on those copies.
 - **`course.UPSTREAM_BRANCH`** (`upstream`) is the toolkit's branch in every release dest,
@@ -948,11 +947,9 @@ one from day one).
 
 Decision 0012 gave each concept one name. The engine writes and reads ONLY the new
 spelling. Since decision 0042 (14 Oct 2026, every live org migrated) an old spelling is no
-longer recognised at all, except the rows of `legacy.py`: `format` in the assignment settings
-and the registry's `cohorts:` key (refused as `NOT_MIGRATED`), the schedule's moved `type` /
-`max_team_size` (a note naming where each lives), the public site's `_publish-config.yml`
-(deleted on publish) and ds01's `all_cohorts` payload (an alias until ds01-infra sends
-`all_semesters`). The table below is the 0.10.0 migration's input, kept until the tool is
+longer recognised by any parser, except the rows of `legacy.py` a parser reads: the
+schedule's moved `type` / `max_team_size` (a note naming where each lives) and ds01's
+`all_cohorts` payload (an alias until ds01-infra sends `all_semesters`). The table below is the 0.10.0 migration's input, kept until the tool is
 retired; `migrate` reads its old names from `legacy.py`. The append-only recognition chains
 for things already open in a live org are not legacy: the Submission receipts labels and
 marks (`course.py`), the archive notice prefixes (`teardown.py`) and the digest titles

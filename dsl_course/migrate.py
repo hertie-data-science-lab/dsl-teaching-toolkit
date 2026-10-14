@@ -86,7 +86,7 @@ from .discovery import (
     is_assignment_template,
     list_org_repos,
 )
-from .faults import NOT_MIGRATED
+from .faults import NOT_MIGRATED, RunSettingInTemplate
 from .gh_commits import first_landed
 from .gh_contents import (
     LINES,
@@ -99,7 +99,7 @@ from .gh_contents import (
     top_level,
 )
 from .ghcli import forget_all, gh, git
-from .grading_spec import GRADING_FILE, REFUSED, assignment_title, parse_grading_spec
+from .grading_spec import GRADING_FILE, assignment_title, parse_grading_spec
 from .log import CLIParser, add_preview_flag, log, log_err, log_ok, log_step
 from .materials import MATERIALS_TOPIC, is_materials_repo, kinds_reader
 from .opencourse import OPENCOURSE_FILE, READINGS_MODES, OpenCourse
@@ -2194,7 +2194,7 @@ def _grading_clean(text: str | None) -> bool:
         return True
     try:
         spec = parse_grading_spec(text)
-    except REFUSED:
+    except RunSettingInTemplate:
         return False
     return not any(NOT_MIGRATED in d for d in spec.dropped)
 
@@ -2597,7 +2597,7 @@ class Semester:
             )
             try:
                 spec = parse_grading_spec(text or "")
-            except (*REFUSED, yaml.YAMLError):
+            except (RunSettingInTemplate, yaml.YAMLError):
                 spec = parse_grading_spec("")
             old, new = (
                 str(entry["title"]).strip(),

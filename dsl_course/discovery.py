@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 
 import yaml
 
-from . import legacy, run
+from . import run
 from .central import resolve_central_ref
 from .config import read_course, read_semester
 from .course import (
@@ -36,7 +36,7 @@ from .course import (
     advertises_console,
     session_dirs,
 )
-from .faults import ConfigFault, NotMigrated, Unusable, not_migrated_fault
+from .faults import ConfigFault, Unusable
 from .gh_contents import get_file_content, put_file, repo_tree
 from .ghcli import ALL, EVERYTHING, FILE, FILES, META, gh, is_missing_resource, on_write
 from .log import log, log_err, log_ok, on_cli_start
@@ -386,9 +386,6 @@ def _read_semesters(
             )
         )
         return []
-    for row in legacy.rows(legacy.SEMESTER_REGISTRY) if isinstance(data, dict) else ():
-        if row.old in data and row.new not in data:
-            return _not_migrated(course_org, row.old, row.new, faults)
     semesters = data.get("semesters", []) if isinstance(data, dict) else data
     if not isinstance(semesters, list) or not all(
         isinstance(c, str) for c in semesters
@@ -408,21 +405,6 @@ def _read_semesters(
         )
         return []
     return [c for c in semesters if c]
-
-
-def _not_migrated(
-    course_org: str, old: str, new: str, faults: list[ConfigFault] | None
-) -> list[str]:
-    """An old spelling in the registry: raised, or - for a caller collecting faults -
-    filed, and read as no semesters at all."""
-    if faults is None:
-        raise NotMigrated(old, new, f"{course_org}/.github/{SEMESTERS_PATH}")
-    faults.append(
-        not_migrated_fault(
-            old, new, where=SEMESTERS_PATH, file=SEMESTERS_PATH, in_repo=".github"
-        )
-    )
-    return []
 
 
 def read_semester_registry(course_org: str, faults: list[ConfigFault]) -> list[str]:

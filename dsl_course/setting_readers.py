@@ -15,7 +15,6 @@ from pathlib import PurePosixPath
 from typing import Self
 from urllib.parse import urlsplit
 
-from . import legacy
 from .course import (
     ASSIGNMENT_TYPES,
     FORMATS,
@@ -26,7 +25,6 @@ from .course import (
     TEAM_FORMATIONS,
     VISIBILITIES,
 )
-from .faults import not_migrated_text
 
 
 def as_decimal(value: object) -> Decimal | None:
@@ -181,24 +179,6 @@ def read_formats(
         )
     )
     return None
-
-
-def refuse_renamed(data: dict, where: str, dropped: list[str]) -> dict:
-    """`data` without its old keys (`legacy.SETTINGS`), each one noted in `dropped`: the
-    old key is never read, and the setting takes its default meanwhile."""
-    out = dict(data)
-    for row in legacy.rows(legacy.SETTINGS):
-        if row.old in out:
-            del out[row.old]
-            dropped.append(
-                Dropped(
-                    where,
-                    row.old,
-                    not_migrated_text(row.old, row.new),
-                    code=row.fault_code,
-                )
-            )
-    return out
 
 
 def _boolean(value: object, field: str, where: str, dropped: list[str]) -> bool:

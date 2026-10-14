@@ -2241,13 +2241,18 @@ def test_a_held_mark_keeps_the_assignment_to_be_returned_again(tmp_path, monkeyp
 
 
 def test_a_refused_definition_returns_no_marks(tmp_path, monkeypatch):
-    # A NOT_MIGRATED grading_config.yml reads as a default spec: individual, and the
+    # A refused grading_config.yml reads as a default spec: individual, and the
     # institution's late rule. Nothing goes out off it, and nothing is recorded returned.
     monkeypatch.setattr(
         grading_spec, "assignment_title", lambda org, repo, spec, name: name
     )
+    # The run setting stays in the TEMPLATE, which is what refuses it.
+    monkeypatch.setitem(globals(), "split_grading", lambda text: (text, None))
     out = _distribute(
-        monkeypatch, tmp_path, grading="format: notebook\n", assignment="assignment-1"
+        monkeypatch,
+        tmp_path,
+        grading="late_window_days: 3\n",
+        assignment="assignment-1",
     )
     assert out["rc"] == 1
     assert out["gradebooks"] == [] and out["config"] == [] and out["outbox"] == []
@@ -2265,7 +2270,7 @@ def test_a_refused_definition_is_not_due_for_return(monkeypatch):
         org="SEMESTER",
     )
     monkeypatch.setattr(
-        grading_spec, "_grading_text", lambda org, tpl: "format: notebook\n"
+        grading_spec, "_grading_text", lambda org, tpl: "late_window_days: 3\n"
     )
 
     def read(org, repo, path, **k):

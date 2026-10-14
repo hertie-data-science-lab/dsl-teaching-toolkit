@@ -2962,21 +2962,6 @@ def test_a_course_file_left_not_migrated_stops_the_preview(
     assert "`assignment_defaults.format` is still NOT_MIGRATED" in err
 
 
-def test_a_template_left_not_migrated_stops_the_preview(
-    fake, course, monkeypatch, capsys
-):
-    # A flow mapping the line rewrite cannot reach, with a run key it can strip: the
-    # rewrite has work, and leaves `format` behind for the verify to refuse.
-    fake.tree(COURSE, "assignment-1-f2026", "solution")["grading_config.yml"] = (
-        b"{format: ipynb, autograde: true}\n# late_window_days: 3\n"
-    )
-    assert _main(monkeypatch, COURSE) == 1
-    assert (
-        "will stop here: assignment-1-f2026@solution/grading_config.yml would still "
-        "say NOT_MIGRATED"
-    ) in capsys.readouterr().out
-
-
 # -------------------------------- a stripped title against the template's (MIG-7)
 
 

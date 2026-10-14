@@ -508,10 +508,8 @@ def test_a_course_problem_stops_ready_though_every_required_stage_is_done():
     )
     assert block["verdict"]["state"] != "ready"
     assert block["verdict"]["state"] == "fixing"
-    # A migration problem on a materials repo is a course problem too.
-    unmigrated = status_json.MaterialsFacts("course-materials-x", "# S", True)
-    unmigrated.topic = False
-    assert _course_block(_course(materials=[unmigrated]))["verdict"]["state"] != "ready"
+    # A website problem is a course problem too.
+    assert _course_block(_course(website_unusable=True))["verdict"]["state"] != "ready"
 
 
 @pytest.mark.parametrize(
@@ -612,20 +610,6 @@ def test_an_undeclared_kind_is_inferred_through_the_repos_aliases():
     semester.sched.releases[0].kind = "lab"
     s3 = next(r for r in _render(semester=semester)["releases"] if r["id"] == "s3")
     assert s3["kind"] == "lab"
-
-
-def test_a_materials_repo_by_its_old_name_only_is_not_migrated():
-    old = status_json.MaterialsFacts("course-materials-f2025", "# S", topic=False)
-    doc = _render(_course(materials=[old]))
-    assert [(m["repo"], m["state"]) for m in doc["course"]["materials"]] == [
-        ("course-materials-f2025", "problem")
-    ]
-    # Its unmet checks are the migration's problem, not to-dos.
-    assert doc["course"]["todo"] == []
-    (problem,) = [p for p in doc["problems"] if p["id"].startswith("materials:")]
-    assert problem["id"] == "materials:course-materials-f2025:NOT_MIGRATED"
-    assert "dsl-materials" in problem["text"] and problem["stage"] == "C4"
-    assert validate(doc, schemas.status_schema()) == []
 
 
 def test_gather_raises_no_problem_for_an_archived_template_without_the_topic(
@@ -1919,7 +1903,6 @@ def _unmet(m: status_json.MaterialsFacts) -> list[str]:
             ["syllabus", "withheld"],
             "ready",
         ),
-        ({"topic": False}, [], "problem"),
     ],
 )
 def test_the_materials_checklist_and_its_state(over, unmet, state):
@@ -2212,9 +2195,6 @@ def test_c4_and_c5_are_done_once_any_one_is_ready():
     # what it still needs - never "no repo is ready".
     assert why["C4"] == "course-materials-b has only supporting files so far."
     assert why["C5"] == "No assignment template is ready yet."
-    unmigrated = _materials("course-materials-x", topic=False)
-    why = _course_block(_course(materials=[unmigrated]))["stage_why"]
-    assert why["C4"] == "1 problem needs fixing."
 
 
 def test_the_todo_list_is_every_unmet_check_and_every_unwritten_brief():
@@ -2619,8 +2599,7 @@ def test_the_three_course_verdicts():
     )
     assert block["verdict"]["state"] != "ready"
     # A `now` course problem: fixing.
-    unmigrated = _materials("course-materials-x", topic=False)
-    block = _course_block(_course(materials=[unmigrated]))
+    block = _course_block(_course(website_unusable=True))
     assert (block["verdict"]["state"], block["verdict"]["problems"]) == ("fixing", 1)
 
 

@@ -22,7 +22,7 @@ from urllib.parse import quote
 
 import yaml
 
-from . import legacy, policy
+from . import policy
 from .config import read_local
 from .course import (
     discover_local_sessions,
@@ -57,7 +57,6 @@ from .site_repo import (
     links_block,
     nav_yaml,
     people_yaml,
-    retired_pages,
     row_file,
     site_readme,
     site_templates,
@@ -243,8 +242,7 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
     """Build/refresh the PUBLIC course site `<course-org>.github.io` (open courseware)
     from `oc`, the course's `opencourse.yml`.
 
-    The first run scaffolds the site (Pages), later runs re-sync it; each deletes a
-    retired file an older publish left in the site repo (`legacy.PUBLIC_SITE`). Hosts the declared
+    The first run scaffolds the site (Pages), later runs re-sync it. Hosts the declared
     `source_repo`'s files - every section it
     actually has (see course.discover_sections), plus, in `actual-readings` mode, `readings`
     - in the public site repo and links to them with site-relative URLs. `reading-list` mode
@@ -414,12 +412,6 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
                 # writes its front matter before any site sees it.
                 **site_templates(),
             },
-            # The Assignments tab a public site no longer has, and the settings file an
-            # older publish kept here: `opencourse.yml` holds them now.
-            retire=(
-                *retired_pages(site_wd, ("assignments.md",)),
-                *(row.old for row in legacy.rows(legacy.PUBLIC_SITE)),
-            ),
             commit=f"site: publish public course site from {source_repo}",
             label="public site",
             title="Public website",

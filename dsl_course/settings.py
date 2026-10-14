@@ -41,7 +41,7 @@ from .gh_contents import (
     yaml_mark_line,
 )
 from .log import log_err
-from .setting_readers import read_settings, refuse_renamed
+from .setting_readers import read_settings
 
 # What a COURSE may set once for every assignment under it, in `dsl-course.yml`
 # `assignment_defaults:` - the course layer of the cascade below. The run settings among
@@ -76,7 +76,6 @@ def parse_assignment_defaults(raw: object) -> dict:
         log_err(f"  ! {_DEFAULTS_WHERE}: must be a block of settings - ignored")
         return {}
     dropped: list[str] = []
-    raw = refuse_renamed(raw, _DEFAULTS_WHERE, dropped)
     values = read_settings(raw, COURSE_DEFAULT_KEYS, _DEFAULTS_WHERE, dropped)
     for line in dropped:
         log_err(line)
