@@ -1,0 +1,7 @@
+timezone: Europe/Berlin
+events:
+  event-clinic-drop-in:
+    title: Clinic drop-in
+    event_datetime: 2026-10-01T16:00
+    location: Room 1.10
+    details: Optional

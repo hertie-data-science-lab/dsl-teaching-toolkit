@@ -1,0 +1,12 @@
+timezone: Europe/Berlin
+semester:
+  start:   {type: start, event_datetime: 2026-09-07}
+  end:     {type: end,   event_datetime: 2026-12-18}
+  reading-week:
+    type: break
+    title: Reading week
+    from: 2026-10-19
+    to: 2026-10-23
+  archive:
+    type: archive
+    event_datetime: 2027-02-16

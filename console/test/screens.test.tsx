@@ -21,7 +21,8 @@ import { DashboardTabs } from '../src/ui/DashboardTabs';
 import { tier } from '../src/model/readiness';
 import { HomeScreen, ReadonlyScreen, SignInScreen } from '../src/screens/Home';
 import { InstructorsScreen, StudentsScreen } from '../src/screens/People';
-import { ReleaseScreen, ScheduleScreen } from '../src/screens/Schedule';
+import { FORM_TEXT, ReleaseScreen, ScheduleScreen } from '../src/screens/Schedule';
+import { FilePicker } from '../src/ui/FilePicker';
 import { parseSchedule, scheduleRows, termOf, weekGroups } from '../src/model/schedule';
 import { OperationsScreen, SiteScreen, announcementFile, readAnnouncement } from '../src/screens/Site';
 import type { CohortProps } from '../src/screens/types';
@@ -45,28 +46,31 @@ const course: Course = {
 const ready: Loaded = { kind: 'ready', status: STATUS, sha: 's', stale: [] };
 
 const SCHEDULE = `timezone: Europe/Berlin
-semester_start: 2026-09-07
-semester_end: 2026-12-18
-releases:
+semester:
+  start: {type: start, event_datetime: 2026-09-07}
+  end: {type: end, event_datetime: 2026-12-18}
+lectures:
   s5:
+    session: 5
     event_datetime: 2026-10-08T10:00
     title: Trees and ensembles
     details: Trees, bagging and *random forests*.
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: lectures/05_trees
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: lectures/05_trees
 assignments:
   assignment-2:
-    course_source_repo: assignment-2-f2026
+    number: 2
+    template: assignment-2-f2026
     details: Fit, regularise and **explain** a model.
     handout_datetime: 2026-09-15T10:00
     due_datetime: 2026-09-27T23:59
-events:
+exams:
   midterm:
-    kind: exam
     title: Midterm
     details: Room 2.61, closed book.
     event_datetime: 2026-10-22T10:00
+events:
   reading:
     title: Reading week
     event_datetime: 2026-10-26
@@ -225,28 +229,14 @@ describe('S6 schedule and S11 release', () => {
     const groups = weekGroups(rows, (r) => r.when, termOf(status, parseSchedule(SCHEDULE), '2026-09-23'), 'Europe/Berlin', 'all');
     expect(groups.at(-1)).toMatchObject({ label: 'No date yet', rows: [{ entry: 'lab9' }] });
   });
-  it('lists a session with nothing to ship as a row of its kind, and edits it on the release sheet with nothing to release', () => {
-    // A second group of lecture 5: `events:` with kind lecture and number 5, titled by its release.
-    const online = SCHEDULE.replace('events:\n', 'events:\n  s5-online:\n    kind: lecture\n    number: 5\n    details: Online, for group 2.\n    event_datetime: 2026-10-09T18:00\n');
-    const withOnline = new StaticFiles({ [`${COHORT_ORG}/semester-config/schedule.yml`]: online }, {}, TREE);
-    const out = html(<ScheduleScreen {...props({ files: withOnline })} />);
-    const row = /<li class="trow lec[^"]*" data-entry="s5-online">.*?<\/li>/.exec(out)?.[0] ?? '';
-    expect(row).toContain('<span class="k">Lecture</span>');
-    expect(row).toContain('<b>Lecture 5</b>: Trees and ensembles');
-    expect(row).toContain('Online, for group 2.');
-    expect(row).not.toContain('not yet released');
-    const sheet = text(<ScheduleScreen {...props({ files: withOnline, entry: 's5-online' })} />);
-    expect(sheet).toContain('Nothing to release: a session of its own');
-    expect(sheet).toContain('Add what to release');
-    expect(sheet).not.toContain('Give it a number first');
-  });
-  it('titles a session only from a shown release with a number, as the site does', () => {
-    const lab = { ...STATUS.releases![0], id: 'lab-9', kind: 'lab', number: 9, title: 'Attention' };
-    const session = SCHEDULE.replace('events:\n', 'events:\n  lab-9-b:\n    kind: lab\n    number: 9\n    event_datetime: 2026-10-09T18:00\n');
-    const nameOf = (r: NonNullable<Status['releases']>[number]) => scheduleRows({ ...STATUS, releases: [...STATUS.releases!, r] }, parseSchedule(session), NOW, 'Europe/Berlin').find((x) => x.entry === 'lab-9-b')?.name;
-    expect(nameOf(lab)).toBe('Attention');
-    expect(nameOf({ ...lab, show_on_site: false })).toBe('');
-    expect(nameOf({ ...lab, id: 'lab-extra', number: null })).toBe('');
+  it('opens a saved lecture on its form: session, date, place, its file as a chip with repo and time', () => {
+    const out = html(<ScheduleScreen {...props({ entry: 's5' })} />);
+    expect(out).toMatch(/id="e-session" type="number" min="1" max="999" value="5"/);
+    expect(out).toMatch(/id="e-date0" type="date" value="2026-10-08"/);
+    expect(out).toMatch(/id="e-time0" type="time" value="10:00"/);
+    expect(out).toContain('lectures/05_trees <span class="sub">· course-materials-f2026 · an hour before</span>');
+    expect(out).toContain('Delete this entry');
+    expect(out).not.toContain('id="e-type"');
   });
   it('shows Type, Details as markdown and State, with events from schedule.yml', () => {
     const out = html(<ScheduleScreen {...props()} />);
@@ -260,26 +250,23 @@ describe('S6 schedule and S11 release', () => {
     expect(out).toContain('<b>Assignment 2</b>: Regression');
     expect(out).toContain('today-line');
   });
-  it('opens the entry a Fix link points to', () => {
+  it('opens the entry a Fix link points to, its missing folder marked on the chip but never refused', () => {
     const out = html(<ScheduleScreen {...props({ entry: 's5' })} />);
     expect(out).toContain('trow lec later current');
     expect(out).toContain('class="entry"');
-    expect(out).toMatch(/<option value="course-materials-f2026" selected>/);
-    expect(out).toContain('id="e-d0-folder" list="folders-0" value="lectures/05_trees"');
-    expect(out).toContain('Not found. The release will be skipped until the folder exists.');
-    expect(out).toContain('Use the one that exists: <button');
-    expect(out).toContain('lectures/05_trees_and_ensembles');
-    expect(out).toContain('schedule.yml#L5');
+    expect(out).toContain('class="chip file-chip bad"');
+    expect(out).toContain('lectures/05_trees is not in course-materials-f2026 yet: it is copied only if it is there at the release time.');
+    expect(out).toContain('schedule.yml#L');
+    expect(out).toContain('>Save</button>');
   });
-  it('offers the kinds of entry, Assignment among them, with a ? saying what each does', () => {
+  it('offers the institution’s kinds in its order and colours, then Assignment, Supporting files and Semester', () => {
     const out = html(<ScheduleScreen {...props({ entry: 'new' })} />);
-    expect([...out.matchAll(/<button type="button" class="trow [a-z]+"[^>]*>([^<]+)<\/button>/g)].map((m) => m[1])).toEqual(['Lecture', 'Lab', 'Readings', 'Assignment', 'Exam', 'Event']);
-    expect(out).toContain('aria-label="About the kinds of entry"');
-    const t = text(<ScheduleScreen {...props({ entry: 'new' })} />);
-    for (const k of ['Lecture, Lab, Readings : a session’s materials.', 'Assignment : work students hand in.', 'Exam : a dated row', 'Event : any other dated row', 'Archive (under Archive settings)']) expect(t).toContain(k);
-    expect(t).toContain('none when work is handed in outside GitHub');
-    expect(out).toContain('docs/07-schedule-releases.md');
-    expect(t).not.toContain('A hand out is an assignment entry');
+    const items = [...out.matchAll(/data-kind="([^"]+)"><i style="background:([^"]+)"><\/i>([^<]+)(?:<span>([^<]+)<\/span>)?/g)].map((m) => [m[1], m[3], m[4] ?? '']);
+    expect(items).toEqual([
+      ['lecture', 'Lecture', 'session 6 next'], ['lab', 'Lab', 'session 1 next'], ['readings', 'Readings', ''], ['exam', 'Exam', ''], ['drop-in', 'Drop-in', 'number 1 next'], ['other', 'Event', ''],
+      ['assignment', 'Assignment', 'number 3 next'], ['assets', 'Supporting files', 'no student row'], ['semester', 'Semester', 'start · end · break · archive'],
+    ]);
+    expect(out.match(/class="sep"/g)).toHaveLength(3);
   });
   it('words each row’s kind and an assignment’s due row exactly as the student site does', () => {
     const out = html(<ScheduleScreen {...props()} />);
@@ -318,45 +305,36 @@ describe('S6 schedule and S11 release', () => {
     }
   });
 
-  it('names both ends of a line From and To, explains what to release, and offers one more line', () => {
-    const out = html(<ScheduleScreen {...props({ entry: 's5' })} />);
-    for (const l of ['From: repo', 'From: path', 'To: repo', 'To: path', 'Release at']) expect(out).toContain(`>${l}`);
-    const t = text(<ScheduleScreen {...props({ entry: 's5' })} />);
-    expect(t).toContain('Name the repo and path where the files will be, even if they are not written yet. At release time the engine copies whatever is at that path.');
-    expect(t).toContain('Ships the files at this moment, before or after the session. Filled in with the default, an hour before the session; clear the date to go back to it.');
-    // One line, its own time unset: the boxes hold the default, an hour before the 10:00 session.
-    expect(out.match(/class="deploy"/g)).toHaveLength(1);
-    expect(out).toContain('id="e-d0-at" value="2026-10-08"/>');
-    expect(out).toContain('id="e-d0-att" value="09:00"/>');
-    expect(t).not.toContain('default: 2026');
-    expect(out).toContain('>Add another release item(s)</button>');
-    // Kind and Title infer silently; the dialog does not describe the site row.
-    for (const gone of ['inferred from where it lands', 'from the folder name', 'On the student site this row shows', 'without the colon']) expect(t).not.toContain(gone);
+  it('says every ? and hint verbatim from the forms review and mock-up v3', () => {
+    const out = html(<ScheduleScreen {...props({ entry: 's5' })} />).replace(/&quot;/g, '"');
+    for (const t of [FORM_TEXT.files, ...FORM_TEXT.filesBullets, FORM_TEXT.number, FORM_TEXT.provisional, FORM_TEXT.tbc, FORM_TEXT.readingsSub, FORM_TEXT.guide, FORM_TEXT.readingsFilesSub, FORM_TEXT.perFile]) expect(out).toContain(t);
+    expect(FORM_TEXT.files).toBe('Copies run AT the release time, not now: whatever is in the folder then is what students get. The path does not have to exist yet: schedule a folder you are still writing, or a file you will add later.');
+    expect(FORM_TEXT.number).toBe('The row word: Lecture 3. Same as the session unless this kind counts on its own (Maths labs start a week late).');
+    expect(FORM_TEXT.guide).toBe('(markdown: any URL links, guidance as to what to read, chapters or pages, how to approach it, etc. This is publicly visible even when the hosted readings files are private)');
+    expect(FORM_TEXT.readingsSub).toBe('Writes a second entry under Readings, attached to this session. The reading materials go in Files (private to students); the Reading guide is what every student sees (and the only readings content on the public site).');
+    for (const l of ['Show on student site', 'Date provisional', 'Date TBC', 'Readings for this session', 'Advanced (readings)', 'Pick from course materials…', '+ Another time slot (a second group, a repeat)']) expect(out).toContain(l);
+    // A course with the console on says so on the switch.
+    const on = html(<ScheduleScreen {...props({ entry: 's5', course: { ...course, meta: { student_console: true } } })} />);
+    expect(on).toContain('Show in student console');
   });
-  it('never says a folder is missing when the repo could not be read, or was listed only in part', () => {
+  it('never marks a folder missing when the repo could not be read, or was listed only in part', () => {
     const withTree = (tree: TreeState): Files => Object.assign(Object.create(files), { tree: () => tree });
     const failed = html(<ScheduleScreen {...props({ entry: 's5', files: withTree({ kind: 'error', message: 'HTTP 502' }) })} />);
-    expect(failed).toContain('Could not read course-materials-f2026 to check the folder; it is tried again shortly.');
-    expect(failed).not.toContain('was not found in the course');
+    expect(failed).not.toContain('file-chip bad');
     const part = html(<ScheduleScreen {...props({ entry: 's5', files: withTree({ kind: 'ready', paths: [{ path: 'lectures', dir: true }], truncated: true }) })} />);
-    expect(part).toContain('course-materials-f2026 is too large to check the folder here.');
-    expect(part).not.toContain('Not found. The release will be skipped');
-    // The repo list failed: the From repo select says so rather than offering no other repos.
-    expect(failed).toContain('Could not list the course’s other repos; it is tried again shortly.');
+    expect(part).not.toContain('file-chip bad');
   });
-  it('pre-selects the inferred kind: the engine’s for a saved entry, else from where the copy lands and the repo’s own aliases', () => {
-    const out = html(<ScheduleScreen {...props({ entry: 's5' })} />);
-    expect(out).toContain('<option value selected>Lecture (inferred)</option>');
-    const withKind = (kind: string | null): Loaded => ({ kind: 'ready', sha: 's', stale: [], status: { ...STATUS, releases: (STATUS.releases ?? []).flatMap((r) => (r.id !== 's5' ? [r] : kind === null ? [] : [{ ...r, kind }])) } });
-    expect(html(<ScheduleScreen {...props({ entry: 's5', loaded: withKind('lab') })} />)).toContain('<option value selected>Lab (inferred)</option>');
-    const aliased = new StaticFiles({ ...Object.fromEntries(['schedule.yml'].map((f) => [`${COHORT_ORG}/semester-config/${f}`, SCHEDULE])), [`${COURSE_ORG}/course-materials-f2026/materials.yml`]: 'kinds:\n  lectures: lab\n' }, {}, TREE);
-    expect(html(<ScheduleScreen {...props({ entry: 's5', files: aliased, loaded: withKind(null) })} />)).toContain('<option value selected>Lab (inferred)</option>');
-  });
-  it('lists the materials repos and the Other repos to release from', () => {
-    const listed = new StaticFiles({ [`${COHORT_ORG}/semester-config/schedule.yml`]: SCHEDULE }, {}, TREE, { [COURSE_ORG]: [{ name: '.github' }, { name: 'course-materials-f2026' }, { name: 'lecture-code-f2026' }, { name: 'assignment-3-f2026' }] });
-    const out = html(<ScheduleScreen {...props({ entry: 's5', files: listed })} />);
+  it('the picker lists the materials repos and the Other repos, marks withheld files, and takes a typed path', () => {
+    const listed = new StaticFiles({ [`${COURSE_ORG}/course-materials-f2026/.releaseignore`]: '*.pdf\n' }, {}, TREE);
+    const out = html(<FilePicker files={listed} org={COURSE_ORG} repos={['course-materials-f2026']} others={['lecture-code-f2026']} onPick={() => {}} onClose={() => {}} />);
     expect(out).toMatch(/<optgroup label="Course materials repos"><option value="course-materials-f2026" selected>/);
     expect(out).toContain('<optgroup label="Other repos"><option value="lecture-code-f2026">lecture-code-f2026</option></optgroup>');
+    // The shared file tree, a tick per file and folder, the withheld file marked.
+    expect(out).toContain('aria-label="Pick lectures/"');
+    expect(out).toMatch(/notes\.pdf.*?<span class="chip amber">withheld<\/span>/s);
+    expect(out).not.toContain('released to students');
+    expect(out).toContain('Or type a path');
+    expect(out).toContain('it need not exist yet');
   });
   it('renders a release with its source, destination and problem', () => {
     const t = text(<ReleaseScreen {...props({ entry: 's5' })} />);
@@ -371,7 +349,7 @@ describe('S6 schedule and S11 release', () => {
   });
   const unstaged: Loaded = {
     kind: 'ready', sha: 's', stale: [],
-    status: { ...STATUS, releases: [...(STATUS.releases ?? []), { id: 'lecture-12', when: '2026-12-10T10:00:00+01:00', kind: 'lecture', title: 'Review', state: 'planned', source: null, dest: null, show_on_site: true, tbc: false }] },
+    status: { ...STATUS, releases: [...(STATUS.releases ?? []), { id: 'lecture-12', when: '2026-12-10T10:00:00+01:00', kind: 'lecture', number: 12, title: 'Review', state: 'planned', source: null, dest: null, show_on_site: true, tbc: false }] },
   };
   it('renders a release with no deploy block as nothing to release, with no Release early', () => {
     const out = html(<ScheduleScreen {...props({ loaded: unstaged })} />);
@@ -865,8 +843,8 @@ describe('read only and the shell', () => {
   });
 });
 
-describe('explicit numbers (decision 0020)', () => {
-  const GUEST = `${SCHEDULE.replace('assignments:', `  guest:\n    event_datetime: 2026-09-25T10:00\n    kind: lecture\n    deploy:\n      - course_source_repo: course-materials-f2026\n        course_source_path: lectures/03_regularisation\nassignments:`)}`;
+describe('explicit numbers (decision 0038 amendment)', () => {
+  const GUEST = SCHEDULE.replace('assignments:', `  guest:\n    session: 3\n    number: 3\n    event_datetime: 2026-09-25T10:00\n    files:\n      - from_course_repo: course-materials-f2026\n        from_path: lectures/03_regularisation\nassignments:`);
   const numbered: Loaded = {
     kind: 'ready', sha: 's', stale: [],
     status: {
@@ -877,21 +855,17 @@ describe('explicit numbers (decision 0020)', () => {
   };
   const guestFiles = new StaticFiles({ [`${COHORT_ORG}/semester-config/schedule.yml`]: GUEST }, {}, TREE);
 
-  it('shows an entry with no number by its kind alone, says why it is skipped, and asks for the number', () => {
+  it('shows an entry with no number by its kind alone and says why it is skipped', () => {
     const out = html(<ScheduleScreen {...props({ loaded: numbered, files: guestFiles, entry: 'guest' })} />);
     expect(out).toContain('<b>Lecture</b>: ');
-    // Fri 25 Sep is inside the horizon: a red `!`, will be skipped, and Fix to the entry.
     expect(out).toContain('<span class="ex" aria-hidden="true">!</span><span class="st-chip skip">will be skipped</span><a class="btn small" href="#schedule-guest">Fix</a>');
     expect(out).toContain('Give it a number first; it cannot be released until it has one.');
-    // Said once in the sheet: no problem card repeating it.
     expect(out).not.toContain('Give guest a number.');
-    expect(out).toContain('<input id="e-num" type="number" min="1" max="999" value style');
-    expect(out).toContain('The number students see. Prefilled with the next one; change it if this is not the next lecture.');
   });
 
-  it('shows a saved entry its own number, and the release detail says what it waits for', () => {
+  it('shows a saved unit its number prefilled with the session, and the release detail says what it waits for', () => {
     const out = html(<ScheduleScreen {...props({ entry: 's5' })} />);
-    expect(out).toMatch(/<input id="e-num" type="number" min="1" max="999" value="5"/);
+    expect(out).toMatch(/<input id="e-num" type="number" min="1" max="999" placeholder="none" value="5"/);
     const t = text(<ReleaseScreen {...props({ loaded: numbered, files: guestFiles, entry: 'guest' })} />);
     expect(t).toContain('Give guest a number.');
   });

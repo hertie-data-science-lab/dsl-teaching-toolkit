@@ -12,10 +12,8 @@ import assignmentsSchema from '../../schemas/assignments.schema.json';
 import courseSchema from '../../schemas/dsl_course.schema.json';
 import gradingSchema from '../../schemas/grading_config.schema.json';
 // WP-C removes: the 0.10 assignments.yml / dsl-course.yml schemas the settings screens
-// still validate against, frozen with the schedule's.
-// WP-C removes: the schedule editor still writes the 0.10 shape, so it validates against a
-// frozen copy of that schema until it writes the 0.11 one (decision 0038).
-import scheduleSchema from '../../schemas/schedule-0.10.schema.json';
+// still validate against, frozen.
+import scheduleSchema from '../../schemas/schedule.schema.json';
 import { labelMap, labelOf } from './labels';
 import { DEFAULTS, penaltyRate } from './policy';
 import type { Status } from './types';

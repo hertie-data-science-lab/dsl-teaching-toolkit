@@ -950,11 +950,6 @@ def all_schemas() -> dict[str, dict]:
         # no literal of its own.
         "policy.json": policy.load(),
         "schedule.schema.json": schedule_schema(),
-        # WP-C removes: the console's schedule editor still writes the 0.10 shape and
-        # validates against that shape's schema, frozen, until it writes the 0.11 one.
-        "schedule-0.10.schema.json": json.loads(
-            Path(__file__).with_name("schedule-0.10.schema.json").read_text()
-        ),
         "course.schema.json": course_schema(),
         "semester.schema.json": semester_schema(),
         "institution.schema.json": institution_schema(),

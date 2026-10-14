@@ -18,7 +18,7 @@ export const RUN_LABEL: Record<RunKey, string> = {
   marks_per_question: 'Marks per question on the student’s page',
 };
 
-const REASON: Record<RunKey, string> = {
+export const RUN_REASON: Record<RunKey, string> = {
   team_formation: 'For team assignments. Students form their own on the assignment’s page in the student console unless you choose to assign them, on the assignment’s Teams tab.',
   max_team_size: 'For team assignments: students cannot join a team that is full.',
   late_window_days: 'Late work is accepted for this many days after the due date; 0 means none. The late cutoff is the due date plus these days.',
@@ -48,7 +48,7 @@ const CHOOSE = { value: '', label: 'Choose…', off: 'Choose a value, or Use the
  */
 export function runTier(key: RunKey, fallback: Effective, { saved, override }: { saved?: unknown; override?: boolean } = {}): FieldTier {
   const grey = `${SOURCE_WORD[fallback.source]}: ${valueWord(key, fallback.value)}`;
-  const base = { tier: 'default' as const, label: RUN_LABEL[key], reason: REASON[key], defaultLabel: grey };
+  const base = { tier: 'default' as const, label: RUN_LABEL[key], reason: RUN_REASON[key], defaultLabel: grey };
   const choose = (labels: Record<string, string>) => {
     const all = Object.entries(labels).map(([v, l]) => opt(v, l));
     return override ? [CHOOSE, ...all] : defaultFirst(fallback.value, valueWord(key, fallback.value), all, saved);

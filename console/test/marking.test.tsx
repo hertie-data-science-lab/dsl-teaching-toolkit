@@ -202,7 +202,7 @@ const SHEET = [
 const CONFIG = 'type: individual\nautograde: true\nformats: [py]\nquestions:\n  Q1: 10\n  Q2: 10\n';
 function files(sheet = SHEET, config = CONFIG) {
   return new StaticFiles({
-    [`${COHORT_ORG}/semester-config/schedule.yml`]: 'timezone: Europe/Berlin\nassignments:\n  assignment-2:\n    course_source_repo: assignment-2-f2026\n',
+    [`${COHORT_ORG}/semester-config/schedule.yml`]: 'timezone: Europe/Berlin\nassignments:\n  assignment-2:\n    number: 2\n    template: assignment-2-f2026\n',
     [`${COURSE_ORG}/assignment-2-f2026/grading_config.yml`]: config,
     [SHEET_PATH]: sheet,
   });

@@ -2,8 +2,7 @@
 // will_be_skipped, release.entry) never reach the screen except through these maps.
 
 import { hostOf } from './settings';
-import { DEFAULT_TIMEZONE, KINDS } from './policy';
-import { FALLBACK_KIND } from './materialsRules';
+import { DEFAULT_TIMEZONE, EVENT_KIND, KINDS } from './policy';
 import type { Assignment, AssignmentState, Bites, Need, Release, ReleaseState } from './types';
 import type { ItemState, ReleaseMark, RepoReadiness, Verdict } from './readiness';
 
@@ -265,13 +264,11 @@ export function opLabel(op: string): string {
 }
 
 /**
- * "Assignment 2": the entry's number (`status.json` `assignments[].number`, decision 0020);
- * without the field (an older status), the number its key carries (`assignment-2`). With no
- * number, the title, and only without one the key itself. Never a position.
+ * "Assignment 2": the entry's number (`status.json` `assignments[].number`, decision 0020).
+ * With no number, the title, and only without one the key itself. Never a position, never the key's digits.
  */
 export function assignmentIdent(slug: string, title = '', number?: number | null): string {
-  const n = number === undefined ? labelNumber(slug) : number;
-  return n ? `Assignment ${n}` : title || slug;
+  return number ? `Assignment ${number}` : title || slug;
 }
 
 /** How a template is named: its title, never an ordinal from its repo name (the ordinal is a schedule fact, decision 0014). */
@@ -287,26 +284,13 @@ export function assignmentTitle(a: Pick<Assignment, 'slug' | 'title' | 'number'>
 
 export const KIND_LABEL: Record<string, string> = Object.fromEntries(KINDS.map((k) => [k.key, k.label]));
 
-/** The number a key carries, as the engine reads it (`schedule.label_number`): `lecture_03` 3, `01_lab` 1, else null. */
-export function labelNumber(key: string): number | null {
-  const m = /0*(\d+)$|^0*(\d+)[-_ ]/.exec(key.trim());
-  return m ? Number(m[1] ?? m[2]) : null;
-}
-
-/** An `events:` session's number from its label (schedule.session_number): the FIRST number in it, so `lab-01-group-2` is a group of Lab 1. A release keeps `labelNumber`. */
-export function sessionNumber(key: string): number | null {
-  const m = /\d+/.exec(key);
-  return m ? Number(m[0]) : null;
-}
-
 /**
  * The name the site gives a release's row: the kind's label and its number ("Lecture 3",
- * "Lab 9"). The number is the engine's (`status.json` `releases[].number`, decisions 0013 and
- * 0020); null is a row with no number, named by its kind alone. Without the field (an older
- * status): the label's own number. Never a position.
+ * "Lab 9"). The number is the engine's (`status.json` `releases[].number`, decision 0038); none
+ * is a row named by its kind alone. Never a position, never the key's digits.
  */
 export function releaseIdent(r: Release): string {
-  return kindIdent(r.kind ?? 'lecture', r.number === undefined ? labelNumber(r.id) : r.number);
+  return kindIdent(r.kind ?? 'lecture', r.number ?? null);
 }
 
 /** A row's name: its kind's label and its number ("Lab 1"), the label alone with no number. */
@@ -326,7 +310,7 @@ export const TYPE_CLASS: Record<string, string> = {
  * assignment's two rows are the `assignment` kind's, a special event the fallback kind's
  * (the site's `schedule.html` maps them the same way).
  */
-const TYPE_KIND: Record<string, string> = { handout: 'assignment', due: 'assignment', special_event: FALLBACK_KIND, event: FALLBACK_KIND };
+const TYPE_KIND: Record<string, string> = { handout: 'assignment', due: 'assignment', special_event: EVENT_KIND, event: EVENT_KIND };
 const lower = (s: string) => s.toLowerCase();
 
 /** A status type's word: its policy kind's label in lower case (`lecture`, `semester`), with the assignment rows' own words. */
@@ -343,7 +327,7 @@ export const TYPE_LABEL: Record<string, string> = {
  */
 const SITE_ROW_WORD: Record<string, string> = {
   handout: `${KIND_LABEL.assignment} out`, assignment: `${KIND_LABEL.assignment} out`, due: `${KIND_LABEL.assignment} due`,
-  special_event: KIND_LABEL[FALLBACK_KIND], event: KIND_LABEL[FALLBACK_KIND],
+  special_event: KIND_LABEL[EVENT_KIND], event: KIND_LABEL[EVENT_KIND],
 };
 /** `own`: the site's own label for a kind the semester's file declares (`kinds[type].label`), ahead of the policy's. */
 export const siteRowWord = (type: string, own?: string): string => SITE_ROW_WORD[type] || own || KIND_LABEL[type] || type;

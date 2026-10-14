@@ -57,6 +57,9 @@ export const SYSTEM_KINDS: string[] = KINDS.filter((k) => k.system).map((k) => k
 /** A kind's tab title: its plural, capitalised (`site_repo.kind_tab`): Lectures, Drop-ins. */
 export const tabTitle = (plural: string): string => plural.charAt(0).toUpperCase() + plural.slice(1);
 
+/** The kind of the `events:` block, and of a kind the policy does not know (the engine's `materials.FALLBACK_KIND`); the site labels it Event. */
+export const EVENT_KIND = 'other';
+
 /** The semester's timezone when its schedule names none. */
 export const DEFAULT_TIMEZONE = DEFAULTS.timezone;
 /** Days after the semester ends that it is archived, when the schedule says nothing. */
