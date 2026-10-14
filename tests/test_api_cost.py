@@ -124,7 +124,7 @@ class FakeGitHub:
                 COURSE,
                 ".github",
                 "course.yml",
-            ): "course_name: Deep Learning\ncourse_code: E1234\n",
+            ): "course:\n  name: Deep Learning\n  code: E1234\n",
             (COURSE, ".github", "semesters.yml"): f"semesters:\n- {SEMESTER}\n",
             (
                 SEMESTER,
@@ -140,7 +140,7 @@ class FakeGitHub:
                 "semester-config",
                 "teams.csv",
             ): "assignment,team,github_handle\n",
-            (SEMESTER, "semester-config", "semester.yml"): "instructors: []\n",
+            (SEMESTER, "semester-config", "semester.yml"): "people: []\n",
         }
         materials = (FIXTURES / "demo-course-tree.txt").read_text().splitlines()
         self.trees: dict[tuple[str, str], list[str]] = {
@@ -661,10 +661,12 @@ OPERATIONS = {
         13,
         0,
     ),
-    "propagate (preview)": (("propagate", *_C, *_S, "--preview"), 3, 0),
+    # A schedule read also reads the course's pointer and course.yml: the plan is read in
+    # the zone, archive grace and default repo the cascade gives (decision 0039).
+    "propagate (preview)": (("propagate", *_C, *_S, "--preview"), 5, 0),
     "team formation (preview)": (
         ("team_formation", *_C, *_S, "--assignment", "assignment-1", "--preview"),
-        6,
+        8,
         0,
     ),
     "enrol codes: resend (preview)": (
@@ -688,7 +690,7 @@ OPERATIONS = {
         8,
         0,
     ),
-    "archive (preview)": (("archive", *_C, *_S, "--preview"), 5, 0),
+    "archive (preview)": (("archive", *_C, *_S, "--preview"), 7, 0),
 }
 # Not covered: the real runs of a hand-out, a release now and an archive, and New
 # assignment / New materials (`scaffold`). Each is a button pressed once per assignment,
@@ -720,7 +722,10 @@ def test_every_operation_stays_under_its_ceiling(
     fake.calls.clear()
     _drive(monkeypatch, argv)
     capsys.readouterr()
-    assert len(fake.calls) <= 1.25 * (base + per_student * students), fake.calls
+    assert len(fake.calls) <= 1.25 * (base + per_student * students), (
+        len(fake.calls),
+        [c[:3] for c in fake.calls],
+    )
     if "--preview" in argv:
         assert _reads_twice(fake.calls) == []
 

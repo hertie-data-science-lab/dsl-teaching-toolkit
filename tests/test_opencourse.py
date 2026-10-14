@@ -1,14 +1,20 @@
-"""opencourse: the public website's `opencourse.yml`, and its withhold list."""
+"""opencourse: the public website's `open_course_site:` block of `course.yml`, and its
+withhold list."""
 
 from __future__ import annotations
 
 import pytest
 import yaml
 
-from dsl_course import opencourse, releaseignore, schemas
+from dsl_course import config, opencourse, releaseignore, schemas
 from dsl_course.faults import Unusable
 from dsl_course.opencourse import OpenCourse
 from dsl_course.schema_check import validate
+
+
+def _seeded(oc: OpenCourse | None = None) -> dict | None:
+    """The seeded block, read back the way the engine reads `course.yml`."""
+    return opencourse.block(yaml.safe_load(opencourse.seed_text(oc)))
 
 
 def test_absent_or_empty_is_off():
@@ -16,10 +22,9 @@ def test_absent_or_empty_is_off():
     assert opencourse.parse({}) == OpenCourse(enabled=False)
 
 
-def test_the_seeded_file_is_instructor_owned_off_and_parses():
-    text = opencourse.seed_text()
-    assert text.startswith("# INSTRUCTOR-OWNED")
-    assert opencourse.parse(yaml.safe_load(text)) == OpenCourse(
+def test_the_seeded_block_is_off_and_parses():
+    assert opencourse.seed_text().startswith("open_course_site:")
+    assert opencourse.parse(_seeded()) == OpenCourse(
         withhold=opencourse.DEFAULT_WITHHOLD
     )
 
@@ -27,26 +32,25 @@ def test_the_seeded_file_is_instructor_owned_off_and_parses():
 def test_the_seed_withholds_the_system_folder_and_answers_by_default():
     text = opencourse.seed_text()
     assert (
-        "# word solution, exam, grade, marks or private in it:\n"
-        "withhold:\n"
-        "- .system/\n"
-        "- '[Ss]olution*'\n"
-        "- '*[-_.][Ss]olution*'\n"
-        "- '*[Ee]xam'\n"
-        "- '*[Ee]xams'\n"
-        "- '*[Ee]xam[-_.]*'\n"
-        "- '[Gg]rade*'\n"
-        "- '*[-_.][Gg]rade*'\n"
-        "- '[Mm]arks*'\n"
-        "- '*[-_.][Mm]arks*'\n"
-        "- '*[Pp]rivate*'\n"
+        "  # word solution, exam, grade, marks or private in it:\n"
+        "  withhold:\n"
+        "  - .system/\n"
+        "  - '[Ss]olution*'\n"
+        "  - '*[-_.][Ss]olution*'\n"
+        "  - '*[Ee]xam'\n"
+        "  - '*[Ee]xams'\n"
+        "  - '*[Ee]xam[-_.]*'\n"
+        "  - '[Gg]rade*'\n"
+        "  - '*[-_.][Gg]rade*'\n"
+        "  - '[Mm]arks*'\n"
+        "  - '*[-_.][Mm]arks*'\n"
+        "  - '*[Pp]rivate*'\n"
     ) in text
     # A website already on keeps its empty list: a default would take files off it.
-    live = opencourse.seed_text(OpenCourse(True, "m"))
-    assert opencourse.parse(yaml.safe_load(live)).withhold == ()
+    assert opencourse.parse(_seeded(OpenCourse(True, "m"))).withhold == ()
     # A seed that names its own list keeps it: the defaults fill only an empty one.
-    mine = opencourse.seed_text(OpenCourse(withhold=("drafts/",)))
-    assert opencourse.parse(yaml.safe_load(mine)).withhold == ("drafts/",)
+    mine = _seeded(OpenCourse(withhold=("drafts/",)))
+    assert opencourse.parse(mine).withhold == ("drafts/",)
 
 
 def test_the_default_withhold_list_keeps_answers_off_at_any_depth(tmp_path):
@@ -76,7 +80,7 @@ def test_the_default_withhold_list_keeps_answers_off_at_any_depth(tmp_path):
     for rel in kept + public:
         (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / rel).write_text("x")
-    lines = opencourse.parse(yaml.safe_load(opencourse.seed_text())).withhold
+    lines = opencourse.parse(_seeded()).withhold
     for rel in kept:
         assert releaseignore.excludes(tmp_path, tmp_path / rel, lines), rel
     for rel in public:
@@ -87,7 +91,10 @@ def test_a_seed_round_trips_its_values():
     oc = OpenCourse(
         True, "course-materials-f2025", "none", False, ("labs/**", "*.key", "!x", "#y")
     )
-    assert opencourse.parse(yaml.safe_load(opencourse.seed_text(oc))) == oc
+    assert opencourse.parse(_seeded(oc)) == oc
+    # The site's contact rides in the block (decision 0019).
+    block = opencourse.block(yaml.safe_load(opencourse.seed_text(oc, "c@x.edu")))
+    assert block["contact"] == "c@x.edu" and opencourse.parse(block) == oc
 
 
 @pytest.mark.parametrize(
@@ -105,25 +112,35 @@ def test_a_file_that_does_not_validate_is_refused_by_name(data, why):
         opencourse.parse(data)
 
 
-def test_a_file_that_is_not_yaml_is_unusable(monkeypatch):
-    def broken(*a):
-        raise yaml.YAMLError("bad")
+def _course_yml(monkeypatch, text: str | None) -> None:
+    monkeypatch.setattr(
+        opencourse,
+        "read_course",
+        lambda org: config.ConfigFile(org, ".github", "course.yml", text),
+    )
 
-    monkeypatch.setattr(opencourse, "load_yaml_config", broken)
+
+def test_a_file_that_is_not_yaml_is_unusable(monkeypatch):
+    _course_yml(monkeypatch, "open_course_site: [\n")
     with pytest.raises(Unusable, match="not valid YAML"):
         opencourse.read("Org")
 
 
-def test_read_is_none_when_the_course_has_no_file(monkeypatch):
-    monkeypatch.setattr(opencourse, "load_yaml_config", lambda *a: None)
+def test_read_is_none_when_the_course_has_no_file_or_no_block(monkeypatch):
+    _course_yml(monkeypatch, None)
     assert opencourse.read("Org") is None
+    _course_yml(monkeypatch, "course:\n  name: C\n")
+    assert opencourse.read("Org") is None
+    _course_yml(monkeypatch, "open_course_site: off\n")
+    with pytest.raises(Unusable, match="not a mapping"):
+        opencourse.read("Org")
 
 
 def test_the_exported_schema_takes_what_the_parser_takes():
-    exported = schemas.opencourse_schema()
+    exported = schemas.course_schema()
     good = yaml.safe_load(opencourse.seed_text(OpenCourse(True, "m")))
     assert validate(good, exported) == []
-    assert validate({"enabled": "yes"}, exported)
+    assert validate({"open_course_site": {"enabled": "yes"}}, exported)
 
 
 def test_the_withhold_list_prunes_like_a_root_releaseignore(tmp_path):

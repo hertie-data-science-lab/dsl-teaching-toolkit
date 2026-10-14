@@ -13,6 +13,7 @@ from dsl_course import (
     course,
     gradebook,
     grading_spec,
+    policy,
     roster,
     schedule,
     schemas,
@@ -60,12 +61,19 @@ def test_file_schema_enums_are_the_engine_constants():
     bad = grading_spec.parse_grading_spec("starter: maybe\n")
     assert bad.starter is None and any("starter" in d for d in bad.dropped)
     assert not set(spec["properties"]) & set(settings.RUN_KEYS)
-    instance = schemas.assignments_schema()["properties"]
-    assert set(instance["defaults"]["properties"]) == set(settings.RUN_KEYS)
-    block = instance["assignments"]["additionalProperties"]
-    assert set(block["properties"]) == set(settings.INSTANCE_KEYS)
-    assert _enum(block, "properties", "team_formation") == list(course.TEAM_FORMATIONS)
-    assert _enum(block, "properties", "visibility") == list(course.VISIBILITIES)
+    # Decision 0039: one fixed `defaults:` key set at every level.
+    semester = schemas.semester_schema()["properties"]
+    assert set(semester) == set(settings.SEMESTER_BLOCKS)
+    defaults = semester["defaults"]
+    assert set(defaults["properties"]) == set(settings.DEFAULT_FILE_KEYS)
+    assert _enum(defaults, "properties", "team_formation") == list(
+        course.TEAM_FORMATIONS
+    )
+    assert _enum(defaults, "properties", "assignment_repo_visibility") == list(
+        course.VISIBILITIES
+    )
+    institution = schemas.institution_schema()["properties"]["defaults"]
+    assert list(institution["required"]) == list(policy.DEFAULT_KEYS)
 
     sched = schemas.schedule_schema()
     top = sched["properties"]
@@ -85,10 +93,8 @@ def test_file_schema_enums_are_the_engine_constants():
     assert schemas.students_schema()["columns"] == list(roster.FIELDS)
     assert schemas.teams_schema()["columns"] == list(teams.FIELDS)
 
-    defaults = schemas.dsl_course_schema()["properties"]["assignment_defaults"][
-        "properties"
-    ]
-    assert set(settings.COURSE_DEFAULT_KEYS) <= set(defaults)
+    defaults = schemas.course_schema()["properties"]["defaults"]["properties"]
+    assert set(defaults) == {*settings.DEFAULT_FILE_KEYS, *settings.COURSE_ASKED_KEYS}
 
 
 def test_op_arg_enums_are_the_engine_constants():
@@ -293,32 +299,45 @@ def test_the_console_copy_of_the_status_schema_is_open_and_the_engines_closed():
     assert len(validate(doc, schemas.status_schema())) == 2
 
 
-def test_the_example_course_file_validates():
-    # The demo course's course.yml has this shape: dated instructor cards and a
-    # course-level TA list, both of which the site reads (`site_repo.people_cards`).
-    example = ROOT / "example-course" / "course-org" / "course.yml"
-    meta = yaml.safe_load(example.read_text())
-    assert meta["people"]["teaching_assistants"]
-    assert "start" in meta["people"]["instructors"][0]
-    assert validate(meta, schemas.dsl_course_schema()) == []
+def test_the_example_files_validate():
+    # The worked examples have every block their files have: dated course-lead cards,
+    # a semester's people with their roles, and the defaults.
+    course_org = ROOT / "example-course" / "course-org" / "course.yml"
+    meta = yaml.safe_load(course_org.read_text())
+    assert "start" in meta["people"]["course_admins"][0]
+    assert validate(meta, schemas.course_schema()) == []
+    semester_org = ROOT / "example-course" / "semester-org" / "semester.yml"
+    assert (
+        validate(yaml.safe_load(semester_org.read_text()), schemas.semester_schema())
+        == []
+    )
+    assert validate(policy.load(), schemas.institution_schema()) == []
 
 
 def test_contact_and_licence_are_optional_course_facts():
     # Forward-only course metadata: a file without them is valid, one with them too.
-    schema = schemas.dsl_course_schema()
-    base = {"course_name": "ML", "course_code": "E1"}
+    schema = schemas.course_schema()
+    base = {"course": {"name": "ML", "code": "E1"}}
     assert validate(base, schema) == []
     assert (
-        validate({**base, "contact": "ml@x.edu", "licence": "CC BY 4.0"}, schema) == []
+        validate(
+            {
+                "course": {**base["course"], "licence": "CC BY 4.0"},
+                "open_course_site": {"contact": "ml@x.edu"},
+            },
+            schema,
+        )
+        == []
     )
-    assert validate({**base, "contact": "not an email"}, schema) != []
+    assert validate({**base, "open_course_site": {"contact": "nope"}}, schema) != []
+    # The old flat keys are not course.yml's.
+    assert validate({"course_name": "ML"}, schema) != []
 
 
 def test_student_console_is_an_optional_course_flag():
-    schema = schemas.dsl_course_schema()
-    base = {"course_name": "ML", "course_code": "E1"}
-    assert validate({**base, "student_console": True}, schema) == []
-    assert validate({**base, "student_console": "yes"}, schema) != []
+    schema = schemas.course_schema()
+    assert validate({"course": {"student_console": True}}, schema) == []
+    assert validate({"course": {"student_console": "yes"}}, schema) != []
 
 
 def test_the_validator_catches_what_the_schemas_forbid():
@@ -333,10 +352,16 @@ def test_names_json_is_the_engines_own_names():
     # The console spells no repo name or path of its own: it reads this file.
     names = schemas.names_json()
     assert set(names) == {
-        "config_repo", "join_repo", "system_dir", "instructors_file",
-        "assignments_file", "registry_file", "records", "join_markers",
-        "opencourse_file", "site_config", "semester_topic", "legacy",
+        "config_repo", "join_repo", "system_dir", "course_file", "semester_file",
+        "default_formats", "instructors_file", "assignments_file", "registry_file",
+        "records", "join_markers", "opencourse_file", "site_config", "semester_topic",
+        "legacy",
     }  # fmt: skip
+    assert (names["course_file"], names["semester_file"]) == (
+        course.COURSE_CONFIG,
+        course.SEMESTER_FILE,
+    )
+    assert names["default_formats"] == list(course.DEFAULT_FORMATS)
     assert names["semester_topic"] == course.SEMESTER_TOPIC
     assert names["join_markers"] == {
         "join_course": course.JOIN_COURSE_MARKER,
@@ -374,7 +399,7 @@ def test_labels_json_names_every_engine_value_once():
 def test_the_seeded_files_validate():
     # What Bootstrap seeds, unedited, must save through the console, which validates the
     # whole file before every write: the schedule's bare `archive.event_datetime:` and the
-    # course file's comment-only `assignment_defaults:` both read as YAML null.
+    # comment-only `defaults:` blocks all read as YAML null.
     from dsl_course import bootstrap_course
 
     sched = yaml.safe_load(
@@ -383,8 +408,13 @@ def test_the_seeded_files_validate():
     assert sched["archive"]["event_datetime"] is None
     assert validate(sched, schemas.schedule_schema()) == []
     for code, admins in (("E1", None), ("", ["ann"])):
-        meta = yaml.safe_load(bootstrap_course._course_metadata("ML", code, admins))
-        assert validate(meta, schemas.dsl_course_schema()) == []
+        meta = yaml.safe_load(bootstrap_course.course_seed("ML", code, admins, "main"))
+        assert validate(meta, schemas.course_schema()) == []
+    seeded = yaml.safe_load(
+        bootstrap_course.semester_scaffold("x-f2026", "semester.yml", "release")
+    )
+    assert seeded["defaults"] is None
+    assert validate(seeded, schemas.semester_schema()) == []
 
 
 def test_blank_schedule_keys_validate():

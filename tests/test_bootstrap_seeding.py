@@ -367,7 +367,7 @@ def test_the_seeded_people_stub_teaches_every_required_field(fake):
     # since an entry without one is granted access but can never be notified.
     bc.setup_semester_extras("Deep-Learning-f2027", "release")
     stub = fake.files[("semester-config", "semester.yml")]
-    block = "# instructors:" + stub.split("# instructors:", 1)[1]
+    block = "# people:" + stub.split("# people:", 1)[1].split("\n\n", 1)[0]
     uncommented = "\n".join(line.removeprefix("# ") for line in block.splitlines())
     faculty = sync_faculty.parse_faculty_from_meta(yaml.safe_load(uncommented) or {})
     assert faculty["instructors"] and faculty["teaching_assistants"]
@@ -377,6 +377,9 @@ def test_the_seeded_people_stub_teaches_every_required_field(fake):
                 f"{role}: {person['github_handle']}"
             )
     assert "show_email" in stub  # ...and how to opt that private address onto the card
+    # The defaults skeleton: every key present, commented, with what it inherits.
+    for key in settings.DEFAULT_FILE_KEYS:
+        assert f"  # {key}:" in stub
 
 
 def test_semester_tag_derivation():
@@ -576,21 +579,15 @@ def test_the_syllabus_samples_ownership_notice_is_added_at_the_write_site():
 
 
 def test_the_example_course_declares_every_key_the_generator_writes():
-    # If `_course_metadata` gains an identity key, the worked example must teach it. The
-    # expectation is DERIVED from the generator's own template, never a hand-kept list
-    # that could drift the same way.
-    generated = yaml.safe_load(
-        welcome.template("course/course.yml").format(
-            org="Course-E1",
-            org_name="Course",
-            course_name="Deep Learning",
-            course_code="E1",
-        )
-    )
+    # If `course_seed` gains a block or an identity key, the worked example must teach
+    # it. The expectation is DERIVED from the generator, never a hand-kept list that could
+    # drift the same way.
+    generated = yaml.safe_load(bc.course_seed("Deep Learning", "E1", ["admin"]))
     example = yaml.safe_load(welcome.example_course_file("course.yml"))
     assert set(generated) <= set(example), (
         f"the worked example omits {sorted(set(generated) - set(example))}"
     )
+    assert set(generated["course"]) <= set(example["course"])
 
 
 def test_the_worked_examples_assignments_parse_with_the_real_reader(capsys):
@@ -620,16 +617,13 @@ def test_the_seeded_assignment_defaults_block_parses_with_the_real_reader(capsys
     # grading_config.yml, so a key or a spelling the reader does not know would be
     # silently dropped there rather than here. Both files that carry it are checked.
     for text in (
-        welcome.template("course/course.yml").format(
-            course_name="Deep Learning",
-            course_code="E1",
-        ),
+        bc.course_seed("Deep Learning", "E1"),
         welcome.example_course_file("course.yml"),
     ):
-        block = yaml.safe_load(text)[settings.ASSIGNMENT_DEFAULTS_KEY]
+        block = yaml.safe_load(text)["defaults"]
         # Whatever a course states here is read through the same readers as the
         # assignment's own settings; the seed states nothing (the institution answers).
-        assert settings.parse_assignment_defaults(block) == (block or {})
+        assert settings.parse_course_defaults(block) == (block or {})
     assert capsys.readouterr().err == ""
 
 
@@ -640,11 +634,11 @@ def test_the_example_courses_people_block_feeds_both_of_its_readers():
     meta = yaml.safe_load(welcome.example_course_file("course.yml"))
     faculty = sync_faculty.parse_faculty_from_meta(meta)
     assert faculty["course_admins"], "course_admins is the SSOT for course-wide admin"
-    assert faculty["instructors"], (
-        "instructor cards are what the public course site shows"
-    )
+    # The course admins are the open site's course leads (decision 0039 rule 3).
+    instructors, _tas = site_repo.people_cards(meta)
+    assert instructors, "the course leads are what the public course site shows"
 
-    for entry in faculty["instructors"]:
+    for entry in faculty["course_admins"]:
         # the example must teach OUR spelling - `photo`/`url` are what a course declares,
         # and an example already written in the theme's names would pass the mapping below
         # while teaching faculty a key the docs never document
@@ -725,13 +719,12 @@ def test_course_dsl_course_yml_is_never_rewritten(fake, monkeypatch):
         "org: My-Course-E1\npeople:\n  course_admins:\n    - github_handle: alice\n"
     )
     fake.files[(".github", "course.yml")] = edited
-    fake.files[(".github", "opencourse.yml")] = "enabled: true\nsource_repo: m\n"
 
     bc.create_profile_repo("My-Course-E1", "Deep Learning", "E1")
 
     assert fake.files[(".github", "course.yml")] == edited
     assert fake.writes == []
-    assert fake.skips == [".github/course.yml", ".github/opencourse.yml"]
+    assert fake.skips == [".github/course.yml"]
 
 
 def test_a_new_course_gets_its_public_website_settings_seeded_off(fake, monkeypatch):
@@ -739,10 +732,10 @@ def test_a_new_course_gets_its_public_website_settings_seeded_off(fake, monkeypa
     # someone turns it on (decision 0016).
     monkeypatch.setattr(bc, "set_repo_topics", lambda *a, **k: True)
     bc.create_profile_repo("My-Course-E1", "Deep Learning", "E1")
-    seeded = fake.files[(".github", "opencourse.yml")]
+    seeded = fake.files[(".github", "course.yml")]
     assert seeded.startswith("# INSTRUCTOR-OWNED")
-    assert opencourse.parse(yaml.safe_load(seeded)) == opencourse.OpenCourse(
-        withhold=opencourse.DEFAULT_WITHHOLD
+    assert opencourse.parse(opencourse.block(yaml.safe_load(seeded))) == (
+        opencourse.OpenCourse(withhold=opencourse.DEFAULT_WITHHOLD)
     )
 
 
@@ -1764,7 +1757,7 @@ def test_semester_bootstrap_reds_when_faculty_sync_reports_errors(monkeypatch, c
 def test_semester_bootstrap_reds_when_student_repos_half_seeded(monkeypatch, capsys):
     # setup_semester_extras returns the count of welcome/config-sample writes that failed.
     stub_bootstrap(monkeypatch)
-    monkeypatch.setattr(bc, "setup_semester_extras", lambda org, ref: 4)
+    monkeypatch.setattr(bc, "setup_semester_extras", lambda org, ref, course: 4)
     monkeypatch.setattr(bc.site, "sync_site", lambda c, o: 0)
     monkeypatch.setattr("sys.argv", _semester_argv())
 
@@ -1902,10 +1895,10 @@ def _profile_repo_run(monkeypatch, *, seeded=True, topics=True):
 def test_an_unseeded_course_ssot_reds_the_bootstrap(monkeypatch, capsys):
     # No course.yml means no faculty SSOT and no course identity for the site, but
     # its write used to be unchecked under an unconditional "initialised" line.
-    assert _profile_repo_run(monkeypatch, seeded=False) == 2
+    assert _profile_repo_run(monkeypatch, seeded=False) == 1
     out = capsys.readouterr()
     assert "profile repo initialised" not in out.out
-    assert "course.yml" in out.err and "opencourse.yml" in out.err
+    assert "course.yml" in out.err
 
 
 def test_an_untagged_github_repo_reds_the_bootstrap(monkeypatch):

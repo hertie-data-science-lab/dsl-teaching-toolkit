@@ -63,9 +63,22 @@ def test_exam_entry_renders_the_real_time_when_one_was_given():
 
 
 _PEOPLE_META = {
+    "people": [
+        {"name": "Prof. Jane", "role": "instructor", "photo": "j.jpg", "url": "u/jane"},
+        {
+            "name": "Alex TA",
+            "role": "teaching_assistant",
+            "photo": "a.jpg",
+            "url": "u/alex",
+        },
+    ]
+}
+# A course's `people:` is its admins, the open site's course leads (decision 0039).
+_COURSE_META = {
     "people": {
-        "instructors": [{"name": "Prof. Jane", "photo": "j.jpg", "url": "u/jane"}],
-        "teaching_assistants": [{"name": "Alex TA", "photo": "a.jpg", "url": "u/alex"}],
+        "course_admins": [
+            {"github_handle": "jane", "name": "Prof. Jane", "photo": "j.jpg"}
+        ]
     }
 }
 
@@ -73,19 +86,19 @@ _PEOPLE_META = {
 def test_people_yaml_semester_includes_tas():
     # The semester site reads its own semester.yml and renders instructors AND TAs.
     out = site_repo.people_yaml(
-        "Some-Semester-f2026", _PEOPLE_META, edit_at="semester.yml"
+        "Some-Semester-f2026", _PEOPLE_META, edit_at="semester.yml", semester=True
     )
     assert "Prof. Jane" in out
     assert "Alex TA" in out
 
 
 def test_people_yaml_course_site_drops_tas():
-    # The multi-year open-courseware site shows instructors only - TAs are semester-only.
+    # The multi-year open-courseware site shows its course leads only.
     out = site_repo.people_yaml(
-        "Some-Course", _PEOPLE_META, edit_at="course.yml", include_tas=False
+        "Some-Course", _COURSE_META, edit_at="course.yml", include_tas=False
     )
     assert "Prof. Jane" in out
-    assert "Alex TA" not in out
+    assert "jane" not in out.replace("Jane", "")
     assert "teaching_assistants:" in out  # the (now empty) key is still emitted
 
 
@@ -96,6 +109,7 @@ def test_people_yaml_header_says_it_is_generated_and_where_to_edit(monkeypatch):
         "Some-Semester-f2026",
         _PEOPLE_META,
         edit_at="Semester/semester-config/semester.yml",
+        semester=True,
     )
     monkeypatch.setattr(site_repo, "_team_people", lambda org, team: [])
     fallback = site_repo.people_yaml(
@@ -116,9 +130,10 @@ def test_people_yaml_passes_every_declared_display_field_through():
     # course declared was silently dropped. Every display field must now reach the card,
     # so adding one is a theme change only.
     meta = {
-        "people": {
-            "instructors": [
-                {
+        "people": [
+            {
+                "role": "instructor",
+                
                     "github_handle": "jane",  # access-only - must NOT reach the card
                     "start": "2020-01-01",
                     "end": "2999-12-31",
@@ -126,12 +141,14 @@ def test_people_yaml_passes_every_declared_display_field_through():
                     "photo": "j.jpg",
                     "url": "u/jane",
                     "title": "Professor of Things",
-                    "office_hours": "Tue 14:00, Room 3.21",
-                }
-            ]
-        }
+                    "office_hours": "Tue 14:00, Room 3.21"
+                ,
+            }
+        ]
     }
-    out = site_repo.people_yaml("Some-Semester-f2026", meta, edit_at="semester.yml")
+    out = site_repo.people_yaml(
+        "Some-Semester-f2026", meta, edit_at="semester.yml", semester=True
+    )
     assert 'title: "Professor of Things"' in out
     assert 'office_hours: "Tue 14:00, Room 3.21"' in out
     assert 'profile_pic: "j.jpg"' in out  # `photo` renamed to the theme's key
@@ -145,14 +162,19 @@ def test_people_yaml_keeps_the_declared_email_off_the_card_by_default():
     # publishing it by default would put an address given for notifications on a public
     # website - for every instructor and TA of every semester, without anyone opting in.
     meta = {
-        "people": {
-            "instructors": [
-                {"name": "Prof. Jane", "title": "Professor", "email": "jane@x.org"}
-            ],
-            "teaching_assistants": [{"name": "Alex TA", "email": "alex@x.org"}],
-        }
+        "people": [
+            {
+                "name": "Prof. Jane",
+                "role": "instructor",
+                "title": "Professor",
+                "email": "jane@x.org",
+            },
+            {"name": "Alex TA", "role": "teaching_assistant", "email": "alex@x.org"},
+        ]
     }
-    out = site_repo.people_yaml("Some-Semester-f2026", meta, edit_at="semester.yml")
+    out = site_repo.people_yaml(
+        "Some-Semester-f2026", meta, edit_at="semester.yml", semester=True
+    )
     assert "jane@x.org" not in out
     assert "alex@x.org" not in out
     assert 'title: "Professor"' in out  # the rest of the card is untouched
@@ -163,17 +185,18 @@ def test_people_yaml_publishes_the_email_only_on_an_exact_show_email_true():
     # would otherwise publish an address nobody agreed to publish. `show_email` itself is
     # a switch this side consumes and must never reach the site either.
     meta = {
-        "people": {
-            "instructors": [
-                {"name": "Prof. Jane", "email": "jane@x.org", "show_email": True},
-                {"name": "Dr Sam", "email": "sam@x.org", "show_email": "yes"},
-            ],
-            "teaching_assistants": [
-                {"name": "Alex TA", "email": "alex@x.org", "show_email": False}
-            ],
-        }
+        "people": [
+            {"name": "Prof. Jane", "role": "instructor", "email": "jane@x.org"}
+            | {"show_email": True},
+            {"name": "Dr Sam", "role": "instructor", "email": "sam@x.org"}
+            | {"show_email": "yes"},
+            {"name": "Alex TA", "role": "teaching_assistant", "email": "alex@x.org"}
+            | {"show_email": False},
+        ]
     }
-    out = site_repo.people_yaml("Some-Semester-f2026", meta, edit_at="semester.yml")
+    out = site_repo.people_yaml(
+        "Some-Semester-f2026", meta, edit_at="semester.yml", semester=True
+    )
     assert 'email: "jane@x.org"' in out  # opted in
     assert "sam@x.org" not in out  # not the string "yes"
     assert "alex@x.org" not in out  # opted out explicitly

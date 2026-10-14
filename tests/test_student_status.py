@@ -119,7 +119,7 @@ PII = (
 )
 
 INSTRUCTORS = {
-    "instructors": [
+    "people": [
         {
             "github_handle": "prof-x",
             "role": "instructor",
@@ -223,9 +223,11 @@ def _course() -> CourseFacts:
     return CourseFacts(
         org=COURSE,
         meta={
-            "course_name": "Deep Learning",
-            "course_description": "Neural networks, from scratch.",
-            "student_console": True,
+            "course": {
+                "name": "Deep Learning",
+                "description": "Neural networks, from scratch.",
+                "student_console": True,
+            },
         },
     )
 
@@ -558,7 +560,13 @@ def test_the_course_description_and_the_previous_offerings():
 def test_the_course_opt_in_travels_to_the_console():
     assert _render()["student_console"] is True
     facts = _facts()
-    for meta in ({}, {"student_console": False}, {"student_console": "yes"}):
+    for meta in (
+        {},
+        {"course": {"student_console": False}},
+        {"course": {"student_console": "yes"}},
+        # The flag lives in the `course:` block; a stray top-level one says nothing.
+        {"student_console": True},
+    ):
         bare = CourseFacts(org=COURSE, meta=meta)
         doc = student_status.render(bare, facts, _extra(facts), NOW)
         assert doc["student_console"] is False
