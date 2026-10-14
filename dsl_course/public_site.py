@@ -23,18 +23,20 @@ from urllib.parse import quote
 import yaml
 
 from . import policy
+from .config import read_local
 from .course import (
     discover_local_sessions,
     discover_sections,
     find_session_dir,
     pages_repo,
 )
+from .discovery import org_meta
 from .faults import Unusable
 from .fs import copy_tree, union_deny
 from .ghcli import clone
 from .log import Summary, log, log_err, log_step
 from .materials import MATERIALS_FILE, Declared, infer_kind
-from .materials import parse as parse_materials
+from .materials import declared as declared_materials
 from .opencourse import OPENCOURSE_FILE, OpenCourse
 from .opencourse import read as read_opencourse
 from .readings import readings_block
@@ -62,7 +64,6 @@ from .site_repo import (
     site_templates,
     sync_site_repo,
     theme_pages,
-    yaml_file,
 )
 
 # Public course site: served folder for the hosted section files.
@@ -93,10 +94,8 @@ def _declared(src: Path) -> Declared:
     """The clone's own `materials.yml`; none, or one that does not parse, is the defaults
     (its problem is reported on the course page, not here)."""
     try:
-        return parse_materials(
-            yaml.safe_load((src / MATERIALS_FILE).read_text(encoding="utf-8"))
-        )
-    except (OSError, yaml.YAMLError, Unusable):
+        return declared_materials(read_local(src, MATERIALS_FILE), quiet=True)
+    except (OSError, Unusable):
         return Declared()
 
 
@@ -262,7 +261,7 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
         return 1
 
     def build(site_wd: Path) -> SitePlan | None:
-        meta = yaml_file(course_org, ".github", "dsl-course.yml")
+        meta = org_meta(course_org)
         # A course site spans years and has no per-semester schedule.yml to read (that's
         # semester-scoped), so the date is a neutral fallback that only orders the session
         # entries.

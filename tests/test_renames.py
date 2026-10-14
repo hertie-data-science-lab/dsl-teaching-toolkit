@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from conftest import workflow_inputs
+from conftest import fake_config, workflow_inputs
 from test_renderers import ALL_RENDERED
 
 from dsl_course import (
@@ -236,11 +236,7 @@ def test_a_cli_takes_only_the_new_flag(monkeypatch, capsys, flag):
 
 @pytest.mark.parametrize("key", course.RETIRED_COURSE_KEYS)
 def test_a_retired_course_key_is_not_migrated(monkeypatch, key):
-    monkeypatch.setattr(
-        sync_faculty,
-        "load_yaml_config",
-        lambda *a, **k: {key: "x", "people": {"course_admins": []}},
-    )
+    fake_config(monkeypatch, lambda *a: {key: "x", "people": {"course_admins": []}})
     faults: list = []
     sync_faculty.read_course_config("C", faults)
     assert [f.field for f in faults if f.code == NOT_MIGRATED] == [key]
@@ -283,11 +279,7 @@ def test_the_instructors_list_is_grouped_by_role_and_a_missing_role_is_a_fault()
 
 
 def _semester_files(monkeypatch, files: dict[str, dict]) -> None:
-    monkeypatch.setattr(
-        sync_faculty,
-        "load_yaml_config",
-        lambda org, repo, path, lines=False: files.get(path),
-    )
+    fake_config(monkeypatch, lambda org, repo, path: files.get(path))
 
 
 @pytest.mark.parametrize(
@@ -350,6 +342,7 @@ def test_the_new_instructors_file_is_read(monkeypatch):
 def test_the_site_cards_read_instructors_yml_only(monkeypatch):
     files = {"people.yml": OLD_PEOPLE, "instructors.yml": NEW_INSTRUCTORS}
     monkeypatch.setattr(site, "yaml_file", lambda org, repo, path: files.get(path, {}))
+    fake_config(monkeypatch, site.yaml_file)
     meta, path = site._instructors_meta("Sem")
     assert path == "instructors.yml"
     grouped = people_by_role(meta)

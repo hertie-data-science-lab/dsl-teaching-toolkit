@@ -26,6 +26,7 @@ from dsl_course import (
     site,
     site_repo,
 )
+from dsl_course import run as run_context
 from dsl_course import schedule as schedule_mod
 from dsl_course.faults import Unusable
 from dsl_course.opencourse import OpenCourse
@@ -39,7 +40,7 @@ from dsl_course.schedule import (
 )
 from dsl_course.setting_readers import read_settings
 from dsl_course.site_repo import Link
-from tests.conftest import BareOrigins
+from tests.conftest import BareOrigins, fake_config
 
 UTC = ZoneInfo("UTC")
 
@@ -1285,6 +1286,7 @@ def _plan(
         site, "discover_release_sources", lambda org, repos: list(sources)
     )
     monkeypatch.setattr(site, "yaml_file", yaml_file)
+    fake_config(monkeypatch, site.yaml_file)
     monkeypatch.setattr(site.schedule, "load", lambda org: sched)
     monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
     monkeypatch.setattr(
@@ -1332,6 +1334,7 @@ def test_the_build_lists_the_semester_once_for_both_of_its_questions(
         lambda org, repos: seen_content.append(repos) or [],
     )
     monkeypatch.setattr(site, "yaml_file", lambda *a: {})
+    fake_config(monkeypatch, site.yaml_file)
     monkeypatch.setattr(site.schedule, "load", lambda org: Schedule())
     monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
     monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "")
@@ -1385,12 +1388,14 @@ def test_course_description_flows_from_course_metadata_into_config(
     monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
 
     monkeypatch.setattr(site, "yaml_file", lambda *a: {})
+    fake_config(monkeypatch, site.yaml_file)
     assert site.sync_site("Course-Org", "Semester-f2026") == 0
     assert "course_description" not in captured["plan"].config
 
     monkeypatch.setattr(
         site, "yaml_file", lambda *a: {"course_description": "Nets, from 0."}
     )
+    fake_config(monkeypatch, site.yaml_file)
     assert site.sync_site("Course-Org", "Semester-f2026") == 0
     cfg = site_repo._replace_config_scalar(
         'course_name: "x"\ncourse_description: "old"\ncourse_code: "y"\n',
@@ -1419,6 +1424,7 @@ def test_the_exported_config_keys_are_the_ones_the_sync_writes_and_the_seed_keep
     monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
     meta = {"course_name": "Nets", "course_code": "E1", "course_description": "D."}
     monkeypatch.setattr(site, "yaml_file", lambda *a: meta)
+    fake_config(monkeypatch, site.yaml_file)
     assert site.sync_site("Course-Org", "Semester-f2026") == 0
     written = {*captured["plan"].config, "title"}  # `title` follows `course_name`
     assert written == set(site_repo.SYNCED_CONFIG_KEYS)
@@ -1461,6 +1467,7 @@ def test_site_still_builds_when_schedule_yml_does_not_parse(
     monkeypatch.setattr(site, "list_org_repos", lambda org: [])
     monkeypatch.setattr(site, "discover_release_sources", lambda org, repos: [])
     monkeypatch.setattr(site, "yaml_file", lambda *a: {"course_name": "Deep Learning"})
+    fake_config(monkeypatch, site.yaml_file)
     monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
     # the REAL schedule.load, fed the malformed file
     monkeypatch.setattr(
@@ -2936,6 +2943,7 @@ def test_a_course_with_no_publish_file_is_never_cloned(monkeypatch, origins, tmp
     # The cost of this feature on a course that does not use it is zero: no clone, no
     # copy, no directory.
     monkeypatch.setattr(site, "yaml_file", lambda *a: {})
+    fake_config(monkeypatch, site.yaml_file)
     monkeypatch.setattr(site, "clone", _never_cloned)
     policies = site._publish_policies("Course-Org", _one_deploy(), ["materials"])
     assert policies == {"materials": ()}
@@ -2949,12 +2957,15 @@ def test_a_policy_that_does_not_parse_stops_the_sync(monkeypatch):
         raise yaml.YAMLError("mapping values are not allowed here")
 
     monkeypatch.setattr(site, "yaml_file", boom)
+
+    fake_config(monkeypatch, site.yaml_file)
     with pytest.raises(yaml.YAMLError):
         site._publish_policies("Course-Org", _one_deploy(), ["materials"])
 
     # A faculty-fixable config fault, so a RuntimeError: a hand-out (assign.py) and the
     # CLI catch exactly that and YAMLError, and anything else aborted the hand-out.
     monkeypatch.setattr(site, "yaml_file", lambda *a: {"public": "lectures/**"})
+    fake_config(monkeypatch, site.yaml_file)
     with pytest.raises(RuntimeError, match="must be a list of patterns"):
         site._publish_policies("Course-Org", _one_deploy(), ["materials"])
 
@@ -2984,7 +2995,7 @@ def test_every_semester_of_one_run_reuses_the_courses_policy(monkeypatch, tmp_pa
     )
     monkeypatch.setattr(site, "live_semesters", lambda org: [])
     assert site.main() == 0
-    assert site._publish_policy.cache_info().currsize == 0
+    assert run_context.current().holds(site._publish_policy) == 0
 
 
 def test_a_file_github_would_refuse_is_skipped_rather_than_failing_the_sync(
@@ -3028,6 +3039,8 @@ def test_the_policy_is_read_from_the_source_repo_the_plan_names(monkeypatch):
         return {"public": ["lectures/**/*.html"]}
 
     monkeypatch.setattr(site, "yaml_file", yaml_file)
+
+    fake_config(monkeypatch, site.yaml_file)
     sched = _one_deploy()
     sched.releases[0].deploy.append(Deploy("course-code-f2026", "src", "code"))
     policies = site._publish_policies("Course-Org", sched, ["materials"])

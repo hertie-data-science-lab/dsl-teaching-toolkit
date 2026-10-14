@@ -42,10 +42,9 @@ from . import (
     team_formation,
     teams,
 )
+from .config import read_semester
 from .course import (
-    CONFIG_REPO,
     CUTOFF_SENTENCE,
-    INSTRUCTORS_FILE,
     SELF_SELECT,
     advertises_console,
     identifier,
@@ -77,7 +76,6 @@ from .site_repo import (
     link_extensions,
     people_cards,
     row_tabs,
-    yaml_file,
 )
 from .status_json import CourseFacts, SemesterFacts, _iso, dumps, handed_out
 
@@ -849,9 +847,7 @@ def gather(course: CourseFacts, facts: SemesterFacts, now: datetime) -> StudentF
         )
     except Unusable:
         extra.syllabus = None  # the site sync names the bad materials.yml
-    extra.cards = people_cards(
-        yaml_file(org, CONFIG_REPO, INSTRUCTORS_FILE), semester=True
-    )
+    extra.cards = people_cards(read_semester(org).instructors.meta(), semester=True)
     site = pages_repo(org)
     if site in facts.listing:
         extra.home = facts.site_home or ""

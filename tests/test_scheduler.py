@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 import yaml
-from conftest import source_fault
+from conftest import fake_config, source_fault
 
 from dsl_course import (
     access,
@@ -29,6 +29,7 @@ from dsl_course import (
     notify,
     repos,
     roster,
+    run,
     scheduler,
     seed,
     settings,
@@ -766,7 +767,7 @@ def _formation_release_phase(monkeypatch, windows):
         }
     )
     rc = scheduler._release_phase(
-        "Course-Org", "Semester-Org", sched, WHEN, False, None, {}
+        "Course-Org", "Semester-Org", sched, WHEN, False, None
     )
     return rc, seen, asked
 
@@ -1011,7 +1012,7 @@ def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
         ),
     )
     r = _r("s", WHEN, assignment="assignment-2-f2026", assignment_slug="assignment-2")
-    assert scheduler._execute_nondeploy("Course-Org", "Semester-Org", r, None) == (
+    assert scheduler._execute_nondeploy("Course-Org", "Semester-Org", r) == (
         0,
         True,
     )
@@ -1033,7 +1034,7 @@ def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
     # scheduled solution can never diverge from what include_solution does by hand.
     r = _r("s", WHEN, assignment="assignment-2-f2026", assignment_slug="assignment-2")
     r.assignment_solution = True
-    assert scheduler._execute_nondeploy("Course-Org", "Semester-Org", r, None) == (
+    assert scheduler._execute_nondeploy("Course-Org", "Semester-Org", r) == (
         0,
         True,
     )
@@ -1770,7 +1771,6 @@ def test_the_sheet_refresh_runs_through_the_whole_late_window(monkeypatch):
         sched,
         datetime(2026, 10, 17, tzinfo=timezone.utc),
         False,
-        None,
     )
     assert refreshed == [("assignment-1", "assignment-1")]
 
@@ -2129,8 +2129,8 @@ def test_a_tick_takes_one_semester_listing_and_hands_it_to_every_pass(
     monkeypatch.setattr(
         scheduler,
         "_reprivatise_student_repos",
-        lambda course, semester, sched, now, dry_run, listing: (
-            seen.update(reprivatise=listing) or 0
+        lambda course, semester, sched, now, dry_run: (
+            seen.update(reprivatise=scheduler._listing(semester)) or 0
         ),
     )
     monkeypatch.setattr(scheduler, "_assignment_template", lambda org, slug, entry: "t")
@@ -2727,7 +2727,7 @@ def test_the_release_phase_counts_a_raised_site_sync(monkeypatch):
     monkeypatch.setattr("dsl_course.site.sync_site", boom)
     due = [_r("wk1", WHEN, deploy=[Deploy("cm", "lectures/01", "materials", None)])]
     # The pass itself is green and says the site moved; the sync beside it is what fails.
-    assert scheduler._run_releases("Course-Org", "Semester-Org", due, WHEN, None) == (
+    assert scheduler._run_releases("Course-Org", "Semester-Org", due, WHEN) == (
         0,
         True,
     )
@@ -3853,7 +3853,7 @@ def _config_preflight(
         lambda spec, *a, **k: mailed.append(spec.file) or notify.Unsent(),
     )
     rc = scheduler._preflight_configs(
-        "Course-Org", "Semester-Org", sched or Schedule(), WHEN, False, None
+        "Course-Org", "Semester-Org", sched or Schedule(), WHEN, False
     )
     return rc, synced, mailed
 
@@ -3985,7 +3985,7 @@ def test_a_digest_that_cannot_be_written_never_touches_the_exit_code(monkeypatch
     )
     monkeypatch.setattr(scheduler.config_digest, "sync", boom)
     rc = scheduler._preflight_configs(
-        "Course-Org", "Semester-Org", Schedule(), WHEN, False, None
+        "Course-Org", "Semester-Org", Schedule(), WHEN, False
     )
     assert rc == 0
 
@@ -4616,6 +4616,11 @@ def test_a_notice_whose_date_moved_out_of_the_window_goes_with_it(monkeypatch):
 CUTOFF = datetime(2026, 10, 30, 23, 59, 59, tzinfo=BERLIN)
 
 
+def _tick_listing(listing: dict | None) -> None:
+    """Hold `listing` as the tick's listing of Semester-f2026, as `scheduler.run` does."""
+    run.current().listings["semester-f2026"] = listing
+
+
 def _choice_rows(*names_and_visibility: tuple[str, str], **extra) -> list[dict]:
     from conftest import repo_row
 
@@ -4657,9 +4662,9 @@ def _reprivatise(
             )
         }
     )
-    listing = None if rows is None else {r["name"]: r for r in rows}
+    _tick_listing(None if rows is None else {r["name"]: r for r in rows})
     rc = scheduler._reprivatise_student_repos(
-        "Course-Org", "Semester-f2026", sched, now, dry_run, listing
+        "Course-Org", "Semester-f2026", sched, now, dry_run
     )
     return rc, patched
 
@@ -4756,6 +4761,7 @@ def test_a_failed_patch_is_counted(monkeypatch):
         }
     )
     rows = _choice_rows(("assignment-1-ada-l", "public"))
+    _tick_listing({r["name"]: r for r in rows})
     assert (
         scheduler._reprivatise_student_repos(
             "Course-Org",
@@ -4763,7 +4769,6 @@ def test_a_failed_patch_is_counted(monkeypatch):
             sched,
             datetime(2026, 10, 14, tzinfo=BERLIN),
             False,
-            {r["name"]: r for r in rows},
         )
         == 1
     )
@@ -4789,13 +4794,13 @@ def test_an_assignment_that_has_not_gone_out_has_no_repos_to_close(monkeypatch):
         }
     )
     rows = _choice_rows(("assignment-1-ada-l", "public"))
+    _tick_listing({r["name"]: r for r in rows})
     scheduler._reprivatise_student_repos(
         "Course-Org",
         "Semester-f2026",
         sched,
         datetime(2026, 10, 14, tzinfo=BERLIN),
         False,
-        {r["name"]: r for r in rows},
     )
     assert patched == []
 
@@ -5150,7 +5155,7 @@ def _numbers_phase(monkeypatch, dry_run: bool, sched: Schedule | None = None):
         },
     )
     out = scheduler._release_phase(
-        "Course-Org", "Semester-Org", sched, WHEN, dry_run, None, {}
+        "Course-Org", "Semester-Org", sched, WHEN, dry_run, None
     )
     return out, seen
 
@@ -5178,10 +5183,7 @@ def test_a_materials_yml_that_does_not_parse_holds_no_inferred_entry(
 ):
     # `week` would be aliased to readings; the file does not parse, so the kind is a
     # guess (lecture) and no number is required on its strength. An explicit kind counts.
-    def broken(org, repo, path):
-        raise yaml.YAMLError("bad")
-
-    monkeypatch.setattr(materials, "load_yaml_config", broken)
+    fake_config(monkeypatch, lambda org, repo, path: "kinds: [not closed")
     materials.read.cache_clear()
     earlier = WHEN - timedelta(hours=1)
     sched = Schedule(

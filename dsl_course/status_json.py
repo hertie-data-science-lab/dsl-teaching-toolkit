@@ -35,6 +35,7 @@ digest issue - never a handle, an email or a student repo name.
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 from collections import Counter
@@ -53,6 +54,7 @@ from . import (
     policy,
     records,
     roster,
+    run,
     schedule,
     settings,
     sync_faculty,
@@ -2745,7 +2747,17 @@ def _materials_facts(course_org: str, repo: str) -> MaterialsFacts:
 
 def gather_course(course_org: str) -> CourseFacts:
     """Read the course org. A listing or tree that could not be read raises: a status that
-    reported an unreadable org as an empty one would tell the console to start again."""
+    reported an unreadable org as an empty one would tell the console to start again.
+
+    Read ONCE per run (`_course_facts`), however many semesters' documents the run writes
+    (the scheduler's refresh after every tick, an operation's semester then course
+    rewrite): a write this run makes anywhere in the course org forgets it. Each caller
+    gets its own copy."""
+    return copy.deepcopy(_course_facts(course_org))
+
+
+@run.per_run(lambda course_org: run.scope(course_org))
+def _course_facts(course_org: str) -> CourseFacts:
     listing = {r["name"]: r for r in list_org_repos(course_org)}
     facts = CourseFacts(org=course_org)
     facts.github_paths = repo_path_shas(

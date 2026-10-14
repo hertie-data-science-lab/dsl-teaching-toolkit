@@ -11,13 +11,13 @@ import io
 import json
 import re
 from collections.abc import Callable, Iterable
-from functools import cache
 from pathlib import PurePosixPath
 from typing import Any
 from urllib.parse import unquote
 
 import yaml
 
+from . import run
 from .course import FACULTY_ONLY_HEADING
 from .faults import ConfigFault, Unusable, header_fault
 from .ghcli import (
@@ -60,8 +60,8 @@ _NOT_MODIFIED = "HTTP 304"
 
 
 def read_once(on: bool) -> None:
-    """Turn the per-process read memo on (empty) or off. `tests/conftest.py` turns it off
-    between tests."""
+    """Turn the per-process read memo on (empty) or off. `run.reset` turns it
+    off."""
     global _reads, _blobs
     _reads, _blobs = ({}, {}) if on else (None, None)
     _stale.clear()
@@ -197,6 +197,7 @@ def _forget(kind: str, targets: frozenset[str]) -> None:
 
 on_write(_forget)
 on_cli_start(lambda parser: read_once(parser.read_once))
+run.on_reset(lambda: read_once(False))
 
 
 def missing_columns(
@@ -1290,7 +1291,7 @@ query($owner: String!, $name: String!, $ref: String!, $path: String!) {
 """
 
 
-@cache
+@run.per_run(lambda org, repo, *a, **k: run.scope(org, repo))
 def blame_logins(
     org: str, repo: str, path: str, ref: str = "refs/heads/main"
 ) -> dict[int, str]:
@@ -1306,7 +1307,7 @@ def blame_logins(
     Memoised per process, like `last_committer` and `path_committers` beside it: this used
     to be asked once per FILE and hoisted out of the loop, and `notify.route` now asks it
     once per FAULT - so a grading sheet with twenty unreadable marks was twenty identical
-    GraphQL blame queries of one file in one tick. `tests/conftest.py` clears it."""
+    GraphQL blame queries of one file in one tick. Held by the run (`run.per_run`)."""
     doc = gh_json(
         "api",
         "graphql",
@@ -1336,7 +1337,7 @@ def blame_logins(
     return out
 
 
-@cache
+@run.per_run(lambda org, repo: run.scope(org, repo))
 def last_committer(org: str, repo: str) -> str | None:
     """The login that made `repo`'s most recent commit on its default branch, or None when
     there is nobody to name (an empty repo, an unlinked commit email).
@@ -1347,14 +1348,14 @@ def last_committer(org: str, repo: str) -> str | None:
 
     Memoised per process, like `repos._repo`: several entries in one plan point into the
     same materials repo, and its last commit does not change under a run.
-    `tests/conftest.py` clears it."""
+    Held by the run (`run.per_run`)."""
     rows = gh_json("api", f"repos/{org}/{repo}/commits?per_page=1")
     if not rows:
         return None
     return ((rows[0] or {}).get("author") or {}).get("login") or None
 
 
-@cache
+@run.per_run(lambda org, repo, *a, **k: run.scope(org, repo))
 def path_committers(org: str, repo: str, path: str, limit: int = 5) -> tuple[str, ...]:
     """The logins behind the most recent commits that touched `path`, newest first.
 
@@ -1365,7 +1366,7 @@ def path_committers(org: str, repo: str, path: str, limit: int = 5) -> tuple[str
     the newest login that is not the bot - hence several, not one.
 
     Raises on a read it could not make, for the reason `blame_logins` does. Memoised per
-    process: one file, one answer, several faults. `tests/conftest.py` clears it."""
+    process: one file, one answer, several faults. Held by the run (`run.per_run`)."""
     rows = gh_json("api", f"repos/{org}/{repo}/commits?per_page={limit}&path={path}")
     logins = [((r or {}).get("author") or {}).get("login") for r in rows or []]
     return tuple(dict.fromkeys(login for login in logins if login))
@@ -1409,22 +1410,34 @@ def load_yaml_config(
     `LineLoader`), for a caller that has to tell somebody WHICH line to go and fix. Off by
     default: the stamp is a reserved key, and a caller that does not consume it would
     render it."""
-    content = get_file_content(org, repo, path)
+    return parse_yaml_config(
+        get_file_content(org, repo, path), f"{org}/{repo}/{path}", lines
+    )
+
+
+def parse_yaml_config(
+    content: str | None, where: str, lines: bool = False, quiet: bool = False
+) -> dict | None:
+    """`load_yaml_config` of text already read (None = absent), `where` naming the file in
+    what it logs. `quiet` raises the same and logs nothing, for a caller that reports the
+    file its own way."""
     if content is None:
         return None
     try:
         data = load_yaml_lines(content) if lines else yaml.safe_load(content)
     except yaml.YAMLError as exc:
-        log_err(f"malformed YAML in {org}/{repo}/{path}: {read_error(exc)}")
+        if not quiet:
+            log_err(f"malformed YAML in {where}: {read_error(exc)}")
         raise
     if data is None:
         return {}
     if not isinstance(data, dict):
         msg = (
-            f"{org}/{repo}/{path} is not a YAML mapping "
+            f"{where} is not a YAML mapping "
             f"(got {type(data).__name__}) - refusing to use it"
         )
-        log_err(msg)
+        if not quiet:
+            log_err(msg)
         # `Unusable`, which IS a RuntimeError - the house style for a bad read/config,
         # which get_file_content and list_org_repos raise too and status.main catches -
         # and which additionally says this is a file faculty must fix rather than a read

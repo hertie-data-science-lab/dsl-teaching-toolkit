@@ -122,6 +122,7 @@ from . import (
     receipts,
     records,
     roster,
+    run,
     schedule,
     sync_teams,
     teams,
@@ -2281,7 +2282,7 @@ def _sudo(*args: str) -> bool:
         return False  # no sudo binary at all
 
 
-@cache
+@run.per_run()
 def sandbox_user() -> str:
     """The account graded subprocesses run as, or `""` when they run as this process does.
 
@@ -2293,7 +2294,7 @@ def sandbox_user() -> str:
     return SANDBOX_USER if _sudo("-u", SANDBOX_USER, "true") else ""
 
 
-@cache
+@run.per_run()
 def sandbox_unusable() -> str:
     """Why no student code may be run right now, or `""` when it may.
 
@@ -2569,7 +2570,7 @@ _PROXY_VARS = (
 _CHECKPOINTS = ".ipynb_checkpoints"
 
 
-@cache
+@run.per_run(lambda course_org, template: run.scope(course_org, template))
 def _starter_notebook_shas(course_org: str, template: str) -> frozenset[str]:
     """The git blob shas of every notebook on the template's DEFAULT branch - the starters
     exactly as students received them.

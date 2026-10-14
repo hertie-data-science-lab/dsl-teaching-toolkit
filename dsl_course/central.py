@@ -8,8 +8,8 @@ both sides must name the same repo/ref. One definition, imported by both.
 from __future__ import annotations
 
 import re
-from functools import cache
 
+from . import run
 from .ghcli import gh, is_missing_resource
 from .log import log_err
 
@@ -76,7 +76,7 @@ def resolve_central_ref(value: object, *, source: str) -> str:
     )
 
 
-@cache
+@run.per_run()
 def central_ref_exists(ref: str) -> bool:
     """Whether `ref` is on the central repo right now.
 

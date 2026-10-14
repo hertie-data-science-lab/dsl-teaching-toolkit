@@ -9,6 +9,7 @@ import time
 from fnmatch import fnmatch
 from typing import NamedTuple
 
+from . import run
 from .course import RETIRED_REPO_NAMES
 from .faults import NOT_MIGRATED
 from .ghcli import (
@@ -33,7 +34,7 @@ class _RepoReadFailed(RuntimeError):
 
 
 # Keyed by the casefolded `org/name`: GitHub's names are not case-sensitive, and callers do
-# not agree on the spelling. Cleared between tests (tests/conftest.py).
+# not agree on the spelling. Cleared by `run.reset`.
 _repos: dict[str, dict] = {}
 
 
@@ -77,6 +78,7 @@ def _forget_repo(kind: str, targets: frozenset[str]) -> None:
 
 
 on_write(_forget_repo)
+run.on_reset(_repos.clear)
 
 
 def repo_missing(org: str, name: str) -> bool:

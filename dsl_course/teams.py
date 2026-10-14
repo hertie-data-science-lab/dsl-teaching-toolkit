@@ -18,8 +18,7 @@ authoritative - it can't drift out of sync the way a Classroom-managed team does
 
 from __future__ import annotations
 
-from functools import cache
-
+from . import run
 from .course import CONFIG_REPO, INSTRUCTORS_TEAM, ROLE_TEAMS
 from .faults import ConfigFault, csv_row_fault
 from .gh_contents import get_file_content, read_csv
@@ -171,14 +170,14 @@ def _row_faults(
     return found
 
 
-@cache
+@run.per_run(lambda semester_org: run.scope(semester_org, CONFIG_REPO, TEAMS_PATH))
 def _teams_text(semester_org: str) -> str | None:
     """teams.csv's text, read ONCE per semester per process.
 
     A single run asks for it repeatedly - the handout, the collection and the off-boarding
     revoke each want the same file - and only the Join-team workflow writes it, in a process
     of its own. The TEXT is memoised rather than `load`'s map, so each caller still parses
-    its own copy and cannot mutate another's. Cleared between tests (tests/conftest.py)."""
+    its own copy and cannot mutate another's. Held by the run (`run.per_run`): a write to the file forgets it."""
     return get_file_content(semester_org, CONFIG_REPO, TEAMS_PATH)
 
 

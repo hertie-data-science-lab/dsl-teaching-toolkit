@@ -89,20 +89,20 @@ Usage:
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import re
 import sys
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
-from functools import cache
 from pathlib import Path
 from typing import NamedTuple
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
-from . import policy, settings
+from . import policy, run, settings
 from .course import (
     ASSIGNMENTS_FILE,
     CONFIG_REPO,
@@ -2116,7 +2116,7 @@ def formation_state(
 # ---------------------------------------------------------------------- gh/git wiring
 
 
-@cache
+@run.per_run(lambda semester_org: run.scope(semester_org, CONFIG_REPO, SCHEDULE_PATH))
 def _schedule_text(semester_org: str) -> str | None:
     """schedule.yml's text, read ONCE per semester per process.
 
@@ -2125,8 +2125,8 @@ def _schedule_text(semester_org: str) -> str | None:
     edits it or `record_handout` writes it. The TEXT is memoised rather than the parsed
     `Schedule`, so every caller gets its own object (nothing shared to mutate) and the
     loud "N entries DROPPED" report is still printed once per caller, exactly as before.
-    `record_handout` clears it after its write; tests/conftest.py clears it between
-    tests."""
+    `record_handout` clears it after its write; it is held by the run (`run.per_run`),
+    and any write of the file this run makes forgets it."""
     return get_file_content(semester_org, CONFIG_REPO, SCHEDULE_PATH)
 
 
@@ -2159,19 +2159,34 @@ def load(semester_org: str) -> Schedule:
     line/column, and an empty Schedule is returned. It must never raise: `load` sits under
     the hourly scheduler AND the site sync, and one semester's typo froze both. It is also
     a FAULT on the file - the one that costs the semester everything - so the digest issue
-    and the mail carry it like any other (see `Schedule.faults`)."""
+    and the mail carry it like any other (see `Schedule.faults`).
+
+    Parsed ONCE per run (`_parsed`, forgotten when this run writes the semester's config):
+    `grades`, `assign` and `collect` each ask again. Every caller still gets its own copy
+    (nothing shared to mutate) and the loud lines below, as each did when it parsed its
+    own."""
+    sched, said = _parsed(semester_org)
+    for line in said:
+        log_err(line)
+    return copy.deepcopy(sched)
+
+
+@run.per_run(lambda semester_org: run.scope(semester_org, CONFIG_REPO))
+def _parsed(semester_org: str) -> tuple[Schedule, tuple[str, ...]]:
+    """`load`'s Schedule and the lines it says about the file, parsed once per run."""
+    said: list[str] = []
     content = _schedule_text(semester_org)
     unparseable: list[ConfigFault] = []
     try:
         meta = load_yaml_lines(content) if content else {}
     except yaml.YAMLError as exc:
-        log_err(
+        said.append(
             f"{semester_org}/{CONFIG_REPO}/{SCHEDULE_PATH} is NOT valid YAML - the whole "
             f"schedule is ignored:"
         )
         # the parser's own message: it carries the line/column and the offending snippet
-        log_err(str(exc))
-        log_err(
+        said.append(str(exc))
+        said.append(
             f"fix {CONFIG_REPO}/{SCHEDULE_PATH} on main in {semester_org} - until then "
             f"NOTHING is scheduled for this semester (no releases, no handouts, no deadline "
             f"snapshots, no autograding) and the site builds without schedule data."
@@ -2188,7 +2203,7 @@ def load(semester_org: str) -> Schedule:
         # Valid YAML, but not a schedule: a bare list, or a stray document separator that
         # left a string at the top level. Same consequence as a parse failure - nothing in
         # the file is read - so it must not read as an empty plan either.
-        log_err(
+        said.append(
             f"{semester_org}/{CONFIG_REPO}/{SCHEDULE_PATH} parses as "
             f"{type(meta).__name__}, not a mapping - the whole schedule is ignored. "
             f"Its top level must be keys like `releases:` / `assignments:`."
@@ -2200,7 +2215,14 @@ def load(semester_org: str) -> Schedule:
                 f"ignored: nothing releases, hands out, snapshots or grades"
             )
         )
-    instance = settings.instance(semester_org)
+    try:
+        instance = settings.instance(semester_org)
+    except BaseException:
+        # A run settings read that failed raises out of `load`: what was said about the
+        # schedule is said first, as it always was.
+        for line in said:
+            log_err(line)
+        raise
     sched = parse(meta if isinstance(meta, dict) else {}, instance)
     sched.org = semester_org
     sched.instance_unparseable = instance.unparseable
@@ -2211,14 +2233,15 @@ def load(semester_org: str) -> Schedule:
         # the run goes green, but an entry they wrote is not in the plan. Every caller
         # comes through here - the hourly scheduler, the site sync, Check semester setup - so
         # saying it once here says it everywhere.
-        log_err(
+        said.append(
             f"{semester_org}/{CONFIG_REPO}/{SCHEDULE_PATH}: {len(sched.dropped)} entry/ies "
             f"DROPPED - they parse as YAML but not as schedule entries:"
         )
-        for line in sched.dropped:
-            log_err(f"  {line}")
-        log_err(f"fix them on main in {semester_org}; everything else is unaffected.")
-    return sched
+        said.extend(f"  {line}" for line in sched.dropped)
+        said.append(
+            f"fix them on main in {semester_org}; everything else is unaffected."
+        )
+    return sched, tuple(said)
 
 
 def load_file(path: str) -> tuple[Schedule | None, str | None]:
@@ -2248,14 +2271,14 @@ def load_file(path: str) -> tuple[Schedule | None, str | None]:
     return sched, None
 
 
-@cache
+@run.per_run(lambda course_org, repo: run.scope(course_org, repo))
 def _repo_paths(course_org: str, repo: str) -> set[str] | None:
     """Every path in a course-org repo, files and directories alike, in ONE tree fetch.
     An empty set is a repo with nothing in it; `None` is "could not tell".
 
     Memoised per process, like `repos._repo`: a repo's tree does not change under a run,
     and the commit-time validator and the hourly pre-flight each ask about the same
-    handful of materials repos from several entries. `tests/conftest.py` clears it.
+    handful of materials repos from several entries. Held by the run (`run.per_run`).
 
     Kept distinct from "the repo is not there" (the caller asks `repo_missing` first),
     because the two want opposite handling: an absent repo is a fault worth naming, an
@@ -2763,6 +2786,7 @@ def record_handout(semester_org: str, slug: str, stamp: str | None = None) -> No
     # returns without writing or writes, and a memo cleared once too often only costs a
     # read, where one held too long hands the next caller a plan missing this handout.
     _schedule_text.cache_clear()
+    _parsed.cache_clear()
     if stamp is None:
         # the release moment, in the semester's own timezone (naive, like every other
         # schedule datetime - the parser reads it back in that same zone)

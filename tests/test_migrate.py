@@ -17,6 +17,7 @@ import yaml
 from dsl_course import (
     discovery,
     gh_commits,
+    gh_contents,
     grading_spec,
     migrate,
     opencourse,
@@ -366,6 +367,8 @@ def fake(monkeypatch):
     monkeypatch.setattr(gh_commits, "gh", f.gh)
     # A template's README heading, the name an assignment takes (`grading_spec.readme_heading`).
     monkeypatch.setattr(grading_spec, "get_file_content", f.get_file_content)
+    # The config files (`config.read`) go through the same stub.
+    monkeypatch.setattr(gh_contents, "get_file_content", f.get_file_content)
     monkeypatch.setattr(migrate, "central_ref_for", lambda org: "main")
     # The checkout is the pinned ref, unless a test says otherwise.
     monkeypatch.setattr(migrate, "git", lambda *a, **k: (0, ""))

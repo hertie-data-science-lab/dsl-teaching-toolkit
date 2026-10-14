@@ -24,6 +24,7 @@ import yaml
 
 from dsl_course import course, ghcli, public_site, site, site_repo
 from dsl_course.opencourse import OpenCourse
+from tests.conftest import fake_config
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "site"
 
@@ -503,6 +504,7 @@ def semester_plan(monkeypatch, tmp_path):
     monkeypatch.setattr(site, "list_org_repos", lambda org: [])
     monkeypatch.setattr(site, "discover_release_sources", lambda org, repos: [])
     monkeypatch.setattr(site, "yaml_file", lambda *a: {})
+    fake_config(monkeypatch, site.yaml_file)
     monkeypatch.setattr(site, "read_opencourse", lambda org: None)
     monkeypatch.setattr(site.schedule, "load", lambda org: site.schedule.Schedule())
     monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
@@ -521,7 +523,7 @@ def public_plan(monkeypatch, tmp_path):
         lambda org, build, **kw: captured.update(plan=build(tmp_path)) or 0,
     )
     monkeypatch.setattr(public_site, "discover_sections", lambda src: [])
-    monkeypatch.setattr(public_site, "yaml_file", lambda *a: {})
+    monkeypatch.setattr(public_site, "org_meta", lambda org: {})
     monkeypatch.setattr(public_site, "people_yaml", lambda *a, **k: "people: []\n")
     monkeypatch.setattr(ghcli, "gh", lambda *a, **k: (0, ""))
     oc = OpenCourse(enabled=True, source_repo="course-materials-f2026")

@@ -10,6 +10,7 @@ import pytest
 
 from dsl_course import (
     faults,
+    gh_contents,
     grading_spec,
     policy,
     schedule,
@@ -110,7 +111,7 @@ def test_a_semester_read_that_fails_raises_and_is_not_cached(monkeypatch):
             raise answer
         return answer
 
-    monkeypatch.setattr(settings, "get_file_content", read)
+    monkeypatch.setattr(gh_contents, "get_file_content", read)
     with pytest.raises(RuntimeError):
         settings.semester_blocks("Sem")
     # A later read that succeeds is read, not the failure remembered as "nothing".
@@ -120,7 +121,7 @@ def test_a_semester_read_that_fails_raises_and_is_not_cached(monkeypatch):
 
 def test_an_absent_assignments_yml_is_the_empty_layer(monkeypatch):
     monkeypatch.setattr(settings, "_assignments_text", _READ_ASSIGNMENTS)
-    monkeypatch.setattr(settings, "get_file_content", lambda *a, **k: None)
+    monkeypatch.setattr(gh_contents, "get_file_content", lambda *a, **k: None)
     assert settings.semester_blocks("Sem") == ({}, {})
 
 

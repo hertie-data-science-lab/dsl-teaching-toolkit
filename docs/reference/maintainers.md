@@ -516,11 +516,11 @@ layers above its own:
 
 | Layer | Modules |
 |---|---|
-| 0, nothing | `log`, `course` (the course vocabulary: config repo, semester key, session-folder rule, syllabus filenames, org topics), `readings`, `fs`, `releaseignore` (the `.releaseignore` rule) |
+| 0, nothing | `log`, `run` (the per-run context: `run.per_run` memos and the scheduler tick's listing), `course` (the course vocabulary: config repo, semester key, session-folder rule, syllabus filenames, org topics), `readings`, `fs`, `releaseignore` (the `.releaseignore` rule) |
 | 1, the shell | `ghcli` (`gh`/`git`, timeouts, the 404 test) |
 | 2 | `central` (which ref an org runs), `repos` (existence, creation, topics, descriptions, the publication denylist), `gh_teams` (an org's settings and its teams), `issues` (one self-updating issue, found by its EXACT title), `pulls` (one pull request per HEAD BRANCH, created or adopted), `invitations` (the bot accepts its own org invitations, from registered course orgs only) |
 | 3 | `gh_contents` (file reads and writes, seeded stubs), `workflows_render` |
-| 4 | `discovery`, `roster`/`teams`/`schedule`, `workflows_place` |
+| 4 | `config` (one reader per hand-edited config file: `read_course`, `read_semester`), `discovery`, `roster`/`teams`/`schedule`, `workflows_place` |
 | 5 and up | `access` (team permissions and the faculty floor), `materials` (the `materials.yml` escape hatch and the kind aliases), `opencourse` (the public website's `opencourse.yml`), `schedule_plan` (the rows a plan declares, one per release entry), `cadence` (the scheduler's driver-health and late-delivery alarms, read off its own run history), `join`, `profile_readme`, `scaffold`, `site_repo` (the Jekyll site repo both websites publish into), `site`, then the CLIs |
 | grading, each above the one before | `grading_sheet` (the sheet file: shape, load and dump, merge, mark arithmetic, what holds a mark), `grading_spec` (`grading_config.yml`, its faults, the `SheetSpec` it gives), `gradebook` (the `grades-<handle>` repos, what a student is shown, the registrar export, `distributed.csv`), `receipts` (the Submission receipts issue), `distribute` (sending marks); `team_formation` (and its lock file) sits above `grading_spec` and `gradebook`, and `grades` is only the CLI over `distribute` |
 
@@ -1236,6 +1236,16 @@ budget), one listing gives the org's members, and a release dest's or an
 `instructors-<tag>` team's grants are read once. A faculty grant held at or above its level
 is left alone (the floor never demotes); a student or role-team grant is skipped only when
 it is exactly read, so an over-grant is still put back.
+
+**Held once per run.** Above the raw reads, what a run derives from them - a file's text, a
+repo's tree, the parsed schedule, a course's defaults, the course facts every semester's
+`status.json` renders, the token's login - is a `run.per_run` answer on the one `Run`
+(`run.current()`). Each names what it was read from (a file, a repo, an org); a write this
+process makes there forgets it, by the rules above. Every caller gets its own copy of a
+parsed plan or course. The scheduler's one listing of a semester is held in `Run.listings`
+for its tick. Add a memo with `run.per_run`, never `functools.cache`: tests reset the run
+(`run.reset`), not each memo. Every hand-edited config file is read through `config`
+(`read_course`, `read_semester`), so absent, empty and malformed mean one thing everywhere.
 
 Keys are case-insensitive, as GitHub's owner and repo names are. Blobs are never forgotten.
 The memos are off outside a CLI run (the e2e harness reads what remote runs write), and off

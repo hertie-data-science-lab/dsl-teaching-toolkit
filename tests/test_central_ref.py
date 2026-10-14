@@ -21,6 +21,7 @@ from dsl_course import (
 )
 from dsl_course.central import CENTRAL, CENTRAL_REF, CENTRAL_REF_PLACEHOLDER
 from dsl_course.team_formation import LockWrite
+from tests.conftest import fake_config
 
 SHA = "0" * 40
 
@@ -34,7 +35,7 @@ def _configs(monkeypatch, files: dict[str, dict]) -> None:
         is_pointer = bool(found and "course" in found)
         return found if is_pointer == (repo == discovery.CONFIG_REPO) else None
 
-    monkeypatch.setattr(discovery, "load_yaml_config", load)
+    fake_config(monkeypatch, load)
 
 
 # ------------------------------------------------------ what a declaration resolves to
@@ -343,11 +344,7 @@ def test_a_mistyped_central_ref_reds_the_refresh_instead_of_running_release(
     # seed.refresh reads the tier before it renders anything, so a refusal there
     # re-renders nothing and leaves last night's workflows exactly where they are - and
     # the CLI turns the cron red rather than converging the org onto a tier nobody chose.
-    monkeypatch.setattr(
-        discovery,
-        "load_yaml_config",
-        lambda org, repo, path: {"central_ref": "stagign"},
-    )
+    fake_config(monkeypatch, lambda org, repo, path: {"central_ref": "stagign"})
     monkeypatch.setattr("sys.argv", ["seed", "refresh", "--course-org", "Course-Org"])
 
     assert seed.main() == 1
