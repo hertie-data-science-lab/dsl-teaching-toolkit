@@ -489,7 +489,7 @@ def status_schema(*, closed: bool = True) -> dict:
                     key: obj(
                         {
                             "value": {
-                                "type": ["string", "integer", "null"],
+                                "type": ["string", "integer", "boolean", "null"],
                             },
                             "source": _enum(SOURCES),
                         },
@@ -677,6 +677,7 @@ _SPEC_TYPES = {
     },
     "late_window_days": {"type": "integer"},
     "late_penalty_per_day": {"type": ["string", "number"]},
+    "marks_per_question": {"type": "boolean"},
     "autograde": {"type": "boolean"},
     "completion_check": {"type": "boolean"},
     "grader_pdf": {"type": "boolean"},

@@ -621,7 +621,7 @@ drop it; the public website neither hosts nor links its files, since it hosts by
 first).
 
 A run setting (`settings.RUN_KEYS`: `team_formation`, `max_team_size`, `late_window_days`,
-`late_penalty_per_day`, `visibility`, `submit_url`) resolves nearest first, and
+`late_penalty_per_day`, `visibility`, `submit_url`, `marks_per_question`) resolves nearest first, and
 `settings.effective(semester_org, slug, key)` returns `(value, source)`:
 
 | Source | File | Key |

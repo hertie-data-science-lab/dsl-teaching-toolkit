@@ -15,6 +15,7 @@ defaults:
   max_team_size: 5
   visibility: private           # private | public | student_choice
   team_formation: self_select   # self_select | assigned
+  marks_per_question: true      # returned marks show each question's mark and feedback
   formats: [ipynb]              # the starters New assignment seeds; the first is runnable
   timezone: Europe/Berlin       # a semester's schedule.yml `timezone:` when it names none
   archive:

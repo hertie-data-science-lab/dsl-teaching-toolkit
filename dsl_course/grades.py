@@ -51,8 +51,9 @@ def main() -> int:
     p.add_argument(
         "--no-per-question",
         action="store_true",
-        help="Withhold the marks and feedback per question of the assignment returned "
-        "(every assignment, without --assignment): the score, late penalty, adjustment "
+        help="For this run only, withhold the marks and feedback per question of the "
+        "assignment returned (every assignment, without --assignment), whatever its "
+        "`marks_per_question` run setting says: the score, late penalty, adjustment "
         "and final grade still go.",
     )
     p.add_argument(

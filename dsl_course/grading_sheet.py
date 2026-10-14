@@ -193,6 +193,8 @@ class SheetSpec(_Shape):
     question_files: dict[str, str] | None = None
     late_window_days: int | None = None
     late_penalty_per_day: str | None = None
+    # The run setting: returned marks show each question's mark and feedback.
+    marks_per_question: bool = True
     autograde: bool = False
     completion_check: bool = False
     due_display: str = ""

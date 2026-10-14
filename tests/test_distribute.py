@@ -522,6 +522,34 @@ def test_marks_per_question_can_be_withheld_for_the_assignment_returned(
     )
 
 
+@pytest.mark.parametrize(
+    ("setting", "override", "shown"),
+    [
+        ("", True, True),  # the institution's default
+        ("marks_per_question: false\n", True, False),  # the run setting
+        ("marks_per_question: true\n", False, False),  # the one-run override
+    ],
+    ids=["default", "run setting off", "override"],
+)
+def test_the_marks_per_question_run_setting_decides_what_a_return_shows(
+    tmp_path, monkeypatch, setting, override, shown
+):
+    sheet = _SHEET.replace(
+        "score_individual: 43", "score_individual:\n      Q1: 14\n      Q2: 9"
+    )
+    grading = _GRADING_YML + setting + "questions:\n  Q1: 15\n  Q2: 10\n"
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": sheet},
+        grading=grading,
+        per_question=override,
+    )
+    ((_repo, files, _d),) = out["gradebooks"]
+    assert ("Q1" in files["grades.yml"]) is shown
+    assert "**Final grade:** 23 / 25" in files["README.md"]
+
+
 _UNMARKED = _SHEET.replace("score_individual: 43", "score_individual:").replace(
     "feedback_individual: |\n      Clean derivation.\n", "feedback_individual:\n"
 )

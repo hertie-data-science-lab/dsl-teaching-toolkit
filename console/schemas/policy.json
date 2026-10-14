@@ -9,6 +9,7 @@
     ],
     "late_penalty_per_day": "10%",
     "late_window_days": 10,
+    "marks_per_question": true,
     "max_team_size": 5,
     "semester_dest_repo": "materials",
     "team_formation": "self_select",

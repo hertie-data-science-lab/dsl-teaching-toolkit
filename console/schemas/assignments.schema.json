@@ -15,6 +15,9 @@
           "late_window_days": {
             "type": "integer"
           },
+          "marks_per_question": {
+            "type": "boolean"
+          },
           "max_team_size": {
             "type": "integer"
           },
@@ -61,6 +64,9 @@
         },
         "late_window_days": {
           "type": "integer"
+        },
+        "marks_per_question": {
+          "type": "boolean"
         },
         "max_team_size": {
           "type": "integer"

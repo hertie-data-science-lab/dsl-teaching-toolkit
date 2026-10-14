@@ -65,6 +65,7 @@
                     "type": [
                       "string",
                       "integer",
+                      "boolean",
                       "null"
                     ]
                   }
@@ -90,6 +91,33 @@
                     "type": [
                       "string",
                       "integer",
+                      "boolean",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "value",
+                  "source"
+                ],
+                "type": "object"
+              },
+              "marks_per_question": {
+                "properties": {
+                  "source": {
+                    "enum": [
+                      "assignment",
+                      "semester",
+                      "course",
+                      "institution"
+                    ],
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": [
+                      "string",
+                      "integer",
+                      "boolean",
                       "null"
                     ]
                   }
@@ -115,6 +143,7 @@
                     "type": [
                       "string",
                       "integer",
+                      "boolean",
                       "null"
                     ]
                   }
@@ -140,6 +169,7 @@
                     "type": [
                       "string",
                       "integer",
+                      "boolean",
                       "null"
                     ]
                   }
@@ -165,6 +195,7 @@
                     "type": [
                       "string",
                       "integer",
+                      "boolean",
                       "null"
                     ]
                   }
@@ -190,6 +221,7 @@
                     "type": [
                       "string",
                       "integer",
+                      "boolean",
                       "null"
                     ]
                   }

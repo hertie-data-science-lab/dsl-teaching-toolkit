@@ -726,8 +726,9 @@ def distribute(
 
     `receipt_note` also posts `MARKS_RETURNED_NOTE` once per assignment on each returned
     unit's Submission receipts issue; `include_feedback` puts the feedback text into the email. Both
-    off by default. `per_question` off withholds the marks and feedback per question of the
-    assignment this run returns (every assignment, unscoped) - `student_view`."""
+    off by default. The marks and feedback per question are withheld for every assignment
+    whose run setting `marks_per_question` is false, and - `per_question` off, a one-run
+    override - for the assignment this run returns (every assignment, unscoped)."""
     # ONE listing of the semester for the whole run: it answers "does this student already
     # have a gradebook?". A dry run writes nothing and needs none.
     listed = None if dry_run else listing_by_name(semester_org)
@@ -805,9 +806,11 @@ def distribute(
             )
             return 1
         titles = {slug: specs[slug].title for slug in sources}
-        withheld = (
-            set() if per_question else ({assignment} if assignment else set(sources))
-        )
+        withheld = {
+            slug for slug, (spec, _) in sources.items() if not spec.marks_per_question
+        }
+        if not per_question:
+            withheld |= {assignment} if assignment else set(sources)
         books, unknown = _on_the_roster(build_gradebooks(sources, withheld), students)
         distributed, migrating = _read_distributed(wd)
         retired = _retired_gradebook_files(wd)

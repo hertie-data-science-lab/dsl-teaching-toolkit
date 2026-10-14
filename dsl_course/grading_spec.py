@@ -107,6 +107,8 @@ class GradingSpec(_Shape):
     # A layer that declares ONE of the two leaves the other empty (`settings.resolve`).
     late_window_days: int | None = _INSTITUTION["late_window_days"]
     late_penalty_per_day: str | None = _INSTITUTION["late_penalty_per_day"]
+    # Whether returned marks show each question's mark and feedback (a run setting).
+    marks_per_question: bool = _INSTITUTION["marks_per_question"]
     # OFF unless the assignment asks for it. Most assignments are hand-marked, and a
     # default of true made every template without the key try to run hidden tests that
     # were never written - a red tick every quarter of an hour for the rest of the term.
@@ -823,6 +825,7 @@ def sheet_spec(
         question_files=gspec.question_files,
         late_window_days=gspec.late_window_days,
         late_penalty_per_day=gspec.late_penalty_per_day,
+        marks_per_question=gspec.marks_per_question,
         autograde=gspec.autograde,
         completion_check=gspec.runs_completion_check,
         due_display=_display_moment(entry.due_datetime if entry else None),
