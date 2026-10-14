@@ -13,9 +13,10 @@ rest of the seed-once half from `templates/site-seed/`. Only the THEME's stand-i
 not fetch - are vendored, under `base/`.
 
 The states it covers are the ones that render DIFFERENTLY, one of each: a released
-lecture, an unreleased one, a lab, a second lab group with nothing to ship, a silent readings row with its reading list inlined, a
-drop-in whose one copy is a single file, a silent syllabus copy that raises no row, a
-handed-out assignment with a declared `details:`, a pending one, one handed in off GitHub, one handed in off GitHub
+lecture, an unreleased one, a lab in two slots in two rooms, a session with nothing to
+ship, readings inlined on their unit's first row with a chip on the unit's others, a
+drop-in whose one copy is a single file, a supporting-files syllabus copy that raises no
+row, a handed-out assignment with a declared `details:`, a pending one, one handed in off GitHub, one handed in off GitHub
 that is not out yet, one whose repos are public, one handed into a shared drop box, one
 group assignment inside its team-formation window, a dated exam and a TBC
 one, a special event, the two term boundaries, the archive row inside its notice window,
@@ -110,7 +111,6 @@ TREE = (
     "lectures/01_week-1/slides_files/figure/plot.svg",
     "lectures/01_week-1/slides.pdf",
     "lectures/02_week-2/slides.pdf",
-    "readings/01_week-1/READINGS.md",
     "readings/01_week-1/schmidhuber-1997.pdf",
     "readings/extra/attention.pdf",
     "clinic/notes.pdf",
@@ -230,8 +230,6 @@ def _spec(text: str, **run) -> grading_spec.GradingSpec:
 
 
 def _get_file_content(_org: str, _repo: str, path: str) -> str | None:
-    if path.endswith("READINGS.md"):
-        return READINGS_MD
     if path == "README.md":
         return ASSIGNMENT_README
     return None
@@ -249,96 +247,133 @@ def _release(label: str, when: datetime, *paths: str, **kw) -> schedule.Release:
     return schedule.Release(label, when, [_copy(p) for p in paths], **kw)
 
 
-# The release plan the rows come from, one entry per row state.
+# The plan the rows come from, one entry per row state (decision 0038: kind from the
+# block, number and session explicit).
 SCHEDULE = schedule.Schedule(
     semester_start=date(2026, 9, 7),
     releases=[
-        # Silent, and all it lands is a root file: a course document, not a row.
+        # Supporting files whose one copy is a root file: released, never a row.
         _release(
-            "course-intro",
+            "assets.course-intro",
             datetime(2026, 8, 31, 9, 0, tzinfo=BERLIN),
             "SYLLABUS.md",
-            show_on_site=False,
+            kind="assets",
         ),
-        # Silent readings a week ahead, numbered 1: joins lecture 1 (its list inlined,
-        # and lecture 1 listed on the Readings tab).
+        # Readings for unit 1: inline on lecture 1 (its list), listed under it on the
+        # Readings tab, and a readings chip on every row of the unit.
         _release(
-            "readings-1",
+            "readings.week-1",
             datetime(2026, 9, 1, 9, 0, tzinfo=BERLIN),
             "readings/01_week-1",
-            show_on_site=False,
+            kind="readings",
+            session="1",
+            reading_list=READINGS_MD,
         ),
-        # A titled silent readings entry: its own unnumbered row, on the Readings tab only.
+        # A titled silent readings entry with no session: its own unnumbered row, on the
+        # Readings tab only.
         _release(
-            "extra-reading",
+            "readings.extra",
             datetime(2026, 9, 2, 9, 0, tzinfo=BERLIN),
             "readings/extra",
+            kind="readings",
             show_on_site=False,
             title="Attention, further",
         ),
-        # A drop-in whose one copy is a single file outside any session folder. Its label
-        # carries no number, so the entry says it (decision 0020: never by position).
+        # A drop-in whose one copy is a single file outside any session folder.
         _release(
-            "clinic",
+            "drop-ins.clinic",
             datetime(2026, 9, 4, 16, 0, tzinfo=BERLIN),
             "clinic/notes.pdf",
             kind="drop-in",
             number=1,
+            session="clinic",
             title="Project clinic",
+            location="Room 1.10",
         ),
         # Released, with a published deck beside an unpublished pdf.
         _release(
-            "lecture-1",
+            "lectures.1",
             datetime(2026, 9, 7, 10, 0, tzinfo=BERLIN),
             "lectures/01_week-1",
+            kind="lecture",
+            number=1,
+            session="1",
             title="What a neural network is",
             details="Perceptrons, activation functions and the chain rule.",
         ),
-        _release("lab-1", datetime(2026, 9, 9, 14, 0, tzinfo=BERLIN), "labs/01_week-1"),
+        # Two groups: two rows of Lab 1, one set of files, each slot its own room.
+        _release(
+            "labs.1",
+            datetime(2026, 9, 9, 14, 0, tzinfo=BERLIN),
+            "labs/01_week-1",
+            kind="lab",
+            number=1,
+            session="1",
+            slots=[
+                schedule.Slot(
+                    datetime(2026, 9, 9, 14, 0, tzinfo=BERLIN), "Lab 2.30", "Group 1."
+                ),
+                schedule.Slot(
+                    datetime(2026, 9, 10, 18, 0, tzinfo=BERLIN), "Lab 2.32", "Group 2."
+                ),
+            ],
+        ),
         # Its readings are still to come: readings_pending on lecture 2.
         _release(
-            "readings-2",
+            "readings.week-2",
             datetime(2026, 9, 10, 9, 0, tzinfo=BERLIN),
             "readings/02_week-2",
-            show_on_site=False,
+            kind="readings",
+            session="2",
         ),
         _release(
-            "lecture-2",
+            "lectures.2",
             datetime(2026, 9, 14, 10, 0, tzinfo=BERLIN),
             "lectures/02_week-2",
+            kind="lecture",
+            number=2,
+            session="2",
             title="Backpropagation",
         ),
-        # An exam kind: the Exams tab, which also lists the `events:` exams. Dated early,
-        # so it stays out of the Updates box the CI job checks (the seven newest).
+        # An exam with files: the Exams tab, which also lists the display-only exams.
+        # Dated early, so it stays out of the Updates box the CI job checks.
         _release(
-            "mock-exam",
+            "exams.mock",
             datetime(2026, 8, 25, 10, 0, tzinfo=BERLIN),
             "exams/mock.pdf",
             kind="exam",
         ),
         # Nothing shipped -> unreleased, and the row names where it will land.
         _release(
-            "lecture-3",
+            "lectures.3",
             datetime(2026, 9, 21, 10, 0, tzinfo=BERLIN),
             "lectures/03_week-3",
+            kind="lecture",
+            number=3,
+            session="3",
             title="Convolutions",
             details="Why weight sharing works.\n\nAnd where it does not.",
         ),
         # `event_datetime: tbc`: a "TBC" row after lab 1 on the schedule and the Labs tab,
         # never in the Updates box.
-        _release("lab-3", None, "labs/03_week-3", title="Attention lab"),
-    ],
-    # A second lab group with nothing to ship: a "Lab 1" row of its own (the release's
-    # title), no files, never in the Updates box.
-    sessions=[
-        schedule.Event(
-            "lab-1-group-2",
-            "",
-            datetime(2026, 9, 10, 18, 0, tzinfo=BERLIN),
-            "lab",
-            details="Group 2, room 2.32.",
-            number=1,
-        )
+        _release(
+            "labs.3",
+            None,
+            "labs/03_week-3",
+            kind="lab",
+            number=3,
+            session="3",
+            title="Attention lab",
+        ),
+        # A session with nothing to ship: a row, no files, never in the Updates box.
+        schedule.Release(
+            "labs.4",
+            datetime(2026, 9, 30, 14, 0, tzinfo=BERLIN),
+            kind="lab",
+            number=4,
+            session="4",
+            title="Revision",
+        ),
     ],
 )
 
@@ -350,7 +385,6 @@ def _lectures(hosted: site_repo.Hosted) -> tuple[dict[str, str], list[str]]:
         schedule_plan.planned_rows(SCHEDULE),
         frozenset(),
         frozenset({MATERIALS}),
-        schedule_plan._no_aliases,
         hosted,
     )
 

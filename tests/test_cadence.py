@@ -220,7 +220,7 @@ def _plan() -> tuple[list[Release], Schedule]:
     sched = Schedule(
         releases=[
             Release(
-                label="lecture_02",
+                label="lectures.2",
                 when=datetime(2026, 9, 4, 11, 0, tzinfo=BERLIN),
                 deploy=[
                     Deploy("cm-f2026", "lectures/02_intro", "materials", None),
@@ -258,11 +258,11 @@ def test_late_items_only_reports_moments_that_fell_in_this_gap():
     prev = datetime(2026, 9, 4, 6, 0, tzinfo=timezone.utc)
     labels = [i.label for i in cadence.late_items(releases, sched, prev, NOW)]
     assert labels == [
-        "releases.lecture_02 -> deploy[1]",  # 09:00 Berlin, the earliest
+        "lectures.2 -> files[1]",  # 09:00 Berlin, the earliest
         "assignments.assignment-1 handout",  # 09:30
         "assignments.assignment-1 snapshot",  # 10:00 (due_datetime, no late window)
         "assignments.assignment-1 solution",  # 10:30
-        "releases.lecture_02 -> deploy[0]",  # 11:00, the entry's own event_datetime
+        "lectures.2 -> files[0]",  # 11:00, the entry's own event_datetime
     ]
 
 
@@ -282,7 +282,7 @@ def test_a_moment_inside_the_slo_is_not_late():
     now = datetime(2026, 9, 4, 9, 30, tzinfo=timezone.utc)
     prev = now - timedelta(days=7)
     labels = [i.label for i in cadence.late_items(releases, sched, prev, now)]
-    assert "releases.lecture_02 -> deploy[0]" not in labels
+    assert "lectures.2 -> files[0]" not in labels
     assert "assignments.assignment-1 solution" not in labels
     assert "assignments.assignment-1 handout" in labels
 
@@ -334,7 +334,7 @@ def test_a_late_label_names_a_yaml_field_and_never_a_repo_or_a_person():
     items = cadence.late_items(releases, sched, NOW - timedelta(days=1), NOW)
     assert items
     for item in items:
-        assert item.label.startswith(("releases.", "assignments."))
+        assert item.label.startswith(("lectures.", "assignments."))
         assert "cm-f2026" not in item.label
         assert "assignment-1-f2026" not in item.label
         assert "-anna" not in item.label
@@ -405,7 +405,7 @@ def test_a_disarmed_verdict_with_no_open_issue_writes_nothing_anywhere(stub, cap
     assert cadence.report_course("Course-Org", v) == 0
     assert (
         cadence.report_semester(
-            "Course-Org", "Semester-f2026", v, [_item("releases.a")]
+            "Course-Org", "Semester-f2026", v, [_item("lectures.a")]
         )
         == 0
     )
@@ -562,7 +562,7 @@ def test_a_semester_exception_is_counted_never_raised(monkeypatch, capsys):
 def test_late_items_open_the_issue_in_the_private_semester_config(stub):
     s = stub()
     items = [
-        _item("releases.lecture_02 -> deploy[0]", 132),
+        _item("lectures.2 -> files[0]", 132),
         _item("assignments.a1 snapshot", 95),
     ]
     v = _verdict(prev_executed_at=NOW - timedelta(minutes=140), recent_gaps=[])
@@ -570,25 +570,25 @@ def test_late_items_open_the_issue_in_the_private_semester_config(stub):
     (repo, title, body, comment) = s.upserted[0]
     assert repo == "Semester-f2026/semester-config"
     assert title == cadence.LATE_TITLE
-    assert "`releases.lecture_02 -> deploy[0]`: due " in body
+    assert "`lectures.2 -> files[0]`: due " in body
     assert "(+132 min)" in body
     assert "cc @Semester-f2026/instructors" in body
     assert comment is not None
     assert cadence.read_state(body) == {
-        "items": ["assignments.a1 snapshot", "releases.lecture_02 -> deploy[0]"]
+        "items": ["assignments.a1 snapshot", "lectures.2 -> files[0]"]
     }
 
 
 def test_only_an_item_the_body_does_not_already_list_earns_a_comment(stub):
     body = cadence._late_body(
-        "Course-Org", "Semester-f2026", _verdict(), [_item("releases.a")]
+        "Course-Org", "Semester-f2026", _verdict(), [_item("lectures.a")]
     )
     s = stub(existing=(7, body))
     v = _verdict(recent_gaps=[])
     # the same item again: refreshed, and silent
     assert (
         cadence.report_semester(
-            "Course-Org", "Semester-f2026", v, [_item("releases.a")]
+            "Course-Org", "Semester-f2026", v, [_item("lectures.a")]
         )
         == 0
     )
@@ -600,7 +600,7 @@ def test_only_an_item_the_body_does_not_already_list_earns_a_comment(stub):
             "Course-Org",
             "Semester-f2026",
             v,
-            [_item("releases.a"), _item("releases.b")],
+            [_item("lectures.a"), _item("releases.b")],
         )
         == 0
     )
@@ -659,7 +659,7 @@ def test_a_semester_dry_run_writes_nothing(stub):
     v = _verdict(recent_gaps=[])
     assert (
         cadence.report_semester(
-            "Course-Org", "Semester-f2026", v, [_item("releases.a")], dry_run=True
+            "Course-Org", "Semester-f2026", v, [_item("lectures.a")], dry_run=True
         )
         == 0
     )

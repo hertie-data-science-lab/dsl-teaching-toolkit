@@ -260,11 +260,11 @@ def preview_summary(due: list[Release], decisions: list[Decision]) -> Summary:
 
 
 def _entry_ref(where: str) -> str:
-    """`assignments.a1` -> the assignment's key; a content entry's path (`lectures.week-2`,
-    the label a release is known by) as it stands, less any `.files[i]` under it."""
-    if where.startswith("assignments."):
-        return where[len("assignments.") :]
-    return where.split(".files", 1)[0]
+    """`assignments.a1` / `lectures.lecture-2.files[0]` -> the entry's own key."""
+    block, _, rest = where.partition(".")
+    if not rest or (block != "assignments" and block not in schedule.BLOCKS):
+        return where
+    return rest.split(".files", 1)[0]
 
 
 def source_decisions(faults: list[ConfigFault], now: datetime) -> list[Decision]:

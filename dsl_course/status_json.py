@@ -317,17 +317,17 @@ def _iso(when: datetime | date | None) -> str | None:
 
 
 def _content_label(where: str) -> str | None:
-    """The content entry a fault's YAML path is about (`lectures.week-1.files[0]` ->
-    `lectures.week-1`, the entry's label), or None for a path in no content block."""
+    """The content entry a fault's YAML path is about (`lectures.lecture-1.files[0]` ->
+    `lecture-1`, the entry's key), or None for a path in no content block."""
     block, _, rest = where.partition(".")
-    if not rest or policy.kind_for_plural(block) not in policy.content_kinds():
+    if not rest or block not in schedule.BLOCKS:
         return None
-    return f"{block}.{rest.split('.', 1)[0].split('[', 1)[0]}"
+    return rest.split(".files", 1)[0]
 
 
 def _entry_of(where: str) -> str:
-    """`lectures.s5...` -> `lectures.s5` (a content entry's label), `assignments.a2` ->
-    `a2`; anything else as it stands."""
+    """`lectures.s5...` -> `s5` (a content entry's key), `assignments.a2` -> `a2`;
+    anything else as it stands."""
     if where.startswith("assignments."):
         return where[len("assignments.") :]
     return _content_label(where) or where
@@ -928,7 +928,11 @@ def _nearest_materials_why(
     return f"{repo} is not ready yet."
 
 
-NOT_NUMBERED, DUPLICATE_NUMBER = "NOT_NUMBERED", "DUPLICATE_NUMBER"
+NOT_NUMBERED, NO_SESSION, DUPLICATE_NUMBER = (
+    "NOT_NUMBERED",
+    "NO_SESSION",
+    "DUPLICATE_NUMBER",
+)
 
 
 def _number_stops(m: Unnumbered, now: datetime, released: bool = False) -> str:
@@ -959,15 +963,17 @@ def _schedule_fix(org: str, key: str | None, line: int | None) -> dict:
 
 
 def _entry_lines(sched: schedule.Schedule, key: str) -> dict[str, int]:
+    """The lines of the assignment or content entry `key`."""
     if key in sched.assignments:
         return sched.assignments[key].lines
     return next((r.lines for r in sched.releases if r.label == key), {})
 
 
 def number_problems(facts: SemesterFacts, now: datetime) -> list[dict]:
-    """Decision 0020 rules 2 and 4: `number:<kind>:<key>` for an entry of a numbered
-    kind with no number, dated at the release or hand-out it stops (so the Dashboard
-    counts it in that week), and `number:<kind>:<n>` for a number two entries share."""
+    """Decision 0038 (amendment): `session:<kind>:<key>` for a lecture or lab with no
+    `session`, `number:assignment:<key>` for an assignment with no `number`, each dated
+    at the release or hand-out it stops (so the Dashboard counts it in that week), and
+    `number:<kind>:<n>` for a number two entries of one kind share."""
     released = {
         r.label
         for r in facts.sched.releases
@@ -977,11 +983,11 @@ def number_problems(facts: SemesterFacts, now: datetime) -> list[dict]:
     for m in unnumbered(facts.sched):
         shipped = m.block == "releases" and m.key in released
         problem = {
-            "id": f"number:{m.kind}:{_slugify(m.key)}",
+            "id": f"{m.field}:{m.kind}:{_slugify(m.key)}",
             "scope": "semester",
             "stage": "K4",
-            "kind": NOT_NUMBERED,
-            "text": f"Give {m.key} a number.",
+            "kind": NOT_NUMBERED if m.field == "number" else NO_SESSION,
+            "text": f"Give {m.key} a {m.field}.",
             "stops": _number_stops(m, now, shipped),
             "fix": _schedule_fix(facts.org, m.key, m.line),
         }
@@ -1171,7 +1177,7 @@ def no_files_todo(
         if not r.files_written or r.deploy or r.when is None or r.when <= now:
             continue
         if any(
-            w == f"{r.label}.files" or w.startswith(f"{r.label}.files[")
+            w == f"{r.where}.files" or w.startswith(f"{r.where}.files[")
             for w in faulted
         ):
             continue
@@ -1871,7 +1877,7 @@ def render_releases(
     numbers = {sr.row.key: sr.number for sr in site_rows(planned)}
     held = {m.key for m in unnumbered(facts.sched) if m.block == "releases"}
     for r in facts.sched.releases:
-        own = [f for f in faults if f.is_source and f.where == r.label]
+        own = [f for f in faults if f.is_source and f.where == r.where]
         first = r.deploy[0] if r.deploy else None
         rows.append(
             {

@@ -7,6 +7,7 @@ publish citations as text without leaking copyrighted bytes.
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import date, datetime
 from pathlib import Path
 from textwrap import indent
@@ -21,14 +22,13 @@ from dsl_course import (
     policy,
     public_site,
     repos,
+    schedule_plan,
     site,
     site_repo,
 )
 from dsl_course.schedule import Deploy, Release, Schedule
 from dsl_course.site_repo import Link
 from tests.conftest import entry_links, repo_row
-
-_NO_ALIASES = lambda repo: None
 
 
 def test_semester_label():
@@ -331,12 +331,10 @@ def _deploy(path, repo="materials", dest=None):
     return Deploy("cm", path, repo, dest)
 
 
-def _landed(monkeypatch, deploy, readings=False, gh=_tree_gh):
+def _landed(monkeypatch, deploy, gh=_tree_gh):
     monkeypatch.setattr(site, "default_branch", lambda org, repo, **k: "main")
     monkeypatch.setattr(gh_contents, "gh", gh)
-    return site._landed(
-        "Semester-f2026", deploy, frozenset(), readings, _NO_ALIASES, {}
-    )
+    return site._landed("Semester-f2026", deploy, frozenset(), {})
 
 
 def test_a_landed_folder_links_its_files_and_folds_its_subfolders(monkeypatch):
@@ -409,33 +407,29 @@ _READINGS_TREE = (
 )
 
 
-def test_a_readings_row_inlines_its_overlay_and_lists_everything_else(monkeypatch):
+def test_a_readings_folder_lists_every_file_it_holds(monkeypatch):
+    # Decision 0038 rule 5: the reading list is the schedule's `reading_list:`, so a
+    # READINGS.md in the folder is a file like any other.
     monkeypatch.setattr(site, "_repo_tree", lambda org, repo: ("main", _READINGS_TREE))
-    landed = site._landed(
-        "C", _deploy("readings/01_week-1"), frozenset(), True, _NO_ALIASES, {}
-    )
-    # Only the overlay is taken out: an uploaded `notes.md` or `refs.bib` is a reading.
-    assert sorted(x.name for x in landed.links) == ["ch1.pdf", "notes.md", "refs.bib"]
-    assert landed.overlays == ["readings/01_week-1/READINGS.md"]
-    monkeypatch.setattr(
-        site, "get_file_content", lambda org, repo, path: "# Week 1\n\n- Blitzstein."
-    )
-    assert site._reading_list("C", [landed]) == "### Week 1\n\n- Blitzstein."
-    # Any other kind keeps the overlay as a file.
-    other = site._landed(
-        "C", _deploy("readings/01_week-1"), frozenset(), False, _NO_ALIASES, {}
-    )
-    assert "READINGS.md" in [x.name for x in other.links] and not other.overlays
+    landed = site._landed("C", _deploy("readings/01_week-1"), frozenset(), {})
+    assert sorted(x.name for x in landed.links) == [
+        "READINGS.md",
+        "ch1.pdf",
+        "notes.md",
+        "refs.bib",
+    ]
 
 
-def test_a_reading_list_read_failure_propagates(monkeypatch):
-    def boom(*a, **k):
-        raise RuntimeError("could not read")
-
-    monkeypatch.setattr(site, "get_file_content", boom)
-    landed = site._Landed("materials", "readings", [], ["readings/01/READINGS.md"])
-    with pytest.raises(RuntimeError):
-        site._reading_list("C", [landed])
+def test_a_reading_list_is_the_entries_text_nested_under_the_row():
+    row = schedule_plan.PlannedRow(
+        "readings.week-1",
+        "readings",
+        None,
+        date(2026, 9, 1),
+        reading_list="# Week 1\n\n- Blitzstein.\n",
+    )
+    assert site._reading_list([row]) == "### Week 1\n\n- Blitzstein."
+    assert site._reading_list([dataclasses.replace(row, reading_list="  ")]) == ""
 
 
 def _syllabus(monkeypatch, releases, tree, declared=None):
@@ -683,9 +677,9 @@ def test_block_keeps_liquid_verbatim_and_expands_tabs():
 # ------------------------------------------------------- the All Materials catch-all index
 # The two shapes real semesters actually have. Both must land where a reader expects, and the
 # ordinal must decide only the LEVEL a section is read at - never whether a file is listed.
-DEMO_REPOS = {  # repo per section, ordinals at the repo root
+DEMO_REPOS = {  # repo per section, folders at the repo root
     "lectures": ("01_introduction/slides.md", "01_introduction/demo.py", "README.md"),
-    "readings": ("01_introduction/reading-list.md",),
+    "readings": ("week-1/reading-list.md",),
 }
 MATHS_REPOS = {  # one materials repo, sections inside it
     "materials": (
@@ -962,7 +956,9 @@ def test_the_denylist_matches_by_name_at_any_depth_and_ignores_case():
 # ----------------------------------------------------- the All Materials index
 def test_the_index_applies_the_same_name_rule(monkeypatch):
     # Same rule on the other page, which is the point of not having two.
-    repos = {"m": ("01_lab/.Rprofile", "01_lab/lab.R", "01_lab/.gitkeep")}
+    repos = {
+        "m": ("labs/01_lab/.Rprofile", "labs/01_lab/lab.R", "labs/01_lab/.gitkeep")
+    }
     entry = _index(monkeypatch, repos)[0]["entries"][0]
     assert entry["name"] == "01_lab/" and entry["files"] == 2
     assert [e["name"] for e in entry["entries"]] == [".Rprofile", "lab.R"]
@@ -971,7 +967,9 @@ def test_the_index_applies_the_same_name_rule(monkeypatch):
 def test_the_index_folds_away_a_junk_directory_entirely(monkeypatch):
     # Not just the file: `__pycache__/` would otherwise be a directory entry of its own,
     # nested and counted, on the page that shows the whole shape of what shipped.
-    repos = {"m": ("01_lab/__pycache__/helpers.cpython-312.pyc", "01_lab/lab.py")}
+    repos = {
+        "m": ("labs/01_lab/__pycache__/helpers.cpython-312.pyc", "labs/01_lab/lab.py")
+    }
     entry = _index(monkeypatch, repos)[0]["entries"][0]
     assert entry["name"] == "01_lab/" and entry["files"] == 1
     assert [e["name"] for e in entry["entries"]] == ["lab.py"]
@@ -997,8 +995,8 @@ def test_root_documents_are_one_group_not_a_section_per_repo(monkeypatch):
     # the repo they sit in listed each of them once per content repo - three READMEs on the
     # live demo site, one under each of lectures, labs and readings.
     repos = {
-        "labs": ("01_lab/lab.ipynb", "README.md", "SYLLABUS.md"),
-        "lectures": ("01_intro/deck.html", "README.md", "SYLLABUS.md"),
+        "labs": ("labs/01_lab/lab.ipynb", "README.md", "SYLLABUS.md"),
+        "lectures": ("lectures/01_intro/deck.html", "README.md", "SYLLABUS.md"),
     }
     monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", repos[r]))
     got = yaml.safe_load(site._materials_index("C", sorted(repos), {}))
@@ -1043,9 +1041,13 @@ def test_index_reads_a_repo_per_section_semester(monkeypatch):
         s["name"]: [e["name"] for e in s["entries"]]
         for s in _index(monkeypatch, DEMO_REPOS)
     }
-    # The repo names the section and its ordinal folders are the entries. The root
-    # README.md is a course document, listed once rather than under a repo's heading.
-    assert got == {"lectures": ["01_introduction/"], "readings": ["01_introduction/"]}
+    # Each top folder is a section, whatever its name (decision 0038: an `NN_` prefix
+    # means nothing). The root README.md is a course document, listed once rather than
+    # under a repo's heading.
+    assert got == {
+        "01_introduction": ["demo.py", "slides.md"],
+        "week-1": ["reading-list.md"],
+    }
     assert _docs(monkeypatch, DEMO_REPOS) == ["README.md"]
 
 
@@ -1126,18 +1128,15 @@ def test_index_is_empty_yaml_when_nothing_is_released(monkeypatch):
 
 
 def test_index_puts_directories_before_files(monkeypatch):
-    # Both in ONE section, which needs the ordinal shape: a non-ordinal directory would
-    # become a section of its own rather than an entry beside the root file.
-    repos = {"m": ("01_zzz/a.txt", "01_zzz/aaa.md")}
+    repos = {"m": ("sec/zzz/a.txt", "sec/aaa.md")}
     entries = [e["name"] for e in _index(monkeypatch, repos)[0]["entries"]]
     # A directory listing: the structure is what a reader scans first, unlike a session
     # row, which leads with its deliverables.
-    assert entries == ["01_zzz/"]
+    assert entries == ["zzz/", "aaa.md"]
 
 
 def test_index_gives_a_non_ordinal_directory_its_own_section(monkeypatch):
-    # The rule that makes both semester shapes work: an ordinal child means the REPO is the
-    # section, a non-ordinal one means the DIRECTORY is.
+    # A top directory is a section, whatever its name.
     repos = {"m": ("handbook/rules.md", "aaa.md")}
     sections = _index(monkeypatch, repos)
     assert {s["name"]: [e["name"] for e in s["entries"]] for s in sections} == {
@@ -1153,10 +1152,10 @@ def test_the_all_materials_index_hides_what_should_never_have_shipped(monkeypatc
     # the answers".
     repos = {
         "labs": (
-            "01_lab/lab.ipynb",
-            "01_lab/solution/answers.ipynb",
-            "01_lab/grading.yml",
-            "01_lab/Tests/test_hidden.py",
+            "labs/01_lab/lab.ipynb",
+            "labs/01_lab/solution/answers.ipynb",
+            "labs/01_lab/grading.yml",
+            "labs/01_lab/Tests/test_hidden.py",
             ".env.production",
             "README.md",
         )
@@ -1171,13 +1170,13 @@ def test_the_all_materials_index_hides_what_should_never_have_shipped(monkeypatc
 def test_the_index_links_a_hosted_copy_beside_the_file(monkeypatch):
     # The same two destinations a row carries: the name opens the site's own copy where
     # the course published one, and `url` stays the file on GitHub.
-    repos = {"m": ("01_a/deck.html", "01_a/notes.pdf")}
+    repos = {"m": ("x/01_a/deck.html", "x/01_a/notes.pdf")}
     monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", repos[r]))
     got = yaml.safe_load(
-        site._materials_index("S", ["m"], {"m": frozenset({"01_a/deck.html"})})
+        site._materials_index("S", ["m"], {"m": frozenset({"x/01_a/deck.html"})})
     )
     files = {e["name"]: e for e in got["sections"][0]["entries"][0]["entries"]}
     assert (
-        files["deck.html"]["view_url"] == "https://s.github.io/files/m/01_a/deck.html"
+        files["deck.html"]["view_url"] == "https://s.github.io/files/m/x/01_a/deck.html"
     )
     assert "view_url" not in files["notes.pdf"]

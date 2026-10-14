@@ -683,6 +683,8 @@ INSTRUCTORS_FILE = "instructors.yml"
 # `assignments:` map of per-slug deviations), at the root of semester-config beside the
 # schedule. Named now so the console has no literal; the engine reads it from B2.
 ASSIGNMENTS_FILE = "assignments.yml"
+# The semester's plan, beside it in `semester-config` (`schedule`).
+SCHEDULE_FILE = "schedule.yml"
 # `role:` value -> the role key every consumer groups by (the old file's own keys).
 INSTRUCTOR_ROLES = {
     "instructor": "instructors",

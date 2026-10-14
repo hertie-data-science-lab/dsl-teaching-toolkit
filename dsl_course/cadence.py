@@ -341,7 +341,7 @@ def late_items(
         for i, dep in enumerate(release.deploy):
             at = dep.deploy_datetime or release.when
             if at is not None:
-                moments.append((f"{label} -> deploy[{i}]", at))
+                moments.append((f"{label} -> files[{i}]", at))
         if release.assignment and release.when is not None:
             moments.append((label, release.when))
     for slug, entry in sched.assignments.items():

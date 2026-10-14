@@ -502,7 +502,6 @@ def semester_plan(monkeypatch, tmp_path):
         lambda org, build: captured.update(plan=build(tmp_path)) or 0,
     )
     monkeypatch.setattr(site, "list_org_repos", lambda org: [])
-    monkeypatch.setattr(site, "discover_release_sources", lambda org, repos: [])
     monkeypatch.setattr(site, "yaml_file", lambda *a: {})
     fake_config(monkeypatch, site.yaml_file)
     monkeypatch.setattr(site, "read_opencourse", lambda org: None)

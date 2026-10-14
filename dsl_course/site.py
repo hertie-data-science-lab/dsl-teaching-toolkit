@@ -115,7 +115,6 @@ from .site_repo import (
     people_yaml,
     q,
     retired_kind_pages,
-    row_file,
     row_tabs,
     site_readme,
     site_templates,
@@ -864,19 +863,13 @@ def _row_entry(
     )
 
 
-def _row_filename(row: _Row, key: str, taken: dict[str, str]) -> str:
-    """The row's file: `row_file` when numbered (`session-03.md`, `lab-09.md`), else
-    named for its entry; a name already taken (a number two entries share, an entry's
-    second slot) gets the entry's key, then a count."""
-    prefix = row_file(1, row.kind).rsplit("-", 1)[0]
-    name = (
-        row_file(row.number, row.kind)
-        if row.number is not None
-        else f"{prefix}-{slug(key)}.md"
-    )
-    if name in taken:
-        name = f"{name[:-3]}-{slug(key)}.md"
-    stem, n = name[:-3], 2
+def _row_filename(key: str, slot: int, taken: dict[str, str]) -> str:
+    """The row's file, named by its entry's KEY (decision 0038 amendment rule 1: the key
+    names the row file, so moving or renumbering an entry keeps its page): `<key>.md`,
+    `<key>-2.md` for its second slot, and on."""
+    stem = slug(key)
+    name = f"{stem}.md" if slot == 0 else f"{stem}-{slot + 1}.md"
+    n = slot + 2
     while name in taken:
         name, n = f"{stem}-{n}.md", n + 1
     return name
@@ -895,7 +888,7 @@ def _site_rows(
     Every row the schedule shows is written, released or not, so the whole term reads as
     a syllabus from the day it is written. A silent readings row is written only once
     something has landed, and never when all it landed is root files."""
-    built: list[tuple[str, _Row]] = []
+    built: list[tuple[str, int, _Row]] = []
     for sr in site_rows(rows):
         r = sr.row
         landed = _row_landed(semester_org, r.deploys, allow, live_repos, hosted)
@@ -933,11 +926,11 @@ def _site_rows(
             reading_list=_reading_list([*own, *sr.readings]),
             chip=sr.chip,
         )
-        built.append((r.key, row))
+        built.append((r.key, r.slot, row))
     out: dict[str, str] = {}
-    for key, row in built:
-        out[_row_filename(row, key, out)] = _row_entry(semester_org, row, live_repos)
-    tabs = dict.fromkeys(tab for _key, row in built for tab in row.tabs)
+    for key, slot, row in built:
+        out[_row_filename(key, slot, out)] = _row_entry(semester_org, row, live_repos)
+    tabs = dict.fromkeys(tab for _key, _slot, row in built for tab in row.tabs)
     return out, list(tabs)
 
 

@@ -160,11 +160,16 @@ class SiteRow:
 
 
 def unit_hosts(rows: list[PlannedRow]) -> dict[str, PlannedRow]:
-    """Each unit's FIRST row by date (`rows` are in date order): a shown row of any kind
-    but readings and supporting files. What a readings entry with that `session:` shows
-    on (decision 0038 rule 5)."""
+    """Each unit's FIRST row by date: a shown row of any kind but readings and supporting
+    files. What a readings entry with that `session:` shows on (decision 0038 rule 5). A
+    dated row comes before any undated (`tbc`) one; a unit with no date yet takes its first
+    row in the policy's kind order (the lecture before the lab)."""
+    order = {kind["key"]: i for i, kind in enumerate(policy.kinds())}
     hosts: dict[str, PlannedRow] = {}
-    for r in rows:
+    for r in sorted(
+        rows,
+        key=lambda r: (r.undated, 0 if not r.undated else order.get(r.kind, 0)),
+    ):
         if r.unit and r.shown and r.kind not in (READINGS_KIND, ASSETS_KIND):
             hosts.setdefault(r.unit, r)
     return hosts
@@ -209,20 +214,28 @@ def site_rows(rows: list[PlannedRow]) -> list[SiteRow]:
 
 
 # ------------------------------------------------------------------ explicit numbers
-# Decision 0020: a number is explicit. An entry of a numbered kind with none is a problem,
-# and its release or hand-out is refused with this sentence, on every path.
+# Decision 0038 (amendment): a lecture or lab names its unit (`session:`, its number by
+# default) and an assignment its number, explicitly. One without is a problem, and its
+# release or hand-out is refused with these sentences, on every path.
 NOT_NUMBERED = "NOT_NUMBERED"
+NO_SESSION = "NO_SESSION"
 
 
 def give_a_number(key: str) -> str:
-    """The one sentence an entry with no number earns, wherever it is refused."""
+    """The one sentence an assignment with no number earns, wherever it is refused."""
     return f"Give {key} a number first."
 
 
-def needs_number(release: schedule.Release, kind: str) -> bool:
-    """Whether a content entry must carry a number: a shown entry of a numbered kind
-    (`policy.numbered_kinds`). Readings, exams and supporting files are not numbered."""
-    return release.show_on_site and kind in policy.numbered_kinds()
+def give_a_session(key: str) -> str:
+    """The one sentence a lecture or lab with no session earns, wherever it is refused."""
+    return f"Give {key} a session first."
+
+
+def needs_session(release: schedule.Release) -> bool:
+    """Whether a content entry must name its unit: a lecture or a lab
+    (`schedule.SESSION_KINDS`). Readings name one only to attach; exams, events and
+    supporting files never."""
+    return release.kind in schedule.SESSION_KINDS
 
 
 def _first_fire(release: schedule.Release) -> datetime | None:
@@ -234,9 +247,10 @@ def _first_fire(release: schedule.Release) -> datetime | None:
 
 @dataclass(frozen=True)
 class Unnumbered:
-    """An entry of a numbered kind with no number: `block` is `releases` (a content entry,
-    `key` its label, the YAML path) or `assignments`, `fires` the release or hand-out it holds up (None: none is dated),
-    `line` the schedule.yml line to fix."""
+    """An entry missing what names it: `block` is `releases` (a lecture or lab with no
+    `session`; `key` its key) or `assignments` (no `number`), `where` its YAML path,
+    `fires` the release or hand-out it holds up (None: none is dated), `line` the
+    schedule.yml line to fix."""
 
     block: str
     key: str
@@ -244,22 +258,29 @@ class Unnumbered:
     fires: datetime | None
     line: int | None
     copies: bool = True  # False: a release row with nothing to copy
+    where: str = ""
+
+    @property
+    def field(self) -> str:
+        """What it lacks: `session` (a lecture or lab) or `number` (an assignment)."""
+        return "number" if self.block == "assignments" else "session"
 
 
 def unnumbered(sched: schedule.Schedule) -> list[Unnumbered]:
-    """Every entry that needs a number and has none, content entries first, in plan
-    order."""
+    """Every lecture or lab with no `session` and every assignment with no `number`,
+    content entries first, in plan order."""
     out = []
     for r in sched.releases:
-        if needs_number(r, r.kind) and r.number is None:
+        if needs_session(r) and not r.session:
             out.append(
                 Unnumbered(
                     "releases",
                     r.label,
                     r.kind,
                     _first_fire(r),
-                    line_of(r.lines, "number"),
+                    line_of(r.lines, "session"),
                     bool(r.deploy),
+                    r.where,
                 )
             )
     for key, entry in sched.assignments.items():
@@ -271,16 +292,19 @@ def unnumbered(sched: schedule.Schedule) -> list[Unnumbered]:
                     "assignment",
                     entry.handout_datetime,
                     line_of(entry.lines, "number"),
+                    where=f"assignments.{key}",
                 )
             )
     return out
 
 
 def duplicate_numbers(sched: schedule.Schedule) -> list[tuple[str, int, list[str]]]:
-    """`(kind, number, keys)` for every number two or more entries of one kind share."""
+    """`(kind, number, keys)` for every number two or more entries of one kind share: a
+    shown entry's number (its `number:`, else its `session:`), per kind (decision 0038
+    amendment rule 3)."""
     groups: dict[tuple[str, int], list[str]] = {}
     for r in sched.releases:
-        if needs_number(r, r.kind) and (n := r.number):
+        if r.show_on_site and (n := r.number):
             groups.setdefault((r.kind, n), []).append(r.label)
     for key, entry in sched.assignments.items():
         if n := entry.number:
@@ -300,8 +324,9 @@ def duplicate_text(kind: str, n: int, keys: list[str]) -> str:
 
 
 def number_faults(missing: list[Unnumbered]) -> list[ConfigFault]:
-    """One fault per entry with no number (`unnumbered`), for the schedule.yml digest: on
-    the clock of the release or hand-out it stops, like a source that is not found."""
+    """One fault per entry missing its session or number (`unnumbered`), for the
+    schedule.yml digest: on the clock of the release or hand-out it stops, like a source
+    that is not found."""
     out = []
     for m in missing:
         if m.block == "assignments":
@@ -312,26 +337,27 @@ def number_faults(missing: list[Unnumbered]) -> list[ConfigFault]:
             cost = "its row on the site has no number until it has one"
         out.append(
             ConfigFault(
-                m.key if m.block == "releases" else f"{m.block}.{m.key}",
-                f"{m.key} has no number",
+                m.where or m.key,
+                f"{m.key} has no {m.field}",
                 fires=m.fires if m.block == "assignments" or m.copies else None,
-                field="number",
+                field=m.field,
                 lineno=m.line,
                 file=schedule.SCHEDULE_PATH,
-                fix_text="give the entry a `number:`",
+                fix_text=f"give the entry a `{m.field}:`",
                 consequence=cost,
-                noun=("entry without a number", "entries without a number"),
-                plain=f"Give {m.key} a number.",
+                noun=(f"entry without a {m.field}", f"entries without a {m.field}"),
+                plain=f"Give {m.key} a {m.field}.",
             )
         )
     return out
 
 
 def refuse_unnumbered(text: str) -> Summary:
-    """A manual run's refusal of an entry with no number: `text` is `give_a_number`'s,
-    which names a schedule key and nobody."""
+    """A manual run's refusal of an entry with no session or number: `text` is
+    `give_a_session`'s or `give_a_number`'s, which names a schedule key and nobody."""
     log_err(text)
-    return Summary(text, reasons=[{"code": NOT_NUMBERED, "text": text}], code=1)
+    code = NO_SESSION if "session" in text else NOT_NUMBERED
+    return Summary(text, reasons=[{"code": code, "text": text}], code=1)
 
 
 def unnumbered_assignment(
@@ -355,9 +381,8 @@ def unnumbered_assignment(
 def unnumbered_release(
     sched: schedule.Schedule, repo: str, paths: Iterable[str]
 ) -> str | None:
-    """The refusal for a manual release of `paths` from `repo` that a numbered entry of
-    the plan copies, itself or inside a requested folder, and that entry has no number;
-    None otherwise (an entry with a number, or a copy the plan does not name)."""
+    """The refusal for a manual release of `paths` from `repo` that a lecture or lab with
+    no session copies, itself or inside a requested folder; None otherwise."""
     wanted = {p.strip("/") for p in paths}
     held = {m.key for m in unnumbered(sched) if m.block == "releases"}
 
@@ -370,7 +395,7 @@ def unnumbered_release(
             d.course_source_repo == repo and asked(d.course_source_path)
             for d in r.deploy
         ):
-            return give_a_number(r.label)
+            return give_a_session(r.label)
     return None
 
 

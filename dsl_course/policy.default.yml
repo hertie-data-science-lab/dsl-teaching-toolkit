@@ -96,7 +96,7 @@ kinds:
     background: "#eceff1"
     system: false
   - key: other
-    plural: other
+    plural: events
     numbered: false
     label: Event
     colour: "#7d6230"

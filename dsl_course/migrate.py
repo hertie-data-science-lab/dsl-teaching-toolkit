@@ -45,7 +45,7 @@ import json
 import os
 import re
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -98,7 +98,13 @@ from .gh_contents import (
 from .ghcli import forget_all, gh, git
 from .grading_spec import GRADING_FILE, assignment_title, parse_grading_spec
 from .log import CLIParser, add_preview_flag, log, log_err, log_ok, log_step
-from .materials import MATERIALS_TOPIC, is_materials_repo
+from .materials import (
+    EMPTY_ENTRY_KIND,
+    MATERIALS_TOPIC,
+    alias_kind,
+    infer_kind,
+    is_materials_repo,
+)
 from .opencourse import OPENCOURSE_FILE, READINGS_MODES, OpenCourse
 from .opencourse import seed_text as opencourse_text
 from .profile_readme import profile_files, update_profile_readme
@@ -1125,6 +1131,425 @@ def opencourse_from(config: str | None) -> OpenCourse:
         readings_mode=mode if mode in READINGS_MODES else READINGS_MODES[0],
         include_lectures=bool(cfg.get("include_lectures", True)),
     )
+
+
+# ------------------------------------------------------------------ schedule shape
+# Decision 0038: schedule.yml goes from one `releases:` block (kind and number on the entry
+# or inferred from a folder or a label) and `events:` (display rows and a lab's second
+# group) to one block per kind. Each entry keeps its KEY (it already names its row and
+# ids), its kind is written by the block it lands in (today's inference, once), lectures
+# and labs get `session:` (their number today), a readings entry the site joins to a
+# lecture gets that lecture's `session:`, `number:` only where it differs, a lab's second
+# group becomes a slot of its lab, the copies' fields are renamed, a READINGS.md becomes
+# the entry's `reading_list:`, and each assignment's `assignments.yml` block moves onto
+# its entry. Rendered rows stay as they were, except what 0038 drops.
+SHAPE_COMMIT = "migrate: schedule shape"
+SHAPE_HEADER = """\
+# INSTRUCTOR-OWNED - yours to edit freely; edits here are not overwritten.
+#
+# This semester's plan: one block per kind (lectures, labs, readings, exams, events, assets),
+# each a map whose KEY names what the toolkit makes for the entry (its site row, its ids; an
+# assignment's repos and mark sheet) and is never displayed or read for a number.
+#   session         the teaching unit (integer): REQUIRED on lectures and labs; optional on
+#                   readings (absent = a standalone row)
+#   number          optional, default = session: the row word ("Lab 2"); REQUIRED on assignments
+#   event_datetime  a datetime, `tbc`, or a list of slots {at, location, details}
+#   files           from_course_repo, from_path, to_semester_repo, to_path, release_datetime
+# Field reference: docs/07-schedule-releases.md in the toolkit.
+"""
+# A label's own number, as 0.10 read it: trailing (`lecture_03`, `lab-9`) or leading
+# (`01_lab`). The migration reads it ONCE, to write `session:` / `number:`.
+_LABEL_NUMBER = re.compile(r"0*(\d+)$|^0*(\d+)[-_ ]")
+_FILE_FIELDS = legacy.renames(legacy.SCHEDULE_FILE)
+_ASSIGNMENT_FIELDS = legacy.renames(legacy.SCHEDULE_ASSIGNMENT)
+_SHAPE_TOP = ("timezone", "semester_start", "semester_end", "archive")
+
+
+class _Verbatim(yaml.SafeLoader):
+    """A SafeLoader that leaves dates and datetimes as the text they were written as, so
+    the rewritten file says `2026-09-01T18:00` where the old one did."""
+
+
+_Verbatim.yaml_implicit_resolvers = {
+    first: [(tag, rx) for tag, rx in rules if tag != "tag:yaml.org,2002:timestamp"]
+    for first, rules in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
+
+
+def _label_number(label: str) -> int | None:
+    m = _LABEL_NUMBER.search(label.strip())
+    return int(m.group(1) or m.group(2)) if m else None
+
+
+def _own_number(entry: dict, key: str) -> int | None:
+    """An entry's number as 0.10 read it: its `number:`, else its key's."""
+    n = entry.get("number")
+    if isinstance(n, int) and not isinstance(n, bool) and n > 0:
+        return n
+    return _label_number(key)
+
+
+def _old_kind(entry: dict, aliases: Aliases) -> str:
+    """The kind 0.10 gave a `releases:` entry: its `kind:`, else the section its first copy
+    lands in (the source repo's `materials.yml` aliases, else the built-in ones), else
+    `lecture` for an entry that copies nothing."""
+    kind = str(entry.get("kind") or "").strip().lower()
+    if kind:
+        return kind if kind in policy.content_kinds() else policy.FALLBACK_KIND
+    deploys = entry.get("deploy")
+    deploys = [deploys] if isinstance(deploys, dict) else deploys or []
+    deploys = [d for d in deploys if isinstance(d, dict)]
+    if not deploys:
+        return EMPTY_ENTRY_KIND
+    first = deploys[0]
+    kinds = aliases(str(first.get("course_source_repo") or ""))
+    dest = str(first.get("semester_dest_path") or first.get("course_source_path") or "")
+    head, sep, _ = dest.strip("/").partition("/")
+    section = (
+        head
+        if sep or (head and alias_kind(head, kinds))
+        else str(first.get("semester_dest_repo") or schedule.DEFAULT_DEST_REPO)
+    )
+    return infer_kind(section, kinds)
+
+
+def _copies(entry: dict) -> list[dict]:
+    """The `deploy:` copies as `files:` items: each field renamed (`legacy`)."""
+    deploys = entry.get("deploy")
+    deploys = [deploys] if isinstance(deploys, dict) else deploys or []
+    return [
+        {_FILE_FIELDS.get(k, k): v for k, v in d.items() if v not in (None, "")}
+        for d in deploys
+        if isinstance(d, dict)
+    ]
+
+
+def _first_time(value: object) -> str | None:
+    """A written date or datetime, None for `tbc` or nothing."""
+    text = str(value or "").strip()
+    return None if not text or text.lower() == "tbc" else text
+
+
+def _hour_before(text: str, tz) -> str | None:
+    """When a copy with no time of its own shipped under 0.10: an hour before a timed
+    event, the day's start for a whole-day one."""
+    when = schedule._coerce_date_or_datetime(text, tz)
+    if isinstance(when, datetime):
+        return f"{when - schedule.DEFAULT_DEPLOY_LEAD:%Y-%m-%dT%H:%M}"
+    return f"{when:%Y-%m-%d}" if when else None
+
+
+# A source repo's `materials.yml` folder aliases (None: it does not parse).
+Aliases = Callable[[str], Mapping[str, str] | None]
+ReadingList = Callable[[str, str], str]
+
+
+def schedule_shape(
+    text: str,
+    instance_text: str | None = None,
+    aliases: Aliases = lambda repo: {},
+    reading_list: ReadingList = lambda repo, path: "",
+) -> tuple[str, str | None, list[str], list[str]]:
+    """`(schedule.yml, assignments.yml or None when it has no `assignments:` block,
+    notes, stops)` for a 0.10 `text` (and the `assignments.yml` beside it): the 0.11 shape
+    (decision 0038), rows unchanged but for what 0038 drops. `aliases(repo)` are a source
+    repo's `materials.yml` folder aliases (today's kind inference); `reading_list(repo,
+    path)` the READINGS.md text a copy of `path` from `repo` carries ("" for none).
+    `stops` are what a person must settle first; `notes` what changes for them to check."""
+    notes: list[str] = []
+    stops: list[str] = []
+    old = yaml.load(schedule_timing(schedule_keys(text)), _Verbatim) or {}
+    if not isinstance(old, dict):
+        return text, instance_text, notes, ["schedule.yml is not a mapping"]
+    tz = schedule._tz(old.get("timezone"))
+    releases = old.get("releases") if isinstance(old.get("releases"), dict) else {}
+    events = old.get("events") if isinstance(old.get("events"), dict) else {}
+    blocks: dict[str, dict[str, dict]] = {b: {} for b in schedule.BLOCKS}
+    plain = lambda e: {k: v for k, v in e.items() if v not in (None, "")}
+
+    # 1. Releases, by today's kind. Lectures' numbers are what readings join.
+    kinds = {
+        str(k): _old_kind(e, aliases)
+        for k, e in releases.items()
+        if isinstance(e, dict)
+    }
+    numbers = {k: _own_number(releases[k], k) for k in kinds}
+    lectures = {
+        numbers[k]
+        for k in kinds
+        if kinds[k] == "lecture"
+        and numbers[k]
+        and releases[k].get("show_on_site") is not False
+    }
+    hosts: dict[
+        tuple[str, int], str
+    ] = {}  # (kind, n) -> the shown key a session repeats
+    for key, kind in kinds.items():
+        entry, n = releases[key], numbers[key]
+        new: dict = {}
+        if kind in schedule.SESSION_KINDS:
+            if n:
+                new["session"] = n
+            else:
+                notes.append(f"{key}: no number today, so no session - give it one")
+        elif kind == "readings":
+            if n and n in lectures:
+                new["session"] = n
+            elif n and entry.get("show_on_site") is not False:
+                new["number"] = n
+        elif n and kind in policy.numbered_kinds():
+            new["number"] = n
+        new |= {
+            k: entry[k]
+            for k in (
+                "title",
+                "details",
+                "event_datetime",
+                "location",
+                "show_on_site",
+                "tbc",
+            )
+            if k in entry and entry[k] not in (None, "")
+        }
+        if "deploy" in entry or kind in schedule.DISPLAY_KINDS:
+            new["files"] = _copies(entry)
+        if kind == "readings":
+            texts = [
+                t.strip()
+                for f in new.get("files", [])
+                if (
+                    t := reading_list(
+                        str(f.get("from_course_repo")), str(f.get("from_path"))
+                    )
+                )
+                and t.strip()
+            ]
+            if texts:
+                new["reading_list"] = "\n\n".join(texts) + "\n"
+        blocks[policy.plural_of(kind)][key] = new
+        if n and entry.get("show_on_site") is not False:
+            hosts.setdefault((kind, n), key)
+
+    # 2. Events: exams and special events are display rows; a session of a content kind
+    # repeats a release - a slot of it where it says nothing of its own but its date,
+    # room and words, else an entry of its own in the same unit.
+    for key, entry in events.items():
+        if not isinstance(entry, dict):
+            continue
+        key = str(key)
+        kind = str(entry.get("kind") or "special_event").strip().lower()
+        if kind in ("exam", "special_event"):
+            block = (
+                "exams" if kind == "exam" else policy.plural_of(policy.FALLBACK_KIND)
+            )
+            blocks[block][key] = plain(
+                {
+                    k: entry.get(k)
+                    for k in (
+                        "title",
+                        "details",
+                        "event_datetime",
+                        "location",
+                        "show_on_site",
+                        "tbc",
+                    )
+                }
+            )
+            continue
+        if kind not in policy.content_kinds():
+            kind = policy.FALLBACK_KIND
+        m = re.search(r"\d+", key)
+        n = (
+            _own_number(entry, key)
+            if entry.get("number")
+            else (int(m.group()) if m else None)
+        )
+        host = hosts.get((kind, n)) if n else None
+        target = blocks[policy.plural_of(kind)]
+        own_title = str(entry.get("title") or "")
+        if (
+            host
+            and entry.get("show_on_site") is not False
+            and not entry.get("tbc")
+            and own_title in ("", str(target[host].get("title") or ""))
+            and _first_time(entry.get("event_datetime"))
+            and _first_time(target[host].get("event_datetime"))
+            and not target[host].get("tbc")
+        ):
+            first = target[host]
+            slots = first["event_datetime"]
+            if not isinstance(slots, list):
+                slots = [slots]
+            slot = plain(
+                {
+                    "at": entry["event_datetime"],
+                    "location": entry.get("location"),
+                    "details": entry.get("details"),
+                }
+            )
+            slots.append(slot if len(slot) > 1 else slot["at"])
+            # Files still ship before the release's own date, not the earlier group's.
+            at = _hour_before(str(slots[0]), tz)
+            for f in first.get("files", []):
+                f.setdefault("release_datetime", at)
+            first["event_datetime"] = slots
+            continue
+        new = {"session": n} if n and kind in schedule.SESSION_KINDS else {}
+        if n and kind not in schedule.SESSION_KINDS:
+            new["number"] = n
+        new |= plain(
+            {
+                k: entry.get(k)
+                for k in (
+                    "details",
+                    "event_datetime",
+                    "location",
+                    "show_on_site",
+                    "tbc",
+                )
+            }
+        )
+        title = own_title or (str(target[host].get("title") or "") if host else "")
+        if title:
+            new["title"] = title
+        if key in target:
+            stops.append(f"events.{key}: its key is a {kind} entry's too - rename one")
+            continue
+        target[key] = new
+    taken: dict[str, str] = {}
+    for block, entries in blocks.items():
+        for key in entries:
+            if key in taken:
+                stops.append(
+                    f"{block}.{key}: the key of a {taken[key]} entry too - rename one"
+                )
+            taken[key] = block
+
+    # 3. Assignments: `template`, `number`, `repo_name` where it is not the default, and
+    # the `assignments.yml` block inline.
+    instance = settings.parse_instance(instance_text)
+    raw_blocks = (
+        (yaml.load(instance_text or "", _Verbatim) or {}) if instance_text else {}
+    )
+    raw_blocks = raw_blocks.get("assignments") if isinstance(raw_blocks, dict) else None
+    raw_blocks = raw_blocks if isinstance(raw_blocks, dict) else {}
+    assignments: dict[str, dict] = {}
+    for key, entry in (old.get("assignments") or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        key = str(key)
+        n = _own_number(entry, key)
+        new = {}
+        if n:
+            new["number"] = n
+        else:
+            notes.append(f"assignments.{key}: no number today - give it one")
+        new["template"] = entry.get("course_source_repo")
+        name = instance.dests.get(key) or key
+        if name != (f"assignment-{n}" if n else key):
+            new["repo_name"] = name
+        new |= plain(
+            {
+                _ASSIGNMENT_FIELDS.get(k, k): v
+                for k, v in entry.items()
+                if k not in ("number", "course_source_repo")
+            }
+        )
+        block = raw_blocks.get(key) if isinstance(raw_blocks.get(key), dict) else {}
+        new |= {
+            settings.INLINE_NAMES.get(k, k): v
+            for k, v in block.items()
+            if k in settings.RUN_KEYS and v is not None
+        }
+        assignments[key] = new
+    for key in sorted(set(map(str, raw_blocks)) - set(assignments)):
+        stops.append(
+            f"{ASSIGNMENTS_FILE} assignments.{key}: no such assignment in schedule.yml"
+        )
+
+    out = [SHAPE_HEADER]
+    for key in _SHAPE_TOP:
+        if key in old:
+            out.append(_emit({key: old[key]}))
+    for block, entries in blocks.items():
+        if entries:
+            out.append(_emit({block: entries}))
+    if assignments:
+        out.append(_emit({"assignments": assignments}))
+    instance_after = _without_block(instance_text, settings.ASSIGNMENTS_BLOCKS)
+    return "\n".join(out), instance_after, notes, stops
+
+
+_DATE_LIKE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?([+-]\d{2}:?\d{2}|Z)?)?$"
+)
+
+
+def _scalar_text(value: object) -> str:
+    """One scalar as YAML: a written date as written, anything else as YAML quotes it."""
+    if isinstance(value, str) and _DATE_LIKE.match(value):
+        return value
+    return (
+        yaml.safe_dump(value, default_flow_style=True, allow_unicode=True, width=10**6)
+        .removesuffix("\n...\n")
+        .strip()
+    )
+
+
+def _emit(value: object, indent: int = 0) -> str:
+    """`value` (mappings, lists and scalars) as block YAML at `indent`; a string with a
+    line break as a literal block."""
+    pad = " " * indent
+    if isinstance(value, dict):
+        lines = []
+        for k, v in value.items():
+            key = (
+                _scalar_text(k)
+                if not isinstance(k, str)
+                else (k if re.fullmatch(r"[A-Za-z0-9_.-]+", k) else _scalar_text(k))
+            )
+            if isinstance(v, (dict, list)) and v:
+                lines.append(f"{pad}{key}:")
+                lines.append(_emit(v, indent + 2))
+            elif isinstance(v, str) and "\n" in v.strip():
+                lines.append(f"{pad}{key}: |")
+                lines += [
+                    f"{pad}  {line}" if line else ""
+                    for line in v.rstrip("\n").split("\n")
+                ]
+            elif isinstance(v, (dict, list)):
+                lines.append(f"{pad}{key}: {'{}' if isinstance(v, dict) else '[]'}")
+            else:
+                lines.append(f"{pad}{key}: {_scalar_text(v)}")
+        return "\n".join(lines)
+    if isinstance(value, list):
+        lines = []
+        for item in value:
+            if isinstance(item, dict) and item:
+                body = _emit(item, indent + 2).split("\n")
+                lines.append(f"{pad}- {body[0].lstrip()}")
+                lines += body[1:]
+            else:
+                lines.append(f"{pad}- {_scalar_text(item)}")
+        return "\n".join(lines)
+    return f"{pad}{_scalar_text(value)}"
+
+
+def _without_block(text: str | None, block: str) -> str | None:
+    """`text` without its top-level `block:` and everything under it (comments above the
+    next top-level key kept); None when it has no such block."""
+    if not text or not re.search(rf"^{block}:", text, re.MULTILINE):
+        return None
+    out, cutting = [], False
+    for line in text.split("\n"):
+        if re.match(rf"^{block}:", line):
+            cutting = True
+            continue
+        if cutting and line and not line[0].isspace() and not line.startswith("#"):
+            cutting = False
+        if not cutting:
+            out.append(line)
+    return re.sub(r"\n\n\n+", "\n\n", "\n".join(out)).rstrip("\n") + "\n"
 
 
 # ------------------------------------------------------------------ GitHub, narrowly
