@@ -248,6 +248,10 @@
             "description": "Email students that there are new marks",
             "type": "boolean"
           },
+          "per_question": {
+            "description": "Include marks per question (the assignment's marks_per_question run setting; off: the score, late line, adjustment and final only)",
+            "type": "boolean"
+          },
           "receipt_note": {
             "description": "Post a note on each Submission receipts issue",
             "type": "boolean"

@@ -189,6 +189,13 @@ def test_return_marks_runs_in_distribute_grades_queue():
         "assignment": "assignment-2",
         "preview": "false",
     }
+    # "Include marks per question": on is the workflow's own default and spells nothing;
+    # off reaches the CLI as its one-run override.
+    off = Request(op.name, "prof", COURSE, SEMESTER, {"per_question": False}, False)
+    assert "--no-per-question" in command(op, off)
+    assert op_inputs(op, command(op, off))["per_question"] == "false"
+    on = Request(op.name, "prof", COURSE, SEMESTER, {"per_question": True}, False)
+    assert "per_question" not in op_inputs(op, command(op, on))
 
 
 def test_a_real_run_of_a_default_on_dry_run_cli_says_no_dry_run():

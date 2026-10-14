@@ -270,6 +270,8 @@ def _grades(request: Request) -> list[str]:
         argv.append("--receipt-note")
     if _a(request, "include_feedback"):
         argv.append("--include-feedback")
+    if not _a(request, "per_question", True):
+        argv.append("--no-per-question")
     if _a(request, "assignment"):
         argv += ["--assignment", _a(request, "assignment")]
     return argv
@@ -517,6 +519,10 @@ _OPS = (
                     "Post a note on each Submission receipts issue"
                 ),
                 "include_feedback": _boolean("Put the feedback text in the email"),
+                "per_question": _boolean(
+                    "Include marks per question (the assignment's marks_per_question "
+                    "run setting; off: the score, late line, adjustment and final only)"
+                ),
                 "assignment": _string(
                     REPO_PATTERN, "Only this assignment (its repo name); empty = all"
                 ),
@@ -538,6 +544,7 @@ _OPS = (
             "notify",
             "receipt_note",
             "include_feedback",
+            "per_question",
         ),
     ),
     Operation(
