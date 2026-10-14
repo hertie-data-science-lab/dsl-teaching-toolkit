@@ -1,0 +1,59 @@
+# INSTRUCTOR-OWNED - yours to edit freely; edits here are not overwritten.
+#
+course_name: Maths for Data Science
+course_code: GRAD-C23
+# The blurb on every cohort site, on ONE line. Jan's own text, moved here verbatim
+# from the f2026 site repo's _config.yml so the course declares it rather than each
+# cohort site carrying a hand edit.
+course_description: "This course aims to deliver a compact and tailored introduction to the core mathematical concepts of data science: probability theory, calculus, linear algebra, and statistics. We will establish and reinforce the foundation that will support your further studies in machine learning, deep learning, and causal inference, and which will inform how you conceptualize and analyze data. By the end of the course, students will (re)acquaint themselves with the basic principles of probability theory that structure the process that generates data; with the behavior of functions that describe relationships in data; with the rules of linear algebra that govern how to manipulate data; and, finally, with the tools of statistical learning that we use to extract information from our datasets."
+# site_link_extensions: [pdf, html, ipynb]   # OPTIONAL: on the SEMESTER sites, link ONLY
+#   # these file types. Default (unset): each session's root files, plus one link per
+#   # subfolder - so a rendered deck lists the deck, not its hundreds of assets. Either way
+#   # everything you release still ships, and the folder itself is always one click away.
+#   # (The public open-courseware site always lists root files - it hosts what it lists.)
+
+# `course_name`, `course_code` and `course_description` are what reach the semester
+# websites. Editing them here re-syncs every semester site already bootstrapped from this
+# course org.
+#
+# This is the persistent COURSE org - it spans many semesters (years). Semesters are
+# registered separately in .github/semesters.yml.
+
+# ---------------------------------------------------------------------------
+# People. Two DIFFERENT things live under the `people:` key below - don't
+# confuse them:
+#
+#   course_admins        GRANTS ACCESS. Course admins keep every button for this
+#                        course across years; a term's instructors are set per
+#                        semester in instructors.yml. The single source of truth for course-wide
+#                        admin rights - the `course-admin` team here, mirrored into
+#                        every semester org. A handle added any other way is reverted
+#                        on the next sync unless it's declared here; removing a
+#                        handle here revokes their access.
+#
+#   instructors          DISPLAY ONLY - website cards (name/photo/title/link) for
+#                        the OPTIONAL public open-courseware course website (the
+#                        "Publish course website" action). They grant NO GitHub
+#                        access. TAs are NOT declared here - they change every
+#                        semester, so a semester's whole teaching team (instructors &
+#                        TAs, their GitHub access AND their semester-site cards) is
+#                        declared PER SEMESTER in that semester's semester-config/instructors.yml.
+# ---------------------------------------------------------------------------
+people:
+  course_admins:
+    - github_handle: "JanGieseler"    # grants the `course-admin` team
+
+  # Instructor website cards (optional, DISPLAY ONLY - no GitHub access) for the
+  # OPTIONAL public open-courseware course website. TAs are NOT listed here - a
+  # semester's own teaching team (instructors & TAs) goes in that semester's
+  # semester-config/instructors.yml instead. Uncomment and fill:
+  # instructors:
+  #   - github_handle: "janedoe"
+  #     name:  "Prof. Dr. Jane Doe"
+  #     title: "Professor of Data Science"
+  #     photo: "https://.../headshot.jpg"        # square image URL
+  #     url:   "https://.../profile/jane-doe"     # bio / profile link
+set_aside:
+  - empty_week:2026-10-19:lecture
+  - empty_week:2026-10-19:readings
+  - empty_week:2026-10-19:lab

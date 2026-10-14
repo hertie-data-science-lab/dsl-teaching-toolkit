@@ -26,6 +26,7 @@ from dsl_course import (
     scaffold,
     workflows_render,
 )
+from dsl_course.bootstrap_course import semester_scaffold
 from dsl_course.central import MissingCentralRef
 from dsl_course.course import (
     CONFIG_REPO,
@@ -38,7 +39,6 @@ from dsl_course.gh_contents import blob_sha
 from dsl_course.legacy import OLD_INSTRUCTORS_FILE as INSTRUCTORS_FILE
 from dsl_course.migrate import OLD_CONFIG_REPO, OLD_JOIN_REPO, OLD_SEMESTER_TOPIC
 from dsl_course.opencourse import OpenCourse
-from dsl_course.welcome import template
 
 SEM, COURSE = "Sem-f2026", "Course-E1"
 WORKFLOW = {".github/workflows/any.yml": b"on: push\n"}
@@ -432,7 +432,7 @@ def _migrated_course(fake, monkeypatch):
         ".github",
         {
             "semesters.yml": b"semesters:\n- Sem-f2026\n",
-            "opencourse.yml": b"enabled: false\n",
+            "course.yml": b"course:\n  name: X\nopen_course_site:\n  enabled: false\n",
             **COURSE_WORKFLOWS,
         },
         topics=["dsl-course-hub"],
@@ -591,16 +591,19 @@ def test_a_real_run_migrates_every_step_once_with_actions_off(
             assert blob_sha(tree[new]) == markers[old], old
     assert not [p for p in tree if p.endswith(".sample")]
     assert "people.yml" not in tree
-    text = tree[INSTRUCTORS_FILE].decode()
-    instructors = yaml.safe_load(text)["instructors"]
+    # Decision 0039: people.yml became instructors.yml, then folded into semester.yml.
+    assert INSTRUCTORS_FILE not in tree and "assignments.yml" not in tree
+    text = tree["semester.yml"].decode()
+    instructors = yaml.safe_load(text)["people"]
     assert [(p["github_handle"], p["role"]) for p in instructors] == [
         ("prof", "instructor"),
         ("ta", "teaching_assistant"),
     ]
     assert "# a comment faculty wrote" in text
     assert "people.yml.sample" not in text and OLD_CONFIG_REPO not in text
-    assert "example-course/semester-org/instructors.yml" in text
+    assert "example-course/semester-org/semester.yml" in text
     assert f"course: {COURSE}" in tree[records.path("pointer")].decode()
+    assert migrate.OLD_SEMESTER_POINTER not in tree
     assert "dsl-course.yml" not in fake.tree(SEM, ".github")
     schedule = tree["schedule.yml"].decode()
     assert "cohort_dest" not in schedule
@@ -668,9 +671,9 @@ def test_a_second_run_finds_every_step_already_migrated(
 
     assert _main(monkeypatch, SEM, "--no-preview") == 0
     out = capsys.readouterr().out
-    # Nine steps, each "already migrated" in the plan and again in the run: nothing is
+    # Ten steps, each "already migrated" in the plan and again in the run: nothing is
     # paused, nothing written, status.json not rewritten.
-    assert out.count("already migrated") == 18
+    assert out.count("already migrated") == 20
     assert fake.commits == commits and fake.puts == puts and semester == []
     assert len(fake.dispatches) == 3  # nothing paused, so nothing was dropped
 
@@ -1026,10 +1029,9 @@ def test_seeded_text_takes_the_new_names_and_the_instructors_words_are_listed(
     archive = yaml.safe_load(text)["semester"]["archive"]
     assert archive["type"] == "archive" and archive["title"] == "Semester archived"
     assert archive["details"].startswith("This semester is archived on {date}:")
-    instructors = fake.tree(SEM, CONFIG_REPO)[INSTRUCTORS_FILE].decode()
-    assert (
-        "# This semester's own instructors: its instructors and teaching" in instructors
-    )
+    # instructors.yml took the new names, then folded into semester.yml (decision 0039).
+    assert INSTRUCTORS_FILE not in fake.tree(SEM, CONFIG_REPO)
+    assert "people:" in fake.tree(SEM, CONFIG_REPO)["semester.yml"].decode()
     join = fake.tree(SEM, JOIN_REPO)["README.md"].decode()
     assert "https://github.com/Sem-f2026/join/issues/new/choose" in join
     assert "The whole cohort reads this." in join
@@ -1062,11 +1064,13 @@ def test_a_course_s_seeded_text_takes_the_new_names(fake, course, monkeypatch, c
     assert "seeded wording rewritten in .github/dsl-course.yml" in out
     assert "rewritten in assignment-1-f2026@solution/grading_config.yml" in out
     assert "-   .github/dsl-course.yml: line(s) 4" in out
+    # The file's own comments are not carried into course.yml: counted, never quoted.
+    assert "comment line(s) of dsl-course.yml are not carried" in out
+    assert "Our cohorts" not in out
     assert _main(monkeypatch, COURSE, "--no-preview") == 0
-    meta = fake.tree(COURSE, ".github")["dsl-course.yml"].decode()
-    assert "it spans many semesters (years). Semesters are" in meta
-    assert "# registered separately in .github/semesters.yml." in meta
-    assert "# Our cohorts are small." in meta
+    tree = fake.tree(COURSE, ".github")
+    assert "dsl-course.yml" not in tree
+    assert yaml.safe_load(tree["course.yml"])["course"]["name"] == "X"
     grading = fake.tree(COURSE, "assignment-1-f2026", "solution")["grading_config.yml"]
     assert grading.decode().splitlines()[0] == scaffold._GRADING_STAMP
     assert (
@@ -1083,10 +1087,10 @@ def test_every_new_seeded_line_is_the_current_templates():
     current = set(
         "\n".join(
             [
-                migrate.semester_scaffold(SEM, "schedule.yml", "main"),
-                migrate.semester_scaffold(SEM, INSTRUCTORS_FILE, "main"),
-                template("course/dsl-course.yml"),
-                template("course/people-cards.yml"),
+                semester_scaffold(SEM, "schedule.yml", "main"),
+                migrate.old_scaffold(SEM, INSTRUCTORS_FILE, "main"),
+                migrate.old_template("course/dsl-course.yml"),
+                migrate.old_template("course/people-cards.yml"),
                 scaffold._GRADING_STAMP,
                 *(
                     scaffold._grading_config(
@@ -1115,7 +1119,7 @@ def test_every_new_seeded_line_is_the_current_templates():
     ]
     assert retired == [], retired
     assert [new for _, new in migrate.seeded_blocks()] == [
-        template("course/people-header.yml")
+        migrate.old_template("course/people-header.yml")
     ] * 2
 
 
@@ -1201,9 +1205,10 @@ def test_the_seeded_skeleton_becomes_the_new_skeleton(fake, semester, monkeypatc
     )
     fake.tree(SEM, OLD_CONFIG_REPO)["people.yml"] = skeleton.encode()
     assert _main(monkeypatch, SEM, "--no-preview") == 0
-    text = fake.tree(SEM, CONFIG_REPO)[INSTRUCTORS_FILE].decode()
-    assert text == migrate.semester_scaffold(SEM, INSTRUCTORS_FILE, "main")
-    assert "# instructors:" in text
+    # The skeleton became the 0.10 skeleton, which folds into semester.yml as the
+    # current one's commented `people:`.
+    text = fake.tree(SEM, CONFIG_REPO)["semester.yml"].decode()
+    assert "# people:" in text and "people" not in yaml.safe_load(text)
 
 
 # ---------------------------------------------------------------- the course org
@@ -1312,11 +1317,14 @@ def test_a_course_run_migrates_and_a_second_finds_it_done(
     assert tree[records.path("heartbeat")] == b"2026-09-01\n"
     assert records.path("missing_semesters") in tree
     assert ".github/.last-refresh" not in tree and ".dsl/status.json" not in tree
-    meta = tree["dsl-course.yml"].decode()
-    assert yaml.safe_load(meta)["course_name"] == "X"
+    # Decision 0039: dsl-course.yml and opencourse.yml folded into course.yml.
+    assert "dsl-course.yml" not in tree and "opencourse.yml" not in tree
+    meta = yaml.safe_load(tree["course.yml"])
+    assert meta["course"]["name"] == "X"
     for key in ("org", "org_name", "cohort_defaults", "semester_defaults"):
-        assert key not in yaml.safe_load(meta)
-    assert "  formats: [ipynb]  # the runnable one" in meta
+        assert key not in meta and key not in meta["course"]
+    # `formats` left the cascade (the New assignment wizard asks).
+    assert "formats" not in (meta["defaults"] or {})
     grading = fake.tree(COURSE, "assignment-1-f2026", "solution")["grading_config.yml"]
     # The template starter step writes rule 6's reading: no source marks an answer.
     assert (
@@ -1333,10 +1341,10 @@ def test_a_course_run_migrates_and_a_second_finds_it_done(
         "SYLLABUS.md",
         *migrate.RELEASE_WORKFLOWS,
     }
-    assert opencourse.parse(yaml.safe_load(tree["opencourse.yml"])) == OpenCourse(
+    assert opencourse.parse(meta["open_course_site"]) == OpenCourse(
         enabled=True, source_repo="course-materials-f2026"
     )
-    assert tree["opencourse.yml"].startswith(b"# INSTRUCTOR-OWNED")
+    assert tree["course.yml"].startswith(b"# INSTRUCTOR-OWNED")
     assert fake._repo(COURSE, "course-materials-f2026")["topics"] == ["dsl-materials"]
     template = fake.tree(COURSE, "assignment-1-f2026")
     assert set(migrate.TEMPLATE_WORKFLOWS) <= set(template)
@@ -1367,7 +1375,7 @@ def test_a_course_run_migrates_and_a_second_finds_it_done(
     course.clear()
     capsys.readouterr()
     assert _main(monkeypatch, COURSE, "--no-preview") == 0
-    assert capsys.readouterr().out.count("already migrated") == 28
+    assert capsys.readouterr().out.count("already migrated") == 30
     assert course == [] and fake.commits == commits and fake.puts == puts
 
 
@@ -1594,14 +1602,18 @@ def test_a_semester_default_that_differs_from_the_policy_stops_before_any_write(
 
 def test_a_semester_default_equal_to_the_policy_is_stripped(fake, course, monkeypatch):
     zone = migrate.policy.defaults()["timezone"]
-    grace = migrate.policy.defaults()["archive"]["grace_days"]
+    grace = migrate.policy.defaults()["archive_grace_days"]
     fake.tree(COURSE, ".github")["dsl-course.yml"] = (
         f"course_name: X\nsemester_defaults:\n  timezone: {zone}\n"
         f"  archive:\n    auto: false\n    grace_days: {grace}\n"
     ).encode()
     assert _main(monkeypatch, COURSE, "--no-preview") == 0
-    meta = yaml.safe_load(fake.tree(COURSE, ".github")["dsl-course.yml"])
-    assert meta == {"course_name": "X"}
+    # Stripped by the keys step; the course.yml it folds into names the course alone.
+    meta = yaml.safe_load(fake.tree(COURSE, ".github")["course.yml"])
+    assert meta["course"] == {"name": "X"}
+    assert (
+        "semester_defaults" not in fake.tree(COURSE, ".github")["course.yml"].decode()
+    )
 
 
 def test_a_registry_already_renamed_but_keyed_the_old_way_is_rewritten(
@@ -1967,7 +1979,7 @@ def test_the_keys_step_commits_a_schedule_with_every_entry_where_it_was(
 
 
 def test_the_run_keys_are_written_into_the_skeleton_and_read_back():
-    skeleton = migrate.semester_scaffold(SEM, "assignments.yml", "main")
+    skeleton = migrate.old_scaffold(SEM, "assignments.yml", "main")
     text = migrate.with_instance_keys(
         skeleton,
         {"a1": {"late_window_days": 2, "late_penalty_per_day": "5%"},
@@ -2032,7 +2044,10 @@ def test_a_semester_migrated_before_b2_completes_on_the_next_run(
     assert _main(monkeypatch, SEM, "--no-preview") == 0
     tree = fake.tree(SEM, CONFIG_REPO)
     tree["schedule.yml"] = B1_SCHEDULE.encode()
-    del tree["assignments.yml"]
+    # ... and before decision 0039: instructors.yml and the old pointer, no semester.yml.
+    del tree["semester.yml"]
+    tree[INSTRUCTORS_FILE] = migrate.people_to_instructors(OLD_PEOPLE).encode()
+    tree[migrate.OLD_SEMESTER_POINTER] = tree.pop(records.path("pointer"))
     # The course step has already taken a1's template's run settings out, into its record.
     fake.tree(COURSE, ".github")[migrate.RUN_KEYS_RECORD] = json.dumps(
         {"assignment-1-f2026": A1_RUN_KEYS}
@@ -2058,14 +2073,10 @@ def test_a_semester_migrated_before_b2_completes_on_the_next_run(
         "late_penalty_per_day": "5%",
     }
     assert plan["a2"]["repo_name"] == "homework-2"
-    assert (
-        migrate.settings.parse_legacy_assignments(
-            tree["assignments.yml"].decode()
-        ).faults
-        == ()
-    )
-    assert migrate._schedule_clean(tree["schedule.yml"].decode(),
-                                   tree["assignments.yml"].decode())  # fmt: skip
+    # ... and the config layers step folded what was left into semester.yml.
+    assert "assignments.yml" not in tree
+    assert migrate.settings.parse_instance(tree["semester.yml"].decode()).faults == ()
+    assert migrate._schedule_clean(tree["schedule.yml"].decode(), None)
     keys = [c for c in fake.commits if c[3] == migrate.KEYS_COMMIT]
     assert keys == [(SEM, CONFIG_REPO, "main", migrate.KEYS_COMMIT)]  # both files, once
     commits = list(fake.commits)
@@ -2461,7 +2472,7 @@ def test_the_old_people_header_becomes_the_current_one_as_a_block(repo, eol):
         "\n", eol
     )
     new = migrate.seeded_yaml(text, "main", COURSE)
-    header = template("course/people-header.yml")
+    header = migrate.old_template("course/people-header.yml")
     assert new == (
         "course_name: X\n\n" + header + "people:\n  course_admins: []\n"
     ).replace("\n", eol)
@@ -2574,9 +2585,8 @@ def test_the_public_website_step_seeds_off_without_earlier_settings(
     assert ".github/opencourse.yml: seeded off" in capsys.readouterr().out
     assert _main(monkeypatch, COURSE, "--no-preview") == 0
     tree = fake.tree(COURSE, ".github")
-    assert opencourse.parse(yaml.safe_load(tree["opencourse.yml"])) == OpenCourse(
-        withhold=opencourse.DEFAULT_WITHHOLD
-    )
+    site = yaml.safe_load(tree["course.yml"])["open_course_site"]
+    assert opencourse.parse(site) == OpenCourse(withhold=opencourse.DEFAULT_WITHHOLD)
 
 
 def test_a_website_already_on_is_seeded_with_nothing_extra_withheld(
@@ -2586,7 +2596,7 @@ def test_a_website_already_on_is_seeded_with_nothing_extra_withheld(
     # live site at the next publish.
     assert _main(monkeypatch, COURSE, "--no-preview") == 0
     seeded = opencourse.parse(
-        yaml.safe_load(fake.tree(COURSE, ".github")["opencourse.yml"])
+        yaml.safe_load(fake.tree(COURSE, ".github")["course.yml"])["open_course_site"]
     )
     assert seeded.enabled
     assert seeded.withhold == ()
@@ -2597,10 +2607,10 @@ def test_the_public_website_step_on_a_migrated_course_keeps_its_opencourse(
 ):
     # The demo orgs are migrated already: a re-run leaves a publish.yml alone (the semester
     # site's hosted-copy opt-in, decision 0035) and never touches an opencourse.yml
-    # someone has written.
+    # someone has written (folded into course.yml since decision 0039).
     assert _main(monkeypatch, COURSE, "--no-preview") == 0
-    mine = b"enabled: true\nsource_repo: other\n"
-    fake.tree(COURSE, ".github")["opencourse.yml"] = mine
+    mine = b"course:\n  name: X\nopen_course_site:\n  enabled: true\n  source_repo: other\n"
+    fake.tree(COURSE, ".github")["course.yml"] = mine
     fake.tree(COURSE, "course-materials-f2026")["publish.yml"] = b"public:\n"
     capsys.readouterr()
     assert _main(monkeypatch, COURSE, "--no-preview") == 0
@@ -2608,7 +2618,7 @@ def test_the_public_website_step_on_a_migrated_course_keeps_its_opencourse(
     assert "publish.yml" not in out
     assert "opencourse.yml: seeded" not in out
     assert fake.tree(COURSE, "course-materials-f2026")["publish.yml"] == b"public:\n"
-    assert fake.tree(COURSE, ".github")["opencourse.yml"] == mine
+    assert fake.tree(COURSE, ".github")["course.yml"] == mine
     capsys.readouterr()
     assert _main(monkeypatch, COURSE) == 0
     assert "public website: already migrated" in capsys.readouterr().out
