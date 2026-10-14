@@ -33,11 +33,31 @@ from dsl_course import (
     settings,
 )
 
-# students.csv's header row, DERIVED from the columns the engine declares rather than
-# re-typed. `roster.FIELDS` is a frozen public contract (the shipped JavaScript spells the
-# same columns out by hand), and five test files each carried their own copy of it - so a
-# column added to FIELDS left five fixtures describing a roster that no longer exists.
-ROSTER_HEADER = ",".join(roster.FIELDS)
+# A test writes each student as ONE row in the pre-0.11.0 combined shape (students.csv
+# with the engine's columns on it), DERIVED from the columns the engine declares rather
+# than re-typed. `parse_roster` / `roster_files` split it exactly as the migration does
+# (`roster.split_legacy`), so a fixture stays one line per student and the parse under
+# test is the real one over the real two files.
+ROSTER_HEADER = ",".join(
+    (roster.LEGACY_EMAIL, *roster.FIELDS[1:], *roster.LEGACY_SYSTEM_COLUMNS)
+)
+
+
+def roster_files(
+    text: str, teams: str | None = None, numbers: dict | None = None
+) -> dict[str, str]:
+    """`{students.csv: text, .system/roster.csv: text}` from one combined fixture (and an
+    old-shape teams.csv, `numbers` = schedule key -> assignment number)."""
+    students, system = roster.split_legacy(text, teams, numbers or {})
+    return {roster.STUDENTS_PATH: students, roster.SYSTEM_PATH: system}
+
+
+def parse_roster(
+    text: str, teams: str | None = None, numbers: dict | None = None
+) -> list[roster.Student]:
+    """`roster.parse` over `roster_files(text)`."""
+    files = roster_files(text, teams, numbers)
+    return roster.parse(files[roster.STUDENTS_PATH], files[roster.SYSTEM_PATH])
 
 
 def new_sheet(

@@ -73,7 +73,7 @@ from .ops.request import REQUEST_JSON_SCHEMA
 from .repos import NEVER_MATERIAL, PUBLICATION_DENYLIST
 from .roster import FIELDS as ROSTER_FIELDS
 from .roster import REQUIRED_FIELDS as ROSTER_REQUIRED
-from .roster import ROLE_AUDITOR, ROLE_ENROLLED
+from .roster import ROLE_AUDITOR, ROLE_ENROLLED, SYSTEM_FIELDS, SYSTEM_PATH, TEAM_PREFIX
 from .schedule import (
     BLOCKS,
     KNOWN_ARCHIVE,
@@ -92,7 +92,6 @@ from .settings import (
     RUN_KEYS,
     SOURCES,
 )
-from .teams import FIELDS as TEAMS_FIELDS
 
 DRAFT = "https://json-schema.org/draft/2020-12/schema"
 # WP-C removes: the console's settings screens still write the 0.10 files and validate
@@ -657,16 +656,21 @@ def _csv_schema(title: str, fields, required, overrides: dict | None = None) -> 
 
 
 def students_schema() -> dict:
-    return _csv_schema(
+    """students.csv: its own columns, plus one `team:<number>` column per team
+    assignment (a string cell: the team name, blank for none)."""
+    schema = _csv_schema(
         f"{CONFIG_REPO}/students.csv",
         ROSTER_FIELDS,
         ROSTER_REQUIRED,
         {"role": _enum(("", ROLE_ENROLLED, ROLE_AUDITOR))},
     )
+    schema["items"]["patternProperties"] = {f"^{TEAM_PREFIX}": {"type": "string"}}
+    return schema
 
 
-def teams_schema() -> dict:
-    return _csv_schema(f"{CONFIG_REPO}/teams.csv", TEAMS_FIELDS, TEAMS_FIELDS)
+def roster_schema() -> dict:
+    """`.system/roster.csv`: engine-written, every column the engine's."""
+    return _csv_schema(f"{CONFIG_REPO}/{SYSTEM_PATH}", SYSTEM_FIELDS, ("email",))
 
 
 _SPEC_TYPES = {
@@ -942,7 +946,7 @@ def all_schemas() -> dict[str, dict]:
         "semester.schema.json": semester_schema(),
         "institution.schema.json": institution_schema(),
         "students.schema.json": students_schema(),
-        "teams.schema.json": teams_schema(),
+        "roster.schema.json": roster_schema(),
         "grading_config.schema.json": grading_config_schema(),
         "materials.schema.json": materials_schema(),
         **{

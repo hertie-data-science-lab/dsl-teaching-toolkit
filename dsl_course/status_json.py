@@ -136,7 +136,6 @@ from .schedule_plan import (
     site_rows,
     unnumbered,
 )
-from .sync_teams import known_handles
 
 # Where each file lives, inside `semester-config` (semester) or `.github` (course).
 STATUS_PATH = records.path("status")
@@ -261,7 +260,6 @@ class SemesterFacts:
     students: list[roster.Student] | None = None
     roster_faults: list[ConfigFault] = field(default_factory=list)
     teams: dict[str, dict[str, list[str]]] = field(default_factory=dict)
-    teams_faults: list[ConfigFault] = field(default_factory=list)
     sheet_faults: list[ConfigFault] = field(default_factory=list)
     # The semester's view of the course-side templates it cites: every value in their
     # grading_config.yml that will not grade as written. Rolled up as COURSE problems.
@@ -349,11 +347,8 @@ STOPS = {
     sync_faculty.SEMESTER_PEOPLE_PATH: (
         "This person has no access and is not told about problems."
     ),
-    roster.ROSTER_PATH: (
+    roster.STUDENTS_PATH: (
         "The whole roster is skipped: nobody new can join or is sent a code."
-    ),
-    teams.TEAMS_PATH: (
-        "That row is ignored: the team is not created or the member not added."
     ),
     grading_sheet.SHEETS_DIR: "That sheet is not updated, and none of its marks are returned.",
     grading_spec.GRADING_FILE: "Marking uses the toolkit's default for that value.",
@@ -389,8 +384,7 @@ _FILES = {
     sync_faculty.SEMESTER_PEOPLE_PATH: _Where(
         "people", "semester", "K3", "instructors", "PEOPLE"
     ),
-    roster.ROSTER_PATH: _Where("roster", "semester", "K5", "roster", "ROSTER"),
-    teams.TEAMS_PATH: _Where("teams", "semester", "K5", "teams", "TEAMS"),
+    roster.STUDENTS_PATH: _Where("roster", "semester", "K5", "roster", "ROSTER"),
     grading_spec.GRADING_FILE: _Where(
         "template", "course", "C5", "template", "GRADING_CONFIG"
     ),
@@ -2256,8 +2250,8 @@ def semester_inputs(facts: SemesterFacts, course: CourseFacts) -> dict[str, str 
     return {
         schedule.SCHEDULE_PATH: paths.get(schedule.SCHEDULE_PATH),
         SEMESTER_FILE: paths.get(SEMESTER_FILE),
-        roster.ROSTER_PATH: paths.get(roster.ROSTER_PATH),
-        teams.TEAMS_PATH: paths.get(teams.TEAMS_PATH),
+        roster.STUDENTS_PATH: paths.get(roster.STUDENTS_PATH),
+        roster.SYSTEM_PATH: paths.get(roster.SYSTEM_PATH),
         grading_sheet.SHEETS_DIR: paths.get(grading_sheet.SHEETS_DIR),
         f"course/{COURSE_CONFIG}": (course.github_paths or {}).get(COURSE_CONFIG),
         team_formation.TEAM_LOCK_PATH: paths.get(team_formation.TEAM_LOCK_PATH),
@@ -2313,7 +2307,6 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
         *facts.schedule_faults,
         *facts.people_faults,
         *facts.roster_faults,
-        *facts.teams_faults,
         *facts.sheet_faults,
     ]
     moments = _handouts(
@@ -2598,11 +2591,10 @@ def gather_semester(course_org: str, semester_org: str, now: datetime) -> Semest
         facts.students = roster.load(semester_org, facts.roster_faults)
     except Unusable:
         facts.students = None  # the header fault is already in roster_faults
-    known = known_handles(facts.students) if facts.students is not None else None
-    try:
-        facts.teams = teams.load(semester_org, facts.teams_faults, known)
-    except Unusable:
-        facts.teams = {}
+    if facts.students is not None:
+        facts.teams = teams.parse(
+            facts.students, teams.columns(sched), facts.roster_faults
+        )
     # `grading_spec.semester_sheet_faults`, with each sheet read once for the faults and the marks.
     sheet_specs = grading_spec.sheet_specs(course_org, sched)
     sheet_texts = {

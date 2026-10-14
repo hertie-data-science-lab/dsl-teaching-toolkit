@@ -102,6 +102,8 @@ def test_the_lock_file_carries_a_scalar_block_per_schedule_assignment(monkeypatc
                 # No window, so no day for a refusal about one to name.
                 "team_formation_closes": None,
                 "team_formation_page": None,
+                # The students.csv column the form writes: no number, so the key.
+                "team_column": "team:a1",
             },
             "project": {
                 "team_formation": "self_select",
@@ -111,6 +113,7 @@ def test_the_lock_file_carries_a_scalar_block_per_schedule_assignment(monkeypatc
                 "team_formation_closes": _CUTOFF.date(),
                 # No `pages` handed in, so none to link - the key is still written.
                 "team_formation_page": None,
+                "team_column": "team:project",
             },
         }
     }
@@ -330,6 +333,7 @@ def test_the_lock_file_is_written_once_and_is_free_when_nothing_changed(monkeypa
         "team_formation_closes": _CUTOFF.date(),
         # Where the teams are listed: the assignment's page on the semester site.
         "team_formation_page": "https://semester.github.io/assignments/project.html",
+        "team_column": "team:project",
     }
 
 

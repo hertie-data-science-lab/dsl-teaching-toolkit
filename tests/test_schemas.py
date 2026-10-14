@@ -19,7 +19,6 @@ from dsl_course import (
     schemas,
     settings,
     team_formation,
-    teams,
 )
 from dsl_course.ops.registry import REGISTRY
 from dsl_course.ops.request import validate
@@ -91,7 +90,7 @@ def test_file_schema_enums_are_the_engine_constants():
     assert set(top["archive"]["properties"]) == set(schedule.KNOWN_ARCHIVE)
 
     assert schemas.students_schema()["columns"] == list(roster.FIELDS)
-    assert schemas.teams_schema()["columns"] == list(teams.FIELDS)
+    assert schemas.roster_schema()["columns"] == list(roster.SYSTEM_FIELDS)
 
     defaults = schemas.course_schema()["properties"]["defaults"]["properties"]
     assert set(defaults) == {*settings.DEFAULT_FILE_KEYS, *settings.COURSE_ASKED_KEYS}

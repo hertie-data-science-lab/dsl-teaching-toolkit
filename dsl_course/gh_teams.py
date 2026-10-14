@@ -359,7 +359,7 @@ def add_team_member(org: str, team_slug: str, login: str) -> bool:
 #
 # The run that CREATES a team never reads it (see `reconcile_team_members(just_created=)`).
 # The waiting is for the run that finds it already there - a later run, or the other of two
-# workflows fired by the same teams.csv push - and is bounded by a PER-PROCESS budget. Once
+# workflows fired by the same students.csv push - and is bounded by a PER-PROCESS budget. Once
 # one ladder's worth of waiting is spent, every later 404 in the same run answers at once -
 # so a sync over many teams, or one that meets a team that really is gone, adds at most
 # `_LAG_BUDGET` seconds in total, never that much per team. Five minutes sits well inside the

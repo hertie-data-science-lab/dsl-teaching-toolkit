@@ -87,7 +87,7 @@ CONTRACT_EXAMPLE = {
         "schedule.yml": "<blob sha>",
         "semester.yml": "...",
         "students.csv": "...",
-        "teams.csv": "...",
+        ".system/roster.csv": "...",
         "grading_sheets": "<sha of the directory tree>",
         "course/course.yml": "...",
         ".system/assignments.lock.yml": "...",
@@ -298,7 +298,7 @@ def _semester(**over) -> status_json.SemesterFacts:
             "schedule.yml": "5c4ed",
             "semester.yml": "9e091",
             "students.csv": "57ude",
-            "teams.csv": "7ea45",
+            ".system/roster.csv": "7ea45",
             "grading_sheets": "5hee7",
             ".system/assignments.lock.yml": "10c4",
         },
@@ -897,7 +897,7 @@ def test_inputs_carry_shas_and_no_timestamp_is_recorded_for_the_write():
         "schedule.yml": "5c4ed",
         "semester.yml": "9e091",
         "students.csv": "57ude",
-        "teams.csv": "7ea45",
+        ".system/roster.csv": "7ea45",
         "grading_sheets": "5hee7",
         "course/course.yml": "c0ffee",
         ".system/assignments.lock.yml": "10c4",
@@ -1646,11 +1646,11 @@ def test_a_failed_refresh_names_no_repo(monkeypatch, capsys):
 def test_write_reads_the_roster_as_it_is_now(monkeypatch):
     texts = iter(["before the send", "after the send"])
     monkeypatch.setattr(roster, "get_file_content", lambda *a, **k: next(texts))
-    assert roster._roster_text(SEMESTER) == "before the send"
+    assert roster._system_text(SEMESTER) == "before the send"
     seen = []
 
     def document(course, semester):
-        seen.append(roster._roster_text(semester))
+        seen.append(roster._system_text(semester))
         return _render(), None
 
     monkeypatch.setattr(status, "_documents", document)

@@ -8,7 +8,7 @@
 // Both CSVs are written by Python's csv module, so a field containing a comma (a roster
 // name like "Doe, Jane") arrives QUOTED. A naive line.split(',') shifts every column right
 // of it: the wrong enrol_code read, github_handle / github_id written into the wrong cells,
-// teams.csv rewritten with mangled rows. Quoted fields may contain commas, newlines and
+// a team cell written into the wrong column. Quoted fields may contain commas, newlines and
 // "" -escaped quotes; serialiseCsv re-quotes on the same rule as csv.QUOTE_MINIMAL.
 const parseCsv = (text) => {
   const rows = [];

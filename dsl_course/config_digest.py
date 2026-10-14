@@ -82,10 +82,9 @@ from .issues import (
     upsert_issue,
 )
 from .log import log_err, log_ok, log_step
-from .roster import ROSTER_PATH
+from .roster import STUDENTS_PATH
 from .schedule import CONFIG_REPO, SourceFault, worst_severity
 from .sync_faculty import SEMESTER_PEOPLE_PATH
-from .teams import TEAMS_PATH
 
 
 @dataclass(frozen=True)
@@ -147,13 +146,8 @@ PEOPLE = Digest(
 )
 ROSTER = Digest(
     title="students.csv has rows the toolkit cannot use",
-    file=ROSTER_PATH,
+    file=STUDENTS_PATH,
     doc="docs/06-enrol-students-to-cohort.md",
-)
-TEAMS = Digest(
-    title="teams.csv has rows the toolkit cannot use",
-    file=TEAMS_PATH,
-    doc="docs/09-release-assignment-to-cohort.md",
 )
 # The FOLDER, not one sheet: a semester marks half a dozen assignments at once and an issue
 # per sheet would be six threads about one grader's afternoon. Each fault still carries
@@ -211,7 +205,6 @@ COURSE = Digest(
 SEMESTER_DIGESTS: tuple[Digest, ...] = (
     PEOPLE,
     ROSTER,
-    TEAMS,
     GRADING_SHEETS,
     GRADING_CONFIG,
     ASSIGNMENTS,

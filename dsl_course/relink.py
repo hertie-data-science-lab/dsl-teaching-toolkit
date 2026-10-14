@@ -1,6 +1,7 @@
 """Relink a student who switched to a different GitHub account, or renamed theirs.
 
-A switch: faculty re-point the row's `github_handle` at the new account; Sync membership
+A switch: faculty re-point the student's `github_handle` in `.system/roster.csv` at the
+new account (the one hand edit that file takes); Sync membership
 then moves the student's handle-keyed state here, before the roster reconcile. A row
 qualifies only on definite answers: the handle names a different account from the stored
 `github_id`, that id still exists under another login, neither is on another row, and
@@ -45,14 +46,13 @@ from .discovery import classify_repos, course_org_for_semester
 from .enrol_codes import write_column
 from .faults import Unusable
 from .gh_contents import (
-    dump_csv,
     get_blob,
+    get_file_content,
     get_file_with_sha,
     head_commit,
     path_commit_subjects,
     put_file,
     put_files,
-    read_csv,
     repo_blob_shas,
 )
 from .gh_teams import (
@@ -149,11 +149,11 @@ def pending(org: str, students: list[roster.Student]) -> list[Pending]:
         if subjects is None:
             try:
                 subjects = path_commit_subjects(
-                    org, roster.CONFIG_REPO, roster.ROSTER_PATH
+                    org, roster.CONFIG_REPO, roster.SYSTEM_PATH
                 )
             except RuntimeError as exc:
                 log_err(
-                    f"could not read {roster.ROSTER_PATH}'s history ({exc}) - no "
+                    f"could not read {roster.SYSTEM_PATH}'s history ({exc}) - no "
                     f"relink this run"
                 )
                 return None
@@ -202,9 +202,7 @@ def pending(org: str, students: list[roster.Student]) -> list[Pending]:
             if any(o.github_id.strip() == stored for o in students if o is not s):
                 _skip(line, "the account this row was linked to is on another row too")
                 continue
-            found.append(
-                Pending(i, s.hertie_email, current, stored, s.github_handle, stored)
-            )
+            found.append(Pending(i, s.email, current, stored, s.github_handle, stored))
             continue
         if new_id is None:
             unanswered += 1
@@ -239,7 +237,7 @@ def pending(org: str, students: list[roster.Student]) -> list[Pending]:
         if handles[old.casefold()]:
             _skip(line, "the previously linked account is still another row's handle")
             continue
-        found.append(Pending(i, s.hertie_email, s.github_handle, new_id, old, stored))
+        found.append(Pending(i, s.email, s.github_handle, new_id, old, stored))
     if unanswered:
         log_err(
             f"{unanswered} roster row(s) in {org} could not be checked for a switched "
@@ -495,37 +493,6 @@ def _rekey_sheet(text: str, old: str, new: str) -> str | None:
     return out
 
 
-def _rekey_teams(text: str, old: str, new: str) -> str | None:
-    """teams.csv with the old login's rows re-pointed. A row identical to one the new login
-    already has is dropped; the new login in a DIFFERENT team for the same assignment
-    refuses."""
-    reader = read_csv(text, teams.FIELDS, teams.TEAMS_PATH)
-    rows = list(reader)
-
-    def cell(row: dict, name: str) -> str:
-        return (row.get(name) or "").strip().casefold()
-
-    theirs = [r for r in rows if cell(r, "github_handle") == old.casefold()]
-    if not theirs:
-        return None
-    new_teams = {
-        cell(r, "assignment"): cell(r, "team")
-        for r in rows
-        if cell(r, "github_handle") == new.casefold()
-    }
-    dropped = set()
-    for row in theirs:
-        team = new_teams.get(cell(row, "assignment"))
-        if team is not None and team != cell(row, "team"):
-            raise Refused("the two accounts are in different teams for one assignment")
-        if team is not None:
-            dropped.add(id(row))  # the new login already has this exact row
-        row["github_handle"] = new
-    kept = [r for r in rows if id(r) not in dropped]
-    fields = list(reader.fieldnames or [])
-    return dump_csv(fields, ([row.get(f) or "" for f in fields] for row in kept))
-
-
 def _rekey_distributed(text: str, old: str, new: str) -> str | None:
     """distributed.csv with the old login's EMAIL rows re-pointed, so nobody is mailed
     twice. The gradebook rows stay, so the next distribute rewrites the renamed gradebook
@@ -560,7 +527,8 @@ def _config_changes(
     files: dict[str, bytes] = {}
     delete: list[str] = []
     sheets = [p for p in sorted(live) if re.fullmatch(rf"{SHEETS_DIR}/[^/]+\.yml", p)]
-    rewrites = {teams.TEAMS_PATH: _rekey_teams, DISTRIBUTED_PATH: _rekey_distributed}
+    # Team cells are keyed by email in students.csv, so they move with the student.
+    rewrites = {DISTRIBUTED_PATH: _rekey_distributed}
     rewrites |= dict.fromkeys(sheets, _rekey_sheet)
     for path, rewrite in rewrites.items():
         if path not in live:
@@ -643,7 +611,7 @@ def _write_cell(
     org: str, p: Pending, column: str, value: str, replacing: str, suffix: str
 ) -> bool:
     """The last step: the row's pending marker, written only over the value it held."""
-    got = get_file_with_sha(org, roster.CONFIG_REPO, roster.ROSTER_PATH)
+    got = get_file_with_sha(org, roster.CONFIG_REPO, roster.SYSTEM_PATH)
     if got is None:
         return False
     raw, sha = got
@@ -652,12 +620,11 @@ def _write_cell(
         raw,
         sha,
         column,
-        [(p.index, p.email, value)],
+        {p.email: value},
         LINK_MESSAGE.format(handle=p.new, user_id=p.new_id) + suffix,
         replacing=replacing,
     )
-    roster._roster_text.cache_clear()
-    teams._teams_text.cache_clear()
+    roster.reread()
     return written is not None
 
 
@@ -716,13 +683,14 @@ def sync(org: str, existing: dict[str, dict] | None, dry_run: bool = False) -> i
     """Relink every row that qualifies in `org`. Returns the error count: a write that
     failed counts, a refusal and an uncertain row do not."""
     try:
-        got = get_file_with_sha(org, roster.CONFIG_REPO, roster.ROSTER_PATH)
+        text = get_file_content(org, roster.CONFIG_REPO, roster.STUDENTS_PATH)
+        system = get_file_content(org, roster.CONFIG_REPO, roster.SYSTEM_PATH)
     except RuntimeError as exc:
         log_err(f"could not read {org}'s roster for the relink check: {exc}")
         return 1
-    if got is None:
-        return 0  # no roster: sync_roster reports it
-    found = pending(org, roster.parse(got[0]))
+    if text is None or system is None:
+        return 0  # no roster (sync_roster reports it), or nobody onboarded yet
+    found = pending(org, roster.parse(text, system))
     if not found:
         return 0
     if existing is None:

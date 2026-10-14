@@ -127,7 +127,7 @@ def test_the_note_is_never_read_as_a_submission_receipt():
 def _students():
     return [
         roster.Student(
-            hertie_email="ada@x.edu",
+            email="ada@x.edu",
             name="Ada",
             github_handle="ada",
             github_id="1",

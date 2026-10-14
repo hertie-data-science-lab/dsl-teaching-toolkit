@@ -15,9 +15,9 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
-from conftest import ROSTER_HEADER
+from conftest import ROSTER_HEADER, roster_files
 
-from dsl_course import discovery, gh_contents, settings, team_formation
+from dsl_course import discovery, gh_contents, roster, settings, team_formation
 from dsl_course.faults import Severity
 from dsl_course.grading_spec import GradingSpec
 from dsl_course.mailer import send_bulk as _SEND_BULK
@@ -77,13 +77,20 @@ def semester(monkeypatch):
     ones the toolkit actually applies."""
 
     def _wire(roster_csv: str = ROSTER, teams_csv: str = "", spec=GROUP):
-        monkeypatch.setattr(
-            team_formation.roster, "_roster_text", lambda org: roster_csv
+        files = (
+            {}
+            if roster_csv is None
+            else roster_files(roster_csv, teams_csv or None, _numbers(teams_csv))
         )
         monkeypatch.setattr(
-            team_formation.teams,
-            "_teams_text",
-            lambda org: teams_csv or None,
+            team_formation.roster,
+            "_students_text",
+            lambda org: files.get(roster.STUDENTS_PATH),
+        )
+        monkeypatch.setattr(
+            team_formation.roster,
+            "_system_text",
+            lambda org: files.get(roster.SYSTEM_PATH),
         )
         monkeypatch.setattr(
             team_formation,
@@ -100,6 +107,12 @@ def semester(monkeypatch):
         )
 
     return _wire
+
+
+def _numbers(teams_csv: str) -> dict[str, int]:
+    """Each schedule key a teams fixture names -> its number (`assignment-2` -> 2)."""
+    keys = {line.split(",")[0] for line in teams_csv.splitlines()[1:] if line}
+    return {k: int(k.rsplit("-", 1)[1]) for k in keys if k.rsplit("-", 1)[-1].isdigit()}
 
 
 def _rows(*pairs: tuple[str, str], key: str = "assignment-2") -> str:
@@ -242,7 +255,7 @@ def test_an_auditor_sharing_a_handle_with_a_student_is_still_not_counted(semeste
     semester(roster_csv=shared)
     (window,) = team_formation.open_windows(COURSE, SEMESTER, _sched(), INSIDE)
     assert window.enrolled == 4
-    assert [s.hertie_email for s in window.waiting].count("fred@x.edu") == 0
+    assert [s.email for s in window.waiting].count("fred@x.edu") == 0
 
 
 def test_rows_for_another_assignment_do_not_team_anybody_up(semester):
@@ -265,7 +278,7 @@ def test_a_teams_csv_that_could_not_be_read_reports_no_windows_at_all(
     def boom(org):
         raise RuntimeError("API rate limit exceeded")
 
-    monkeypatch.setattr(team_formation.teams, "_teams_text", boom)
+    monkeypatch.setattr(team_formation.roster, "_system_text", boom)
     windows = team_formation.open_windows(COURSE, SEMESTER, _sched(), INSIDE)
     assert windows is None
     assert "rate limit" in capsys.readouterr().err
@@ -287,8 +300,8 @@ def test_a_semester_with_no_self_select_assignment_reads_neither_csv(
             "the semester was read for a plan with no self-select window"
         )
 
-    monkeypatch.setattr(team_formation.roster, "_roster_text", refuse)
-    monkeypatch.setattr(team_formation.teams, "_teams_text", refuse)
+    monkeypatch.setattr(team_formation.roster, "_students_text", refuse)
+    monkeypatch.setattr(team_formation.roster, "_system_text", refuse)
     assert team_formation.open_windows(COURSE, SEMESTER, _sched(), INSIDE) == []
 
 
@@ -396,7 +409,8 @@ def test_the_fault_carries_its_own_consequence_and_fix(semester):
         "team cannot hand anything in"
     )
     assert fault.fix() == (
-        "write the missing rows into semester-config/teams.csv yourself, or move the "
+        "write the missing team cells into semester-config/students.csv yourself, or "
+        "move the "
         "date on the line above to keep team formation open for longer."
     )
 

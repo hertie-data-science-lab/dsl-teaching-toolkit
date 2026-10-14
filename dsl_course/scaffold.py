@@ -1583,7 +1583,7 @@ def main() -> int:
         dest="kind",
         choices=list(ASSIGNMENT_TYPES),
         default="individual",
-        help="individual = one repo per student; group = one repo per team (teams.csv)",
+        help="individual = one repo per student; group = one repo per team (students.csv)",
     )
     pa.add_argument(
         "--submit-via",

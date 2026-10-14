@@ -24,7 +24,7 @@ an instructor or a TA, `email` (the only way a notification reaches them - see
 `teaching_contacts`); `start`/`end` (optional ISO dates) bound when they're active,
 giving auto-rotation with no manual removal step. Every reconcile here is FULL
 (add + remove) - a lapsed `end` date or a deleted entry revokes access on the next sync,
-same as an edit to students.csv/teams.csv.
+same as an edit to students.csv.
 
 A missing or malformed `email` is reported and does NOT withhold access: a semester that
 has not filled it in keeps working (and keeps getting the @mention on its digest issue)

@@ -63,6 +63,7 @@ SEMESTER_TOPICS = "semester .github topics"
 COURSE_REPOS = "course org repos"
 MEMBERSHIP_DISPATCH = "sync-membership dispatch payload"
 STATUS_TODO_CHECK = "status.json to-do check"
+ROSTER_FILES = "semester-config students.csv / teams.csv"
 
 _GRADING_CONFIG_HOME = (
     "in the assignment's own grading_config.yml, on the course template's "
@@ -233,6 +234,15 @@ ROWS: tuple[Old, ...] = (
     # A 0.10 defaults block's keys (`assignment_defaults:`, `assignments.yml defaults:`).
     Old("visibility", "assignment_repo_visibility", DEFAULTS_KEYS, "0.11.0"),
     Old("formats", "", DEFAULTS_KEYS, "0.11.0"),
+    # The roster before decision 0039 rule 4: one students.csv carrying the engine's
+    # columns too, and teams.csv beside it. Read by `roster.split_legacy`, which the 0.11.0
+    # migration folds them with.
+    Old("hertie_email", "email", ROSTER_FILES, "0.11.0"),
+    Old("github_handle", ".system/roster.csv", ROSTER_FILES, "0.11.0"),
+    Old("github_id", ".system/roster.csv", ROSTER_FILES, "0.11.0"),
+    Old("enrol_code", ".system/roster.csv", ROSTER_FILES, "0.11.0"),
+    Old("code_sent_at", ".system/roster.csv", ROSTER_FILES, "0.11.0"),
+    Old("teams.csv", "students.csv `team:<number>` columns", ROSTER_FILES, "0.11.0"),
     # A status.json an engine before 0.11.0 wrote still carries it until the semester's next
     # status refresh rewrites the file; the final sweep drops the row once every live org
     # has migrated and refreshed (decision 0038 retired the check).

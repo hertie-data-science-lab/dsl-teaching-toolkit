@@ -426,19 +426,17 @@ def test_sync_site_auto_resyncs_on_sourced_changes():
 DISPATCH_MAP = {
     "scheduled-release": {
         "schedule.yml",
-        "assignments.yml",
         "semester.yml",
         "students.csv",
-        "teams.csv",
+        ".system/roster.csv",
     },
     "sync-membership": {
         "students.csv",
-        "teams.csv",
+        ".system/roster.csv",
         "semester.yml",
         "schedule.yml",
-        "assignments.yml",
     },
-    "sync-site": {"schedule.yml", "assignments.yml", "semester.yml", "teams.csv"},
+    "sync-site": {"schedule.yml", "semester.yml", "students.csv"},
     "send-codes": {"students.csv"},
 }
 

@@ -2,7 +2,7 @@
 
 `schedule.formation_window` answers WHEN a self-selected team may be formed, off the
 parsed plan alone and with no I/O. This module owns the other half of the same question -
-WHO has not formed one yet - which needs the roster and teams.csv and therefore cannot live
+WHO has not formed one yet - which needs the roster and the team cells and therefore cannot live
 there; and it writes the lock file the Join-team form reads (`sync_team_lock`). The grading
 modules (`grading_spec`, `gradebook`) must never import it.
 
@@ -26,7 +26,7 @@ permanent - no team, so no repo, so nothing to hand in - and a fault that vanish
 would be read by `config_digest.transitions` as a key that stopped appearing, which owes
 the teaching team a *Cleared* comment. Telling them it is fixed at the exact minute it
 became unfixable is the one thing this must not do. So a window that has shut short of its
-teams keeps its fault, at MISSED, until somebody writes the missing rows into teams.csv,
+teams keeps its fault, at MISSED, until somebody writes the missing rows into the team cells,
 moves the date, or takes the entry out of the plan - which are the three things that
 genuinely clear it. It does not nag: MISSED is the top rung, so after the one comment for
 the crossing there is no further comment and no further mail (`config_digest.transitions`
@@ -134,7 +134,8 @@ NOUN = (
 )
 
 FIX = (
-    "write the missing rows into semester-config/teams.csv yourself, or move the date on "
+    "write the missing team cells into semester-config/students.csv yourself, or move "
+    "the date on "
     "the line above to keep team formation open for longer."
 )
 
@@ -151,7 +152,7 @@ class Window:
     shut with somebody still waiting - and what the semester has done with it so far.
 
     TWO NAMES, for the reason `assign.provision_all` spells out: `key` is the SCHEDULE key,
-    which teams.csv is keyed on (the Join-team form validates against `assignments:` and
+    which the team cells are keyed on (the Join-team form validates against `assignments:` and
     writes that key), and `name` is the semester-side name every repo is called after. They
     differ exactly when the entry sets `semester_dest_repo`.
 
@@ -167,11 +168,11 @@ class Window:
     # than by the slug the plan is keyed on.
     title: str
     closes: datetime
-    # Every team with at least one row for `key` in teams.csv, as `(name, member count)`,
+    # Every team with at least one row for `key` in the team cells, as `(name, member count)`,
     # sorted by name. `teams` counts them for the fault; the semester site prints the names and the
     # room each has left off the same file (`site._formed_teams`).
     sizes: tuple[tuple[str, int], ...]
-    # Enrolled, onboarded roster rows with no teams.csv row for `key` - and the people the
+    # Enrolled, onboarded roster rows with no team cell for `key` - and the people the
     # mail below is addressed to.
     #
     # ONBOARDED only, and a student who has not joined GitHub yet is deliberately not asked
@@ -206,12 +207,12 @@ def open_windows(
     course_org: str, semester_org: str, sched: schedule.Schedule, now: datetime
 ) -> list[Window] | None:
     """Every assignment whose team-formation window is open at `now` - plus every one that
-    has SHUT with somebody still unteamed - with the roster x teams.csv diff for each.
+    has SHUT with somebody still unteamed - with the roster x the team cells diff for each.
     `None` when the semester could not be read.
 
     None is NOT an empty list, for the reason `scheduler._config_faults` gives: "we could
     not look" must not be reported as "there is nothing to report". A rate limit on
-    teams.csv would otherwise say every student has a team.
+    the team cells would otherwise say every student has a team.
 
     A window is here only when the assignment's teams are SELF-SELECTED
     (`self_select_keys`). Whether `now` falls inside it is `schedule.formation_state`'s
@@ -227,7 +228,7 @@ def open_windows(
     # Asked BEFORE the two reads below, and free by then: `declared_grading_spec` memoises
     # each template's text per process and the tick has read every one of them already. A
     # semester with no self-select assignment at all - most of them, for most of a term - has
-    # no window any date could open, so students.csv and teams.csv would be two contents
+    # no window any date could open, so students.csv would be two contents
     # reads a quarter of an hour that could only ever produce an empty list.
     keys = self_select_keys(course_org, sched)
     if not keys:
@@ -239,7 +240,7 @@ def open_windows(
         # A semester with no students.csv already carries that fault on its own digest.
         if students is None:
             return None
-        per_assignment = teams.load(semester_org)
+        per_assignment = teams.parse(students, teams.columns(sched))
     except Exception as exc:
         log_err(
             f"could not work out who is still without a team in {semester_org} "
@@ -248,7 +249,7 @@ def open_windows(
         return None
     # The same population every group handout provisions for, built the same way and with
     # the same idiom `assign` and `gradebook` use: ENROLLED because an auditor gets no
-    # assignment repo at all, ONBOARDED because those are the only accounts teams.csv may
+    # assignment repo at all, ONBOARDED because those are the only accounts the team cells may
     # name. One filter over the roster rows, not a round trip through a handle set - that
     # re-admits any row of the unfiltered list sharing a handle, so an auditor who shares
     # one with an enrolled student would inflate the counts a public digest prints.
@@ -267,7 +268,7 @@ def open_windows(
         shut = state == "closed"
         if shut and opens is None:
             continue
-        # teams.csv is keyed on the SCHEDULE key, and parsed CASEFOLDED - GitHub logins are
+        # the team cells are keyed on the SCHEDULE key, and parsed CASEFOLDED - GitHub logins are
         # case-insensitive, so the roster's own casing is folded to meet it rather than the
         # other way round.
         groups = teams.teams_for(per_assignment, key)
@@ -318,7 +319,7 @@ def window_faults(
     later.
 
     A SHUT one is where this matters most: its `fires` has passed, so it sits at MISSED,
-    and it is the state nobody can put right by waiting. It clears when teams.csv, the
+    and it is the state nobody can put right by waiting. It clears when the team cells, the
     date or the plan changes - never merely because the calendar moved past it.
 
     They ride into the SCHEDULE digest, which already carries both notifiers and the
@@ -391,12 +392,12 @@ def _what(window: Window) -> str:
 # sent is retried exactly once, because the row holding its claim is given back.
 MAILED_PATH = records.path("team_formation", "mailed.csv")
 MAILED_HEADER = (
-    # The SCHEDULE key, not the semester-side name: it is what teams.csv and the Join-team
+    # The SCHEDULE key, not the semester-side name: it is what the team cells and the Join-team
     # form are keyed on, and it survives an edit to `semester_dest_repo` - which, keyed on
     # the name, would read as an assignment nobody had been told about and re-mail the
     # whole semester.
     "assignment",
-    # The student's `hertie_email`, CASEFOLDED. Not the handle: the address is what the
+    # The student's `email`, CASEFOLDED. Not the handle: the address is what the
     # message is actually addressed to, and it is what collapses a roster row somebody
     # duplicated onto one message, exactly as `enrol_codes.run` collapses it.
     "recipient",
@@ -641,7 +642,7 @@ def _nudges(
     for window in windows:
         seen: set[str] = set()
         for student in window.waiting:
-            to = student.hertie_email.strip()
+            to = student.email.strip()
             fold = to.casefold()
             if not fold or fold in seen:
                 continue
@@ -1126,7 +1127,7 @@ def run(
     """One press of **Open team formation**: mail whoever is still without a team, for
     every open window or for the one `only` names. Returns the error count.
 
-    `only` is the SCHEDULE key, because that is what teams.csv, the Join-team form and the
+    `only` is the SCHEDULE key, because that is what the team cells, the Join-team form and the
     record are keyed on - and it is free text on the button rather than a dropdown, since
     the keys are per semester and the workflow is rendered once for the whole course org.
 
@@ -1189,7 +1190,7 @@ _TEAM_LOCK_HEADER = f"""\
 # The Join-team form in this semester's `join` repo reads THIS FILE and nothing else.
 #
 #   team_formation: self_select   students form their own teams with the Join-team form
-#                   assigned      the teaching team writes teams.csv; the form refuses
+#                   assigned      the teaching team writes the team cells; the form refuses
 #                   none          an individual assignment; the form refuses
 #   max_team_size:  the cap the form enforces (group assignments only)
 #   team_formation_window:
@@ -1203,15 +1204,20 @@ _TEAM_LOCK_HEADER = f"""\
 #   team_formation_page:
 #                   the assignment's page, which lists the teams that exist - for the
 #                   refusal to link; empty for anything not self-select
+#   team_column:    the students.csv column the form writes the team into (`team:4`)
 #
 # An assignment whose course template does not exist yet is locked to `{NO_TEAMS}`:
 # until the template says what it is, nobody can mint a GitHub team for it.
 """
 
 
-def team_lock_text(entries: dict[str, tuple[str, int, str, str, str]]) -> str:
+def team_lock_text(
+    entries: dict[str, tuple[str, int, str, str, str]],
+    columns: Mapping[str, str] | None = None,
+) -> str:
     """The lock file's whole text, from
-    `{schedule key: (team_formation, cap, window, closes, page)}`.
+    `{schedule key: (team_formation, cap, window, closes, page)}` and each key's
+    students.csv team column suffix (`teams.columns`; the key itself where absent).
 
     Hand-rolled rather than `yaml.safe_dump`, for the same reason the workflows are: it is
     read by a line scanner with no YAML library to hand (the Join-team form's JavaScript),
@@ -1236,6 +1242,7 @@ def team_lock_text(entries: dict[str, tuple[str, int, str, str, str]]) -> str:
             f"    team_formation_window: {window}",
             f"    team_formation_closes: {closes}".rstrip(),
             f"    team_formation_page: {page}".rstrip(),
+            f"    team_column: {roster.team_column((columns or {}).get(key, key))}",
         ]
     return "\n".join(lines) + "\n"
 
@@ -1425,7 +1432,8 @@ def team_lock_content(
     return team_lock_text(
         team_lock_entries(
             course_org, sched, now, _formation_pages(course_org, semester_org, sched)
-        )
+        ),
+        teams.columns(sched),
     ).encode()
 
 

@@ -579,7 +579,7 @@ def refresh(course_org: str, *, course_only: bool = False) -> int:
             continue
         failures += refresh_join_workflows(semester)
         # SYSTEM-owned files only (see welcome.CONFIG_SYSTEM_FILES): the semester's own
-        # students.csv/teams.csv/schedule.yml/semester.yml are never touched here, or this
+        # students.csv/schedule.yml/semester.yml are never touched here, or this
         # nightly cron would overwrite a live roster every night. Skipped whole when the
         # ref is missing: the set includes validate-schedule.yml, which is rendered at it.
         failures += render(

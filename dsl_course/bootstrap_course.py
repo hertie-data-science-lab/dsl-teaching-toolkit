@@ -83,7 +83,7 @@ def _profile_topics(is_semester: bool, course_code: str = "") -> list[str]:
 # every re-run. The guard has to be per FILE, and it depends on who owns the file:
 #
 #   USER-owned - content faculty edit, or that the running system writes live state into.
-#   In a semester: semester-config/{students.csv, teams.csv, schedule.yml, semester.yml} and
+#   In a semester: semester-config/{students.csv, schedule.yml, semester.yml} and
 #   join/README.md (the student landing page). On a course org: .github/course.yml
 #   (the faculty/course_admins SSOT). Seed these ONLY
 #   when absent (gh_contents.seed_if_absent) - rewriting them on a re-run destroys live enrolment
@@ -257,7 +257,7 @@ def grant_button_access(org: str) -> int:
 # The SEMESTER infra repos the faculty teams need the same standing grant on as `.github`.
 # Every org is tightened to default_repository_permission=none, so without these grants
 # only org OWNERS can touch either repo - yet the whole faculty workflow lives in them:
-# `semester-config` is what instructors edit (schedule.yml, students.csv, teams.csv,
+# `semester-config` is what instructors edit (schedule.yml, students.csv,
 # semester.yml, grading_sheets/), and `join` is where they triage `needs-review`
 # onboarding issues. Course orgs have neither repo, so this is semester-only. Single-sourced
 # with the nightly sweep's floor (access.SEMESTER_WRITE_REPOS), so the two cannot disagree.

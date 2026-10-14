@@ -40,7 +40,7 @@ from dsl_course.collect import Target
 from dsl_course.faults import RunSettingInTemplate, Severity
 from dsl_course.roster import Student
 from dsl_course.schedule import Schedule
-from tests.conftest import ROSTER_HEADER, run_settings
+from tests.conftest import ROSTER_HEADER, parse_roster, run_settings
 from tests.plans import citing
 
 # Every template these tests hand out, collect or patch: the plan cites each.
@@ -3752,7 +3752,7 @@ def _roster_of(monkeypatch, *rows: str):
     monkeypatch.setattr(
         collect.roster,
         "load",
-        lambda org: collect.roster.parse(
+        lambda org: parse_roster(
             ROSTER_HEADER + "\n" + "".join(r + "\n" for r in rows)
         ),
     )
@@ -3779,7 +3779,7 @@ def test_submission_targets_vets_teams_csv_against_the_roster(monkeypatch, capsy
     # the roster's casing wins; everyone else is dropped
     assert targets == [Target("assignment-4-team-1", "team-1", ["ada-l"])]
     err = capsys.readouterr().err
-    assert "3 handle(s) in teams.csv" in err
+    assert "3 team member(s) for" in err
     assert "stranger-x" not in err, "a student's typing must not reach a public log"
 
 

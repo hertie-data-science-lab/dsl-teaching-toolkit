@@ -393,7 +393,7 @@ def _semicolon_roster_fault() -> Exception:
     """The exception a `;`-delimited students.csv really raises, taken from the reader the
     sync actually calls - not a hand-built stand-in whose type could drift from it."""
     with pytest.raises(faults.Unusable) as caught:
-        roster.parse("hertie_email;name;github_handle\na;b;c\n")
+        roster.parse("email;name;role\na;b;c\n")
     return caught.value
 
 

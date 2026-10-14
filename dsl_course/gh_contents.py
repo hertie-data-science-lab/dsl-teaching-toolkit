@@ -341,7 +341,7 @@ def read_csv(
 ) -> csv.DictReader:
     """A DictReader over `text`, BOM stripped and the header checked for `required`.
 
-    The single door every HAND-EDITED CSV comes through - the roster, teams.csv, a grades
+    The single door every HAND-EDITED CSV comes through - the roster, a grades
     CSV, the enrol-code writers. Excel's two ways of handing back an unreadable file (a
     leading BOM, a `;`-delimited export) each look like ordinary empty data to DictReader,
     so neither is optional and neither is left to a caller to remember. `what` names the

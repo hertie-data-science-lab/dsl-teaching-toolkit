@@ -25,7 +25,7 @@ from dsl_course import (
     workflows_place,
 )
 from dsl_course.schedule import AssignmentEntry, Schedule
-from tests.conftest import ROSTER_HEADER, repo_row, run_settings
+from tests.conftest import ROSTER_HEADER, repo_row, roster_files, run_settings
 from tests.plans import citing
 
 # Every template these tests hand out, collect or patch: the plan cites each.
@@ -41,9 +41,10 @@ HEADER = ROSTER_HEADER
 
 
 def _roster_file(tmp_path, *rows: str):
-    path = tmp_path / "students.csv"
-    path.write_text("\n".join((HEADER, *rows)) + "\n")
-    return str(path)
+    for name, text in roster_files("\n".join((HEADER, *rows)) + "\n").items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(text)
+    return str(tmp_path / "students.csv")
 
 
 @pytest.fixture(autouse=True)
@@ -852,11 +853,13 @@ def test_provisioning_still_works_for_a_roster_without_a_role_column(
     tmp_path, capsys, monkeypatch
 ):
     monkeypatch.setenv("DSL_VERBOSE", "1")  # per-repo lines are verbose-only
-    path = tmp_path / "students.csv"
-    path.write_text(
+    for name, text in roster_files(
         "student_id,hertie_email,name,github_handle,github_id,section\n"
         "1,ada@uni.edu,Ada,ada-l,42,A\n"
-    )
+    ).items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(text)
+    path = tmp_path / "students.csv"
     rc, _changed = assign.provision_all(
         "COURSE",
         "assignment-1-f2026",
@@ -1076,7 +1079,7 @@ def test_group_provisioning_filters_teams_csv_through_the_roster_allowlist(
     # Both rejections are reported - but the HANDLES a student typed go to the verbose
     # channel (this workflow's log is world-readable) and the actionable error is a count.
     assert "stranger-x" in captured.out and "Eve-E" in captured.out
-    assert "2 handle(s) in teams.csv" in captured.err
+    assert "2 member(s) of team" in captured.err
     assert "stranger-x" not in captured.err and "Eve-E" not in captured.err
 
 
@@ -1105,7 +1108,7 @@ def test_a_rejected_teams_csv_handle_is_not_published_in_the_workflow_log(
         dry_run=True,
     )
     captured = capsys.readouterr()
-    assert "1 handle(s) in teams.csv" in captured.err
+    assert "1 member(s) of team" in captured.err
     assert "stranger-x" not in captured.err + captured.out
 
 
@@ -1642,7 +1645,7 @@ def test_an_allocated_assignment_with_no_teams_names_the_teaching_team(
         )
 
     assert run(scheduled=True) == (0, False)
-    assert "the instructors write them into teams.csv" in capsys.readouterr().out
+    assert "the instructors write them into students.csv" in capsys.readouterr().out
     assert run() == (1, False)
     err = capsys.readouterr().err
     assert "team_formation: assigned" in err and "self-select" not in err

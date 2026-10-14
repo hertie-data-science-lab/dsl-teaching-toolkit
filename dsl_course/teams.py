@@ -1,36 +1,33 @@
-"""dsl-course teams -- per-assignment group membership from semester-config/teams.csv.
+"""dsl-course teams -- per-assignment group membership, read from students.csv.
 
-`teams.csv` (private, in the semester's `semester-config` repo) is the single source of
-truth for who is in which team for which assignment:
+A team assignment has a `team:<assignment number>` column in the semester's private
+`students.csv` (decision 0039 rule 4); a team is the rows sharing a cell value, blank = no
+team:
 
-    assignment,team,github_handle
-    assignment-4-project,team-x,anna-adams
-    assignment-4-project,team-x,ben-baker
-    assignment-4-project,team-y,carla-cohen
+    email,name,role,team:4
+    anna@example.org,Anna Adams,,team-x
+    ben@example.org,Ben Baker,,team-x
+    carla@example.org,Carla Cohen,,team-y
 
-Students self-select by opening a "Join team" issue in `join` (the workflow appends a
-row - authenticated author, size-capped); faculty & instructors override by editing the CSV directly. This
-CSV is the only writer surface for membership. `sync_teams` then materialises a GitHub Team
-`<assignment>-<team>` from it (one-way, idempotent), and group-assignment provisioning grants
-that team its shared repo. Because the Team is a downstream projection of the CSV - never
-authoritative - it can't drift out of sync the way a Classroom-managed team does.
+Students self-select by opening a "Join team" issue in `join` (the workflow writes their
+cell - authenticated author, size-capped); faculty type a cell directly, before anyone has
+joined if they like. `sync_teams` then materialises a GitHub Team `<assignment>-<team>`
+from the onboarded members (one-way, idempotent), and group-assignment provisioning grants
+that team its shared repo. The Team is a downstream projection of the file, never
+authoritative, so it cannot drift the way a Classroom-managed team does.
 """
 
 from __future__ import annotations
 
-from . import run
-from .course import CONFIG_REPO, INSTRUCTORS_TEAM, ROLE_TEAMS
-from .faults import ConfigFault, csv_row_fault
-from .gh_contents import get_file_content, read_csv
+from . import roster, schedule
+from .course import INSTRUCTORS_TEAM, ROLE_TEAMS
+from .faults import ConfigFault
 
-TEAMS_PATH = "teams.csv"
-FIELDS = ("assignment", "team", "github_handle")
-
-# Team slugs students may never materialise. teams.csv is STUDENT-written (the public
+# Team slugs students may never materialise. A team cell is STUDENT-written (the public
 # Join-team issue form), and `team_slug("course", "admin")` is `course-admin` - the faculty
-# team that holds admin on every repo in the semester. Reconciling that slug from teams.csv
-# would add the student to it and prune the real admins. The workflow refuses these at the
-# form; this is the backstop for a row that reached the CSV any other way.
+# team that holds admin on every repo in the semester. Reconciling that slug would add the
+# student to it and prune the real admins. The workflow refuses these at the form; this is
+# the backstop for a cell that reached the file any other way.
 RESERVED_TEAM_SLUGS = ROLE_TEAMS
 
 
@@ -47,165 +44,100 @@ def is_reserved_slug(slug: str) -> bool:
     return slug in RESERVED_TEAM_SLUGS or slug.startswith(f"{INSTRUCTORS_TEAM}-")
 
 
-_HANDLES_FIX = "handles must be onboarded roster handles"
+def columns(sched: schedule.Schedule) -> dict[str, str]:
+    """`{schedule key: its team column suffix}`: the assignment's number (`team:4`), or
+    its key when the entry has none."""
+    return {
+        key: str(entry.number) if entry.number is not None else key
+        for key, entry in sched.assignments.items()
+    }
 
 
 def parse(
-    text: str,
+    students: list[roster.Student],
+    keys: dict[str, str],
     faults: list[ConfigFault] | None = None,
-    known_handles: set[str] | None = None,
 ) -> dict[str, dict[str, list[str]]]:
-    """Parse teams.csv into {assignment: {team: [handles]}}.
+    """`{assignment key: {team: [handles]}}` from the roster's team cells. `keys` is
+    `columns(schedule)`.
 
-    Blank rows are skipped; a handle listed twice in a team is de-duplicated, CASEFOLDED
-    (GitHub logins are case-insensitive, so `ALICE` and `alice` are one account and were
-    two members here - two collaborator adds, two grade rows); member order follows first
-    appearance so provisioning is deterministic.
+    Keys and team names are CASEFOLDED: the GitHub team they materialise into is
+    lower-cased, so `Wizards` and `wizards` are one team. Only ONBOARDED students are
+    members - a faculty-assigned cell typed before its student has joined waits for the
+    handle. Member order follows the file, so provisioning is deterministic.
 
-    Assignment keys and team names are both CASEFOLDED. The GitHub team they materialise
-    into is lower-cased (`sync_teams.team_slug`) and so is the repo named after them, so
-    `Wizards` and `wizards` were always one team downstream while reading here as two -
-    two entries in the parsed map, two provisioning units, one repo. The Join-team form
-    already writes both lower-case; a schedule key declared `Assignment-4` (or a legacy
-    hand-edited row) is what the lookups arrive with, and folding here is what makes the
-    two agree - keyed raw, such an assignment found no teams at all and every group
-    handout, snapshot and grading pass for it silently had nothing to do.
-
-    `faults` collects the rows this parse acts on differently from how they read - a
-    faculty team named where a project team belongs, a student claimed by two teams of one
-    assignment (the first row wins; the later one is ignored), a row de-duplicated away -
-    each of which was a silent drop or a `log_err` in a sync nobody watches.
-
-    `known_handles` is the onboarded roster, when the caller has it: a handle that is not
-    on it would INVITE an arbitrary GitHub account into a private org, so the syncs refuse
-    it, and until now the only trace was a verbose-only line. None means "not checked" and
-    is not the same as an empty set - an unreadable roster must not report every row as a
-    stranger."""
+    `faults` collects what this parse acts on differently from how it reads: a cell naming
+    a faculty team (ignored), and a `team:` column that is no assignment in the schedule
+    (nobody in it is grouped)."""
+    by_suffix = {suffix.casefold(): key.casefold() for key, suffix in keys.items()}
     out: dict[str, dict[str, list[str]]] = {}
-    claimed: dict[tuple[str, str], tuple[str, int]] = {}  # (assignment, handle) -> team
-    # Folded here, not by the caller: GitHub logins are case-insensitive and the rows are
-    # folded on the way in, so an allowlist in the roster's own casing would read every
-    # differently-typed handle as a stranger.
-    allowed = None if known_handles is None else {h.casefold() for h in known_handles}
-    reader = read_csv(text, FIELDS, TEAMS_PATH, faults)
-    for row in reader:
-        lineno = reader.line_num
-        assignment = (row.get("assignment") or "").strip().casefold()
-        team = (row.get("team") or "").strip().casefold()
-        handle = (row.get("github_handle") or "").strip().casefold()
-        if not (assignment and team and handle):
-            continue
-        if faults is not None:
-            faults += _row_faults(lineno, assignment, team, handle, claimed, allowed)
-        if is_reserved_slug(team_slug(assignment, team)):
-            continue  # ignored, as its fault says - and so it claims nobody either
-        was = claimed.setdefault((assignment, handle), (team, lineno))
-        if was[0] != team:
-            # The first claim wins, as the fault says: a second team's row would put the
-            # student in both GitHub teams, with push on both group repos.
-            continue
-        members = out.setdefault(assignment, {}).setdefault(team, [])
-        if handle not in members:
-            members.append(handle)
+    unknown: set[str] = set()
+    for s in students:
+        for suffix, team in s.teams.items():
+            key = by_suffix.get(suffix.casefold())
+            if key is None:
+                unknown.add(suffix)
+                continue
+            if is_reserved_slug(team_slug(key, team)):
+                if faults is not None:
+                    faults.append(
+                        ConfigFault(
+                            roster.team_column(suffix),
+                            "a cell in this column names a FACULTY team - the toolkit "
+                            "will not manage one from students.csv, so the cell is "
+                            "ignored",
+                            file=roster.STUDENTS_PATH,
+                            field=roster.team_column(suffix),
+                        )
+                    )
+                continue
+            if not s.onboarded:
+                continue
+            members = out.setdefault(key, {}).setdefault(team, [])
+            handle = s.github_handle.strip().casefold()
+            if handle not in members:
+                members.append(handle)
+    if faults is not None:
+        for suffix in sorted(unknown):
+            faults.append(
+                ConfigFault(
+                    roster.team_column(suffix),
+                    "this column names no assignment in schedule.yml, so nobody in it "
+                    "is put in a team",
+                    file=roster.STUDENTS_PATH,
+                    field=roster.team_column(suffix),
+                    fix_text=(
+                        "name the column `team:<number>` after an assignment's number in "
+                        "schedule.yml"
+                    ),
+                )
+            )
     return out
-
-
-def _row_faults(
-    lineno: int,
-    assignment: str,
-    team: str,
-    handle: str,
-    claimed: dict[tuple[str, str], tuple[str, int]],
-    known_handles: set[str] | None,
-) -> list[ConfigFault]:
-    """Everything wrong with one row, in the order a reader would notice it."""
-    found = []
-    slug = team_slug(assignment, team)
-    if is_reserved_slug(slug):
-        found.append(
-            csv_row_fault(
-                TEAMS_PATH,
-                lineno,
-                "team",
-                "this row names a FACULTY team - the toolkit will not manage one from "
-                "teams.csv, so the row is ignored",
-                fix=_HANDLES_FIX,
-            )
-        )
-    was = claimed.get((assignment, handle))
-    if was and was[0] != team:
-        found.append(
-            csv_row_fault(
-                TEAMS_PATH,
-                lineno,
-                "team",
-                f"this handle is already in another team for the same assignment "
-                f"(row {was[1]}) - two teams cannot claim one student, so this row is "
-                f"ignored",
-                fix=_HANDLES_FIX,
-            )
-        )
-    elif was:
-        found.append(
-            csv_row_fault(
-                TEAMS_PATH,
-                lineno,
-                "github_handle",
-                f"this handle is already listed for this team on row {was[1]} - the "
-                f"duplicate row is ignored",
-                fix=_HANDLES_FIX,
-            )
-        )
-    if known_handles is not None and handle not in known_handles:
-        found.append(
-            csv_row_fault(
-                TEAMS_PATH,
-                lineno,
-                "github_handle",
-                "this handle is not an onboarded roster handle - it is NOT added to the "
-                "team (adding it would invite an arbitrary GitHub account to the org)",
-                fix=_HANDLES_FIX,
-            )
-        )
-    return found
-
-
-@run.per_run(lambda semester_org: run.scope(semester_org, CONFIG_REPO, TEAMS_PATH))
-def _teams_text(semester_org: str) -> str | None:
-    """teams.csv's text, read ONCE per semester per process.
-
-    A single run asks for it repeatedly - the handout, the collection and the off-boarding
-    revoke each want the same file - and only the Join-team workflow writes it, in a process
-    of its own. The TEXT is memoised rather than `load`'s map, so each caller still parses
-    its own copy and cannot mutate another's. Held by the run (`run.per_run`): a write to the file forgets it."""
-    return get_file_content(semester_org, CONFIG_REPO, TEAMS_PATH)
 
 
 def load(
     semester_org: str,
     faults: list[ConfigFault] | None = None,
-    known_handles: set[str] | None = None,
+    sched: schedule.Schedule | None = None,
 ) -> dict[str, dict[str, list[str]]]:
-    """Fetch + parse teams.csv from the semester's PRIVATE semester-config repo.
-
-    A pure loader: a missing CSV returns {} silently. Whether that is benign (a
-    semester with no group assignments yet) or an error (group provisioning/grading
-    asked for) is the caller's call - each contextualises it for itself.
-
-    `faults` and `known_handles` are `parse`'s, for the caller that is checking the file
-    rather than reading it."""
-    return load_or_none(semester_org, faults, known_handles) or {}
+    """Every assignment's teams, from the semester's roster and schedule (`sched`, when
+    the caller holds it). `{}` when the roster is absent - whether that is benign or an
+    error is the caller's call. `faults` is `parse`'s."""
+    return load_or_none(semester_org, faults, sched) or {}
 
 
 def load_or_none(
     semester_org: str,
     faults: list[ConfigFault] | None = None,
-    known_handles: set[str] | None = None,
+    sched: schedule.Schedule | None = None,
 ) -> dict[str, dict[str, list[str]]] | None:
-    """`load`, but None when teams.csv is ABSENT (a 404) - for the caller that would take
-    access away on the strength of an empty answer (the pruning team sync)."""
-    content = _teams_text(semester_org)
-    return None if content is None else parse(content, faults, known_handles)
+    """`load`, but None when students.csv is ABSENT (a 404) - for the caller that would
+    take access away on the strength of an empty answer (the pruning team sync)."""
+    students = roster.load(semester_org)
+    if students is None:
+        return None
+    sched = sched if sched is not None else schedule.load(semester_org)
+    return parse(students, columns(sched), faults)
 
 
 def teams_for(

@@ -151,7 +151,7 @@ _FIX: dict[tuple[FaultKind, bool, bool], str] = {
 # leads with it ("Until they are fixed: ...") because "students.csv has 1 entry the
 # toolkit cannot use" says nothing about whether anybody's term is affected, and the
 # answer differs sharply per file: a bad roster header stops every enrolment, a bad
-# teams.csv row stops one.
+# a team cell stops one.
 CONSEQUENCE = {
     "schedule.yml": (
         "that entry is not scheduled: nothing releases, hands out or grades from it"
@@ -160,7 +160,6 @@ CONSEQUENCE = {
     "students.csv": (
         "the whole roster is skipped: nobody new is enrolled or sent a code"
     ),
-    "teams.csv": "that row is ignored: the team is not created or the member not added",
     # Keyed on the DIGEST's label for the folder, not on one sheet's path: every grading
     # sheet in the semester is carried by one issue and one letter.
     "grading_sheets/": "that sheet is not refreshed, and nothing on it is sent",
@@ -192,7 +191,6 @@ FIX = {
     ),
     "semester.yml": "fix the handle/email on the line above",
     "students.csv": CSV_HEADER_FIX,
-    "teams.csv": CSV_HEADER_FIX,
     "course.yml": "correct the line above",
     "semesters.yml": "correct the line above",
 }
@@ -539,7 +537,7 @@ def header_fault(file: str, missing: list[str]) -> ConfigFault:
     """The fault a CSV whose header cannot be read produces - one per file, not per row,
     because a header nobody can read costs the whole file.
 
-    Built here rather than in each reader so students.csv, teams.csv and the sheets say the
+    Built here rather than in each reader so students.csv and the sheets say the
     same thing. It names the columns that are MISSING (a constant of the toolkit's) and not
     the ones it found: a file whose header row was deleted has cell values there, and this
     text travels to an email and an issue - see the privacy rule in CLAUDE.md."""
@@ -566,11 +564,11 @@ def csv_row(lineno: int | None) -> str:
 def csv_row_fault(
     file: str, lineno: int, field: str, what: str, fix: str = ""
 ) -> ConfigFault:
-    """One row of a hand-edited CSV (students.csv, teams.csv) the toolkit cannot use as
+    """One row of a hand-edited CSV (students.csv) the toolkit cannot use as
     written.
 
     ROW AND COLUMN ONLY. Never the cell: a roster cell is a name, an address, a handle or
-    an enrolment code, a teams.csv cell is a handle or a team name a student typed into a
+    an enrolment code, a team cell is a handle or a team name a student typed into a
     public form, and this text travels to an email, to a digest issue and to a run log.
     The row number is enough to open the file at the line. `fix` adds to the remedy."""
     return ConfigFault(

@@ -172,7 +172,7 @@ def _repo_tree(_org: str, repo: str) -> tuple[str, tuple[str, ...]]:
     return "main", TREE if repo == MATERIALS else ()
 
 
-def _formed_teams(_org: str):
+def _formed_teams(_org: str, _sched=None):
     """Two teams for the assignment inside its team-formation window - one with room and
     one full, so the built page carries both halves of the Places-left column."""
     return lambda _key: [

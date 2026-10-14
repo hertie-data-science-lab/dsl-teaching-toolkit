@@ -10,7 +10,7 @@ const treeOf = (entries: Record<string, string>): Tree => ({
   tree: Object.entries(entries).map(([path, sha]) => ({ path, sha, mode: '100644', type: ['grading_sheets', '.system'].includes(path) ? 'tree' : 'blob' })),
 });
 // The recursive tree the engine recorded from: every present input (nested ones included,
-// under their directory's entry); `teams.csv` is recorded `null`, so it is absent.
+// under their directory's entry); `.system/roster.csv` is recorded `null`, so it is absent.
 const matching = () => {
   const own = Object.entries(example.inputs).filter(([k, v]) => !k.startsWith('course/') && v !== null) as [string, string][];
   return treeOf({ '.system': 'sys-tree', ...Object.fromEntries(own) });
@@ -46,7 +46,7 @@ describe('status', () => {
 
   it('matches a nested input by its full path and a recorded null by an absent file', () => {
     expect(example.inputs['.system/assignments.lock.yml']).toBe('sha-6');
-    expect(example.inputs['teams.csv']).toBeNull();
+    expect(example.inputs['.system/roster.csv']).toBeNull();
     expect(staleInputs(example.inputs, matching())).toEqual([]);
   });
 
@@ -55,8 +55,8 @@ describe('status', () => {
     t.tree = t.tree
       .filter((e) => e.path !== 'students.csv')
       .map((e) => (e.path === 'schedule.yml' || e.path === '.system/assignments.lock.yml' ? { ...e, sha: 'edited' } : e));
-    t.tree.push({ path: 'teams.csv', sha: 'new', mode: '100644', type: 'blob' });
-    expect(staleInputs(example.inputs, t).sort()).toEqual(['.system/assignments.lock.yml', 'schedule.yml', 'students.csv', 'teams.csv']);
+    t.tree.push({ path: '.system/roster.csv', sha: 'new', mode: '100644', type: 'blob' });
+    expect(staleInputs(example.inputs, t).sort()).toEqual(['.system/assignments.lock.yml', '.system/roster.csv', 'schedule.yml', 'students.csv']);
   });
 
   it('does not count a path a truncated tree lacks', () => {

@@ -118,7 +118,8 @@ class FakeGitHub:
         # `pushed`: students who pushed since the sheets last looked. `gone`: handles off
         # the roster whose submission repos are still in the org.
         self.students, self.pushed = students, pushed
-        roster = "hertie_email,name,role,github_handle"
+        roster = "email,name,role"
+        system = "email,github_handle"
         self.files: dict[tuple[str, str, str], str] = {
             (
                 COURSE,
@@ -134,7 +135,10 @@ class FakeGitHub:
             (SEMESTER, "semester-config", "schedule.yml"): _schedule(),
             (SEMESTER, "semester-config", "students.csv"): roster
             + "\n"
-            + "".join(f"{h}@example.org,{h},enrolled,{h}\n" for h in students),
+            + "".join(f"{h}@example.org,{h},enrolled\n" for h in students),
+            (SEMESTER, "semester-config", ".system/roster.csv"): system
+            + "\n"
+            + "".join(f"{h}@example.org,{h}\n" for h in students),
             (
                 SEMESTER,
                 "semester-config",

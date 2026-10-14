@@ -110,7 +110,7 @@ def sentinel_books() -> dict:
 def sentinel_students() -> list[roster.Student]:
     return [
         roster.Student(
-            hertie_email=f"{handle}@students.hertie-school.org",
+            email=f"{handle}@students.hertie-school.org",
             name=handle.upper(),
             github_handle=handle,
             github_id="",
