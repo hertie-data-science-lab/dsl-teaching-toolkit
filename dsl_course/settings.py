@@ -342,10 +342,17 @@ def instance(semester_org: str) -> Instance:
     )
 
 
+@run.per_run(lambda semester_org: run.scope(semester_org, CONFIG_REPO, SCHEDULE_FILE))
+def _schedule_text(semester_org: str) -> str | None:
+    """`semester-config/schedule.yml`, or None when the semester has none (a 404). Any
+    other read failure raises (`get_file_content`)."""
+    return read_semester(semester_org).file(SCHEDULE_FILE).text
+
+
 def _inline(semester_org: str) -> dict[str, dict]:
     """Each schedule.yml assignment entry's inline run settings (`inline_blocks`); none
     when the file is absent or does not parse (its own digest says so)."""
-    text = read_semester(semester_org).file(SCHEDULE_FILE).text
+    text = _schedule_text(semester_org)
     try:
         data = yaml.safe_load(text or "") or {}
     except yaml.YAMLError:

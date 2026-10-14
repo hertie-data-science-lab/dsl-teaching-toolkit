@@ -6,10 +6,10 @@
 #
 # - full schema: https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/__CENTRAL_REF__/docs/07-schedule-releases.md
 #
-# Every setting is optional. Nearest wins: an assignment's own block, then `defaults:`
-# below, then the course's `assignment_defaults:` (.github/dsl-course.yml), then the
-# institution's (policy.yml). The late window and penalty go together: a block naming
-# one of them sets the other to none.
+# Every setting is optional. Nearest wins: the setting written on an assignment's own
+# schedule.yml entry, then `defaults:` below, then the course's `assignment_defaults:`
+# (.github/dsl-course.yml), then the institution's (policy.yml). The late window and
+# penalty go together: a layer naming one of them sets the other to none.
 #
 # This is a SKELETON: uncomment and fill what you want.
 
@@ -19,10 +19,3 @@
 #   max_team_size: {max_team_size}               # institution default: {max_team_size}. Group assignments only
 #   team_formation: {team_formation}    # institution default: {team_formation}. self_select (students use the Join team form) | assigned (you write teams.csv)
 #   visibility: {visibility}           # institution default: {visibility}. private | public | student_choice. Read when each repo is created: change it before the first hand out
-
-# assignments:                      # one block per key under `assignments:` in schedule.yml
-#   assignment-1:
-#     late_window_days: 5           # this assignment only
-#     late_penalty_per_day: 5%
-#     submit_url: https://moodle.example.org/mod/assign/view.php?id=123   # `submit_via: external` only: the site's Submit button
-#     semester_dest_repo: assignment-1-resit   # OPTIONAL - default: the key. What this semester's repos are called

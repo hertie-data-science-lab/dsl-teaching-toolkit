@@ -145,7 +145,7 @@ def test_the_migration_writes_session_number_only_where_it_differs_and_keeps_key
     assert data["drop-ins"]["lecture-12"] == {
         "number": 1,
         "title": "Tutorial presentations",
-        "details": "Students present their tutorial topic to the group.\n",
+        "details": "Students present their tutorial topic to the group.",
         "event_datetime": "2026-10-20T10:00",
     }
     # Supporting files (kind inferred once, today's way).

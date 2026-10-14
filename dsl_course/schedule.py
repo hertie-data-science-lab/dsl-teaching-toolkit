@@ -1044,7 +1044,9 @@ def _parse_slots(
             return Slot(None, location, details), None
         written = _coerce_date_or_datetime(value, tz)
         if written is None:
-            if value is not None:
+            # One unusable value drops the whole entry (its caller says so); one slot of
+            # several is flagged and the others stand.
+            if value is not None and isinstance(raw, list):
                 _flag_bad_value(
                     drops, at, "event_datetime", value, "this slot is no row", lines
                 )
@@ -1116,15 +1118,6 @@ def _parse_block(
             )
             continue
         taken[key] = block
-        old = _old_keys(drops, entry, legacy.SCHEDULE_ENTRY, where, lines)
-        _flag_unknown_keys(
-            drops,
-            {k: v for k, v in entry.items() if k not in old},
-            KNOWN_READINGS if kind == READINGS_KIND else KNOWN_ENTRY,
-            where,
-            "that setting is ignored",
-            lines,
-        )
         session = _parse_whole(
             entry, "session", where, drops, lines, "the entry belongs to no unit"
         )
@@ -1153,6 +1146,17 @@ def _parse_block(
             )
             continue
         slots = slots or [(Slot(None), None)]
+        # A stray or 0.10 key is flagged on an entry that is kept; a dropped one already
+        # has its own line.
+        old = _old_keys(drops, entry, legacy.SCHEDULE_ENTRY, where, lines)
+        _flag_unknown_keys(
+            drops,
+            {k: v for k, v in entry.items() if k not in old},
+            KNOWN_READINGS if kind == READINGS_KIND else KNOWN_ENTRY,
+            where,
+            "that setting is ignored",
+            lines,
+        )
         tbc = marked or _is_tbc(entry.get("event_datetime"))
         title = str(entry.get("title") or "")
         details = _flagged_details(entry, drops, where, lines) or ""

@@ -1,166 +1,194 @@
-# Worked example for the hertie-dsl-demo-f2026 semester's whole term in one file. 
+# Worked example: the hertie-dsl-demo-f2026 semester's whole term in one file.
 #
 # - full schema: https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/main/docs/07-schedule-releases.md
-# - see reference: https://github.com/hertie-dsl-demo-f2026/semester-config/blob/main/schedule.yml
 # - see deployed end-product: https://hertie-dsl-demo-f2026.github.io/schedule/
 #
-# this deliberately showcases a range of different fields for each entry, showing possible maximal vs minimal (i.e. relying on defaults) usage
+# One block per kind (lectures, labs, readings, exams, events, assets) and assignments; each
+# a map whose KEY names what the toolkit creates for the entry (its site row and ids; an
+# assignment's repos and mark sheet) and is never displayed or read for a number.
+#   session         the teaching unit: REQUIRED on lectures and labs; on readings it shows
+#                   them on the unit's first row (absent = a row of their own)
+#   number          optional, default = session: the row word ("Lab 2")
+#   event_datetime  a datetime, `tbc`, or a list of slots {at, location, details}
+#   files           from_course_repo, from_path, to_semester_repo, to_path, release_datetime
+#                   (default: an hour before the first slot)
+# Assignments carry their run settings inline (late_window_days, ..., repo_name).
 
 timezone: Europe/Berlin
 semester_start: 2026-09-07
 semester_end: 2026-12-18
-
-releases:
-  course-intro:
-    event_datetime: 2026-08-31T09:00
-    show_on_site: false
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: SYLLABUS.md
-  readings-1:
-    event_datetime: 2026-08-25T09:00
-    show_on_site: false
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: readings/01_week-1
+archive:
+  event_datetime: 2027-02-16
+  title: Semester archived
+  show_on_site: true
+  details: 'This semester is archived on {date}: every repository in it becomes read-only. You keep read access, so you can still fork or clone anything you want to keep working on into your own account.'
+lectures:
   lecture-1:
-    event_datetime: 2026-09-01T10:00
+    session: 1
     title: Perceptrons and gradient descent
-    details: >
-      What a linear model can and cannot separate, and how gradient descent finds its
-      weights.
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: lectures/01_week-1
-        deploy_datetime: 2026-09-01T09:00
-      - course_source_repo: lecture-code-f2026
-        course_source_path: mlpkg/core
-  lab-1:
-    event_datetime: 2026-09-03T14:00
-    title: Your first classifier
-    details: Build, train and score it end to end.
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: labs/01_week-1
-      - course_source_repo: course-materials-f2026
-        course_source_path: solutions/labs/01_week-1
-        semester_dest_path: labs/01_week-1/solutions
-        deploy_datetime: 2026-09-03T18:00
-  readings-2:
-    event_datetime: 2026-09-01T09:00
-    show_on_site: false
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: readings/02_week-2
+    details: What a linear model can and cannot separate, and how gradient descent finds its weights.
+    event_datetime: 2026-09-01T10:00
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: lectures/01_week-1
+        release_datetime: 2026-09-01T09:00
+      - from_course_repo: lecture-code-f2026
+        from_path: mlpkg/core
   lecture-2:
-    event_datetime: 2026-09-08T10:00
+    session: 2
     title: Backpropagation
     details: How a network computes its own gradients, and why the chain rule is the whole trick.
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: lectures/02_week-2
-        deploy_datetime: 2026-09-08T09:00
+    event_datetime: 2026-09-08T10:00
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: lectures/02_week-2
+        release_datetime: 2026-09-08T09:00
+  lecture-3:
+    session: 3
+    details: Simulation as a way of testing what a model has actually learned.
+    event_datetime: 2026-09-15T10:00
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: lectures/03_week-3
+        release_datetime: 2026-09-15T09:00
+      - from_course_repo: lecture-code-f2026
+        from_path: mlpkg/simulation
+  lecture-4:
+    session: 4
+    details: Regularisation, and what overfitting looks like before the test set tells you.
+    event_datetime: 2026-09-22T10:00
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: lectures/04_week-4
+        release_datetime: 2026-09-22T09:00
+  lecture-5:
+    session: 5
+    event_datetime: 2026-09-29T10:00
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: lectures/05_week-5
+        release_datetime: 2026-09-29T09:00
+      - from_course_repo: lecture-code-f2026
+        from_path: mlpkg/training
+labs:
+  lab-1:
+    session: 1
+    title: Your first classifier
+    details: Build, train and score it end to end.
+    event_datetime: 2026-09-03T14:00
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: labs/01_week-1
+      - from_course_repo: course-materials-f2026
+        from_path: solutions/labs/01_week-1
+        to_path: labs/01_week-1/solutions
+        release_datetime: 2026-09-03T18:00
   lab-2:
-    event_datetime: 2026-09-10T14:00
+    session: 2
     details: Implement backprop by hand, then check it against the autograd version.
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: labs/02_week-2
+    event_datetime: 2026-09-10T14:00
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: labs/02_week-2
+  lab-3:
+    session: 3
+    details: Run the simulation package against your week-2 model.
+    event_datetime: 2026-09-17T14:00
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: labs/03_week-3
+  lab-4:
+    session: 4
+    details: Tune one model three ways and argue for one of them.
+    event_datetime: 2026-09-24T14:00
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: labs/04_week-4
+  lab-5:
+    session: 5
+    event_datetime: 2026-10-01T14:00
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: labs/05_week-5
+readings:
+  readings-1:
+    session: 1
+    event_datetime: 2026-08-25T09:00
+    show_on_site: false
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: readings/01_week-1
+    reading_list: |
+      # Week 1 readings - 
+
+      - Goodfellow et al., *Deep Learning*, ch. 1 (citation only).
+      - A blog post or paper relevant to: .
+  readings-2:
+    session: 2
+    event_datetime: 2026-09-01T09:00
+    show_on_site: false
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: readings/02_week-2
+    reading_list: |
+      # Week 2 readings - Intro to deep learning
+
+      - Goodfellow et al., *Deep Learning*, ch. 2 (citation only).
+      - A blog post or paper relevant to: Intro to deep learning.
   readings-3:
+    session: 3
     event_datetime: 2026-09-08T09:00
     show_on_site: false
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: readings/03_week-3
-  lecture-3:
-    event_datetime: 2026-09-15T10:00
-    details: Simulation as a way of testing what a model has actually learned.
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: lectures/03_week-3
-        deploy_datetime: 2026-09-15T09:00
-      - course_source_repo: lecture-code-f2026
-        course_source_path: mlpkg/simulation
-  lab-3:
-    event_datetime: 2026-09-17T14:00
-    details: Run the simulation package against your week-2 model.
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: labs/03_week-3
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: readings/03_week-3
+    reading_list: |
+      # Week 3 readings - Linear models & gradient descent
+
+      - Goodfellow et al., *Deep Learning*, ch. 3 (citation only).
+      - A blog post or paper relevant to: Linear models & gradient descent.
   readings-4:
+    session: 4
     event_datetime: 2026-09-15T09:00
     show_on_site: false
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: readings/04_week-4
-  lecture-4:
-    event_datetime: 2026-09-22T10:00
-    details: Regularisation, and what overfitting looks like before the test set tells you.
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: lectures/04_week-4
-        deploy_datetime: 2026-09-22T09:00
-  lab-4:
-    event_datetime: 2026-09-24T14:00
-    details: Tune one model three ways and argue for one of them.
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: labs/04_week-4
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: readings/04_week-4
+    reading_list: |
+      # Week 4 readings - Neural networks & backprop
+
+      - Goodfellow et al., *Deep Learning*, ch. 4 (citation only).
+      - A blog post or paper relevant to: Neural networks & backprop.
   readings-5:
+    session: 5
     event_datetime: 2026-09-22T09:00
     show_on_site: false
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: readings/05_week-5
-  lecture-5:
-    event_datetime: 2026-09-29T10:00
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: lectures/05_week-5
-        deploy_datetime: 2026-09-29T09:00
-      - course_source_repo: lecture-code-f2026
-        course_source_path: mlpkg/training
-  lab-5:
-    event_datetime: 2026-10-01T14:00
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: labs/05_week-5
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: readings/05_week-5
+    reading_list: |
+      # Week 5 readings - Convolutional networks
 
-assignments:                    
-  assignment-1:
-    details: Closed form first, then by gradient descent.   # NB optional: the Details column of both its rows
-    course_source_repo: assignment-linear-regression
-    handout_datetime: 2026-09-15T14:00  
-    due_datetime: 2026-10-13
-    solution_datetime: 2026-10-16T09:00
-  assignment-2:
-    course_source_repo: assignment-gradient-descent
-    details: Classification on a dataset you have not seen, scored on held-out data.
-    handout_datetime: 2026-09-29T14:00
-    due_datetime: 2026-10-27T23:59
-  assignment-4-project:
-    number: 4                   # a number in the middle of a key is not read
-    details: Four weeks, one question of your own choosing, one write-up between you.
-    course_source_repo: assignment-group-project
-    handout_datetime: 2026-10-13T14:00
-    due_datetime: 2026-11-15T23:59
-    # NB this file is timing only. What the assignment IS (`type: group`, its title) is
-    # its template's grading_config.yml; how this semester runs it (a max team size of 4,
-    # the late rule) is assignments.yml beside this file. The late cutoff is the due date
-    # plus `late_window_days`, never written here.
-
-events:
+      - Goodfellow et al., *Deep Learning*, ch. 5 (citation only).
+      - A blog post or paper relevant to: Convolutional networks.
+exams:
   mid-term:
-    kind: exam
-    title: MidTerm Exam                   # NB if empty, default -> would display as this anyway
+    title: MidTerm Exam
     details: Ninety minutes, closed book. Everything up to and including week 5.
     event_datetime: tbc
   final-exam:
-    kind: exam
-    title: Final Exam                     # NB if empty, default -> would display as this anyway
+    title: Final Exam
     details: Two hours, closed book. Room confirmed nearer the time.
-    event_datetime: 2026-12-15T14:00   
+    event_datetime: 2026-12-15T14:00
     tbc: true
+assets:
+  course-intro:
+    event_datetime: 2026-08-31T09:00
+    show_on_site: false
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: SYLLABUS.md
+events:
   project-clinic:
     title: Project clinic
     details: Drop-in, room xyz. Bring a laptop and whatever is not working.
@@ -169,11 +197,29 @@ events:
     title: Guest lecture
     details: An industry speaker - announced nearer the time.
     event_datetime: tbc
-
-# archive the org (every repo read-only): removes all write permissions, retains all read permissions
-archive:
-  event_datetime: 2027-02-16  # optional (default: semester_end + 60 days)
-  title: Semester archived      # optional - the row's Title column
-  show_on_site: true          # a "Semester archived" row on the site's Schedule tab, also sends a notice email 14 days out
-  details: >-                 # optional, `{date}` is filled in automatically
-    This semester is archived on {date}: every repository in it becomes read-only. You keep read access, so you can still fork or clone anything you want to keep working on into your own account.
+assignments:
+  assignment-1:
+    number: 1
+    template: assignment-linear-regression
+    details: Closed form first, then by gradient descent.
+    handout_datetime: 2026-09-15T14:00
+    due_datetime: 2026-10-13
+    solution_datetime: 2026-10-16T09:00
+    late_window_days: 2
+    late_penalty_per_day: 10%
+    submit_url: https://moodle.hertie-school.org/mod/assign/view.php?id=EXAMPLE
+  assignment-2:
+    number: 2
+    template: assignment-gradient-descent
+    repo_name: homework-2
+    details: Classification on a dataset you have not seen, scored on held-out data.
+    handout_datetime: 2026-09-29T14:00
+    due_datetime: 2026-10-27T23:59
+  assignment-4-project:
+    number: 4
+    template: assignment-group-project
+    repo_name: assignment-4-project
+    details: Four weeks, one question of your own choosing, one write-up between you.
+    handout_datetime: 2026-10-13T14:00
+    due_datetime: 2026-11-15T23:59
+    max_team_size: 4

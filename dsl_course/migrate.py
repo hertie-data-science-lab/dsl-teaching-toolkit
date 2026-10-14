@@ -85,7 +85,7 @@ from .discovery import (
     is_assignment_template,
     list_org_repos,
 )
-from .faults import NOT_MIGRATED, RunSettingInTemplate
+from .faults import NOT_MIGRATED, RunSettingInTemplate, Unusable
 from .gh_contents import (
     blob_sha,
     get_file_content,
@@ -105,9 +105,11 @@ from .materials import (
     infer_kind,
     is_materials_repo,
 )
+from .materials import read as read_materials
 from .opencourse import OPENCOURSE_FILE, READINGS_MODES, OpenCourse
 from .opencourse import seed_text as opencourse_text
 from .profile_readme import profile_files, update_profile_readme
+from .readings import is_reading_overlay
 from .repos import (
     current_description,
     default_branch,
@@ -1511,7 +1513,9 @@ def _emit(value: object, indent: int = 0) -> str:
             if isinstance(v, (dict, list)) and v:
                 lines.append(f"{pad}{key}:")
                 lines.append(_emit(v, indent + 2))
-            elif isinstance(v, str) and "\n" in v.strip():
+            elif isinstance(v, str) and "\n" not in v.strip():
+                lines.append(f"{pad}{key}: {_scalar_text(v.strip())}")
+            elif isinstance(v, str):
                 lines.append(f"{pad}{key}: |")
                 lines += [
                     f"{pad}  {line}" if line else ""
@@ -2937,6 +2941,85 @@ class Semester:
             and _instance_clean(instance, legacy_ok=True)
         )
 
+    # schedule shape ----------------------------------------------------------
+    def _aliases(self, repo: str) -> Mapping[str, str]:
+        """A source repo's `materials.yml` folder aliases, as 0.10 inferred kinds by."""
+        try:
+            return read_materials(self.course, repo).kinds
+        except Unusable:
+            return {}
+
+    def _reading_list(self, repo: str, path: str) -> str:
+        """The READINGS.md (or .txt/.bib) text a copy of `path` from the course's `repo`
+        carries: the file itself, or each one directly inside the folder."""
+        path = path.strip("/")
+        found = [
+            p
+            for p in sorted(_files(self.course, repo))
+            if is_reading_overlay(p)
+            and (
+                p == path or p.rsplit("/", 1)[0] == path or (not path and "/" not in p)
+            )
+        ]
+        texts = [(get_file_content(self.course, repo, p) or "").strip() for p in found]
+        return "\n\n".join(t for t in texts if t)
+
+    def shape_work(
+        self,
+    ) -> tuple[str | None, str | None, str | None, list[str], list[str]]:
+        """`(schedule.yml now, rewritten, assignments.yml rewritten or None, notes,
+        stops)`; nothing to rewrite (None) once the schedule reads clean."""
+        text = get_file_content(self.org, self.config(), schedule.SCHEDULE_PATH)
+        instance = self.instance_text()
+        if text is None or _schedule_clean(text, instance, quiet=True):
+            return text, None, None, [], []
+        new, after, notes, stops = schedule_shape(
+            text, instance, self._aliases, self._reading_list
+        )
+        return text, new, after, notes, stops
+
+    def shape_done(self) -> bool:
+        return self.keys_done() and self.shape_work()[1] is None
+
+    def shape_plan(self) -> list[str]:
+        text, new, after, notes, _ = self.shape_work()
+        out = [
+            (
+                f"{CONFIG_REPO}/{schedule.SCHEDULE_PATH}: one block per kind (decision "
+                f"0038); keys kept, sessions and numbers written, copies' fields renamed"
+                + (
+                    f"; {ASSIGNMENTS_FILE}'s blocks moved onto their entries"
+                    if after
+                    else ""
+                )
+            ),
+            *_diff(schedule.SCHEDULE_PATH, text or "", new or ""),
+        ]
+        if after is not None:
+            out += _diff(ASSIGNMENTS_FILE, self.instance_text() or "", after)
+        return out + [f"  {note}" for note in notes]
+
+    def shape_stops(self) -> list[str]:
+        _, new, after, _, stops = self.shape_work()
+        if new is None or stops:
+            return stops
+        if not _schedule_clean(
+            new, after if after is not None else self.instance_text()
+        ):
+            return [f"{schedule.SCHEDULE_PATH} would still say NOT_MIGRATED"]
+        return []
+
+    def shape(self) -> bool:
+        _, new, after, _, stops = self.shape_work()
+        if new is None:
+            return True
+        if stops or self.shape_stops():
+            return False
+        files = {schedule.SCHEDULE_PATH: new.encode()}
+        if after is not None:
+            files[ASSIGNMENTS_FILE] = after.encode()
+        return move_files(self.org, self.config(), {}, SHAPE_COMMIT, files=files)
+
     # topic -------------------------------------------------------------------
     def topics(self) -> set[str]:
         return _topics(_listing(self.org))
@@ -2975,6 +3058,7 @@ class Semester:
             self.renamed()
             and self.layout_done()
             and self.keys_done()
+            and self.shape_done()
             and self.topic_done()
         )
 
@@ -3030,6 +3114,18 @@ class Semester:
                 stops=self.keys_stops,
                 rollback=(
                     f"git revert the '{KEYS_COMMIT}' commit in {repo} (it holds "
+                    f"{schedule.SCHEDULE_PATH} and {ASSIGNMENTS_FILE})"
+                ),
+            ),
+            Step(
+                "schedule shape",
+                done=self.shape_done,
+                plan=self.shape_plan,
+                do=self.shape,
+                verify=self.shape_done,
+                stops=self.shape_stops,
+                rollback=(
+                    f"git revert the '{SHAPE_COMMIT}' commit in {repo} (it holds "
                     f"{schedule.SCHEDULE_PATH} and {ASSIGNMENTS_FILE})"
                 ),
             ),

@@ -50,26 +50,30 @@ SCHEDULE = """\
 timezone: Europe/Berlin
 semester_start: 2026-09-07
 semester_end: 2026-12-18
-releases:
+lectures:
   s3:
+    session: 3
     event_datetime: 2026-09-24T10:00
     title: Trees
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: lectures/03_trees
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: lectures/03_trees
   s5:
+    session: 5
     event_datetime: 2026-10-08T10:00
     title: Trees and ensembles
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: lectures/05_trees
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: lectures/05_trees
 assignments:
   assignment-2:
-    course_source_repo: assignment-2-f2026
+    number: 2
+    template: assignment-2-f2026
     handout_datetime: 2026-09-15T10:00
     due_datetime: 2026-09-27T23:59
   assignment-3:
-    course_source_repo: assignment-3-f2026
+    number: 3
+    template: assignment-3-f2026
     handout_datetime: 2026-10-20T10:00
     due_datetime: 2026-11-01T23:59
 """
@@ -316,10 +320,10 @@ def _semester(**over) -> status_json.SemesterFacts:
 def _missing_s5() -> ConfigFault:
     """What `schedule.source_faults` files for a release folder nobody has written."""
     return ConfigFault(
-        "releases.s5",
+        "lectures.s5",
         f"{COURSE}/course-materials-f2026/lectures/05_trees does not exist",
         datetime(2026, 10, 8, 10, 0, tzinfo=BERLIN),
-        field="course_source_path",
+        field="from_path",
         kind=FaultKind.MISSING_PATH,
         file="schedule.yml",
         lineno=41,
@@ -571,12 +575,12 @@ def test_release_states_follow_the_destination():
 def test_a_release_with_one_copy_landed_and_one_to_come_is_not_late():
     sched = _sched(
         SCHEDULE.replace(
-            """        course_source_path: lectures/05_trees
+            """        from_path: lectures/05_trees
 """,
-            """        course_source_path: lectures/05_trees
-        deploy_datetime: 2026-09-30T10:00
-      - course_source_repo: course-materials-f2026
-        course_source_path: labs/05_trees
+            """        from_path: lectures/05_trees
+        release_datetime: 2026-09-30T10:00
+      - from_course_repo: course-materials-f2026
+        from_path: labs/05_trees
 """,
         )
     )
@@ -1256,14 +1260,8 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
     # The topic makes a materials repo, not the name: the code repo is not one.
     (m,) = course["course"]["materials"]
     assert (m["repo"], m["state"]) == ("course-materials-f2026", "ready")
-    # Read off the one tree: its folder has a kind; no withhold list, no session list.
-    # Only lectures/: no labs or readings folder is a suggestion, never a failure.
-    assert [c["id"] for c in m["checks"] if not c["done"]] == [
-        "syllabus",
-        "withheld",
-        "kind_folder:lab",
-        "kind_folder:readings",
-    ]
+    # Read off the top of the tree: no withhold list; no folder is checked for a kind.
+    assert [c["id"] for c in m["checks"] if not c["done"]] == ["syllabus", "withheld"]
 
 
 def test_every_render_validates_against_the_exported_schema():
@@ -1317,8 +1315,8 @@ def _many_faults() -> list[ConfigFault]:
         faults,
     )
     faults += _sched(
-        "timezone: Europe/Berlin\nreleases:\n  s1:\n    event_datetime: someday\n"
-        "    deploy:\n      - course_source_repo: x\n        course_source_path: y\n"
+        "timezone: Europe/Berlin\nlectures:\n  s1:\n    event_datetime: someday\n"
+        "    files:\n      - from_course_repo: x\n        from_path: y\n"
     ).faults
     faults.append(header_fault("students.csv", ["github_handle"]))
     return faults
@@ -1492,15 +1490,9 @@ def test_a_stage_that_is_not_done_says_why():
     assert doc["semester"]["stage_why"]["K3"] == (
         "No instructor is declared in instructors.yml yet."
     )
-    # Decision 0034: a stub syllabus is suggested; a repo with no content folder names
-    # itself as the nearest one's missing needed item.
+    # Decision 0034: a stub syllabus is suggested, and no folder needs a kind (decision
+    # 0038): the repo is ready.
     assert doc["course"]["stages"]["C4"] == "done"
-    course = _course(materials=[_materials("course-materials-f2025", folders=())])
-    doc = _render(course, _semester(people=ta_only))
-    assert doc["course"]["stages"]["C4"] == "todo"
-    assert doc["course"]["stage_why"]["C4"] == (
-        "course-materials-f2025 has no lectures/, labs/ or readings/ folder yet."
-    )
     # Done stages carry no sentence; every other one does.
     for block in (doc["course"], doc["semester"]):
         assert set(block["stage_why"]) == {
@@ -1682,8 +1674,7 @@ def test_an_assignments_yml_that_is_not_yaml_is_a_problem_not_a_crash(monkeypatc
         status_json.schedule,
         "_schedule_text",
         lambda org: (
-            "assignments:\n  a1:\n    course_source_repo: t\n"
-            "    due_datetime: 2026-10-13\n"
+            "assignments:\n  a1:\n    template: t\n    due_datetime: 2026-10-13\n"
         ),
     )
     monkeypatch.setattr(status_json, "list_org_repos", lambda org: [])
@@ -1739,41 +1730,46 @@ def test_students_without_a_team_are_a_problem_only_once_the_window_shuts():
 
 UNNUMBERED = """\
 timezone: Europe/Berlin
-releases:
+lectures:
   lecture-3:
+    session: 3
     event_datetime: 2026-09-24T10:00
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: lectures/03_trees
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: lectures/03_trees
   guest:
     event_datetime: 2026-10-08T10:00
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: lectures/05_guest
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: lectures/05_guest
+  other-three:
+    session: 4
+    number: 3
+    event_datetime: 2026-10-15T10:00
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: lectures/03_again
+readings:
   week-reading:
     event_datetime: 2026-10-09T10:00
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: readings/extra
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: readings/extra
+assets:
   setup:
     event_datetime: 2026-09-10T10:00
     show_on_site: false
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: setup
-  other-three:
-    event_datetime: 2026-10-15T10:00
-    number: 3
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: lectures/03_again
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: setup
 assignments:
   project:
-    course_source_repo: assignment-project
+    template: assignment-project
     handout_datetime: 2026-10-20T10:00
     due_datetime: 2026-11-01T23:59
   assignment-2:
-    course_source_repo: assignment-2-f2026
+    number: 2
+    template: assignment-2-f2026
     due_datetime: 2026-09-27T23:59
 """
 
@@ -1784,23 +1780,26 @@ def _numbers_render() -> dict:
 
 def test_an_entry_with_no_number_is_a_problem_dated_at_what_it_stops():
     problems = {p["id"]: p for p in _numbers_render()["problems"]}
-    guest = problems["number:lecture:guest"]
-    assert guest["text"] == "Give guest a number."
+    guest = problems["session:lecture:guest"]
+    assert guest["text"] == "Give guest a session."
+    assert guest["kind"] == "NO_SESSION"
     assert guest["stops"] == "The release on Thu 8 Oct will be skipped."
     assert guest["when"] == "2026-10-08T09:00:00+02:00"  # its copy, an hour early
     assert guest["scope"] == "semester"
     assert guest["fix"]["path"] == "schedule.yml"
     assert guest["fix"]["entry"] == "guest"
     assert guest["fix"]["screen"] == "schedule"
-    assert guest["fix"]["line"] == 9
+    assert guest["fix"]["line"] == 10
     project = problems["number:assignment:project"]
     assert project["when"] == "2026-10-20T10:00:00+02:00"
     assert project["stops"] == "The hand out on Tue 20 Oct will be skipped."
-    # Label-numbered entries, a stand-alone readings row and a silent copy need none.
+    # Entries with a session or a number, a stand-alone readings row and supporting
+    # files need none.
     assert not {
-        "number:lecture:lecture-3",
-        "number:readings:week-reading",
-        "number:lecture:setup",
+        "session:lecture:lecture-3",
+        "session:lecture:other-three",
+        "session:readings:week-reading",
+        "session:assets:setup",
         "number:assignment:assignment-2",
     } & set(problems)
 
@@ -1813,8 +1812,8 @@ def test_an_unnumbered_release_already_out_says_only_its_row_goes_without():
             dest_paths={schedule.DEFAULT_DEST_REPO: {"lectures/05_guest"}},
         )
     )
-    guest = {p["id"]: p for p in doc["problems"]}["number:lecture:guest"]
-    assert guest["text"] == "Give guest a number."
+    guest = {p["id"]: p for p in doc["problems"]}["session:lecture:guest"]
+    assert guest["text"] == "Give guest a session."
     assert guest["stops"] == "Its rows show no number until then."
     assert "when" not in guest
     assert "skipped" not in guest["stops"]
@@ -1865,23 +1864,6 @@ def _unmet(m: status_json.MaterialsFacts) -> list[str]:
         ({"syllabus": "<!-- dsl-stub: syllabus -->"}, ["syllabus"], "ready"),
         # A PDF syllabus that is there counts as written; its plan is pasted by hand.
         ({"syllabus": ""}, ["syllabus"], "ready"),
-        # No folder at all: none of a known kind.
-        ({"folders": ()}, ["kind_folder"], "todo"),
-        # A folder no kind names is supporting files (decision 0031): it blocks nothing.
-        ({"folders": ("lectures", "labs", "readings", "code")}, [], "ready"),
-        ({"folders": ("code",)}, ["kind_folder"], "todo"),
-        # Supporting files, by name or by default, on their own make nothing to show.
-        ({"folders": ("lectures", "labs", "readings", "img")}, [], "ready"),
-        ({"folders": ("data",)}, ["kind_folder"], "todo"),
-        # A declared kind maps the folder, matched case-insensitively.
-        (
-            {
-                "folders": ("Tutorien", "lectures", "readings"),
-                "kinds": {"tutorien": "lab"},
-            },
-            [],
-            "ready",
-        ),
         # The two non-blocking lines never stop ready.
         (
             {"syllabus": "# Syllabus", "releaseignore": None},
@@ -1929,19 +1911,18 @@ def test_the_one_syllabus_check_names_its_unmet_parts():
 
 
 def test_the_checklist_order_and_what_blocks():
-    # Folder kinds first, then the syllabus with its weekly plan, and the withheld
-    # patterns. No "every folder has a kind": since decision 0031 each has one.
+    # The syllabus with its weekly plan, and the withheld patterns, both suggested; no
+    # folder check (decision 0038: folders carry no kind).
     checks = status_json.materials_checks(_materials("m", None))
     assert [(c["id"], c["need"]) for c in checks] == [
-        ("kind_folder", "needed"),
         ("syllabus", "suggested"),
         ("withheld", "suggested"),
     ]
     # A done check carries no why; an unmet one names what is missing.
-    assert [c["why"] is None for c in checks] == [True, False, False]
-    assert checks[1]["why"] == "There is no SYLLABUS.md yet."
-    assert checks[0]["label"] == "At least one folder of a content kind"
-    assert checks[1]["label"] == "Syllabus"
+    assert [c["why"] is None for c in checks] == [False, False]
+    assert checks[0]["why"] == "There is no SYLLABUS.md yet."
+    assert checks[0]["label"] == "Syllabus"
+    assert checks[1]["label"] == "Withheld patterns reviewed"
 
 
 def test_the_seeded_releaseignore_is_not_reviewed_and_a_pattern_or_the_mark_is():
@@ -1972,17 +1953,14 @@ def test_c4_and_c5_are_done_once_any_one_is_ready():
     assert (block["stages"]["C4"], block["stages"]["C5"]) == ("done", "done")
     assert "C4" not in block["stage_why"] and "C5" not in block["stage_why"]
     none_ready = _course(
-        materials=[
-            _materials("course-materials-b", folders=("code",)),
-            _materials("course-materials-c", folders=()),
-        ],
+        materials=[_materials("course-materials-b", None)],
         templates=[status_json.TemplateFacts("assignment-2", None)],
     )
-    why = _course_block(none_ready)["stage_why"]
-    # Decision 0034: the nearest repo (fewest needed checks open, then by name) and
-    # what it still needs - never "no repo is ready".
-    assert why["C4"] == "course-materials-b has only supporting files so far."
-    assert why["C5"] == "No assignment template is ready yet."
+    block = _course_block(none_ready)
+    # Every materials check is suggested: a materials repo is ready as soon as it is
+    # there (decision 0038 retired the folder-kind check).
+    assert block["stages"]["C4"] == "done"
+    assert block["stage_why"]["C5"] == "No assignment template is ready yet."
 
 
 def test_the_todo_list_is_every_unmet_check_and_every_unwritten_brief():
@@ -2426,10 +2404,10 @@ def test_k5_and_k6_are_done_once_their_needed_part_is():
 
 def test_an_undated_source_fault_is_later():
     fault = ConfigFault(
-        "releases.s9",
+        "lectures.s9",
         f"{COURSE}/course-materials-f2026/lectures/09 does not exist",
         None,
-        field="course_source_path",
+        field="from_path",
         kind=FaultKind.MISSING_PATH,
         file="schedule.yml",
         repo="course-materials-f2026",
@@ -2482,9 +2460,9 @@ def test_every_problem_carries_its_kind_and_the_release_it_holds_back():
     # A number problem holds its entry while something is still to copy or hand out.
     numbers = {p["id"]: p for p in _numbers_render()["problems"]}
     assert (
-        numbers["number:lecture:guest"]["kind"],
-        numbers["number:lecture:guest"]["release"],
-    ) == ("NOT_NUMBERED", "guest")
+        numbers["session:lecture:guest"]["kind"],
+        numbers["session:lecture:guest"]["release"],
+    ) == ("NO_SESSION", "guest")
     assert numbers["number:assignment:project"]["release"] == "project"
     # A duplicate number holds nothing back.
     (duplicate,) = [p for p in numbers.values() if p["kind"] == "DUPLICATE_NUMBER"]
@@ -2496,11 +2474,12 @@ def test_every_problem_carries_its_kind_and_the_release_it_holds_back():
 
 SYLLABUS_RELEASE = SCHEDULE.replace(
     "assignments:\n",
-    """  syllabus:
+    """assets:
+  syllabus:
     event_datetime: 2026-09-30T10:00
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: SYLLABUS.md
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: SYLLABUS.md
 assignments:
 """,
 )
@@ -2652,18 +2631,19 @@ def test_a_hand_out_that_has_happened_never_dates_a_template_problem():
         t["id"] for t in doc["course"]["todo"]
     }
     # A second assignment cites it on 27 Oct: that hand-out dates it, not the past one.
-    mixed = SCHEDULE + (
+    # Two assignments may share a template only when each names its own repos.
+    mixed = SCHEDULE.replace(
+        "    template: assignment-2-f2026\n",
+        "    template: assignment-2-f2026\n    repo_name: assignment-2\n",
+    ) + (
         "  assignment-4:\n"
-        "    course_source_repo: assignment-2-f2026\n"
+        "    number: 4\n"
+        "    repo_name: assignment-4\n"
+        "    template: assignment-2-f2026\n"
         "    handout_datetime: 2026-10-27T10:00\n"
         "    due_datetime: 2026-11-08T23:59\n"
     )
-    # Two assignments may share a template only when each names its own copy.
-    dest = settings.parse_instance(
-        "assignments:\n  assignment-2:\n    semester_dest_repo: assignment-2\n"
-        "  assignment-4:\n    semester_dest_repo: assignment-4\n"
-    )
-    sched = schedule.parse(load_yaml_lines(mixed), dest)
+    sched = schedule.parse(load_yaml_lines(mixed))
     doc = _render(course, _semester(sched=sched))
     template = [p for p in doc["problems"] if p["stage"] == "C5"]
     assert [(p["id"], p["release"], p["when"]) for p in template] == [
@@ -2762,10 +2742,10 @@ def test_two_ticks_of_the_same_facts_render_the_same_bytes():
     # The no-churn contract: the file carries no tick time, so a render ten minutes on
     # makes no commit - with a `soon` problem standing in both.
     soon = ConfigFault(
-        "releases.s3",
+        "lectures.s3",
         f"{COURSE}/course-materials-f2026/lectures/03_trees does not exist",
         datetime(2026, 9, 24, 10, 0, tzinfo=BERLIN),
-        field="course_source_path",
+        field="from_path",
         kind=FaultKind.MISSING_PATH,
         file="schedule.yml",
         repo="course-materials-f2026",
@@ -2873,13 +2853,13 @@ THREE_WEEKS = """\
 timezone: Europe/Berlin
 semester_start: 2026-10-05
 semester_end: 2026-10-23
-releases:
+lectures:
   s1:
+    session: 1
     event_datetime: 2026-10-07T10:00
     title: One
-events:
+exams:
   exam:
-    kind: exam
     title: Exam
     event_datetime: 2026-10-22
 """
@@ -2918,10 +2898,10 @@ def test_the_weeks_are_the_semesters_own_counted_from_its_first_day():
 timezone: Europe/Berlin
 semester_start: 2026-10-07
 semester_end: 2026-10-20
-releases:
+lectures:
   lecture_1:
+    session: 1
     event_datetime: 2026-10-12T10:00
-    kind: lecture
 """
     facts = _semester(sched=_sched(text))
     before = datetime(2026, 9, 30, 9, 0, tzinfo=UTC)
@@ -2940,19 +2920,21 @@ WEEKLY = """\
 timezone: Europe/Berlin
 semester_start: 2026-10-05
 semester_end: 2026-10-16
-releases:
+lectures:
   lecture_1:
+    session: 1
     event_datetime: 2026-10-06T10:00
-    kind: lecture
-  lab_1:
-    event_datetime: 2026-10-08T10:00
-    kind: lab
   lecture_2:
+    session: 2
     event_datetime: 2026-10-13T10:00
-    kind: lecture
+labs:
+  lab_1:
+    session: 1
+    event_datetime: 2026-10-08T10:00
 assignments:
   a1:
-    course_source_repo: a1-f2026
+    number: 1
+    template: a1-f2026
     handout_datetime: 2026-10-14T10:00
     due_datetime: 2026-10-30T23:59
 """
@@ -2978,20 +2960,21 @@ def _twelve_weeks(readings_weeks: int) -> list[str]:
     """The kind gaps of a 12-week term (Mon 5 Oct to Fri 25 Dec) with a lecture every
     week, readings in its first `readings_weeks` weeks and one lab that is `tbc`, read
     before the term starts."""
-    releases = "".join(
-        f"  lecture_{n}:\n    event_datetime: {date(2026, 10, 6) + timedelta(weeks=n - 1)}T10:00\n"
-        "    kind: lecture\n"
+    lectures = "".join(
+        f"  lecture_{n}:\n    session: {n}\n"
+        f"    event_datetime: {date(2026, 10, 6) + timedelta(weeks=n - 1)}T10:00\n"
         for n in range(1, 13)
     )
-    releases += "".join(
-        f"  readings_{n}:\n    event_datetime: {date(2026, 10, 7) + timedelta(weeks=n - 1)}T10:00\n"
-        "    kind: readings\n"
+    readings = "".join(
+        f"  readings_{n}:\n"
+        f"    event_datetime: {date(2026, 10, 7) + timedelta(weeks=n - 1)}T10:00\n"
         for n in range(1, readings_weeks + 1)
     )
-    releases += "  lab_1:\n    event_datetime: tbc\n    kind: lab\n"
     text = (
         "timezone: Europe/Berlin\nsemester_start: 2026-10-05\n"
-        f"semester_end: 2026-12-25\nreleases:\n{releases}"
+        f"semester_end: 2026-12-25\nlectures:\n{lectures}"
+        + (f"readings:\n{readings}" if readings else "")
+        + "labs:\n  lab_1:\n    session: 1\n    event_datetime: tbc\n"
     )
     facts = _semester(sched=_sched(text))
     before = datetime(2026, 9, 30, 9, 0, tzinfo=UTC)
@@ -3028,102 +3011,94 @@ def test_a_set_aside_empty_week_is_not_raised():
     assert "empty_week:2026-10-12" not in ids
 
 
-# ------------------------------------------------------------ nothing to release
+# ------------------------------------------------------------ no files yet
 
-NOTHING_PLANNED = """\
+NO_FILES = """\
 timezone: Europe/Berlin
 semester_start: 2026-10-05
 semester_end: 2026-12-18
-releases:
+lectures:
   lecture_9:
+    session: 9
     event_datetime: 2026-11-05T10:00
-    kind: lecture
-  lab-2:
-    event_datetime: 2026-10-08T10:00
-    kind: lab
-    number: 2
+    files: []
   lecture_10:
+    session: 10
     event_datetime: 2026-11-12T10:00
-    kind: lecture
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: lectures/10
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: lectures/10
+  lecture_11:
+    session: 11
+    event_datetime: 2026-11-19T10:00
+labs:
+  lab-2:
+    session: 2
+    event_datetime: 2026-10-08T10:00
+    files: []
   lab-tbc:
+    session: 3
     event_datetime: tbc
-    kind: lab
+    files: []
 """
 
 
-def _nothing(now: datetime, aside: tuple[str, ...] = ()) -> list[dict]:
-    facts = _semester(sched=_sched(NOTHING_PLANNED))
-    return status_json.nothing_to_release_problems(facts, now, frozenset(aside))
+def _no_files(now: datetime, aside: tuple[str, ...] = ()) -> list[dict]:
+    facts = _semester(sched=_sched(NO_FILES))
+    return status_json.no_files_todo(facts, now, frozenset(aside))
 
 
-def test_a_dated_release_with_no_files_is_nothing_to_release():
-    # Neither the entry with a deploy nor the tbc one is raised.
+def test_an_entry_written_with_no_files_is_a_quiet_to_do_dated_at_its_session():
+    # Plan 0.11.0 9b ruling 5: `files: []` is a suggested, set-aside-able to-do dated at
+    # the session, never a problem. No `files:` key (lecture 11) is a plain session, and a
+    # tbc one is undated, so neither is raised.
     lab, lecture = sorted(
-        _nothing(datetime(2026, 10, 1, 9, 0, tzinfo=UTC)), key=lambda p: p["when"]
+        _no_files(datetime(2026, 10, 1, 9, 0, tzinfo=UTC)), key=lambda t: t["when"]
     )
-    assert lecture["id"] == "nothing_to_release:lecture_9"
-    assert lecture["kind"] == "NOTHING_TO_RELEASE"
-    assert lecture["label"] == "Nothing to release"
-    assert lecture["aside"] is True
-    assert lecture["text"] == (
-        "Lecture 9 has nothing to release. If this is intentional, click 'Set aside'."
+    assert lecture["id"] == "schedule:files:lecture_9"
+    assert (lecture["kind"], lecture["check"], lecture["need"]) == (
+        "schedule",
+        "files",
+        "suggested",
     )
+    assert lecture["text"] == "Lecture 9 has no files yet."
     assert lecture["when"] == "2026-11-05T10:00:00+01:00"
-    assert lecture["fix"]["screen"] == "schedule"
-    assert lecture["fix"]["entry"] == "lecture_9"
-    assert lab["text"].startswith("Lab 2 has nothing to release.")
+    assert (lecture["screen"], lecture["entry"]) == ("schedule", "lecture_9")
+    assert lab["text"] == "Lab 2 has no files yet."
+    # Past: nothing to say.
+    ids = [t["id"] for t in _no_files(datetime(2026, 10, 9, 9, 0, tzinfo=UTC))]
+    assert ids == ["schedule:files:lecture_9"]
 
 
-def test_nothing_to_release_is_coming_up_until_the_horizon_and_never_once_past():
-    now = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
-    tiers = {p["id"]: p["bites"] for p in status_json._tier(_nothing(now), now)}
-    # The lab is 7 days off: a problem. The lecture is weeks off: coming up.
-    assert tiers == {
-        "nothing_to_release:lab-2": "soon",
-        "nothing_to_release:lecture_9": "later",
-    }
-    # Past: the push comment says it fired with nothing to ship; no problem here.
-    ids = [p["id"] for p in _nothing(datetime(2026, 10, 9, 9, 0, tzinfo=UTC))]
-    assert ids == ["nothing_to_release:lecture_9"]
-
-
-def test_a_release_whose_copies_were_all_dropped_is_not_nothing_to_release():
-    # Its deploy line is a parse fault, which is the problem; a Set aside must not hide it.
-    text = NOTHING_PLANNED.replace(
-        "    kind: lecture\n    deploy:\n      - course_source_repo: course-materials-f2026\n",
-        "    kind: lecture\n    deploy:\n      - course_source_repo: \n",
+def test_an_entry_whose_copies_were_all_dropped_is_not_a_to_do():
+    # Its file line is a parse fault, which is the problem; a Set aside must not hide it.
+    text = NO_FILES.replace(
+        "      - from_course_repo: course-materials-f2026\n        from_path: lectures/10\n",
+        "      - from_course_repo: course-materials-f2026\n",
     )
     sched = _sched(text)
-    assert [f.where for f in sched.faults] == ["releases.lecture_10.deploy[0]"]
-    facts = _semester(sched=sched)
+    assert [f.where for f in sched.faults] == ["lectures.lecture_10.files[0]"]
     ids = [
-        p["id"]
-        for p in status_json.nothing_to_release_problems(
-            facts, datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
+        t["id"]
+        for t in status_json.no_files_todo(
+            _semester(sched=sched), datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
         )
     ]
-    assert "nothing_to_release:lecture_10" not in ids
-    assert "nothing_to_release:lecture_9" in ids
+    assert "schedule:files:lecture_10" not in ids
+    assert "schedule:files:lecture_9" in ids
 
 
-def test_a_set_aside_release_with_nothing_to_release_is_not_raised():
+def test_a_set_aside_no_files_to_do_is_marked_and_never_a_problem():
     now = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
-    assert [p["id"] for p in _nothing(now, ("nothing_to_release:lab-2",))] == [
-        "nothing_to_release:lecture_9"
-    ]
-    course = _course()
-    course.meta = {**course.meta, "set_aside": ["nothing_to_release:lecture_9"]}
-    ids = [
-        p["id"]
-        for p in _render(course, _semester(sched=_sched(NOTHING_PLANNED)), now)[
-            "problems"
-        ]
-    ]
-    assert "nothing_to_release:lab-2" in ids
-    assert "nothing_to_release:lecture_9" not in ids
+    aside = {t["id"]: t["set_aside"] for t in _no_files(now, ("schedule:files:lab-2",))}
+    assert aside == {"schedule:files:lab-2": True, "schedule:files:lecture_9": False}
+    doc = _render(_course(), _semester(sched=_sched(NO_FILES)), now)
+    assert not any("files" in p["id"] for p in doc["problems"])
+    assert {t["id"] for t in doc["semester"]["todo"]} >= {
+        "schedule:files:lab-2",
+        "schedule:files:lecture_9",
+    }
+    assert validate(doc, schemas.status_schema()) == []
 
 
 def test_an_assignment_carries_the_site_s_submit_shape():
@@ -3140,104 +3115,65 @@ def test_an_assignment_carries_the_site_s_submit_shape():
 
 
 def test_an_assignment_carries_its_semester_side_name():
-    # The per-unit repos are `<semester_dest_repo>-<handle>`, not `<key>-<handle>`.
-    dest = settings.parse_instance(
-        "assignments:\n  assignment-2:\n    semester_dest_repo: project-2\n"
+    # The per-unit repos are `<repo_name>-<handle>`, not `<key>-<handle>`.
+    sched = schedule.parse(
+        load_yaml_lines(
+            SCHEDULE.replace(
+                "    template: assignment-2-f2026\n",
+                "    template: assignment-2-f2026\n    repo_name: project-2\n",
+            )
+        )
     )
-    sched = schedule.parse(load_yaml_lines(SCHEDULE), dest)
     doc = _render(semester=_semester(sched=sched))
     row = next(a for a in doc["assignments"] if a["slug"] == "assignment-2")
     assert row["semester_name"] == "project-2"
 
 
-# ------------------------------------------------------------------ sessions without files
+# ------------------------------------------------------------------ slots
 
-SESSIONS = (
-    WEEKLY
-    + """\
-events:
+SLOTS = """\
+timezone: Europe/Berlin
+semester_start: 2026-10-05
+semester_end: 2026-10-16
+lectures:
+  lecture_1:
+    session: 1
+    event_datetime: 2026-10-06T10:00
+  lecture_2:
+    session: 2
+    event_datetime: 2026-10-13T10:00
+labs:
+  lab_1:
+    session: 1
+    title: Regression
+    event_datetime:
+      - 2026-10-08T10:00
+      - {at: 2026-10-09T18:00, details: Group 2}
   lab-2-only-group:
-    kind: lab
-    number: 2
+    session: 2
     title: Trees
     event_datetime: 2026-10-15T18:00
-  lab-1-group-2:
-    kind: lab
-    number: 1
-    event_datetime: 2026-10-09T18:00
 """
-)
 
 
-def test_a_session_event_fills_its_kinds_week():
-    # Week 2's only lab is an `events:` session: not a week with no lab.
-    facts = _semester(sched=_sched(SESSIONS))
+def test_every_slot_fills_its_kinds_week():
+    facts = _semester(sched=_sched(SLOTS))
     before = datetime(2026, 9, 30, 9, 0, tzinfo=UTC)
     assert status_json.empty_week_problems(facts, before, frozenset()) == []
 
 
-def test_this_week_lists_a_session_event_under_its_kind():
-    sched = _sched(SESSIONS)
-    now = datetime(2026, 10, 13, 9, 0, tzinfo=UTC)
-    rows = status_json.this_week(sched, [], [], now, planned_rows(sched))
-    (lab,) = [r for r in rows if r["ref"] == "lab-2-only-group"]
-    assert (lab["kind"], lab["title"], lab["state"]) == ("lab", "Trees", "planned")
-    early = status_json.this_week(
+def test_this_week_lists_each_slot_under_its_entry():
+    sched = _sched(SLOTS)
+    rows = status_json.this_week(
         sched, [], [], datetime(2026, 10, 8, 9, 0, tzinfo=UTC), planned_rows(sched)
     )
-    (group,) = [r for r in early if r["ref"] == "lab-1-group-2"]
-    assert group["title"] == "Lab 1"
-
-
-def test_this_week_titles_a_session_as_the_release_it_repeats():
-    # No `title:` of its own: the lab 1 release's, as on the site row.
-    sched = _sched(SESSIONS.replace("  lab_1:\n", "  lab_1:\n    title: Regression\n"))
-    week = status_json.this_week(
-        sched, [], [], datetime(2026, 10, 8, 9, 0, tzinfo=UTC), planned_rows(sched)
+    labs = [(r["ref"], r["title"], r["when"][:10]) for r in rows if r["ref"] == "lab_1"]
+    assert labs == [
+        ("lab_1", "Regression", "2026-10-08"),
+        ("lab_1", "Regression", "2026-10-09"),
+    ]
+    later = status_json.this_week(
+        sched, [], [], datetime(2026, 10, 13, 9, 0, tzinfo=UTC), planned_rows(sched)
     )
-    (group,) = [r for r in week if r["ref"] == "lab-1-group-2"]
-    assert (group["kind"], group["title"]) == ("lab", "Regression")
-
-
-def test_a_session_event_is_never_nothing_to_release():
-    facts = _semester(sched=_sched(SESSIONS))
-    now = datetime(2026, 9, 30, 9, 0, tzinfo=UTC)
-    ids = {p["id"] for p in status_json.nothing_to_release_problems(facts, now)}
-    assert not any("group" in i for i in ids)
-
-
-# --------------------------------------------------------- folder kinds at any depth
-
-
-# A repo shaped like the Maths course's: kinds one level down, solutions denied.
-MATHS_TREE = {
-    "": {
-        "students": "dir",
-        "solutions": "dir",
-        "readings": "dir",
-        "m4ds": "dir",
-        "SYLLABUS.md": "file",
-    },
-    "students": {"lectures": "dir", "labs": "dir", "notes.md": "file"},
-    "solutions": {"labs": "dir"},
-    "readings": {"week1": "dir"},
-    "m4ds": {"chapter1": "dir", "labs-old": "dir"},
-}
-
-
-def _facts(monkeypatch, tree, declared=None, releaseignore=None, listed=None):
-    monkeypatch.setattr(status_json, "top_level", _repo_tree(tree, listed))
-    monkeypatch.setattr(
-        status_json, "_declaration", lambda org, repo: declared or Declared()
-    )
-    monkeypatch.setattr(
-        status_json,
-        "get_file_content",
-        lambda org, repo, path: releaseignore if path == ".releaseignore" else None,
-    )
-    return status_json._materials_facts(COURSE, "maths-materials")
-
-
-def _found(m) -> dict[str, list[str]]:
-    (kind,) = [c for c in status_json.materials_checks(m) if c["id"] == "kind_folder"]
-    return {d["kind"]: d["folders"] for d in kind["detail"]}
+    (lab,) = [r for r in later if r["ref"] == "lab-2-only-group"]
+    assert (lab["kind"], lab["title"], lab["state"]) == ("release", "Trees", "planned")
