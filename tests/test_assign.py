@@ -25,7 +25,7 @@ from dsl_course import (
     workflows_place,
 )
 from dsl_course.schedule import AssignmentEntry, Schedule
-from tests.conftest import ROSTER_HEADER, repo_row
+from tests.conftest import ROSTER_HEADER, repo_row, run_settings
 from tests.plans import citing
 
 # Every template these tests hand out, collect or patch: the plan cites each.
@@ -1601,7 +1601,7 @@ def test_a_group_assignment_nobody_declared_a_formation_for_waits_on_students(
     monkeypatch.setattr(
         grading_spec, "_grading_text", lambda org, template: "type: group\n"
     )
-    monkeypatch.setattr(settings, "_assignments_text", lambda org: None)
+    run_settings(monkeypatch, lambda org: None)
     monkeypatch.setattr(settings, "org_meta", lambda org: {})
     monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
     path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
@@ -2903,7 +2903,7 @@ def _two_entries_one_numbered() -> Schedule:
                 course_source_repo="assignment-trees", due_datetime=due
             ),
             "assignment-2": AssignmentEntry(
-                course_source_repo="assignment-trees", due_datetime=due
+                course_source_repo="assignment-trees", due_datetime=due, number=2
             ),
         }
     )

@@ -254,7 +254,7 @@ SCHEDULE = schedule.Schedule(
     releases=[
         # Supporting files whose one copy is a root file: released, never a row.
         _release(
-            "assets.course-intro",
+            "course-intro",
             datetime(2026, 8, 31, 9, 0, tzinfo=BERLIN),
             "SYLLABUS.md",
             kind="assets",
@@ -262,7 +262,7 @@ SCHEDULE = schedule.Schedule(
         # Readings for unit 1: inline on lecture 1 (its list), listed under it on the
         # Readings tab, and a readings chip on every row of the unit.
         _release(
-            "readings.week-1",
+            "readings-week-1",
             datetime(2026, 9, 1, 9, 0, tzinfo=BERLIN),
             "readings/01_week-1",
             kind="readings",
@@ -272,7 +272,7 @@ SCHEDULE = schedule.Schedule(
         # A titled silent readings entry with no session: its own unnumbered row, on the
         # Readings tab only.
         _release(
-            "readings.extra",
+            "readings-extra",
             datetime(2026, 9, 2, 9, 0, tzinfo=BERLIN),
             "readings/extra",
             kind="readings",
@@ -281,7 +281,7 @@ SCHEDULE = schedule.Schedule(
         ),
         # A drop-in whose one copy is a single file outside any session folder.
         _release(
-            "drop-ins.clinic",
+            "clinic",
             datetime(2026, 9, 4, 16, 0, tzinfo=BERLIN),
             "clinic/notes.pdf",
             kind="drop-in",
@@ -292,7 +292,7 @@ SCHEDULE = schedule.Schedule(
         ),
         # Released, with a published deck beside an unpublished pdf.
         _release(
-            "lectures.1",
+            "lecture-1",
             datetime(2026, 9, 7, 10, 0, tzinfo=BERLIN),
             "lectures/01_week-1",
             kind="lecture",
@@ -303,7 +303,7 @@ SCHEDULE = schedule.Schedule(
         ),
         # Two groups: two rows of Lab 1, one set of files, each slot its own room.
         _release(
-            "labs.1",
+            "lab-1",
             datetime(2026, 9, 9, 14, 0, tzinfo=BERLIN),
             "labs/01_week-1",
             kind="lab",
@@ -320,14 +320,14 @@ SCHEDULE = schedule.Schedule(
         ),
         # Its readings are still to come: readings_pending on lecture 2.
         _release(
-            "readings.week-2",
+            "readings-week-2",
             datetime(2026, 9, 10, 9, 0, tzinfo=BERLIN),
             "readings/02_week-2",
             kind="readings",
             session="2",
         ),
         _release(
-            "lectures.2",
+            "lecture-2",
             datetime(2026, 9, 14, 10, 0, tzinfo=BERLIN),
             "lectures/02_week-2",
             kind="lecture",
@@ -338,14 +338,14 @@ SCHEDULE = schedule.Schedule(
         # An exam with files: the Exams tab, which also lists the display-only exams.
         # Dated early, so it stays out of the Updates box the CI job checks.
         _release(
-            "exams.mock",
+            "mock-exam",
             datetime(2026, 8, 25, 10, 0, tzinfo=BERLIN),
             "exams/mock.pdf",
             kind="exam",
         ),
         # Nothing shipped -> unreleased, and the row names where it will land.
         _release(
-            "lectures.3",
+            "lecture-3",
             datetime(2026, 9, 21, 10, 0, tzinfo=BERLIN),
             "lectures/03_week-3",
             kind="lecture",
@@ -357,7 +357,7 @@ SCHEDULE = schedule.Schedule(
         # `event_datetime: tbc`: a "TBC" row after lab 1 on the schedule and the Labs tab,
         # never in the Updates box.
         _release(
-            "labs.3",
+            "lab-3",
             None,
             "labs/03_week-3",
             kind="lab",
@@ -367,7 +367,7 @@ SCHEDULE = schedule.Schedule(
         ),
         # A session with nothing to ship: a row, no files, never in the Updates box.
         schedule.Release(
-            "labs.4",
+            "lab-4",
             datetime(2026, 9, 30, 14, 0, tzinfo=BERLIN),
             kind="lab",
             number=4,

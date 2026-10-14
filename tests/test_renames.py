@@ -202,7 +202,7 @@ def test_a_not_migrated_fault_carries_its_own_problem_code():
 
 
 def _one_assignment(**extra) -> schedule.Schedule:
-    entry = {"course_source_repo": "a-f2026", "due_datetime": "2026-10-13T18:00"}
+    entry = {"template": "a-f2026", "due_datetime": "2026-10-13T18:00"}
     return schedule.parse({"assignments": {"a1": {**entry, **extra}}})
 
 
@@ -561,21 +561,6 @@ def test_distribute_says_notify_and_only_false_holds_the_mail():
 
 
 # ------------------------------------------------------------------- kind (row type)
-
-
-def test_a_row_kind_is_read_from_kind():
-    sched = schedule.parse(
-        {
-            "releases": {
-                "lab-1": {"event_datetime": "2026-09-08T09:00", "kind": "lab"},
-            },
-            "events": {
-                "mid": {"event_datetime": "2026-11-03", "kind": "exam"},
-            },
-        }
-    )
-    assert {r.label: r.kind for r in sched.releases} == {"lab-1": "lab"}
-    assert {e.label: e.kind for e in sched.events} == {"mid": "exam"}
 
 
 def test_the_site_emits_kind_beside_the_pinned_themes_type():

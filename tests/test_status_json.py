@@ -38,7 +38,7 @@ from dsl_course.gh_contents import load_yaml_lines
 from dsl_course.materials import PLAN_END, PLAN_START, Declared
 from dsl_course.ops.request import validate
 from dsl_course.schedule_plan import planned_rows
-from tests.conftest import repo_row
+from tests.conftest import repo_row, run_settings
 
 COURSE = "hertie-dsl-demo-course-e1234"
 SEMESTER = "hertie-dsl-demo-f2026"
@@ -790,7 +790,7 @@ def test_a_group_assignment_nobody_declared_a_formation_for_is_forming_teams(
 ):
     # The spec as the engine reads it (the cascade, every layer empty): the institution's
     # `self_select` answers, so the state is teams_forming, never blocked.
-    monkeypatch.setattr(settings, "_assignments_text", lambda org: None)
+    run_settings(monkeypatch, lambda org: None)
     monkeypatch.setattr(settings, "org_meta", lambda org: {})
     group = grading_spec.with_run_settings(
         grading_spec.GradingSpec(type="group"), "COURSE", SEMESTER, "assignment-2"

@@ -15,12 +15,19 @@ DUE = datetime(2026, 1, 5, 23, 59, tzinfo=UTC)
 
 def citing(*templates: str, due: datetime = DUE) -> Schedule:
     """Each template under the key its name gives without the semester suffix
-    (`assignment-1-f2026` -> `assignment-1`), due on `due`."""
+    (`assignment-1-f2026` -> `assignment-1`), numbered by the digits in it, due on
+    `due`."""
+
+    def number(key: str) -> int | None:
+        found = re.search(r"\d+", key)
+        return int(found.group()) if found else None
+
     return Schedule(
         assignments={
-            re.sub(r"-[fs]\d{4}$", "", t): AssignmentEntry(
-                course_source_repo=t, due_datetime=due
+            key: AssignmentEntry(
+                course_source_repo=t, due_datetime=due, number=number(key)
             )
             for t in templates
+            for key in [re.sub(r"-[fs]\d{4}$", "", t)]
         }
     )

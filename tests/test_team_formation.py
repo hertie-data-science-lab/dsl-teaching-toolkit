@@ -46,6 +46,7 @@ TEAMS_HEADER = "assignment,team,github_handle"
 
 
 def _entry(**kw) -> AssignmentEntry:
+    kw.setdefault("number", 2)
     return AssignmentEntry(
         course_source_repo="a2-f2026",
         due_datetime=SHUTS,
@@ -195,7 +196,7 @@ def test_an_assignment_handed_out_by_hand_has_no_window_to_be_waiting_at(
     sched = _sched(
         **{
             "assignment-2": AssignmentEntry(
-                due_datetime=SHUTS, course_source_repo="a2-f2026"
+                number=2, due_datetime=SHUTS, course_source_repo="a2-f2026"
             )
         }
     )
@@ -867,6 +868,7 @@ def test_a_window_shorter_than_the_reminder_lead_sends_one_message_for_both_phas
     short = _sched(
         **{
             "assignment-2": AssignmentEntry(
+                number=2,
                 course_source_repo="a2-f2026",
                 due_datetime=INSIDE + timedelta(hours=6),
                 handout_datetime=INSIDE - timedelta(hours=1),
@@ -883,7 +885,7 @@ def test_a_window_shorter_than_the_reminder_lead_sends_one_message_for_both_phas
 def test_two_open_windows_are_one_batch_of_one_message_each(semester, post):
     semester()
     _rec, sender = post()
-    assert _tick(sched=_sched(**{"a-1": _entry(), "a-2": _entry()})) == 0
+    assert _tick(sched=_sched(**{"a-1": _entry(number=1), "a-2": _entry()})) == 0
     assert len(sender.batches) == 1, (
         "one send_bulk a tick - one token, one rate limiter"
     )

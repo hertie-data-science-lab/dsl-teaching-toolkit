@@ -38,7 +38,7 @@ def wired(monkeypatch):
         releases=[
             # A week ahead of its lecture, silent, as the demo ships them.
             Release(
-                "readings.week-1",
+                "readings-week-1",
                 datetime(2026, 8, 25, 9, 0, tzinfo=BERLIN),
                 deploy=[Deploy("cm", "readings/01_week-1", "materials", None)],
                 kind="readings",
@@ -46,7 +46,7 @@ def wired(monkeypatch):
                 reading_list=READING,
             ),
             Release(
-                "lectures.2",
+                "lecture-2",
                 datetime(2026, 9, 8, 10, 0, tzinfo=BERLIN),
                 deploy=[Deploy("cm", "lectures/02_x", "materials", None)],
                 kind="lecture",
@@ -56,7 +56,7 @@ def wired(monkeypatch):
                 details="Distributions, expectation\nand variance.",
             ),
             Release(
-                "lectures.1",
+                "lecture-1",
                 datetime(2026, 9, 1, 10, 0, tzinfo=BERLIN),
                 deploy=[Deploy("cm", "lectures/01_intro", "materials", None)],
                 kind="lecture",
@@ -67,7 +67,7 @@ def wired(monkeypatch):
             ),
             # Lab 1 is in unit 1 too: one session, headed by its first row (lecture 1).
             Release(
-                "labs.1",
+                "lab-1",
                 datetime(2026, 9, 3, 10, 0, tzinfo=BERLIN),
                 kind="lab",
                 number=1,
@@ -467,7 +467,7 @@ def test_a_titleless_entry_does_not_blank_a_session_the_site_names(wired, monkey
     sched = syllabus.schedule.load("Semester-f2026")
     sched.releases.append(
         Release(
-            "assets.course-intro",
+            "assets-course-intro",
             datetime(2026, 8, 20, 9, 0, tzinfo=BERLIN),
             deploy=[Deploy("cm", "SYLLABUS.md", "materials", None)],
             kind="assets",
@@ -495,7 +495,7 @@ def test_readings_come_from_any_repo_and_any_folder_by_their_session(
     _with(
         monkeypatch,
         Release(
-            "readings.papers-2",
+            "readings-papers-2",
             datetime(2026, 9, 5, 9, 0, tzinfo=BERLIN),
             deploy=[Deploy("nlp-literature", "week-2/vaswani.pdf", "readings", None)],
             kind="readings",
@@ -512,7 +512,7 @@ def test_readings_after_the_last_lecture_close_the_list(monkeypatch, wired):
     _with(
         monkeypatch,
         Release(
-            "readings.further",
+            "readings-further",
             datetime(2026, 12, 1, 9, 0, tzinfo=BERLIN),
             deploy=[Deploy("cm", "literature/week-12", "materials", None)],
             kind="readings",

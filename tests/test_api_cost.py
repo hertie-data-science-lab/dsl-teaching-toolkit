@@ -43,7 +43,7 @@ from dsl_course import (
 )
 from dsl_course.discovery import ASSIGNMENT_TEMPLATE_TOPIC, TEMPLATE_TOPIC
 
-FIXTURES = Path(__file__).parent / "fixtures" / "layouts"
+FIXTURES = Path(__file__).parent / "fixtures" / "schedule-shape"
 COURSE = "Course-e1234"
 SEMESTER = "Course-f2026"
 STUDENTS = ("octo-one", "octo-two")
@@ -75,7 +75,8 @@ def _schedule() -> str:
     text = (FIXTURES / "demo-schedule.yml").read_text()
     blocks = "".join(
         f"  {slug}:\n"
-        f"    course_source_repo: {slug}-f2026\n"
+        f"    number: {i + 1}\n"
+        f"    template: {slug}-f2026\n"
         f"    handout_datetime: 2026-09-{8 + 7 * i:02d}T10:00\n"
         f"    due_datetime: 2026-09-{15 + 7 * i:02d}T23:59\n"
         # The second with a solution date still held at NOW (inside its late window), so
@@ -141,7 +142,7 @@ class FakeGitHub:
             ): "assignment,team,github_handle\n",
             (SEMESTER, "semester-config", "instructors.yml"): "instructors: []\n",
         }
-        materials = (FIXTURES / "demo-tree.txt").read_text().splitlines()
+        materials = (FIXTURES / "demo-course-tree.txt").read_text().splitlines()
         self.trees: dict[tuple[str, str], list[str]] = {
             (COURSE, "course-materials-f2026"): materials,
             (COURSE, "lecture-code-f2026"): [

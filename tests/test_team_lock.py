@@ -17,7 +17,7 @@ from dsl_course import (
     team_formation,
 )
 from dsl_course.schedule import AssignmentEntry, Schedule
-from tests.conftest import split_grading
+from tests.conftest import run_settings, split_grading
 
 # ------------------------------------------------- the team-formation lock file
 
@@ -67,9 +67,8 @@ def _lock(
         "_grading_text",
         lambda org, template: (split.get(template) or (None,))[0],
     )
-    monkeypatch.setattr(
-        settings,
-        "_assignments_text",
+    run_settings(
+        monkeypatch,
         lambda org: yaml.safe_dump({"assignments": blocks}) if blocks else None,
     )
     monkeypatch.setattr(

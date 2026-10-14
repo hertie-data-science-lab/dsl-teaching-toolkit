@@ -707,8 +707,9 @@ def test_a_semester_gets_a_tab_per_kind_it_has_rows_of():
     assert {"assignments.md", "materials.md", "profile.md"} <= set(semester)
     assert "layout: profile" in semester["profile.md"]
     assert "permalink: /materials/" in semester["materials.md"]
-    assert "permalink: /other/" in site_repo.theme_pages(True, ["other"])["other.md"]
-    assert "title: Other" in site_repo.theme_pages(True, ["other"])["other.md"]
+    # The `other` kind's block and tab are `events` (decision 0038).
+    assert "permalink: /events/" in site_repo.theme_pages(True, ["other"])["events.md"]
+    assert "title: Events" in site_repo.theme_pages(True, ["other"])["events.md"]
     # A public course site keeps its own pages: /materials/ is its readings page.
     public = site_repo.theme_pages(semester=False)
     assert "readings.md" not in public

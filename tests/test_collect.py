@@ -40,7 +40,7 @@ from dsl_course.collect import Target
 from dsl_course.faults import RunSettingInTemplate, Severity
 from dsl_course.roster import Student
 from dsl_course.schedule import Schedule
-from tests.conftest import ROSTER_HEADER
+from tests.conftest import ROSTER_HEADER, run_settings
 from tests.plans import citing
 
 # Every template these tests hand out, collect or patch: the plan cites each.
@@ -111,18 +111,20 @@ def test_parse_grading_spec_defaults_and_overrides():
 
 
 def _instance_faults(block: str) -> list[str]:
-    """What `assignments.yml` says about one assignment block's values."""
-    return [
-        f.what for f in settings.parse_instance(f"assignments:\n  a:\n{block}").faults
-    ]
+    """What the schedule's parse says about the run settings written on one assignment
+    entry (`settings.inline_settings`; `visibility` spelt `assignment_repo_visibility`
+    there)."""
+    data = yaml.safe_load(f"a:\n{block}")["a"] or {}
+    data = {settings.INLINE_NAMES.get(k, k): v for k, v in data.items()}
+    dropped: list = []
+    settings.inline_settings(data, "assignments.a", dropped)
+    return [getattr(d, "what", str(d)) for d in dropped]
 
 
 def _resolved(monkeypatch, spec_text: str, block: str) -> grading_spec.GradingSpec:
     """The template `spec_text` with the run settings `block` gives assignment `a` in the
     semester's assignments.yml - what every reader is handed."""
-    monkeypatch.setattr(
-        settings, "_assignments_text", lambda org: f"assignments:\n  a:\n{block}"
-    )
+    run_settings(monkeypatch, lambda org: f"assignments:\n  a:\n{block}")
     return grading_spec.with_run_settings(
         collect.parse_grading_spec(spec_text), "C", "Sem", "a"
     )
@@ -419,8 +421,8 @@ def test_a_bare_late_penalty_number_is_refused_out_loud():
     # `penalty_rate` refuses a bare 10 - neither 1000% nor, silently, 10%. Refusing it
     # without a word meant every late mark in that semester lost its deduction and every
     # receipt showed no percentage, on a green run.
-    read = settings.parse_instance("assignments:\n  a:\n    late_penalty_per_day: 10\n")
-    assert read.blocks["a"]["late_penalty_per_day"] is None
+    read = settings.parse_instance("defaults:\n  late_penalty_per_day: 10\n")
+    assert read.defaults["late_penalty_per_day"] is None
     (said,) = [f.what for f in read.faults]
     assert "late_penalty_per_day: 10" in said
     assert "`10%` or `0.1`" in said
@@ -440,10 +442,8 @@ def test_a_bare_late_penalty_number_is_refused_out_loud():
 def test_every_way_the_late_policy_can_be_wrong_says_so(typed, says):
     # One number multiplies every late mark in the semester. `-10%` ADDED marks for being
     # late and `150%` took more than the work was worth, both on a green run.
-    read = settings.parse_instance(
-        f"assignments:\n  a:\n    late_penalty_per_day: '{typed}'\n"
-    )
-    assert read.blocks["a"]["late_penalty_per_day"] is None
+    read = settings.parse_instance(f"defaults:\n  late_penalty_per_day: '{typed}'\n")
+    assert read.defaults["late_penalty_per_day"] is None
     (said,) = [f.what for f in read.faults]
     assert says in said
     assert "no late penalty is applied" in said
@@ -452,9 +452,9 @@ def test_every_way_the_late_policy_can_be_wrong_says_so(typed, says):
 def test_a_penalty_rate_that_parses_is_kept_exactly_as_typed():
     for typed in ("10%", "0.1", "5.5%", "0%", "100%"):
         read = settings.parse_instance(
-            f"assignments:\n  a:\n    late_penalty_per_day: '{typed}'\n"
+            f"defaults:\n  late_penalty_per_day: '{typed}'\n"
         )
-        assert read.blocks["a"]["late_penalty_per_day"] == typed
+        assert read.defaults["late_penalty_per_day"] == typed
         assert read.faults == ()
 
 
@@ -3910,7 +3910,7 @@ def _sheet_env(
     `private` assignment - every test here but one - looks like.
     `write_ok=False` refuses the sheet write, which is what a lost compare-and-swap is."""
     written: list[tuple[str, str]] = []
-    monkeypatch.setattr(settings, "_assignments_text", lambda org: LATE_YML)
+    run_settings(monkeypatch, lambda org: LATE_YML)
     monkeypatch.setattr(
         collect,
         "listing_by_name",
@@ -4394,7 +4394,7 @@ def _canonical(status: str, units: list[str]) -> str:
         late_penalty_per_day="10%",
     )
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(settings, "_assignments_text", lambda org: LATE_YML)
+        run_settings(mp, lambda org: LATE_YML)
         settings.semester_blocks.cache_clear()
         spec = grading_spec.sheet_spec(
             _sched(), "assignment-1", "assignment-1", gspec, False
@@ -5028,9 +5028,8 @@ def test_the_header_facts_come_from_the_two_files_that_own_them(monkeypatch):
 
 def test_an_assignment_s_own_window_moves_the_cutoff(monkeypatch):
     written = _sheet_env(monkeypatch, targets=SOLO_TARGETS)
-    monkeypatch.setattr(
-        settings,
-        "_assignments_text",
+    run_settings(
+        monkeypatch,
         lambda org: (
             LATE_YML + "assignments:\n  assignment-1:\n    late_window_days: 4\n"
             "    late_penalty_per_day: 10%\n"
@@ -5786,7 +5785,8 @@ def test_the_due_moment_the_sheet_counts_from_is_the_semesters_own(monkeypatch):
             "timezone": "Europe/Berlin",
             "assignments": {
                 "assignment-1": {
-                    "course_source_repo": "assignment-1-f2026",
+                    "template": "assignment-1-f2026",
+                    "number": 1,
                     "due_datetime": "2026-10-04",
                 }
             },
@@ -6248,9 +6248,7 @@ def _collect_configs(monkeypatch, text=BROKEN_CONFIG, legacy=None):
 def test_the_grading_moment_is_the_late_cutoff(monkeypatch):
     # Due plus the institution's 10 days, or the semester's own window.
     assert _collect_configs(monkeypatch)[0].fires == DUE_AT + timedelta(days=10)
-    monkeypatch.setattr(
-        settings, "_assignments_text", lambda org: "defaults:\n  late_window_days: 0\n"
-    )
+    run_settings(monkeypatch, lambda org: "defaults:\n  late_window_days: 0\n")
     settings.semester_blocks.cache_clear()
     assert _collect_configs(monkeypatch)[0].fires == DUE_AT
 
@@ -6290,9 +6288,8 @@ def _split_run_keys(monkeypatch, config: str) -> None:
     monkeypatch.setattr(grading_spec, "_grading_text", lambda course, template: rest)
     monkeypatch.setattr(grading_spec, "get_file_content", lambda *a, **k: None)
     block = "".join(f"    {ln}\n" for ln in run)
-    monkeypatch.setattr(
-        settings,
-        "_assignments_text",
+    run_settings(
+        monkeypatch,
         lambda org: f"assignments:\n  a3:\n{block}" if block else None,
     )
     settings.semester_blocks.cache_clear()

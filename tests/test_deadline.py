@@ -11,6 +11,7 @@ import pytest
 
 from dsl_course import settings
 from dsl_course.schedule import Schedule, grading_cutoff_datetime, parse
+from tests.conftest import run_settings
 
 
 def grading_datetime_iso(sched: Schedule, slug: str) -> str | None:
@@ -22,7 +23,11 @@ def _one(due) -> Schedule:
     return parse(
         {
             "assignments": {
-                "assignment-1": {"course_source_repo": "a-f2026", "due_datetime": due}
+                "assignment-1": {
+                    "number": 1,
+                    "template": "a-f2026",
+                    "due_datetime": due,
+                }
             }
         }
     )
@@ -34,9 +39,8 @@ def window(monkeypatch):
 
     def set_days(days: int) -> None:
         settings.semester_blocks.cache_clear()
-        monkeypatch.setattr(
-            settings,
-            "_assignments_text",
+        run_settings(
+            monkeypatch,
             lambda org: (
                 f"assignments:\n  assignment-1:\n    late_window_days: {days}\n"
             ),
@@ -95,7 +99,7 @@ def test_a_cutoff_without_due_is_still_dropped():
     # `due_datetime` remains the required field - it is what students are told.
     assert (
         parse(
-            {"assignments": {"assignment-1": {"course_source_repo": "a"}}}
+            {"assignments": {"assignment-1": {"number": 1, "template": "a"}}}
         ).assignments
         == {}
     )

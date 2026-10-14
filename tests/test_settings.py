@@ -16,6 +16,8 @@ from dsl_course import (
     schedule,
     settings,
 )
+from dsl_course.gh_contents import load_yaml_lines
+from tests.conftest import run_settings
 
 PACKAGE = Path(settings.__file__).parent
 # The real read, before conftest's autouse fixture answers it with "no file".
@@ -47,7 +49,7 @@ def course(monkeypatch):
 
 @pytest.fixture
 def semester(monkeypatch):
-    monkeypatch.setattr(settings, "_assignments_text", lambda org: ASSIGNMENTS_YML)
+    run_settings(monkeypatch, lambda org: ASSIGNMENTS_YML)
 
 
 def test_with_nothing_declared_every_value_is_the_institution_s():
@@ -102,7 +104,7 @@ def test_no_assignments_yml_means_both_of_its_layers_are_empty(course):
 
 
 def test_a_semester_read_that_fails_raises_and_is_not_cached(monkeypatch):
-    monkeypatch.setattr(settings, "_assignments_text", _READ_ASSIGNMENTS)
+    run_settings(monkeypatch, _READ_ASSIGNMENTS)
     answers = [RuntimeError("could not read Sem/semester-config/assignments.yml: 403")]
 
     def read(org, repo, path, ref=""):
@@ -120,7 +122,7 @@ def test_a_semester_read_that_fails_raises_and_is_not_cached(monkeypatch):
 
 
 def test_an_absent_assignments_yml_is_the_empty_layer(monkeypatch):
-    monkeypatch.setattr(settings, "_assignments_text", _READ_ASSIGNMENTS)
+    run_settings(monkeypatch, _READ_ASSIGNMENTS)
     monkeypatch.setattr(gh_contents, "get_file_content", lambda *a, **k: None)
     assert settings.semester_blocks("Sem") == ({}, {})
 
@@ -142,9 +144,8 @@ def test_a_course_read_that_fails_raises_and_is_not_cached(monkeypatch):
 
 
 def test_a_value_the_reader_refuses_leaves_the_next_layer_to_answer(monkeypatch):
-    monkeypatch.setattr(
-        settings,
-        "_assignments_text",
+    run_settings(
+        monkeypatch,
         lambda org: "defaults:\n  max_team_size: lots\n",
     )
     assert settings.effective("Sem", "a1", "max_team_size", course_org="C") == (
@@ -256,9 +257,8 @@ def test_the_read_check_sees_a_read_by_the_constant():
 def test_the_digest_checks_the_spec_the_handout_resolves(monkeypatch):
     """`assignments.yml` makes a1 public on a template that says nothing about visibility:
     the digest reads the same answer the handout does."""
-    monkeypatch.setattr(
-        settings,
-        "_assignments_text",
+    run_settings(
+        monkeypatch,
         lambda org: "assignments:\n  a1:\n    visibility: public\n",
     )
     template = "type: individual\nsubmit_via: assignment_repo\n"
@@ -291,9 +291,7 @@ def test_a_closed_vocabulary_typo_leaves_the_next_layer_to_answer(
     monkeypatch.setattr(
         settings, "org_meta", lambda org: {"assignment_defaults": {key: course_value}}
     )
-    monkeypatch.setattr(
-        settings, "_assignments_text", lambda org: f"defaults:\n  {key}: {typo}\n"
-    )
+    run_settings(monkeypatch, lambda org: f"defaults:\n  {key}: {typo}\n")
     assert settings.effective("Sem", "a1", key, course_org="C") == (
         course_value,
         "course",
@@ -301,33 +299,48 @@ def test_a_closed_vocabulary_typo_leaves_the_next_layer_to_answer(
 
 
 @pytest.mark.parametrize(
-    ("key", "typo"), [("visibility", "publik"), ("team_formation", "x")]
+    ("key", "inline", "typo"),
+    [
+        ("visibility", "assignment_repo_visibility", "publik"),
+        ("team_formation", "team_formation", "x"),
+    ],
 )
-def test_an_assignment_block_typo_leaves_the_semester_default_to_answer(
-    monkeypatch, key, typo
+def test_an_entry_setting_typo_leaves_the_semester_default_to_answer(
+    monkeypatch, key, inline, typo
 ):
     good = "public" if key == "visibility" else "assigned"
-    text = f"defaults:\n  {key}: {good}\nassignments:\n  a1:\n    {key}: {typo}\n"
-    monkeypatch.setattr(settings, "_assignments_text", lambda org: text)
+    monkeypatch.setattr(
+        settings, "_assignments_text", lambda org: f"defaults:\n  {key}: {good}\n"
+    )
+    entry = f"assignments:\n  a1:\n    {inline}: {typo}\n"
+    monkeypatch.setattr(settings, "_schedule_text", lambda org: entry)
     monkeypatch.setattr(
         grading_spec, "_grading_text", lambda org, template: "type: group\n"
     )
     spec = grading_spec.load_grading_spec("C", "t", semester_org="Sem", slug="a1")
     assert getattr(spec, key) == good and dict(spec.sources)[key] == "semester"
-    # ...and the refused line is a fault on assignments.yml, at its line.
-    (fault,) = settings.parse_instance(text).faults
+    # ...and the refused value is a fault on the schedule entry, at its line.
+    sched = schedule.parse(
+        load_yaml_lines(
+            "assignments:\n  a1:\n    template: t\n    number: 1\n"
+            f"    due_datetime: 2026-10-13\n    {inline}: {typo}\n"
+        )
+    )
+    (fault,) = sched.faults
     assert (fault.file, fault.where, fault.field, fault.lineno) == (
-        settings.ASSIGNMENTS_FILE,
+        "schedule.yml",
         "assignments.a1",
-        key,
-        5,
+        inline,
+        6,
     )
 
 
 # ------------------------------------------------------------ assignments.yml, read
 
 
-def test_assignments_yml_reads_each_block_and_its_repo_name():
+def test_the_assignments_block_of_assignments_yml_is_legacy_and_read_for_migrate():
+    # Decision 0038 rule 9: each assignment's settings are written on its schedule.yml
+    # entry; a per-assignment block here is NOT_MIGRATED, read only for the migration.
     got = settings.parse_instance(
         "defaults:\n  max_team_size: 4\n"
         "assignments:\n  a2:\n    late_window_days: 0\n"
@@ -336,20 +349,32 @@ def test_assignments_yml_reads_each_block_and_its_repo_name():
     assert got.defaults == {"max_team_size": 4}
     assert got.blocks == {"a2": {"late_window_days": 0}}
     assert got.dests == {"a2": "homework-2"}
-    assert got.faults == ()
+    (fault,) = got.faults
+    assert (fault.where, fault.code) == ("assignments", faults.NOT_MIGRATED)
+
+
+def test_an_entrys_inline_settings_are_read_through_their_readers():
+    values = settings.inline_settings(
+        {
+            "late_window_days": 3,
+            "assignment_repo_visibility": "public",
+            "template": "t",
+            "due_datetime": "2026-10-13",
+        },
+        "assignments.a1",
+        dropped := [],
+    )
+    assert (values, dropped) == ({"late_window_days": 3, "visibility": "public"}, [])
+    assert settings.inline_blocks({"a1": {"max_team_size": 4}, "a2": "x"}) == {
+        "a1": {"max_team_size": 4}
+    }
 
 
 @pytest.mark.parametrize(
     ("text", "field"),
     [
         ("defaults:\n  semester_dest_repo: x\n", "semester_dest_repo"),
-        (
-            "assignments:\n  a1:\n    semester_dest_repo: 'not a name'\n",
-            "semester_dest_repo",
-        ),
-        ("assignments:\n  a1:\n    type: group\n", "type"),
         ("extra:\n  a: 1\n", "extra"),
-        ("assignments:\n  a1: 5\n", ""),
     ],
 )
 def test_every_line_assignments_yml_cannot_use_is_a_fault(text, field):
@@ -358,7 +383,7 @@ def test_every_line_assignments_yml_cannot_use_is_a_fault(text, field):
 
 
 def test_an_assignments_yml_that_is_not_yaml_stops_the_cascade(monkeypatch):
-    monkeypatch.setattr(settings, "_assignments_text", lambda org: "defaults: [\n")
+    run_settings(monkeypatch, lambda org: "defaults: [\n")
     read = settings.instance("Sem")
     assert read.unparseable and read.faults[0].file == settings.ASSIGNMENTS_FILE
     # Fail closed: nothing hands out or grades on defaults the semester did not choose.
@@ -366,31 +391,18 @@ def test_an_assignments_yml_that_is_not_yaml_stops_the_cascade(monkeypatch):
         settings.semester_blocks("Sem")
 
 
-def test_the_schedule_carries_assignments_yml_s_faults_and_its_orphan_blocks(
-    monkeypatch,
-):
-    # Cross-file: a schedule key with no block runs on the defaults (no fault); a block
-    # for a key the schedule does not name is one.
-    monkeypatch.setattr(
-        settings,
-        "_assignments_text",
-        lambda org: (
-            "assignments:\n  a1:\n    max_team_size: 0\n  ghost:\n"
-            "    max_team_size: 3\n"
-        ),
-    )
+def test_the_schedule_carries_assignments_yml_s_faults(monkeypatch):
+    run_settings(monkeypatch, lambda org: "defaults:\n  max_team_size: 0\n")
     monkeypatch.setattr(
         schedule,
         "_schedule_text",
         lambda org: (
-            "assignments:\n  a1:\n    course_source_repo: t1\n"
-            "    due_datetime: 2026-10-13\n  a2:\n    course_source_repo: t2\n"
-            "    due_datetime: 2026-10-20\n"
+            "assignments:\n  a1:\n    template: t1\n    number: 1\n"
+            "    due_datetime: 2026-10-13\n"
         ),
     )
     sched = schedule.load("Sem")
-    assert set(sched.assignments) == {"a1", "a2"}
-    got = sorted((f.where, f.field) for f in sched.faults)
-    assert got == [("assignments.a1", "max_team_size"), ("assignments.ghost", "")]
-    assert all(f.file == settings.ASSIGNMENTS_FILE for f in sched.faults)
-    assert len(sched.dropped) == 2
+    assert set(sched.assignments) == {"a1"}
+    got = [(f.file, f.where, f.field) for f in sched.faults]
+    assert got == [(settings.ASSIGNMENTS_FILE, "defaults", "max_team_size")]
+    assert len(sched.dropped) == 1

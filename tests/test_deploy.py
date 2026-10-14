@@ -808,7 +808,11 @@ def _plan_with_guest(monkeypatch):
                     "guest", when, [Deploy("cm", "lectures/guest")], kind="lecture"
                 ),
                 Release(
-                    "lecture-2", when, [Deploy("cm", "lectures/02")], kind="lecture"
+                    "lecture-2",
+                    when,
+                    [Deploy("cm", "lectures/02")],
+                    kind="lecture",
+                    session="2",
                 ),
             ]
         ),
@@ -830,8 +834,8 @@ def _plan_with_guest(monkeypatch):
 def test_release_now_refuses_a_copy_of_an_entry_with_no_number(
     monkeypatch, path, refused
 ):
-    # Decision 0020 rule 3: the copy of an unnumbered entry is refused as the scheduled
-    # release skips it; a numbered entry's, or one off the plan, goes.
+    # Decision 0038: the copy of a lecture with no session is refused as the scheduled
+    # release skips it; one with a session, or a copy off the plan, goes.
     _plan_with_guest(monkeypatch)
     monkeypatch.setattr(deploy, "deploy_many", lambda *a, **k: (0, True))
     monkeypatch.setattr(
@@ -843,7 +847,7 @@ def test_release_now_refuses_a_copy_of_an_entry_with_no_number(
     if refused:
         assert out == 1
         assert out.reasons == [
-            {"code": "NOT_NUMBERED", "text": "Give guest a number first."}
+            {"code": "NO_SESSION", "text": "Give guest a session first."}
         ]
     else:
         assert out == 0

@@ -535,3 +535,33 @@ def entry_link_rows(rendered: str) -> list[dict]:
 def entry_links(rendered: str) -> list[tuple[str, str]]:
     """The (section, name) pairs of the same block - the view most assertions want."""
     return [(l["section"], l["name"]) for l in entry_link_rows(rendered)]
+
+
+def run_settings(monkeypatch, read) -> None:
+    """Stub a semester's run settings from `read(org)`, the text of an `assignments.yml`
+    as it was written before decision 0038: its `defaults:` stay in `assignments.yml`,
+    and each `assignments.<key>` block becomes the settings written on that key's
+    schedule.yml entry (`settings.inline_settings`; `visibility` spelt
+    `assignment_repo_visibility` there). Text that is not YAML is the `assignments.yml`
+    as it stands."""
+
+    def split(org):
+        text = read(org)
+        try:
+            data = yaml.safe_load(text) if text else None
+        except yaml.YAMLError:
+            return text, None
+        if not isinstance(data, dict):
+            return text, None
+        blocks = data.pop("assignments", None)
+        defaults = yaml.safe_dump(data, sort_keys=False) if data else None
+        if not isinstance(blocks, dict):
+            return defaults, None
+        inline = {
+            key: {settings.INLINE_NAMES.get(k, k): v for k, v in (block or {}).items()}
+            for key, block in blocks.items()
+        }
+        return defaults, yaml.safe_dump({"assignments": inline}, sort_keys=False)
+
+    monkeypatch.setattr(settings, "_assignments_text", lambda org: split(org)[0])
+    monkeypatch.setattr(settings, "_schedule_text", lambda org: split(org)[1])
