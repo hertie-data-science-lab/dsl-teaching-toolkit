@@ -356,7 +356,7 @@ describe('Save on the marks grid', () => {
     await type('input[aria-label="Q1 (out of 5) for team-alpha"]', '4');
     await click(q('button[aria-label="Show feedback per question for team-alpha"]'));
     await type('textarea[aria-label="Feedback on Q1 for team-alpha"]', 'Clear proof.');
-    await click(button('Open all teams'));
+    await click(q('button[aria-label="Show the members of team-alpha"]'));
     await type('input[aria-label="Adjustment for anna-a"]', '1');
     await click(button('Save marks'));
     await settle(() => puts(gh, 'grading_sheets/assignment-3.yml').length > 0);
@@ -487,7 +487,7 @@ describe('Save on the Students grid', () => {
   it('re-points a joined student at their new account, checked on GitHub first', async () => {
     const gh = github().on('GET', '/users/anna-new', { login: 'anna-new' }), f = roster();
     await mount(envOf(gh, f), <StudentsScreen {...props(f)} />);
-    await click(button('Edit roster'));
+    await click(q('button[aria-label="Edit roster"]'));
     // Only a joined row's handle is editable: the next sync moves the student to it.
     expect(root!.querySelector('input[aria-label="GitHub handle, line 3"]')).toBeNull();
     await type(HANDLE, 'anna-new');
@@ -501,10 +501,10 @@ describe('Save on the Students grid', () => {
     await mount(envOf(gh, f), <StudentsScreen {...props(f)} />);
     expect(root!.querySelector('input[aria-label="Email, line 2"]')).toBeNull();
     expect(root!.querySelector('.roster-table.editing')).toBeNull();
-    await click(button('Edit roster'));
+    await click(q('button[aria-label="Edit roster"]'));
     expect(root!.querySelector('.roster-table.editing')).not.toBeNull();
     await type('input[aria-label="Name, line 3"]', 'Ben B. Baker');
-    await click(button('Done editing'));
+    await click(q('button[aria-label="Done editing"]'));
     expect(root!.querySelector('input[aria-label="Name, line 3"]')).toBeNull();
     expect(root!.textContent).toContain('Ben B. Baker');
     await click(button('Save 1 change'));
@@ -517,13 +517,13 @@ describe('Save on the Students grid', () => {
     await mount(envOf(gh, f), <StudentsScreen {...props(f)} />);
     await click(button('Add a student'));
     expect(root!.querySelector('input[aria-label="Email, line 4"]')).not.toBeNull();
-    expect(button('Done editing')).toBeTruthy();
+    expect(q('button[aria-label="Done editing"]')).toBeTruthy();
   });
 
   it('writes nothing for a handle no GitHub account has', async () => {
     const gh = github(), f = roster();
     await mount(envOf(gh, f), <StudentsScreen {...props(f)} />);
-    await click(button('Edit roster'));
+    await click(q('button[aria-label="Edit roster"]'));
     await type(HANDLE, 'nobody-here');
     await click(button('Save 1 change'));
     await settle(() => root!.textContent!.includes('There is no GitHub account'));

@@ -287,24 +287,50 @@ describe('the marking screen', () => {
     expect(document.activeElement?.getAttribute('aria-label')).toBe('Feedback for ben-k');
   });
 
-  it('jumps to the next unmarked row', async () => {
+  it('opens full screen from the corner icon as an overlay, and Escape or the icon closes it, focus back on the icon', async () => {
     await marks();
-    await click(button('Next unmarked ↓'));
-    expect(document.activeElement?.getAttribute('aria-label')).toBe('Q1 (out of 10) for cy-d');
-  });
-
-  it('fills the window in full screen, and Escape leaves it', async () => {
-    await marks();
-    await click(button('Full screen'));
+    const icon = () => q<HTMLButtonElement>('button.full-toggle');
+    expect([icon().getAttribute('aria-label'), icon().title]).toEqual(['Full screen', 'Full screen']);
+    await click(icon());
     expect(q('.marking').classList.contains('full')).toBe(true);
+    expect(q('.marking').getAttribute('role')).toBe('dialog');
+    expect(icon().getAttribute('aria-label')).toBe('Exit full screen');
+    expect(q('.marking .marks-bar')).not.toBeNull(); // the toolbar stays inside
     await act(() => void document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
+    expect(q('.marking').classList.contains('full')).toBe(false);
+    expect(document.activeElement).toBe(icon());
+    await click(icon());
+    await click(icon());
     expect(q('.marking').classList.contains('full')).toBe(false);
   });
 
-  it('shows a student’s marks page as it will be, never the private notes', async () => {
+  it('keeps Return marks and Student view above the marking panel, and the toolbar to marking and saving', async () => {
     await marks();
+    const block = q('.return-block');
+    expect(block.nextElementSibling!.classList.contains('marking')).toBe(true);
+    expect(block.querySelector('button.btn.big')!.textContent).toBe('Return marks to 1 student');
+    expect(block.querySelector('.hint-btn')!.getAttribute('aria-label')).toBe('What returning marks does');
+    const tools = q('.marking .marks-bar').textContent!;
+    for (const gone of ['Preview', 'Return marks', 'Student view', 'Next unmarked', 'Open all teams', 'From the submission']) expect(tools).not.toContain(gone);
+  });
+
+  it('folds the submission columns from their own heading', async () => {
+    await marks();
+    const fold = () => q<HTMLButtonElement>('thead th .th-fold');
+    expect([fold().textContent, fold().getAttribute('aria-expanded')]).toEqual(['From the submission ▾', 'true']);
+    await click(fold());
+    expect([fold().textContent, fold().getAttribute('aria-expanded')]).toEqual(['From the submission ▸', 'false']);
+    expect(q('thead').textContent).not.toContain('Days late');
+    expect(q('thead').textContent).toContain('Score'); // every other column stays
+  });
+
+  it('shows a student’s marks page as it will be in a dialog, never the private notes', async () => {
+    await marks();
+    await click(button('Student view'));
+    const dialog = q('[role="dialog"]');
+    expect(dialog.querySelector('#modal-title')!.textContent).toBe('Student view');
     await act(() => {
-      const s = q<HTMLSelectElement>('select.student-pick');
+      const s = q<HTMLSelectElement>('#student-pick');
       s.value = 'ada-l';
       s.dispatchEvent(new Event('change', { bubbles: true }));
     });
@@ -314,6 +340,8 @@ describe('the marking screen', () => {
     expect(view.textContent).toContain('17 / 20');
     expect(view.textContent).toContain('Good.');
     expect(view.textContent).not.toContain('Check the plot.');
+    await act(() => void document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
+    expect(root!.querySelector('.student-view')).toBeNull();
   });
 
   it('opens feedback per question as one row under the unit, closed by default', async () => {
@@ -479,15 +507,10 @@ describe('teams and people on the grid', () => {
     expect([...members[0].querySelectorAll('td.calc')].pop()!.textContent).toBe('20');
   });
 
-  it('opens and closes every team from the toolbar, and opens a team on load where a member has an adjustment', async () => {
-    await mountTeams();
-    await click(button('Open all teams'));
-    expect(root!.querySelectorAll('tr.member-row')).toHaveLength(3);
-    await click(button('Close all teams'));
-    expect(root!.querySelectorAll('tr.member-row')).toHaveLength(0);
-    root!.remove();
+  it('opens a team on load where a member has an adjustment', async () => {
     await mountTeams(teamFiles(TEAMS.replace('      ben-k:\n        adjustment_individual:', '      ben-k:\n        adjustment_individual: -2')));
     expect(root!.querySelectorAll('tr.member-row')).toHaveLength(3);
+    expect(button('Open all teams')).toBeUndefined();
   });
 
   it('names an individual student, handle under the name, and keeps Adjustment behind its chip', async () => {

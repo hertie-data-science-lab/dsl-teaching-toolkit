@@ -20,9 +20,10 @@ import { marksDraft, saveMarksDraft, type MarksDraft } from '../model/prefs';
 import { parseRoster, sameHandle } from '../model/people';
 import type { Assignment } from '../model/types';
 import { returnMarks, teamsWindow, type AsgRef, type LateReturn } from '../ops/defs';
-import { OpButtons } from '../ops/Panel';
+import { OpButtons, OpOpen, VerbHint } from '../ops/Panel';
 import { assignmentHref, tabHref } from '../router';
 import { CheckLine, Loading } from '../ui/bits';
+import { Modal } from '../ui/Modal';
 import { Hint } from '../ui/Hint';
 import { SaveBar } from '../ui/edit';
 import { Check } from '../ui/icons';
@@ -166,8 +167,11 @@ export function MarksTab(p: TabProps) {
   // An individual assignment's Adjustment column: null opens it where the saved sheet has any adjustment.
   const [adjChoice, setAdjChoice] = useState<boolean | null>(null);
   const [full, setFull] = useState(false);
-  const [viewing, setViewing] = useState('');
+  // The Student view dialog: null closed, else the handle shown ('' before one is chosen).
+  const [viewing, setViewing] = useState<string | null>(null);
   const table = useRef<HTMLTableElement>(null);
+  const fullBtn = useRef<HTMLButtonElement>(null);
+  const wasFull = useRef(false);
   // The Return marks def as this render built it, for a request from the Overview.
   const returnDef = useRef<ReturnType<typeof returnMarks> | null>(null);
   useEffect(() => {
@@ -187,8 +191,14 @@ export function MarksTab(p: TabProps) {
   useEffect(() => {
     if (!pending) saveMarksDraft(org, path, Object.keys(edits).length ? { sha, at: Date.now(), edits } : null);
   }, [edits, pending, org, path]);
+  // Full screen is an overlay over the page: Escape or the icon closes it, and focus goes back to the icon.
   useEffect(() => {
-    if (!full) return;
+    if (!full) {
+      if (wasFull.current) fullBtn.current?.focus();
+      wasFull.current = false;
+      return;
+    }
+    wasFull.current = true;
     const esc = (e: KeyboardEvent) => e.key === 'Escape' && setFull(false);
     document.addEventListener('keydown', esc);
     return () => document.removeEventListener('keydown', esc);
@@ -286,7 +296,6 @@ export function MarksTab(p: TabProps) {
   const membersOpen = (u: Unit) => folds[`m:${u.key}`] ?? u.people.some((pr) => !blank(pr.adjustment) || !blank(pr.feedback));
   // The Adjustment column: while any team is open; on an individual sheet behind the Adjustments chip, open where any is saved.
   const adjOpen = sheet.group ? sheet.units.some(membersOpen) : (adjChoice ?? sheet.units.some((u) => !blank(u.people[0]?.adjustment)));
-  const setAllTeams = (open: boolean) => setFolds({ ...folds, ...Object.fromEntries(sheet.units.map((u) => [`m:${u.key}`, open])) });
   /** A person's cell: real name, handle under it (the handle alone when the roster has no name). */
   const who = (h: string, strong: boolean) => {
     const n = realName(h);
@@ -460,14 +469,6 @@ export function MarksTab(p: TabProps) {
     next.focus();
     next.select?.();
   };
-  const nextUnmarked = () => {
-    const marked = [...(table.current?.querySelectorAll<HTMLTableRowElement>('tr[data-unmarked]') ?? [])];
-    const at = (document.activeElement as HTMLElement | null)?.closest('tr');
-    const to = (at && marked.find((r) => at.compareDocumentPosition(r) & Node.DOCUMENT_POSITION_FOLLOWING)) || marked[0];
-    if (!to) return;
-    to.scrollIntoView?.({ block: 'center' });
-    to.querySelector<HTMLElement>('input, textarea')?.focus();
-  };
   // Return marks reads the sheet as saved: who gets marks, who is skipped or held, and the final grades.
   const savedHeld = holdReasons(sheet.units.map((u) => holdUnit(u, u.score, u.latePenalty, (pr) => pr.adjustment)), questions, rate);
   const heldUnits = sheet.units.filter((u) => u.people.some((pr) => savedHeld[pr.handle])).length;
@@ -484,39 +485,40 @@ export function MarksTab(p: TabProps) {
     spread(finals, Object.keys(savedHeld).length),
   ];
   const people = sheet.units.flatMap((u) => u.people.map((pr) => ({ u, pr })));
-  const view = people.find((x) => x.pr.handle === viewing) ?? null;
+  const view = viewing === null ? null : (people.find((x) => x.pr.handle === viewing) ?? people[0] ?? null);
   const restore = () => {
     if (!pending) return;
     setEdits({ ...pending.edits, ...edits });
     setPending(null);
   };
+  const returnDef_ = (returnDef.current = returnMarks(scope, asgRef(a, group), sending, name, late, facts, <PreviewEmails org={org} slug={name} />));
+  // Returning is its own block above the grid: the panel it opens holds the figures and Preview.
+  const returnBlock = (
+    <div class="return-block">
+      <span class="return-main"><OpOpen def={returnDef_} cls="btn big" label={returnDef_.verb} /><VerbHint def={returnDef_} /></span>
+      <button class="btn small quiet" type="button" onClick={() => setViewing('')}>Student view</button>
+    </div>
+  );
   const tools = (
     <div class="marks-bar">
       <div class="marks-filters" role="group" aria-label="Show">
         <span class="footnote">Show:</span>
         {(['all', 'unmarked', 'late', 'held'] as const).map((f) => <button class={`chip filter${filter === f ? ' on' : ''}`} type="button" aria-pressed={filter === f} onClick={() => setFilter(f)}>{FILTER_WORD[f]} {counts[f]}</button>)}
-        <button class="btn small quiet" type="button" disabled={!counts.unmarked} onClick={nextUnmarked}>Next unmarked ↓</button>
         {sheet.group ? null : <button class="chip adj-chip" type="button" aria-expanded={adjOpen} onClick={() => setAdjChoice(!adjOpen)}>Adjustments {adjOpen ? '▾' : '▸'}</button>}
+        <button class="icon-btn full-toggle" type="button" ref={fullBtn} aria-label={full ? 'Exit full screen' : 'Full screen'} title={full ? 'Exit full screen (Esc)' : 'Full screen'} onClick={() => setFull(!full)}>{full ? '⤡' : '⤢'}</button>
       </div>
       <div class="marks-tools">
-        {external ? null : <button class="btn small quiet" type="button" aria-expanded={!subFolded} onClick={() => setSubFolded(!subFolded)}>From the submission {subFolded ? '▸' : '▾'}</button>}
-        {sheet.group ? <><button class="btn small quiet" type="button" onClick={() => setAllTeams(true)}>Open all teams</button><button class="btn small quiet" type="button" onClick={() => setAllTeams(false)}>Close all teams</button></> : null}
-        <button class="btn small quiet" type="button" aria-pressed={full} onClick={() => setFull(!full)}>{full ? 'Leave full screen' : 'Full screen'}</button>
-        <select class="student-pick" aria-label="Student view: what a student’s marks page will show" value={viewing} onChange={(e) => setViewing((e.target as HTMLSelectElement).value)}>
-          <option value="">Student view…</option>
-          {people.map(({ pr }) => <option value={pr.handle}>{pr.handle}</option>)}
-        </select>
         <SaveBar state={save} onSave={() => void doSave()} label="Save marks" disabled={!changed} small file={{ org, repo: CONFIG_REPO, path }} note={changed ? `${changed} ${noun}${changed > 1 ? 's' : ''} changed` : 'No unsaved changes'} />
-        <span class="marks-return"><OpButtons def={(returnDef.current = returnMarks(scope, asgRef(a, group), sending, name, late, facts, <PreviewEmails org={org} slug={name} />))} small /></span>
       </div>
     </div>
   );
-  const subHint = <ColHint col="From the submission">Filled in by the toolkit from the submission; you never type these.</ColHint>;
+  const subHint = <ColHint col="From the submission">Filled in by the toolkit from the submission; you never type these. Click the heading to fold these columns into one.</ColHint>;
+  const subFold = <button class="th-fold" type="button" aria-expanded={!subFolded} onClick={() => setSubFolded(!subFolded)}>From the submission {subFolded ? '▸' : '▾'}</button>;
   const head = (
     <thead>
       <tr>
         <th rowSpan={2}>{sheet.group ? 'Team' : 'Student'}</th>
-        {external ? null : subFolded ? <th class="sys" rowSpan={2}>From the submission {subHint}</th> : <th class="sys grp-h" colSpan={subCols}>From the submission {subHint}</th>}
+        {external ? null : subFolded ? <th class="sys" rowSpan={2}>{subFold} {subHint}</th> : <th class="sys grp-h" colSpan={subCols}>{subFold} {subHint}</th>}
         {qs.length ? <th class="grp-h" colSpan={qs.length}>Points per question</th> : null}
         {qs.length
           ? <th rowSpan={2} class="num">Score{max ? ` / ${max}` : ''} <ColHint col="Score">The questions added up, before any late penalty.</ColHint></th>
@@ -553,15 +555,10 @@ export function MarksTab(p: TabProps) {
           <button class="btn small" type="button" onClick={restore}>Restore</button> <button class="btn small quiet" type="button" onClick={() => setPending(null)}>Discard</button>
         </p>
       ) : null}
-      <div class={`marking${full ? ' full' : ''}`}>
+      {returnBlock}
+      <div class={`marking${full ? ' full' : ''}`} role={full ? 'dialog' : undefined} aria-modal={full ? 'true' : undefined} aria-label={full ? `Marks: ${assignmentTitle(a)}` : undefined}>
         {tools}
         {external ? <p class="footnote">Submitted outside GitHub: no dates, no late penalty.</p> : null}
-        {view ? <StudentView handle={view.pr.handle} title={assignmentTitle(a)} onClose={() => setViewing('')} submitted={view.u.info?.submitted} m={studentMarks({
-          group: sheet.group, team: view.u.key, score: fullScore(view.u), questions, max: max || null, rate, daysLate: view.u.info?.days_late, latePenalty: lateOf(view.u),
-          adjustment: adjOf(view.pr), feedback: fbOf(view.pr),
-          teamFeedback: view.u.feedbackPath ? v(view.u.feedbackPath, view.u.feedback) : null,
-          questionFeedback: { ...view.u.questionFeedback, ...Object.fromEntries(qs.map(([q]) => [q, v([...view.u.questionFeedbackPath, q], view.u.questionFeedback[q] ?? null)])) },
-        })} /> : null}
         <div class="table-wrap marks-wrap">
           <table class="grid marks" ref={table} onKeyDown={onKey}>
             {head}
@@ -569,19 +566,35 @@ export function MarksTab(p: TabProps) {
           </table>
         </div>
       </div>
+      {viewing !== null ? (
+        <Modal title="Student view" onClose={() => setViewing(null)}>
+          <div class="field">
+            <label for="student-pick">Student</label>
+            <select id="student-pick" class="student-pick" value={view?.pr.handle ?? ''} onChange={(e) => setViewing((e.target as HTMLSelectElement).value)}>
+              {people.map(({ pr }) => <option value={pr.handle}>{realName(pr.handle) ? `${realName(pr.handle)} (${pr.handle})` : pr.handle}</option>)}
+            </select>
+          </div>
+          {view ? <StudentView handle={view.pr.handle} title={assignmentTitle(a)} submitted={view.u.info?.submitted} m={studentMarks({
+            group: sheet.group, team: view.u.key, score: fullScore(view.u), questions, max: max || null, rate, daysLate: view.u.info?.days_late, latePenalty: lateOf(view.u),
+            adjustment: adjOf(view.pr), feedback: fbOf(view.pr),
+            teamFeedback: view.u.feedbackPath ? v(view.u.feedbackPath, view.u.feedback) : null,
+            questionFeedback: { ...view.u.questionFeedback, ...Object.fromEntries(qs.map(([q]) => [q, v([...view.u.questionFeedbackPath, q], view.u.questionFeedback[q] ?? null)])) },
+          })} /> : <p>No students on this sheet yet.</p>}
+        </Modal>
+      ) : null}
     </>
   );
 }
 
 /** What one student's marks page will show, read-only, from the marks on screen: the whole breakdown, never the private notes. */
-function StudentView({ handle, title, m, submitted, onClose }: { handle: string; title: string; m: ReturnType<typeof studentMarks>; submitted: unknown; onClose: () => void }) {
+function StudentView({ handle, title, m, submitted }: { handle: string; title: string; m: ReturnType<typeof studentMarks>; submitted: unknown }) {
   const over = (x: string) => (x && m.max ? `${x} / ${m.max}` : x);
   const qs = Object.entries(m.score).filter(([q]) => q);
   const late = m.daysLate === null ? '' : m.daysLate > 0 ? `${plural(m.daysLate, 'day')} late` : 'on time';
   const perQ = m.questionFeedback.length ? <ul>{m.questionFeedback.map(([q, x]) => <li><b>{q}:</b> <span class="pre">{x}</span></li>)}</ul> : null;
   return (
-    <section class="panel section student-view" aria-label={`${handle}’s marks page`}>
-      <div class="section-head"><h2>{handle} · {title}</h2><button class="btn small quiet" type="button" onClick={onClose}>Close</button></div>
+    <section class="student-view" aria-label={`${handle}’s marks page`}>
+      <h3>{handle} · {title}</h3>
       <p class="footnote">What {handle} will see once marks are returned, from the marks on this screen. Private notes are never shown.</p>
       <div class="table-wrap">
         <table class="grid">
