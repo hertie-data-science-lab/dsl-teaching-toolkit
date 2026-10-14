@@ -251,6 +251,24 @@ def test_the_merge_keeps_an_invented_key_and_a_withdrawn_unit():
     ]  # units first, then leftovers
 
 
+def test_the_console_s_marker_and_snippets_survive_a_rewrite_and_never_reach_a_student():
+    # The Marks tab writes `marked_by` on a unit it saved marks for and keeps the
+    # assignment's reusable comments in a top-level `snippets:` list. Both are the
+    # grader's: a tick keeps them through parse, merge and dump, and neither is ever on
+    # what a student is shown.
+    spec = individual(questions=QUESTIONS)
+    sheet = new_sheet(spec, SOLO)
+    sheet["submissions"]["ada-l"]["marked_by"] = "jan-marker"
+    sheet["snippets"] = ["Label your axes.", "See the worked example."]
+    text = dump_sheet(merge_sheet(sheet, spec, SOLO, {}), spec, "open")
+    again = merge_sheet(parse_sheet(text), spec, SOLO, {})
+    assert again["submissions"]["ada-l"]["marked_by"] == "jan-marker"
+    assert again["snippets"] == ["Label your axes.", "See the worked example."]
+    view = gradebook.student_view(spec, "ada-l", again["submissions"]["ada-l"], "ada-l")
+    assert "marked_by" not in view and "snippets" not in view
+    assert "jan-marker" not in repr(view)
+
+
 def test_the_merge_does_not_re_add_a_human_key_the_grader_deleted():
     # A file that grows a key back on every tick is one nobody can tidy. Only `info:` is
     # re-derived; a deleted human key stays deleted.
