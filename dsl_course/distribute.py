@@ -513,7 +513,7 @@ def _reachable(handles: list[str], students: list[roster.Student] | None) -> lis
     emails = {
         s.github_handle.casefold()
         for s in students or []
-        if s.github_handle and s.hertie_email
+        if s.github_handle and s.email
     }
     return [h for h in handles if h.casefold() in emails]
 
@@ -1407,7 +1407,7 @@ def update_message(
         if course_name
         else "Your grades have been updated"
     )
-    return (student.hertie_email, subject, body)
+    return (student.email, subject, body)
 
 
 def sample_message(
@@ -1471,9 +1471,9 @@ def _email_updates(
     handles_for: dict[str, list[str]] = {}
     for handle in handles:
         student = by_handle.get(handle.casefold())
-        if not student or not student.hertie_email:
+        if not student or not student.email:
             continue
-        email = student.hertie_email.strip().casefold()
+        email = student.email.strip().casefold()
         if email in handles_for:
             handles_for[email].append(handle)
             continue

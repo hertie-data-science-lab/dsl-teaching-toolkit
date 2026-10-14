@@ -1853,7 +1853,7 @@ def provision_all(
                 arrives = (
                     "the first team forms"
                     if self_select
-                    else "the instructors write them into teams.csv"
+                    else "the instructors write them into students.csv"
                 )
                 log(
                     f"  [wait] no teams for `{key}` in {semester_org} yet - the handout "
@@ -1867,7 +1867,9 @@ def provision_all(
                 "the instructors fill the CSV - the Join-team form refuses it"
             )
             log_err(
-                f"no teams for `{key}` in {semester_org}/semester-config/teams.csv - {how}."
+                f"no teams for `{key}` in {semester_org}/semester-config/students.csv "
+                f"(column `{roster.team_column(teams.columns(sched).get(key, key))}`) - "
+                f"{how}."
             )
             return 1, False
         # teams.csv is student-writable (the "Join team" issue appends rows), so its
@@ -1886,13 +1888,13 @@ def provision_all(
                 # world-readable - so the handle is verbose-only and the actionable line
                 # below names nobody. Same split as sync_teams' own rejection log.
                 log_person(
-                    f"    {m} in teams.csv ({key}/{team}) is not an enrolled, onboarded "
+                    f"    {m} in team ({key}/{team}) is not an enrolled, onboarded "
                     f"roster handle - excluding it (would invite an arbitrary account "
                     f"into {semester_org})"
                 )
             if rejected:
                 log_err(
-                    f"{len(rejected)} handle(s) in teams.csv ({key}/{team}) are not "
+                    f"{len(rejected)} member(s) of team ({key}/{team}) are not "
                     f"enrolled, onboarded roster handles - excluded (they would invite "
                     f"arbitrary accounts into {semester_org}). Re-run the CLI locally with "
                     f"DSL_VERBOSE=1 to see which."

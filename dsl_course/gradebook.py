@@ -668,7 +668,7 @@ def render_registrar_csv(
     def row(student: roster.Student) -> list[str]:
         book = by_handle.get(student.github_handle.casefold()) or {}
         return [
-            student.hertie_email,
+            student.email,
             student.name,
             student.github_handle,
             *(str(book.get(slug, {}).get("final_grade", "")) for slug in slugs),
@@ -679,7 +679,7 @@ def render_registrar_csv(
         (
             row(student)
             for student in sorted(
-                roster.enrolled(students), key=lambda s: s.hertie_email.casefold()
+                roster.enrolled(students), key=lambda s: s.email.casefold()
             )
         ),
     )

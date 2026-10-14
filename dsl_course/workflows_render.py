@@ -871,13 +871,13 @@ def render_sync_membership() -> str:
     team; and, for whichever semester is in scope, that semester's own instructors/TAs
     (from its semester-config/instructors.yml) into its own instructors team + a
     course-org instructors-<tag> team. Roster (students.csv) + project teams
-    (teams.csv) additionally reconcile for whichever semester is in scope. Fully
+    (its team columns) additionally reconcile for whichever semester is in scope. Fully
     automatic, including removals (no --prune flag - config is the live truth):
 
     - push to this file's own dsl-course.yml -> course_admins only (no single semester
       implied - but still applied to every semester's own course-admin team)
     - repository_dispatch (from a semester's semester-config dispatcher on push to its
-      students.csv/teams.csv/instructors.yml) -> course_admins + that one semester's
+      students.csv/instructors.yml) -> course_admins + that one semester's
       instructors/TAs; one whose payload says `all_semesters: true` and names no semester
       (the ds01 timer's hourly dispatch) -> EVERY registered semester, like the cron
     - daily cron -> course_admins + EVERY registered semester (roster/teams/instructors,
@@ -1167,7 +1167,7 @@ on:
 # (`templates/semester-config/dispatch.yml` sends driver=semester-config
 # and its own org as semester_org), and so does the migration's catch-up after a semester's
 # unpause (driver=migrate). The run releases into the one semester that changed and
-# hands any site render to Sync site's queue - which a schedule.yml / instructors.yml / teams.csv
+# hands any site render to Sync site's queue - which a schedule.yml / instructors.yml / students.csv
 # push has usually just started as well - rather than racing it. Every other arrival - the GitHub cron, the ds01 timer's dispatch
 # (driver=ds01, no semester), the button - walks every semester as before. The payload is
 # written by whoever holds a semester's bot token, so the scheduler checks the name against

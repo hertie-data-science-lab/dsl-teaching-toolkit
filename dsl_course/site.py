@@ -1014,10 +1014,10 @@ FormedTeams = Callable[[str], list[tuple[str, list[str]]]]
 def _formed_teams(semester_org: str) -> FormedTeams:
     """A reader of `(team, member handles)` for every team formed for an assignment key
     so far, by name - the same reader (`teams.teams_for`) the student console's team list
-    uses. teams.csv is loaded once, on the first ask, however many assignments list
+    uses. the roster is loaded once, on the first ask, however many assignments list
     teams, and never when none does.
 
-    Never fatal: teams.csv is student-written, and a row somebody broke must not take down
+    Never fatal: a team cell is student-written, and a row somebody broke must not take down
     the render of a semester's whole website. The callout still goes out; only the table
     is missing."""
 
@@ -1085,7 +1085,7 @@ def _assignment_entry(
     carries `team_salt` and `teams:` once any has formed: each team's name, headcount
     (and, while the window is open, its cap), its members as salted digests
     (`member_digest`, never a handle) and its repo's URL. `formed_teams` is the sync's one
-    reader of teams.csv (`_formed_teams`), shared by every page."""
+    reader of the team cells (`_formed_teams`), shared by every page."""
     slug = schedule.semester_name(*found) if found else repo
     undated = when is None
     if undated:
@@ -1534,7 +1534,7 @@ def sync_site(course_org: str, semester_org: str) -> int:
         else:
             hosted = _mirror_public(site_wd, semester_org, policies)
         rows, present = _site_rows(semester_org, planned, allow, live, hosted)
-        # ONE read of teams.csv for every self-select group assignment (`_formed_teams`).
+        # ONE read of the team cells for every self-select group assignment (`_formed_teams`).
         formed_teams = _formed_teams(semester_org)
         log_step(
             f"Syncing {semester_org}/{pages_repo(semester_org)}: {len(rows)} row(s) "

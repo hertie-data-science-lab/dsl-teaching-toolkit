@@ -149,7 +149,7 @@ STARTER_STATES = (*STARTER_MODES, STARTER_NONE)
 # an INDIVIDUAL assignment gives, which is why the Join-team form can refuse a slug
 # outright, and it is not a value an instructor ever writes.
 SELF_SELECT = "self_select"  # students use the Join-team form in `join`
-ASSIGNED = "assigned"  # the teaching team writes teams.csv; the form refuses
+ASSIGNED = "assigned"  # the teaching team writes the team cells; the form refuses
 TEAM_FORMATIONS = (SELF_SELECT, ASSIGNED)
 NO_TEAMS = "none"
 # Which starter stubs `New assignment` seeds, and nothing else: grading reads whatever

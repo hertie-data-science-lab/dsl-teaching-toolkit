@@ -160,7 +160,6 @@ CONSEQUENCE = {
     "students.csv": (
         "the whole roster is skipped: nobody new is enrolled or sent a code"
     ),
-    "teams.csv": "that row is ignored: the team is not created or the member not added",
     # Keyed on the DIGEST's label for the folder, not on one sheet's path: every grading
     # sheet in the semester is carried by one issue and one letter.
     "grading_sheets/": "that sheet is not refreshed, and nothing on it is sent",
@@ -192,7 +191,6 @@ FIX = {
     ),
     "instructors.yml": "fix the handle/email on the line above",
     "students.csv": CSV_HEADER_FIX,
-    "teams.csv": CSV_HEADER_FIX,
     "dsl-course.yml": "correct the line above",
     "semesters.yml": "correct the line above",
 }
@@ -566,7 +564,7 @@ def csv_row(lineno: int | None) -> str:
 def csv_row_fault(
     file: str, lineno: int, field: str, what: str, fix: str = ""
 ) -> ConfigFault:
-    """One row of a hand-edited CSV (students.csv, teams.csv) the toolkit cannot use as
+    """One row of a hand-edited CSV (students.csv) the toolkit cannot use as
     written.
 
     ROW AND COLUMN ONLY. Never the cell: a roster cell is a name, an address, a handle or

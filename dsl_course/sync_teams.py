@@ -1,18 +1,18 @@
-"""dsl-course sync-teams -- materialise per-(assignment, team) GitHub Teams from teams.csv.
+"""dsl-course sync-teams -- materialise per-(assignment, team) GitHub Teams from students.csv.
 
-The group "access" half, mirroring sync_roster for enrolment. `teams.csv` (in the semester's
-private semester-config) is the single source of truth for who is in which project team for
-which assignment; this reconciles a GitHub Team `<assignment>-<team>` from each row so the
-team's repo access tracks the CSV. Idempotent.
+The group "access" half, mirroring sync_roster for enrolment. The `team:<number>` columns of
+`students.csv` (in the semester's private semester-config) are the single source of truth
+for who is in which project team for which assignment (`teams`); this reconciles a GitHub
+Team `<assignment>-<team>` from them so the team's repo access tracks the file. Idempotent.
 
 The Teams are a DOWNSTREAM PROJECTION of the CSV, never authoritative, so they can't drift -
 a re-sync overwrites them to match. Provisioning a group assignment grants the matching team
 on the group's repo (so post-sync membership edits propagate to access automatically).
 
-With --prune, members no longer in the CSV are removed from their team (off-boarding) - never
+With --prune, members no longer in the file are removed from their team (off-boarding) - never
 an org Owner or the acting login (see gh_teams.reconcile_team_members); off by default here so a
-standalone/manual run never silently revokes access. A project team whose LAST row has gone
-(its last member moved to another team) is reconciled to empty as well - see
+standalone/manual run never silently revokes access. A project team whose LAST member has gone
+(moved to another team) is reconciled to empty as well - see
 `emptied_teams` - and left in place, with its repo: nothing here deletes or archives. The seeded **Sync membership** workflow (dsl_course.sync_membership) always calls this
 with prune=True - config is meant to be the live truth there; this module's own off-by-default
 is only for ad-hoc/CLI use outside that workflow.
@@ -42,7 +42,7 @@ from .teams import is_reserved_slug, team_slug
 
 
 def desired_teams(per: dict[str, dict[str, list[str]]]) -> dict[str, set[str]]:
-    """Flatten parsed teams.csv {assignment: {team: [handles]}} to {team_slug: {handles}}.
+    """Flatten parsed teams {assignment: {team: [handles]}} to {team_slug: {handles}}.
 
     team_slug lower-cases, so two team names differing only in case (`Team-X`/`team-x`)
     map to the same slug: UNION their members rather than overwriting, or one team's
@@ -53,8 +53,8 @@ def desired_teams(per: dict[str, dict[str, list[str]]]) -> dict[str, set[str]]:
             slug = team_slug(assignment, team)
             if is_reserved_slug(slug):
                 log_err(
-                    f"  ! teams.csv row ({assignment}, {team}) names the faculty team "
-                    f"`{slug}` - refusing to manage it from teams.csv; remove the row"
+                    f"  ! a students.csv team cell ({assignment}, {team}) names the "
+                    f"faculty team `{slug}` - refusing to manage it; clear the cell"
                 )
                 continue
             wanted.setdefault(slug, set()).update(members)
@@ -64,6 +64,8 @@ def desired_teams(per: dict[str, dict[str, list[str]]]) -> dict[str, set[str]]:
 # What `ensure_team` stamps on every team it creates - and so the mark of a team this module
 # owns. `emptied_teams` touches nothing without it.
 PROJECT_TEAM_DESCRIPTION = "Project team (auto-managed from teams.csv)"
+# Kept as written: it is the mark `emptied_teams` recognises on every team made before
+# the team columns moved into students.csv.
 # `secret`, not `closed`: GitHub shows every org member a "Request to join" button on a
 # visible team, which goes around the Join team form, mails the owners with no context, and
 # is undone by the next pruning sync if approved. A secret team is visible only to its own
@@ -75,7 +77,7 @@ PROJECT_TEAM_PRIVACY = "secret"
 def emptied_teams(
     existing: dict[str, str], wanted: dict[str, set[str]], keys: list[str]
 ) -> list[str]:
-    """Project teams that exist on GitHub but no longer have a row in teams.csv.
+    """Project teams that exist on GitHub but no longer have a member in students.csv.
 
     The hole this closes: the reconcile below walks the teams the CSV names, so a team
     whose last member MOVED out (a Join or Create from someone already in a team) was never
@@ -87,7 +89,7 @@ def emptied_teams(
     - its slug is `<assignment>-...` for an assignment key in the semester's schedule;
     - it is not a role team (`teams.is_reserved_slug`: instructors, students, auditors,
       course-admin, instructors-*), whatever else is true of it;
-    - teams.csv names no member for it."""
+    - students.csv names no member for it."""
     prefixes = tuple(f"{k.lower()}-" for k in keys)
     if not prefixes:
         return []
@@ -138,12 +140,12 @@ def ensure_team(
 
 
 def known_handles(students: list[roster.Student] | None) -> set[str]:
-    """The onboarded roster handles - the only accounts teams.csv may add.
+    """The onboarded roster handles - the only accounts a team may add.
 
     Adding a handle to a GitHub Team also INVITES it to the org if it isn't a member
-    yet, so an unvetted teams.csv handle (a typo, or a placeholder name that happens
-    to collide with a real GitHub account) would invite an arbitrary stranger. The
-    roster is the SSOT of who belongs to the semester; teams.csv only groups them."""
+    yet, so an unvetted handle would invite an arbitrary stranger. Team members are read
+    off the roster itself (`teams.parse`), so this holds by construction; the handout and
+    the collection still narrow it to their own view of the roster (enrolled only)."""
     return {s.github_handle for s in students or [] if s.onboarded}
 
 
@@ -171,7 +173,7 @@ def vet_groups(
     """`(group name, accepted, rejected)` for every group, name-sorted.
 
     The fold-keyed allowlist is built ONCE for the whole map and applied by `vet_handles`,
-    so the three readers of teams.csv - this module's team sync, the assignment handout and
+    so the three readers of the teams - this module's team sync, the assignment handout and
     the collection that grades it - cannot vet a row differently. They used to build the
     same allowlist three times, and a handle good enough to be handed a repo but not good
     enough to earn a grade row is the failure that costs a student marks.
@@ -222,9 +224,9 @@ def _empty_the_emptied(
 def sync(semester_org: str, prune: bool = False, dry_run: bool = False) -> int:
     per = teams.load_or_none(semester_org)
     if per is None:
-        # ABSENT teams.csv - deleted, or renamed by hand - is not an empty one: reconciling
-        # every project team to nobody would take every student's push on their group
-        # repo. Hold, like the absent roster below; a header-only file is how to empty them.
+        # ABSENT students.csv - deleted, or renamed by hand - is not an empty one:
+        # reconciling every project team to nobody would take every student's push on
+        # their group repo. Hold; blank team cells are how to empty them.
         emptied = _emptied(semester_org, {}) if prune else []
         if emptied is None:
             # The team listing failed: red, as `_empty_the_emptied` is on the same read.
@@ -232,59 +234,27 @@ def sync(semester_org: str, prune: bool = False, dry_run: bool = False) -> int:
             return 1
         if emptied:
             log_err(
-                f"{teams.TEAMS_PATH} is absent in {semester_org}/{teams.CONFIG_REPO} but "
+                f"{roster.STUDENTS_PATH} is absent in {semester_org}/{roster.CONFIG_REPO} but "
                 f"project teams exist - nobody is removed from them until it is restored"
             )
         else:
-            log_ok(f"no {teams.TEAMS_PATH} yet - nothing to sync.")
+            log_ok(f"no {roster.STUDENTS_PATH} yet - nothing to sync.")
         return 0
     wanted = desired_teams(per)
     if not wanted:
         log_ok("no project teams defined yet - nothing to sync.")
         return _empty_the_emptied(semester_org, wanted, dry_run) if prune else 0
-    students = roster.load(semester_org)
-    if students is None:
-        # The roster is ABSENT - distinct from a present-but-empty one. Building the
-        # allowlist from None gives an empty set, so a pruning reconcile would then EVICT
-        # every member from every project team. Refuse to touch anything, mirroring
-        # sync_roster's skip on the same signal. GREEN, for the same reason it is: a file
-        # faculty have to write is reported on the roster's own digest issue and mailed to
-        # them, and a red X here reaches only a maintainer who cannot fix it. A read that
-        # FAILED still raises out of `roster.load` and still reds the run.
-        log_err(
-            f"no roster to vet teams.csv against in {semester_org} - skipping (reported on "
-            f"the students.csv digest issue in {teams.CONFIG_REPO})"
-        )
-        return 0
+    # Present: `teams.load_or_none` read it above. Members are its own onboarded handles.
+    students = roster.load(semester_org) or []
     log_step(f"Materialising {len(wanted)} project team(s) in {semester_org}")
     # Each onboarded member's GitHub id, so a renamed one keeps their place (`ensure_team`).
     ids = {
         s.github_handle: s.github_id for s in students if s.github_id and s.onboarded
     }
     errors = 0
-    for slug, accepted, rejected in vet_groups(
+    for slug, accepted, _rejected in vet_groups(
         {s: sorted(members) for s, members in wanted.items()}, students
     ):
-        for member in rejected:
-            # Names a handle a STUDENT typed into teams.csv, so the detail is verbose-only
-            # (this workflow's log is world-readable). The count below is what a faculty
-            # member acts on, and it names nobody.
-            log_person(
-                f"    {member} in teams.csv is not an onboarded roster handle - "
-                f"not adding to {slug} (would invite an arbitrary GitHub account)"
-            )
-        if rejected:
-            # NOT an error. A handle faculty typed that is not on the roster is a CONTENT
-            # fault of teams.csv: `teams.parse` records it, the teams.csv digest issue
-            # lists the row, and the mail beside it goes to whoever pushed the line. The
-            # row is skipped either way - adding it would invite an arbitrary GitHub
-            # account into a private org - and counting it here as well only reddened the
-            # nightly cron for a typo nobody reading that red X can correct.
-            log_err(
-                f"{len(rejected)} handle(s) in teams.csv are not onboarded roster handles "
-                f"- not added to {slug} (they would invite arbitrary GitHub accounts). "
-                f"Re-run the CLI locally with DSL_VERBOSE=1 to see which."
-            )
         members = set(accepted)
         if dry_run:
             log_person(
@@ -309,7 +279,7 @@ def main() -> int:
     parser.add_argument(
         "--prune",
         action="store_true",
-        help="Remove team members no longer in teams.csv.",
+        help="Remove team members no longer in students.csv.",
     )
     add_preview_flag(parser, "Report the team changes; make none (default).")
     args = parser.parse_args()

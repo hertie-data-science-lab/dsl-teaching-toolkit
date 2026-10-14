@@ -541,7 +541,7 @@ def sample_message_of(
     where the message shows one (`<code>`, `<handle>`). No real name, handle or credential
     appears, so the result is safe in a world-readable Actions log."""
     fields = {
-        "hertie_email": "<email>",
+        "email": "<email>",
         "name": "<name>",
         "github_handle": "",
         "github_id": "",

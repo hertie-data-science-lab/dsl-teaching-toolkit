@@ -6,7 +6,7 @@ One entrypoint replacing three separate workflows' worth of orchestration:
   everywhere - the course org itself + every semester registered under it
   (sync_faculty.sync_course_admins) - regardless of which semester (if any) triggered
   this sync, since admin access is course-wide by design.
-- Roster (students.csv), project teams (teams.csv), and each semester's own
+- Roster (students.csv, with the project teams), and each semester's own
   instructors/TAs (semester-config/instructors.yml, via
   sync_faculty.sync_semester_instructors) additionally reconcile for whichever
   semester(s) are in scope: one named semester (--semester-org, e.g. a push to that
@@ -18,7 +18,7 @@ config is the live truth, so a deleted roster row or a lapsed faculty `end` date
 revokes access on the very next sync.
 
 A CONTENT fault never reds this run. A students.csv saved as a `;`-delimited export, a
-teams.csv with no header, a instructors.yml that is not YAML: each skips its semester and is
+students.csv with no header, a instructors.yml that is not YAML: each skips its semester and is
 reported where the person who left it there will see it - the per-file digest issue in
 that semester's semester-config, and the mail beside it. The COURSE org's own two files
 (`dsl-course.yml`, the semester registry) are the same rule at a wider blast radius: nothing

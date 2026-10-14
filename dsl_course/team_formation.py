@@ -134,7 +134,8 @@ NOUN = (
 )
 
 FIX = (
-    "write the missing rows into semester-config/teams.csv yourself, or move the date on "
+    "write the missing team cells into semester-config/students.csv yourself, or move "
+    "the date on "
     "the line above to keep team formation open for longer."
 )
 
@@ -227,7 +228,7 @@ def open_windows(
     # Asked BEFORE the two reads below, and free by then: `declared_grading_spec` memoises
     # each template's text per process and the tick has read every one of them already. A
     # semester with no self-select assignment at all - most of them, for most of a term - has
-    # no window any date could open, so students.csv and teams.csv would be two contents
+    # no window any date could open, so students.csv would be two contents
     # reads a quarter of an hour that could only ever produce an empty list.
     keys = self_select_keys(course_org, sched)
     if not keys:
@@ -641,7 +642,7 @@ def _nudges(
     for window in windows:
         seen: set[str] = set()
         for student in window.waiting:
-            to = student.hertie_email.strip()
+            to = student.email.strip()
             fold = to.casefold()
             if not fold or fold in seen:
                 continue
@@ -1189,7 +1190,7 @@ _TEAM_LOCK_HEADER = f"""\
 # The Join-team form in this semester's `join` repo reads THIS FILE and nothing else.
 #
 #   team_formation: self_select   students form their own teams with the Join-team form
-#                   assigned      the teaching team writes teams.csv; the form refuses
+#                   assigned      the teaching team writes the team cells; the form refuses
 #                   none          an individual assignment; the form refuses
 #   max_team_size:  the cap the form enforces (group assignments only)
 #   team_formation_window:
@@ -1203,15 +1204,20 @@ _TEAM_LOCK_HEADER = f"""\
 #   team_formation_page:
 #                   the assignment's page, which lists the teams that exist - for the
 #                   refusal to link; empty for anything not self-select
+#   team_column:    the students.csv column the form writes the team into (`team:4`)
 #
 # An assignment whose course template does not exist yet is locked to `{NO_TEAMS}`:
 # until the template says what it is, nobody can mint a GitHub team for it.
 """
 
 
-def team_lock_text(entries: dict[str, tuple[str, int, str, str, str]]) -> str:
+def team_lock_text(
+    entries: dict[str, tuple[str, int, str, str, str]],
+    columns: Mapping[str, str] | None = None,
+) -> str:
     """The lock file's whole text, from
-    `{schedule key: (team_formation, cap, window, closes, page)}`.
+    `{schedule key: (team_formation, cap, window, closes, page)}` and each key's
+    students.csv team column suffix (`teams.columns`; the key itself where absent).
 
     Hand-rolled rather than `yaml.safe_dump`, for the same reason the workflows are: it is
     read by a line scanner with no YAML library to hand (the Join-team form's JavaScript),
@@ -1236,6 +1242,7 @@ def team_lock_text(entries: dict[str, tuple[str, int, str, str, str]]) -> str:
             f"    team_formation_window: {window}",
             f"    team_formation_closes: {closes}".rstrip(),
             f"    team_formation_page: {page}".rstrip(),
+            f"    team_column: {roster.team_column((columns or {}).get(key, key))}",
         ]
     return "\n".join(lines) + "\n"
 
@@ -1425,7 +1432,8 @@ def team_lock_content(
     return team_lock_text(
         team_lock_entries(
             course_org, sched, now, _formation_pages(course_org, semester_org, sched)
-        )
+        ),
+        teams.columns(sched),
     ).encode()
 
 

@@ -24,6 +24,9 @@ RECORDS = {
     "outcomes": "outcomes",
     # semester-config: the pointer to the course org, and the semester's records
     "pointer": "dsl-course.yml",
+    # semester-config: each student's GitHub account and enrolment code (`roster`),
+    # beside the instructor-owned students.csv
+    "roster": "roster.csv",
     "lock": "assignments.lock.yml",
     "snapshots": "snapshots",
     "autograde": "autograde",

@@ -605,7 +605,9 @@ def submission_targets(
         key = teams_key or slug
         groups = teams.teams_for(teams.load(semester_org), key)
         if not groups:
-            log_err(f"no teams for `{key}` in {semester_org}/{CONFIG_REPO}/teams.csv.")
+            log_err(
+                f"no teams for `{key}` in {semester_org}/{CONFIG_REPO}/students.csv."
+            )
             return []
         # teams.csv is student-writable (the "Join team" issue appends rows), so its
         # handles pass the SAME roster allowlist `assign.provision_all` vets them through
@@ -621,7 +623,7 @@ def submission_targets(
                 # A count, not the handles: this log is public, and the handles are a
                 # student's own typing.
                 log_err(
-                    f"  ! {len(rejected)} handle(s) in teams.csv for `{key}` are not "
+                    f"  ! {len(rejected)} team member(s) for `{key}` are not "
                     f"enrolled, onboarded roster handles - they get no grade row"
                 )
             out.append(

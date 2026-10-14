@@ -92,7 +92,6 @@ from . import (
     source_digest,
     status,
     sync_faculty,
-    sync_teams,
     team_formation,
     teams,
     teardown,
@@ -1009,15 +1008,11 @@ def _config_faults(
     def read_roster(found: list) -> None:
         nonlocal students
         students = roster.load(semester_org, found)
+        # The team columns are students.csv's too, so their faults are its digest's.
+        if students is not None:
+            teams.parse(students, teams.columns(sched), found)
 
     collect(config_digest.ROSTER, read_roster)
-    # The roster is the allowlist teams.csv is vetted against, and only where it was
-    # actually read: an empty one would report every member as a stranger. `None` is a
-    # roster that is ABSENT as well as one whose read failed - a semester with no
-    # students.csv already has that fault in its own digest, and vetting against the
-    # empty set it implies would file one more teams.csv fault per row on top of it.
-    known = sync_teams.known_handles(students) if students is not None else None
-    collect(config_digest.TEAMS, lambda found: teams.load(semester_org, found, known))
     # The grading sheets, on this tick and no other: they have no push fast path, because a
     # sheet is edited all day while somebody marks and a mail per save would be a mail
     # about a file still being typed into.
