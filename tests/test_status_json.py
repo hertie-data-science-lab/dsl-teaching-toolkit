@@ -217,6 +217,17 @@ def _materials(repo: str, syllabus: str | None = "# Syllabus", **over):
     )
 
 
+def _repo_tree(tree: dict[str, dict[str, str]], listed: list[str] | None = None):
+    """A `top_level` stub over `{folder: {name: type}}`; an absent folder is empty."""
+
+    def top_level(org, repo, folder=""):
+        if listed is not None:
+            listed.append(folder)
+        return tree.get(folder, {})
+
+    return top_level
+
+
 # The weeks of SCHEDULE with nothing dated in them after NOW, and those with an assignment
 # date but no lecture: the fixture course sets them aside (decision 0032), so only the
 # empty-week tests see an EMPTY_WEEK or EMPTY_WEEK_KIND problem.
@@ -693,11 +704,7 @@ def test_a_declared_pdf_syllabus_counts_once_it_is_there(monkeypatch):
     )
     monkeypatch.setattr(status_json, "file_exists", lambda org, repo, path: False)
     present = {"E1282_syllabus.pdf": "file", "lectures": "dir"}
-    monkeypatch.setattr(
-        status_json,
-        "top_level",
-        lambda org, repo, folder="": {} if folder else present,
-    )
+    monkeypatch.setattr(status_json, "top_level", _repo_tree({"": present}))
     facts = status_json._materials_facts(COURSE, "nlp-materials")
     checks = status_json.materials_checks(facts)
     assert status_json.materials_state(facts, checks) == "ready"
@@ -1261,11 +1268,7 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
     monkeypatch.setattr(
         status_json,
         "top_level",
-        lambda org, repo, folder="": (
-            {}
-            if folder
-            else {"SYLLABUS.md": "file", "lectures": "dir", ".system": "dir"}
-        ),
+        _repo_tree({"": {"SYLLABUS.md": "file", "lectures": "dir", ".system": "dir"}}),
     )
     monkeypatch.setattr(status_json, "file_exists", lambda org, repo, path: False)
     monkeypatch.setattr(gh_commits, "gh", lambda *a: (0, "2026-09-22T06:02:00Z"))
@@ -2036,16 +2039,12 @@ def test_only_unkinded_folders_with_numbered_subfolders_are_read_and_flagged(
     monkeypatch,
 ):
     listed = []
-
-    def top_level(org, repo, folder=""):
-        listed.append(folder)
-        return {
-            "": {"lectures": "dir", "quiz": "dir", "code": "dir", "data": "dir"},
-            "quiz": {"01_first": "dir", "notes.md": "file"},
-            "code": {"helpers": "dir", "run.py": "file"},
-        }.get(folder, {})
-
-    monkeypatch.setattr(status_json, "top_level", top_level)
+    tree = {
+        "": {"lectures": "dir", "quiz": "dir", "code": "dir", "data": "dir"},
+        "quiz": {"01_first": "dir", "notes.md": "file"},
+        "code": {"helpers": "dir", "run.py": "file"},
+    }
+    monkeypatch.setattr(status_json, "top_level", _repo_tree(tree, listed))
     monkeypatch.setattr(status_json, "_declaration", lambda org, repo: Declared())
     monkeypatch.setattr(status_json, "get_file_content", lambda org, repo, path: None)
     m = status_json._materials_facts(COURSE, "cm")
@@ -3378,17 +3377,6 @@ def test_an_assignment_carries_its_semester_side_name():
 
 
 # --------------------------------------------------------- folder kinds at any depth
-
-
-def _repo_tree(tree: dict[str, dict[str, str]], listed: list[str] | None = None):
-    """A `top_level` stub over `{folder: {name: type}}`; an absent folder is empty."""
-
-    def top_level(org, repo, folder=""):
-        if listed is not None:
-            listed.append(folder)
-        return tree.get(folder, {})
-
-    return top_level
 
 
 # A repo shaped like the Maths course's: kinds one level down, solutions denied.

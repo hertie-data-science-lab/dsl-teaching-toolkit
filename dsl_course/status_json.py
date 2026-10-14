@@ -38,7 +38,7 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -117,7 +117,6 @@ from .materials import (
     PLAN_START,
     Declared,
     alias_kind,
-    infer_kind,
     is_materials_repo,
     publishable,
 )
@@ -127,7 +126,7 @@ from .opencourse import load as load_opencourse
 from .opencourse import parse as parse_opencourse
 from .ops.outcome import OUTCOMES_DIR
 from .ops.registry import STATUS_SCHEMA
-from .releaseignore import RELEASEIGNORE, REVIEWED_MARK, listed
+from .releaseignore import RELEASEIGNORE, REVIEWED_MARK, Ignore, listed
 from .repos import default_branch
 from .schedule_plan import (
     Unnumbered,
@@ -239,6 +238,14 @@ class MaterialsFacts:
     # numbered subfolders: each got rows under the old `lecture` default and is now
     # supporting files (`kindless_problems`).
     numbered: tuple[str, ...] = ()
+    # The folders a release can copy (`_released`); read off `folders` and
+    # `releaseignore` when not given.
+    released: tuple[str, ...] | None = None
+
+    def __post_init__(self):
+        if self.released is None:
+            withheld = listed((self.releaseignore or "").splitlines())
+            self.released = _released(self.folders, withheld)
 
 
 @dataclass
@@ -873,15 +880,20 @@ def _syllabus_written(m: MaterialsFacts) -> bool:
     return m.syllabus == "" or _written(m.syllabus)
 
 
-def _released_folders(m: MaterialsFacts) -> list[str]:
+def _released(folders: Iterable[str], withheld: Ignore) -> tuple[str, ...]:
     """The folders a release can copy: `solution/`, `tests/` and the like never go
-    anywhere, and a withheld one is never copied, so they need no kind."""
-    withheld = listed((m.releaseignore or "").splitlines())
-    return [
+    anywhere, and a folder `withheld` (the `.releaseignore`) excludes is never copied, so
+    they need no kind."""
+    return tuple(
         f
-        for f in m.folders
+        for f in folders
         if publishable(f) and not withheld.excludes(f, lambda _rel: True)
-    ]
+    )
+
+
+def _released_folders(m: MaterialsFacts) -> tuple[str, ...]:
+    """`MaterialsFacts.released`."""
+    return m.released or ()
 
 
 def _reviewed(text: str | None) -> bool:
@@ -915,11 +927,17 @@ def _syllabus_why(m: MaterialsFacts) -> str:
     return f"{file}, and the weekly plan (written from the schedule) is not in it yet."
 
 
-def _kinds_found(m: MaterialsFacts) -> list[dict]:
+def _named(m: MaterialsFacts) -> dict[str, str | None]:
+    """Each released folder's named kind (`alias_kind`), or None: the one alias sweep
+    `materials_checks` reads its kind rows from."""
+    return {f: alias_kind(f, m.kinds) for f in _released_folders(m)}
+
+
+def _kinds_found(named: Mapping[str, str | None]) -> list[dict]:
     """Every content kind but supporting files, in the policy's order, each with the
-    released folders of that kind (paths, `students/lectures`); empty for a kind no folder has, so the console shows
-    which kinds are present and which are not."""
-    named = {f: alias_kind(f, m.kinds) for f in _released_folders(m)}
+    released folders of that kind (paths, `students/lectures`; `named`, from `_named`);
+    empty for a kind no folder has, so the console shows which kinds are present and
+    which are not."""
     return [
         {"kind": kind, "folders": [f for f, k in named.items() if k == kind]}
         for kind in policy.content_kinds()
@@ -927,11 +945,11 @@ def _kinds_found(m: MaterialsFacts) -> list[dict]:
     ]
 
 
-def _shown_folders(m: MaterialsFacts) -> list[str]:
-    """The released folders of a kind the sites show: a supporting-files folder (any
-    folder no kind names) is released but gets no page, so on its own it does not make a
-    repo releasable."""
-    return [f for f in _released_folders(m) if infer_kind(f, m.kinds) != ASSETS_KIND]
+def _shown_folders(named: Mapping[str, str | None]) -> list[str]:
+    """The released folders of a kind the sites show (`named`, from `_named`): a
+    supporting-files folder (any folder no kind names) is released but gets no page, so
+    on its own it does not make a repo releasable."""
+    return [f for f, k in named.items() if (k or ASSETS_KIND) != ASSETS_KIND]
 
 
 def _kind_folder_why(released: list[str]) -> str:
@@ -948,14 +966,15 @@ def _noun(kind: str) -> str:
     return kind if kind.endswith("s") else f"{kind}s"
 
 
-def _missing_kind_rows(m: MaterialsFacts) -> list[tuple]:
+def _missing_kind_rows(found: list[dict], shown: list[str]) -> list[tuple]:
     """One suggested row per folder kind (lectures, labs, readings) with no folder, once
     the repo has a folder of some content kind: a course that teaches no labs sets
     nothing and loses nothing, so it is a notice, never a failure. Its id is
-    `kind_folder:<kind>`; its to-do's check is `kind_folder`."""
-    if not _shown_folders(m):
+    `kind_folder:<kind>`; its to-do's check is `kind_folder`. `found` and `shown`:
+    `_kinds_found` and `_shown_folders`."""
+    if not shown:
         return []
-    found = {d["kind"]: d["folders"] for d in _kinds_found(m)}
+    folders = {d["kind"]: d["folders"] for d in found}
     return [
         (
             f"kind_folder:{kind}",
@@ -968,7 +987,7 @@ def _missing_kind_rows(m: MaterialsFacts) -> list[tuple]:
             ),
         )
         for kind in FOLDER_KINDS
-        if kind in found and not found[kind]
+        if kind in folders and not folders[kind]
     ]
 
 
@@ -981,12 +1000,15 @@ def materials_checks(m: MaterialsFacts) -> list[dict]:
     syllabus is suggested, since releases run without it. `why` names what is missing,
     None once the check is done; `kind_folder` carries `detail`, the folders found per content kind.
     Then a suggested `kind_folder:<kind>` per folder kind no folder has (`_missing_kind_rows`)."""
+    named = _named(m)
+    found = _kinds_found(named)
+    shown = _shown_folders(named)
     rows = (
         (
             "kind_folder",
             "At least one folder of a content kind",
             NEEDED,
-            bool(_shown_folders(m)),
+            bool(shown),
             _kind_folder_why(_released_folders(m)),
         ),
         (
@@ -1003,7 +1025,7 @@ def materials_checks(m: MaterialsFacts) -> list[dict]:
             _reviewed(m.releaseignore),
             "Nothing is withheld from students yet; review the withheld patterns.",
         ),
-        *_missing_kind_rows(m),
+        *_missing_kind_rows(found, shown),
     )
     return [
         {
@@ -1012,7 +1034,7 @@ def materials_checks(m: MaterialsFacts) -> list[dict]:
             "done": done,
             "why": None if done else why,
             "need": need,
-            **({"detail": _kinds_found(m)} if cid == "kind_folder" else {}),
+            **({"detail": found} if cid == "kind_folder" else {}),
         }
         for cid, label, need, done, why in rows
     ]
@@ -2647,15 +2669,17 @@ def kind_folders(
     ]
     seen = {f.lower() for f in found}
     by_name = {top.lower(): top for top in tops}
+    # Each folder listed once, however many `kinds:` paths run through it.
+    listings = dict(children)
     for key in sorted(k for k in kinds if "/" in k and k not in seen):
         head, *rest = key.split("/")
         path = by_name.get(head)
         for part in rest:
             if path is None:
                 break
-            listing = children.get(path)
+            listing = listings.get(path)
             if listing is None:
-                listing = top_level(course_org, repo, path)
+                listing = listings[path] = top_level(course_org, repo, path)
             name = next((n for n in _dirs(listing) if n.lower() == part), None)
             path = f"{path}/{name}" if name else None
         if path:
@@ -2686,11 +2710,7 @@ def _materials_facts(course_org: str, repo: str) -> MaterialsFacts:
         else None
     )
     withheld = listed((releaseignore or "").splitlines())
-    released = [
-        f
-        for f in folders
-        if publishable(f) and not withheld.excludes(f, lambda _rel: True)
-    ]
+    released = _released(folders, withheld)
     # Only a top folder no kind names is listed (one read each, usually few): the rest
     # cannot have lost their rows, and what is inside a kind folder is of its kind.
     children = {
@@ -2703,15 +2723,17 @@ def _materials_facts(course_org: str, repo: str) -> MaterialsFacts:
         for f, listing in children.items()
         if any(session_number(name) is not None for name in _dirs(listing))
     )
-    nested = kind_folders(course_org, repo, released, children, declared.kinds)
+    nested = kind_folders(course_org, repo, list(released), children, declared.kinds)
+    every = tuple(sorted({*folders, *nested}))
     return MaterialsFacts(
         repo,
         syllabus,
         path,
-        folders=tuple(sorted({*folders, *nested})),
+        folders=every,
         kinds=declared.kinds,
         releaseignore=releaseignore,
         numbered=numbered,
+        released=_released(every, withheld),
     )
 
 
