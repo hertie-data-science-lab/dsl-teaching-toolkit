@@ -1306,9 +1306,9 @@ on:
         type: boolean
         default: false
       per_question:
-        description: "Include marks per question (off: the score, late line, adjustment and final grade only)"
-        type: boolean
-        default: true
+        description: "Marks per question for this run: true or false; empty = the assignment's marks_per_question setting"
+        required: false
+        default: ""
 
 {_DISTRIBUTE_CONCURRENCY}
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
@@ -1334,6 +1334,7 @@ on:
           [ "$NOTIFY" = "false" ] && args+=(--no-notify)
           [ "$RECEIPT_NOTE" = "true" ] && args+=(--receipt-note)
           [ "$INCLUDE_FEEDBACK" = "true" ] && args+=(--include-feedback)
+          [ "$PER_QUESTION" = "true" ] && args+=(--per-question)
           [ "$PER_QUESTION" = "false" ] && args+=(--no-per-question)
           [ -n "$ASSIGNMENT" ] && args+=(--assignment "$ASSIGNMENT")
           [ -n "$DISPATCHED_BY" ] && args+=(--dispatched-by "$DISPATCHED_BY")

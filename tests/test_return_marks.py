@@ -187,11 +187,14 @@ def test_the_button_offers_both_channels_off_by_default():
     assert '[ "$INCLUDE_FEEDBACK" = "true" ] && args+=(--include-feedback)' in run
 
 
-def test_the_button_includes_marks_per_question_unless_unticked():
-    # The scheduler's dispatch carries no inputs, so an empty value must mean "on" too:
-    # the assignment's own `marks_per_question` setting then decides.
+def test_marks_per_question_is_the_setting_unless_a_run_overrides_it():
+    # Empty - the scheduler's dispatch, a bare manual run - leaves the assignment's own
+    # `marks_per_question` to decide; the Console passes its box either way.
     rendered = workflows_render.render_distribute_grades([SEMESTER])
     per_question = workflow_inputs(rendered)["per_question"]
-    assert per_question["type"] == "boolean" and per_question["default"] is True
+    assert (
+        per_question.get("type", "string") == "string" and per_question["default"] == ""
+    )
     run = workflow_jobs(rendered)["distribute-grades"]["steps"][-1]["run"]
+    assert '[ "$PER_QUESTION" = "true" ] && args+=(--per-question)' in run
     assert '[ "$PER_QUESTION" = "false" ] && args+=(--no-per-question)' in run
