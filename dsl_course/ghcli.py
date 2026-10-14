@@ -16,12 +16,12 @@ from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from functools import cache
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
 
+from . import run
 from .log import CLIParser, log_err, on_cli_start, plural
 
 RATE_LIMIT_MARKERS = (
@@ -415,6 +415,33 @@ def file_target(target: str) -> tuple[str, str]:
     return f"{org}/{repo}", unquote(path)
 
 
+def _stale(kind: str, targets: frozenset[str]) -> Callable[[run.Scope], bool]:
+    """Which `run.Scope`s a write of `kind` to `targets` may have changed: a file write
+    its file, its repo and its org's listing; a push or a repo made or deleted every
+    file of that repo (or org); a settings write the org's listing only."""
+    if EVERYTHING in targets:
+        return lambda scope: True
+    if kind == FILE:
+        files = [file_target(t) for t in targets]
+        paths = {(*repo.split("/", 1), path) for repo, path in files}
+        return lambda scope: any(scope == p[: len(scope)] for p in paths)
+    pairs = {tuple(t.split("/", 1)) for t in targets}
+    if kind == META:
+        return lambda scope: len(scope) == 1 and any(scope[0] == p[0] for p in pairs)
+    return lambda scope: any(
+        scope[0] == p[0] and (len(p) == 1 or len(scope) == 1 or scope[1] == p[1])
+        for p in pairs
+    )
+
+
+def _forget_run(kind: str, targets: frozenset[str]) -> None:
+    if kind in (FILES, FILE, META, ALL):
+        run.current().forget(_stale(kind, targets))
+
+
+on_write(_forget_run)
+
+
 # --------------------------------------------------------- the opt-in org allowlist
 
 # An OPT-IN blast-radius fence for the live end-to-end run (tests/e2e), which drives real
@@ -661,7 +688,7 @@ GIT_ENV = [
 ]
 
 
-@cache
+@run.per_run()
 def bot_login() -> str:
     """The GitHub login this token authenticates as - resolved ONCE per process.
 
@@ -672,7 +699,7 @@ def bot_login() -> str:
 
     "" when it cannot be read, which every caller must treat as "cannot tell" - never as
     "not the bot", or a transient here would turn a handout commit into a submission.
-    A CLI run has already asked, for its budget line."""
+    A CLI run has already asked, for its budget line. Held by the run (`run.per_run`)."""
     if _start_budget is not None and _start_budget.login != UNKNOWN_LOGIN:
         return _start_budget.login
     code, out = gh("api", "user", "--jq", ".login")
@@ -838,6 +865,14 @@ def _budget_at_end(start: Budget) -> None:
 
 # What this run's start line said, for the scheduler's budget alarm (`cadence.report_budget`).
 _start_budget: Budget | None = None
+
+
+def _forget_start_budget() -> None:
+    global _start_budget
+    _start_budget = None
+
+
+run.on_reset(_forget_start_budget)
 
 
 def start_budget() -> Budget | None:

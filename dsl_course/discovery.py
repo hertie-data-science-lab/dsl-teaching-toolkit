@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 
 import yaml
 
-from . import records
+from . import records, run
 from .central import resolve_central_ref
 from .course import (
     CONFIG_REPO,
@@ -203,8 +203,8 @@ _listings: dict[str, list[dict]] | None = None
 
 
 def hold_listings(on: bool) -> None:
-    """Turn the per-run listing memo on (empty) or off. `tests/conftest.py` turns it off
-    between tests."""
+    """Turn the per-run listing memo on (empty) or off. `run.reset` turns it
+    off."""
     global _listings
     _listings = {} if on else None
 
@@ -220,6 +220,7 @@ def _forget_listings(kind: str, targets: frozenset[str]) -> None:
 
 on_write(_forget_listings)
 on_cli_start(lambda parser: hold_listings(parser.read_once))
+run.on_reset(lambda: hold_listings(False))
 
 
 def list_org_repos(org: str) -> list[dict]:

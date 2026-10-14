@@ -25,11 +25,10 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from functools import cache
 
 import yaml
 
-from . import policy
+from . import policy, run
 from .course import ASSIGNMENTS_FILE, CONFIG_REPO, COURSE_CONFIG
 from .discovery import course_org_for_semester, org_meta
 from .faults import ConfigFault, Unusable
@@ -102,14 +101,14 @@ ASSIGNMENTS_BLOCKS = "assignments"
 Layer = tuple[str, Mapping]
 
 
-@cache
+@run.per_run(lambda course_org: run.scope(course_org, ".github", COURSE_CONFIG))
 def course_defaults(course_org: str) -> dict:
     """A course's `assignment_defaults:` block, validated, read ONCE per course per process.
 
     An absent `dsl-course.yml` (a 404) declares nothing. Any OTHER failure to read it - no
     permission, rate limit, malformed YAML - RAISES and is not cached: a run that cannot
     see the course's defaults must stop rather than hand out and grade on the
-    institution's. tests/conftest.py clears it."""
+    institution's. Held by the run (`run.per_run`)."""
     if not course_org:
         return {}
     return parse_assignment_defaults(org_meta(course_org).get(ASSIGNMENT_DEFAULTS_KEY))
@@ -278,7 +277,9 @@ def parse_instance(text: str | None) -> Instance:
     )
 
 
-@cache
+@run.per_run(
+    lambda semester_org: run.scope(semester_org, CONFIG_REPO, ASSIGNMENTS_FILE)
+)
 def _assignments_text(semester_org: str) -> str | None:
     """`semester-config/assignments.yml`, or None when the semester has none (a 404).
     Any other read failure raises (`get_file_content`)."""
@@ -293,14 +294,16 @@ def instance(semester_org: str) -> Instance:
     )
 
 
-@cache
+@run.per_run(
+    lambda semester_org: run.scope(semester_org, CONFIG_REPO, ASSIGNMENTS_FILE)
+)
 def semester_blocks(semester_org: str) -> tuple[dict, dict[str, dict]]:
     """`(defaults, {slug: block})` out of the semester's `assignments.yml`, each value
     through its reader; `({}, {})` when the file is absent (a 404). A read that fails for
     any other reason RAISES and is not cached, and a file that is not YAML raises
     `Unusable` - the same fail-closed rule as `course_defaults`: nothing hands out or
     grades on defaults the semester did not choose. `schedule.load` carries the fault.
-    tests/conftest.py clears it."""
+    Held by the run (`run.per_run`)."""
     read = instance(semester_org)
     if read.unparseable:
         raise Unusable(

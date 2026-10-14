@@ -38,12 +38,11 @@ from __future__ import annotations
 
 import sys
 from datetime import date
-from functools import cache
 from typing import NamedTuple
 
 import yaml
 
-from . import schedule
+from . import run, schedule
 from .access import grant_team_repo_access, holds, team_repo_access
 from .central import MissingCentralRef, resolve_central_ref
 from .course import (
@@ -474,11 +473,11 @@ def load_semester_faculty(semester_org: str) -> dict[str, list[dict]] | None:
     release tick asks it who to notify, `status` asks it who is unreachable, and the file
     changes only when somebody edits it. The memo also means the "no usable `email:`"
     error lines are printed once per run rather than once per reader.
-    `tests/conftest.py` clears it."""
+    Held by the run (`run.per_run`)."""
     return _semester_faculty(semester_org)[0]
 
 
-@cache
+@run.per_run(lambda semester_org: run.scope(semester_org, CONFIG_REPO))
 def _semester_faculty(
     semester_org: str,
 ) -> tuple[dict[str, list[dict]] | None, tuple[str, ...]]:

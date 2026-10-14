@@ -676,8 +676,10 @@ OPERATIONS = {
         ("deploy", *_C, "--course-source-repo", "course-materials-f2026", *_S)
         + ("--course-source-path", "lectures", "--semester-dest-repo", "materials")
         + ("--semester-dest-path", "lectures", "--preview"),
-        # The schedule and its run settings: a copy of an unnumbered entry is refused.
-        3,
+        # The schedule and its run settings, and each materials repo's materials.yml (a
+        # fresh run reads them; this was 3 while the materials memo leaked between runs):
+        # a copy of an unnumbered entry is refused.
+        5,
         0,
     ),
     "assign: hand out now (preview)": (

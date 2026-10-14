@@ -27,11 +27,10 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from functools import cache
 
 import yaml
 
-from . import policy
+from . import policy, run
 from .faults import Unusable
 from .gh_contents import load_yaml_config
 from .repos import has_denied_component, has_never_material_component
@@ -126,7 +125,7 @@ def parse(data: object, where: str = MATERIALS_FILE) -> Declared:
     return Declared(syllabus or DEFAULT_SYLLABUS, kinds, bool(syllabus))
 
 
-@cache
+@run.per_run(lambda org, repo: run.scope(org, repo, MATERIALS_FILE))
 def read(org: str, repo: str) -> Declared:
     """`repo`'s declaration, read once per run. Absent is the defaults; a file that does
     not parse or does not validate raises `Unusable`."""

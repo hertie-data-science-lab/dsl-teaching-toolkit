@@ -22,6 +22,7 @@ from dsl_course import (
     roster,
     teams,
 )
+from dsl_course import run as run_context
 from dsl_course.gh_contents import blob_sha, read_csv
 from tests.conftest import ROSTER_HEADER, new_sheet, repo_row
 
@@ -366,9 +367,9 @@ def test_a_second_run_does_nothing(world):
 def test_the_roster_memo_is_cleared_once_the_id_moves(world, monkeypatch):
     monkeypatch.setattr(roster, "get_file_content", lambda *a, **k: world.roster)
     roster.load(ORG)
-    assert roster._roster_text.cache_info().currsize == 1
+    assert run_context.current().holds(roster._roster_text) == 1
     run(world)
-    assert roster._roster_text.cache_info().currsize == 0
+    assert run_context.current().holds(roster._roster_text) == 0
     assert roster.load(ORG)[0].github_id == NEW_ID
 
 

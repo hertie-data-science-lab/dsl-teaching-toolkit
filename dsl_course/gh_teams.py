@@ -9,8 +9,8 @@ import json
 import re
 import time
 from collections.abc import Iterable
-from functools import cache, lru_cache
 
+from . import run
 from .ghcli import (
     UNKNOWN_LOGIN,
     gh,
@@ -457,7 +457,7 @@ def remove_team_member(org: str, team_slug: str, login: str) -> bool:
     return code == 0
 
 
-@lru_cache(maxsize=1)
+@run.per_run()
 def acting_login() -> str | None:
     """Login of the token `gh` is currently authenticated as (the bot, in CI) - off the
     budget line's `GET /user` when this is a CLI run, which has already asked."""
@@ -503,7 +503,7 @@ def remove_org_membership(org: str, login: str) -> bool:
     return code == 0 or is_missing_resource(out)
 
 
-@cache
+@run.per_run()
 def get_org_owners(org: str) -> frozenset[str] | None:
     """Active Owners of `org` - see reconcile_team_members for why these are never
     pruned from any team.

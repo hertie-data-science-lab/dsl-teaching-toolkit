@@ -12,12 +12,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from decimal import Decimal
-from functools import cache
 from urllib.parse import urlsplit
 
 import yaml
 
-from . import gh_teams, policy, schedule, settings
+from . import gh_teams, policy, run, schedule, settings
 from .course import (
     ASSIGNMENTS_FILE,
     CONFIG_REPO,
@@ -274,14 +273,14 @@ def with_run_settings(
     )
 
 
-@cache
+@run.per_run(lambda course_org, template: run.scope(course_org, template))
 def _grading_text(course_org: str, template: str) -> str | None:
     """The template's `grading_config.yml`, read ONCE per template per process.
 
     An hourly tick asks the same template the same question from the scheduler, the sheet
     refresh and the collection that follows them. Memoising the TEXT (like
     `schedule._schedule_text`) means every caller still parses its own spec - nothing
-    shared to mutate - and still sees its own warnings. tests/conftest.py clears it."""
+    shared to mutate - and still sees its own warnings. Held by the run (`run.per_run`)."""
     return get_file_content(course_org, template, GRADING_FILE, ref=SOLUTION_BRANCH)
 
 
@@ -772,11 +771,11 @@ def _display_long(at: datetime | None, tz_name: str = "") -> str:
     return f"{at:%A} {at.day} {at:%B %Y}, {at:%H:%M}{zone}"
 
 
-@cache
+@run.per_run(lambda course_org, template: run.scope(course_org, template))
 def readme_heading(course_org: str, template: str) -> str:
     """The template README's first `# ` heading, or "" - the name an assignment has when
     its `grading_config.yml` gives no `title:`. Read once per template per process; a
-    read that fails is no heading. tests/conftest.py clears it."""
+    read that fails is no heading. Held by the run (`run.per_run`)."""
     if not course_org or not template:
         return ""
     try:

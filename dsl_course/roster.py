@@ -29,8 +29,8 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
-from functools import cache
 
+from . import run
 from .course import CONFIG_REPO
 from .faults import ConfigFault, csv_row_fault
 from .gh_contents import get_file_content, read_csv
@@ -183,7 +183,7 @@ def enrolled(students: list[Student]) -> list[Student]:
     return [s for s in students if s.is_enrolled]
 
 
-@cache
+@run.per_run(lambda semester_org: run.scope(semester_org, CONFIG_REPO, ROSTER_PATH))
 def _roster_text(semester_org: str) -> str | None:
     """students.csv's text, read ONCE per semester per process.
 
@@ -201,7 +201,7 @@ def _roster_text(semester_org: str) -> str | None:
 
         The TEXT is memoised rather than `load`'s rows, so every caller still gets its own
         parse (nobody can mutate another's list) and the loud "roster missing" line is still
-        printed where it happens. Cleared between tests (tests/conftest.py)."""
+        printed where it happens. Held by the run (`run.per_run`): a write to the file forgets it."""
     return get_file_content(semester_org, CONFIG_REPO, ROSTER_PATH)
 
 

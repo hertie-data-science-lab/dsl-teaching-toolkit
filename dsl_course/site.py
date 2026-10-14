@@ -41,7 +41,7 @@ from textwrap import indent
 import yaml
 from pathspec import GitIgnoreSpec
 
-from . import policy, schedule, status, teams
+from . import policy, run, schedule, status, teams
 from .course import (
     CONFIG_REPO,
     CUTOFF_SENTENCE,
@@ -76,7 +76,7 @@ from .ghcli import clone
 from .gradebook import spoken_day
 from .grading_spec import load_grading_spec, total_points
 from .log import CLIParser, log, log_err, log_step, log_withheld
-from .materials import ASSETS_KIND, Declared, publishable
+from .materials import ASSETS_KIND, MATERIALS_FILE, Declared, publishable
 from .materials import read as read_materials
 from .opencourse import read as read_opencourse
 from .public_site import publish as publish_public_site
@@ -150,7 +150,7 @@ def _semester_label(semester_org: str) -> str:
     return semester_label(semester_of(semester_org)) or ""
 
 
-@cache
+@run.per_run(lambda org, repo: run.scope(org, repo))
 def _repo_tree(org: str, repo: str) -> tuple[str, tuple[str, ...]]:
     """(default branch, every blob path in it) for a repo - one recursive tree fetch,
     memoised for the run. A semester site asks for the files of EVERY released session, and
@@ -181,7 +181,7 @@ PUBLISH_FILE = "publish.yml"
 _MAX_PUBLIC_FILE_BYTES = 100 * 1024 * 1024
 
 
-@cache
+@run.per_run(lambda course_org, source_repo: run.scope(course_org, source_repo))
 def _publish_policy(course_org: str, source_repo: str) -> GitIgnoreSpec | None:
     """What `publish.yml` in `source_repo` declares public, or None when it declares
     nothing.
@@ -1051,7 +1051,7 @@ RETIRED_SITE_FILES = tuple(
 )
 
 
-@cache
+@run.per_run(lambda course_org, repo: run.scope(course_org, repo, MATERIALS_FILE))
 def _materials(course_org: str, repo: str) -> Declared | None:
     """`repo`'s `materials.yml`, or None when it cannot be used - said once per run, naming
     the file. The site then infers kinds from the built-in folder names and looks for the

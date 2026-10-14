@@ -19,23 +19,17 @@ import yaml
 from dsl_course import (
     bootstrap_course,
     central,
-    collect,
     discovery,
-    gh_contents,
     gh_teams,
     ghcli,
     grading_sheet,
-    grading_spec,
     issues,
     log,
     pulls,
-    repos,
     roster,
+    run,
     schedule,
     settings,
-    site,
-    sync_faculty,
-    teams,
 )
 
 # students.csv's header row, DERIVED from the columns the engine declares rather than
@@ -194,8 +188,7 @@ def _not_on_a_runner(monkeypatch):
     are answered once per process, so a test that sets `GITHUB_ACTIONS` itself must not
     leave its answer behind for the next one."""
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
-    collect.sandbox_user.cache_clear()
-    collect.sandbox_unusable.cache_clear()
+    run.reset()
 
 
 @pytest.fixture(autouse=True)
@@ -204,39 +197,10 @@ def _clear_process_memos():
 
 
 def clear_process_memos() -> None:
-    """The per-process memos a single CLI run is entitled to keep: a repo's tree and its
-    paths, a repo's metadata and its last committer, whether a central ref exists, the
-    semester-config files a run re-reads (students.csv, teams.csv, schedule.yml,
-    instructors.yml), an assignment's definition, its course's defaults and its handed-out
-    starters, and the login the token belongs to. Tests reuse the same org/repo names
-    with different fakes, so clear them between tests - and the CLI's read-once memos
-    (`gh_contents`, `issues`) go back to off, as a CLI start turns them on."""
-    site._repo_tree.cache_clear()
-    site._materials.cache_clear()
-    central.central_ref_exists.cache_clear()
-    repos._repos.clear()
-    gh_teams.get_org_owners.cache_clear()
-    gh_teams.acting_login.cache_clear()
-    ghcli.bot_login.cache_clear()
-    discovery.hold_listings(False)
-    roster._roster_text.cache_clear()
-    teams._teams_text.cache_clear()
-    schedule._schedule_text.cache_clear()
-    schedule._repo_paths.cache_clear()
-    grading_spec._grading_text.cache_clear()
-    grading_spec.readme_heading.cache_clear()
-    settings.course_defaults.cache_clear()
-    settings._assignments_text.cache_clear()
-    settings.semester_blocks.cache_clear()
-    collect._starter_notebook_shas.cache_clear()
-    gh_contents.last_committer.cache_clear()
-    gh_contents.blame_logins.cache_clear()
-    gh_contents.path_committers.cache_clear()
-    sync_faculty._semester_faculty.cache_clear()
-    ghcli.bot_login.cache_clear()
-    gh_contents.read_once(False)
-    issues.list_once(False)
-    ghcli._start_budget = None
+    """Back to the state a process starts in (`run.reset`): a fresh per-run context and
+    every read-once memo off. Tests reuse the same org/repo names with different fakes,
+    so nothing one test read may answer the next."""
+    run.reset()
 
 
 def stub_bootstrap(monkeypatch) -> None:

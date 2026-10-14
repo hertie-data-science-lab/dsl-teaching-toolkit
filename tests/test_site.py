@@ -26,6 +26,7 @@ from dsl_course import (
     site,
     site_repo,
 )
+from dsl_course import run as run_context
 from dsl_course import schedule as schedule_mod
 from dsl_course.faults import Unusable
 from dsl_course.opencourse import OpenCourse
@@ -2984,7 +2985,7 @@ def test_every_semester_of_one_run_reuses_the_courses_policy(monkeypatch, tmp_pa
     )
     monkeypatch.setattr(site, "live_semesters", lambda org: [])
     assert site.main() == 0
-    assert site._publish_policy.cache_info().currsize == 0
+    assert run_context.current().holds(site._publish_policy) == 0
 
 
 def test_a_file_github_would_refuse_is_skipped_rather_than_failing_the_sync(
