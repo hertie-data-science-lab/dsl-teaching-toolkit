@@ -25,11 +25,11 @@ Live example of every file below: [`example-course/semester-org/`](../example-co
     - Install the console app on the new semester org: https://github.com/apps/dsl-console/installations/new, choose the org, All repositories, Install.
 
 2. **Invite `hertie-dsl-bot` as Owner** (Org → People → Invite → role *Owner*).
-    - List the org in the course org's `.github/semesters.yml` (the console's New semester does this for you). The bot then joins by itself within 15 minutes; Bootstrap semester fails until it has.
+    - List the org in the course org's `.github/semesters.yml` (the console's New semester does this for you). The bot then joins by itself within 15 minutes; setting the semester up fails until it has.
 
-3. **Run [Bootstrap semester](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/bootstrap-semester.yml)**
-    - From the **course** org's `.github` Actions tab: `Bootstrap semester`.
-    - `semester_org` = select the newly created `hertie-<course-slug>-<termtag>`. 
+3. **Set the semester up** (op `semester.bootstrap`, course admins only)
+    - In the Instructor Console: the new semester's **Set up**.
+    - Or from a laptop: `python -m dsl_course semester.bootstrap --course-org <course-org> --semester-org hertie-<course-slug>-<termtag> --no-preview`.
     - This seeds: 
       - **`join`** repo (**public** - it is the front door students reach before they are org members) - for student onboarding via `join course` issue tickets.
       - its **`README.md`**, telling them how to join - public like the rest of the repo, yours to reword, and never overwritten
@@ -93,4 +93,4 @@ Live example of every file below: [`example-course/semester-org/`](../example-co
 
 ---
 **Demo:** semester [`hertie-dsl-demo-f2026`](https://github.com/hertie-dsl-demo-f2026), bootstrapped from
-[`hertie-dsl-demo-course-e1234`](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/bootstrap-semester.yml).
+[`hertie-dsl-demo-course-e1234`](https://github.com/hertie-dsl-demo-course-e1234).

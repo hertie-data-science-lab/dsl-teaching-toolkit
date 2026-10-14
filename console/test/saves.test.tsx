@@ -354,7 +354,7 @@ describe('Save on the marks grid', () => {
     const gh = github(), f = files();
     await mount(envOf(gh, f), <AssignmentScreen {...props(f, { entry: 'assignment-3', tab: 'marks' })} />);
     await type('input[aria-label="Q1 (out of 5) for team-alpha"]', '4');
-    await click(q('button[aria-label="Show feedback per question for team-alpha"]'));
+    await click(q('button[aria-label="Open team feedback for team-alpha"]'));
     await type('textarea[aria-label="Feedback on Q1 for team-alpha"]', 'Clear proof.');
     await click(q('button[aria-label="Show the members of team-alpha"]'));
     await type('input[aria-label="Adjustment for anna-a"]', '1');

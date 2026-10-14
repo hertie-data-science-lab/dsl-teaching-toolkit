@@ -1,8 +1,8 @@
 """Every operation the Instructor Console can ask the engine for, one entry each.
 
-A dispatch op names the frozen CLI it runs and spells that CLI's flags exactly as the
-seeded workflow for the same job does (`workflows_render`), so the console and the Actions
-tab cannot drift into two meanings for one button. `args_schema` is built from the course
+A dispatch op names the frozen CLI it runs and spells that CLI's flags; the Console and
+`python -m dsl_course <op>` (`cli`) both run it from here, so the two surfaces cannot
+drift into two meanings for one operation (decision 0041). `args_schema` is built from the course
 vocabulary in `course`, so a new enum value reaches the console's form with no second edit.
 
 The preview gate mirrors `workflows_render._PREVIEW_GATE`: every CLI previews by default
@@ -270,6 +270,12 @@ def _grades(request: Request) -> list[str]:
         argv.append("--receipt-note")
     if _a(request, "include_feedback"):
         argv.append("--include-feedback")
+    # Absent: the assignment's `marks_per_question` decides. Given (the Console always
+    # gives its box): this run's override, so a preview shows what the box would send.
+    if _a(request, "per_question") is True:
+        argv.append("--per-question")
+    elif _a(request, "per_question") is False:
+        argv.append("--no-per-question")
     if _a(request, "assignment"):
         argv += ["--assignment", _a(request, "assignment")]
     return argv
@@ -527,6 +533,10 @@ _OPS = (
                     "Post a note on each Submission receipts issue"
                 ),
                 "include_feedback": _boolean("Put the feedback text in the email"),
+                "per_question": _boolean(
+                    "Include marks per question in this run; absent: the assignment's "
+                    "marks_per_question run setting decides"
+                ),
                 "assignment": _string(
                     REPO_PATTERN, "Only this assignment (its repo name); empty = all"
                 ),
@@ -548,6 +558,7 @@ _OPS = (
             "notify",
             "receipt_note",
             "include_feedback",
+            "per_question",
         ),
     ),
     Operation(

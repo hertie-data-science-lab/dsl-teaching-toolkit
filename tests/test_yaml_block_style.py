@@ -44,16 +44,13 @@ EXCLUDED = {
     "templates/join/team-formation.yml",
     "templates/join/ISSUE_TEMPLATE/01-join-course.yml",
     "templates/join/ISSUE_TEMPLATE/02-join-team.yml",
-    "templates/semester-config/dispatch-sync.yml",
-    "templates/semester-config/dispatch-sync-site.yml",
-    "templates/semester-config/dispatch-scheduled-release.yml",
-    "templates/semester-config/dispatch-send-codes.yml",
+    "templates/semester-config/dispatch.yml",
 }
 
 FIX = (
     "flow-style mapping used as a list item. The faculty-facing YAML in this repo is block "
     "style (indent-only): rewrite `- {a: 1, b: 2}` as `- a: 1` / `  b: 2`, one key per line. "
-    "Machine infrastructure (.github/workflows, templates/welcome, dispatch-*) is exempt "
+    "Machine infrastructure (.github/workflows, templates/welcome, dispatch.yml) is exempt "
     "- see EXCLUDED in this file."
 )
 

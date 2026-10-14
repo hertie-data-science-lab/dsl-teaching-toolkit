@@ -10,7 +10,7 @@ first-run guard - the guard has to be per file. These tests pin the split:
   rewritten - a rewrite destroyed a live roster (enrol codes + onboarded handles) in
   hertie-dsl-demo-f2026.
 - SYSTEM-owned (join's onboard/team-formation workflows + the issue forms they parse,
-  semester-config's dispatch-*.yml and README contract, the semester's generated
+  semester-config's dispatch.yml and README contract, the semester's generated
   course pointer): re-pushed on every run so fixes reach running semesters.
 
 Every user-editable semester-config file is a scaffold seeded once; the filled examples
@@ -75,10 +75,7 @@ def example_semester_file(rel: str) -> str:
 # these tests police - which is the whole point of the table existing.
 USER_OWNED = set(welcome.CONFIG_SCAFFOLDS)
 SYSTEM_OWNED = {
-    ".github/workflows/dispatch-sync.yml",
-    ".github/workflows/dispatch-sync-site.yml",
-    ".github/workflows/dispatch-scheduled-release.yml",
-    ".github/workflows/dispatch-send-codes.yml",
+    ".github/workflows/dispatch.yml",
     ".github/workflows/validate-schedule.yml",
     "README.md",
 }
@@ -217,7 +214,7 @@ def test_rerun_preserves_user_config_and_refreshes_workflows(fake):
         "instructors.yml": "people:\n  instructors:\n    - github_handle: profx\n",
         "assignments.yml": "defaults:\n  max_team_size: 3\n",
         "README.md": "# stale contract from an older engine\n",
-        ".github/workflows/dispatch-sync.yml": "name: stale dispatcher\n",
+        ".github/workflows/dispatch.yml": "name: stale dispatcher\n",
     }
     fake.files.update({("semester-config", p): c for p, c in live.items()})
     fake.files[("join", ".github/workflows/onboard.yml")] = "name: stale onboard\n"
@@ -231,9 +228,9 @@ def test_rerun_preserves_user_config_and_refreshes_workflows(fake):
     assert fake.written("semester-config") == SYSTEM_OWNED
 
     # SYSTEM-owned files: re-pushed, so the stale copies are replaced by the templates.
-    assert fake.files[("semester-config", ".github/workflows/dispatch-sync.yml")] == (
+    assert fake.files[("semester-config", ".github/workflows/dispatch.yml")] == (
         welcome.config_system_files("release")[
-            ".github/workflows/dispatch-sync.yml"
+            ".github/workflows/dispatch.yml"
         ].decode()
     )
     assert fake.files[("semester-config", "README.md")] == (
@@ -788,8 +785,8 @@ def test_semester_extras_no_longer_repeat_the_org_tighten(fake, monkeypatch):
 
 
 def test_semester_extras_reds_when_a_dispatcher_write_fails(fake, monkeypatch):
-    # A failed SYSTEM-owned write (the semester-config README contract, or a dispatch-sync
-    # workflow) means membership/site sync never triggers, yet the create_repo blocks stay
+    # A failed SYSTEM-owned write (the semester-config README contract, or the
+    # dispatcher) means membership/site sync never triggers, yet the create_repo blocks stay
     # green - so the previously-discarded write return is now counted. The SYSTEM-owned
     # writes go through dsl_course.welcome (shared with the nightly refresh), so that is
     # the put_files to break.
@@ -1869,10 +1866,7 @@ def test_the_nightly_config_refresh_touches_only_system_owned_files(monkeypatch)
     assert welcome.refresh_config_system_files("Semester-f2026", "release") == 0
     assert {path for _, path in written} == {
         "README.md",
-        ".github/workflows/dispatch-sync.yml",
-        ".github/workflows/dispatch-sync-site.yml",
-        ".github/workflows/dispatch-scheduled-release.yml",
-        ".github/workflows/dispatch-send-codes.yml",
+        ".github/workflows/dispatch.yml",
         ".github/workflows/validate-schedule.yml",
     }, (
         "the nightly refresh may only re-push SYSTEM-owned semester-config files; a "

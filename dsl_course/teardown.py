@@ -312,7 +312,7 @@ def _carry_back(course_org: str, semester_org: str, dry_run: bool) -> tuple[str,
     if not course_org:
         log(
             "  [skip] no --course-org given, so this semester's edits are NOT being "
-            "carried back. Run Propagate semester edits before un-archiving anything."
+            "carried back. Run Keep for future semesters before un-archiving anything."
         )
         return "not offered - no course org was named", 0
     try:
@@ -332,7 +332,7 @@ def _carry_back(course_org: str, semester_org: str, dry_run: bool) -> tuple[str,
         said.append(
             f"NOT read: {', '.join(f'`{r}`' for r in done.behind)} - behind its latest "
             f"release. Merge the open `{UPSTREAM_BRANCH}` pull request there and re-run "
-            f"Propagate semester edits before un-archiving anything"
+            f"Keep for future semesters before un-archiving anything"
         )
     unread = 1 if done.behind else 0
     return "; ".join(said) or "nothing had been edited", done.errors + unread

@@ -10,7 +10,7 @@ import { parse } from 'yaml';
 import { EnvCtx, type Env } from '../src/env';
 import { GitHubClient, decodeBase64 } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
-import { holdReasons, lateRule, needsHandDecision, rowsChanged, spread, studentMarks, type HoldUnit } from '../src/model/marks';
+import { holdReasons, insertSnippet, lateRule, markerLines, needsHandDecision, readSnippets, rowsChanged, spread, studentMarks, type HoldUnit } from '../src/model/marks';
 import { marksDraft, saveMarksDraft } from '../src/model/prefs';
 import { StatusStore, type Loaded } from '../src/model/status';
 import type { Assignment, Status } from '../src/model/types';
@@ -87,6 +87,30 @@ describe('the figures the marking screen shows', () => {
     expect(member).toMatchObject({ final: '20', score: { Q1: 8, Q2: 9 }, total: '17', adjustment: '+3', team: 'geneva', teamFeedback: 'Clean.', questionFeedback: [['Q1', 'Good']] });
     const solo = studentMarks({ ...base, group: false, score: { Q1: 8, Q2: null }, daysLate: 2, adjustment: null });
     expect(solo).toMatchObject({ final: '6.4', score: { Q1: 8 }, total: '8', adjustment: '', team: null, teamFeedback: '', penalty: '−20%' });
+  });
+
+  it('puts a snippet at the cursor, a space before it where it would run into a word', () => {
+    expect(insertSnippet('', 0, 0, 'Label your axes.')).toEqual({ text: 'Label your axes.', caret: 16 });
+    expect(insertSnippet('Good.', 5, 5, 'Label your axes.')).toEqual({ text: 'Good. Label your axes.', caret: 22 });
+    expect(insertSnippet('Good.\n', 6, 6, 'X')).toEqual({ text: 'Good.\nX', caret: 7 });
+    expect(insertSnippet('Good. Bad.', 6, 10, 'Fine.')).toEqual({ text: 'Good. Fine.', caret: 11 });
+    expect(readSnippets({ snippets: ['A', '', 3, null, { x: 1 }] })).toEqual(['A', '3']);
+    expect(readSnippets({ snippets: 'A' })).toEqual([]);
+  });
+
+  it('gives each marker a count, a mean and a median, the unrecorded last', () => {
+    const lines = markerLines([
+      { marker: 'jan', score: { Q1: 8, Q2: 9 } },
+      { marker: 'jan', score: { Q1: 4, Q2: null } },
+      { marker: 'kim', score: { Q1: 'pass' } },
+      { marker: null, score: { Q1: 6 } },
+      { marker: 'kim', score: { Q1: null, Q2: '' } }, // not marked: not counted
+    ], Q);
+    expect(lines).toEqual([
+      { marker: 'jan', count: 2, mean: 10.5, median: 10.5 },
+      { marker: 'kim', count: 1, mean: null, median: null },
+      { marker: '', count: 1, mean: 6, median: 6 },
+    ]);
   });
 
   it('counts the rows someone else changed', () => {
@@ -321,18 +345,20 @@ describe('the marking screen', () => {
     expect(ben.querySelector('td.sys .chip')!.textContent).toBe('2 days late · 5/10 tests');
   });
 
-  it('moves down a column with Enter in a number box, and with Ctrl+Enter in a text box', async () => {
+  it('moves down a column with Enter in a number box, and the side panel to the next row with Ctrl+Enter in a text box', async () => {
     await marks();
     const box = q<HTMLInputElement>('input[aria-label="Q1 (out of 10) for ada-l"]');
     box.focus();
     await act(() => void box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
     expect(document.activeElement?.getAttribute('aria-label')).toBe('Q1 (out of 10) for ben-k');
-    const fb = q<HTMLTextAreaElement>('textarea[aria-label="Feedback for ada-l"]');
-    fb.focus();
-    await act(() => void fb.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
-    expect(document.activeElement).toBe(fb);
-    await act(() => void fb.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true })));
-    expect(document.activeElement?.getAttribute('aria-label')).toBe('Feedback for ben-k');
+    await click(q('button[aria-label="Open private notes for ada-l"]'));
+    const pn = q<HTMLTextAreaElement>('textarea[aria-label="Private notes for ada-l"]');
+    expect(document.activeElement).toBe(pn);
+    await act(() => void pn.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+    expect(document.activeElement).toBe(pn);
+    await act(() => void pn.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true })));
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('Private notes for ben-k');
+    expect(q('#marks-drawer-title').textContent).toBe('ben-k');
   });
 
   it('opens full screen from the corner icon as an overlay, and Escape or the icon closes it, focus back on the icon', async () => {
@@ -392,12 +418,86 @@ describe('the marking screen', () => {
     expect(root!.querySelector('.student-view')).toBeNull();
   });
 
-  it('opens feedback per question as one row under the unit, closed by default', async () => {
+  it('keeps the grid to marks and numbers: feedback and notes are one line that opens the row’s side panel', async () => {
+    const k = `dsl-console-marks-draft:${COHORT_ORG}:grading_sheets/assignment-2.yml`;
+    await marks(files(SHEET.replace('    feedback_individual: Good.\n', '    feedback_individual: Good.\n    feedback_per_question:\n      Q2: Tidy.\n')));
+    expect(root!.querySelector('table.marks textarea')).toBeNull();
+    const ada = () => q<HTMLButtonElement>('button[aria-label="Open feedback for ada-l"]');
+    expect(ada().querySelector('.md-line')!.textContent).toBe('Good.');
+    expect(ada().querySelector('.qfb-count')!.textContent).toBe('✎ 1');
+    expect(root!.querySelector('aside.marks-drawer')).toBeNull();
+    await click(ada());
+    const panel = q('aside.marks-drawer');
+    expect([...panel.querySelectorAll('textarea')].map((t) => t.getAttribute('aria-label'))).toEqual(['Feedback for ada-l', 'Feedback on Q1 for ada-l', 'Feedback on Q2 for ada-l', 'Private notes for ada-l']);
+    expect(panel.querySelector<HTMLTextAreaElement>('textarea[aria-label="Feedback on Q2 for ada-l"]')!.value).toBe('Tidy.');
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('Feedback for ada-l');
+    expect([...panel.querySelectorAll<HTMLAnchorElement>('.md-links a')].map((l) => [l.textContent, l.getAttribute('href')])).toEqual([
+      ['Submission repo', `https://github.com/${COHORT_ORG}/assignment-2-ada-l`],
+      ['Test results (8/10)', `https://github.com/${COHORT_ORG}/semester-config/blob/HEAD/.system/autograde/assignment-2/ada-l.json`],
+    ]);
+    expect(panel.querySelector('details.md-view summary')!.textContent).toBe('Student view');
+    expect(panel.querySelector('.student-view')!.textContent).not.toContain('Check the plot.');
+    // A box in the panel is the same cell edit as the grid's: the preview, the badge and the draft follow it.
+    await type('textarea[aria-label="Feedback for ada-l"]', 'Good.\nThe plot needs labels.');
+    expect(ada().querySelector('.md-line')!.textContent).toBe('Good.');
+    expect(ada().title).toBe('Good.\nThe plot needs labels.');
+    expect(root!.textContent).toContain('1 student changed');
+    expect(JSON.parse(localStorage.getItem(k)!).edits['["submissions","ada-l","feedback_individual"]']).toBe('Good.\nThe plot needs labels.');
+    // Escape closes it, and focus goes back to the line that opened it.
+    await act(() => void q('textarea[aria-label="Feedback for ada-l"]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(root!.querySelector('aside.marks-drawer')).toBeNull();
+    expect(document.activeElement).toBe(ada());
+  });
+
+  it('moves the side panel with focus in the grid, leaving focus where it is', async () => {
     await marks();
-    expect(root!.querySelector('tr.qfb-row')).toBeNull();
-    await click(q('button[aria-label="Show feedback per question for ada-l"]'));
-    expect(root!.querySelectorAll('tr.qfb-row')).toHaveLength(1);
-    expect(root!.querySelectorAll('tr.qfb-row textarea')).toHaveLength(2);
+    await click(q('button[aria-label="Open feedback for ada-l"]'));
+    const box = q<HTMLInputElement>('input[aria-label="Q1 (out of 10) for ben-k"]');
+    await act(() => box.focus());
+    expect(q('#marks-drawer-title').textContent).toBe('ben-k');
+    expect(document.activeElement).toBe(box);
+    expect(q('tr.md-here').getAttribute('data-unit')).toBe('ben-k');
+    await click(q('button[aria-label="Close the side panel"]'));
+    expect(root!.querySelector('aside.marks-drawer')).toBeNull();
+  });
+
+  it('closes the side panel before full screen on Escape', async () => {
+    await marks();
+    await click(q('button.full-toggle'));
+    await click(q('button[aria-label="Open feedback for ada-l"]'));
+    expect(q('.marking.full aside.marks-drawer')).not.toBeNull();
+    await act(() => void document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
+    expect(root!.querySelector('aside.marks-drawer')).toBeNull();
+    expect(q('.marking').classList.contains('full')).toBe(true);
+    await act(() => void document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
+    expect(q('.marking').classList.contains('full')).toBe(false);
+  });
+
+  it('names the submission from status.json’s semester-side name, and links the Completion cell to the executed notebook', async () => {
+    const renamed: Loaded = { ...ready, status: { ...ready.status!, assignments: [{ ...solo, semester_name: 'assignment-2-resit', submit_shape: 'shared-dropbox-repo' }] } } as Loaded;
+    const nb = SHEET.replace('      autograde: 8/10\n', '      autograde: 8/10\n      completion: errors:2\n').replace('      autograde: 5/10\n', '      autograde: 5/10\n      completion: not-attempted\n');
+    const f = files(nb, CONFIG.replace('formats: [py]', 'formats: [ipynb]'));
+    await mount(envOf(github(), f), <AssignmentScreen {...props(f, { loaded: renamed })} />);
+    const nbUrl = `https://github.com/${COHORT_ORG}/semester-config/blob/HEAD/.system/autograde/assignment-2/ada-l.ipynb`;
+    const ada = [...root!.querySelectorAll('tr.unit-row')][0];
+    expect(ada.querySelectorAll('td.sys')[3].querySelector('a')!.getAttribute('href')).toBe(nbUrl);
+    // Nothing was run for a submission never attempted: no notebook to link.
+    expect([...root!.querySelectorAll('tr.unit-row')][1].querySelectorAll('td.sys')[3].querySelector('a')).toBeNull();
+    await click(q('button[aria-label="Open feedback for ada-l"]'));
+    expect([...root!.querySelectorAll<HTMLAnchorElement>('.md-links a')].map((l) => [l.textContent, l.getAttribute('href')])).toEqual([
+      ['Submission folder', `https://github.com/${COHORT_ORG}/assignment-2-resit-submissions/tree/HEAD/ada-l`],
+      ['Test results (8/10)', `https://github.com/${COHORT_ORG}/semester-config/blob/HEAD/.system/autograde/assignment-2/ada-l.json`],
+      ['Executed notebook', nbUrl],
+    ]);
+  });
+
+  it('links the Tests cell to the per-test results the cutoff archived', async () => {
+    await marks();
+    const link = q<HTMLAnchorElement>('td.sys.auto a');
+    expect([link.textContent, link.getAttribute('href')]).toEqual(['8/10', `https://github.com/${COHORT_ORG}/semester-config/blob/HEAD/.system/autograde/assignment-2/ada-l.json`]);
+    // A unit with no count yet has no link.
+    const cy = [...root!.querySelectorAll('tr.unit-row')].find((r) => r.textContent?.includes('cy-d'))!;
+    expect(cy.querySelector('td.sys a')).toBeNull();
   });
 });
 
@@ -444,6 +544,7 @@ describe('growing text boxes', () => {
     // As Firefox and Safari answer: no field-sizing.
     vi.stubGlobal('CSS', { supports: () => false, escape: (s: string) => s });
     await marks();
+    await click(q('button[aria-label="Open feedback for ada-l"]'));
     const fb = q<HTMLTextAreaElement>('textarea[aria-label="Feedback for ada-l"]');
     Object.defineProperty(fb, 'scrollHeight', { configurable: true, get: () => 90 });
     await act(() => {
@@ -555,12 +656,23 @@ describe('teams and people on the grid', () => {
     expect([...members[0].querySelectorAll('td.calc')].pop()!.textContent).toBe('20');
   });
 
-  it('gives a team its own Private notes box on its row, members closed, and each member theirs', async () => {
+  it('gives a team its own Private notes on its row, members closed, and each member theirs, each opening its side panel', async () => {
     await mountTeams();
     expect(root!.querySelector('tr.member-row')).toBeNull();
-    expect(root!.querySelector('tr.team-row textarea[aria-label="Team private notes for geneva"]')).not.toBeNull();
+    await click(q('tr.team-row button[aria-label="Open team private notes for geneva"]'));
+    let panel = q('aside.marks-drawer');
+    expect(panel.querySelector('.eyebrow')!.textContent).toBe('Team');
+    expect([...panel.querySelectorAll('textarea')].map((t) => t.getAttribute('aria-label'))).toEqual(['Team feedback for geneva', 'Feedback on Q1 for geneva', 'Feedback on Q2 for geneva', 'Team private notes for geneva']);
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('Team private notes for geneva');
+    // The team's Student view shows one member at a time.
+    expect([...panel.querySelectorAll<HTMLOptionElement>('select[aria-label="Member shown"] option')].map((o) => o.value)).toEqual(['ana-l', 'ben-k', 'cy-d']);
     await click(q('button[aria-label="Show the members of geneva"]'));
-    for (const h of ['ana-l', 'ben-k', 'cy-d']) expect(root!.querySelector(`tr.member-row textarea[aria-label="Private notes for ${h}"]`)).not.toBeNull();
+    for (const h of ['ana-l', 'ben-k', 'cy-d']) expect(root!.querySelector(`tr.member-row button[aria-label="Open private notes for ${h}"]`)).not.toBeNull();
+    await click(q('tr.member-row button[aria-label="Open feedback for ben-k"]'));
+    panel = q('aside.marks-drawer');
+    expect([panel.querySelector('.eyebrow')!.textContent, q('#marks-drawer-title').textContent]).toEqual(['Member of geneva', 'Ben Okafor']);
+    expect([...panel.querySelectorAll('textarea')].map((t) => t.getAttribute('aria-label'))).toEqual(['Feedback for ben-k', 'Private notes for ben-k']);
+    expect(panel.querySelector('.md-links a')!.getAttribute('href')).toBe(`https://github.com/${COHORT_ORG}/assignment-2-geneva`);
   });
 
   it('opens a team on load where a member has an adjustment', async () => {
@@ -662,41 +774,78 @@ describe('column widths', () => {
 });
 
 describe('text boxes', () => {
-  it('gives every row shape a Private notes box: a student, a team with its members closed, and each member', async () => {
+  it('gives every row a Private notes line: a student, a team with its members closed, and each member', async () => {
     await marks();
-    for (const h of ['ada-l', 'ben-k', 'cy-d']) expect(root!.querySelector(`textarea[aria-label="Private notes for ${h}"]`)).not.toBeNull();
+    for (const h of ['ada-l', 'ben-k', 'cy-d']) expect(root!.querySelector(`button[aria-label="Open private notes for ${h}"]`)).not.toBeNull();
+    expect(q('button[aria-label="Open private notes for ada-l"]').textContent).toBe('Check the plot.');
+  });
+});
+
+describe('feedback snippets', () => {
+  it('adds a snippet in the side panel, puts it into the last feedback box with one click, and saves both', async () => {
+    const gh = github();
+    await marks(files(SHEET.replace('submissions:\n', 'snippets:\n  - Label your axes.\nsubmissions:\n')), gh);
+    await click(q('button[aria-label="Open feedback for ben-k"]'));
+    const chips = () => [...root!.querySelectorAll<HTMLButtonElement>('.md-snip')].map((b) => b.textContent);
+    expect(chips()).toEqual(['Label your axes.']);
+    await click(button('Edit snippets'));
+    await type('input[aria-label="New snippet"]', 'See the worked example.');
+    await click(button('Add'));
+    await click(button('Done'));
+    expect(chips()).toEqual(['Label your axes.', 'See the worked example.']);
+    expect(root!.textContent).toContain('snippets changed');
+    // Into the box last focused: feedback on Q1 here, not the overall feedback.
+    await act(() => q<HTMLTextAreaElement>('textarea[aria-label="Feedback on Q1 for ben-k"]').focus());
+    await click([...root!.querySelectorAll('.md-snip')][1]);
+    expect(q<HTMLTextAreaElement>('textarea[aria-label="Feedback on Q1 for ben-k"]').value).toBe('See the worked example.');
+    await click(button('Save marks'));
+    await settle(() => puts(gh).length > 0);
+    const saved = parse(body(puts(gh)[0]));
+    expect(saved.snippets).toEqual(['Label your axes.', 'See the worked example.']);
+    expect(saved.submissions['ben-k'].feedback_per_question).toEqual({ Q1: 'See the worked example.' });
+    expect(saved.submissions['ben-k'].marked_by).toBeUndefined(); // feedback only: no mark was saved
+  });
+});
+
+describe('moderation', () => {
+  const MARKED = SHEET.replace('    notes_not_shared_with_students: Check the plot.\n', '    notes_not_shared_with_students: Check the plot.\n    marked_by: jan\n')
+    .replace('      Q1: pass\n', '      Q1: 4\n').replace('  ben-k:\n    info:', '  ben-k:\n    marked_by: kim\n    info:');
+
+  it('writes the marker on each unit whose marks a save changes', async () => {
+    const gh = github();
+    await marks(files(), gh);
+    await type('input[aria-label="Q1 (out of 10) for cy-d"]', '6');
+    await type('input[aria-label="Late penalty override for ben-k, as a percentage"]', '15');
+    await click(button('Save marks'));
+    await settle(() => puts(gh).length > 0);
+    const saved = parse(body(puts(gh)[0])).submissions;
+    expect(saved['cy-d'].marked_by).toBe(USER.login);
+    expect(saved['ben-k'].marked_by).toBeUndefined();
+    expect(saved['ada-l'].marked_by).toBeUndefined();
   });
 
-  it('opens a box in a large editor whose Save is the same cell edit, and whose Cancel or Escape changes nothing', async () => {
-    const k = `dsl-console-marks-draft:${COHORT_ORG}:grading_sheets/assignment-2.yml`;
+  it('shows each marker’s count, mean and median, and filters the grid to one marker', async () => {
+    await marks(files(MARKED));
+    const rows = [...root!.querySelectorAll('section.markers tbody tr')].map((r) => [...r.querySelectorAll('td')].map((d) => d.textContent));
+    expect(rows).toEqual([['jan', '1', '17', '17'], ['kim', '1', '4', '4']]);
+    const pick = async (value: string) => act(() => {
+      const s = q<HTMLSelectElement>('select[aria-label="Marked by"]');
+      s.value = value;
+      s.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const keys = () => [...root!.querySelectorAll('tr.unit-row')].map((r) => r.getAttribute('data-unit'));
+    expect(keys()).toEqual(['ada-l', 'ben-k', 'cy-d']);
+    await pick('kim');
+    expect(keys()).toEqual(['ben-k']);
+    await pick('-');
+    expect(keys()).toEqual(['cy-d']);
+    await pick('*');
+    expect(keys()).toHaveLength(3);
+  });
+
+  it('shows no Markers table and no Marked by filter before any marker is recorded', async () => {
     await marks();
-    const open = () => q<HTMLButtonElement>('textarea[aria-label="Feedback for ada-l"] + button.area-open');
-    expect(open().getAttribute('aria-label')).toBe('Open editor');
-    await click(open());
-    expect(q('#modal-title').textContent).toBe('Feedback for ada-l');
-    const big = q<HTMLTextAreaElement>('textarea.big-editor');
-    expect(big.value).toBe('Good.');
-    await act(() => {
-      big.value = 'Good.\nThe plot needs labels.';
-      big.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    await click(button('Save'));
-    expect(root!.querySelector('textarea.big-editor')).toBeNull();
-    expect(q<HTMLTextAreaElement>('textarea[aria-label="Feedback for ada-l"]').value).toBe('Good.\nThe plot needs labels.');
-    expect(root!.textContent).toContain('1 student changed');
-    expect(JSON.parse(localStorage.getItem(k)!).edits['["submissions","ada-l","feedback_individual"]']).toBe('Good.\nThe plot needs labels.');
-    // Cancel, and Escape, leave the cell as it was.
-    await click(q('textarea[aria-label="Private notes for ben-k"] + button.area-open'));
-    await act(() => {
-      const t = q<HTMLTextAreaElement>('textarea.big-editor');
-      t.value = 'scratch';
-      t.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    await click(button('Cancel'));
-    expect(q<HTMLTextAreaElement>('textarea[aria-label="Private notes for ben-k"]').value).toBe('');
-    await click(q('textarea[aria-label="Private notes for ben-k"] + button.area-open'));
-    await act(() => void document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
-    expect(root!.querySelector('textarea.big-editor')).toBeNull();
-    expect(root!.textContent).toContain('1 student changed');
+    expect(root!.querySelector('section.markers')).toBeNull();
+    expect(root!.querySelector('select[aria-label="Marked by"]')).toBeNull();
   });
 });

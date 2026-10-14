@@ -279,7 +279,7 @@ def _distribute(
     preview_issues: list[dict] | None = None,
     assignment: str | None = None,
     include_feedback: bool = False,
-    per_question: bool = True,
+    per_question: bool | None = None,
     intent_ok: bool = True,
     send_error: Exception | None = None,
 ) -> dict:
@@ -520,11 +520,12 @@ def test_marks_per_question_can_be_withheld_for_the_assignment_returned(
 @pytest.mark.parametrize(
     ("setting", "override", "shown"),
     [
-        ("", True, True),  # the institution's default
-        ("marks_per_question: false\n", True, False),  # the run setting
-        ("marks_per_question: true\n", False, False),  # the one-run override
+        ("", None, True),  # the institution's default
+        ("marks_per_question: false\n", None, False),  # the run setting
+        ("marks_per_question: true\n", False, False),  # a one-run override, off
+        ("marks_per_question: false\n", True, True),  # ... and on: the box's preview
     ],
-    ids=["default", "run setting off", "override"],
+    ids=["default", "run setting off", "override off", "override on"],
 )
 def test_the_marks_per_question_run_setting_decides_what_a_return_shows(
     tmp_path, monkeypatch, setting, override, shown

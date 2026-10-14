@@ -14,14 +14,13 @@ Hand out one **private repo per student** from a course org assignment template.
 
 A `handout_datetime:` datetime under `assignments.<slug>` in the semester's `schedule.yml` hands out the same repos automatically - the assignment's whole lifecycle (handout, due date, grading deadline) sits in one block: [Schedule releases](07-schedule-releases.md). One setup cost, and the entry appears on the deployed `<course>.github.io` site so students see the plan in advance.
 
-> NB: a manual release stays compatible with the schedule: on success the workflow **records the release moment into `schedule.yml`** (`assignments.<slug>.handout_datetime`, write-once - a scheduled value is never touched), so the schedule remains the one record of when every assignment went out - and late onboarders get their repo on the next tick.
+> NB: a manual release stays compatible with the schedule: on success the hand-out **records the release moment into `schedule.yml`** (`assignments.<slug>.handout_datetime`, write-once - a scheduled value is never touched), so the schedule remains the one record of when every assignment went out - and late onboarders get their repo on the next tick.
 
-## Release assignment via manual dispatch
+## Hand out an assignment now
 
-The `release assignment` workflow can be found in the course org's: 
-  1. `.github` → **Actions** tab → **Release assignment** - e.g. [this demo repo](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/release-assignment.yml) 
-  2. within any assignment template (any repo created using the **New assignment** workflow) → **Actions** tab → **Release assignment** - e.g. [the demo's templates](https://github.com/orgs/hertie-dsl-demo-course-e1234/repositories?q=topic%3Adsl-assignment)
-
+Hand an assignment out now (op `assignment.handout_now`):
+  1. in the Instructor Console, the assignment's **Hand out**;
+  2. or from a laptop: `python -m dsl_course assignment.handout_now --course-org <course-org> --semester-org <semester-org> --arg course_source_repo=<template>` (previews; add `--no-preview` to hand out).
 
 Pick the `course_source_repo` - the same field a scheduled handout names in `schedule.yml`.
 The template must be in the semester's schedule; one that is not is refused: add it to the
@@ -30,12 +29,12 @@ schedule first.
 - then it creates one **private** `<name>-<handle>` repo per onboarded student/group, with that student as
 collaborator.
 
-Four boxes, in the order you answer them: `course_source_repo`, `semester_org`, then
+Besides the template and the semester:
 - `solution_datetime` (empty by default; `now` also pushes the template's `solution`
 branch into each student repo - the model answer and rubric, which is not returning marks
 and cannot be undone: think twice if the template is reused in a later semester). Schedulable instead, as `solution_datetime:` on the
 assignment - see [07](07-schedule-releases.md#releasing-the-model-solution)
-- `preview` (**on** by default; list the repos that *would* be created - untick it to hand out).
+- a preview (the default) lists the repos that *would* be created; a real run hands out.
 
 It asks nothing about the assignment itself: individual or group is the template's own
 `grading_config.yml` - see [Group or individual?](#group-or-individual).
@@ -148,7 +147,7 @@ Which of the two an assignment uses is the semester's - `team_formation` on its 
 
 **The students are emailed** - the only mail the toolkit sends off a clock rather than off something you did. When the window opens, every enrolled, onboarded student with no team for that assignment gets one plain message, addressed to them by name and naming the assignment as the site does (`Assignment 3: Project`): the cap, the day formation closes, the link to the form and the link to the assignment's page. Anyone still without a team 48 hours before it shuts gets one more, and a student who onboards mid-window is asked on the next tick. Nothing goes out between 23:00 and 07:00 in the semester's timezone - the message waits for the morning, while the lock, the form and the site still turn at the window's own minute - nothing is said twice (`.system/team-formation/mailed.csv` in `semester-config` is the record), and a semester whose course org has no `GRAPH_*` mail secrets is sent nothing and has nothing recorded against it. It does not say whether working alone is allowed - that is yours to tell them.
 
-**Open team formation** (the course org's Actions tab) sends that same message on your own say-so - useful right after you announce the assignment in class, or once a semester's `GRAPH_*` secrets are finally set. Pick a semester, and optionally one `schedule.yml` assignment key; left empty it asks about every window open right now, and a key with no open window is an error rather than a quiet no-op. Same message on the same record, so a second press reaches only the students the first could not, and the overnight hold applies to a press exactly as it does to the clock. Preview first.
+**Email students without a team** (the Console, or `python -m dsl_course teams.open_window --arg assignment=<key>`) sends that same message on your own say-so - useful right after you announce the assignment in class, or once a semester's `GRAPH_*` secrets are finally set. It takes one `schedule.yml` assignment key; a key with no open window is an error rather than a quiet no-op. Same message on the same record, so a second run reaches only the students the first could not, and the overnight hold applies to it exactly as it does to the clock. Preview first.
 
 **You hear about it too.** While anybody is still without a team, the semester's *schedule.yml* [digest issue](07-schedule-releases.md#the-digest-issue) carries a line on that assignment - counts only, never a name - and it gets louder as the window runs out, exactly like a source nobody has staged. A window that has stood open for a week with anybody still waiting is at least a warning, so you hear about it well before the last day. It does **not** go away when the window shuts: that is the moment the problem becomes permanent, so the line stays at its loudest rung until you fill the gaps in `teams.csv`, move the closing date to give the semester longer, or take the entry out of the plan. Standing there it says nothing new - no further comment, no further email - it simply does not report itself as fixed while those students still have no repo to hand into. The console's Problems shows it only once the window has shut: while it is open, joining a team is the students' step.
 
@@ -189,16 +188,17 @@ assignments:
 ## Fixing a file after the assignment has gone out
 
 A broken cell, a wrong path, a dataset that moved. The repos are in students' hands
-already, so editing the template changes nothing for them - **Patch released assignment**
-is what distributes the fix.
+already, so editing the template changes nothing for them - **Update every copy**
+(`assignment.update_copies`) is what distributes the fix.
 
 1. Commit the correction to the **template's default branch** (`main`) as you normally
-   would. This button only distributes what is already there.
-2. Course org → `.github` → **Actions** → **Patch released assignment**. Inputs:
-   `semester_org`, `course_source_repo` (the template), `path` (a file, or a folder to push
-   whole), `overwrite` (default **off**), `assignment` and `preview` (default **on**). Leave
-   `assignment` empty unless two schedule entries hand out from the template: then give
-   the key of the one to patch (left empty, the run is refused, naming both).
+   would. This only distributes what is already there.
+2. In the Console, the assignment's **Update every copy**; or
+   `python -m dsl_course assignment.update_copies --course-org <org> --semester-org <semester>
+   --arg course_source_repo=<template> --arg path=<file or folder>`, plus `--arg
+   overwrite=true` to replace a file the student changed (default **off**), and `--arg
+   assignment=<key>` only when two schedule entries hand out from the template (left out,
+   the run is refused, naming both).
 3. Preview first: it counts the repos it would touch and writes nothing.
 
 What a real run does:

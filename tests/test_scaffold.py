@@ -346,37 +346,6 @@ def test_a_fresh_assignment_gets_the_hand_out_button_and_nothing_else(
     assert asked == [("assignment-1", workflows_place.TEMPLATE_WORKFLOWS)]
 
 
-def test_a_new_templates_button_pre_selects_it_before_the_listing_catches_up(
-    fake, monkeypatch
-):
-    # A default that is not among the dropdown's options is dropped, and the org listing
-    # GitHub answers a moment after create_repo need not carry the repo it has just made -
-    # so a listing that has not caught up left the one button whose whole point is THIS
-    # template pre-selected on the newest other assignment.
-    pushed: dict[str, bytes] = {}
-    monkeypatch.setattr(
-        scaffold, "push_content_workflows", workflows_place.push_content_workflows
-    )
-    monkeypatch.setattr(scaffold, "discover_semesters", lambda org: ["Semester-f2026"])
-    monkeypatch.setattr(
-        scaffold, "discover_assignments", lambda org: ["assignment-1-f2026"]
-    )
-    monkeypatch.setattr(scaffold, "central_ref_for", lambda org: "release")
-    monkeypatch.setattr(
-        workflows_place,
-        "put_files",
-        lambda org, repo, files, message, **k: pushed.update(files) or True,
-    )
-    _clone_ok(monkeypatch, _git_ok)
-
-    assert scaffold.scaffold_assignment("Org", "Assignment 2", ["py"]) == 0
-
-    assert (
-        _hand_out_default(pushed[workflows_place.RELEASE_ASSIGNMENT].decode())
-        == "assignment-2"
-    )
-
-
 def test_a_template_without_its_button_is_not_reported_ready(fake, monkeypatch):
     # Same rule as a materials repo with no Release workflows: the scaffold's exit code is
     # what the New assignment run goes red on, so a half-equipped template must not pass.
@@ -1273,13 +1242,6 @@ def test_a_source_that_opens_on_its_solution_branch_is_not_copied(origins, capsy
 
     assert not (origins.root / "origins" / "course-materials-f2026.git").exists()
     assert course.SOLUTION_BRANCH in capsys.readouterr().err
-
-
-def _hand_out_default(text: str) -> str:
-    """Which template the rendered Release assignment button opens on."""
-    loaded = yaml.safe_load(text)
-    trigger = loaded.get("on", loaded.get(True))
-    return trigger["workflow_dispatch"]["inputs"]["course_source_repo"]["default"]
 
 
 def test_a_copy_into_a_repo_that_already_has_content_lands_no_branch(origins, capsys):

@@ -24,7 +24,7 @@ import { labelMap, labelOf } from './labels';
 import { DEFAULTS, penaltyRate } from './policy';
 import { validator } from './validate';
 
-export const RUN_KEYS = ['team_formation', 'max_team_size', 'late_window_days', 'late_penalty_per_day', 'visibility', 'submit_url'] as const;
+export const RUN_KEYS = ['team_formation', 'max_team_size', 'late_window_days', 'late_penalty_per_day', 'visibility', 'submit_url', 'marks_per_question'] as const;
 export type RunKey = (typeof RUN_KEYS)[number];
 export const LATE_PAIR: RunKey[] = ['late_window_days', 'late_penalty_per_day'];
 
@@ -94,9 +94,17 @@ export function readSetting(key: string, v: unknown): unknown {
       const t = String(v).trim();
       return t.toLowerCase().startsWith('https://') && hostOf(t) && !t.includes(SETTING_PLACEHOLDER) ? t : undefined;
     }
+    case 'marks_per_question':
+      // `setting_readers._boolean`: true, yes, on or 1 is on; anything else is off.
+      return typeof v === 'boolean' ? v : ['true', 'yes', 'on', '1'].includes(String(v).trim().toLowerCase());
     default:
       return v;
   }
+}
+
+/** A form's value as the file writes it: a yes/no setting chosen from a select is a boolean, not text. */
+export function fileValue(key: string, v: unknown): unknown {
+  return key === 'marks_per_question' && typeof v === 'string' && v !== '' ? readSetting(key, v) : v;
 }
 
 /** Whether the engine reads `v` for `key`. */
@@ -114,7 +122,7 @@ export function usableBlock(raw: unknown, keys: readonly string[] = RUN_KEYS): B
 }
 
 /** The run keys the course layer may state (`settings.COURSE_DEFAULT_KEYS`): no submit link, a per-semester fact. */
-export const COURSE_RUN_KEYS: RunKey[] = ['max_team_size', 'late_window_days', 'late_penalty_per_day', 'team_formation', 'visibility'];
+export const COURSE_RUN_KEYS: RunKey[] = ['max_team_size', 'late_window_days', 'late_penalty_per_day', 'team_formation', 'visibility', 'marks_per_question'];
 
 /** The name the semester's artefacts use for an assignment (`schedule.semester_name`): its
  *  `semester_dest_repo` in assignments.yml when that is a repo name, else its schedule key. */
@@ -174,6 +182,8 @@ export function valueWord(key: RunKey, v: unknown): string {
       return `${String(v)} a day`;
     case 'max_team_size':
       return `up to ${String(v)}`;
+    case 'marks_per_question':
+      return readSetting(key, v) ? 'on' : 'off';
     default:
       return String(v);
   }
@@ -252,7 +262,7 @@ export function layersOf(course: Block, assignmentsDoc: Block, key = ''): Layers
 export function writeBlock(y: YamlText, path: Path, before: Block, after: Block, keys: readonly string[]): boolean {
   let changed = false;
   for (const k of keys) {
-    const a = after[k] === '' ? undefined : after[k];
+    const a = after[k] === '' ? undefined : fileValue(k, after[k]);
     if (deepEqual(before[k] === '' ? undefined : before[k], a)) continue;
     y.assign([...path, k], a);
     changed = true;
@@ -265,6 +275,20 @@ export function writeBlock(y: YamlText, path: Path, before: Block, after: Block,
       y.delete(path.slice(0, i));
     }
   return changed;
+}
+
+/**
+ * assignments.yml's text with one run setting of assignment `key` set to `value`, or null when
+ * its block already says so. Throws when the file cannot be written as it stands.
+ */
+export function withRunSetting(f: YamlFile, key: string, setting: string, value: unknown): string | null {
+  if (f.error) throw new Error(`${ASSIGNMENTS_FILE} does not parse (${f.error}); nothing was saved`);
+  const path: Path = ['assignments', key];
+  const before = rawBlock(f.doc, path);
+  const y = new YamlText(f.text);
+  if (!writeBlock(y, path, before, { ...before, [setting]: value }, [setting])) return null;
+  if (!validAssignments(y.toJS() ?? {})) throw new Error(`${ASSIGNMENTS_FILE} would not be valid; nothing was saved`);
+  return y.text;
 }
 
 /** What a run-settings form edits at one layer: the block's own keys, as written. */

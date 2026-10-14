@@ -8,15 +8,18 @@ import json
 import re
 import sys
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from conftest import workflow_inputs, workflow_jobs
 
 from dsl_course import (
+    cli,
     console,
     deploy,
     enrol_codes,
     scheduler,
+    schemas,
     status,
     workflows_render,
 )
@@ -35,6 +38,7 @@ from dsl_course.ops.registry import (
 from dsl_course.ops.request import RequestError, parse_request
 from dsl_course.schedule import AssignmentEntry, Deploy, Release, Schedule
 
+ROOT = Path(__file__).resolve().parents[1]
 COURSE = "hertie-dsl-demo-course-e1234"
 SEMESTER = "hertie-dsl-demo-f2026"
 
@@ -119,23 +123,6 @@ def _all_flags(name: str, args: dict, semester: str | None = SEMESTER) -> set[st
     ("name", "rendered", "args"),
     [
         (
-            "semester.archive",
-            workflows_render.render_archive_semester([SEMESTER]),
-            {"force": True},
-        ),
-        (
-            "assignment.update_copies",
-            workflows_render.render_patch_assignment(
-                [SEMESTER], ["assignment-1-f2026"]
-            ),
-            {
-                "course_source_repo": "assignment-1-f2026",
-                "path": "a.ipynb",
-                "assignment": "a1",
-                "overwrite": True,
-            },
-        ),
-        (
             "assignment.collect_now",
             workflows_render.render_collect_submissions(
                 [SEMESTER], ["assignment-1-f2026"]
@@ -191,6 +178,17 @@ def test_return_marks_runs_in_distribute_grades_queue():
         "assignment": "assignment-2",
         "preview": "false",
     }
+    # "Include marks per question": the box rides as this run's override either way (so a
+    # preview shows what it would send); absent, the assignment's setting decides.
+    for box, flag, value in ((False, "--no-per-question", "false"), (True, "--per-question", "true")):  # fmt: skip
+        for preview in (True, False):
+            req = Request(
+                op.name, "prof", COURSE, SEMESTER, {"per_question": box}, preview
+            )
+            assert flag in command(op, req)
+            assert op_inputs(op, command(op, req))["per_question"] == value
+    bare = Request(op.name, "prof", COURSE, SEMESTER, {}, False)
+    assert "per_question" not in op_inputs(op, command(op, bare))
 
 
 def test_a_real_run_of_a_default_on_dry_run_cli_says_no_dry_run():
@@ -716,3 +714,116 @@ def test_a_failed_refresh_after_a_new_template_is_a_reason_not_a_failure(
     rc, body, _ = _main(monkeypatch, capsys, raw)
     assert rc == 0 and body["conclusion"] == "done"
     assert [r["code"] for r in body["reasons"]] == ["REFRESH_FAILED"]
+
+
+# ------------------------------------------------------------------ the laptop CLI (0041)
+
+
+def test_the_registry_the_console_and_the_cli_list_the_same_ops():
+    # The parity contract: every op is a Console button and a `python -m dsl_course <op>`.
+    # ops.json is the console's copy, committed; the CLI lists what it can run.
+    committed = json.loads((ROOT / "console" / "schemas" / "ops.json").read_text())
+    exported = {o["name"] for o in schemas.ops_json()["ops"]}
+    assert set(REGISTRY) == exported == {o["name"] for o in committed["ops"]}
+    assert cli.listing() == list(REGISTRY)
+
+
+def _cli(monkeypatch, capsys, *argv: str) -> tuple[int, str]:
+    monkeypatch.setattr(cli, "acting_login", lambda: "prof")
+    rc = cli.main(list(argv))
+    captured = capsys.readouterr()
+    return rc, captured.out + captured.err
+
+
+def test_the_cli_runs_an_op_as_the_console_does(monkeypatch, capsys, engine):
+    seen = []
+
+    def fake_main():
+        seen.append(sys.argv[1:])
+        return Summary("Codes sent: 3.", counts={"sent": 3})
+
+    monkeypatch.setattr(enrol_codes, "main", fake_main)
+    base = ("--course-org", COURSE, "--semester-org", SEMESTER)
+    rc, out = _cli(monkeypatch, capsys, "roster.send_codes", *base, "--no-preview")
+    assert rc == 0
+    # The argv the Console's own run of the op spells (test_an_inline_run_end_to_end).
+    assert seen[-1][-1] == "--no-preview" and "--resend-unjoined" in seen[-1]
+    assert "done: Codes sent: 3." in out
+    (org, repo, path, content, _msg), _ = engine[0]
+    assert (org, repo, path) == (
+        SEMESTER,
+        "semester-config",
+        ".system/outcomes/roster.send_codes.json",
+    )
+    assert json.loads(content)["summary"] == "Codes sent: 3."
+    # Bare, it previews, as every CLI does.
+    rc, out = _cli(monkeypatch, capsys, "roster.send_codes", *base)
+    assert rc == 0 and seen[-1][-1] == "--preview"
+
+
+def test_the_cli_sends_the_request_the_console_sends():
+    op = REGISTRY["grades.return"]
+    text = cli.request_text(
+        op,
+        "prof",
+        COURSE,
+        SEMESTER,
+        ["notify=false", "assignment=assignment-2"],
+        True,
+    )
+    req = parse_request(text)
+    assert req.args == {"notify": False, "assignment": "assignment-2"}
+    assert (req.op, req.course_org, req.semester_org, req.preview) == (
+        "grades.return",
+        COURSE,
+        SEMESTER,
+        True,
+    )
+    assert req.client == "cli"
+
+
+def test_the_cli_refuses_what_the_console_refuses(monkeypatch, capsys, engine):
+    # An argument the op does not take is the request parser's refusal, by name.
+    rc, out = _cli(
+        monkeypatch,
+        capsys,
+        "access.check",
+        "--course-org",
+        COURSE,
+        "--semester-org",
+        SEMESTER,
+        "--arg",
+        "surprise=1",
+    )
+    assert rc == 0 and "BAD_ARGS" in out
+    # An op with no preview runs only when told to.
+    rc, out = _cli(
+        monkeypatch,
+        capsys,
+        "site.update",
+        "--course-org",
+        COURSE,
+        "--semester-org",
+        SEMESTER,
+    )
+    assert rc == 2 and "--no-preview" in out
+    # A boolean is true or false.
+    rc, out = _cli(
+        monkeypatch,
+        capsys,
+        "grades.return",
+        "--course-org",
+        COURSE,
+        "--semester-org",
+        SEMESTER,
+        "--arg",
+        "notify=maybe",
+    )
+    assert rc == 2 and "true or false" in out
+
+
+def test_the_cli_lists_every_op_with_its_help(capsys):
+    assert cli.main([]) == 0
+    out = capsys.readouterr().out
+    for op in REGISTRY.values():
+        assert f"{op.name}" in out and op.help in out

@@ -176,7 +176,7 @@ export interface Assignment {
   returned: boolean;
   problem: boolean;
   /** Each run setting's effective value and where it came from (`status_json.run_settings`). */
-  settings?: Record<string, { value: string | number | null; source: 'assignment' | 'semester' | 'course' | 'institution' }>;
+  settings?: Record<string, { value: string | number | boolean | null; source: 'assignment' | 'semester' | 'course' | 'institution' }>;
   /** Where the work is handed in, in the site's one word (`course.submit_shape`). Absent in an older status. */
   submit_shape?: string;
   /** The semester-side name (`semester_dest_repo`, else the slug): the per-unit repos' stem. Absent in an older status. */

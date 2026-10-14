@@ -48,13 +48,19 @@ def main() -> int:
         action="store_true",
         help="Put the markers' feedback text into each student's email.",
     )
-    p.add_argument(
+    per_question = p.add_mutually_exclusive_group()
+    per_question.add_argument(
+        "--per-question",
+        action="store_true",
+        help="For this run only, show the marks and feedback per question of the "
+        "assignment returned (every assignment, without --assignment), whatever its "
+        "`marks_per_question` run setting says.",
+    )
+    per_question.add_argument(
         "--no-per-question",
         action="store_true",
-        help="For this run only, withhold the marks and feedback per question of the "
-        "assignment returned (every assignment, without --assignment), whatever its "
-        "`marks_per_question` run setting says: the score, late penalty, adjustment "
-        "and final grade still go.",
+        help="For this run only, withhold them, whatever the setting says: the score, "
+        "late penalty, adjustment and final grade still go.",
     )
     p.add_argument(
         "--assignment",
@@ -94,7 +100,9 @@ def main() -> int:
             dry_run=args.preview,
             receipt_note=args.receipt_note,
             include_feedback=args.include_feedback,
-            per_question=not args.no_per_question,
+            per_question=(
+                True if args.per_question else False if args.no_per_question else None
+            ),
             assignment=args.assignment or None,
             sched=sched,
         )

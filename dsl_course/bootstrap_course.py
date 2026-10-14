@@ -91,7 +91,7 @@ def _profile_topics(is_semester: bool, course_code: str = "") -> list[str]:
 #   SYSTEM-owned - machinery and documentation this repo generates and must be able to fix
 #   in place: everything under `.github/` in the seeded repos (join/onboard.yml,
 #   join/team-formation.yml, the ISSUE_TEMPLATE join forms those workflows parse - they
-#   must stay in lockstep with them - and semester-config's dispatch-sync*.yml), a
+#   must stay in lockstep with them - and semester-config's dispatch.yml), a
 #   semester's `semester-config/.system/dsl-course.yml` (a wholly generated course pointer with no
 #   faculty-authored content), semester-config's README.md (the schema contract - it went
 #   stale as USER-owned).
@@ -120,7 +120,7 @@ def set_org_secret(org: str, secret_name: str, secret_value: str) -> bool:
     """Create or update an org secret, scoped to the infra repos that need it.
 
     The token must reach the **public** `.github` (faculty & instructors workflows), `join`
-    (onboarding), and `semester-config` (its dispatch-sync workflow cross-repo
+    (onboarding), and `semester-config` (its dispatch.yml workflow cross-repo
     triggers Sync membership in `.github`). gh defaults org-secret visibility to
     `private`, which excludes public repos - so the seeded workflows there run with
     an empty `secrets.DSL_BOT_TOKEN` and fail with "set the GH_TOKEN environment
@@ -388,7 +388,7 @@ def _course_metadata(
 def _semester_metadata(course: str) -> str:
     """dsl-course.yml for a SEMESTER org's .github repo: a pointer back to its persistent
     course org. This is the single source the semester's semester-config dispatchers
-    (dispatch-sync / dispatch-sync-site) read to find where to fire Sync membership /
+    (dispatch.yml) read to find where to fire Sync membership /
     Sync site - so without it those auto-triggers can't resolve the course org."""
     return template("semester/dsl-course.yml").format(course=course)
 

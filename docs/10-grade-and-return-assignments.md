@@ -55,6 +55,8 @@ teams:
 | `adjustment_individual` | you - one person's change to their final grade, in both shapes (the late penalty has its own override, `late_penalty`) | yes, their own only, as its own line (`adjustment +4`); never a team-mate's |
 | `late_penalty` (per student or team, beside `info:`; optional) | you: `apply` (the default), `waive`, or the whole penalty as `15%` / `0.15` | with their marks (Distribute grades), the penalty that applied: `-20%`, `waived` or `-15% (set by hand)`; a submission receipt quotes the late rule's own figure only |
 | `notes_not_shared_with_students` (each person's; on a group sheet the team's own too, beside `feedback_group`) | you | **never** |
+| `marked_by` (per student or team) | the console, on each unit whose marks a save changes: the signed-in login | **never** |
+| `snippets` (top level, beside `submissions:` / `teams:`) | you: reusable feedback comments for this assignment, edited in the console | **never** |
 | final grade | derived on output, never stored | yes |
 
 The final mark is `total × (1 − rate × days_late) + adjustment`, floored at 0. A late
@@ -83,9 +85,19 @@ per student or team. On a team assignment a team's ▸ shows its members, each w
 team with any of those set opens by itself. On an individual one the Adjustment column sits
 behind the **Adjustments** chip. Every column header has a `?`; the **From the submission** heading
 folds its columns into one (folded to begin with in a window narrower than 1400px; your choice is kept). Drag a column's edge to resize it (double-click puts it back; widths are kept
-in this browser), and open any text box's corner ⤢ for a large editor. The filters (All, Unmarked, Late,
+in this browser). The grid holds marks and numbers: Feedback and Private notes show one line each
+(✎ counts the questions with their own feedback), and clicking one opens the row's **side panel**
+with the overall feedback, the feedback per question, the private notes, links to the submission,
+the per-test results (with automatic tests) and the executed notebook (with the completion check), the assignment's **snippets** (reusable comments:
+one click puts one into the feedback box you were last in; **Edit snippets** changes the list, saved
+with Save marks) and that student's Student view. While it is open it follows the row you work in;
+Escape or × closes it. The filters (All, Unmarked, Late,
 Held) count from the sheet as typed, and a held row says why, by the same rules as Return marks.
-Enter moves down a column of numbers; in a text box Ctrl+Enter (⌘+Enter) does. **Student view**
+Enter moves down a column of numbers; in the side panel Ctrl+Enter (⌘+Enter) moves to the same box
+on the next row. Saving records `marked_by` on each row whose marks you changed; once any row has
+one, a **Markers** table under the grid gives each marker's count, mean and median score (before
+penalty and adjustment), and **Marked by** in the filter bar narrows the grid to one marker's rows
+for a second pass. **Student view**
 shows what one student's marks page will hold. Unsaved marks stay in this browser until saved, and
 are offered back (Restore or Discard) on the next visit; a save that meets someone else's keeps
 both and says how many rows they changed. Return marks counts who gets marks, who is skipped and
@@ -205,10 +217,13 @@ its sheet refresh and Return marks until it is fixed. Untick `notify` to skip th
 
 The marks per question and the feedback per question go to the page unless the
 assignment's run setting `marks_per_question` is `false` (its `schedule.yml` entry, see
-[the run settings](07-schedule-releases.md#assignments)),
-or one run withholds them (`--no-per-question` on `python3 -m dsl_course.grades
-distribute`, for the assignment it returns). The score, late penalty, adjustment and final
-grade go either way.
+[the run settings](07-schedule-releases.md#assignments)).
+Set it on the assignment's **How this semester runs it**, or with Return marks' **Include
+marks per question** box: the box starts at the setting, a preview follows the box, and the
+real run saves a changed box for the assignment before it goes, so the automatic return does
+the same. For one run only, the workflow's `per_question` input (`true` / `false`) or the
+CLI's `--per-question` / `--no-per-question` overrides it. The score, late penalty,
+adjustment and final grade go either way.
 
 Two options, both off by default. `include_feedback` puts the markers' feedback text into
 the email: the overall feedback, then each question's. `receipt_note` posts one line,
@@ -231,7 +246,8 @@ A preview waits for nothing.
 Off unless you ask for it. `autograde: true` in the template's `grading_config.yml` runs the
 hidden tests from its `solution` branch at the late cutoff, against the frozen pin, in a sandbox with the token stripped. The
 count lands in `info.autograde` (`7/9`) for your information only - it is never a mark by
-itself and a student never sees it. Per-test detail goes to `semester-config/.system/autograde/`.
+itself and a student never sees it. Per-test detail goes to `semester-config/.system/autograde/<slug>/<unit>.json`;
+the Marks tab's Tests cell links to it, and its Completion cell to the executed notebook beside it.
 To regrade, delete `.system/autograde/<slug>/`.
 
 **Writing the tests.** One test function per behaviour, named for it: the per-test detail lists
@@ -388,8 +404,8 @@ project teams are untouched.
 To reopen anything - a grade appeal, a late submission - un-archive that repo from its own
 Settings page. It comes back exactly as it was, write access included.
 
-**Archive semester** is the button for archiving a semester early, or at all. `preview` is on
-by default and prints the counts; the real run **refuses** until the archive date has
+**Archive** (the Console, or `python -m dsl_course semester.archive`) archives a semester
+early, or at all. A preview prints the counts; the real run **refuses** until the archive date has
 arrived, and `force` overrides that - which is how a semester with no `archive:` block, and
 so no date, is archived. Run it again if it fails part-way - it picks up where it stopped,
 and only the last step seals the record.

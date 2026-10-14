@@ -94,7 +94,7 @@ and no marks. A **Join team** issue from an auditor is refused and labelled `nee
   (in the student console instead, for a course with `student_console: true`) - linked from the form, its refusals and the mail; students still
   without a team are emailed while the window is open. Both: [09](09-release-assignment-to-cohort.md#group-assignments-creating-the-teams).
 - The **Sync membership** workflow then creates a secret GitHub team per group: GitHub offers no "Request to join" on it, so the form is the only way in.
-- A **Release assignment** run then grants each team its shared repo (the template declares `type: group`).
+- Handing the assignment out then grants each team its shared repo (the template declares `type: group`).
 
 ## Next
 
