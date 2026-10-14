@@ -22,7 +22,7 @@ import type { Assignment } from '../model/types';
 import { returnMarks, teamsWindow, type AsgRef, type LateReturn } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
 import type { OpDef } from '../ops/session';
-import { assignmentHref, tabHref } from '../router';
+import { assignmentHref, replaceHash, tabHref } from '../router';
 import { CheckLine, Loading } from '../ui/bits';
 import { Modal } from '../ui/Modal';
 import { Hint } from '../ui/Hint';
@@ -73,11 +73,13 @@ const PREVIEW_TITLE = 'Distribute grades preview';
 
 /**
  * Return marks asked for from the Overview (the route's `open`): the Marks tab mounts this once its
- * sheet is read, so the panel always carries the sheet's figures, and it opens it once.
+ * sheet is read, so the panel always carries the sheet's figures, and it opens it once. The open
+ * is taken out of the address, so a reload or Back/Forward does not run another preview.
  */
-function OpenOnArrival({ def, start }: { def: OpDef; start: 'preview' | 'run' }) {
+function OpenOnArrival({ slug, def, start }: { slug: string; def: OpDef; start: 'preview' | 'run' }) {
   const env = useEnv();
   useEffect(() => {
+    replaceHash(tabHref(slug, 'marks'));
     env?.ops.open(def, start);
   }, []);
   return null;
@@ -651,7 +653,7 @@ export function MarksTab(p: TabProps) {
   // Returning is its own block above the grid: the panel it opens holds the figures and Preview.
   const returnBlock = (
     <div class="return-block">
-      <span class="return-main"><OpOpen def={returnDef} cls="btn big" label={returnDef.verb} />{p.open ? <OpenOnArrival def={returnDef} start={p.open === 'return-run' ? 'run' : 'preview'} /> : null}</span>
+      <span class="return-main"><OpOpen def={returnDef} cls="btn big" label={returnDef.verb} />{p.open ? <OpenOnArrival slug={a.slug} def={returnDef} start={p.open === 'return-run' ? 'run' : 'preview'} /> : null}</span>
       <button class="btn small quiet" type="button" onClick={() => setViewing('')}>Student view</button>
     </div>
   );

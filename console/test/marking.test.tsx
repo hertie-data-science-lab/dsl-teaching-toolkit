@@ -18,6 +18,7 @@ import { returnMarks } from '../src/ops/defs';
 import { DispatchAdapter } from '../src/ops/adapter';
 import { OpPanel } from '../src/ops/Panel';
 import { OpsSession } from '../src/ops/session';
+import { parseHash } from '../src/router';
 import { AssignmentScreen } from '../src/screens/Assignments';
 import { previewEmails, templateChecks } from '../src/screens/Marking';
 import type { CohortProps } from '../src/screens/types';
@@ -433,6 +434,22 @@ describe('Return marks from the marking screen', () => {
     await act(() => render(<EnvCtx.Provider value={env}><AssignmentScreen {...props(f, { loaded: live, open: 'return-run' })} /><OpPanel /></EnvCtx.Provider>, root!));
     expect(env.ops.current.value?.def.verb).toBe('Return marks to 1 student');
     expect(q('.op-facts').textContent).toContain('1 held (fix first)');
+  });
+
+  it('opens once per arrival: the address drops the open, so a reload or Back does not preview again', async () => {
+    const gh = github(), f = files(), env = envOf(gh, f);
+    const opened = vi.spyOn(env.ops, 'open').mockImplementation(() => {});
+    location.hash = '#assignment-assignment-2/marks/return-preview';
+    const arrive = () => act(() => render(<EnvCtx.Provider value={env}><AssignmentScreen {...props(f, { open: parseHash(location.hash).open })} /></EnvCtx.Provider>, root!));
+    root = document.createElement('div');
+    document.body.appendChild(root);
+    await arrive();
+    expect(opened).toHaveBeenCalledTimes(1);
+    expect(location.hash).toBe('#assignment-assignment-2/marks');
+    render(null, root);
+    await arrive();
+    expect(opened).toHaveBeenCalledTimes(1);
+    location.hash = '';
   });
 
   it('names who a preview would email, from the private preview issue', () => {
