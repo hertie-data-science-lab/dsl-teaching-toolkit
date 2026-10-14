@@ -1,42 +1,19 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "columns": [
-    "hertie_email",
+    "email",
     "name",
-    "role",
-    "github_handle",
-    "github_id",
-    "enrol_code",
-    "code_sent_at"
+    "role"
   ],
   "items": {
     "additionalProperties": false,
+    "patternProperties": {
+      "^team:": {
+        "type": "string"
+      }
+    },
     "properties": {
-      "code_sent_at": {
-        "type": [
-          "string",
-          "null"
-        ]
-      },
-      "enrol_code": {
-        "type": [
-          "string",
-          "null"
-        ]
-      },
-      "github_handle": {
-        "type": [
-          "string",
-          "null"
-        ]
-      },
-      "github_id": {
-        "type": [
-          "string",
-          "null"
-        ]
-      },
-      "hertie_email": {
+      "email": {
         "type": [
           "string",
           "null"
@@ -58,8 +35,7 @@
       }
     },
     "required": [
-      "hertie_email",
-      "github_handle"
+      "email"
     ],
     "type": "object"
   },

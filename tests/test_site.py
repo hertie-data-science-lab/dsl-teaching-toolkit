@@ -21,6 +21,7 @@ from dsl_course import (
     ghcli,
     grading_spec,
     materials,
+    roster,
     settings,
     site,
     site_repo,
@@ -40,9 +41,47 @@ from dsl_course.schedule import (
 )
 from dsl_course.setting_readers import read_settings
 from dsl_course.site_repo import Link
-from tests.conftest import BareOrigins, fake_config, run_settings
+from tests.conftest import (
+    ROSTER_HEADER,
+    BareOrigins,
+    fake_config,
+    roster_files,
+    run_settings,
+)
 
 UTC = ZoneInfo("UTC")
+
+
+def _teams_reader(monkeypatch, read) -> None:
+    """Serve the roster whose team cells the old-shape teams.csv `read(org)` returns (None
+    = no roster), one onboarded student per handle it names, through the real parsers."""
+    held: dict = {}
+
+    def files(org: str) -> dict:
+        if org not in held:
+            text = read(org)
+            rows = [line.split(",") for line in (text or "").splitlines()[1:] if line]
+            handles = sorted({r[2] for r in rows})
+            combined = (
+                ROSTER_HEADER
+                + "\n"
+                + "".join(f"{h}@x.org,{h},,{h},1,,\n" for h in handles)
+            )
+            keys = {r[0] for r in rows}
+            numbers = {
+                k: int(k.rsplit("-", 1)[1])
+                for k in keys
+                if k.rsplit("-", 1)[-1].isdigit()
+            }
+            held[org] = {} if text is None else roster_files(combined, text, numbers)
+        return held[org]
+
+    monkeypatch.setattr(
+        roster, "_students_text", lambda org: files(org).get(roster.STUDENTS_PATH)
+    )
+    monkeypatch.setattr(
+        roster, "_system_text", lambda org: files(org).get(roster.SYSTEM_PATH)
+    )
 
 
 def _spec(config: str) -> grading_spec.GradingSpec:
@@ -569,7 +608,7 @@ def test_a_group_assignment_names_the_team_repo_shape(monkeypatch):
         lambda *a, **k: _spec("type: group\n"),
     )
     # Out, so the page would list any team formed; this semester has none.
-    monkeypatch.setattr(site.teams, "_teams_text", lambda org: None)
+    _teams_reader(monkeypatch, lambda org: None)
     sched = Schedule(
         assignments={
             "assignment-3": AssignmentEntry(
@@ -610,10 +649,8 @@ def _team_entry(monkeypatch, config: str, *, now: datetime, teams_csv="", **kw) 
         site, "get_file_content", lambda *a, **k: "# Group project\nThe brief."
     )
     monkeypatch.setattr(site, "load_grading_spec", lambda *a, **k: _spec(config))
-    monkeypatch.setattr(
-        site.teams,
-        "_teams_text",
-        teams_csv if callable(teams_csv) else lambda org: teams_csv or None,
+    _teams_reader(
+        monkeypatch, teams_csv if callable(teams_csv) else lambda org: teams_csv or None
     )
     sched = Schedule(
         assignments={
@@ -735,9 +772,8 @@ def test_a_sync_reads_teams_csv_once_for_every_forming_assignment(
     )
     run_settings(monkeypatch, lambda org: None)
     reads = []
-    monkeypatch.setattr(
-        site.teams,
-        "_teams_text",
+    _teams_reader(
+        monkeypatch,
         lambda org: (
             reads.append(org)
             or "assignment,team,github_handle\nassignment-1,alpha,ada-l\n"

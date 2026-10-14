@@ -1429,7 +1429,7 @@ def test_every_comment_the_press_left_is_scanned(monkeypatch):
 
 def _student_row(handle: str, role: str = "enrolled"):
     return roster.Student(
-        hertie_email=f"{handle}@example.org",
+        email=f"{handle}@example.org",
         name=handle,
         github_handle=handle,
         github_id="1",

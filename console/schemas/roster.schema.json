@@ -1,14 +1,28 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "columns": [
-    "assignment",
-    "team",
-    "github_handle"
+    "email",
+    "github_handle",
+    "github_id",
+    "enrol_code",
+    "code_sent_at"
   ],
   "items": {
     "additionalProperties": false,
     "properties": {
-      "assignment": {
+      "code_sent_at": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "email": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "enrol_code": {
         "type": [
           "string",
           "null"
@@ -20,7 +34,7 @@
           "null"
         ]
       },
-      "team": {
+      "github_id": {
         "type": [
           "string",
           "null"
@@ -28,12 +42,10 @@
       }
     },
     "required": [
-      "assignment",
-      "team",
-      "github_handle"
+      "email"
     ],
     "type": "object"
   },
-  "title": "semester-config/teams.csv",
+  "title": "semester-config/.system/roster.csv",
   "type": "array"
 }

@@ -1011,7 +1011,9 @@ def member_digest(semester_org: str, handle: str) -> str:
 FormedTeams = Callable[[str], list[tuple[str, list[str]]]]
 
 
-def _formed_teams(semester_org: str) -> FormedTeams:
+def _formed_teams(
+    semester_org: str, sched: schedule.Schedule | None = None
+) -> FormedTeams:
     """A reader of `(team, member handles)` for every team formed for an assignment key
     so far, by name - the same reader (`teams.teams_for`) the student console's team list
     uses. the roster is loaded once, on the first ask, however many assignments list
@@ -1024,7 +1026,7 @@ def _formed_teams(semester_org: str) -> FormedTeams:
     @cache
     def loaded() -> dict[str, dict[str, list[str]]] | None:
         try:
-            return teams.load(semester_org)
+            return teams.load(semester_org, sched=sched)
         except RuntimeError as exc:
             log_err(f"could not read {semester_org}'s teams: {exc}")
             return None
@@ -1190,7 +1192,9 @@ def _assignment_entry(
 
         listed = "".join(
             team_entry(name, handles)
-            for name, handles in (formed_teams or _formed_teams(semester_org))(found[0])
+            for name, handles in (formed_teams or _formed_teams(semester_org, sched))(
+                found[0]
+            )
         )
         if forming:
             closes = spoken_day(schedule.in_semester_zone(sched, shuts))
@@ -1535,7 +1539,7 @@ def sync_site(course_org: str, semester_org: str) -> int:
             hosted = _mirror_public(site_wd, semester_org, policies)
         rows, present = _site_rows(semester_org, planned, allow, live, hosted)
         # ONE read of the team cells for every self-select group assignment (`_formed_teams`).
-        formed_teams = _formed_teams(semester_org)
+        formed_teams = _formed_teams(semester_org, sched)
         log_step(
             f"Syncing {semester_org}/{pages_repo(semester_org)}: {len(rows)} row(s) "
             f"({sum('unreleased: true' in text for text in rows.values())} not released "
