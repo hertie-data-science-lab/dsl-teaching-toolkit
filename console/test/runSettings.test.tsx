@@ -234,14 +234,14 @@ describe('the marks grid: teams > students > questions', () => {
     const out = html(<AssignmentScreen {...props({ entry: 'assignment-3', tab: 'marks' })} />);
     expect(out).toContain('aria-label="Q2 (out of 5) for team-alpha"');
     expect(out).toContain('/ 5 · <code>report.tex</code>');
-    expect(out).toContain('aria-label="Team feedback for team-alpha" data-col="fb">Solid work.</textarea>');
-    // Feedback per question folds until opened; its chip counts the questions with text.
-    expect(out).toContain('aria-expanded="false" aria-label="Show feedback per question for team-alpha">✎ Feedback per question (1)</button>');
+    // Feedback is one line opening the row's side panel; its badge counts the questions with feedback.
+    expect(out).toContain('aria-label="Open team feedback for team-alpha" title="Solid work." data-preview="fb"><span class="md-line">Solid work.</span><span class="chip qfb-count" title="Feedback on 1 question">✎ 1</span></button>');
     expect(out).not.toContain('Feedback on Q1 for team-alpha');
+    expect(out).not.toContain('<textarea');
     for (const h of ['anna-a', 'ben-b']) {
-      expect(out).toContain(`aria-label="Feedback for ${h}"`);
+      expect(out).toContain(`aria-label="Open feedback for ${h}"`);
       expect(out).toContain(`aria-label="Adjustment for ${h}"`);
-      expect(out).toContain(`aria-label="Private notes for ${h}"`);
+      expect(out).toContain(`aria-label="Open private notes for ${h}"`);
     }
     expect(out).toContain('aria-label="Hide the members of team-alpha"');
     // A member carries an adjustment, so the team opens on load, with the amber Adjustment column.
@@ -250,14 +250,14 @@ describe('the marks grid: teams > students > questions', () => {
     expect(out).not.toContain('class="grp">students see');
   });
 
-  it('renders every input even when the sheet is blank, and folds feedback per question until there is some', () => {
+  it('renders every input even when the sheet is blank, feedback per question waiting in the side panel', () => {
     const out = html(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'marks' })} />);
     expect(out).toContain('aria-label="Q1 (out of 10) for carla-c"');
     // No adjustment saved: the Adjustment column waits behind its chip.
     expect(out).not.toContain('aria-label="Adjustment for carla-c"');
     expect(out).toContain('aria-expanded="false">Adjustments ▸</button>');
-    expect(out).toContain('aria-label="Private notes for carla-c"');
-    expect(out).toContain('aria-expanded="false" aria-label="Show feedback per question for carla-c"');
+    expect(out).toContain('aria-label="Open private notes for carla-c"');
+    expect(out).not.toContain('qfb-count');
     expect(out).not.toContain('Feedback on Q1 for carla-c');
     // The penalty is the one status states (the semester's), not a literal.
     expect(out).toContain('late penalties (5% of the total per day started)');

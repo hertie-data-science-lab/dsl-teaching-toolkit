@@ -10,8 +10,8 @@ import { YamlText, blank, isObj, type Path } from '../edit/yamlText';
 import { Invalid } from '../forms/Form';
 import { assignmentTitle, fmtDay, fmtWhen, plural, str } from '../model/format';
 import {
-  HOLD_WORDS, NOTES_KEY, cellValue, effectivePenalty, finalGrade, holdReasons, lateRule, num, overrideText, overrideValue, penaltyFigure, questionFile,
-  questionPoints, readSheet, round, rowsChanged, scoreTotal, spread, studentMarks, type HoldReason, type HoldUnit, type Penalty, type Person, type Unit,
+  HOLD_WORDS, NOTES_KEY, SNIPPETS_KEY, cellValue, effectivePenalty, finalGrade, holdReasons, lateRule, markerLines, num, overrideText, overrideValue, penaltyFigure, questionFile,
+  questionPoints, readSheet, readSnippets, round, rowsChanged, scoreTotal, spread, studentMarks, type HoldReason, type HoldUnit, type Penalty, type Person, type Unit,
 } from '../model/marks';
 import { SOURCE_WORD, assignmentsFile, resolve, valueWord, withRunSetting } from '../model/cascade';
 import type { Env } from '../env';
@@ -31,7 +31,8 @@ import { SaveBar } from '../ui/edit';
 import { Check } from '../ui/icons';
 import type { TabProps } from './Assignments';
 import { cohortScope, todayOf, tzOf, useGradingConfig, yearOf } from './common';
-import { ASSIGNMENTS_FILE, CONFIG_REPO } from '../model/names';
+import { ASSIGNMENTS_FILE, CONFIG_REPO, NAMES } from '../model/names';
+import { MarksDrawer, type DrawerBox, type DrawerLink } from './MarksDrawer';
 import { formatsList } from '../tiers/grading';
 
 /** The late cutoff as the Return marks dialog names it, while it has not passed; null after it. */
@@ -108,13 +109,17 @@ export function requestReturnMarks(slug: string, start: 'preview' | 'run'): void
   pendingReturn = { slug, start };
 }
 
-/** Whether the browser grows a textarea with its text by itself (CSS `field-sizing`, Chromium only). */
-const sizesItself = () => typeof CSS !== 'undefined' && typeof CSS.supports === 'function' && CSS.supports('field-sizing', 'content');
-/** Grow a textarea to its text where the browser does not (Firefox, Safari); its CSS min-height still holds. */
-function grow(el: HTMLTextAreaElement): void {
-  if (sizesItself()) return;
-  el.style.height = 'auto';
-  el.style.height = `${el.scrollHeight + 2}px`;
+/** A row of the grid the side panel can show: a student or team, or one member of a team. */
+interface RowRef {
+  unit: string;
+  member: string | null;
+}
+/** The side panel: its row, the box to put the cursor in, and whether to take focus (not when it follows focus in the grid). */
+type DrawerAt = RowRef & { focus: string | null; grab: boolean };
+
+/** The units an edit set touches (its cells under `teams:` or `submissions:`), by key. */
+function unitsEdited(edits: Record<string, unknown>, container: string): Set<string> {
+  return new Set(Object.keys(edits).map((k) => JSON.parse(k) as Path).filter((pth) => pth[0] === container && pth.length > 1).map((pth) => String(pth[1])));
 }
 
 const on = (v: unknown) => v === true || v === 'true';
@@ -242,8 +247,14 @@ export function MarksTab(p: TabProps) {
   const [full, setFull] = useState(false);
   // The Student view dialog: null closed, else the handle shown ('' before one is chosen).
   const [viewing, setViewing] = useState<string | null>(null);
-  // The large editor for one text box: its cell, the dialog's title, and the text as typed there.
-  const [editor, setEditor] = useState<{ path: Path; title: string; text: string } | null>(null);
+  // The side panel for one row (feedback, per question, private notes, links, Student view); null closed.
+  const [drawer, setDrawer] = useState<DrawerAt | null>(null);
+  const drawerOpen = useRef(false);
+  drawerOpen.current = drawer !== null;
+  // In the panel's Student view on a team row: the member shown.
+  const [svPick, setSvPick] = useState<string | null>(null);
+  // The "Marked by" filter: null anyone, '' nobody recorded, else a login.
+  const [byMarker, setByMarker] = useState<string | null>(null);
   const table = useRef<HTMLTableElement>(null);
   // Column widths the person dragged, kept per sheet in this browser.
   const [widths, setWidths] = useState<Record<string, number>>(() => marksWidths(org, path));
@@ -262,10 +273,6 @@ export function MarksTab(p: TabProps) {
     pendingReturn = null;
     env.ops.open(returnDef.current, start);
   });
-  // Textareas grow with their text where the browser cannot do it in CSS.
-  useEffect(() => {
-    table.current?.querySelectorAll('textarea').forEach(grow);
-  });
   const [save, , setSave] = useSave(env);
   const file = p.files.file(org, CONFIG_REPO, path);
   const sha = file.kind === 'ready' ? file.sha : null;
@@ -281,7 +288,8 @@ export function MarksTab(p: TabProps) {
       return;
     }
     wasFull.current = true;
-    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setFull(false);
+    // With the side panel open, Escape closes the panel first.
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && (drawerOpen.current ? setDrawer(null) : setFull(false));
     document.addEventListener('keydown', esc);
     return () => document.removeEventListener('keydown', esc);
   }, [full]);
@@ -289,7 +297,9 @@ export function MarksTab(p: TabProps) {
   const parsed = useMemo(() => {
     if (text === null) return null;
     const y = new YamlText(text);
-    return y.errors.length ? { error: y.errors[0] } : { sheet: readSheet(text, y.toJS()) };
+    if (y.errors.length) return { error: y.errors[0] };
+    const doc = y.toJS();
+    return { sheet: readSheet(text, doc), snippets: readSnippets(doc) };
   }, [text]);
   const roster = p.files.file(org, CONFIG_REPO, 'students.csv');
   const rosterText = roster.kind === 'ready' ? roster.text : null;
@@ -304,6 +314,7 @@ export function MarksTab(p: TabProps) {
   const max = qs.reduce((n, [, m]) => n + (Number(questionPoints(m)) || 0), 0);
   const group = a.teams !== null && a.teams !== undefined;
   const scope = cohortScope(p);
+  const runs = templateChecks(cfg);
   const lede = (
     <p class="lede">{a.marks.filled} of {a.marks.total} marked. {rule ? `Totals and late penalties (${rule}) are worked out for you.` : 'Totals are worked out for you; no late penalty applies.'}</p>
   );
@@ -327,12 +338,24 @@ export function MarksTab(p: TabProps) {
   if (!parsed?.sheet)
     return <>{headOnly}<CheckLine cls="bad">The mark sheet does not parse ({parsed?.error}). Fix it with Edit the file directly.</CheckLine></>;
   const { sheet } = parsed;
+  const container = sheet.group ? 'teams' : 'submissions';
   const v = (pth: Path, orig: unknown) => (key(pth) in edits ? edits[key(pth)] : orig);
   const set = (pth: Path, raw: string, typed = false) => {
     setEdits({ ...edits, [key(pth)]: typed ? cellValue(raw) : raw.trim() ? raw : null });
     if (save.kind !== 'busy') setSave({ kind: 'idle' });
   };
-  const changed = new Set(Object.keys(edits).map((k) => (JSON.parse(k) as Path)[1] as string)).size;
+  const changed = unitsEdited(edits, container).size;
+  // The feedback snippets, as edited: the whole list is one edit, dropped when it is back to the saved one.
+  const snipKey = key([SNIPPETS_KEY]);
+  const savedSnippets = parsed.snippets ?? [];
+  const snippets = snipKey in edits ? (edits[snipKey] as string[]) : savedSnippets;
+  const snippetsEdited = snipKey in edits;
+  const setSnippets = (list: string[]) => {
+    const { [snipKey]: _drop, ...rest } = edits;
+    setEdits(JSON.stringify(list) === JSON.stringify(savedSnippets) ? rest : { ...rest, [snipKey]: list });
+    if (save.kind !== 'busy') setSave({ kind: 'idle' });
+  };
+  const dirty = changed > 0 || snippetsEdited;
   const scoreOf = (u: Unit) => {
     if (qs.length) {
       const base = u.score && typeof u.score === 'object' ? (u.score as Record<string, unknown>) : {};
@@ -367,7 +390,11 @@ export function MarksTab(p: TabProps) {
     late: sheet.units.filter(isLate).length,
     held: sheet.units.filter((u) => heldOf(u) !== null).length,
   };
-  const shown = sheet.units.filter((u) => filter === 'all' || (filter === 'unmarked' ? unmarked(u) : filter === 'late' ? isLate(u) : heldOf(u) !== null));
+  // Moderation: who saved each unit's marks, as the saved sheet records it.
+  const markerOf = (u: Unit) => (blank(u.markedBy) ? '' : str(u.markedBy).trim());
+  const markers = markerLines(sheet.units.map((u) => ({ marker: u.markedBy, score: u.score })), questions);
+  const anyMarker = sheet.units.some((u) => markerOf(u) !== '');
+  const shown = sheet.units.filter((u) => (filter === 'all' || (filter === 'unmarked' ? unmarked(u) : filter === 'late' ? isLate(u) : heldOf(u) !== null)) && (byMarker === null || !anyMarker || markerOf(u) === byMarker));
   // Handed in outside GitHub: no `info:` anywhere, so nothing to show from the submission.
   const external = sheet.units.length > 0 && sheet.units.every((u) => u.info === null);
   // Tests and Completion: a column only when some unit's submission has the fact (the template runs tests / the completion check).
@@ -384,19 +411,42 @@ export function MarksTab(p: TabProps) {
     const top = n || h;
     return <>{strong ? <b>{top}</b> : <span>{top}</span>}{n ? <><br /><span class="slug footnote">{h}</span></> : null}</>;
   };
-  // A text box carries a corner icon that opens it in a large editor; Save there is the same cell edit.
-  const input = (pth: Path, orig: unknown, cls: string, label: string, col: string, typed = true, area = false) =>
-    area ? (
-      <span class="area-wrap">
-        <textarea class={cls} rows={1} aria-label={label} data-col={col} onInput={(e) => { grow(e.target as HTMLTextAreaElement); set(pth, (e.target as HTMLTextAreaElement).value, false); }}>{str(v(pth, orig))}</textarea>
-        <button class="area-open" type="button" aria-label="Open editor" title={`Open editor: ${label}`} onClick={() => setEditor({ path: pth, title: label, text: str(v(pth, orig)) })}>⤢</button>
-      </span>
-    ) : (
-      <input class={cls} type="text" inputMode={typed ? 'decimal' : undefined} value={str(v(pth, orig))} aria-label={label} data-col={col} onInput={(e) => set(pth, (e.target as HTMLInputElement).value, typed)} />
+  const input = (pth: Path, orig: unknown, cls: string, label: string, col: string, typed = true) => (
+    <input class={cls} type="text" inputMode={typed ? 'decimal' : undefined} value={str(v(pth, orig))} aria-label={label} data-col={col} onInput={(e) => set(pth, (e.target as HTMLInputElement).value, typed)} />
+  );
+  const openDrawer = (row: RowRef, focus: string | null) => {
+    setSvPick(null);
+    setDrawer({ ...row, focus, grab: true });
+  };
+  const here = (r: RowRef) => drawer !== null && drawer.unit === r.unit && drawer.member === r.member;
+  // Closing puts focus on the line it was showing, in the row it ended on.
+  const closeDrawer = () => {
+    const at = drawer;
+    setDrawer(null);
+    const tr = at && [...(table.current?.querySelectorAll<HTMLElement>('tr[data-unit]') ?? [])].find((r) => r.dataset.unit === at.unit && (r.dataset.member ?? null) === at.member);
+    (tr?.querySelector<HTMLElement>(`[data-preview="${at?.focus === 'pn' ? 'pn' : 'fb'}"]`) ?? tr?.querySelector<HTMLElement>('[data-preview]'))?.focus();
+  };
+  // Feedback and Private notes in the grid: the first line of the text, which opens the row's side panel.
+  const preview = (text: unknown, label: string, field: 'fb' | 'pn', row: RowRef, extra: ComponentChildren = null) => {
+    const t = str(text).trim();
+    return (
+      <button class={`md-preview${t ? '' : ' empty'}`} type="button" aria-label={label} title={t || 'Open the side panel to write'} data-preview={field} onClick={() => openDrawer(row, field)}>
+        <span class="md-line">{t ? t.split('\n')[0] : '+'}</span>{extra}
+      </button>
     );
+  };
+  // The row's submission, where GitHub holds it: the student's or team's repo, or their folder in the drop box.
+  const via = str(cfg.submit_via);
+  const submissionOf = (u: Unit): DrawerLink | null => {
+    if (external || via === 'external') return null;
+    if (via === 'shared_dropbox_repo') return { href: `https://github.com/${org}/${name}-submissions/tree/HEAD/${encodeURIComponent(u.key)}`, text: 'Submission folder' };
+    return { href: `https://github.com/${org}/${name}-${u.key}`, text: 'Submission repo' };
+  };
+  // The per-test results the cutoff archived (collect: `.system/autograde/<slug>/<unit>.json` in semester-config).
+  const testsOf = (u: Unit): string | null =>
+    runs.tests && u.info !== null && !blank(u.info.autograde) ? `https://github.com/${org}/${CONFIG_REPO}/blob/HEAD/${NAMES.records.autograde}/${encodeURIComponent(name)}/${encodeURIComponent(u.key)}.json` : null;
   // "—" where the template does not run the check, whatever the sheet carries (a key can outlive the
   // setting that wrote it), and where this unit's sheet has no such fact; blank until the cutoff fills it.
-  const runs = templateChecks(cfg);
   const fact = (u: Unit, k: 'autograde' | 'completion') => (!(k === 'autograde' ? runs.tests : runs.completion) || (u.info !== null && !(k in u.info)) ? '—' : str(u.info?.[k]));
   const info = (u: Unit) => {
     if (external) return [];
@@ -414,7 +464,7 @@ export function MarksTab(p: TabProps) {
     return [
       <td class="sys">{submittedShort(u.info?.submitted) || (u.info ? 'Nothing' : '—')}</td>,
       <td class="sys num">{str(u.info?.days_late)}</td>,
-      ...(showTests ? [<td class={`sys${runs.tests && !blank(u.info?.autograde) ? ' auto' : ''}`}>{fact(u, 'autograde')}</td>] : []),
+      ...(showTests ? [<td class={`sys${runs.tests && !blank(u.info?.autograde) ? ' auto' : ''}`}>{testsOf(u) ? <a href={testsOf(u)!} target="_blank" rel="noopener" title="Which tests passed, in semester-config">{fact(u, 'autograde')}</a> : fact(u, 'autograde')}</td>] : []),
       ...(showCompletion ? [<td class="sys">{fact(u, 'completion')}</td>] : []),
     ];
   };
@@ -438,7 +488,6 @@ export function MarksTab(p: TabProps) {
     );
   };
   const qfbCount = (u: Unit) => qs.filter(([q]) => !blank(v([...u.questionFeedbackPath, q], u.questionFeedback[q] ?? null))).length;
-  const qOpen = (u: Unit) => folds[`q:${u.key}`] ?? false;
   const heldChip = (u: Unit) => {
     const why = heldOf(u);
     return why ? <><br /><span class="chip bad held-chip">held</span> <span class="held-why">{HOLD_WORDS[why]}</span></> : null;
@@ -452,79 +501,76 @@ export function MarksTab(p: TabProps) {
       ? [...qs.map(([q, m]) => <td>{input([...u.scorePath, q], (u.score as Record<string, unknown> | null)?.[q] ?? null, 'q', `${q}${outOf(m)} for ${u.key}`, `q:${q}`)}</td>), <td class="calc">{round(total)}</td>]
       : [<td>{input(u.scorePath, typeof u.score === 'object' ? null : u.score, 'q', `Score for ${u.key}`, 'score')}</td>];
     const n = qfbCount(u);
-    const qChip = qs.length ? (
-      <><br /><button class="chip qfb-chip" type="button" aria-expanded={qOpen(u)} aria-label={`${qOpen(u) ? 'Hide' : 'Show'} feedback per question for ${u.key}`} onClick={() => setFolds({ ...folds, [`q:${u.key}`]: !qOpen(u) })}>✎ Feedback per question{n ? ` (${n})` : ''}</button></>
-    ) : null;
+    // Feedback per question lives in the side panel; the Feedback cell says how many questions have some.
+    const qCount = n ? <span class="chip qfb-count" title={`Feedback on ${plural(n, 'question')}`}>✎ {n}</span> : null;
     const mark = unmarked(u) ? { 'data-unmarked': '' } : {};
     if (!sheet.group) {
       const pr = u.people[0];
       return (
-        <tr class={`unit-row${nosub ? ' nosub' : ''}`} {...mark}>
-          <td>{who(u.key, true)}{heldChip(u)}{qChip}</td>{info(u)}{scoreCells}
+        <tr class={`unit-row${nosub ? ' nosub' : ''}${here({ unit: u.key, member: null }) ? ' md-here' : ''}`} data-unit={u.key} {...mark}>
+          <td>{who(u.key, true)}{heldChip(u)}</td>{info(u)}{scoreCells}
           {lateCell(u, pen)}
           {adjOpen ? <td class="adjcol">{input([...pr.base, 'adjustment_individual'], pr.adjustment, 'adj', `Adjustment for ${u.key}`, 'adj')}</td> : null}
           <td class="calc">{round(finalGrade(total, pen, adjOf(pr)))}</td>
-          <td class="grow">{input([...pr.base, 'feedback_individual'], pr.feedback, 'fb', `Feedback for ${u.key}`, 'fb', false, true)}</td>
-          <td class="grow">{input([...pr.base, NOTES_KEY], pr.notes, 'pn', `Private notes for ${u.key}`, 'pn', false, true)}</td>
+          <td class="grow">{preview(fbOf(pr), `Open feedback for ${u.key}`, 'fb', { unit: u.key, member: null }, qCount)}</td>
+          <td class="grow">{preview(v([...pr.base, NOTES_KEY], pr.notes), `Open private notes for ${u.key}`, 'pn', { unit: u.key, member: null })}</td>
         </tr>
       );
     }
     const open = membersOpen(u);
     const names = u.people.map((pr) => realName(pr.handle) || pr.handle);
     return (
-      <tr class={`team-row${nosub ? ' nosub' : ''}`} {...mark}>
+      <tr class={`team-row${nosub ? ' nosub' : ''}${here({ unit: u.key, member: null }) ? ' md-here' : ''}`} data-unit={u.key} {...mark}>
         <td>
           <button class="fold-toggle" type="button" aria-expanded={open} aria-label={`${open ? 'Hide' : 'Show'} the members of ${u.key}`} onClick={() => setFolds({ ...folds, [`m:${u.key}`]: !open })}>{open ? '▾' : '▸'}</button>
-          <b>{u.key}</b><br /><span class="footnote team-names">{names.length ? `${names.join(', ')} · ` : ''}{names.length}</span>{heldChip(u)}{qChip}
+          <b>{u.key}</b><br /><span class="footnote team-names">{names.length ? `${names.join(', ')} · ` : ''}{names.length}</span>{heldChip(u)}
         </td>{info(u)}{scoreCells}
         {lateCell(u, pen)}{adjOpen ? <td class="adjcol" /> : null}<td class="calc">{round(finalGrade(total, pen, 0))}</td>
-        <td class="grow">{u.feedbackPath ? input(u.feedbackPath, u.feedback, 'fb', `Team feedback for ${u.key}`, 'fb', false, true) : null}</td>
-        <td class="grow">{u.notesPath ? input(u.notesPath, u.notes, 'pn', `Team private notes for ${u.key}`, 'pn', false, true) : null}</td>
+        <td class="grow">{u.feedbackPath ? preview(v(u.feedbackPath, u.feedback), `Open team feedback for ${u.key}`, 'fb', { unit: u.key, member: null }, qCount) : null}</td>
+        <td class="grow">{u.notesPath ? preview(v(u.notesPath, u.notes), `Open team private notes for ${u.key}`, 'pn', { unit: u.key, member: null }) : null}</td>
       </tr>
     );
   };
-  const after = 4 + (adjOpen ? 1 : 0); // Penalty, [Adjustment,] Final, Feedback, Private notes
-  // Feedback per question: one row under the unit, a box under each question (the team's on a group sheet).
-  const questionRow = (u: Unit) => (
-    <tr class="qfb-row">
-      <td class="footnote" style="padding-left:22px">{sheet.group ? 'Team feedback per question' : 'Feedback per question'}</td>
-      {subCols ? <td class="sys" colSpan={subCols} /> : null}
-      {qs.map(([q]) => <td>{input([...u.questionFeedbackPath, q], u.questionFeedback[q] ?? null, 'qfb', `Feedback on ${q} for ${u.key}`, `qfb:${q}`, false, true)}</td>)}
-      <td colSpan={1 + after} />
-    </tr>
-  );
   // A member's row: the team's score, the member's own adjustment, final, feedback and private notes.
   const memberRows = (u: Unit) => {
     const total = scoreTotal(scoreOf(u), questions);
     const pen = lateFor(u);
     return u.people.map((pr) => (
-      <tr class="member-row">
+      <tr class={`member-row${here({ unit: u.key, member: pr.handle }) ? ' md-here' : ''}`} data-unit={u.key} data-member={pr.handle}>
         <td style="padding-left:22px">{who(pr.handle, false)}</td>
         {subCols ? <td class="sys" colSpan={subCols} /> : null}{qs.length ? <td colSpan={qs.length} /> : null}
         <td class="calc team-score">{qs.length ? round(total) : str(scoreOf(u))}</td>
         <td class="pen" />
         <td class="adjcol">{input([...pr.base, 'adjustment_individual'], pr.adjustment, 'adj', `Adjustment for ${pr.handle}`, 'adj')}</td>
         <td class="calc">{round(finalGrade(total, pen, adjOf(pr)))}</td>
-        <td class="grow">{input([...pr.base, 'feedback_individual'], pr.feedback, 'fb', `Feedback for ${pr.handle}`, 'fb', false, true)}</td>
-        <td class="grow">{input([...pr.base, NOTES_KEY], pr.notes, 'pn', `Private notes for ${pr.handle}`, 'pn', false, true)}</td>
+        <td class="grow">{preview(fbOf(pr), `Open feedback for ${pr.handle}`, 'fb', { unit: u.key, member: pr.handle })}</td>
+        <td class="grow">{preview(v([...pr.base, NOTES_KEY], pr.notes), `Open private notes for ${pr.handle}`, 'pn', { unit: u.key, member: pr.handle })}</td>
       </tr>
     ));
   };
   const rows = shown.flatMap((u) => [
     unitRow(u),
-    ...(qs.length && qOpen(u) ? [questionRow(u)] : []),
     ...(sheet.group && membersOpen(u) ? memberRows(u) : []),
   ]);
+  // The rows in the grid's order, for Ctrl/Cmd+Enter in the side panel.
+  const rowOrder: RowRef[] = shown.flatMap((u) => [{ unit: u.key, member: null }, ...(sheet.group && membersOpen(u) ? u.people.map((pr) => ({ unit: u.key, member: pr.handle })) : [])]);
+  // A save writes the edits cell by cell, blank snippets dropped, and `marked_by` on every unit whose
+  // score this save changes: the signed-in login, for the Markers table and the Marked by filter.
   const applyTo = (base: string) => {
     const out = new YamlText(base);
-    for (const [k, val] of Object.entries(edits)) out.assign(JSON.parse(k) as Path, val);
+    for (const [k, val] of Object.entries(edits)) out.assign(JSON.parse(k) as Path, k === snipKey ? (val as string[]).map((s) => s.trim()).filter(Boolean) : val);
+    if (env) {
+      const scored = new Set(Object.keys(edits).map((k) => JSON.parse(k) as Path).filter((pth) => pth[0] === container && pth[2] === sheet.units.find((u) => u.key === pth[1])?.scorePath[2]).map((pth) => String(pth[1])));
+      for (const u of sheet.units) if (scored.has(u.key)) out.assign(u.markedByPath, env.user.login);
+    }
     return out.text;
   };
   // A save over someone else's: read the sheet again, put the edits over it cell by cell, and save once more.
   const doSave = async () => {
     if (!env) return setSave({ kind: 'bad', text: 'Sign in to save.' });
     const target = { owner: org, repo: CONFIG_REPO, path };
-    const opts = { message: `marks: ${a.slug}, ${changed} ${sheet.group ? 'team' : 'student'}${changed === 1 ? '' : 's'}, from the DSL Teaching Console`, statusRepo: [org, CONFIG_REPO] as [string, string] };
+    const what = [...(changed ? [`${changed} ${sheet.group ? 'team' : 'student'}${changed === 1 ? '' : 's'}`] : []), ...(snippetsEdited ? ['snippets'] : [])].join(', ');
+    const opts = { message: `marks: ${a.slug}, ${what}, from the DSL Teaching Console`, statusRepo: [org, CONFIG_REPO] as [string, string] };
     const seen: { last: SaveState | null } = { last: null };
     const report = (s: SaveState) => {
       seen.last = s;
@@ -574,6 +620,95 @@ export function MarksTab(p: TabProps) {
     spread(finals, Object.keys(savedHeld).length),
   ];
   const people = sheet.units.flatMap((u) => u.people.map((pr) => ({ u, pr })));
+  /** What one person's marks page will show, from the marks on screen (the toolbar's Student view and the side panel's). */
+  const studentViewOf = (u: Unit, pr: Person) => (
+    <StudentView handle={pr.handle} title={assignmentTitle(a)} submitted={u.info?.submitted} m={studentMarks({
+      group: sheet.group, team: u.key, score: fullScore(u), questions, max: max || null, rate, daysLate: u.info?.days_late, latePenalty: lateOf(u),
+      adjustment: adjOf(pr), feedback: fbOf(pr),
+      teamFeedback: u.feedbackPath ? v(u.feedbackPath, u.feedback) : null,
+      questionFeedback: { ...u.questionFeedback, ...Object.fromEntries(qs.map(([q]) => [q, v([...u.questionFeedbackPath, q], u.questionFeedback[q] ?? null)])) },
+    })} />
+  );
+  // With the side panel open, moving into another row of the grid moves the panel with it (focus stays in the grid).
+  const followFocus = (e: FocusEvent) => {
+    if (!drawer) return;
+    const tr = (e.target as HTMLElement).closest?.('tr[data-unit]') as HTMLElement | null;
+    if (!tr) return;
+    const row = { unit: tr.dataset.unit!, member: tr.dataset.member ?? null };
+    if (!here(row)) setDrawer({ ...row, focus: null, grab: false });
+  };
+  const drawerUnit = drawer ? sheet.units.find((u) => u.key === drawer.unit) ?? null : null;
+  const drawerMember = drawer?.member && drawerUnit ? drawerUnit.people.find((pr) => pr.handle === drawer.member) ?? null : null;
+  const drawerView = (() => {
+    if (!drawer || !drawerUnit || (drawer.member && !drawerMember)) return null;
+    const u = drawerUnit;
+    const qBoxes = (label: (q: string) => string): DrawerBox[] =>
+      qs.map(([q, m]) => ({ path: [...u.questionFeedbackPath, q], field: `qfb:${q}`, heading: `Feedback on ${q}${outOf(m)}`, label: label(q), value: str(v([...u.questionFeedbackPath, q], u.questionFeedback[q] ?? null)) }));
+    const links = [submissionOf(u), ...(testsOf(u) ? [{ href: testsOf(u)!, text: `Test results (${str(u.info?.autograde)})` }] : [])].filter((l): l is DrawerLink => l !== null);
+    let eyebrow: string, title: string, sub: string | undefined, boxes: DrawerBox[], viewOf: Person | null;
+    if (drawerMember) {
+      const pr = drawerMember, nm = realName(pr.handle);
+      eyebrow = `Member of ${u.key}`;
+      title = nm || pr.handle;
+      sub = nm ? pr.handle : undefined;
+      boxes = [
+        { path: [...pr.base, 'feedback_individual'], field: 'fb', heading: 'Their own feedback (only this member sees it)', label: `Feedback for ${pr.handle}`, value: str(fbOf(pr)) },
+        { path: [...pr.base, NOTES_KEY], field: 'pn', heading: 'Private notes (never sent)', label: `Private notes for ${pr.handle}`, value: str(v([...pr.base, NOTES_KEY], pr.notes)), private: true },
+      ];
+      viewOf = pr;
+    } else if (sheet.group) {
+      eyebrow = 'Team';
+      title = u.key;
+      sub = u.people.map((pr) => realName(pr.handle) || pr.handle).join(', ') || undefined;
+      boxes = [
+        ...(u.feedbackPath ? [{ path: u.feedbackPath, field: 'fb', heading: 'Team feedback (every member sees it)', label: `Team feedback for ${u.key}`, value: str(v(u.feedbackPath, u.feedback)) }] : []),
+        ...qBoxes((q) => `Feedback on ${q} for ${u.key}`),
+        ...(u.notesPath ? [{ path: u.notesPath, field: 'pn', heading: 'Team private notes (never sent)', label: `Team private notes for ${u.key}`, value: str(v(u.notesPath, u.notes)), private: true }] : []),
+      ];
+      viewOf = u.people.find((pr) => pr.handle === svPick) ?? u.people[0] ?? null;
+    } else {
+      const pr = u.people[0], nm = realName(u.key);
+      eyebrow = 'Student';
+      title = nm || u.key;
+      sub = nm ? u.key : undefined;
+      boxes = [
+        { path: [...pr.base, 'feedback_individual'], field: 'fb', heading: 'Feedback', label: `Feedback for ${u.key}`, value: str(fbOf(pr)) },
+        ...qBoxes((q) => `Feedback on ${q} for ${u.key}`),
+        { path: [...pr.base, NOTES_KEY], field: 'pn', heading: 'Private notes (never sent)', label: `Private notes for ${u.key}`, value: str(v([...pr.base, NOTES_KEY], pr.notes)), private: true },
+      ];
+      viewOf = pr;
+    }
+    const at = rowOrder.findIndex((r) => here(r));
+    const view = viewOf ? (
+      <details class="md-view">
+        <summary>Student view</summary>
+        {sheet.group && !drawerMember && u.people.length > 1 ? (
+          <select class="student-pick" aria-label="Member shown" value={viewOf.handle} onChange={(e) => setSvPick((e.target as HTMLSelectElement).value)}>
+            {u.people.map((pr) => <option value={pr.handle}>{realName(pr.handle) ? `${realName(pr.handle)} (${pr.handle})` : pr.handle}</option>)}
+          </select>
+        ) : null}
+        {studentViewOf(u, viewOf)}
+      </details>
+    ) : null;
+    return (
+      <MarksDrawer rowKey={`${drawer.unit}/${drawer.member ?? ''}`} eyebrow={eyebrow} title={title} sub={sub} boxes={boxes} links={links}
+        onText={(pth, text) => set(pth, text, false)} snippets={snippets} onSnippets={setSnippets} view={view}
+        focus={drawer.grab ? drawer.focus : null} grab={drawer.grab} onClose={closeDrawer}
+        onNext={(field) => { const next = rowOrder[at + 1]; if (next) setDrawer({ ...next, focus: field, grab: true }); }} />
+    );
+  })();
+  // Moderation: each marker's count, mean and median score, from the saved sheet.
+  const markersTable = anyMarker ? (
+    <section class="panel section markers">
+      <h2>Markers <Hint label="About Markers">Who saved each {noun}’s marks from the console, read from the saved mark sheet: how many each marked, and the mean and median score (the questions added up, before any late penalty or adjustment). Use Marked by above the grid for a second pass over one marker’s {noun}s.</Hint></h2>
+      <div class="table-wrap">
+        <table class="grid">
+          <thead><tr><th>Marker</th><th class="num">Marked</th><th class="num">Mean{max ? ` / ${max}` : ''}</th><th class="num">Median{max ? ` / ${max}` : ''}</th></tr></thead>
+          <tbody>{markers.map((m) => <tr><td>{m.marker || <span class="footnote">not recorded</span>}</td><td class="num">{m.count}</td><td class="num">{m.mean === null ? '—' : round(m.mean)}</td><td class="num">{m.median === null ? '—' : round(m.median)}</td></tr>)}</tbody>
+        </table>
+      </div>
+    </section>
+  ) : null;
   const view = viewing === null ? null : (people.find((x) => x.pr.handle === viewing) ?? people[0] ?? null);
   const restore = () => {
     if (!pending) return;
@@ -593,12 +728,21 @@ export function MarksTab(p: TabProps) {
       <div class="marks-filters" role="group" aria-label="Show">
         <span class="footnote">Show:</span>
         {(['all', 'unmarked', 'late', 'held'] as const).map((f) => <button class={`chip filter${filter === f ? ' on' : ''}`} type="button" aria-pressed={filter === f} onClick={() => setFilter(f)}>{FILTER_WORD[f]} {counts[f]}</button>)}
+        {anyMarker ? (
+          <label class="marker-filter footnote">Marked by{' '}
+            <select aria-label="Marked by" value={byMarker === null ? '*' : byMarker === '' ? '-' : byMarker} onChange={(e) => { const x = (e.target as HTMLSelectElement).value; setByMarker(x === '*' ? null : x === '-' ? '' : x); }}>
+              <option value="*">anyone</option>
+              {markers.filter((m) => m.marker).map((m) => <option value={m.marker}>{m.marker}</option>)}
+              <option value="-">not recorded</option>
+            </select>
+          </label>
+        ) : null}
         {sheet.group ? null : <button class="chip adj-chip" type="button" aria-expanded={adjOpen} onClick={() => setAdjChoice(!adjOpen)}>Adjustments {adjOpen ? '▾' : '▸'}</button>}
         {Object.keys(widths).length ? <button class="btn small quiet reset-widths" type="button" onClick={() => setWidths({})}>Reset widths</button> : null}
         <button class="icon-btn full-toggle" type="button" ref={fullBtn} aria-label={full ? 'Exit full screen' : 'Full screen'} title={full ? 'Exit full screen (Esc)' : 'Full screen'} onClick={() => setFull(!full)}>{full ? '⤡' : '⤢'}</button>
       </div>
       <div class="marks-tools">
-        <SaveBar state={save} onSave={() => void doSave()} label="Save marks" disabled={!changed} small file={{ org, repo: CONFIG_REPO, path }} note={changed ? `${changed} ${noun}${changed > 1 ? 's' : ''} changed` : 'No unsaved changes'} />
+        <SaveBar state={save} onSave={() => void doSave()} label="Save marks" disabled={!dirty} small file={{ org, repo: CONFIG_REPO, path }} note={dirty ? [...(changed ? [`${changed} ${noun}${changed > 1 ? 's' : ''} changed`] : []), ...(snippetsEdited ? ['snippets changed'] : [])].join(' · ') : 'No unsaved changes'} />
       </div>
     </div>
   );
@@ -611,7 +755,6 @@ export function MarksTab(p: TabProps) {
       u.key.length + 4,
       ...(sheet.group ? [`${u.people.map((pr) => realName(pr.handle) || pr.handle).join(', ')} · ${u.people.length}`.length] : []),
       ...u.people.map((pr) => (realName(pr.handle) || pr.handle).length),
-      qs.length ? 'Feedback per question (9)'.length : 0,
     ]),
   );
   const whoWidth = Math.min(220, Math.max(96, Math.round(longest * 6.4 + 28)));
@@ -704,7 +847,7 @@ export function MarksTab(p: TabProps) {
       {sheet.frozen ? <p class="note" style="margin-bottom:12px"><b>Frozen at the late cutoff.</b> The submission details no longer change; your marks and feedback are still yours to edit.</p> : null}
       {pending ? (
         <p class="note draft-offer">
-          Unsaved draft from {fmtWhen(new Date(pending.at).toISOString(), tz, year)} ({plural(new Set(Object.keys(pending.edits).map((k) => String((JSON.parse(k) as Path)[1]))).size, 'row')}){pending.sha && pending.sha !== sha ? ', made before the sheet last changed: restoring puts your edits over the current marks cell by cell' : ''}:{' '}
+          Unsaved draft from {fmtWhen(new Date(pending.at).toISOString(), tz, year)} ({plural(unitsEdited(pending.edits, container).size, 'row')}{snipKey in pending.edits ? ', snippets' : ''}){pending.sha && pending.sha !== sha ? ', made before the sheet last changed: restoring puts your edits over the current marks cell by cell' : ''}:{' '}
           <button class="btn small" type="button" onClick={restore}>Restore</button> <button class="btn small quiet" type="button" onClick={() => setPending(null)}>Discard</button>
         </p>
       ) : null}
@@ -713,22 +856,15 @@ export function MarksTab(p: TabProps) {
         {tools}
         {external ? <p class="footnote">Submitted outside GitHub: no dates, no late penalty.</p> : null}
         <div class="table-wrap marks-wrap">
-          <table class="grid marks" ref={table} onKeyDown={onKey} style={{ minWidth: `${minTable}px` }}>
+          <table class="grid marks" ref={table} onKeyDown={onKey} onFocusIn={followFocus} style={{ minWidth: `${minTable}px` }}>
             {colgroup}
             {head}
             <tbody>{rows}</tbody>
           </table>
         </div>
+        {drawerView}
       </div>
-      {editor ? (
-        <Modal title={editor.title} onClose={() => setEditor(null)}>
-          <textarea class="big-editor" aria-label={editor.title} value={editor.text} onInput={(e) => setEditor({ ...editor, text: (e.target as HTMLTextAreaElement).value })} />
-          <div class="actions" style="margin-top:12px">
-            <button class="btn" type="button" onClick={() => { set(editor.path, editor.text, false); setEditor(null); }}>Save</button>
-            <button class="btn quiet" type="button" onClick={() => setEditor(null)}>Cancel</button>
-          </div>
-        </Modal>
-      ) : null}
+      {markersTable}
       {viewing !== null ? (
         <Modal title="Student view" onClose={() => setViewing(null)}>
           <div class="field">
@@ -737,12 +873,7 @@ export function MarksTab(p: TabProps) {
               {people.map(({ pr }) => <option value={pr.handle}>{realName(pr.handle) ? `${realName(pr.handle)} (${pr.handle})` : pr.handle}</option>)}
             </select>
           </div>
-          {view ? <StudentView handle={view.pr.handle} title={assignmentTitle(a)} submitted={view.u.info?.submitted} m={studentMarks({
-            group: sheet.group, team: view.u.key, score: fullScore(view.u), questions, max: max || null, rate, daysLate: view.u.info?.days_late, latePenalty: lateOf(view.u),
-            adjustment: adjOf(view.pr), feedback: fbOf(view.pr),
-            teamFeedback: view.u.feedbackPath ? v(view.u.feedbackPath, view.u.feedback) : null,
-            questionFeedback: { ...view.u.questionFeedback, ...Object.fromEntries(qs.map(([q]) => [q, v([...view.u.questionFeedbackPath, q], view.u.questionFeedback[q] ?? null)])) },
-          })} /> : <p>No students on this sheet yet.</p>}
+          {view ? studentViewOf(view.u, view.pr) : <p>No students on this sheet yet.</p>}
         </Modal>
       ) : null}
     </>

@@ -768,7 +768,7 @@ input[aria-invalid="true"] { border-color: var(--bad); background: var(--bad-sof
 table.marks { table-layout: fixed; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }
 table.marks th { white-space: normal; position: sticky; }
 table.marks td { white-space: nowrap; }
-table.marks td:first-child, table.marks td.grow, table.marks tr.qfb-row td { white-space: normal; }
+table.marks td:first-child { white-space: normal; }
 .col-grip { position: absolute; top: 0; right: -3px; width: 6px; height: 100%; cursor: col-resize; z-index: 4; touch-action: none; }
 .col-grip:hover, .col-grip:focus-visible { background: var(--rule-strong); outline: none; }
 table.marks td { padding: 4px 6px; }
@@ -797,7 +797,6 @@ table.marks td.pen .invalid-msg { display: flex; justify-content: flex-start; ma
 table.marks td.sys.auto { background: var(--ok-soft); }
 table.marks .held-chip { margin-top: 4px; }
 table.marks .held-why { font-size: 12px; font-weight: 400; color: var(--bad-ink); }
-table.marks .qfb-chip { margin-top: 4px; border: 0; cursor: pointer; }
 table.marks th.adjcol, table.marks td.adjcol { background: var(--amber-soft); }
 table.marks input.adj { border-color: var(--amber-ink); }
 table.marks .team-names { font-weight: 400; }
@@ -836,17 +835,37 @@ table.marks tr.nosub td { color: var(--muted); }
 table.marks tr.team-row td { background: var(--sunk); font-weight: 600; border-top: 1px solid var(--rule-strong); }
 table.marks tr.member-row td { font-weight: 400; }
 table.marks .fold-toggle { border: 0; background: none; padding: 0 6px 0 0; min-height: 0; cursor: pointer; color: var(--ink-2); font: inherit; }
-table.marks td textarea { border-color: var(--rule-strong); background: var(--surface); min-height: 30px; padding: 3px 22px 3px 6px; resize: both; min-width: 160px; max-width: 100%; field-sizing: content; max-height: 14em; }
-table.marks .area-wrap { position: relative; display: block; }
-table.marks .area-wrap textarea { display: block; }
-table.marks td.grow textarea { width: 100%; }
-table.marks .area-open { position: absolute; top: 3px; right: 3px; border: 0; background: none; padding: 0 2px; min-height: 0; font-size: 12px; line-height: 1; color: var(--muted); cursor: pointer; }
-table.marks .area-open:hover, table.marks .area-open:focus-visible { color: var(--ink); }
-.big-editor { width: 100%; height: 60vh; resize: vertical; font-size: 14.5px; }
-table.marks textarea.fb { min-width: 160px; }
-table.marks textarea.pn { min-width: 160px; }
-table.marks textarea.qfb { width: 100%; min-width: 0; font-size: 13px; resize: vertical; }
-table.marks tr.qfb-row td { border-top: 0; font-weight: 400; }
+/* Feedback and Private notes in the grid: one line of the text, opening the row's side panel. */
+table.marks .md-preview { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 30px; padding: 3px 6px; border: 1px solid var(--rule-strong); border-radius: 6px; background: var(--surface); color: var(--ink); font: inherit; font-weight: 400; text-align: left; cursor: pointer; }
+table.marks .md-preview:hover, table.marks .md-preview:focus-visible { border-color: var(--ink-2); }
+table.marks .md-preview .md-line { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+table.marks .md-preview.empty .md-line { color: var(--muted); }
+table.marks .md-preview .qfb-count { flex: none; font-size: 11.5px; padding: 0 6px; }
+table.marks tr.md-here > td:first-child { box-shadow: inset 3px 0 0 var(--ink); }
+/* The row's side panel: the operation panel's drawer, under it when both are open. */
+.drawer.marks-drawer { z-index: 39; width: min(480px, calc(100% - 32px)); }
+.marking.full .drawer.marks-drawer { top: 12px; max-height: calc(100vh - 24px); }
+.marks-drawer .drawer-body { gap: 14px; }
+.marks-drawer h2 { font-size: 17px; margin: 0; }
+.marks-drawer .md-links { margin: 0; font-size: 13.5px; }
+.marks-drawer .md-box { display: grid; gap: 4px; }
+.marks-drawer .md-box label { font-size: 13px; font-weight: 600; }
+.marks-drawer .md-text { width: 100%; min-height: 5.5em; max-height: 40vh; resize: vertical; field-sizing: content; font-size: 14px; }
+.marks-drawer .md-box.private label { color: var(--muted); }
+.marks-drawer .md-box.private .md-text { background: var(--sunk); }
+.marks-drawer .md-snippets { display: grid; gap: 8px; border-top: 1px solid var(--rule); padding-top: 10px; }
+.marks-drawer .md-snip-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.marks-drawer .md-snip-head h3 { margin: 0; font-size: 14px; }
+.marks-drawer .md-snip-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.marks-drawer .md-snip { border: 0; cursor: pointer; text-align: left; white-space: normal; }
+.marks-drawer .md-snip-edit { display: grid; gap: 6px; }
+.marks-drawer .md-snip-row { display: flex; gap: 6px; align-items: center; }
+.marks-drawer .md-snip-row input { flex: 1 1 auto; min-width: 0; }
+.marks-drawer .md-view { border-top: 1px solid var(--rule); padding-top: 10px; }
+.marks-drawer .md-view summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+.marks-drawer .md-view .student-pick { margin-top: 8px; width: auto; }
+.marks-filters .marker-filter select { width: auto; min-height: 28px; padding: 2px 6px; font-size: 13px; }
+.markers { margin-top: 12px; }
 
 /* run settings: effective value and source, and the links to change it */
 .run-row .eff { font-weight: 600; }

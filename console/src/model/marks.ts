@@ -12,6 +12,10 @@ export const NOTES_KEY = 'notes_not_shared_with_students';
 export const QUESTION_FEEDBACK_KEY = 'feedback_per_question';
 /** The unit's late penalty, beside `info:`: `apply` (absent means the same), `waive`, or the whole penalty (`25%`) (grades.LATE_PENALTY_KEY). */
 export const LATE_PENALTY_KEY = 'late_penalty';
+/** Who saved the unit's marks from the console: a login, written on save, read only for moderation (the engine keeps it and never sends it). */
+export const MARKED_BY_KEY = 'marked_by';
+/** The assignment's reusable feedback comments: a top-level list in the sheet, beside the units (the engine keeps it and never sends it). */
+export const SNIPPETS_KEY = 'snippets';
 
 export interface Person {
   handle: string;
@@ -36,6 +40,9 @@ export interface Unit {
   /** The team's own private notes (a group sheet; a person's notes are on the person). */
   notes: unknown;
   notesPath: Path | null;
+  /** Who saved its marks (`marked_by`), as the sheet holds it. */
+  markedBy: unknown;
+  markedByPath: Path;
   people: Person[];
 }
 
@@ -59,6 +66,7 @@ export function readSheet(text: string, doc: unknown): Sheet {
         questionFeedback: obj(u[QUESTION_FEEDBACK_KEY]), questionFeedbackPath: [container, key, QUESTION_FEEDBACK_KEY],
         latePenalty: u[LATE_PENALTY_KEY] ?? null, latePenaltyPath: [container, key, LATE_PENALTY_KEY],
         notes: u[NOTES_KEY] ?? null, notesPath: [container, key, NOTES_KEY],
+        markedBy: u[MARKED_BY_KEY] ?? null, markedByPath: [container, key, MARKED_BY_KEY],
         people: Object.entries(obj(u.members)).map(([handle, m]) => {
           const mm = obj(m);
           return { handle, adjustment: mm.adjustment_individual ?? null, feedback: mm.feedback_individual ?? null, notes: mm[NOTES_KEY] ?? null, base: [container, key, 'members', handle] };
@@ -69,10 +77,64 @@ export function readSheet(text: string, doc: unknown): Sheet {
       questionFeedback: obj(u[QUESTION_FEEDBACK_KEY]), questionFeedbackPath: [container, key, QUESTION_FEEDBACK_KEY],
       latePenalty: u[LATE_PENALTY_KEY] ?? null, latePenaltyPath: [container, key, LATE_PENALTY_KEY],
       notes: null, notesPath: null,
+      markedBy: u[MARKED_BY_KEY] ?? null, markedByPath: [container, key, MARKED_BY_KEY],
       people: [{ handle: key, adjustment: u.adjustment_individual ?? null, feedback: u.feedback_individual ?? null, notes: u[NOTES_KEY] ?? null, base: [container, key] }],
     };
   });
   return { group, frozen, units };
+}
+
+/** The sheet's feedback snippets: the strings of its top-level `snippets:` list, in order (none when it has no list). */
+export function readSnippets(doc: unknown): string[] {
+  const list = obj(doc)[SNIPPETS_KEY];
+  return Array.isArray(list) ? list.filter((s) => (typeof s === 'string' || typeof s === 'number') && String(s).trim()).map(String) : [];
+}
+
+/** `text` with `snippet` put in place of the selection `start`..`end`, a space before it where it would run into a word; and where the caret lands after it. */
+export function insertSnippet(text: string, start: number, end: number, snippet: string): { text: string; caret: number } {
+  const before = text.slice(0, start);
+  const lead = before && !/\s$/.test(before) ? ' ' : '';
+  const out = `${before}${lead}${snippet}`;
+  return { text: out + text.slice(end), caret: out.length };
+}
+
+/** One marker's line in the Markers table. */
+export interface MarkerLine {
+  /** The login, or '' for marks nobody's console recorded. */
+  marker: string;
+  count: number;
+  mean: number | null;
+  median: number | null;
+}
+
+/**
+ * The Markers table: per `marked_by`, how many marked units and the mean and median of their
+ * scores (the questions added up, before any late penalty or adjustment). A unit with no mark is
+ * not counted; one whose mark is a word counts but adds no figure. Markers by count, most first;
+ * the unrecorded line last.
+ */
+export function markerLines(units: { marker: unknown; score: unknown }[], questions: Record<string, unknown> | null): MarkerLine[] {
+  const by = new Map<string, { count: number; totals: number[] }>();
+  for (const u of units) {
+    const marked = isObj(u.score) ? !Object.values(u.score).every(blank) : !blank(u.score);
+    if (!marked) continue;
+    const who = blank(u.marker) ? '' : String(u.marker).trim();
+    const line = by.get(who) ?? { count: 0, totals: [] };
+    line.count += 1;
+    const total = scoreTotal(u.score, questions);
+    if (total !== null) line.totals.push(total);
+    by.set(who, line);
+  }
+  return [...by.entries()]
+    .map(([marker, { count, totals }]) => {
+      const s = [...totals].sort((x, y) => x - y), mid = Math.floor(s.length / 2);
+      return {
+        marker, count,
+        mean: s.length ? s.reduce((n, x) => n + x, 0) / s.length : null,
+        median: s.length ? (s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2) : null,
+      };
+    })
+    .sort((a, b) => (a.marker === '') !== (b.marker === '') ? (a.marker === '' ? 1 : -1) : b.count - a.count || a.marker.localeCompare(b.marker));
 }
 
 /** A cell as a number, or null when it is blank or not a number (`pass`, `A-` stay text). */
