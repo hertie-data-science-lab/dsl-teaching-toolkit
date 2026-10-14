@@ -111,8 +111,9 @@ export function Hint({ children, doc, label = 'About this page', small = false }
       {doc ? <> <a href={`${DOCS}${doc}`} target="_blank" rel="noopener">Learn more</a></> : null}
     </span>
   );
+  // Not once the box is gone: closing runs this with `host` still the removed box.
   useLayoutEffect(() => {
-    if (host) render(body, host);
+    if (host?.isConnected) render(body, host);
   });
   // Once on opening, after the box holds it (the effect above runs first).
   useLayoutEffect(() => {

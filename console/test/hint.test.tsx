@@ -5,6 +5,7 @@
 import { readFileSync } from 'node:fs';
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
+import { useEffect } from 'preact/hooks';
 import { afterEach, describe, expect, it } from 'vitest';
 import { DOCS } from '../src/ui/bits';
 import { Hint } from '../src/ui/Hint';
@@ -77,6 +78,26 @@ describe('Hint', () => {
     expect(pop().hidden).toBe(false);
     await act(() => (document.activeElement as HTMLElement).blur());
     expect(pop().hidden).toBe(true);
+  });
+
+  it('renders nothing into the removed box once it closes', async () => {
+    let live = 0;
+    const Body = () => {
+      useEffect(() => {
+        live++;
+        return () => void live--;
+      }, []);
+      return <>Dates.</>;
+    };
+    root = document.createElement('div');
+    document.body.appendChild(root);
+    await act(() => render(<Hint><Body /></Hint>, root!));
+    const btn = root.querySelector<HTMLButtonElement>('.hint-btn')!;
+    await act(() => btn.focus());
+    expect(live).toBe(1);
+    await act(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); });
+    expect(live).toBe(1); // the copy in place, and none left in the removed box
+    expect(root.contains(pop())).toBe(true);
   });
 
   describe('inside a dialog', () => {
