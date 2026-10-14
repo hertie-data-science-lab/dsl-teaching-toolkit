@@ -408,12 +408,12 @@ def test_the_course_defaults_block_is_validated_like_the_file_it_is_stamped_into
     # `assignment_defaults:` in course.yml is what `New assignment` stamps into the
     # file it generates - at WRITE time, so a reader never merges it - and it goes through
     # the same readers, so a value the writer would emit cannot be one the reader refuses.
-    assert settings.parse_assignment_defaults(
+    assert settings.parse_course_defaults(
         {"max_team_size": 5, "late_window_days": 7, "late_penalty_per_day": "10%"}
     ) == {"max_team_size": 5, "late_window_days": 7, "late_penalty_per_day": "10%"}
     # A per-assignment key is not a course-wide one: nothing about ONE assignment belongs
     # in a block that stands behind all of them.
-    assert settings.parse_assignment_defaults({"title": "no"}) == {}
+    assert settings.parse_course_defaults({"title": "no"}) == {}
     assert "title" in capsys.readouterr().err
 
 
@@ -6335,7 +6335,7 @@ def test_a_public_assignment_whose_repos_are_private_is_a_fault(monkeypatch):
         _semester_rows(("a3-ada", "private"), ("a3-ben", "public")),
     )
     (fault,) = found
-    assert fault.field == "visibility"
+    assert fault.field == "assignment_repo_visibility"
     assert "1 of 2 are not public" in fault.what
     assert "read when each repo is CREATED" in fault.what
     # A COUNT and never a name: this sentence reaches a public run log, a digest issue and
@@ -6343,8 +6343,8 @@ def test_a_public_assignment_whose_repos_are_private_is_a_fault(monkeypatch):
     assert "ada" not in fault.what + fault.fix()
     # It bites when the assignment is graded (the late cutoff), like every other value.
     assert fault.fires == DUE_AT + timedelta(days=10)
-    # ...and names the file the setting lives in now.
-    assert fault.file == "assignments.yml"
+    # ...and names the file the setting lives in now: its schedule.yml entry.
+    assert fault.file == "schedule.yml"
 
 
 def test_a_private_assignment_whose_repos_are_public_is_the_same_fault(monkeypatch):

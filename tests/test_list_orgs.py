@@ -268,7 +268,9 @@ def test_each_course_org_reports_the_toolkit_tier_it_runs(monkeypatch):
     monkeypatch.setattr(
         list_orgs,
         "org_meta",
-        lambda org: {"central_ref": "main"} if org == "Trunk" else {},
+        lambda org: (
+            {"course": {"toolkit_version_ref": "main"}} if org == "Trunk" else {}
+        ),
     )
 
     assert [(o["org"], o["central_ref"]) for o in list_orgs.discover_course_orgs()] == [
@@ -287,7 +289,7 @@ def test_one_unreadable_org_does_not_hide_every_other_one(monkeypatch, capsys):
     def meta(org):
         if org == "Bad":
             raise RuntimeError("Bad/.github/course.yml is not a YAML mapping")
-        return {"central_ref": "main"}
+        return {"course": {"toolkit_version_ref": "main"}}
 
     monkeypatch.setattr(list_orgs, "org_meta", meta)
 
@@ -348,7 +350,11 @@ def test_an_org_whose_declared_tier_is_junk_reports_no_tier(monkeypatch, capsys)
     # A null tier matches none, so Promote's fan-out names the org and skips it. It used
     # to resolve to `release`, which refreshed a mistyped org onto a tier nobody chose.
     _registry(monkeypatch, "Typo")
-    monkeypatch.setattr(list_orgs, "org_meta", lambda org: {"central_ref": "stagign"})
+    monkeypatch.setattr(
+        list_orgs,
+        "org_meta",
+        lambda org: {"course": {"toolkit_version_ref": "stagign"}},
+    )
 
     assert [o["central_ref"] for o in list_orgs.discover_course_orgs()] == [None]
     assert "stagign" in capsys.readouterr().err

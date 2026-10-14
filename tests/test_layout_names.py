@@ -106,7 +106,7 @@ def test_a_semester_is_found_through_the_pointer_in_its_config_repo(monkeypatch)
 
     fake_config(monkeypatch, load)
     assert discovery.course_org_for_semester("Sem-f2026") == "Course-Org"
-    assert reads == [("Sem-f2026", CONFIG_REPO, ".system/dsl-course.yml")]
+    assert reads == [("Sem-f2026", CONFIG_REPO, ".system/course.yml")]
 
 
 def test_a_semester_without_its_config_repo_or_topic_is_never_written_into(monkeypatch):

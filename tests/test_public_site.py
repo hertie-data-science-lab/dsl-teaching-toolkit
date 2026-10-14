@@ -410,10 +410,12 @@ def test_the_course_description_contact_and_licence_reach_the_public_site(
     # Seeded, documented and console-editable, and once read by nothing: the public site
     # kept the seed's placeholder paragraph and showed no contact or licence at all.
     meta = {
-        "course_name": "Deep Learning",
-        "course_description": "Nets, end to end.",
-        "contact": "dl@example.edu",
-        "licence": "CC BY 4.0",
+        "course": {
+            "name": "Deep Learning",
+            "description": "Nets, end to end.",
+            "licence": "CC BY 4.0",
+        },
+        "open_course_site": {"contact": "dl@example.edu"},
     }
     monkeypatch.setattr(public_site, "org_meta", lambda org: meta)
     files = published()
@@ -430,17 +432,19 @@ def test_the_course_description_contact_and_licence_reach_the_public_site(
 def test_unset_keys_fall_back_and_a_blank_description_replaces_the_placeholder(
     published, monkeypatch
 ):
-    monkeypatch.setattr(public_site, "org_meta", lambda org: {"contact": ""})
+    monkeypatch.setattr(
+        public_site, "org_meta", lambda org: {"open_course_site": {"contact": ""}}
+    )
     files = published()
     assert 'course_description: ""' in files["_config.yml"]
     assert "One paragraph description" not in files["_config.yml"]
     pol = policy.load()
     assert yaml.safe_load(files["_data/course.yml"]) == {
-        "contact": pol["contact"],
+        "contact": policy.contact(),
         "licence": pol["licences"][0],
     }
 
 
 def test_a_licence_the_policy_does_not_list_is_shown_without_a_link():
-    facts = yaml.safe_load(public_site.course_facts({"licence": "MIT"}))
+    facts = yaml.safe_load(public_site.course_facts({"course": {"licence": "MIT"}}))
     assert facts["licence"] == {"name": "MIT", "url": ""}

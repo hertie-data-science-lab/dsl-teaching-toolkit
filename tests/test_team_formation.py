@@ -681,7 +681,7 @@ def post(monkeypatch):
         monkeypatch.setattr(discovery, "course_name_of", lambda org: "Deep Learning")
         # The course's course.yml, as `student_console_for` reads it.
         monkeypatch.setattr(
-            discovery, "org_meta", lambda org: {"student_console": console}
+            discovery, "org_meta", lambda org: {"course": {"student_console": console}}
         )
         return rec, sender
 

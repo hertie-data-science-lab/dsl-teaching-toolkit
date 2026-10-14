@@ -117,10 +117,10 @@ def test_status_json_says_semester_and_never_cohort():
     assert "cohort" not in schemas.status_schema()["properties"]
 
 
-# --------------------------------------------------------- instructors.yml (people.yml)
+# ----------------------------------- semester.yml people (instructors.yml, people.yml)
 
 NEW_INSTRUCTORS = {
-    "instructors": [
+    "people": [
         {"github_handle": "prof", "role": "instructor", "email": "p@x.org"},
         {"github_handle": "ta", "role": "teaching_assistant", "email": "t@x.org"},
         {"github_handle": "nobody", "email": "n@x.org"},
@@ -134,7 +134,7 @@ def test_the_instructors_list_is_grouped_by_role_and_a_missing_role_is_a_fault()
     faculty = sync_faculty.parse_faculty_from_meta(NEW_INSTRUCTORS, found)
     assert [p["github_handle"] for p in faculty["instructors"]] == ["prof"]
     assert [p["github_handle"] for p in faculty["teaching_assistants"]] == ["ta"]
-    assert [(f.where, f.field) for f in found] == [("instructors[2]", "role")]
+    assert [(f.where, f.field) for f in found] == [("people[2]", "role")]
 
 
 def _semester_files(monkeypatch, files: dict[str, dict]) -> None:
@@ -142,10 +142,10 @@ def _semester_files(monkeypatch, files: dict[str, dict]) -> None:
 
 
 def test_a_skeleton_instructors_file_alone_is_a_fault_and_prunes_nobody(monkeypatch):
-    _semester_files(monkeypatch, {"instructors.yml": {}})
+    _semester_files(monkeypatch, {"semester.yml": {}})
     found: list = []
     assert sync_faculty.read_semester_people("Sem", found) is None
-    assert "no `instructors:` list" in found[0].what
+    assert "no `people:` list" in found[0].what
     reconciled: list = []
     monkeypatch.setattr(
         sync_faculty,
@@ -157,31 +157,32 @@ def test_a_skeleton_instructors_file_alone_is_a_fault_and_prunes_nobody(monkeypa
 
 
 def test_the_new_instructors_file_is_read(monkeypatch):
-    _semester_files(monkeypatch, {"instructors.yml": NEW_INSTRUCTORS})
+    _semester_files(monkeypatch, {"semester.yml": NEW_INSTRUCTORS})
     faculty = sync_faculty.read_semester_people("Sem", [])
     assert [p["github_handle"] for p in faculty["instructors"]] == ["prof"]
 
 
-def test_the_site_cards_read_instructors_yml_only(monkeypatch):
-    files = {"people.yml": OLD_PEOPLE, "instructors.yml": NEW_INSTRUCTORS}
+def test_the_site_cards_read_semester_yml_only(monkeypatch):
+    files = {"people.yml": OLD_PEOPLE, "semester.yml": NEW_INSTRUCTORS}
     monkeypatch.setattr(site, "yaml_file", lambda org, repo, path: files.get(path, {}))
     fake_config(monkeypatch, site.yaml_file)
     meta, path = site._instructors_meta("Sem")
-    assert path == "instructors.yml"
+    assert path == "semester.yml"
     grouped = people_by_role(meta)
     assert [p["github_handle"] for p in grouped["teaching_assistants"]] == ["ta"]
 
 
-def test_a_new_semester_is_seeded_instructors_yml_and_never_people_yml():
-    assert "instructors.yml" in welcome.CONFIG_SCAFFOLDS
+def test_a_new_semester_is_seeded_semester_yml_and_never_people_yml():
+    assert "semester.yml" in welcome.CONFIG_SCAFFOLDS
     assert "people.yml" not in welcome.CONFIG_SCAFFOLDS
-    example = ROOT / "example-course" / "semester-org" / "instructors.yml"
+    assert "instructors.yml" not in welcome.CONFIG_SCAFFOLDS
+    example = ROOT / "example-course" / "semester-org" / "semester.yml"
     shipped = yaml.safe_load(example.read_text(encoding="utf-8"))
-    assert {p["role"] for p in shipped["instructors"]} == set(INSTRUCTOR_ROLES)
+    assert {p["role"] for p in shipped["people"]} == set(INSTRUCTOR_ROLES)
 
 
-def test_the_exported_instructors_schema_requires_a_role():
-    entry = schemas.instructors_schema()["properties"]["instructors"]["items"]
+def test_the_exported_semester_schema_requires_a_role():
+    entry = schemas.semester_schema()["properties"]["people"]["items"]
     assert "role" in entry["required"]
     assert entry["properties"]["role"]["enum"] == list(INSTRUCTOR_ROLES)
 
@@ -361,8 +362,9 @@ def test_formats_is_a_list_and_its_first_entry_is_the_runnable_one():
 
 
 def test_a_course_default_under_the_old_format_key_is_not_read():
-    assert settings.parse_assignment_defaults({"format": "py"}) == {}
-    assert settings.parse_assignment_defaults({"formats": "py"}) == {"formats": ("py",)}
+    # Neither is a cascaded default any more (decision 0039 rule 2: the wizard asks).
+    assert settings.parse_course_defaults({"format": "py"}) == {}
+    assert settings.parse_course_defaults({"formats": "py"}) == {}
 
 
 # ------------------------------------------------ preview (dry_run, write) and notify
@@ -724,9 +726,9 @@ def test_semester_cards_never_come_from_the_old_people_shape(monkeypatch):
     page = site_repo.people_yaml("Sem", OLD_PEOPLE, edit_at="x", semester=True)
     assert "old" not in page and "declared in the" not in page
     course_page = site_repo.people_yaml(
-        "Course", {"people": {"instructors": [{"name": "Prof"}]}}, edit_at="x"
+        "Course", {"people": {"course_admins": [{"name": "Prof"}]}}, edit_at="x"
     )
-    assert "Prof" in course_page  # a COURSE file's `people:` block is its own shape
+    assert "Prof" in course_page  # a course's admins are its open site's leads
 
 
 def _gate_store(monkeypatch, *, put_ok=True) -> dict:

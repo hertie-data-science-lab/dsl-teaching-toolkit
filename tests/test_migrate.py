@@ -29,13 +29,13 @@ from dsl_course import (
 from dsl_course.central import MissingCentralRef
 from dsl_course.course import (
     CONFIG_REPO,
-    INSTRUCTORS_FILE,
     JOIN_REPO,
     SEMESTER_TOPIC,
     SUBMIT_VIA,
 )
 from dsl_course.faults import NOT_MIGRATED
 from dsl_course.gh_contents import blob_sha
+from dsl_course.legacy import OLD_INSTRUCTORS_FILE as INSTRUCTORS_FILE
 from dsl_course.migrate import OLD_CONFIG_REPO, OLD_JOIN_REPO, OLD_SEMESTER_TOPIC
 from dsl_course.opencourse import OpenCourse
 from dsl_course.welcome import template
@@ -1881,7 +1881,7 @@ def test_the_old_files_say_what_assignments_yml_must_hold():
 
 def test_a_setting_assignments_yml_already_states_is_left_as_written():
     meta = yaml.safe_load(B1_SCHEDULE)
-    existing = migrate.settings.parse_instance(
+    existing = migrate.settings.parse_legacy_assignments(
         "assignments:\n  a1:\n    late_window_days: 7\n    max_team_size: 4\n"
     )
     want, _ = migrate.instance_additions(
@@ -1967,7 +1967,7 @@ def test_the_run_keys_are_written_into_the_skeleton_and_read_back():
         {"a1": {"late_window_days": 2, "late_penalty_per_day": "5%"},
          "a2": {"semester_dest_repo": "homework-2"}},
     )  # fmt: skip
-    got = migrate.settings.parse_instance(text)
+    got = migrate.settings.parse_legacy_assignments(text)
     # Read back as the schedule shape step reads them, to move them inline.
     assert [f.code for f in got.faults] == ["NOT_MIGRATED"]
     assert got.blocks["a1"] == {"late_window_days": 2, "late_penalty_per_day": "5%"}
@@ -1975,7 +1975,10 @@ def test_the_run_keys_are_written_into_the_skeleton_and_read_back():
     assert text.startswith(skeleton.rstrip("\n"))  # the skeleton's comments kept
     # Into a file with a block of its own: the slug's block gains the key.
     again = migrate.with_instance_keys(text, {"a1": {"max_team_size": 3}})
-    assert migrate.settings.parse_instance(again).blocks["a1"]["max_team_size"] == 3
+    assert (
+        migrate.settings.parse_legacy_assignments(again).blocks["a1"]["max_team_size"]
+        == 3
+    )
 
 
 def test_a_template_loses_its_run_settings_live_or_commented():
@@ -2050,7 +2053,10 @@ def test_a_semester_migrated_before_b2_completes_on_the_next_run(
     }
     assert plan["a2"]["repo_name"] == "homework-2"
     assert (
-        migrate.settings.parse_instance(tree["assignments.yml"].decode()).faults == ()
+        migrate.settings.parse_legacy_assignments(
+            tree["assignments.yml"].decode()
+        ).faults
+        == ()
     )
     assert migrate._schedule_clean(tree["schedule.yml"].decode(),
                                    tree["assignments.yml"].decode())  # fmt: skip

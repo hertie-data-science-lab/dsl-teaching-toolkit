@@ -21,6 +21,7 @@ from .course import (
     CONFIG_REPO,
     NO_STARTER,
     NO_TEAMS,
+    SCHEDULE_FILE,
     SEMESTER_FILE,
     SOLUTION_BRANCH,
     creates_unit_repos,
@@ -605,11 +606,13 @@ def _visibility_faults(
     wrong = [r for r in rows if r.get("visibility") != spec.visibility]
     if not wrong:
         return []
+    # On the assignment's schedule.yml entry when that is where the value came from, else
+    # in semester.yml `defaults:` (decision 0039): free to change until the first hand
+    # out, and a drift report afterwards.
+    on_entry = dict(spec.sources).get("visibility") == "entry"
     return [
-        # In the SEMESTER's assignments.yml, where the setting lives (decision 0009): free
-        # to change until the first hand out, and a drift report afterwards.
         ConfigFault(
-            f"assignments.{slug}",
+            f"assignments.{slug}" if on_entry else "defaults",
             # A COUNT and never a name: a submission repo is `<slug>-<handle>`, and this
             # sentence is repeated into a public run log, a digest issue and an email.
             f"`assignment_repo_visibility: {spec.visibility}` does not describe the repos this assignment "
@@ -618,7 +621,7 @@ def _visibility_faults(
             f"nothing on its own",
             fires=fires,
             field="assignment_repo_visibility",
-            file=SEMESTER_FILE,
+            file=SCHEDULE_FILE if on_entry else SEMESTER_FILE,
             in_org=semester_org,
             fix_text=f"set this assignment's `assignment_repo_visibility:` (on its "
             f"schedule.yml entry, else in {SEMESTER_FILE} `defaults:`) back to "

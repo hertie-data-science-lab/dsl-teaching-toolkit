@@ -149,7 +149,7 @@ def test_the_course_default_cap_fills_in_for_an_assignment_that_names_none(monke
         monkeypatch,
         _sched(project="assignment-4-project-f2026"),
         {"assignment-4-project-f2026": "type: group\n"},
-        defaults="assignment_defaults:\n  max_team_size: 4\n",
+        defaults="defaults:\n  max_team_size: 4\n",
     )
     assert yaml.safe_load(text)["assignments"]["project"]["max_team_size"] == 4
 
@@ -296,7 +296,9 @@ def _writes(
         grading_spec, "_grading_text", lambda org, t, **_: "type: group\n"
     )
     monkeypatch.setattr(settings, "org_meta", lambda org: {})
-    monkeypatch.setattr(discovery, "org_meta", lambda org: {"student_console": console})
+    monkeypatch.setattr(
+        discovery, "org_meta", lambda org: {"course": {"student_console": console}}
+    )
     monkeypatch.setattr(
         team_formation, "repo_is_archived", lambda org, repo, **_: False
     )
