@@ -459,8 +459,26 @@ def test_the_registrar_export_is_summarised_by_its_row_count(monkeypatch):
         lambda o, r, p: "hertie_email,name,github_handle,a1\na@uni.edu,Ada,ada-l,80\n",
     )
     summary = teardown.registrar_summary(SEMESTER)
-    assert summary == ".system/semester-gradebook.csv, 1 student row(s)"
+    assert summary == ".system/semester-grades.csv, 1 student row(s)"
     assert "ada-l" not in summary
+
+
+def test_the_semester_grades_file_is_found_under_its_old_name_until_renamed(
+    monkeypatch,
+):
+    # A semester that returned no marks since 0.11.0 has the file only under its old
+    # name; the record must not say no grade was ever sent.
+    monkeypatch.setattr(
+        teardown,
+        "get_file_content",
+        lambda o, r, p: (
+            "github_handle,a1\nada-l,80\n"
+            if p == ".system/semester-gradebook.csv"
+            else None
+        ),
+    )
+    summary = teardown.registrar_summary(SEMESTER)
+    assert summary == ".system/semester-gradebook.csv, 1 student row(s)"
 
 
 def test_a_semester_that_never_distributed_a_grade_says_so(monkeypatch):

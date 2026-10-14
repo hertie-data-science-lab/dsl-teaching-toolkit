@@ -582,7 +582,11 @@ def test_a_real_run_migrates_every_step_once_with_actions_off(
     tree = fake.tree(SEM, CONFIG_REPO)
     moved = migrate.fold(set(OLD_RECORDS), migrate.SEMESTER_MOVES)
     assert moved["autograde/a1/_graded.json"] == ".system/autograde/a1/_graded.json"
-    assert moved["cohort-gradebook.csv"] == ".system/semester-gradebook.csv"
+    assert moved["cohort-gradebook.csv"] == ".system/semester-grades.csv"
+    # 0.11.0's rename of the semester grades file is a move like any other.
+    assert migrate.fold({".system/semester-gradebook.csv"}, migrate.SEMESTER_MOVES) == {
+        ".system/semester-gradebook.csv": ".system/semester-grades.csv"
+    }
     assert moved["enrolment/refusals/9.json"] == ".system/enrolment/refusals/9.json"
     for old, new in moved.items():
         assert old not in tree, old

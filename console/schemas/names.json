@@ -24,7 +24,7 @@
     "outcomes": ".system/outcomes",
     "pointer": ".system/dsl-course.yml",
     "proposed_releases": ".system/proposed-releases.yml",
-    "semester_gradebook": ".system/semester-gradebook.csv",
+    "semester_gradebook": ".system/semester-grades.csv",
     "snapshots": ".system/snapshots",
     "solution_preview": ".system/solution-preview.json",
     "solutions": ".system/solutions",

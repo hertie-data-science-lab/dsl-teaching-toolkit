@@ -711,7 +711,7 @@ def test_an_unasked_run_setting_leaves_the_semester_layer_to_answer(fake, monkey
         2,
     )
     sources = dict(spec.sources)
-    del sources["submit_url"]  # nobody states one
+    del sources["submit_url"], sources["marks_per_question"]  # nobody states them
     assert set(sources.values()) == {"semester"}
 
 

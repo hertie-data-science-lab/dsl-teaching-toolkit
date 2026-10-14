@@ -592,7 +592,6 @@ function StudentView({ handle, title, m, submitted, onClose }: { handle: string;
       {m.feedback ? <p class="pre">{m.feedback}</p> : null}
       {m.teamFeedback || (m.team && perQ) ? <blockquote class="sv-team"><b>Team feedback (shared with {m.team}):</b> <span class="pre">{m.teamFeedback}</span>{perQ}</blockquote> : null}
       {!m.team ? perQ : null}
-      {m.team ? <p class="footnote">Until the next engine release, a team member’s live page shows the final grade only.</p> : null}
     </section>
   );
 }

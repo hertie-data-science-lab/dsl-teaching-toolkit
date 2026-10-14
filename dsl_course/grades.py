@@ -6,7 +6,7 @@ A grader fills ONE file per assignment, `semester-config/grading_sheets/<slug>.y
     grading_sheets/<slug>.yml   (the grader types here; the toolkit owns only `info:`)
           |
           +--> semester/grades-<handle>   (private; student = read) grades.yml + README.md
-          +--> semester-config/.system/semester-gradebook.csv   (the registrar export, never logged)
+          +--> semester-config/.system/semester-grades.csv   (the semester grades file, never logged)
           +--> an email saying there is something new to read (no marks in it)
 
 ONE place a mark is written, and it is the student's gradebook. Nothing is posted into a
@@ -49,6 +49,14 @@ def main() -> int:
         help="Put the markers' feedback text into each student's email.",
     )
     p.add_argument(
+        "--no-per-question",
+        action="store_true",
+        help="For this run only, withhold the marks and feedback per question of the "
+        "assignment returned (every assignment, without --assignment), whatever its "
+        "`marks_per_question` run setting says: the score, late penalty, adjustment "
+        "and final grade still go.",
+    )
+    p.add_argument(
         "--assignment",
         default="",
         help="Return this assignment only (its semester-side name), beside the ones "
@@ -86,6 +94,7 @@ def main() -> int:
             dry_run=args.preview,
             receipt_note=args.receipt_note,
             include_feedback=args.include_feedback,
+            per_question=not args.no_per_question,
             assignment=args.assignment or None,
             sched=sched,
         )

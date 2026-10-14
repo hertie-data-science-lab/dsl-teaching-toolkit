@@ -9,6 +9,7 @@ import { isMarked, markEntry, parseGradebook, readMine, readReceipts, unitOf, ty
 import { FRESH_MS, SiteSource, cutoffFrom, instant, myState, startOfDay, type SemesterFacts } from '../src/model/student';
 import { weekItems } from '../src/model/week';
 import { StudentScreen } from '../src/screens/Student';
+import { MarkBody } from '../src/screens/StudentAssignment';
 import { AssignmentsView, YourMarks } from '../src/screens/StudentAssignments';
 import { InstructorsView } from '../src/screens/StudentInstructors';
 import { ArchiveNotice, ScheduleView } from '../src/screens/StudentSchedule';
@@ -173,6 +174,12 @@ describe('a student’s own data', () => {
     const b3 = markEntry({ final_grade: 30, feedback: { overall: 'Good.', Q1: 'Tidy.', Q2: null }, question_feedback: { Q3: 'Check units.' } });
     expect(b3).toMatchObject({ finalGrade: '30', feedback: 'Good.', questionFeedback: { Q1: 'Tidy.', Q3: 'Check units.' } });
     expect(parseGradebook('total: 88\nassignments: {}\n')?.total).toBe('88');
+    // 0.11.0: the team's score and the student's own adjustment are on the page.
+    const team = markEntry({ final_grade: '40', score: { Q1: 14, Q2: 29 }, adjustment: '-3', team: 'team-alpha', days_late: 0 });
+    expect(team).toMatchObject({ adjustment: '-3', score: { Q1: '14', Q2: '29' } });
+    const html = render(<MarkBody e={team} />);
+    expect(html).toContain('<dt>Adjustment</dt><dd>-3</dd>');
+    expect(render(<MarkBody e={markEntry({ final_grade: '43', score: 43 })} />)).not.toContain('Adjustment');
     expect(parseGradebook(': : :')).toBeNull();
   });
 

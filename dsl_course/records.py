@@ -5,7 +5,8 @@ A repo's root holds only what an instructor edits; everything the engine writes 
 status, the outcomes of console runs, the fire-once markers, the records of what was sent -
 lives under `.system/`. `path(kind, ...)` is the one spelling of each: the writers and the
 readers ask it, the console reads the same table from `console/schemas/names.json`, and
-`migrate` is the only module that knows where a record used to be.
+`migrate` is the only module that knows where a record used to be - but for
+`RETIRED_SEMESTER_GRADES`, which `distribute` also renames on its first write.
 
 Stdlib only, no I/O: this is a vocabulary, like `course`.
 """
@@ -40,7 +41,8 @@ RECORDS = {
     # workflow) and each switched-account relink (`relinks/<old id>.json`, `relink`)
     "enrolment": "enrolment",
     "archive": "archive.md",
-    "semester_gradebook": "semester-gradebook.csv",
+    # the semester grades file: one row per enrolled student, one column per assignment
+    "semester_gradebook": "semester-grades.csv",
     # the course org's `.github`: the refresh's heartbeat and its miss ledger
     "heartbeat": "last-refresh",
     "missing_semesters": "missing-semesters",
@@ -58,6 +60,12 @@ RECORDS = {
     "syllabus_sample": "SYLLABUS.md.sample",
     "syllabus_sessions": "SYLLABUS.sessions.md",
 }
+
+
+# The semester grades file's name before 0.11.0. `distribute` reads it while the new one is
+# not there yet and deletes it in the commit that first writes the new one; `migrate` moves
+# it for a semester that returns no marks before it is migrated.
+RETIRED_SEMESTER_GRADES = f"{SYSTEM_DIR}/semester-gradebook.csv"
 
 
 def path(kind: str, *parts: str) -> str:

@@ -60,7 +60,7 @@ every write.
 
 **Nothing here reaches a student until you run Distribute grades.** It writes each
 student's private `grades-<handle>` gradebook - the one place a mark or a feedback line ever
-goes - and `.system/semester-gradebook.csv` (the registrar export - generated, never hand-edited), and
+goes - and `.system/semester-grades.csv` (the semester grades file - generated, never hand-edited), and
 records every gradebook and email in `.system/gradebook/distributed.csv`. That file is SYSTEM-owned:
 it is what stops a re-run repeating itself and what lets a failed notification be retried.
 

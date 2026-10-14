@@ -1,6 +1,6 @@
 """dsl-course distribute -- sending what a grader wrote in the grading sheet.
 
-`distribute` fans each sheet out to the students' gradebooks, the registrar's export and an
+`distribute` fans each sheet out to the students' gradebooks, the semester grades file and an
 email, and records every send in `distributed.csv`; `marks_due` says which assignments a
 Scheduled release may return by itself. The CLI is `python3 -m dsl_course.grades`.
 """
@@ -293,7 +293,7 @@ def _hold_undecided(
     (`sheet_hold_reasons`), and arithmetic that could not be done (`undecided_marks`) -
     `pass`, two days late, is not `pass minus 20%`. Sending either puts a line a student
     can read where a decision should have been, and the dry run that counted it has
-    already gone by. So the mark is HELD: no gradebook entry, no column in the registrar's export, no
+    already gone by. So the mark is HELD: no gradebook entry, no column in the semester grades file, no
     email, until a grader settles it in the sheet. Nothing else that student has is held
     with it - unless the held mark is one they were already sent (`_hold_returned`).
 
@@ -328,7 +328,7 @@ def _hold_returned(
     told: dict[str, dict[str, str]],
 ) -> dict[str, dict[str, str]]:
     """Take out of the run, whole, every student a HELD mark of whose they have already
-    been sent, and say what the registrar's export last carried for each:
+    been sent, and say what the semester grades file last carried for each:
     `{handle: {slug: final grade}}`.
 
     A hold stops a NEW value going out. Taking the mark out of the book did that, and for
@@ -357,7 +357,7 @@ def _hold_returned(
 def _with_told(
     books: dict[str, dict[str, dict]], kept: dict[str, dict[str, str]]
 ) -> dict[str, dict[str, dict]]:
-    """The books the registrar's export is rendered from: this run's, plus each student
+    """The books the semester grades file is rendered from: this run's, plus each student
     held whole (`_hold_returned`) as the export last carried them."""
     return books | {
         handle: {slug: {"final_grade": grade} for slug, grade in row.items()}
@@ -395,13 +395,29 @@ def _canonical(value: object) -> object:
     return value
 
 
-def _marks_digest(book: dict[str, dict]) -> str:
+def _marks_digest(
+    book: dict[str, dict], specs: dict[str, SheetSpec] | None = None
+) -> str:
     """What the EMAIL keys on: what a grader wrote, per assignment, and nothing else. A
     refreshed `submitted`, a new `max_points` or a respelt date moves grades.yml without
-    there being anything new for a student to read; a late penalty that moves a mark
-    moves `final_grade`, so it is still in here."""
+    there being anything new for a student to read; a late penalty or an adjustment that
+    moves a mark moves `final_grade`, so it is still in here.
+
+    The team's score on a group assignment with a repo per team is left out (`specs`
+    names those): a member's page has shown it only since 0.11.0, and keying the email on
+    it would have mailed every such student once to say nothing new. Its total moves the
+    final grade, which is in here."""
+    team_repo = {
+        slug
+        for slug, spec in (specs or {}).items()
+        if spec.is_group and spec.creates_unit_repos
+    }
     projection = {
-        slug: {key: view[key] for key in _GRADER_KEYS if key in view}
+        slug: {
+            key: view[key]
+            for key in _GRADER_KEYS
+            if key in view and not (key == "score" and slug in team_repo)
+        }
         for slug, view in book.items()
     }
     text = json.dumps(
@@ -466,7 +482,7 @@ def _gradebook_files(
 def _commit_record(
     semester_org: str, writes: dict[str, bytes], message: str, delete: list[str]
 ) -> bool:
-    """Land `distributed.csv` and the registrar export, with ONE retry on a fresh head.
+    """Land `distributed.csv` and the semester grades file, with ONE retry on a fresh head.
 
     The ref update is deliberately not forced, so a commit that landed between reading the
     head and moving it makes this fail - and the quarter-hourly scheduler commits into the
@@ -511,6 +527,7 @@ def _record_before_mail(
     live: dict[str, str],
     now: str,
     registrar: bytes | None,
+    retired: list[str],
 ) -> bool:
     """Commit `distributed.csv` with every pending address marked told BEFORE the mail
     goes, so a record commit that fails after the send can never mail anybody twice:
@@ -519,10 +536,11 @@ def _record_before_mail(
     whose mail failed or raised, so only a runner killed between the two commits loses a
     notification (the gradebook still holds the marks).
 
-    The registrar export goes in the same commit: the gradebooks are written by now, and
-    a scoped return refuses while `distributed.csv` has rows and the export is missing
+    The semester grades file goes in the same commit: the gradebooks are written by now,
+    and a scoped return refuses while `distributed.csv` has rows and the file is missing
     (`_already_returned`), so a run that died after this commit would otherwise wedge
-    every later one."""
+    every later one. `retired` is the file's old name where the clone still has it
+    (`records.RETIRED_SEMESTER_GRADES`), deleted in the commit that writes the new one."""
     intent = dict(record)
     for handle in pending:
         intent[(handle, "", CHANNEL_EMAIL)] = (live[handle], now, "")
@@ -533,7 +551,7 @@ def _record_before_mail(
         semester_org,
         writes,
         f"{INTENT_MESSAGE} ({len(pending)} notification(s))",
-        [],
+        retired if registrar is not None else [],
     )
 
 
@@ -546,11 +564,13 @@ def _final_record(
     now: str,
     counts: dict[str, int],
     delete: list[str],
+    retired: list[str],
 ) -> bool:
-    """The registrar's export and the record of what went out, in ONE commit - together
+    """The semester grades file and the record of what went out, in ONE commit - together
     with the retired files this semester is migrating off, so the old and the new can
     never both be present for a reader to choose between - and, for a scoped return,
-    `marker`'s returned record."""
+    `marker`'s returned record. `retired` (the semester grades file's old name, where the
+    clone had it) goes only in a commit that writes the file under its new one."""
     writes = {DISTRIBUTED_PATH: dump_distributed(record).encode()}
     if registrar is None:
         # `roster.load` answers None for a roster it could not READ and [] for one with no
@@ -574,7 +594,7 @@ def _final_record(
         writes,
         f"grades: distribute ({counts['gradebooks']} gradebook(s), "
         f"{counts['emails']} email(s))",
-        delete,
+        [*delete, *(retired if registrar is not None else [])],
     )
     if not recorded:
         log_err(
@@ -673,11 +693,12 @@ def distribute(
     *,
     receipt_note: bool = False,
     include_feedback: bool = False,
+    per_question: bool = True,
     assignment: str | None = None,
     sched: schedule.Schedule | None = None,
 ) -> int:
     """Send every mark a grader has written where it has to go: each student's private
-    gradebook, the registrar's export, and an email saying there is something new to read.
+    gradebook, the semester grades file, and an email saying there is something new to read.
 
     ONE place a mark is written, and it is the gradebook. Nothing is posted into a
     submission repo: a thread in a repo the toolkit does not own the visibility of is a
@@ -694,10 +715,10 @@ def distribute(
     rendered from one selected sheet alone: that silently deleted every other assignment
     from every gradebook it touched. Unscoped, every sheet is rendered. `assignment` (a
     semester-side name) scopes a run to that assignment's marks: the gradebook is rendered
-    from its sheet plus the sheets ALREADY RETURNED - the assignments the registrar's
-    export already carries a column for, which is what the last real run told students -
+    from its sheet plus the sheets ALREADY RETURNED - the assignments the semester grades
+    file already carries a column for, which is what the last real run told students -
     so nothing already given is taken away and nothing not yet returned goes out. The
-    registrar's export is rendered from the same books.
+    semester grades file is rendered from the same books.
 
     A preview - the default - writes no grades and sends nothing: it prints the counts a
     grader checks before pressing it for real, and posts the per-student detail as an
@@ -705,7 +726,9 @@ def distribute(
 
     `receipt_note` also posts `MARKS_RETURNED_NOTE` once per assignment on each returned
     unit's Submission receipts issue; `include_feedback` puts the feedback text into the email. Both
-    off by default."""
+    off by default. The marks and feedback per question are withheld for every assignment
+    whose run setting `marks_per_question` is false, and - `per_question` off, a one-run
+    override - for the assignment this run returns (every assignment, unscoped)."""
     # ONE listing of the semester for the whole run: it answers "does this student already
     # have a gradebook?". A dry run writes nothing and needs none.
     listed = None if dry_run else listing_by_name(semester_org)
@@ -783,9 +806,16 @@ def distribute(
             )
             return 1
         titles = {slug: specs[slug].title for slug in sources}
-        books, unknown = _on_the_roster(build_gradebooks(sources), students)
+        withheld = {
+            slug for slug, (spec, _) in sources.items() if not spec.marks_per_question
+        }
+        if not per_question:
+            withheld |= {assignment} if assignment else set(sources)
+        books, unknown = _on_the_roster(build_gradebooks(sources, withheld), students)
         distributed, migrating = _read_distributed(wd)
         retired = _retired_gradebook_files(wd)
+        old_grades = records.RETIRED_SEMESTER_GRADES
+        retired_grades = [old_grades] if (wd / old_grades).is_file() else []
         changed = {} if dry_run else _sheets_changed_at(wd, sheets)
         export = _told_grades(wd)
         # None: the export is missing or unreadable while gradebooks went out already.
@@ -863,7 +893,7 @@ def distribute(
     for handle in sorted(books):
         files = _gradebook_files(handle, books[handle], titles)
         digest = content_hash("".join(f.decode() for f in files.values()))
-        marks = _marks_digest(books[handle])
+        marks = _marks_digest(books[handle], specs)
         entry = record.get((handle, "", CHANNEL_GRADEBOOK))
         if entry and entry[0] == digest:
             live[handle] = marks
@@ -950,7 +980,7 @@ def distribute(
         else None
     )
     if reachable and not _record_before_mail(
-        semester_org, record, reachable, live, now, registrar
+        semester_org, record, reachable, live, now, registrar, retired_grades
     ):
         log_err(
             f"{DISTRIBUTED_PATH} could not be written before the emails went, so none "
@@ -987,6 +1017,7 @@ def distribute(
             now=now,
             counts=counts,
             delete=[*([NOTIFIED_PATH] if migrating else []), *retired],
+            retired=retired_grades,
         )
 
     failed_mail, told = 0, []
@@ -1192,7 +1223,7 @@ def _preview_body(
 ) -> str:
     """The preview issue, laid out by what a grader has to do: what to fix, what is not
     marked yet, which grades would change, and who would be emailed and why. A grade is
-    listed only where it differs from the registrar's export, which is what the last real
+    listed only where it differs from the semester grades file, which is what the last real
     run sent. If it does not fit in one issue, what is left out is counted."""
     names = {s.github_handle.casefold(): s.name for s in students if s.github_handle}
 

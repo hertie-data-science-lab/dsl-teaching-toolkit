@@ -625,7 +625,7 @@ def test_cleanup_refuses_without_the_transport_fence(monkeypatch):
 
 # ------------------------------------------------- putting the shared files back exactly
 
-# `csv.writer` writes CRLF, so this is the shape `.system/semester-gradebook.csv` really has on
+# `csv.writer` writes CRLF, so this is the shape `.system/semester-grades.csv` really has on
 # disk - trailing newline and all. Every byte of it has to survive the round trip.
 CRLF_CSV = b"hertie_email,name\r\nada@x,Ada\r\n"
 
@@ -651,9 +651,9 @@ def test_a_recorded_file_keeps_every_byte_it_had(monkeypatch):
     # a different blob, and the estate check at teardown - which compares blob shas -
     # called it drift on every single run.
     encoded = base64.b64encode(CRLF_CSV).decode()
-    _reads(monkeypatch, {".system/semester-gradebook.csv": (0, encoded)})
+    _reads(monkeypatch, {".system/semester-grades.csv": (0, encoded)})
     assert cleanup.file_bytes(
-        SEMESTER, "semester-config", ".system/semester-gradebook.csv"
+        SEMESTER, "semester-config", ".system/semester-grades.csv"
     ) == (CRLF_CSV)
 
 
@@ -670,12 +670,10 @@ def test_a_read_that_failed_is_not_read_as_absent(monkeypatch):
     # real file out of a real org.
     _reads(
         monkeypatch,
-        {".system/semester-gradebook.csv": (1, "gh: API rate limit exceeded")},
+        {".system/semester-grades.csv": (1, "gh: API rate limit exceeded")},
     )
     with pytest.raises(RuntimeError, match="could not read"):
-        cleanup.file_bytes(
-            SEMESTER, "semester-config", ".system/semester-gradebook.csv"
-        )
+        cleanup.file_bytes(SEMESTER, "semester-config", ".system/semester-grades.csv")
 
 
 def test_the_restore_writes_back_exactly_what_was_recorded(monkeypatch):
@@ -692,7 +690,7 @@ def test_the_restore_writes_back_exactly_what_was_recorded(monkeypatch):
             SEMESTER,
             "semester-config",
             {
-                ".system/semester-gradebook.csv": CRLF_CSV,
+                ".system/semester-grades.csv": CRLF_CSV,
                 ".system/gradebook/distributed.csv": None,
             },
         )
@@ -700,7 +698,7 @@ def test_the_restore_writes_back_exactly_what_was_recorded(monkeypatch):
     )
     ((org, repo, files, delete),) = written
     assert (org, repo) == (SEMESTER, "semester-config")
-    assert files == {".system/semester-gradebook.csv": CRLF_CSV}
+    assert files == {".system/semester-grades.csv": CRLF_CSV}
     assert delete == (".system/gradebook/distributed.csv",)
 
 
@@ -710,10 +708,10 @@ def test_what_was_read_is_what_is_written_back(monkeypatch):
     # file makes no commit at all.
     _reads(
         monkeypatch,
-        {".system/semester-gradebook.csv": (0, base64.b64encode(CRLF_CSV).decode())},
+        {".system/semester-grades.csv": (0, base64.b64encode(CRLF_CSV).decode())},
     )
     recorded = cleanup.file_bytes(
-        SEMESTER, "semester-config", ".system/semester-gradebook.csv"
+        SEMESTER, "semester-config", ".system/semester-grades.csv"
     )
     written: list[dict] = []
     monkeypatch.setattr(
@@ -724,9 +722,9 @@ def test_what_was_read_is_what_is_written_back(monkeypatch):
         ),
     )
     cleanup.restore_files(
-        SEMESTER, "semester-config", {".system/semester-gradebook.csv": recorded}
+        SEMESTER, "semester-config", {".system/semester-grades.csv": recorded}
     )
-    assert written == [{".system/semester-gradebook.csv": CRLF_CSV}]
+    assert written == [{".system/semester-grades.csv": CRLF_CSV}]
 
 
 def _pipeline_module(monkeypatch):

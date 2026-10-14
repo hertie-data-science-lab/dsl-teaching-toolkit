@@ -100,7 +100,7 @@ _RETENTION_NOTE = f"""This repository is the semester's private record and is no
 It holds the roster (`students.csv`), the project teams (`teams.csv`), the instructors
 (`instructors.yml`), the semester plan (`schedule.yml`), every grading sheet (`grading_sheets/`),
 the autograde detail (`.system/autograde/`), what was sent to whom (`.system/gradebook/distributed.csv`),
-the enrolment refusals and account relinks (`.system/enrolment/`) and the registrar export
+the enrolment refusals and account relinks (`.system/enrolment/`) and the semester grades file
 (`{SEMESTER_CSV_NAME}`). Together those are this semester's record of
 assessment: delete the repository when your institution's retention period for that record
 expires, and the archived student repos with it."""
@@ -227,14 +227,16 @@ def freeze_order(semester_org: str, repos: list[dict]) -> list[dict]:
 
 
 def registrar_summary(semester_org: str) -> str:
-    """One plain-text line for the record: what the registrar export holds, or that there
-    is none. A ROW COUNT, never a row - this string is printed to the run log too, and the
-    log of a course org's `.github` is world-readable."""
-    text = get_file_content(semester_org, CONFIG_REPO, SEMESTER_CSV_NAME)
-    if text is None:
-        return f"{SEMESTER_CSV_NAME} is NOT here - no grade was ever sent"
-    rows = len(list(read_csv(text, (), SEMESTER_CSV_NAME)))
-    return f"{SEMESTER_CSV_NAME}, {rows} student row(s)"
+    """One plain-text line for the record: what the semester grades file holds, or that
+    there is none. A ROW COUNT, never a row - this string is printed to the run log too, and
+    the log of a course org's `.github` is world-readable. A semester that returned no marks
+    since 0.11.0 still has the file under `records.RETIRED_SEMESTER_GRADES`."""
+    for path in (SEMESTER_CSV_NAME, records.RETIRED_SEMESTER_GRADES):
+        text = get_file_content(semester_org, CONFIG_REPO, path)
+        if text is not None:
+            rows = len(list(read_csv(text, (), path)))
+            return f"{path}, {rows} student row(s)"
+    return f"{SEMESTER_CSV_NAME} is NOT here - no grade was ever sent"
 
 
 def render_record(
@@ -267,7 +269,7 @@ Archived on **{sealed_on}** (UTC). {due}
 | --- | --- |
 | Repositories archived | {len(frozen)} ({len(closed.already)} already were) |
 | Semester edits carried back | {propagated} |
-| Registrar export | {registrar} |
+| Semester grades file | {registrar} |
 
 **Nobody was revoked.** An archived repository is read-only for everyone, so archiving IS
 the withdrawal of write access - and everyone who could read this semester still can, which
@@ -492,7 +494,7 @@ def close_out(
         log(f"  {not_due} A real run would need --force.")
 
     registrar = registrar_summary(semester_org)
-    log(f"  registrar export: {registrar}")
+    log(f"  semester grades file: {registrar}")
     propagated, errors = _carry_back(course_org, semester_org, dry_run)
     errors += _close_notices(semester_org, dry_run)
     errors += _final_sync(course_org, semester_org, dry_run)

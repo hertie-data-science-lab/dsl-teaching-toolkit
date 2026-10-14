@@ -428,6 +428,7 @@ READERS = {
     "questions": _questions,
     "late_window_days": _whole_days,
     "late_penalty_per_day": _penalty,
+    "marks_per_question": lambda v, w, d: _boolean(v, "marks_per_question", w, d),
     "autograde": lambda v, w, d: _boolean(v, "autograde", w, d),
     "completion_check": lambda v, w, d: _boolean(v, "completion_check", w, d),
     "tests": lambda v, w, d: str(v or "tests").strip() or "tests",
