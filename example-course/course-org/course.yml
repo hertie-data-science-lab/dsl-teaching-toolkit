@@ -1,0 +1,42 @@
+# A worked example of a course org's .github/course.yml (decision 0039).
+course:
+  name: Deep Learning (Demo)
+  code: E1234
+  description: A demo course - the blurb every semester site shows under the title.
+  # toolkit_version_ref: release   # absent = release
+  # licence: CC BY-NC-SA 4.0       # absent = the institution's first
+
+# The course's owners: org admins on this course and every semester under it, fault mail,
+# and the course leads on the open course site. A semester's instructors and TAs are in
+# its own semester-config/semester.yml (../semester-org/semester.yml).
+# DEMO DATA: the `demo-*-placeholder` handles are deliberately NON-EXISTENT GitHub
+# accounts, so copying this dataset never sends anyone an org invitation.
+people:
+  course_admins:
+    - github_handle: "demo-lkaack-placeholder"
+      name: "Prof. Lynn Kaack, PhD"
+      title: "Assistant Professor of Computer Science and Public Policy"
+      photo: "https://github.com/LynnKaack.png"
+      url: "https://www.hertie-school.org/de/research/faculty-and-researchers/profile/person/kaack"
+      start: "2026-08-01"
+      end: "2027-07-31"
+
+defaults:   # every key present; uncomment to override. The comment shows the inherited value and its source.
+  # timezone: Europe/Berlin                 (institution)
+  # late_window_days: 10                    (institution)
+  # late_penalty_per_day: 10%               (institution)
+  max_team_size: 4
+  # assignment_repo_visibility: private     (institution)
+  # archive_grace_days: 60                  (institution)
+  # materials_repo: materials               (institution)
+  # marks_per_question: true                (institution)
+  team_formation: self_select
+
+open_course_site:   # the public website, an open version of one materials repo
+  enabled: false
+  source_repo: course-materials-f2026
+  readings_mode: reading-list
+  include_lectures: true
+  withhold:
+    - .system/
+    - "[Ss]olution*"

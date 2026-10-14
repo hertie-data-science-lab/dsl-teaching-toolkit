@@ -1,16 +1,9 @@
-# This semester's own instructors: its instructors and teaching assistants, one list.
-#
-# - the SSOT for their GitHub access & permissions
-# - the SSOT for who is emailed when this semester needs attention (`email`, required).
-# - supplies the deployed .github.io site's instructor cards (name/title/photo/url).
-# - see reference: https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/main/docs/05-manage-teaching-team.md
-# - see deployed reference: https://github.com/hertie-dsl-demo-f2026/semester-config/blob/main/instructors.yml
-# - see deployed end-product: https://hertie-dsl-demo-f2026.github.io/
-#
-# This is a FILLED EXAMPLE. The skeleton to edit is `instructors.yml` beside it; the two
-# `photo` forms are shown below.
+# A worked example of a semester's semester-config/semester.yml (decision 0039). The
+# skeleton to edit is seeded beside the schedule; the two `photo` forms are shown below.
 
-instructors:
+# Who delivers THIS semester: GitHub access, fault mail (`email`, required), and the
+# student site's instructor cards.
+people:
   - github_handle: "demo-lkaack-placeholder"
     role: instructor
     email: "l.kaack@example.org"
@@ -36,3 +29,17 @@ instructors:
     url: "https://www.hertie-school.org/en/who-we-are/profile/person/baker"
     start: "2026-08-01"
     end: "2027-01-31"
+
+defaults:   # every key present; uncomment to override. The comment shows the inherited value and its source.
+  # timezone: Europe/Berlin                 (institution)
+  late_window_days: 5
+  late_penalty_per_day: 10%
+  # max_team_size: 4                        (course)
+  # assignment_repo_visibility: private     (institution)
+  # archive_grace_days: 60                  (institution)
+  # materials_repo: materials               (institution)
+  # marks_per_question: true                (institution)
+  # team_formation: self_select             (course)
+
+student_site:
+  syllabus: SYLLABUS.md
