@@ -72,9 +72,7 @@ defaults:                         # every key seeded; the comment shows the inhe
 open_course_site:                 # the public website
   enabled: false
   source_repo: course-materials-f2026
-  readings_mode: reading-list     # reading-list | actual-readings | none
-  include_lectures: true
-  withhold: [.system/]            # .releaseignore syntax
+  publish: {kinds: [lectures, labs], reading_lists: true}   # which files it shows
   # contact: course@example.org   # unset = the institution's
 set_aside: [C6]                   # optional - suggestions set aside; see below
 ```

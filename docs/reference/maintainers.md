@@ -177,15 +177,22 @@ Things whose *literal spelling* is depended on from outside Python:
   faculty's patterns gone, and whatever they withheld shipping again on a green run. The
   price is that its wording cannot be improved in a repo that already has it.
 - **`course.yml` `open_course_site:`** (`opencourse.block`, in the course `.github`) is the
-  public website's one declaration (decision 0016): `enabled`, `source_repo`,
-  `readings_mode`, `include_lectures`, `withhold` (`.releaseignore` syntax,
-  `releaseignore.deny_lines`) and `contact`. The Publish website operation and the daily cron read
-  it and nothing else (the semester site sync reads its `withhold` alone); `enabled:
-  false` stops both. Seeded CREATE-ONLY and INSTRUCTOR-OWNED
-  by Bootstrap Course Org (off), schema in `console/schemas/course.schema.json`. A
-  site repo's `_publish-config.yml` is retired (none is left on a live site). A materials repo's `publish.yml` is NOT the open site's: it is
-  the semester site's opt-in list of files to host publicly under `files/` (decision 0035;
-  `site._mirror_public`), and `withhold` here is an extra deny filter on those copies.
+  public website's one declaration (decision 0016): `enabled`, `source_repo`, `publish`
+  (a Selection plus `reading_lists`) and `contact`. The Publish website operation and the
+  daily cron read it; `enabled: false` stops both. Seeded CREATE-ONLY and
+  INSTRUCTOR-OWNED by Bootstrap Course Org (off). Its 0.10 keys (`readings_mode`,
+  `include_lectures`, `withhold`) and a materials repo's `publish.yml` are `legacy` rows the
+  0.11.0 migration folds (`migrate.fold_open_site`, `migrate.publish_host`).
+- **`selection`** is the one rule for every outbound copy (decision 0040): the institution
+  denylist (`DENYLIST`, `CLUTTER`), then `.releaseignore`, then the use's Selection
+  (`semester.yml student_site.host`, `open_course_site.publish`; a release has none but
+  the root `.github/` and unwritten stubs), then `institution.yml selection_floor`. `select`
+  answers a path list, `deny` a `copytree` walk. A file's kind is the schedule block of the
+  entry that landed it (`site._landings`); a kindless file is shown only by `include`. The
+  console mirrors `select` in `console/src/model/selection.ts`, held to the golden vectors
+  in `console/schemas/selection.json` and to the demo fixture's hosting
+  (`console/test/fixtures/demo-hosting.json`, both checked by `tests/test_selection.py`).
+  `propagate` keeps its own plumbing filter: it carries edits IN, so the denylist is not its.
 - **`course.UPSTREAM_BRANCH`** (`upstream`) is the toolkit's branch in every release dest,
   and the dest's DEFAULT branch is what students, the website and `propagate` read. The
   release commits onto `upstream` and merges it into the default one; a conflict aborts the
@@ -507,9 +514,9 @@ layers above its own:
 |---|---|
 | 0, nothing | `log`, `run` (the per-run context: `run.per_run` memos and the scheduler tick's listing), `course` (the course vocabulary: config repo, semester key, session-folder rule, syllabus filenames, org topics), `readings`, `fs`, `releaseignore` (the `.releaseignore` rule) |
 | 1, the shell | `ghcli` (`gh`/`git`, timeouts, the 404 test) |
-| 2 | `central` (which ref an org runs), `repos` (existence, creation, topics, descriptions, the publication denylist), `gh_teams` (an org's settings and its teams), `issues` (one self-updating issue, found by its EXACT title), `pulls` (one pull request per HEAD BRANCH, created or adopted), `invitations` (the bot accepts its own org invitations, from registered course orgs only) |
+| 2 | `central` (which ref an org runs), `repos` (existence, creation, topics, descriptions), `gh_teams` (an org's settings and its teams), `issues` (one self-updating issue, found by its EXACT title), `pulls` (one pull request per HEAD BRANCH, created or adopted), `invitations` (the bot accepts its own org invitations, from registered course orgs only) |
 | 3 | `gh_contents` (file reads and writes, seeded stubs), `workflows_render` |
-| 4 | `config` (one reader per hand-edited config file: `read_course`, `read_semester`), `discovery`, `roster`/`teams`/`schedule`, `workflows_place` |
+| 4 | `selection` (the one Selection rule, above `releaseignore` and `policy`), `config` (one reader per hand-edited config file: `read_course`, `read_semester`), `discovery`, `roster`/`teams`/`schedule`, `workflows_place` |
 | 5 and up | `access` (team permissions and the faculty floor), `materials` (the semester's `student_site.syllabus`, a folder's kind in the institution's kinds; the old aliases only for the console until WP-C2 and `migrate`), `opencourse` (the public website's `open_course_site:` block), `schedule_plan` (the rows a plan declares: one per slot of each entry, readings attached to their session's first row), `cadence` (the scheduler's driver-health and late-delivery alarms, read off its own run history), `join`, `profile_readme`, `scaffold`, `site_repo` (the Jekyll site repo both websites publish into), `site`, then the CLIs |
 | grading, each above the one before | `grading_sheet` (the sheet file: shape, load and dump, merge, mark arithmetic, what holds a mark), `grading_spec` (`grading_config.yml`, its faults, the `SheetSpec` it gives), `gradebook` (the `grades-<handle>` repos, what a student is shown, the semester grades file, `distributed.csv`), `receipts` (the Submission receipts issue), `distribute` (sending marks); `team_formation` (and its lock file) sits above `grading_spec` and `gradebook`, and `grades` is only the CLI over `distribute` |
 
@@ -576,7 +583,8 @@ flag): the engine writes no status once it is, so the last file still says `live
 writes `names.json` (repo and path names, and the `_config.yml` keys a site sync rewrites or
 leaves to the site) and `policy.json` (the loaded policy, below), so
 the console holds no default of its own, and `materials.schema.json` (the old `materials.yml`'s
-shape, for the console's Folder kinds panel until WP-C2; the engine reads no `materials.yml`).
+shape, for the console's syllabus picker until WP-C2; the engine reads no `materials.yml`), and
+`selection.json` (the Selection rule's lists, defaults and golden vectors, decision 0040).
 
 ## The course org registry
 

@@ -51,7 +51,7 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
 
    *NB: this repo stays private - students never see it. Only the sessions you **actively release** reach the semester org, so you can privately stage the whole course here.*
 
-   *NB: to withhold a file from every release, name it in `.releaseignore` - `.gitignore` syntax, in any folder ([08](08-release-materials-to-cohort.md#withholding-files-with-releaseignore)).*
+   *NB: to withhold a file from every release, name it in `.releaseignore` - `.gitignore` syntax, in any folder ([08](08-release-materials-to-cohort.md#withholding-files-with-releaseignore)). Solutions, tests, grading files and `.env*` are never released anyway.*
 
    *NB: a session folder is released whole, subfolders included ([11](11-configure-cohort-site.md)).*
 
