@@ -107,7 +107,7 @@ Worked example: [`example-course/semester-org/instructors.yml`](../example-cours
 ## What the access actually reaches
 
 `instructors-<semester>` gets:
-1. **push** on the course org's **`.github`** - which is what makes the workflows (Release materials, Release assignment, Refresh actions…) and the Console visible and runnable for them
+1. **push** on the course org's **`.github`** - which is what makes the workflows (Refresh actions, Collect submissions…) and the Console's operations visible and runnable for them
 2. every course-org repo **their semester's `schedule.yml` names**: each assignment's template and each release's source repo.
 3. Semester-side they also get write on `semester-config`, `join` and the **released materials**, so they can edit the roster, schedule and team lists, and fix a broken lab in place during class - a release merges rather than overwrites, so the fix stays ([08](08-release-materials-to-cohort.md#fixing-something-you-have-already-released)). **Read** on everything else in the semester: every student's submission repo, every gradebook. Full table: [`access-reference.md`](reference/access-reference.md#what-faculty-hold-on-each-repo).
 

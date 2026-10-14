@@ -212,8 +212,8 @@ of truth (SSOT) `sync_faculty` reconciles against. **Anything not in the SSOT ge
 so an admin added via the Teams UI or a one-off `gh api` call must also be declared in
 `dsl-course.yml`.
 
-A **semester** is bootstrapped from the course org's own **Bootstrap semester** button (not the
-central action), given the empty semester org's name. It runs the same `bootstrap_course` with
+A **semester** is bootstrapped by the Console's New semester (`semester.bootstrap`, run in the
+course org's Console workflow, not the central action), given the empty semester org's name. It runs the same `bootstrap_course` with
 `--semester`: seeds `join` + `semester-config` (roster, teams, `schedule.yml`,
 `instructors.yml`), creates the `students` + `auditors` teams, tightens permissions, scaffolds the
 website, applies the course's current `course_admins`, registers the semester in the course's

@@ -14,8 +14,10 @@ template is reused every semester; its number comes from each semester's schedul
 Live example: [`example-course/course-org/assignment-linear-regression/`](../example-course/course-org/assignment-linear-regression).
 
 1. **Scaffold the template.** 
-   - In the course org → `.github` → **Actions tab** → [New assignment](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/new-assignment.yml). Inputs:
-      - `assignment_name` = the assignment's name, e.g. `Neural networks from scratch`
+   - In the Instructor Console: **New assignment** (op `assignment.create`); or from a
+     laptop: `python -m dsl_course assignment.create --course-org <course-org> --arg
+     name=<name> [--arg formats=py ...] --no-preview`. Inputs:
+      - `name` = the assignment's name, e.g. `Neural networks from scratch`
       - `formats` = which starter file(s) to seed, comma-separated (the first is the
         runnable one): `ipynb`, `py`, `rmd`,
         `qmd`, `latex` - or `none` on its own for the brief and nothing else. Picks the
@@ -31,9 +33,9 @@ Live example: [`example-course/course-org/assignment-linear-regression/`](../exa
       - `autograde` (off by default; on seeds a `tests/` stub on `solution` for you to
         fill, and each submission's pass count appears on the grading sheet as a first
         pass for graders - never shown to students)
-   - The console's New assignment also asks how students get the starter: `derived`
-     from your marked solution, or `handwritten` on `main`. The workflow writes
-     `derived` when `autograde` is on, else `handwritten`; change `starter:` in
+   - `starter` = how students get the starter: `derived` from your marked solution, or
+     `handwritten` on `main`. Left out, it is `derived` when `autograde` is on, else
+     `handwritten`; change `starter:` in
      `grading_config.yml` later. See [derived or by hand](assignment-starter.md).
    - How each semester RUNS it - how teams form, the max team size, the late window and
      penalty, who may read the repos, an external submit link - is not asked here and
@@ -242,7 +244,7 @@ feedback go to the private `grades-<handle>` gradebook for every shape alike, wh
 > Those two are what the **Join team** form in each semester's `join` repo answers on. The
 > form runs in a public repo and cannot read either file, so the toolkit mirrors them into
 > `semester-config/.system/assignments.lock.yml` and the form reads that. The mirror
-> catches up on the next **Sync membership**, **Release assignment** or nightly **Refresh
+> catches up on the next **Sync membership**, a hand-out or nightly **Refresh
 > actions**. Until this template exists, its schedule entry is locked to "no teams".
 
 > **Deadlines aren't set here.** The due date students see is *per semester*, in that semester's `schedule.yml` - see [Release assignment → Deadlines](09-release-assignment-to-cohort.md#deadlines).

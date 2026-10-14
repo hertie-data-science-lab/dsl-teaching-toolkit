@@ -14,14 +14,13 @@ Hand out one **private repo per student** from a course org assignment template.
 
 A `handout_datetime:` datetime under `assignments.<slug>` in the semester's `schedule.yml` hands out the same repos automatically - the assignment's whole lifecycle (handout, due date, grading deadline) sits in one block: [Schedule releases](07-schedule-releases.md). One setup cost, and the entry appears on the deployed `<course>.github.io` site so students see the plan in advance.
 
-> NB: a manual release stays compatible with the schedule: on success the workflow **records the release moment into `schedule.yml`** (`assignments.<slug>.handout_datetime`, write-once - a scheduled value is never touched), so the schedule remains the one record of when every assignment went out - and late onboarders get their repo on the next tick.
+> NB: a manual release stays compatible with the schedule: on success the hand-out **records the release moment into `schedule.yml`** (`assignments.<slug>.handout_datetime`, write-once - a scheduled value is never touched), so the schedule remains the one record of when every assignment went out - and late onboarders get their repo on the next tick.
 
-## Release assignment via manual dispatch
+## Hand out an assignment now
 
-The `release assignment` workflow can be found in the course org's: 
-  1. `.github` → **Actions** tab → **Release assignment** - e.g. [this demo repo](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/release-assignment.yml) 
-  2. within any assignment template (any repo created using the **New assignment** workflow) → **Actions** tab → **Release assignment** - e.g. [the demo's templates](https://github.com/orgs/hertie-dsl-demo-course-e1234/repositories?q=topic%3Adsl-assignment)
-
+Hand an assignment out now (op `assignment.handout_now`):
+  1. in the Instructor Console, the assignment's **Hand out**;
+  2. or from a laptop: `python -m dsl_course assignment.handout_now --course-org <course-org> --semester-org <semester-org> --arg course_source_repo=<template>` (previews; add `--no-preview` to hand out).
 
 Pick the `course_source_repo` - the same field a scheduled handout names in `schedule.yml`.
 The template must be in the semester's schedule; one that is not is refused: add it to the
@@ -30,12 +29,12 @@ schedule first.
 - then it creates one **private** `<name>-<handle>` repo per onboarded student/group, with that student as
 collaborator.
 
-Four boxes, in the order you answer them: `course_source_repo`, `semester_org`, then
+Besides the template and the semester:
 - `solution_datetime` (empty by default; `now` also pushes the template's `solution`
 branch into each student repo - the model answer and rubric, which is not returning marks
 and cannot be undone: think twice if the template is reused in a later semester). Schedulable instead, as `solution_datetime:` on the
 assignment - see [07](07-schedule-releases.md#releasing-the-model-solution)
-- `preview` (**on** by default; list the repos that *would* be created - untick it to hand out).
+- a preview (the default) lists the repos that *would* be created; a real run hands out.
 
 It asks nothing about the assignment itself: individual or group is the template's own
 `grading_config.yml` - see [Group or individual?](#group-or-individual).
