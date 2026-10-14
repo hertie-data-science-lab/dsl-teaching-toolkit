@@ -495,7 +495,7 @@ def test_hand_out_due_exam_and_term_rows():
     assert rows["assignment-1:handout"]["kind"] == "assignment"
     assert rows["assignment-1:due"]["assignment"] == "assignment-1"
     assert rows["midterm"]["kind"] == "exam"
-    assert rows["term-start"]["all_day"] and rows["term-start"]["kind"] == "term_date"
+    assert rows["term-start"]["all_day"] and rows["term-start"]["kind"] == "semester"
     ids = [r["id"] for r in _render()["rows"]]
     assert ids.index("term-start") < ids.index("lecture_01") < ids.index("term-end")
 
@@ -503,13 +503,14 @@ def test_hand_out_due_exam_and_term_rows():
 def test_kinds_come_from_the_policy():
     kinds = _render()["kinds"]
     assert kinds["lecture"]["label"] == "Lecture"
-    assert set(kinds["lecture"]) == {"label", "colour", "background", "tab"}
+    assert set(kinds["lecture"]) == {"label", "plural", "colour", "background", "tab"}
+    assert kinds["lab"]["plural"] == "labs"
 
 
 def test_a_kind_has_a_tab_unless_the_engine_makes_its_rows():
     kinds = _render()["kinds"]
     assert kinds["lecture"]["tab"] and kinds["readings"]["tab"] and kinds["exam"]["tab"]
-    assert not kinds["assignment"]["tab"] and not kinds["term"]["tab"]
+    assert not kinds["assignment"]["tab"] and not kinds["semester"]["tab"]
 
 
 def test_a_row_is_on_the_tabs_the_site_lists_it_on():

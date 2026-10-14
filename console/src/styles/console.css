@@ -152,7 +152,7 @@ main { min-width: 0; }
 .chip.lab { background: var(--lab-bg); color: var(--lab-ink); }
 .chip.exam { background: var(--exam-bg); color: var(--exam-ink); }
 .chip.evt { background: var(--evt-bg); color: var(--evt-ink); }
-.chip.term { background: var(--term-bg); color: var(--term-ink); }
+.chip.semester { background: var(--semester-bg); color: var(--semester-ink); }
 .count-badge { font-family: var(--font-display); font-weight: 700; font-size: 13px; min-width: 24px; height: 24px; padding: 0 8px; border-radius: 999px; background: var(--bad); color: #fff; display: inline-grid; place-items: center; }
 .probs { display: inline-flex; gap: 8px; align-items: center; font-family: var(--font-display); font-weight: 600; font-size: 14px; color: var(--bad-ink); white-space: nowrap; }
 .probs.none { color: var(--ok); }
@@ -166,11 +166,11 @@ main { min-width: 0; }
 .wk .wk-marks { display: grid; gap: 3px; align-content: end; }
 .wk .m { display: block; height: 6px; border-radius: 2px; }
 .m.lec { background: var(--lec-ink); } .m.lab { background: var(--lab-ink); } .m.asg { background: var(--asg-ink); }
-.m.exam { background: var(--exam-ink); } .m.evt { background: var(--amber); } .m.term { background: var(--term-ink); }
+.m.exam { background: var(--exam-ink); } .m.evt { background: var(--amber); } .m.semester { background: var(--semester-ink); }
 .wk.past { opacity: 0.62; }
 .wk.now { background: var(--surface); border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); opacity: 1; }
-.wk.rw { background: var(--term-bg); border-color: transparent; }
-.wk.rw .wk-n { color: var(--term-ink); }
+.wk.rw { background: var(--semester-bg); border-color: transparent; }
+.wk.rw .wk-n { color: var(--semester-ink); }
 button.wk { font: inherit; text-align: left; cursor: pointer; align-content: start; }
 .wk[aria-pressed="true"] { opacity: 1; border-color: var(--link); box-shadow: 0 0 0 2px var(--link); }
 .wk .wk-count { position: absolute; top: -7px; right: -5px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 999px; background: var(--bad); color: #fff; font-family: var(--font-display); font-weight: 700; font-size: 11px; display: grid; place-items: center; line-height: 1; }
@@ -406,7 +406,7 @@ table.grid td input:hover, table.grid td select:hover { border-color: var(--rule
 .trow.asg { background: var(--asg-bg); } .trow.asg .k { color: var(--asg-ink); }
 .trow.exam { background: var(--exam-bg); } .trow.exam .k { color: var(--exam-ink); }
 .trow.evt { background: var(--evt-bg); } .trow.evt .k { color: var(--evt-ink); }
-.trow.term { background: var(--term-bg); } .trow.term .k { color: var(--term-ink); }
+.trow.semester { background: var(--semester-bg); } .trow.semester .k { color: var(--semester-ink); }
 .trow.current { box-shadow: inset 0 0 0 2px var(--ink); position: relative; z-index: 1; }
 .trow.fault { box-shadow: inset 5px 0 0 var(--bad); }
 .trow.fault.current { box-shadow: inset 5px 0 0 var(--bad), inset 0 0 0 2px var(--ink); }
@@ -898,7 +898,7 @@ fieldset.field { border: 0; margin: 0; padding: 0; }
 .callout { border: 1px solid var(--rule); border-left: 4px solid var(--asg-ink); border-radius: 10px; padding: 12px 16px; background: var(--surface-2); }
 .callout > p { margin: 0 0 8px; }
 .callout .kv { margin-top: 10px; }
-.callout.team-step-form { border-left-color: var(--term-ink); }
+.callout.team-step-form { border-left-color: var(--semester-ink); }
 .a-step { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-size: 15.5px; margin: 0 0 8px; }
 .a-step[data-team-state='missing'] { opacity: 0.55; }
 .step-num { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--ink-2); color: var(--surface); font-size: 12.5px; }

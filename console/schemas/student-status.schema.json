@@ -246,12 +246,16 @@
           "label": {
             "type": "string"
           },
+          "plural": {
+            "type": "string"
+          },
           "tab": {
             "type": "boolean"
           }
         },
         "required": [
           "label",
+          "plural",
           "colour",
           "background",
           "tab"

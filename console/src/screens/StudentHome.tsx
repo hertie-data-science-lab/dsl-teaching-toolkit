@@ -4,7 +4,7 @@
 // instructors and teaching assistants in two columns. The Updates box's files and the syllabus
 // are file links (`FileLinkItem`), each with its menu.
 
-import { DEFAULT_TIMEZONE } from '../model/policy';
+import { DEFAULT_TIMEZONE, SYSTEM_KINDS } from '../model/policy';
 import type { Setup } from '../model/open';
 import { ARCHIVE_ROWS, instant, startOfDay, type Announcement, type ScheduleRow, type SemesterAssignment, type SemesterFacts } from '../model/student';
 import { assignmentHref } from '../router';
@@ -14,8 +14,8 @@ import { GhMd } from '../ui/rendered';
 import { FileLinkItem, fileHref, useYourSetup } from './StudentFiles';
 import { PersonCard } from './StudentInstructors';
 
-/** Display-only rows (the site's `_events`): never news, and on a kind tab only as the kind's own event. */
-const EVENT_KINDS = ['assignment', 'due', 'exam', 'special_event', 'term_date'];
+/** Display-only rows (the site's `_events`, and the rows the engine makes): never news, and on a kind tab only as the kind's own event. */
+const EVENT_KINDS = [...SYSTEM_KINDS, 'due', 'exam', 'special_event'];
 export const isEventRow = (r: ScheduleRow) => EVENT_KINDS.includes(r.kind);
 
 /** The archive row's ids: the status file's, and an old site's. */

@@ -22,7 +22,7 @@ import { homeText } from './siteText';
 /** One row of the semester calendar. `when` is wall-clock time in the semester's timezone ("2026-09-22T10:00:00") or a full ISO instant; null for a row with no date yet (`dateless`). */
 export interface ScheduleRow {
   id: string;
-  /** lecture | lab | assignment (hand out) | due | exam | special_event | term_date, or a kind added later. */
+  /** lecture | lab | assignment (hand out) | due | exam | special_event | semester, or a kind added later. */
   kind: string;
   when: string | null;
   /** Where the row sorts: its `when`, or a dateless row's place after its kind's last dated one. Orders, never shown. */
@@ -180,14 +180,13 @@ export interface SemesterFacts {
 
 export interface RowKind {
   label: string;
+  /** Its block and tab name (`lectures`). */
+  plural: string;
   colour: string;
   background: string;
   /** The kind has a tab of its own (the site's kind tabs); false for the rows the engine makes (hand-out, term dates, archive). */
   tab: boolean;
 }
-
-/** The kinds that had a tab before the file said which do: a file without `tab` is read this way. */
-const TABBED_KINDS = ['lecture', 'lab', 'readings'];
 
 /** A row's kind tabs as written, or its own kind's alone when the source says nothing. */
 function tabsOf(v: unknown, kind: string): string[] {
@@ -597,7 +596,7 @@ export function factsFromStatus(doc: Obj): SemesterFacts {
   const syl = doc.syllabus as Obj | null | undefined;
   const syllabusPath = syl ? str(syl.path) : '';
   const kinds: Record<string, RowKind> = {};
-  for (const [k, v] of Object.entries((doc.kinds as Record<string, Obj> | undefined) ?? {})) kinds[k] = { label: str(v.label), colour: str(v.colour), background: str(v.background), tab: typeof v.tab === 'boolean' ? v.tab : TABBED_KINDS.includes(k) };
+  for (const [k, v] of Object.entries((doc.kinds as Record<string, Obj> | undefined) ?? {})) kinds[k] = { label: str(v.label), plural: str(v.plural), colour: str(v.colour), background: str(v.background), tab: v.tab === true };
   const org = str(doc.semester);
   return {
     courseName: str(doc.course_name),

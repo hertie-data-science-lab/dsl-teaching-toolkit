@@ -464,7 +464,7 @@ type, and the type is never a field you set - it follows from where the row came
 | assignment | an `assignments:` entry - shown on **both** its handout date and its due date |
 | exam | an `events:` entry with `kind: exam` |
 | special_event | an `events:` entry with no `kind` (clinic, guest lecture, revision session), and the `archive` block's date - the "Semester archived" row |
-| term_date | the `semester_start` / `semester_end` scalars |
+| semester | the `semester_start` / `semester_end` scalars |
 
 Labels, colours and tabs come from the institution policy's `kinds:`; a week with a lecture
 and a lab entry renders two rows.

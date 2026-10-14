@@ -3366,7 +3366,7 @@ def test_a_set_aside_release_with_nothing_to_release_is_not_raised():
 
 
 def test_an_assignment_carries_the_site_s_submit_shape():
-    # The console words the due row from it, as the site's schedule_row_due.html does.
+    # The console words the due row from it, as the site's schedule_row.html does.
     for via, shape in (
         ("assignment_repo", "assignment-repo-private"),
         ("shared_dropbox_repo", "shared-dropbox-repo"),

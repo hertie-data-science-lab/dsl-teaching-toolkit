@@ -607,10 +607,13 @@ values); an optional `policy.yml` at this repo's root overrides it (`defaults` a
 raises on anything wrong. The engine reads it at the org's `central_ref`, like the code.
 Blocks: `defaults` (late pair, team cap, visibility, team formation, formats, timezone,
 archive grace, release destination repo), `kinds` (ordered row kinds with label, label
-colour and row colour; `assignment`, `term`, `archive` are `system: true` and `other` is
-required; the non-system kinds are what a release entry's `kind:` may say, and each one a
-semester has rows of gets a tab on its site; `assets`, "Supporting files", is released but
-never a row or a tab on either site, and is the kind of any folder no alias names
+colour and row colour, `plural` (the block and tab name: `/lectures/`, Lectures), `numbered`
+and `shown` (default true); the engine and the console read every kind word from here
+(`policy.plural_of`, `kind_for_plural`, `numbered_kinds`, `shown_kinds`); `assignment`,
+`semester`, `archive` are `system: true` and `other` is required; the non-system kinds are what a release entry's `kind:` may say, and each one a
+semester has rows of gets a tab on its site; every schedule row renders through the one
+`_includes/schedule_row.html`, labelled and coloured from the site's `_data/kinds.yml`;
+`assets`, "Supporting files" (`shown: false`), is released but never a row or a tab on either site, and is the kind of any folder no alias names
 (`materials.DEFAULT_KIND`, decision 0031; an entry with no copies stays `lecture`), `schedule_plan.site_rows` and `public_site.shown_sections`
 drop it; the public website neither hosts nor links its files, since it hosts by section), `institution` (the site block), `contact` (the last fault address, after
 `DSL_MAINTAINER_EMAIL` and `GRAPH_SENDER`), `licences` (the open site's choices, default

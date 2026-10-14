@@ -391,8 +391,8 @@ def duplicate_numbers(
 
 
 def kind_plural(kind: str) -> str:
-    """`lectures`, `labs`, `assignments`: the kind's label, as a plural noun."""
-    return f"{policy.kind_label(kind).lower()}s"
+    """`lectures`, `labs`, `readings`: the kind's policy `plural`."""
+    return policy.plural_of(kind)
 
 
 def duplicate_text(kind: str, n: int, keys: list[str]) -> str:

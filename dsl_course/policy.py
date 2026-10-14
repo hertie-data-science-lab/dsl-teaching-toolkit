@@ -28,7 +28,7 @@ OVERRIDE_PATH = Path(__file__).resolve().parents[1] / "policy.yml"
 
 # The kinds the engine creates rows for itself, and the one an unknown kind lands on: an
 # override may relabel or recolour them, never drop them.
-SYSTEM_KINDS = ("assignment", "term", "archive")
+SYSTEM_KINDS = ("assignment", "semester", "archive")
 FALLBACK_KIND = "other"
 # The blocks an override merges key by key; every other block it names replaces ours whole.
 MERGED = ("defaults", "institution")
@@ -45,6 +45,7 @@ READ_DEFAULTS = (
 )
 
 _HEX = "^#[0-9a-fA-F]{6}$"
+_KEY = r"^[a-z][a-z0-9_-]*$"
 # `10%` or a fraction `0.1`: the two spellings `setting_readers.penalty_fault` accepts.
 _PENALTY = r"^(?:(?:100|[0-9]{1,2})(?:\.[0-9]+)?%|0?\.[0-9]+|0)$"
 _WHOLE = {"type": "integer"}
@@ -91,13 +92,24 @@ SCHEMA = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "key": {"type": "string", "pattern": r"^[a-z][a-z0-9_-]*$"},
+                    "key": {"type": "string", "pattern": _KEY},
+                    "plural": {"type": "string", "pattern": _KEY},
+                    "numbered": {"type": "boolean"},
+                    "shown": {"type": "boolean"},
                     "label": {"type": "string"},
                     "colour": {"type": "string", "pattern": _HEX},
                     "background": {"type": "string", "pattern": _HEX},
                     "system": {"type": "boolean"},
                 },
-                "required": ["key", "label", "colour", "background", "system"],
+                "required": [
+                    "key",
+                    "plural",
+                    "numbered",
+                    "label",
+                    "colour",
+                    "background",
+                    "system",
+                ],
                 "additionalProperties": False,
             },
         },
@@ -178,6 +190,9 @@ def _problems(policy: dict) -> list[str]:
     keys = [kind["key"] for kind in policy["kinds"]]
     if len(keys) != len(set(keys)):
         out.append("policy.kinds: each key may appear once")
+    plurals = [kind["plural"] for kind in policy["kinds"]]
+    if len(plurals) != len(set(plurals)):
+        out.append("policy.kinds: each plural may appear once")
     for key in (*SYSTEM_KINDS, FALLBACK_KIND):
         if key not in keys:
             out.append(
@@ -209,6 +224,8 @@ def read(default: Path = DEFAULT_PATH, override: Path | None = OVERRIDE_PATH) ->
     problems = _problems(policy)
     if problems:
         raise PolicyError("; ".join(problems))
+    for kind in policy["kinds"]:
+        kind.setdefault("shown", True)
     return policy
 
 
@@ -224,7 +241,8 @@ def defaults() -> dict:
 
 
 def kinds() -> list[dict]:
-    """The row kinds, in display order: `key`, `label`, `colour`, `background`, `system`."""
+    """The row kinds, in display order: `key`, `plural`, `numbered`, `shown`, `label`,
+    `colour`, `background`, `system`."""
     return load()["kinds"]
 
 
@@ -259,3 +277,24 @@ def content_kinds() -> tuple[str, ...]:
     """The kinds a `releases:` entry may declare (every kind the engine does not create
     rows for itself), in display order."""
     return tuple(k["key"] for k in kinds() if not k["system"])
+
+
+def plural_of(key: str) -> str:
+    """A kind's block and tab name (`lecture` -> `lectures`); the key itself when unknown."""
+    return next((k["plural"] for k in kinds() if k["key"] == key), key)
+
+
+def kind_for_plural(name: str) -> str | None:
+    """The kind a block or tab name names (`labs` -> `lab`), or None."""
+    return next((k["key"] for k in kinds() if k["plural"] == name), None)
+
+
+def numbered_kinds() -> tuple[str, ...]:
+    """The kinds whose entries are numbered (Lecture 3), in display order."""
+    return tuple(k["key"] for k in kinds() if k["numbered"])
+
+
+def shown_kinds() -> tuple[str, ...]:
+    """The kinds that are rows and tabs (every kind but `shown: false` ones such as
+    supporting files), in display order."""
+    return tuple(k["key"] for k in kinds() if k["shown"])

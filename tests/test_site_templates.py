@@ -201,7 +201,7 @@ def test_the_sync_ships_every_template_to_both_kinds_of_site(
 # site got its table layout from a repo the toolkit does not ship; a theme release that
 # drops them flattens every schedule, materials and assignments table on every live site.
 _TABLE_TEMPLATES = ("_layouts/schedule.html",) + tuple(
-    rel for rel in _templates() if rel.startswith("_includes/schedule_row_")
+    rel for rel in _templates() if rel.startswith("_includes/schedule_row")
 )
 # Page chrome the theme still owns.
 _THEME_CHROME = frozenset({"home", "post-header", "post-title"})
@@ -365,34 +365,31 @@ def test_every_image_a_template_renders_carries_alt_text(rel):
         assert re.search(r'\balt="[^"]+"', tag.group(0)), f"{rel}: {tag.group(0)}"
 
 
-_WHEN_INCLUDE = re.compile(
-    r'{%\s*when\s+"(?P<kind>[^"]+)"\s*%}{%\s*include\s+(?P<include>\S+)'
-)
-
-
-def test_a_schedule_row_template_exists_for_every_type_the_sync_emits(generated):
-    # The schedule dispatches on `kind`, so a row kind added to site.py without a branch
-    # renders as the neutral fallback row - silently, on the live schedule. What each
-    # branch includes is its own business, so this checks only that the branch exists and
-    # that the template it names ships. A release row, of any kind, is the one generic row.
+def test_every_row_kind_the_sync_emits_is_labelled_from_the_policy(
+    generated, site_data
+):
+    # ONE row template, labelled and coloured from `_data/kinds.yml`: a row kind added to
+    # site.py that is neither a policy kind nor one the layout maps onto one renders as
+    # the plain fallback row - silently, on the live schedule.
     documents = [
         _front_matter(text)
-        for name, entries in generated["collections"].items()
-        if name != "_lectures"
+        for entries in generated["collections"].values()
         for text in entries.values()
     ]
     emitted = {doc["kind"] for doc in documents if doc.get("kind")}
     emitted |= {doc["due_event"]["kind"] for doc in documents if doc.get("due_event")}
-    schedule = _strip_comments(_templates()["_layouts/schedule.html"])
-    assert 'event.collection == "lectures"' in schedule
-    assert "include schedule_row_lecture.html event=event kind=kind.label" in schedule
-    branches = {
-        m["kind"]: m["include"]
-        for m in _WHEN_INCLUDE.finditer(_templates()["_layouts/schedule.html"])
-    }
+    keys = {k["key"] for k in site_data["kinds"]}
+    mapped = {"due": "assignment", "special_event": "other"}
     for kind in sorted(emitted):
-        assert kind in branches, kind
-        assert f"_includes/{branches[kind]}" in _templates(), kind
+        assert mapped.get(kind, kind) in keys, kind
+    schedule = _strip_comments(_templates()["_layouts/schedule.html"])
+    for kind, key in mapped.items():
+        assert f'key == "{kind}" %}}{{% assign key = "{key}"' in schedule
+    assert "{% include schedule_row.html event=event label=kind.label" in schedule
+    assert "{% when" not in schedule and "{% case" not in schedule
+    assert [r for r in _templates() if r.startswith("_includes/schedule_row")] == [
+        "_includes/schedule_row.html"
+    ]
 
 
 def test_no_generated_row_carries_the_retired_type_key(generated):
@@ -410,15 +407,11 @@ def test_every_row_that_can_carry_a_provisional_date_marks_it():
     # so. The lecture/lab row read it nowhere and rendered nothing, which is the one
     # failure a faculty member cannot see from the file they wrote: they marked a class
     # date provisional and the deployed schedule went on showing it as settled.
-    for rel, text in _liquid_templates().items():
-        if not rel.startswith("_includes/schedule_row_"):
-            continue
-        body = _strip_comments(text)
-        # The lab row is the lecture row, included with its own word.
-        if "schedule_row_lecture.html" in body:
-            continue
-        assert "include.event.tbc" in body, rel
-        assert "(TBC)" in body, rel
+    body = _strip_comments(_liquid_templates()["_includes/schedule_row.html"])
+    assert "include.event.tbc" in body
+    # One typography for every kind: a provisional date bold, a dateless row plain.
+    assert "<b>(TBC)</b>" in body
+    assert "<b>TBC</b>" not in body
 
 
 @pytest.mark.parametrize("rel", sorted(_liquid_templates()))
@@ -856,13 +849,13 @@ def test_an_assignment_entry_is_a_page_and_its_rows(generated):
     for text in generated["collections"]["_assignments"].values():
         keys |= set(_front_matter(text))
     assert {"late_rule", "cutoff_sentence", "shape_note", "max_points", "teams"} <= keys
-    row = _strip_comments(_templates()["_includes/schedule_row_assignment.html"])
+    row = _strip_comments(_templates()["_includes/schedule_row.html"])
     assert "include.event.url" in row
 
 
 def test_the_schedule_row_names_the_day_teams_close(generated):
     # The Details cell's one call to action: form a team, by this day.
-    row = _strip_comments(_liquid_templates()["_includes/schedule_row_assignment.html"])
+    row = _strip_comments(_liquid_templates()["_includes/schedule_row.html"])
     assert "include.event.team_join_url" in row
     # Off-site, so it leaves in a new tab like every other link on this site that does.
     assert (
@@ -887,14 +880,6 @@ def test_the_schedule_row_names_the_day_teams_close(generated):
 # cell is how one of them comes to render it differently.
 DETAILS_INCLUDE = "{%- include schedule_details.html"
 
-DETAILS_ROWS = (
-    "_includes/schedule_row_lecture.html",
-    "_includes/schedule_row_assignment.html",
-    "_includes/schedule_row_due.html",
-    "_includes/schedule_row_exam.html",
-    "_includes/schedule_row_special_event.html",
-)
-
 
 def _details_cell(text: str) -> str:
     """The Details column's cell of one schedule-row template, comments stripped."""
@@ -915,52 +900,39 @@ def test_the_details_include_renders_the_front_matter_it_is_handed():
     assert "{{ include.details | markdownify }}" in body
 
 
-@pytest.mark.parametrize("rel", DETAILS_ROWS)
-def test_declared_details_render_above_what_the_cell_generates(rel):
+def test_declared_details_render_above_what_the_cell_generates():
     # ADDITIVE, and outside every branch. A lecture row's links and its "not released yet"
     # note are two arms of one `if`; details written inside either arm would disappear on
     # the other - so a session that declared a blurb would show it only until its slides
     # shipped.
-    cell = _details_cell(_templates()[rel])
+    cell = _details_cell(_templates()["_includes/schedule_row.html"])
     above, marker, below = cell.partition(DETAILS_INCLUDE)
-    assert marker, rel
-    assert not above.strip(), rel
-    assert below.strip(), rel
+    assert marker
+    assert not above.strip()
+    assert below.strip()
 
 
-def test_the_schedule_layouts_fallback_row_shows_declared_details_too():
-    # The `{% else %}` arm an unrecognised `type:` falls through to. It renders a plain
-    # row rather than failing the build, and a plain row still has a Details column.
-    cell = _details_cell(_templates()["_layouts/schedule.html"])
-    assert DETAILS_INCLUDE in cell
-    assert "details=event.details" in cell
+def test_a_row_of_a_kind_the_policy_does_not_know_is_a_plain_row():
+    # No colour to look up: the row names its kind in the Event column and keeps the
+    # shared Date, Title and Details cells, rather than failing the build.
+    row = _strip_comments(_templates()["_includes/schedule_row.html"])
+    assert '{{ include.event.kind | default: "Event" }}' in row
 
 
 def test_the_exam_row_still_renders_a_body_below_its_details():
     # The hardcoded "Details to be confirmed." body went; the line that RENDERS a body did
     # not. Deleting both would blank an exam that has something to say.
-    cell = _details_cell(_templates()["_includes/schedule_row_exam.html"])
+    cell = _details_cell(_templates()["_includes/schedule_row.html"])
     assert "include.event.content" in cell
     assert cell.index(DETAILS_INCLUDE) < cell.index("include.event.content")
 
 
-@pytest.mark.parametrize(
-    "rel",
-    [
-        "_includes/schedule_row_lecture.html",
-        "_includes/schedule_row_assignment.html",
-        "_includes/schedule_row_due.html",
-        "_includes/schedule_row_exam.html",
-        "_includes/schedule_row_special_event.html",
-        "_includes/schedule_row_term_date.html",
-    ],
-)
-def test_every_schedule_row_takes_its_title_from_title(rel):
-    body = _strip_comments(_templates()[rel])
+def test_every_schedule_row_takes_its_title_from_title():
+    body = _strip_comments(_templates()["_includes/schedule_row.html"])
     _, marker, rest = body.partition('data-label="Title">')
-    assert marker, rel
+    assert marker
     cell, _, _ = rest.partition("</div>")
-    assert "include.event.title" in cell, rel
+    assert "include.event.title" in cell
 
 
 def test_the_updates_box_still_prints_a_rows_declared_sentence():
@@ -982,14 +954,13 @@ def test_no_template_reads_description_off_a_generated_document():
         assert "description" not in _reads(text)[1], rel
 
 
-def test_the_term_date_row_names_its_kind_and_not_its_entry():
-    # `{{ include.event.name | default: "Term" }}` outlived the `name:` site.py wrote, and
-    # a default is exactly the failure that looks fine: the column would have gone on
-    # reading "Term" for every row while the name sat unread.
-    body = _strip_comments(_templates()["_includes/schedule_row_term_date.html"])
-    _, _, rest = body.partition('data-label="Event">')
-    cell, _, _ = rest.partition("</div>")
-    assert cell.strip() == "Semester"
+def test_the_semester_row_names_its_kind_and_not_its_entry(generated, site_data):
+    # The Event column says "Semester" - the kind, from the policy - and the row's title
+    # says which boundary it is.
+    start = _front_matter(generated["collections"]["_events"]["term-start.md"])
+    assert start["kind"] == "semester" and start["title"] == "Semester starts"
+    kind = next(k for k in site_data["kinds"] if k["key"] == "semester")
+    assert kind["label"] == "Semester"
 
 
 # ---------------------------------------------------------------------------
@@ -1039,7 +1010,7 @@ def test_an_external_assignment_is_never_told_to_push(generated):
     # Nor may either arm claim no repository was created: a semester handed out before this
     # shipped has the repos it was given, and the page would deny them.
     layout = _liquid_templates()["_layouts/assignment.html"]
-    due_row = _liquid_templates()["_includes/schedule_row_due.html"]
+    due_row = _liquid_templates()["_includes/schedule_row.html"]
     arms = [
         _external_arm(
             layout,
@@ -1378,7 +1349,7 @@ def test_a_student_choice_page_says_when_the_repo_may_be_published(generated):
         in note
     )
     # And the due row says at a glance that the flag is the student's.
-    due_row = _liquid_templates()["_includes/schedule_row_due.html"]
+    due_row = _liquid_templates()["_includes/schedule_row.html"]
     assert '"assignment-repo-student-choice" %} (yours to publish)' in due_row
 
 
@@ -1991,7 +1962,7 @@ def test_the_schedule_row_names_the_same_day_as_the_page(generated):
     # The Details cell is one line beside the brief's link, and it takes the date and the
     # address from the same two keys the Assignments tab's callout does - so the schedule
     # cannot come to name a different closing day from the page it links to.
-    row = _strip_comments(_liquid_templates()["_includes/schedule_row_assignment.html"])
+    row = _strip_comments(_liquid_templates()["_includes/schedule_row.html"])
     assert "include.event.team_join_url" in row
     # Off-site, so it leaves in a new tab like every other link on this site that does.
     assert (
@@ -2024,7 +1995,7 @@ def test_a_shared_page_names_the_drop_box_and_the_folder(generated):
     # Who else can read it is the shape note's half, under the brief, not the callout's.
     assert "everyone in the semester can read the whole repo" in page["shape_note"]
     # And the due row says at a glance that the reader's own work goes in a folder.
-    due_row = _liquid_templates()["_includes/schedule_row_due.html"]
+    due_row = _liquid_templates()["_includes/schedule_row.html"]
     assert (
         '"shared-dropbox-repo" %} ({{ include.event.submit_path | escape }} folder)'
         in due_row

@@ -4,7 +4,8 @@
 import { parse } from 'yaml';
 import { obj } from '../edit/yamlText';
 import { ASSIGNMENT_WORD, RELEASE_WORD, addDays, assignmentIdent, dayKey, daysBetween, kindIdent, labelNumber, releaseIdent, sessionNumber, sortKey, zoned } from './format';
-import { ASSETS_KIND, CONTENT_KINDS } from './materialsRules';
+import { CONTENT_KINDS } from './materialsRules';
+import { SHOWN_KINDS } from './policy';
 import type { Release, Status } from './types';
 
 export interface SchedEntry {
@@ -47,8 +48,8 @@ function entry(raw: unknown, dflt: Partial<SchedEntry> = {}): SchedEntry {
   };
 }
 
-/** The kinds an `events:` entry may take besides special_event (`schedule.EVENT_KINDS`): every content kind that is a row. */
-const EVENT_KINDS = CONTENT_KINDS.filter((k) => k !== ASSETS_KIND);
+/** The kinds an `events:` entry may take besides special_event (`schedule.EVENT_KINDS`): every content kind that is a row (`shown`). */
+const EVENT_KINDS = CONTENT_KINDS.filter((k) => SHOWN_KINDS.includes(k));
 /** Whether an event kind is a session with nothing to ship (`Schedule.sessions`): any but exam and special_event. */
 export const isSession = (kind: string) => kind !== 'exam' && EVENT_KINDS.includes(kind);
 /** An event's kind as the engine reads it: an unknown one is a special event. */
@@ -147,8 +148,8 @@ export function scheduleRows(status: Status, sched: Schedule | null, now: number
         name: session ? ev.title || (n === null ? '' : titles.get(`${ev.kind}:${n}`) ?? '') : ev.title, state: ev.when ? (past(ev.when) ? 'past' : 'upcoming') : 'upcoming', details: ev.details, tbc: ev.tbc, show: ev.show,
       });
     }
-    if (sched.start) rows.push({ entry: 'semester', block: 'events', type: 'term', when: sched.start, ident: 'Semester', name: 'Starts', state: past(sched.start) ? 'past' : 'upcoming', details: '', tbc: false, show: true });
-    if (sched.end) rows.push({ entry: 'semester', block: 'events', type: 'term', when: sched.end, ident: 'Semester', name: 'Ends', state: past(sched.end) ? 'past' : 'upcoming', details: '', tbc: false, show: true });
+    if (sched.start) rows.push({ entry: 'semester', block: 'events', type: 'semester', when: sched.start, ident: 'Semester', name: 'Starts', state: past(sched.start) ? 'past' : 'upcoming', details: '', tbc: false, show: true });
+    if (sched.end) rows.push({ entry: 'semester', block: 'events', type: 'semester', when: sched.end, ident: 'Semester', name: 'Ends', state: past(sched.end) ? 'past' : 'upcoming', details: '', tbc: false, show: true });
   }
   const archive = sched?.archive?.when ?? status.semester?.archive_date ?? null;
   if (archive) rows.push({ entry: 'archive', block: 'events', type: 'archive', when: archive, ident: 'Archive', name: sched?.archive?.title || 'Semester archived', state: 'scheduled', details: (sched?.archive?.details ?? '').replace('{date}', archive), tbc: false, show: sched?.archive?.show ?? true });

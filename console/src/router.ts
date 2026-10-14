@@ -13,7 +13,7 @@
 // tab with that file open in it (after a slash: a kind key and a repo name may both hold `-`).
 
 import { semesterOver } from './model/catalogue';
-import { ORG_NAME_RE } from './model/policy';
+import { ORG_NAME_RE, tabTitle } from './model/policy';
 import { isInstructor, roleOf, type Course, type CohortRef, type Estate, type Mode, type Semester } from './model/discovery';
 import type { SemesterFacts } from './model/student';
 
@@ -203,18 +203,15 @@ export const STUDENT_SCREENS: [string, string][] = [
   ['home', 'Home'], ['week', 'This week'], ['schedule', 'Schedule'], ['assignments', 'Assignments'], ['materials', 'All materials'], ['instructors', 'Instructors'],
 ];
 
-/** A kind's label as a tab name, as the engine's `site_repo.tab_word` writes it: one trailing `s`. */
-export const tabWord = (word: string) => (word.endsWith('s') ? word : `${word}s`);
-
 /**
  * The kind tabs a semester has (decision 0035 rule 3): each kind with a tab of its own that
- * at least one row is listed on, in the policy's order, as `kind-<key>` and its label
- * pluralised.
+ * at least one row is listed on, in the policy's order, as `kind-<key>` and its plural
+ * (`site_repo.kind_tab`).
  */
 export function kindTabs(facts: SemesterFacts | null | undefined): [string, string][] {
   if (!facts?.kinds) return [];
   const named = new Set((facts.tabRows ?? facts.rows).flatMap((r) => r.tabs));
-  return Object.entries(facts.kinds).filter(([k, v]) => v.tab && named.has(k)).map(([k, v]) => [`kind-${k}`, tabWord(v.label || k)]);
+  return Object.entries(facts.kinds).filter(([k, v]) => v.tab && named.has(k)).map(([k, v]) => [`kind-${k}`, tabTitle(v.plural || k)]);
 }
 
 /** A semester's student screens in nav order: the fixed ones with its kind tabs after Schedule; the fixed ones alone while its facts are read. */

@@ -527,3 +527,9 @@ def test_the_shared_landing_table(case):
     release = Release("x", _at(1), [deploy])
     landing = schedule_plan.entry_landing(release, lambda repo: case["aliases"])
     assert (landing.section, landing.kind) == (case["section"], case["kind"])
+
+
+def test_a_duplicate_number_names_the_kind_by_its_policy_plural():
+    assert schedule_plan.duplicate_text("readings", 2, ["a", "b"]).startswith(
+        "Two readings are numbered 2"
+    )

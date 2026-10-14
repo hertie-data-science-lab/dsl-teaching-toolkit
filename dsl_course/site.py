@@ -1033,8 +1033,20 @@ def _site_rows(
 
 
 # Files an older toolkit wrote into every semester site that nothing writes or includes
-# any more: 0.9.0's lab row include.
-RETIRED_SITE_FILES = ("_includes/schedule_row_lab.html",)
+# any more: 0.9.0's lab row include, and the per-kind row includes `schedule_row.html`
+# replaced (0.11.0).
+RETIRED_SITE_FILES = tuple(
+    f"_includes/schedule_row_{kind}.html"
+    for kind in (
+        "lab",
+        "lecture",
+        "assignment",
+        "due",
+        "exam",
+        "special_event",
+        "term_date",
+    )
+)
 
 
 @cache
@@ -1354,9 +1366,9 @@ def _event_row(
     dateless: bool = False,
     details: str = "",
 ) -> str:
-    """A display-only schedule row - `kind='exam'` for the red exam row the theme styles
-    (schedule_row_exam.html), `kind='special_event'` for the generic one
-    (schedule_row_special_event.html): a clinic, a guest lecture, a review session.
+    """A display-only schedule row - `kind='exam'` for the exam row, `kind='special_event'`
+    for the generic one (labelled as the policy's `other` kind): a clinic, a guest lecture,
+    a review session.
     Nothing is released; the site simply shows it. ONE renderer, because the two rows
     differ in the word and in nothing else - the templates differ, the front matter does
     not, and two copies of it is how a key added to one row type misses the other.
@@ -1483,8 +1495,8 @@ def _archive_entry(archive: schedule.ArchiveRow, today: date) -> str:
     )
 
 
-def _term_date_entry(name: str, when: date) -> str:
-    """A semester-boundary row (the theme's schedule_row_term_date.html).
+def _semester_entry(name: str, when: date) -> str:
+    """A semester-boundary row (the `semester` kind of the theme's schedule_row.html).
 
     `name` ("Semester starts" / "Semester ends") is the row's TITLE. It used to be written to
     `name:`, which the theme prints in the Event column, beside a `description: ""` that
@@ -1494,7 +1506,7 @@ def _term_date_entry(name: str, when: date) -> str:
     clock time - a term boundary is a whole day, not a 09:00 appointment."""
     return (
         f"---\n"
-        f"kind: term_date\n"
+        f"kind: semester\n"
         f"date: {iso_when(when)}\n"
         f"sort_at: {iso_when(when)}\n"
         f"hide_time: true\n"
@@ -1676,11 +1688,11 @@ def sync_site(course_org: str, semester_org: str) -> int:
                 )
         # The term's own boundaries, when the schedule pins them.
         if sched.semester_start:
-            event_entries["term-start.md"] = _term_date_entry(
+            event_entries["term-start.md"] = _semester_entry(
                 "Semester starts", sched.semester_start
             )
         if sched.semester_end:
-            event_entries["term-end.md"] = _term_date_entry(
+            event_entries["term-end.md"] = _semester_entry(
                 "Semester ends", sched.semester_end
             )
 

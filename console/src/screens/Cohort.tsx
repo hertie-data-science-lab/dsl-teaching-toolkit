@@ -55,8 +55,8 @@ export function headerLine(status: Status, sched: Schedule | null, tz: string, t
   return out.join(' ');
 }
 
-const KIND_ORDER = ['lec', 'lab', 'asg', 'exam', 'evt', 'term'];
-const KIND_WORD: Record<string, string> = { lec: 'lecture', lab: 'lab', asg: 'assignment', exam: 'exam', evt: 'event', term: 'semester date' };
+const KIND_ORDER = ['lec', 'lab', 'asg', 'exam', 'evt', 'semester'];
+const KIND_WORD: Record<string, string> = { lec: 'lecture', lab: 'lab', asg: 'assignment', exam: 'exam', evt: 'event', semester: 'semester date' };
 
 /** A week's badge on the strip: how many problems, and whether they are all later (hollow). */
 export interface WeekCount { n: number; later: boolean }

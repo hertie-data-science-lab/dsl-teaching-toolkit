@@ -48,9 +48,6 @@ PLAN_END = "<!-- /dsl:weekly-plan -->"
 ASSETS_KIND = "assets"
 # The kind of a folder no alias names (decision 0031 rule 10; it was `lecture`).
 DEFAULT_KIND = ASSETS_KIND
-# The kinds a folder may be set to (the console's Folder kinds dropdown), in row order;
-# the policy's other kinds belong to schedule entries, not folders.
-FOLDER_KINDS = ("lecture", "lab", "readings", ASSETS_KIND)
 # The kind of a `releases:` entry that names none and copies nothing yet: there is no
 # folder to infer from, so it stays the row it always was.
 EMPTY_ENTRY_KIND = "lecture"
@@ -82,6 +79,12 @@ BUILTIN_ALIASES = {
     "src": "assets",
     "static": "assets",
 }
+# The kinds a folder may be set to (the console's Folder kinds dropdown): the policy's kinds a
+# built-in folder name implies, in the policy's order; its other kinds belong to schedule
+# entries, not folders.
+FOLDER_KINDS = tuple(
+    k for k in policy.content_kinds() if k in set(BUILTIN_ALIASES.values())
+)
 
 SCHEMA = {
     "type": "object",

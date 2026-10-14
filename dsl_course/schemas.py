@@ -850,6 +850,7 @@ def materials_json() -> dict:
         "default_syllabus": materials.DEFAULT_SYLLABUS,
         "default_kind": materials.DEFAULT_KIND,
         "assets_kind": materials.ASSETS_KIND,
+        "fallback_kind": policy.FALLBACK_KIND,
         "empty_entry_kind": materials.EMPTY_ENTRY_KIND,
         "folder_kinds": list(materials.FOLDER_KINDS),
         "alias_depth": materials.ALIAS_DEPTH,

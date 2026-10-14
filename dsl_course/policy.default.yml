@@ -21,46 +21,65 @@ defaults:
     grace_days: 60              # archive date = semester_end + this, unless given
   semester_dest_repo: materials # where a release lands when its deploy entry names no repo
 
-# Schedule row kinds, in display order. `colour` is the row's label, `background` its row
-# (both clear 4.5:1). `system: true` = the engine creates the row (the kind may be relabelled
-# or recoloured, never removed); `other` is where an unknown kind lands.
+# Schedule row kinds, in display order: the only kind vocabulary the engine and the console
+# know. `plural` is the kind's block and tab name (`/lectures/`, Lectures); `numbered` says
+# its entries are numbered (Lecture 3); `shown: false` = released, never a row or a tab
+# (default true). `colour` is the row's label, `background` its row (both clear 4.5:1).
+# `system: true` = the engine creates the row (the kind may be relabelled or recoloured,
+# never removed); `other` is where an unknown kind lands.
 kinds:
   - key: lecture
+    plural: lectures
+    numbered: true
     label: Lecture
     colour: "#a94442"
     background: "#f2dede"
     system: false
   - key: lab
+    plural: labs
+    numbered: true
     label: Lab
     colour: "#3c763d"
     background: "#dff0d8"
     system: false
   - key: readings
+    plural: readings
+    numbered: false
     label: Readings
     colour: "#2b6a60"
     background: "#dcefec"
     system: false
   - key: exam
+    plural: exams
+    numbered: false
     label: Exam
     colour: "#2b2f36"
     background: "#e6e8ec"
     system: false
   - key: assignment
+    plural: assignments
+    numbered: true
     label: Assignment
     colour: "#1f5fa8"
     background: "#d6e6f7"
     system: true
-  - key: term
+  - key: semester
+    plural: semesters
+    numbered: false
     label: Semester
     colour: "#7b3fb8"
     background: "#ead9f6"
     system: true
   - key: archive
+    plural: archives
+    numbered: false
     label: Archive
     colour: "#7d6230"
     background: "#fbf2d5"
     system: true
   - key: drop-in
+    plural: drop-ins
+    numbered: true
     label: Drop-in
     colour: "#8f4a1c"
     background: "#fbe3d6"
@@ -68,11 +87,16 @@ kinds:
   # Supporting files (data, images, code): released with everything else, never a row or a
   # tab on the student site or the public website (decision 0026 rule 3).
   - key: assets
+    plural: assets
+    numbered: false
+    shown: false
     label: Supporting files
     colour: "#4a5560"
     background: "#eceff1"
     system: false
   - key: other
+    plural: other
+    numbered: false
     label: Event
     colour: "#7d6230"
     background: "#fbf2d5"
