@@ -36,25 +36,38 @@ Set up once per course; it serves every future semester. Per-semester setup of t
    | Input | Value | Notes |
    |-------|-------|-------|
    | `org` | the org you just made | e.g. `hertie-dsl-demo-course-e1234` |
-   | `course_name` | the course's name | e.g. `Deep Learning` - `course_name` in `dsl-course.yml`, the title of every site |
+   | `course_name` | the course's name | e.g. `Deep Learning` - `course.name` in `course.yml`, the title of every site |
    | `course_code` | short code | e.g. `E1234` |
    | `set_secret` | `true` (default) | propagates `DSL_BOT_TOKEN` - **don't set the secret by hand** |
    | `admin` | *your handle* | adds you to `course-admin` so you can run the course workflows |
-   | `central_ref` | `release` (default) | which toolkit tier this course runs - leave it unless you are setting up the demo course |
+   | `central_ref` | `release` (default) | which toolkit tier this course runs (`course.toolkit_version_ref`) - leave it unless you are setting up the demo course |
 
    > Safe to re-run.
    
-   This seeds the `.github` repo with every workflow you'll need ([actions reference](reference/actions-reference.md)), the `course-admin` team, and `dsl-course.yml` at that repo's root (the course's identity card).
+   This seeds the `.github` repo with every workflow you'll need ([actions reference](reference/actions-reference.md)), the `course-admin` team, and `course.yml` at that repo's root: the course's one settings file (below).
 
 4. **Add any other admins.** 
-   - Edit `people.course_admins` in course org → `.github` → `dsl-course.yml` and commit to `main` 
+   - Edit `people.course_admins` in course org → `.github` → `course.yml` and commit to `main` 
    - **Sync membership** runs on the push automatically (no need for additional input).
 
    > Each admin handle gets an org invite that stays `pending` until they accept, so check *People → Pending invitations* if someone looks missing.
 
-   NB: TAs and co-instructors are **not** granted access here; each semester declares its own in `semester-config/instructors.yml` when you [bootstrap that semester](04-new-cohort-org.md).
+   NB: TAs and co-instructors are **not** granted access here; each semester declares its own in `semester-config/semester.yml` when you [bootstrap that semester](04-new-cohort-org.md).
 
-   > **If an edit here breaks the file**, nothing goes quiet. `dsl-course.yml` and `semesters.yml` (the semester registry, written for you by **Bootstrap semester**) are the two files that decide whether this course is synced at all, so a line the toolkit cannot use - a handle that is not a GitHub username, a `central_ref:` that is neither `main`, `release`, `preview` nor a full 40-character commit SHA, a registry that is not a list of org names - opens **one** issue in this repo, *dsl-course.yml / semester registry has entries the sync cannot use*, listing every such line with a link to it, and emails the admins. Fix the line and the issue closes itself. Nothing here reds a run.
+   > **If an edit here breaks the file**, nothing goes quiet. `course.yml` and `semesters.yml` (the semester registry, written for you by **Bootstrap semester**) are the two files that decide whether this course is synced at all, so a line the toolkit cannot use - a handle that is not a GitHub username, a `toolkit_version_ref:` that is neither `main`, `release`, `preview` nor a full 40-character commit SHA, a registry that is not a list of org names - opens **one** issue in this repo, *course.yml / semester registry has entries the sync cannot use*, listing every such line with a link to it, and emails the admins. Fix the line and the issue closes itself. Nothing here reds a run.
+
+## `course.yml`
+
+One file for the course, in course org → `.github`. Worked example: [`example-course/course-org/course.yml`](../example-course/course-org/course.yml).
+
+| Block | Holds |
+|---|---|
+| `course:` | `name`, `code`, `description` (the blurb on every site), `toolkit_version_ref` (absent = `release`), `licence` (one of the institution's; absent = its first) |
+| `people:` | `course_admins`: the course's owners - admin on the course and every semester, mailed about faults here, shown as the course leads on the open course site |
+| `defaults:` | the defaults every semester inherits: `timezone`, `late_window_days`, `late_penalty_per_day`, `max_team_size`, `assignment_repo_visibility`, `archive_grace_days`, `materials_repo`, `marks_per_question`, `team_formation`. Seeded with every key commented, showing the value it inherits and from where; uncomment to override |
+| `open_course_site:` | the public website: `enabled`, `source_repo`, `readings_mode`, `include_lectures`, `withhold`, `contact` |
+
+A default resolves nearest first, per key: the assignment's `schedule.yml` entry, the semester's `semester.yml`, this file, then the institution's `institution.yml`. The console shows each effective value and where it came from.
 
 ## Next
 

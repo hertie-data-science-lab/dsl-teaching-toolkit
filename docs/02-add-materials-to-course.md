@@ -13,7 +13,7 @@ the console (its GitHub link and a **Full screen** button in its header, for pre
 - A bootstrapped [course org](01-new-course-org.md).
 - Push access on its content repos, from either: 
    1. `course-admin` membership (course org), or
-   2. being declared an instructor/TA in a semester org's `semester-config/instructors.yml`
+   2. being declared an instructor/TA in a semester org's `semester-config/semester.yml`
 
 > see [Manage the instructors](05-manage-teaching-team.md) for full access details.
 

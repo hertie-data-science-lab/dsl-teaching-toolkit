@@ -7,7 +7,7 @@ only its comments record. If you run a course rather than the toolkit, you want
 ## A merge to main is a deploy - to the demo org
 
 Every seeded workflow, in every bootstrapped org, checks this repo out at the ref **that org**
-runs - `central_ref:` in its course org's `.github/dsl-course.yml`, defaulting to
+runs - `course.toolkit_version_ref:` in its course org's `.github/course.yml`, defaulting to
 `central.CENTRAL_REF` (`release`).
 
 Two tiers along one linear history, and a third off to the side. PRs squash-merge to `main`,
@@ -21,20 +21,20 @@ inspection.
 
 Engine changes are live on the next press in each org; workflow *shapes* (inputs, jobs, crons)
 are re-rendered by the same fan-out, and by each org's nightly **Refresh actions**. Rollback is
-a `git revert` on `main`, promoted forward - never a force-push. `central_ref:` may be `main`,
+a `git revert` on `main`, promoted forward - never a force-push. `toolkit_version_ref:` may be `main`,
 `release`, `preview`, or a full 40-character SHA on main's history.
 
 **`preview` is the third tier: a PR looked at in a real org before it merges.** Force-push the
 PR's head to it - `git push --force origin <pr-tip>:preview` - set the demo course org's
-`central_ref: preview`, and **Deploy preview** re-renders that org out of the tip; then inspect
+`toolkit_version_ref: preview`, and **Deploy preview** re-renders that org out of the tip; then inspect
 it as you would before a promotion. Only the demo course may pin it, never a real org. The
 branch is rewritten by every push, which is the point and is why nothing is ever promoted from
 it: the `tiers` ruleset protects `release` alone, and must stay that way. Once the PR merges,
-put the demo course back on `central_ref: main` and run its **Refresh actions** - an org left
+put the demo course back on `toolkit_version_ref: main` and run its **Refresh actions** - an org left
 on `preview` keeps running the old tip, because the merge moves `main`, not this branch.
 
 An org's seeded workflows check the toolkit out at **the ref they were rendered with**, so
-moving an org between refs is always: edit `central_ref:`, run that org's **Refresh actions**,
+moving an org between refs is always: edit `toolkit_version_ref:`, run that org's **Refresh actions**,
 *then* retire the old ref. Deleting a ref an org is still rendered against takes down its
 whole Actions tab, Refresh included. That is the order the `staging` retirement followed.
 Tiers, the pre-promotion checklist and the full rollback procedure:
@@ -50,11 +50,11 @@ breaks a live link that faculty click:
 | `docs/01-new-course-org.md` | `config_digest.COURSE` |
 | `docs/03-add-assignment-to-course.md` | `config_digest.GRADING_CONFIG` |
 | `docs/assignment-starter.md` | the console's Template settings and New assignment `?` (`Course.tsx` `STARTER_DOC`) |
-| `docs/05-manage-teaching-team.md` | `templates/semester-config/instructors.yml`, `config_digest.PEOPLE` |
+| `docs/05-manage-teaching-team.md` | `templates/semester-config/semester.yml`, `config_digest.PEOPLE` |
 | `docs/06-enrol-students-to-cohort.md` | `config_digest.ROSTER` |
-| `docs/07-schedule-releases.md` | `source_digest.py`, `profile_readme.py`, `templates/semester-config/schedule.yml`, `templates/semester-config/assignments.yml` |
+| `docs/07-schedule-releases.md` | `source_digest.py`, `profile_readme.py`, `templates/semester-config/schedule.yml`, `templates/semester-config/semester.yml` |
 | `docs/08-release-materials-to-cohort.md` | `scaffold._RELEASEIGNORE_STUB` (seeded into every materials repo) |
-| `docs/09-release-assignment-to-cohort.md` | `config_digest.TEAMS`, `config_digest.ASSIGNMENTS` |
+| `docs/09-release-assignment-to-cohort.md` | `config_digest.ASSIGNMENTS` |
 | `docs/10-grade-and-return-assignments.md` | `config_digest.GRADING_SHEETS` |
 | `docs/README.md` | `profile_readme.py` |
 | `docs/10-grade-and-return-assignments.md` | `scheduler._ARCHIVE_DOC` (the archive notice) |
@@ -176,13 +176,13 @@ Things whose *literal spelling* is depended on from outside Python:
   marked file would still read as untouched and be rewritten by the nightly refresh -
   faculty's patterns gone, and whatever they withheld shipping again on a green run. The
   price is that its wording cannot be improved in a repo that already has it.
-- **`opencourse.OPENCOURSE_FILE`** (`opencourse.yml`, in the course `.github`) is the
+- **`course.yml` `open_course_site:`** (`opencourse.block`, in the course `.github`) is the
   public website's one declaration (decision 0016): `enabled`, `source_repo`,
   `readings_mode`, `include_lectures`, `withhold` (`.releaseignore` syntax,
-  `releaseignore.deny_lines`). The Publish website operation and the daily cron read
+  `releaseignore.deny_lines`) and `contact`. The Publish website operation and the daily cron read
   it and nothing else (the semester site sync reads its `withhold` alone); `enabled:
   false` stops both. Seeded CREATE-ONLY and INSTRUCTOR-OWNED
-  by Bootstrap Course Org (off), schema in `console/schemas/opencourse.schema.json`. A
+  by Bootstrap Course Org (off), schema in `console/schemas/course.schema.json`. A
   site repo's `_publish-config.yml` is retired (none is left on a live site). A materials repo's `publish.yml` is NOT the open site's: it is
   the semester site's opt-in list of files to host publicly under `files/` (decision 0035;
   `site._mirror_public`), and `withhold` here is an extra deny filter on those copies.
@@ -333,8 +333,8 @@ repo's variables, so an org bootstrapped before the variable existed gets it onc
     gh secret set DSL_MAINTAINER_EMAIL --org <course-org> \
       --visibility selected --repos .github --body '<address>'
 
-A fault in a course org's OWN config (`dsl-course.yml`, `semesters.yml`; one digest issue in
-its `.github`) is mailed to the course admins' optional `email:` in `dsl-course.yml`
+A fault in a course org's OWN config (`course.yml`, `semesters.yml`; one digest issue in
+its `.github`) is mailed to the course admins' optional `email:` in `course.yml`
 (`mailer.course_admin_addresses`). That file is public; an admin who keeps an address out of it
 is reached by the digest issue's `cc @<course>/course-admin` alone, and the run log says how many
 admins went unmailed.
@@ -350,7 +350,7 @@ its annotation instead of emailing them
 (`tests/test_validate_schedule_template.py` enforces it).
 
 Nothing converges a semester's addresses either. `email:` is required on every instructor and
-TA entry in a semester's `semester-config/instructors.yml`, and that file is INSTRUCTOR-OWNED, so
+TA entry in a semester's `semester-config/semester.yml` `people:`, and that file is INSTRUCTOR-OWNED, so
 no refresh can fill it in: until somebody edits it by hand the whole feature is inert on
 that semester - every fault still opens its digest issue and still @mentions the instructors
 team, and no email goes anywhere. the Check's C7 row counts the entries without
@@ -447,10 +447,10 @@ Decision 0034 (need, time, verdict), all computed by the engine so the console h
   dated hand-out cites is ALSO a problem, on the semester and the course file:
   `template:<repo>:brief` / `:starter`, kind `BRIEF` / `STARTER`, `when` the hand-out
   (`release` its assignment, in the semester file); the to-do stays in `course.todo[]`.
-  assignments.yml values bite at their assignment's hand-out; visibility drift and a late
+  semester run-setting values bite at their assignment's hand-out; visibility drift and a late
   release with no other problem (`schedule:<entry>:LATE`) stand now; a cited root stub
   still the placeholder is `schedule:<entry>:SOURCE_UNWRITTEN` at the release's moment;
-  `opencourse.yml` that does not parse is a `now` problem while the website is on. The
+  `open_course_site:` that does not parse is a `now` problem while the website is on. The
   digest's mail ladder is a separate clock and unchanged.
 - **Verdict.** `course.verdict` / `semester.verdict`: `fixing` (a `now`/`soon` problem;
   `problems` counts them), else `not_ready` (a needed stage open; `missing` is its
@@ -469,7 +469,7 @@ Decision 0034 (need, time, verdict), all computed by the engine so the console h
   counts.
 
 Decision 0032: the course block carries `stage_set_aside` (per stage id) and each `todo[]`
-entry `set_aside`. `set_aside` comes from `dsl-course.yml`'s `set_aside:` list
+entry `set_aside`. `set_aside` comes from `course.yml`'s `set_aside:` list
 (`status_json.set_aside_ids`), read at the edge: any other shape or an unknown id sets nothing
 aside and is never a fault; a needed or done item's id is ignored. Setting aside changes no
 stage, no problem; a set-aside item is no suggestion. Forward-only: no migration, an absent
@@ -510,7 +510,7 @@ layers above its own:
 | 2 | `central` (which ref an org runs), `repos` (existence, creation, topics, descriptions, the publication denylist), `gh_teams` (an org's settings and its teams), `issues` (one self-updating issue, found by its EXACT title), `pulls` (one pull request per HEAD BRANCH, created or adopted), `invitations` (the bot accepts its own org invitations, from registered course orgs only) |
 | 3 | `gh_contents` (file reads and writes, seeded stubs), `workflows_render` |
 | 4 | `config` (one reader per hand-edited config file: `read_course`, `read_semester`), `discovery`, `roster`/`teams`/`schedule`, `workflows_place` |
-| 5 and up | `access` (team permissions and the faculty floor), `materials` (`materials.yml`'s `syllabus`; its kind aliases only for the console and `public_site` until WP-P/WP-C), `opencourse` (the public website's `opencourse.yml`), `schedule_plan` (the rows a plan declares: one per slot of each entry, readings attached to their session's first row), `cadence` (the scheduler's driver-health and late-delivery alarms, read off its own run history), `join`, `profile_readme`, `scaffold`, `site_repo` (the Jekyll site repo both websites publish into), `site`, then the CLIs |
+| 5 and up | `access` (team permissions and the faculty floor), `materials` (`materials.yml`'s `syllabus`; its kind aliases only for the console and `public_site` until WP-P/WP-C), `opencourse` (the public website's `open_course_site:` block), `schedule_plan` (the rows a plan declares: one per slot of each entry, readings attached to their session's first row), `cadence` (the scheduler's driver-health and late-delivery alarms, read off its own run history), `join`, `profile_readme`, `scaffold`, `site_repo` (the Jekyll site repo both websites publish into), `site`, then the CLIs |
 | grading, each above the one before | `grading_sheet` (the sheet file: shape, load and dump, merge, mark arithmetic, what holds a mark), `grading_spec` (`grading_config.yml`, its faults, the `SheetSpec` it gives), `gradebook` (the `grades-<handle>` repos, what a student is shown, the semester grades file, `distributed.csv`), `receipts` (the Submission receipts issue), `distribute` (sending marks); `team_formation` (and its lock file) sits above `grading_spec` and `gradebook`, and `grades` is only the CLI over `distribute` |
 
 `legacy` is the one module that knows old names: every parser and `migrate` reads them from
@@ -582,10 +582,10 @@ optional `materials.yml`: `syllabus`, `kinds` folder aliases, names or paths; `m
 
 `orgs.yml` at this repo's root is the list of course orgs the toolkit serves
 (`course_orgs: [<org>, ...]`, `org_registry`). Maintainers edit it by pull request, and it is
-read like `policy.yml`: from the checkout of the ref the run is on. A `dsl-course-hub` topic
+read like `institution.yml`: from the checkout of the ref the run is on. A `dsl-course-hub` topic
 is anyone's to set, and the tier fan-out writes `DSL_BOT_TOKEN` into every org it refreshes,
 so the topic alone is never enough: the fan-out (`list_orgs`, behind Deploy main, Deploy
-preview and Promote) walks the registry and each listed org's `dsl-course.yml`, never a topic
+preview and Promote) walks the registry and each listed org's `course.yml`, never a topic
 search, and the bot accepts an invitation only from a registered org, and only under its own
 token (`invitations.BOT`), never a maintainer's break-glass one. The topic search is left to
 the inventory's semester listing and the awaiting-registration report, both best effort.
@@ -604,14 +604,18 @@ token seeding by the tier fan-out waits for the next Promote. *Bot Token Canary*
 registration*, listing every org that has invited the bot or carries the topic without being
 registered; it closes itself when the list is empty.
 
-## Policy and the cascade
+<a id="policy-and-the-cascade"></a>
 
-`dsl_course/policy.default.yml` is the institution policy the toolkit ships (Hertie's
-values); an optional `policy.yml` at this repo's root overrides it (`defaults` and
-`institution` merge key by key, the other blocks replace). `policy.load()` validates it and
-raises on anything wrong. The engine reads it at the org's `central_ref`, like the code.
-Blocks: `defaults` (late pair, team cap, visibility, team formation, formats, timezone,
-archive grace, release destination repo), `kinds` (ordered row kinds with label, label
+## The institution file and the cascade
+
+`dsl_course/institution.default.yml` is the institution file the toolkit ships (Hertie's
+values); an optional `institution.yml` at this repo's root overrides it (`institution` and
+`defaults` merge key by key, the other blocks replace). `policy.load()` validates it and
+raises on anything wrong, including a checkout that still carries the retired `policy.yml`.
+The module keeps the name `policy` (frozen). The engine reads the file at the org's
+`toolkit_version_ref`, like the code. Blocks: `institution` (the site block, and `contacts`:
+fault addresses in escalation order, the first also the open site's contact; `policy.contact`),
+`defaults` (below), `kinds` (ordered row kinds with label, label
 colour and row colour, `plural` (the block and tab name: `/lectures/`, Lectures), `numbered`
 and `shown` (default true); the engine and the console read every kind word from here
 (`policy.plural_of`, `kind_for_plural`, `numbered_kinds`, `shown_kinds`); `assignment`,
@@ -620,39 +624,41 @@ and `shown` (default true); the engine and the console read every kind word from
 semester has rows of gets a tab on its site; every schedule row renders through the one
 `_includes/schedule_row.html`, labelled and coloured from the site's `_data/kinds.yml`;
 `assets`, "Supporting files" (`shown: false`), is released but never a row or a tab on either site: `schedule_plan.site_rows` and `public_site.shown_sections`
-drop it; the public website neither hosts nor links its files, since it hosts by section), `institution` (the site block), `contact` (the last fault address, after
-`DSL_MAINTAINER_EMAIL` and `GRAPH_SENDER`), `licences` (the open site's choices, default
-first).
+drop it; the public website neither hosts nor links its files, since it hosts by section),
+`selection_floor` (reserved, `{}`), `licences` (the open site's choices, default first).
 
-A run setting (`settings.RUN_KEYS`: `team_formation`, `max_team_size`, `late_window_days`,
-`late_penalty_per_day`, `visibility`, `submit_url`, `marks_per_question`) resolves nearest first, and
-`settings.effective(semester_org, slug, key)` returns `(value, source)`:
+One hand-edited file per level (decision 0039), each with the same fixed `defaults:` key set:
+`timezone`, `late_window_days`, `late_penalty_per_day`, `max_team_size`,
+`assignment_repo_visibility`, `archive_grace_days`, `materials_repo`, `marks_per_question`, and
+`team_formation` from the course level down (none at the institution: `settings.TEAM_FORMATION_FALLBACK`).
+`formats` is not a default: New assignment asks. A key resolves nearest first, per key never per
+block, and `settings.resolve` returns `(value, source)`:
 
 | Source | File | Key |
 |---|---|---|
-| `assignment` | `semester-config/schedule.yml` | `assignments.<key>.<setting>` (`visibility` is written `assignment_repo_visibility`; `settings.inline_settings`) |
-| `semester` | `semester-config/assignments.yml` | `defaults.<key>` |
-| `course` | course `.github/dsl-course.yml` | `assignment_defaults.<key>` |
-| `institution` | `policy.yml` | `defaults.<key>` |
+| `entry` | `semester-config/schedule.yml` | `assignments.<key>.<setting>` (`settings.inline_settings`) |
+| `semester` | `semester-config/semester.yml` | `defaults.<key>` |
+| `course` | course `.github/course.yml` | `defaults.<key>` |
+| `institution` | `institution.yml` | `defaults.<key>` |
 
-The late pair is one rule: a layer stating either half answers both, the other half none.
-An absent `assignments.yml` leaves its layer empty. A template's `grading_config.yml`
-states no run setting: one written there refuses the whole file as `RUN_SETTING_IN_TEMPLATE`
-(`grading_spec.TEMPLATE_KEYS` is what it reads). `settings.parse_instance` is the one parser of
-`assignments.yml`, which holds `defaults:` only: a per-key `assignments:` block is
-`NOT_MIGRATED` (the migration's schedule shape step moves it onto the entries). Its faults
-ride the `schedule.yml` digest and file in status.json as `ASSIGNMENTS`. The late cutoff has one resolver,
-`schedule.grading_cutoff_datetime`: due + the effective `late_window_days`. A read of
-`dsl-course.yml` or `assignments.yml` that fails other than with a 404 raises and is not
-cached (an `assignments.yml` that is not YAML raises `Unusable`); a value a reader refuses
-states nothing, and the next layer answers.
-An `assignments.yml` that is not YAML is the exception to the ride: the scheduler files it
-on the `assignments.yml` digest and holds the `schedule.yml` digest as it stands for that
-tick, since its window, number and marks faults need the settings to be worked out.
-`grading_spec.load_grading_spec(course, template, semester_org=, slug=)`
-hands every reader the effective values, with `GradingSpec.sources`; `status.json` carries
-them per assignment (`settings`). `settings` is the only module that reads
-`assignment_defaults` (`tests/test_settings.py`).
+The semester-wide keys (`settings.SEMESTER_KEYS`: timezone, archive grace, default materials
+repo) have no entry layer. The late pair is one rule: a layer stating either half answers both,
+the other half none. Seeds write every key, commented, with the inherited value and its source
+(`settings.defaults_skeleton`). A template's `grading_config.yml` states no run setting: one
+written there refuses the whole file as `RUN_SETTING_IN_TEMPLATE` (`grading_spec.TEMPLATE_KEYS`
+is what it reads). `settings.parse_instance` is the one parser of `semester.yml` `defaults:`;
+its faults file on their own digest (`config_digest.ASSIGNMENTS`). The late cutoff has one
+resolver, `schedule.grading_cutoff_datetime`: due + the effective `late_window_days`. A read of
+`course.yml` or `semester.yml` that fails other than with a 404 raises and is not cached (a
+`semester.yml` that is not YAML raises `Unusable`); a value a reader refuses states nothing, and
+the next layer answers. A `semester.yml` that is not YAML holds the `schedule.yml` digest as it
+stands for that tick, since its window, number and marks faults need the settings.
+`grading_spec.load_grading_spec(course, template, semester_org=, slug=)` hands every reader the
+effective values, with `GradingSpec.sources`. status.json carries every effective value with its
+`source` (per assignment `settings`, per level `defaults`, `settings.effective_defaults`); the
+console reads `source` there and never recomputes the cascade. Every config file is read through
+`config` (`read_course`, `read_semester`), and `settings` is the only module that reads a
+`defaults:` block (`tests/test_settings.py`).
 
 ## Adding a workflow
 
@@ -676,8 +682,8 @@ Four places, in order - miss the last and every org keeps two buttons for one jo
 
 ## The clean break in `schedule.yml`
 
-(History. Since decision 0009, `team_formation` and `max_team_size` live in each semester's
-`assignments.yml`, not the template - see [Migration](#migration).)
+(History. Since decision 0009, `team_formation` and `max_team_size` are each semester's
+(since 0039 on its `schedule.yml` entry), not the template's - see [Migration](#migration).)
 
 `type:` and `max_team_size:` were accepted on an assignment entry and BEAT the template's
 own `grading_config.yml`. They are gone from `KNOWN_ASSIGNMENT` and from `AssignmentEntry`:
@@ -719,14 +725,14 @@ under an older one is still found, updated and closed.
 
 | issue title | file | where it lives |
 | --- | --- | --- |
-| `schedule.yml: planned releases cite sources not staged in the course org` | `schedule.yml` and `assignments.yml` | semester `semester-config` |
-| `instructors.yml has entries the sync cannot use` (was `people.yml ...`) | `instructors.yml` | semester `semester-config` |
+| `schedule.yml: planned releases cite sources not staged in the course org` | `schedule.yml` | semester `semester-config` |
+| `semester.yml people has entries the sync cannot use` (was `instructors.yml ...`, `people.yml ...`) | `semester.yml` `people:` | semester `semester-config` |
 | `students.csv has rows the toolkit cannot use` | `students.csv` | semester `semester-config` |
 | `teams.csv has rows the toolkit cannot use` (retired 0.11.0: team cells are students.csv's) | - | - |
 | `grading sheets have entries the grader cannot read` | `grading_sheets/` | semester `semester-config` |
 | `assignment grading_config.yml has values that will not grade as written` | template `solution` branch | semester `semester-config` |
-| `assignments.yml has values that will not run as written` | `assignments.yml` (what is checked against the handed-out repos) | semester `semester-config` |
-| `dsl-course.yml / semester registry has entries the sync cannot use` (was `... / cohort registry ...`) | both course files | course `.github` |
+| `semester.yml defaults have values that will not run as written` (was `assignments.yml ...`) | `semester.yml` `defaults:` (and what is checked against the handed-out repos) | semester `semester-config` |
+| `course.yml / semester registry has entries the sync cannot use` (was `dsl-course.yml / ...`, `... / cohort registry ...`) | both course files | course `.github` |
 
 The body is rewritten every tick (GitHub does not email about that); a comment - which it
 does - is posted only on appearance, escalation and clearing. An empty fault list CLOSES the
@@ -749,9 +755,9 @@ half a dozen assignments in one afternoon.
 **Recipients** are the committer of the faulty line, by blame of the file at that line (for a
 CSV, the actor who pushed it, skipping the bot). Any addressee who is a TA puts the
 instructors on Cc; nobody identifiable falls back to every instructor, and a semester whose
-`instructors.yml` holds no address at all falls further - to the course admins' `email:`, then to the
+`semester.yml` holds no address at all falls further - to the course admins' `email:`, then to the
 maintainer, with the run log naming which fallback it used and never an address. The
-course-level digest goes to the course admins' `email:` in `dsl-course.yml` (see
+course-level digest goes to the course admins' `email:` in `course.yml` (see
 [Secrets an org carries](#secrets-an-org-carries)) with the maintainer copied from the first
 mail, and falls back to `cc @<course>/course-admin`.
 A CSV or sheet fault carries the row or line and the column - never a cell value, never a
@@ -760,7 +766,7 @@ handle - in the mail, the issue and the log alike.
 **What still reds an unattended run.** Nothing above does, and there is no exception. A
 content fault is delivered by its digest issue and the mail beside it, never by an exit
 code: Sync membership skips the semester it cannot read (`sync_membership._CONTENT_FAULT` -
-`faults.Unusable` plus a YAML error), skips a semester with no `instructors.yml` and no
+`faults.Unusable` plus a YAML error), skips a semester with no `semester.yml` and no
 `students.csv`; a course
 file it cannot read reconciles nothing at all and still exits 0; a `schedule.yml` that does
 not parse is one fault on the file, not a red scheduler tick; Send enrolment codes is green
@@ -813,7 +819,7 @@ gaps of 13 hours, so its cron is the **backstop** and not the clock. The primary
 systemd timer on the lab server ds01 - `dsl-scheduled-release.timer` running
 `scripts/maintenance/dsl-scheduled-release.sh`, both in `hertie-data-science-lab/ds01-infra` - which
 POSTs `repository_dispatch: scheduled-release` to the `.github` repo of every `dsl-course-hub`
-org at :00/:15/:30/:45. A push to a semester's `schedule.yml`, `instructors.yml`, `students.csv` or
+org at :00/:15/:30/:45. A push to a semester's `schedule.yml`, `semester.yml`, `students.csv` or
 `.system/roster.csv` dispatches the same event with `driver: semester-config`, and that run releases
 into **that semester only** (checked against the registry) and asks Sync site for any render
 instead of pushing the site itself. Each driver guards the other; the cron and ds01 runs
@@ -926,7 +932,7 @@ Three fences, and all three must hold. `DSL_ORG_ALLOWLIST` refuses any WRITE (`g
 push`) outside the orgs it names - opt-in, unset everywhere else, and it raises rather than
 returning a failure pair, which `repo_exists` would read as absence. `tests/e2e/allowlist.py`
 names the two demo orgs as a literal; `DSL_E2E_ORGS` may only NARROW that. Preflight refuses
-to start unless the course org declares `central_ref: main`, `main` is this checkout's
+to start unless the course org declares `toolkit_version_ref: main`, `main` is this checkout's
 HEAD, every workflow the org holds is byte-for-byte what this checkout renders for it, the
 test student has a roster row, every onboarded enrolled student already has a gradebook,
 and the run's namespace is empty.
@@ -1044,6 +1050,11 @@ marks (`course.py`), the archive notice prefixes (`teardown.py`) and the digest 
 | status `fix.screen: staff` | `instructors` | `dsl.status/1` |
 | status `inputs` key `assignments.lock.yml` | `.system/assignments.lock.yml` | `dsl.status/1` |
 | toolkit `templates/classroom-config/`, `templates/welcome/`, `templates/cohort/` | `templates/semester-config/`, `templates/join/`, `templates/semester/` | this repo only |
+| course `.github/dsl-course.yml` + `.github/opencourse.yml` (0.11.0) | `.github/course.yml`: `course:` (`course_name` -> `name`, `course_code` -> `code`, `course_description` -> `description`, `central_ref` -> `toolkit_version_ref`, `licence`, `student_console`), `people.course_admins`, `assignment_defaults` -> `defaults` (`visibility` -> `assignment_repo_visibility`; `formats` dropped), opencourse.yml -> `open_course_site:` (+ `contact`), `set_aside` kept; course-level `instructors` / `teaching_assistants` and `site_link_extensions` dropped (decision 0039) | course org; folded by the config layers step |
+| `semester-config/instructors.yml` + `assignments.yml` `defaults:` (0.11.0) | `semester-config/semester.yml` `people:` + `defaults:` | semester org; folded by the config layers step |
+| `students.csv` `hertie_email`, `github_handle`, `github_id`, `enrol_code`, `code_sent_at`; `teams.csv` (0.11.0) | `students.csv` `email` + one `team:<number>` column per team assignment; the engine's columns in `.system/roster.csv` | semester org; split by the config layers step (`roster.split_legacy`) |
+| `semester-config/.system/dsl-course.yml` (0.11.0) | `semester-config/.system/course.yml` | semester org; moved by the config layers step |
+| toolkit `policy.yml`, `dsl_course/policy.default.yml` (0.11.0) | `institution.yml`, `dsl_course/institution.default.yml` (`contact` -> `contacts:` list) | this repo; `policy.read` refuses a checkout still carrying `policy.yml` |
 
 Not renamed here, deliberately: the frozen doc filenames, the site's `_data/people.yml` the pinned theme reads, the
 `SCOPED_RUN_TITLE` run-name the cadence check reads back, the `dsl_course.welcome` module
@@ -1071,7 +1082,7 @@ every real course is held:
    org is not migrated; `--abandon` releases anyway, naming them.
 5. Refresh per semester, one preview of the next automatic run, the catch-up runs green.
 
-One course at a time instead: pin its `central_ref` to the new ref rather than Promote.
+One course at a time instead: pin its `toolkit_version_ref` to the new ref rather than Promote.
 Under a hold a migration never pauses and never unpauses: its bracket steps only mark the
 org `migrated` in its record; a stop restores nothing. `--status` and `--release` also find
 a semester archived or unregistered during the hold (the course's record names every held
@@ -1125,7 +1136,13 @@ from the number each lecture and lab showed, `number:` only where it differs, a 
 group's event a slot of its entry, `deploy:` fields renamed into `files:`, a READINGS.md's
 text into `reading_guide:`, the term's dates into the `semester:` block, `template:` / `repo_name:` and `assignments.yml`'s blocks onto each
 assignment; comments are not carried, and the preview prints only the new lines - one
-`migrate: schedule shape` commit), topic, re-render (the lock synced first, so the Join team form reads it; drift
+`migrate: schedule shape` commit), config layers (decision 0039: `instructors.yml` and
+`assignments.yml` `defaults:` folded into `semester.yml` - faculty's `people:` lines kept as
+written, every other default commented with what it inherits; `students.csv` + `teams.csv`
+split into `students.csv` with `team:` columns and `.system/roster.csv`; the pointer moved to
+`.system/course.yml`; the old files deleted - one `migrate: config layers` commit; a key with
+no new home, a value a reader refuses or a value the fold would lose stops the step; the old
+files' comments are counted, not carried; roster lines are counts, never values), topic, re-render (the lock synced first, so the Join team form reads it; drift
 checked over the dispatchers, README, pointer, lock, join files and org READMEs), status,
 unpause (status.json first, so re-enabled workflows never race it). A move never overwrites:
 a target holding other bytes refuses the whole commit, naming both paths. Course steps: preflight (not archived; no `cohort_defaults` / `semester_defaults`
@@ -1139,16 +1156,21 @@ semester), template starter (`starter:` written into each live template's
 `grading_config.yml` from its answer markers, decision 0028),
 materials files, public website (`.github/opencourse.yml`
 seeded, create-only, from the site repo's `_publish-config.yml` when there is one - on, with its
-settings - else off), re-render (Refresh
+settings - else off), config layers (`dsl-course.yml` and `opencourse.yml` folded into
+`course.yml`, both deleted, one `migrate: config layers` commit; the plan names what decision
+0039 drops), re-render (Refresh
 actions from the checkout, the course's own repos only -
 no semester; with no `DSL_BOT_TOKEN` on the laptop the repo secret is left, with a note, to
 the org's next Refresh actions; drift checked in `.github`, every content repo and every
 live template), status, unpause. The `dsl-course.yml` keys
 step strips `org`, `org_name`, `cohort_defaults` and `semester_defaults` (each with its
 block) and rewrites `assignment_defaults` `format:` and `submit_via: github`; its verify re-reads the file with the
-retired keys (`legacy.COURSE_CONFIG`) and expects none left.
+retired keys (`legacy.COURSE_CONFIG`) and expects none left. The 0.10 steps write the 0.10
+files the config layers step then folds, off seeds frozen in `templates/legacy-0.10/`
+(`migrate.old_template`), removed with the tool.
 Tested only against a stubbed GitHub
-(`tests/test_migrate.py`).
+(`tests/test_migrate.py`), and the fold against copies of the demo, NLP and Maths files
+(`tests/test_migrate_layers.py`, no roster: three made-up rows).
 
 What the demo rehearsal (2026-09-25) changed, one line each:
 

@@ -16,7 +16,7 @@ The schedule file can be updated throughout the semester.
 
 > A fully worked `schedule.yml` (a whole semester): [example-course/semester-org/schedule.yml](../example-course/semester-org/schedule.yml). The schedule it renders, live: [here](https://hertie-dsl-demo-f2026.github.io/schedule/).
 
-`schedule.yml` holds **one block per kind** - `lectures:`, `labs:`, `readings:`, `exams:`, `drop-ins:`, `events:`, `assets:` (the institution's kinds, from `policy.yml`) - and `assignments:`. The term's own dates are one [`semester:`](#semester) block.
+`schedule.yml` holds **one block per kind** - `lectures:`, `labs:`, `readings:`, `exams:`, `drop-ins:`, `events:`, `assets:` (the institution's kinds, from `institution.yml`) - and `assignments:`. The term's own dates are one [`semester:`](#semester) block.
 
 Each block is a map. The **key** of an entry (`lecture-3`, `lab-2b`) is its id: it names the entry's site row and, for an assignment, its mark sheet. It is never shown to students and never read for a number - so call it anything, and renaming it is the only thing that changes it.
 
@@ -145,7 +145,7 @@ Each assignment's dates and run settings.
 | `type` | no | the template's | `individual` or `group`: this semester's override of the template's `grading_config.yml` |
 | `submit_via` | no | the template's | `assignment_repo`, `shared_dropbox_repo` or `external`: this semester's override |
 
-Run settings, each optional, written on the entry: `late_window_days`, `late_penalty_per_day`, `team_formation` (`self_select` or `assigned`), `max_team_size`, `assignment_repo_visibility` (`private`, `public`, `student_choice`; read when each repo is created), `marks_per_question`, `submit_url` (`submit_via: external` only). Nearest wins: the entry, then `semester-config/assignments.yml` `defaults:`, then the course's `assignment_defaults:` (`.github/dsl-course.yml`), then `policy.yml`. The late window and penalty go together: an entry naming one sets the other to none.
+Run settings, each optional, written on the entry: `late_window_days`, `late_penalty_per_day`, `team_formation` (`self_select` or `assigned`), `max_team_size`, `assignment_repo_visibility` (`private`, `public`, `student_choice`; read when each repo is created), `marks_per_question`, `submit_url` (`submit_via: external` only). Nearest wins, per key: the entry, then `semester-config/semester.yml` `defaults:`, then the course's `.github/course.yml` `defaults:`, then `institution.yml`. The console shows each effective value and where it came from. The late window and penalty go together: an entry naming one sets the other to none.
 
 **The late cutoff is computed, never written:** `due_datetime` plus `late_window_days`.
 
@@ -240,7 +240,7 @@ Everything else is **cumulative**: material deploys, assignment handouts, the si
 
 ## Verifying your schedule
 
-**It checks itself.** Every commit touching `schedule.yml` or `assignments.yml` runs **Validate schedule** in `semester-config`. A commit that parses clean gets a green tick; one the scheduler cannot fully read gets a **red X** and a run summary naming what it dropped. That run emails nobody: the fault joins the standing *schedule.yml* [digest issue](#the-digest-issue) in `semester-config` instead, on the next tick - within the minute, since this push fires one - and that is what emails whoever wrote the line. An `assignments.yml` that is not YAML goes on its own digest issue instead, and the *schedule.yml* one is left as it stands until it parses.
+**It checks itself.** Every commit touching `schedule.yml` or `semester.yml` runs **Validate schedule** in `semester-config`. A commit that parses clean gets a green tick; one the scheduler cannot fully read gets a **red X** and a run summary naming what it dropped. That run emails nobody: the fault joins the standing *schedule.yml* [digest issue](#the-digest-issue) in `semester-config` instead, on the next tick - within the minute, since this push fires one - and that is what emails whoever wrote the line. A `semester.yml` that is not YAML goes on its own digest issue instead, and the *schedule.yml* one is left as it stands until it parses.
 
 > The run happens *after* the push: Actions cannot gate a commit, so the red X and the digest issue are how a fault reaches you, rather than the commit being refused.
 
@@ -276,7 +276,7 @@ So the sources are checked against the course org in two places: **Validate sche
 | 6 hours or less | **critical** | it comments again, one rung louder, and the email copies the toolkit maintainer |
 | the moment has passed | **missed** | the copy did not ship. A last comment and a last email, and the fault stays listed until the source is staged |
 
-**Who is emailed.** Whoever git says can act: the person who last edited that line of `schedule.yml`, and whoever last committed to the materials or template repo it names. A TA's email copies the semester's instructors. If git can name nobody in `instructors.yml` - the line was never edited by instructors, or the blame could not be read - every instructor is emailed instead. Addresses come from the `email:` field on each entry in `semester-config/instructors.yml`; the digest issue `cc`s the same people by handle. If nobody in `instructors.yml` has an `email:` at all, the course admins are emailed, and the toolkit maintainer if the course names none.
+**Who is emailed.** Whoever git says can act: the person who last edited that line of `schedule.yml`, and whoever last committed to the materials or template repo it names. A TA's email copies the semester's instructors. If git can name nobody in `semester.yml` `people:` - the line was never edited by instructors, or the blame could not be read - every instructor is emailed instead. Addresses come from the `email:` field on each `people:` entry in `semester-config/semester.yml`; the digest issue `cc`s the same people by handle. If nobody in `semester.yml` has an `email:` at all, the course admins are emailed, and the toolkit maintainer if the course names none.
 
 **Nothing is emailed between 23:00 and 07:00** in the semester's own timezone. The issue still updates and comments immediately; the email is held and sent on the first tick after 07:00, as one message at the loudest rung it reached overnight.
 

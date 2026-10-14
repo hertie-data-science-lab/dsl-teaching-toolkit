@@ -33,7 +33,7 @@ Live example of every file below: [`example-course/semester-org/`](../example-co
     - This seeds: 
       - **`join`** repo (**public** - it is the front door students reach before they are org members) - for student onboarding via `join course` issue tickets.
       - its **`README.md`**, telling them how to join - public like the rest of the repo, yours to reword, and never overwritten
-      - **`semester-config`** repo (hidden-from-students) - containing empty templates for `students.csv`, `teams.csv`, `schedule.yml`, `instructors.yml`
+      - **`semester-config`** repo (hidden-from-students) - containing empty templates for `students.csv`, `schedule.yml` and `semester.yml`
       - **`students` + `auditors` teams** (empty) - do not edit directly these, these will be populated by the workflow, 
       - **`course-admin` team** for this semester
       - **`hertie-dsl-demo-f2026.github.io`** auto-deployed website - what it shows, and what you must not hand-edit: [11](11-configure-cohort-site.md)
@@ -46,11 +46,11 @@ Live example of every file below: [`example-course/semester-org/`](../example-co
     - Full schema for the schedule [here](DEPLOYMENT-CHECKLIST.md#scheduleyml)
 
 
-5. *(optional)* **Declare this semester's instructors/TAs** in `semester-config/instructors.yml`.
+5. *(optional)* **Declare this semester's instructors/TAs** under `people:` in `semester-config/semester.yml`.
     - This grants them push on this semester and on this year's course content repos, and supplies the semester site's cards.
 
    ```yaml
-   instructors:
+   people:
      - github_handle: "janedoe"
        role: instructor
        email: "jane@example.org"
@@ -63,12 +63,13 @@ Live example of every file below: [`example-course/semester-org/`](../example-co
 
     - `github_handle` grants access; a named entry with no `github_handle` is display-only (a site card, no access granted). 
     - The optional `start`/`end` dates **bound when the access is live** - this is how you hand a guest lecturer or a fixed-term TA push access for one semester. 
-      - Course-wide admins are declared at the **course** level instead (course org → `.github` → `dsl-course.yml` → `course_admins`), not here. 
+      - Course-wide admins are declared at the **course** level instead (course org → `.github` → `course.yml` → `course_admins`), not here. 
       - Full guide, including removing people and how quickly changes land: [05 Manage the instructors](05-manage-teaching-team.md).
+    - The same file's `defaults:` overrides the course's defaults for this semester (each key seeded commented, with the value it inherits and from where).
 
 6. **Load the student roster.** 
-  - Fill `semester-config/students.csv` (seeded header-only) with registrar data (`hertie_email, name`)
-  - Leave `github_handle, github_id` blank - onboarding fills them. 
+  - Fill `semester-config/students.csv` (seeded header-only) with registrar data (`email, name`)
+  - Onboarding writes each student's handle and enrolment code to `.system/roster.csv`; you never edit that file. 
   - Add `role: auditor` for anyone who should get the released materials but no assignments and no grades. 
   - The [worked example](../example-course/semester-org/students.csv) shows a filled row of each kind, and that repo's `README.md` documents every column.
   - Full details found in [06-enrol-students-to-cohort.md](06-enrol-students-to-cohort.md)
