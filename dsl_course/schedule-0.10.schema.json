@@ -1,0 +1,296 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "archive": {
+      "additionalProperties": false,
+      "properties": {
+        "details": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "event_datetime": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "grace_days": {
+          "type": "integer"
+        },
+        "show_on_site": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "tbc": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "assignments": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "course_source_repo": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "details": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "due_datetime": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "handout_datetime": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "marks_return_datetime": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "event_datetime": {
+                    "type": "string"
+                  },
+                  "show_on_site": {
+                    "type": "boolean"
+                  }
+                },
+                "type": "object"
+              }
+            ]
+          },
+          "number": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "show_on_site": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "solution_datetime": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tbc": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "due_datetime",
+          "course_source_repo"
+        ],
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "events": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "details": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "event_datetime": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "enum": [
+              "special_event",
+              "lecture",
+              "lab",
+              "readings",
+              "exam",
+              "drop-in",
+              "other"
+            ],
+            "type": "string"
+          },
+          "number": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "show_on_site": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "tbc": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "releases": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "deploy": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "course_source_path": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "course_source_repo": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "deploy_datetime": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "semester_dest_path": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "semester_dest_repo": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "course_source_repo",
+                "course_source_path"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "details": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "event_datetime": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "assets",
+              "drop-in",
+              "exam",
+              "lab",
+              "lecture",
+              "other",
+              "readings"
+            ],
+            "type": "string"
+          },
+          "number": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "show_on_site": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "tbc": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "semester_end": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "semester_start": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "timezone": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "title": "semester-config/schedule.yml",
+  "type": "object"
+}

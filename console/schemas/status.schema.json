@@ -471,7 +471,8 @@
                   "description",
                   "home",
                   "archive_date",
-                  "email"
+                  "email",
+                  "files"
                 ],
                 "type": "string"
               },
@@ -509,6 +510,9 @@
                 "type": "boolean"
               },
               "text": {
+                "type": "string"
+              },
+              "when": {
                 "type": "string"
               }
             },
@@ -899,7 +903,8 @@
                   "description",
                   "home",
                   "archive_date",
-                  "email"
+                  "email",
+                  "files"
                 ],
                 "type": "string"
               },
@@ -937,6 +942,9 @@
                 "type": "boolean"
               },
               "text": {
+                "type": "string"
+              },
+              "when": {
                 "type": "string"
               }
             },

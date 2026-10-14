@@ -44,85 +44,7 @@
         "null"
       ]
     },
-    "assignments": {
-      "additionalProperties": {
-        "additionalProperties": false,
-        "properties": {
-          "course_source_repo": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "details": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "due_datetime": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "handout_datetime": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "marks_return_datetime": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "event_datetime": {
-                    "type": "string"
-                  },
-                  "show_on_site": {
-                    "type": "boolean"
-                  }
-                },
-                "type": "object"
-              }
-            ]
-          },
-          "number": {
-            "minimum": 1,
-            "type": "integer"
-          },
-          "show_on_site": {
-            "type": [
-              "boolean",
-              "null"
-            ]
-          },
-          "solution_datetime": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "tbc": {
-            "type": [
-              "boolean",
-              "null"
-            ]
-          }
-        },
-        "required": [
-          "due_datetime",
-          "course_source_repo"
-        ],
-        "type": "object"
-      },
-      "type": "object"
-    },
-    "events": {
+    "assets": {
       "additionalProperties": {
         "additionalProperties": false,
         "properties": {
@@ -133,24 +55,97 @@
             ]
           },
           "event_datetime": {
+            "oneOf": [
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              {
+                "items": {
+                  "oneOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "at": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "details": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "location": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                },
+                "type": "array"
+              }
+            ]
+          },
+          "files": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "from_course_repo": {
+                  "type": "string"
+                },
+                "from_path": {
+                  "type": "string"
+                },
+                "release_datetime": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "to_path": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "to_semester_repo": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "from_course_repo",
+                "from_path"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "location": {
             "type": [
               "string",
               "null"
             ]
           },
-          "kind": {
-            "enum": [
-              "special_event",
-              "lecture",
-              "lab",
-              "readings",
-              "exam",
-              "drop-in",
-              "other"
-            ],
-            "type": "string"
-          },
           "number": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "session": {
             "minimum": 1,
             "type": "integer"
           },
@@ -177,52 +172,17 @@
       },
       "type": "object"
     },
-    "releases": {
+    "assignments": {
       "additionalProperties": {
         "additionalProperties": false,
         "properties": {
-          "deploy": {
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "course_source_path": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "course_source_repo": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "deploy_datetime": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "semester_dest_path": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "semester_dest_repo": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                }
-              },
-              "required": [
-                "course_source_repo",
-                "course_source_path"
-              ],
-              "type": "object"
-            },
-            "type": "array"
+          "assignment_repo_visibility": {
+            "enum": [
+              "private",
+              "public",
+              "student_choice"
+            ],
+            "type": "string"
           },
           "details": {
             "type": [
@@ -230,22 +190,857 @@
               "null"
             ]
           },
-          "event_datetime": {
-            "type": "string"
+          "due_datetime": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
-          "kind": {
+          "handout_datetime": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "late_penalty_per_day": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "late_window_days": {
+            "type": "integer"
+          },
+          "marks_per_question": {
+            "type": "boolean"
+          },
+          "marks_return_datetime": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "event_datetime": {
+                    "type": "string"
+                  },
+                  "show_on_site": {
+                    "type": "boolean"
+                  }
+                },
+                "type": "object"
+              }
+            ]
+          },
+          "max_team_size": {
+            "type": "integer"
+          },
+          "number": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "repo_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "show_on_site": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "solution_datetime": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "submit_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tbc": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "team_formation": {
             "enum": [
-              "assets",
-              "drop-in",
-              "exam",
-              "lab",
-              "lecture",
-              "other",
-              "readings"
+              "self_select",
+              "assigned"
             ],
             "type": "string"
           },
+          "template": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "due_datetime",
+          "template",
+          "number"
+        ],
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "drop-ins": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "details": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "event_datetime": {
+            "oneOf": [
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              {
+                "items": {
+                  "oneOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "at": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "details": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "location": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                },
+                "type": "array"
+              }
+            ]
+          },
+          "files": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "from_course_repo": {
+                  "type": "string"
+                },
+                "from_path": {
+                  "type": "string"
+                },
+                "release_datetime": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "to_path": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "to_semester_repo": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "from_course_repo",
+                "from_path"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "location": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "number": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "session": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "show_on_site": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "tbc": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "events": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "details": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "event_datetime": {
+            "oneOf": [
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              {
+                "items": {
+                  "oneOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "at": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "details": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "location": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                },
+                "type": "array"
+              }
+            ]
+          },
+          "files": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "from_course_repo": {
+                  "type": "string"
+                },
+                "from_path": {
+                  "type": "string"
+                },
+                "release_datetime": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "to_path": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "to_semester_repo": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "from_course_repo",
+                "from_path"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "location": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "number": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "session": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "show_on_site": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "tbc": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "exams": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "details": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "event_datetime": {
+            "oneOf": [
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              {
+                "items": {
+                  "oneOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "at": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "details": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "location": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                },
+                "type": "array"
+              }
+            ]
+          },
+          "files": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "from_course_repo": {
+                  "type": "string"
+                },
+                "from_path": {
+                  "type": "string"
+                },
+                "release_datetime": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "to_path": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "to_semester_repo": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "from_course_repo",
+                "from_path"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "location": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "number": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "session": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "show_on_site": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "tbc": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "labs": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "details": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "event_datetime": {
+            "oneOf": [
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              {
+                "items": {
+                  "oneOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "at": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "details": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "location": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                },
+                "type": "array"
+              }
+            ]
+          },
+          "files": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "from_course_repo": {
+                  "type": "string"
+                },
+                "from_path": {
+                  "type": "string"
+                },
+                "release_datetime": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "to_path": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "to_semester_repo": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "from_course_repo",
+                "from_path"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "location": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "number": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "session": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "show_on_site": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "tbc": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "lectures": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "details": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "event_datetime": {
+            "oneOf": [
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              {
+                "items": {
+                  "oneOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "at": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "details": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "location": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                },
+                "type": "array"
+              }
+            ]
+          },
+          "files": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "from_course_repo": {
+                  "type": "string"
+                },
+                "from_path": {
+                  "type": "string"
+                },
+                "release_datetime": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "to_path": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "to_semester_repo": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "from_course_repo",
+                "from_path"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "location": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "number": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "session": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "show_on_site": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "tbc": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "readings": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "details": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "event_datetime": {
+            "oneOf": [
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              {
+                "items": {
+                  "oneOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "at": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "details": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "location": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                },
+                "type": "array"
+              }
+            ]
+          },
+          "files": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "from_course_repo": {
+                  "type": "string"
+                },
+                "from_path": {
+                  "type": "string"
+                },
+                "release_datetime": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "to_path": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "to_semester_repo": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "from_course_repo",
+                "from_path"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "location": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "number": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "reading_list": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "session": {
             "minimum": 1,
             "type": "integer"
           },
