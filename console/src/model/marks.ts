@@ -1,13 +1,17 @@
 // A grading sheet (`grading_sheets/<slug>.yml` in the config repo) as the marks grid reads it,
 // and the arithmetic `grades.py` does on output: a per-question total (a blank question
 // skipped, a non-number making the whole total unknown), then
-// `total x (1 - rate x days_late) + adjustment`, floored at 0. Never stored in the sheet.
+// `total x (1 - penalty) + adjustment`, floored at 0, the penalty `rate x days_late` unless the
+// unit's `late_penalty` waives or sets it. Never stored in the sheet.
 
 import { blank, isObj, obj, type Path } from '../edit/yamlText';
+import { penaltyRate } from './policy';
 
 export const NOTES_KEY = 'notes_not_shared_with_students';
 /** Feedback on each question: the student's on a solo sheet, the team's on a group sheet (grades.QUESTION_FEEDBACK_KEY). */
 export const QUESTION_FEEDBACK_KEY = 'feedback_per_question';
+/** The unit's late penalty, beside `info:`: `apply` (absent means the same), `waive`, or the whole penalty (`25%`) (grades.LATE_PENALTY_KEY). */
+export const LATE_PENALTY_KEY = 'late_penalty';
 
 export interface Person {
   handle: string;
@@ -27,6 +31,8 @@ export interface Unit {
   /** Feedback per question, keyed by question; its cells live under `questionFeedbackPath`. */
   questionFeedback: Record<string, unknown>;
   questionFeedbackPath: Path;
+  latePenalty: unknown;
+  latePenaltyPath: Path;
   people: Person[];
 }
 
@@ -48,6 +54,7 @@ export function readSheet(text: string, doc: unknown): Sheet {
       return {
         key, info, score: u.score_group ?? null, scorePath: [container, key, 'score_group'], feedback: u.feedback_group ?? null, feedbackPath: [container, key, 'feedback_group'],
         questionFeedback: obj(u[QUESTION_FEEDBACK_KEY]), questionFeedbackPath: [container, key, QUESTION_FEEDBACK_KEY],
+        latePenalty: u[LATE_PENALTY_KEY] ?? null, latePenaltyPath: [container, key, LATE_PENALTY_KEY],
         people: Object.entries(obj(u.members)).map(([handle, m]) => {
           const mm = obj(m);
           return { handle, adjustment: mm.adjustment_individual ?? null, feedback: mm.feedback_individual ?? null, notes: mm[NOTES_KEY] ?? null, base: [container, key, 'members', handle] };
@@ -56,6 +63,7 @@ export function readSheet(text: string, doc: unknown): Sheet {
     return {
       key, info, score: u.score_individual ?? null, scorePath: [container, key, 'score_individual'], feedback: null, feedbackPath: null,
       questionFeedback: obj(u[QUESTION_FEEDBACK_KEY]), questionFeedbackPath: [container, key, QUESTION_FEEDBACK_KEY],
+      latePenalty: u[LATE_PENALTY_KEY] ?? null, latePenaltyPath: [container, key, LATE_PENALTY_KEY],
       people: [{ handle: key, adjustment: u.adjustment_individual ?? null, feedback: u.feedback_individual ?? null, notes: u[NOTES_KEY] ?? null, base: [container, key] }],
     };
   });
@@ -118,19 +126,84 @@ export function scoreTotal(score: unknown, questions?: Record<string, unknown> |
   return marked ? total : null;
 }
 
-export function finalGrade(total: number | null, rate: number | null, daysLate: unknown, adjustment: unknown): number | null {
-  if (total === null) return null;
-  let earned = total;
-  const days = num(daysLate);
-  if (rate !== null && days !== null && days > 0) earned *= 1 - rate * days;
-  return Math.max(0, earned + (num(adjustment) ?? 0));
+export type LateMode = 'apply' | 'waive' | 'set' | 'bad';
+
+/** A unit's `late_penalty` read once (grades.late_choice): `apply` (absent or blank too), `waive`
+ *  (a set `0%` too), `set` - the whole penalty is `set` - or `bad`, which nobody can apply and the
+ *  engine holds. */
+export function lateChoice(latePenalty: unknown): { mode: LateMode; set?: number } {
+  const t = latePenalty === null || latePenalty === undefined ? '' : String(latePenalty).trim();
+  if (t === '' || t.toLowerCase() === 'apply') return { mode: 'apply' };
+  if (t.toLowerCase() === 'waive') return { mode: 'waive' };
+  const set = penaltyRate(t);
+  if (set === null) return { mode: 'bad' };
+  return set === 0 ? { mode: 'waive' } : { mode: 'set', set };
 }
 
-/** The penalty as the grid shows it: "−20%". */
-export function penaltyText(rate: number | null, daysLate: unknown): string {
+/** What a unit loses for lateness (grades.effective_penalty): `fraction` of its total, the `mode`
+ *  of the grader's choice behind it, and whether it is `late` at all. */
+export interface Penalty {
+  fraction: number;
+  mode: LateMode;
+  late: boolean;
+}
+
+/** `rate x days` when absent or `apply`, nothing when waived or not late, the written penalty when
+ *  set by hand; a `bad` one keeps the late rule's arithmetic, and the engine holds the unit. With no
+ *  late rule (`rate` null) nothing comes off and `late_penalty` is ignored, as the engine ignores it. */
+export function effectivePenalty(rate: number | null, daysLate: unknown, latePenalty: unknown = null): Penalty {
   const days = num(daysLate);
-  if (rate === null || days === null || days <= 0) return '';
-  return `−${Math.round(rate * days * 1000) / 10}%`;
+  const late = days !== null && days > 0;
+  if (rate === null) return { fraction: 0, mode: 'apply', late };
+  const choice = lateChoice(latePenalty);
+  if (!late || choice.mode === 'waive') return { fraction: 0, mode: choice.mode, late };
+  return { fraction: choice.set ?? rate * days, mode: choice.mode, late };
+}
+
+/** `total x (1 - penalty) + adjustment`, floored at 0; null when there is no total. */
+export function finalGrade(total: number | null, penalty: Penalty, adjustment: unknown): number | null {
+  if (total === null) return null;
+  return Math.max(0, total * (1 - penalty.fraction) + (num(adjustment) ?? 0));
+}
+
+const percent = (fraction: number) => Math.round(fraction * 1000) / 10;
+const percentOff = (fraction: number) => `−${percent(fraction)}%`;
+
+/** The penalty as the grid shows it: "−20%", "waived" or "−25% (set by hand)"; '' when not late,
+ *  or when no late rule gives one. */
+export function penaltyText(p: Penalty, rate: number | null): string {
+  if (!p.late) return '';
+  switch (p.mode) {
+    case 'waive':
+      return 'waived';
+    case 'set':
+      return `${percentOff(p.fraction)} (set by hand)`;
+    default:
+      return rate === null ? '' : percentOff(p.fraction);
+  }
+}
+
+/** What the override box writes: `15` or `15%` as `15%`, `0` as `waive`, cleared as `apply`, anything
+ *  else as typed (the engine holds it, and the grid says so). */
+export function overrideValue(raw: string): string {
+  const t = raw.trim().replace(/%$/, '').trim();
+  if (!t) return 'apply';
+  const set = penaltyRate(`${t}%`);
+  if (set === null) return raw.trim();
+  return set === 0 ? 'waive' : `${Number(t)}%`;
+}
+
+/** The override box's text for a stored `late_penalty`: empty unless the penalty is set by hand. */
+export function overrideText(latePenalty: unknown): string {
+  const choice = lateChoice(latePenalty);
+  switch (choice.mode) {
+    case 'set':
+      return `${percent(choice.set ?? 0)}`;
+    case 'bad':
+      return String(latePenalty).trim();
+    default:
+      return '';
+  }
 }
 
 export const round = (n: number | null) => (n === null ? '' : String(Math.round(n * 100) / 100));

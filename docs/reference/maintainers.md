@@ -58,7 +58,7 @@ breaks a live link that faculty click:
 | `docs/10-grade-and-return-assignments.md` | `config_digest.GRADING_SHEETS` |
 | `docs/README.md` | `profile_readme.py` |
 | `docs/10-grade-and-return-assignments.md` | `scheduler._ARCHIVE_DOC` (the archive notice) |
-| `docs/01`-`04`, `07`-`11` and `docs/reference/actions-reference.md` | the console's **Learn more** links (`Hint doc=` / `OrgWhy doc=` in `console/src/screens/`, under `ui/bits.tsx` `DOCS`) |
+| `docs/01`-`04`, `07`-`11` and `docs/reference/actions-reference.md` | the console's **Learn more** links (`Hint doc=` / `OrgWhy doc=` in `console/src/screens/`, a field's `hint.doc` in `console/src/tiers/`, under `ui/bits.tsx` `DOCS`) |
 
 Every `Digest.doc` is one of these: each digest issue ends with a `Field reference:` link built
 from it, so the eight of them are the widest surface in this table.
@@ -432,7 +432,11 @@ Decision 0034 (need, time, verdict), all computed by the engine so the console h
   (without it automation cannot act, or a student gets something wrong) or `suggested`. C1-C3
   and K1-K6 are needed; C4-C6 suggested (there is no K7: the archive date is a to-do only).
   Of a materials repo's checks only the content-kind folder is needed; the syllabus and its
-  weekly plan are ONE suggested check, `syllabus`. A template's brief and starter are
+  weekly plan are ONE suggested check, `syllabus`. Once a repo has a kind folder, each folder
+  kind (lectures, labs, readings) none has is a suggested check `kind_folder:<kind>`, whose
+  to-do's `check` is `kind_folder`. A kind folder is a top folder, a folder one level down in
+  an unkinded top folder whose name is a built-in alias (`materials.ALIAS_DEPTH`), or a
+  `kinds:` path at any depth (`status_json.kind_folders`); withheld ones never count. A template's brief and starter are
   needed. The semester's suggested to-dos (`semester.todo[]`) are `site:home`,
   `schedule:archive_date` and `instructors:email` (a count, never a handle); the course
   description is the course to-do `course:description`. Every to-do names its `check`
@@ -567,7 +571,7 @@ flag): the engine writes no status once it is, so the last file still says `live
 writes `names.json` (repo and path names, and the `_config.yml` keys a site sync rewrites or
 leaves to the site) and `policy.json` (the loaded policy, below), so
 the console holds no default of its own, and `materials.schema.json` (a materials repo's
-optional `materials.yml`: `syllabus`, `kinds` folder aliases; `materials.parse`).
+optional `materials.yml`: `syllabus`, `kinds` folder aliases, names or paths; `materials.parse`).
 
 ## The course org registry
 

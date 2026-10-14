@@ -1,8 +1,8 @@
 """Interpret a parsed `schedule.Schedule` into the rows a site or syllabus shows.
 
-A row is a `releases:` entry: its date, its kind, its name and the copies it makes. Rows
-come in date order and nothing is inferred from folder names beyond one fallback - an entry
-that declares no `kind` takes it from the section its first copy lands in
+A row is a `releases:` entry: its date, its kind, its name and the copies it makes (or an
+`events:` session, which makes none: `Schedule.sessions`). Rows come in date order and nothing is inferred from folder names beyond one fallback - an entry that
+declares no `kind` takes it from the section its first copy lands in
 (`materials.infer_kind`). An `NN_` prefix on a folder means nothing here. Pure: nothing
 touches GitHub or renders anything - `site` turns rows into pages, `syllabus` into a table.
 """
@@ -28,7 +28,7 @@ from .materials import (
     infer_kind,
     publishable,
 )
-from .schedule import own_number
+from .schedule import own_number, session_number
 
 # A source repo -> its `materials.yml` folder aliases (None: the file does not parse).
 # The caller reads them; the plan stays pure.
@@ -110,7 +110,11 @@ class PlannedRow:
 
     `when` is the entry's date, None when it is `event_datetime: tbc` (`undated`).
     `sort_at` is where the row sorts (`planned_rows`): its `when` when dated. It orders and
-    nothing else - nothing shows it or fires on it."""
+    nothing else - nothing shows it or fires on it.
+
+    `session`: an `events:` session (`Schedule.sessions`) - no copies, its `number` and
+    `subtitle` already resolved (`planned_rows`). The site never marks it unreleased nor
+    announces it."""
 
     key: str
     kind: str
@@ -121,8 +125,9 @@ class PlannedRow:
     subtitle: str = ""
     details: str = ""
     shown: bool = True
-    number: int | None = None  # the entry's own `number:`
+    number: int | None = None  # the entry's own `number:`; a session's resolved one
     deploys: tuple[schedule.Deploy, ...] = ()
+    session: bool = False
 
     @property
     def dests(self) -> list[str]:
@@ -138,19 +143,20 @@ class PlannedRow:
 def planned_rows(
     sched: schedule.Schedule, aliases: Aliases = _no_aliases
 ) -> list[PlannedRow]:
-    """One row per `releases:` entry: the dated ones in date order (ties in plan order),
-    then the undated (`event_datetime: tbc`) ones in plan order, flagged `undated`.
+    """One row per `releases:` entry and per `events:` session (`Schedule.sessions`), in
+    date order: sorted on `sort_at`, stably, so ties keep plan order with the releases
+    first. An undated (`event_datetime: tbc`) row is flagged `undated`. A session has no copies:
+    numbered by `session_number` (the label's FIRST number, `lab-01-group-2` -> 1), titled with its own `title:`, else that of the
+    shown release of the same kind and number. A session never takes the row file of the
+    release it shares a number with: the site names release rows first (`site._site_rows`).
 
-    An undated row's `when` is None, and it sorts (`sort_at`) at the END of its kind: a
-    minute after the last dated row of that kind, one more per undated row before it - so
-    "Lab 9, TBC" follows Lab 8 on the schedule rather than piling up after the exams. A
-    kind with no dated row sorts at the end of term."""
+    An undated row's `when` is None, and it sorts (`sort_at`) at the end of its kind
+    (`_undated_placer`)."""
 
     def row(release: schedule.Release, sort_at: date | datetime) -> PlannedRow:
-        kind, _ = entry_kind(release, aliases)
         return PlannedRow(
             key=release.label,
-            kind=kind,
+            kind=kinds[release.label],
             when=release.when,
             sort_at=sort_at,
             tbc=release.tbc,
@@ -162,18 +168,60 @@ def planned_rows(
             deploys=tuple(release.deploy),
         )
 
+    def session(event: schedule.Event, sort_at: date | datetime) -> PlannedRow:
+        n = session_number(event.number, event.label)
+        return PlannedRow(
+            key=event.label,
+            kind=event.kind,
+            when=event.when,
+            sort_at=sort_at,
+            tbc=event.tbc,
+            undated=event.when is None,
+            subtitle=event.title or (titles.get((event.kind, n), "") if n else ""),
+            details=event.details,
+            shown=event.show_on_site,
+            number=n,
+            session=True,
+        )
+
+    kinds = {r.label: entry_kind(r, aliases)[0] for r in sched.releases}
+    place = _undated_placer(
+        sched,
+        [(kinds[r.label], r.when) for r in sched.releases if r.when is not None]
+        + [(e.kind, e.when) for e in sched.sessions if e.when is not None],
+    )
     dated = [r for r in sched.releases if r.when is not None]
     rows = [row(r, r.when) for r in sorted(dated, key=lambda r: r.when)]
-    last: dict[str, datetime] = {r.kind: r.sort_at for r in rows}
-    end = term_end(sched, [r.sort_at for r in rows])
+    rows += [row(r, place(kinds[r.label])) for r in sched.releases if r.when is None]
+    titles: dict[tuple[str, int], str] = {}
+    for r in rows:
+        if r.shown and r.subtitle and (n := own_number(r.number, r.key)):
+            titles.setdefault((r.kind, n), r.subtitle)
+    rows += [session(e, e.when or place(e.kind)) for e in sched.sessions]
+    tz = ZoneInfo(sched.timezone)
+    return sorted(rows, key=lambda r: schedule._instant(r.sort_at, tz))
+
+
+def _undated_placer(
+    sched: schedule.Schedule, dated: list[tuple[str, date | datetime]]
+) -> Callable[[str], datetime]:
+    """Where each next undated row of a kind sorts, given the `(kind, when)` of every
+    dated row: a minute after the last dated row of that kind, one more per undated row of
+    it placed before - so "Lab 9, TBC" follows Lab 8 on the schedule rather than piling up
+    after the exams. A kind with no dated row sorts at the end of term (`term_end`)."""
+    tz = ZoneInfo(sched.timezone)
+    last: dict[str, datetime] = {}
+    for kind, when in dated:
+        at = schedule._instant(when, tz)
+        last[kind] = max(last.get(kind, at), at)
+    end = term_end(sched, list(last.values()))
     taken: dict[str, int] = {}
-    for release in sched.releases:
-        if release.when is None:
-            kind, _ = entry_kind(release, aliases)
-            taken[kind] = taken.get(kind, 0) + 1
-            at = last.get(kind, end) + timedelta(minutes=taken[kind])
-            rows.append(row(release, at))
-    return rows
+
+    def place(kind: str) -> datetime:
+        taken[kind] = taken.get(kind, 0) + 1
+        return last.get(kind, end) + timedelta(minutes=taken[kind])
+
+    return place
 
 
 def term_end(sched: schedule.Schedule, dated: list[datetime]) -> datetime:
@@ -209,18 +257,24 @@ def site_rows(rows: list[PlannedRow]) -> list[SiteRow]:
     - A silent (`show_on_site: false`) entry is no row, unless it is readings: an
       unjoined one is a row of the Readings tab, unnumbered.
     - A supporting-files (`assets`) entry is never a row: it is released, not shown
-      (decision 0026 rule 3)."""
+      (decision 0026 rule 3).
+    - A session (`PlannedRow.session`) is a row when shown, of whatever kind; it neither
+      hosts readings nor joins a lecture."""
     lecture_numbers: dict[int, str] = {}
     for r in rows:
-        if r.shown and r.kind == "lecture" and (n := own_number(r.number, r.key)):
+        if r.session or not r.shown or r.kind != "lecture":
+            continue
+        if n := own_number(r.number, r.key):
             lecture_numbers.setdefault(n, r.key)
     attached: dict[str, list[PlannedRow]] = {}
     own = []
     for r in rows:
         n = own_number(r.number, r.key)
-        if r.kind == ASSETS_KIND:
+        if r.kind == ASSETS_KIND or (r.session and not r.shown):
             continue
-        if r.kind == "readings" and n and (host := lecture_numbers.get(n)):
+        if r.session:
+            own.append(r)
+        elif r.kind == "readings" and n and (host := lecture_numbers.get(n)):
             attached.setdefault(host, []).append(r)
         elif r.shown or r.kind == "readings":
             own.append(r)

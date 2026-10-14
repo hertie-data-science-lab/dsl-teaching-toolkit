@@ -293,14 +293,14 @@ repos, never orgs. Every release is idempotent - re-runs are no-ops.
 | `deploy` | copy a source path → a semester repo | `course_source_repo`, `course_source_path`, `semester_dest_repo` (default `materials`), `semester_dest_path` (default: mirror). A list, or a single mapping for one copy |
 
 Per entry: `event_datetime` (required - when the thing happens; the site schedule shows it,
-and it is the default fire time), `title` and `details` (optional - the session's name,
+and its deploys ship an hour before it by default), `title` and `details` (optional - the session's name,
 shown beside the row's name, and a sentence about it in the schedule's Details column and on
 its kind's tab), `kind` (optional - the row's kind; inferred from where the first copy lands), and the `deploy`
 actions. A deploy item may carry its own `deploy_datetime` to ship earlier or later than
 the calendar event.
 An assignment's dates (handout_datetime/due_datetime/solution_datetime/marks_return_datetime)
 live under `assignments:` below; how the semester runs it is `assignments.yml`.
-Anything that ships nothing - an exam, a clinic, a guest lecture - goes under `events:`.
+Anything that ships nothing - an exam, a clinic, a guest lecture, a second lab group - goes under `events:`.
 Uncertain dates:
 `tbc: true` beside a date = provisional, shown "(TBC)" but fires; `event_datetime: tbc`
 = undated TBC row, nothing fires.
@@ -314,7 +314,7 @@ Deploy-item fields (paths are **relative to their repo**: `course_source_path` i
 | `course_source_path` | **yes** | - | folder or file to copy, relative to `course_source_repo` |
 | `semester_dest_repo` | no | `materials` | semester repo to copy into (created on first release) |
 | `semester_dest_path` | no | mirrors `course_source_path` | where it lands, relative to `semester_dest_repo` |
-| `deploy_datetime` | no | the entry's `event_datetime` | ship this copy earlier/later |
+| `deploy_datetime` | no | an hour before the entry's `event_datetime` (whole-day: the day's start) | ship this copy earlier/later |
 
 **Minimal** - the recommended shape; everything not stated takes its default:
 
@@ -346,7 +346,7 @@ releases:
         course_source_path: lectures/02_intro
         semester_dest_repo: lecture_materials
         semester_dest_path: lectures/02_intro
-        deploy_datetime: 2026-09-15T09:00   # ships 1h early
+        deploy_datetime: 2026-09-14T18:00   # ships the evening before
   bonus-dataset:
     event_datetime: 2026-10-20T09:30  # a one-off that isn't a teaching session
     deploy:
@@ -402,8 +402,9 @@ the row simply appears on the site's schedule.
 | Field | Required | Default | Meaning |
 |---|---|---|---|
 | `event_datetime` | **yes** | - (entry dropped without it) | when it happens; a bare date is a whole day, shown as 09:00 |
-| `kind` | no | `special_event` | `exam` / `special_event` - which colour the row takes |
-| `title` | no | prettified label | site row label |
+| `kind` | no | `special_event` | `exam` / `special_event`, or a release kind (`lab`, ...): a session row of that kind with no files |
+| `number` | no | the label's number | a session's number (`Lab 1`) |
+| `title` | no | prettified label | site row label; a session's defaults to its release's |
 | `details` | no | - | the row's Details column: the room, the format, what to bring |
 | `tbc` | no | `false` | provisional date - shown "(TBC)" |
 | `show_on_site` | no | `true` | `false` keeps the row off the site |
@@ -459,7 +460,7 @@ type, and the type is never a field you set - it follows from where the row came
 
 | Row type | Comes from |
 |---|---|
-| lecture, lab, readings, drop-in, ... | a `releases:` entry, of its `kind` (declared, or inferred from the folder its first copy lands in) |
+| lecture, lab, readings, drop-in, ... | a `releases:` entry, of its `kind` (declared, or inferred from the folder its first copy lands in), or an `events:` entry of that `kind` (no files) |
 | assignment | an `assignments:` entry - shown on **both** its handout date and its due date |
 | exam | an `events:` entry with `kind: exam` |
 | special_event | an `events:` entry with no `kind` (clinic, guest lecture, revision session), and the `archive` block's date - the "Semester archived" row |
@@ -483,7 +484,7 @@ fully read goes red and opens an issue naming the bad entry.
 | `solution_datetime:` before the late cutoff | refused by the check on push; at run time held and shown at the cutoff, with a digest warning |
 | `handout_datetime:` unparseable | kept, but nothing is ever handed out |
 | `title:`, `grading_datetime:`, `semester_dest_repo:` on an assignment | NOT_MIGRATED - the entry is dropped until the migration moves them |
-| `deploy_datetime:` unparseable | kept - that copy ships at the `event_datetime` |
+| `deploy_datetime:` unparseable | kept - that copy ships at its default, an hour before the `event_datetime` |
 | unknown `kind:` on an event, unknown key, unknown `timezone:` | kept, on the documented fallback |
 | `type:` on a release or an event | NOT_MIGRATED - the row is placed as if it had no `kind:` |
 

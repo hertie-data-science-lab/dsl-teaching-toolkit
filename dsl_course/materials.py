@@ -6,8 +6,9 @@ required. `materials.yml` at its root is the one escape hatch for what the conve
 say, and is absent for the default layout:
 
     syllabus: E1282_syllabus.pdf   # the syllabus file (default SYLLABUS.md)
-    kinds:                         # a folder name -> the row kind it holds
+    kinds:                         # a folder (a name or a path) -> the kind it holds
       tutorials: lab
+      students/lectures: lecture
       quiz: other
 
 A release entry that declares no `kind` takes one from the section its first copy lands in:
@@ -16,6 +17,10 @@ names a kind (`lectures` copied whole), else the destination repo itself. The so
 repo's `kinds:` first, then the built-in aliases, both matched case-insensitively, else
 supporting files (`assets`, decision 0031 rule 10): a folder not named lectures, labs or
 readings (or a synonym) is released, never shown.
+
+A built-in name is recognised at the top and one level down (`students/lectures`,
+`ALIAS_DEPTH`); a `kinds:` path is honoured at any depth. Deeper undeclared folders are part
+of the folder above them.
 """
 
 from __future__ import annotations
@@ -49,6 +54,10 @@ FOLDER_KINDS = ("lecture", "lab", "readings", ASSETS_KIND)
 # The kind of a `releases:` entry that names none and copies nothing yet: there is no
 # folder to infer from, so it stays the row it always was.
 EMPTY_ENTRY_KIND = "lecture"
+
+# How deep a folder's own name still names its kind: the top, and one level down. A
+# `kinds:` path is honoured at any depth.
+ALIAS_DEPTH = 2
 
 # The folder names every course gets for free. A folder of one of these names that no
 # schedule entry releases still gets its rows (`site`'s off-plan rows), except a
@@ -154,9 +163,14 @@ def infer_kind(section: str, aliases: Mapping[str, str] | None = None) -> str:
 
 
 def alias_kind(section: str, aliases: Mapping[str, str] | None = None) -> str | None:
-    """The kind a section NAMES - the repo's alias, else a built-in one - or None."""
-    key = section.lower()
-    found = (aliases or {}).get(key) or BUILTIN_ALIASES.get(key)
+    """The kind a section NAMES - the repo's alias, else a built-in one - or None. A
+    section may be a folder path: the repo's alias names it at any depth, a built-in name
+    only within `ALIAS_DEPTH` (`students/lectures`, never `a/b/lectures`)."""
+    key = section.strip("/").lower()
+    parts = key.split("/")
+    found = (aliases or {}).get(key) or (
+        BUILTIN_ALIASES.get(parts[-1]) if len(parts) <= ALIAS_DEPTH else None
+    )
     return known_kind(found) if found else None
 
 

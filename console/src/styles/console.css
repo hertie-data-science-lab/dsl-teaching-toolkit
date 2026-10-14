@@ -110,6 +110,8 @@ main { min-width: 0; }
 .hint-pop.flip-x { right: auto; left: 0; }
 .hint-pop.flip-y { top: auto; bottom: calc(100% + 8px); }
 .hint-pop.flip-y::before { top: auto; bottom: -9px; }
+/* In a dialog the popover is fixed to the viewport (Hint.tsx), so the scrolling body cannot clip it; above the modal scrim and the panel. */
+.hint-pop.fixed { z-index: 60; }
 .lbl-row { display: flex; align-items: center; gap: 0; flex-wrap: wrap; }
 .fold > summary::before, .a-card > summary.a-sum::before { content: ""; width: 7px; height: 7px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform 0.15s; margin-right: 2px; flex: none; }
 .fold[open] > summary::before, .a-card[open] > summary.a-sum::before { transform: rotate(45deg); }
@@ -203,8 +205,10 @@ button.wk { font: inherit; text-align: left; cursor: pointer; align-content: sta
 .no-problems svg { width: 14px; height: 14px; }
 
 /* Setup: a calm checklist, deliberately unlike the red problem cards beside it. */
+/* A checklist row's mark column and the gap after it; the materials kinds fold (.s-kinds) lines up with the labels by them. */
+:root { --setup-mark: 18px; --setup-gap: 10px; }
 .setup { list-style: none; margin: 0; padding: 0; }
-.setup li { display: grid; grid-template-columns: 18px minmax(0, 1fr); column-gap: 10px; row-gap: 1px; padding: 7px 0; }
+.setup li { display: grid; grid-template-columns: var(--setup-mark) minmax(0, 1fr); column-gap: var(--setup-gap); row-gap: 1px; padding: 7px 0; }
 .setup .s-mark { grid-row: 1 / span 2; width: 16px; height: 16px; margin-top: 3px; border-radius: 999px; display: grid; place-items: center; }
 .setup .s-mark svg { width: 10px; height: 10px; }
 .setup li.done .s-mark { background: var(--ok-soft); color: var(--ok); }
@@ -472,6 +476,13 @@ table.grid td input:hover, table.grid td select:hover { border-color: var(--rule
 .field:focus-within > .why { display: block; }
 .row-2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
 @media (max-width: 480px) { .row-2 { grid-template-columns: minmax(0, 1fr); } }
+/* In the entry sheet each pair shares one grid: the labels on one row, sat on their boxes, the
+   boxes on the next, the notes under them (a field has at most four parts). */
+.entry .row-2 { row-gap: 0; }
+.entry .row-2 > .field { grid-row: span 4; grid-template-rows: subgrid; row-gap: 0; }
+.entry .row-2 > .field > :first-child { align-self: end; }
+.entry .row-2 > .field > * + * { margin-top: 4px; }
+@media (max-width: 480px) { .entry .row-2 > .field + .field { margin-top: 12px; } }
 input[type="text"], input[type="email"], input[type="date"], input[type="time"], input[type="number"], input[type="url"], select, textarea { font: inherit; font-size: 14.5px; color: var(--ink); background: var(--surface); border: 1px solid var(--rule-strong); border-radius: 6px; padding: 6px 9px; width: 100%; min-width: 0; min-height: 36px; }
 textarea { min-height: 70px; resize: vertical; }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--focus); outline-offset: 0; border-color: transparent; }
@@ -718,7 +729,6 @@ input[aria-invalid="true"] { border-color: var(--bad); background: var(--bad-sof
   .trow .k { grid-area: k; } .trow .d { grid-area: d; } .trow .d span { display: inline; margin-left: 6px; }
   .trow .ttl { grid-area: ttl; } .trow .st { grid-area: st; } .trow .det { grid-area: det; }
 }
-.site-note { font-size: 12.5px; color: var(--muted); background: var(--sunk); border-radius: 8px; padding: 8px 12px; }
 .ident { font-family: var(--font-display); font-weight: 700; font-size: 15px; }
 .ident span { font-weight: 400; color: var(--muted); font-family: var(--font-body); font-size: 12.5px; margin-left: 6px; }
 
@@ -763,6 +773,8 @@ table.marks input.fb { min-width: 180px; }
 table.marks input.pn { min-width: 150px; }
 table.marks td.calc { font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
 table.marks td.pen { color: var(--amber-ink); font-variant-numeric: tabular-nums; text-align: right; }
+table.marks td.pen .late-apply { display: flex; gap: 6px; justify-content: flex-end; color: var(--ink-2); font-size: 12.5px; white-space: nowrap; }
+table.marks input.ovr { width: 92px; }
 table.marks tr.nosub td { color: var(--muted); }
 table.marks tr.team-row td { background: var(--sunk); font-weight: 600; border-top: 1px solid var(--rule-strong); }
 table.marks tr.member-row td { font-weight: 400; }
@@ -942,11 +954,12 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .switch input[role="switch"]:disabled { opacity: 0.5; cursor: default; }
 .web-switch .check-line { flex-basis: 100%; }
 
-/* T3: materials checklist kinds fold; withheld tree toggles right-aligned on folders too */
-.setup .s-kinds { grid-column: 2; border-top: 0; padding-top: 2px; }
-.setup .s-kinds > summary { min-height: 0; font-size: 13px; }
-.setup .s-kinds .fold-body { list-style: none; margin: 0; padding: 4px 0 0; gap: 2px; font-size: 13.5px; color: var(--ink-2); }
-.setup .s-kinds li { display: block; padding: 0; }
+/* T3: materials checklist kinds fold (a sibling of the Needed/Suggested lists since 0034, so not
+   under .setup, lined up with the checklist labels); withheld tree toggles right-aligned on folders too */
+.s-kinds { margin-left: calc(var(--setup-mark) + var(--setup-gap)); border-top: 0; padding-top: 2px; }
+.s-kinds > summary { min-height: 0; font-size: 13px; }
+.s-kinds .fold-body { list-style: none; margin: 0; padding: 4px 0 0; gap: 2px; font-size: 13.5px; color: var(--ink-2); }
+.s-kinds li { display: block; padding: 0; }
 .file-tree:not(.select) summary .ft-toggle { margin-left: auto; }
 
 /* T2: course chrome (decision 0024 rules 1-5) */
@@ -988,6 +1001,7 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .file-tree .ft-closed, .file-tree .ft-opened { display: inline-flex; }
 .file-tree details[open] > summary .ft-closed, .file-tree details:not([open]) > summary .ft-opened { display: none; }
 .file-tree .ft-out > .ft-name, .file-tree .ft-out > details > summary > .ft-name { color: var(--muted); text-decoration: line-through; }
+.file-tree .ft-kind { margin-left: auto; font-size: 12px; padding: 1px 6px; min-height: 0; }
 .pattern-box { position: relative; background: var(--surface); border-radius: 6px; }
 .pattern-box textarea.code, .pattern-box .pattern-mirror { font-family: var(--font-code); font-size: 13px; line-height: 1.5; padding: 6px 9px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .pattern-box textarea.code { position: relative; background: transparent; min-height: 240px; }
@@ -1010,8 +1024,8 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .all-courses-head .actions { gap: 8px 16px; }
 .all-courses-head .my-only { min-height: 0; align-items: center; }
 .all-courses-head .my-only input { margin-top: 0; }
-.setup .s-kinds .k-mark { display: inline-grid; place-items: center; width: 14px; margin-right: 4px; color: var(--ok); vertical-align: -1px; }
-.setup .s-kinds .k-mark svg { width: 10px; height: 10px; }
+.s-kinds .k-mark { display: inline-grid; place-items: center; width: 14px; margin-right: 4px; color: var(--ok); vertical-align: -1px; }
+.s-kinds .k-mark svg { width: 10px; height: 10px; }
 
 /* U1: the course code on its own quiet line under a card's title (decision 0031 rule 1) */
 .cohort-card .cc-name .cc-code { font-size: 12px; letter-spacing: 0.02em; margin-top: 2px; }

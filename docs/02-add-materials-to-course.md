@@ -56,8 +56,11 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
    `lab/`, `tutorials/` are labs, `readings/`, `reading/`, `literature/` readings,
    `lectures/`, `lecture/` lectures. Any other folder (`data/`, `img/`, `code/`, ...) is
    supporting files: released like everything else, but never a row or a tab on the
-   semester site or the public website. Name your folders differently? Set their kinds in
-   `materials.yml` (below) or under Folder kinds in the console.
+   semester site or the public website. A folder one level down counts too
+   (`students/lectures/`). Name your folders differently? Set their kinds in
+   `materials.yml` (below) or under Folder kinds in the console: which folders hold the
+   lectures, labs and readings, so the sites can sort them. Pick any folder, including one
+   inside another; a kind this course does not teach stays unassigned.
 
    *NB: this repo stays private - students never see it. Only the sessions you **actively release** reach the semester org, so you can privately stage the whole course here.*
 
@@ -75,13 +78,15 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
 
    ```yaml
    syllabus: E1282_syllabus.pdf   # the syllabus the home page pins (default SYLLABUS.md)
-   kinds:                         # a top folder -> the kind of the rows it feeds
+   kinds:                         # a folder -> the kind of the rows it feeds
      slides: lecture
-     seminars: lab
+     students/seminars: lab       # a path names a folder at any depth
    ```
 
-   *`kinds:` keys name the top folder the copy LANDS in (its semester-side path), in any
-   case. A file that does not parse stops the site sync and says so.*
+   *`kinds:` keys are folder names or paths, in any case, and win over the built-in names
+   (`readings: assets` makes it supporting files). An entry with no `kind` reads them
+   against the top folder its copy LANDS in (its semester-side path). A file that does not
+   parse stops the site sync and says so.*
 
    *NB: the console's **Weekly plan** writes every session with its date and readings into
    your Markdown syllabus, between `<!-- dsl:weekly-plan -->` and `<!-- /dsl:weekly-plan -->`

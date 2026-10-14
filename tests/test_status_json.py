@@ -35,6 +35,7 @@ from dsl_course.faults import ConfigFault, FaultKind, header_fault
 from dsl_course.gh_contents import load_yaml_lines
 from dsl_course.materials import PLAN_END, PLAN_START, Declared
 from dsl_course.ops.request import validate
+from dsl_course.schedule_plan import planned_rows
 from tests.conftest import repo_row
 
 COURSE = "hertie-dsl-demo-course-e1234"
@@ -210,10 +211,22 @@ def _people(email: str | None = "prof@x.edu") -> dict:
 
 
 def _materials(repo: str, syllabus: str | None = "# Syllabus", **over):
-    """A materials repo whose blocking checks pass unless `over` says otherwise."""
+    """A materials repo whose checks of its folders pass unless `over` says otherwise:
+    a folder of each kind."""
     return status_json.MaterialsFacts(
-        repo, syllabus, **{"folders": ("lectures",), **over}
+        repo, syllabus, **{"folders": ("lectures", "labs", "readings"), **over}
     )
+
+
+def _repo_tree(tree: dict[str, dict[str, str]], listed: list[str] | None = None):
+    """A `top_level` stub over `{folder: {name: type}}`; an absent folder is empty."""
+
+    def top_level(org, repo, folder=""):
+        if listed is not None:
+            listed.append(folder)
+        return tree.get(folder, {})
+
+    return top_level
 
 
 # The weeks of SCHEDULE with nothing dated in them after NOW, and those with an assignment
@@ -692,7 +705,7 @@ def test_a_declared_pdf_syllabus_counts_once_it_is_there(monkeypatch):
     )
     monkeypatch.setattr(status_json, "file_exists", lambda org, repo, path: False)
     present = {"E1282_syllabus.pdf": "file", "lectures": "dir"}
-    monkeypatch.setattr(status_json, "top_level", lambda org, repo: present)
+    monkeypatch.setattr(status_json, "top_level", _repo_tree({"": present}))
     facts = status_json._materials_facts(COURSE, "nlp-materials")
     checks = status_json.materials_checks(facts)
     assert status_json.materials_state(facts, checks) == "ready"
@@ -733,7 +746,7 @@ events:
     event_datetime: 2026-09-22T23:59
 """
     )
-    rows = status_json.this_week(sched, [], [], NOW)
+    rows = status_json.this_week(sched, [], [], NOW, planned_rows(sched))
     assert [r["ref"] for r in rows] == ["e0", "e1"]
     assert rows[0]["when"] == "2026-09-23T00:00:00+02:00"
 
@@ -1002,7 +1015,8 @@ def test_a_problem_is_dated_by_the_moment_it_bites_and_a_roster_one_is_not(
         )
     )
     when = {(p["stage"], p["fix"]["entry"]): p.get("when") for p in doc["problems"]}
-    assert when[("K4", "s5")] == "2026-10-08T10:00:00+02:00"  # the release
+    # The release's copy ships by default an hour before its 10:00 session.
+    assert when[("K4", "s5")] == "2026-10-08T09:00:00+02:00"
     assert when[("K4", "assignment-3")] == "2026-10-20T10:00:00+02:00"  # hand out
     # A template fault bites when the template is handed out, not at the late cutoff.
     assert when[("C5", "assignment-3-f2026")] == "2026-10-20T10:00:00+02:00"
@@ -1251,11 +1265,12 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
     monkeypatch.setattr(
         status_json, "repo_tree", lambda org, repo, branch: ("lectures",)
     )
-    # A materials repo is read by its top only, never its whole tree.
+    # A materials repo is read by its top and its top folders' tops, never its whole
+    # tree.
     monkeypatch.setattr(
         status_json,
         "top_level",
-        lambda org, repo: {"SYLLABUS.md": "file", "lectures": "dir", ".system": "dir"},
+        _repo_tree({"": {"SYLLABUS.md": "file", "lectures": "dir", ".system": "dir"}}),
     )
     monkeypatch.setattr(status_json, "file_exists", lambda org, repo, path: False)
     monkeypatch.setattr(gh_commits, "gh", lambda *a: (0, "2026-09-22T06:02:00Z"))
@@ -1281,7 +1296,13 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
     (m,) = course["course"]["materials"]
     assert (m["repo"], m["state"]) == ("course-materials-f2026", "ready")
     # Read off the one tree: its folder has a kind; no withhold list, no session list.
-    assert [c["id"] for c in m["checks"] if not c["done"]] == ["syllabus", "withheld"]
+    # Only lectures/: no labs or readings folder is a suggestion, never a failure.
+    assert [c["id"] for c in m["checks"] if not c["done"]] == [
+        "syllabus",
+        "withheld",
+        "kind_folder:lab",
+        "kind_folder:readings",
+    ]
 
 
 def test_every_render_validates_against_the_exported_schema():
@@ -1803,7 +1824,7 @@ def test_an_entry_with_no_number_is_a_problem_dated_at_what_it_stops():
     guest = problems["number:lecture:guest"]
     assert guest["text"] == "Give guest a number."
     assert guest["stops"] == "The release on Thu 8 Oct will be skipped."
-    assert guest["when"] == "2026-10-08T10:00:00+02:00"
+    assert guest["when"] == "2026-10-08T09:00:00+02:00"  # its copy, an hour early
     assert guest["scope"] == "semester"
     assert guest["fix"]["path"] == "schedule.yml"
     assert guest["fix"]["entry"] == "guest"
@@ -1884,13 +1905,20 @@ def _unmet(m: status_json.MaterialsFacts) -> list[str]:
         # No folder at all: none of a known kind.
         ({"folders": ()}, ["kind_folder"], "todo"),
         # A folder no kind names is supporting files (decision 0031): it blocks nothing.
-        ({"folders": ("lectures", "code")}, [], "ready"),
+        ({"folders": ("lectures", "labs", "readings", "code")}, [], "ready"),
         ({"folders": ("code",)}, ["kind_folder"], "todo"),
         # Supporting files, by name or by default, on their own make nothing to show.
-        ({"folders": ("lectures", "img")}, [], "ready"),
+        ({"folders": ("lectures", "labs", "readings", "img")}, [], "ready"),
         ({"folders": ("data",)}, ["kind_folder"], "todo"),
         # A declared kind maps the folder, matched case-insensitively.
-        ({"folders": ("Tutorien",), "kinds": {"tutorien": "lab"}}, [], "ready"),
+        (
+            {
+                "folders": ("Tutorien", "lectures", "readings"),
+                "kinds": {"tutorien": "lab"},
+            },
+            [],
+            "ready",
+        ),
         # The two non-blocking lines never stop ready.
         (
             {"syllabus": "# Syllabus", "releaseignore": None},
@@ -2013,16 +2041,12 @@ def test_only_unkinded_folders_with_numbered_subfolders_are_read_and_flagged(
     monkeypatch,
 ):
     listed = []
-
-    def top_level(org, repo, folder=""):
-        listed.append(folder)
-        return {
-            "": {"lectures": "dir", "quiz": "dir", "code": "dir", "data": "dir"},
-            "quiz": {"01_first": "dir", "notes.md": "file"},
-            "code": {"helpers": "dir", "run.py": "file"},
-        }[folder]
-
-    monkeypatch.setattr(status_json, "top_level", top_level)
+    tree = {
+        "": {"lectures": "dir", "quiz": "dir", "code": "dir", "data": "dir"},
+        "quiz": {"01_first": "dir", "notes.md": "file"},
+        "code": {"helpers": "dir", "run.py": "file"},
+    }
+    monkeypatch.setattr(status_json, "top_level", _repo_tree(tree, listed))
     monkeypatch.setattr(status_json, "_declaration", lambda org, repo: Declared())
     monkeypatch.setattr(status_json, "get_file_content", lambda org, repo, path: None)
     m = status_json._materials_facts(COURSE, "cm")
@@ -2136,6 +2160,16 @@ def test_a_whole_folder_copy_is_read_as_that_folder():
     ]
     facts.aliases = {"cm": {"misc": "lab"}}
     assert status_json.kindless_entry_problems(facts) == []
+
+
+def test_released_folders_are_derived_from_the_folders_and_the_releaseignore():
+    # One source of truth: a changed `.releaseignore` changes what is released.
+    m = status_json.MaterialsFacts(
+        "course-materials", folders=("labs", "drafts", "solutions")
+    )
+    assert m.released == ("labs", "drafts")
+    m.releaseignore = "drafts/\n"
+    assert m.released == ("labs",)
 
 
 def test_the_kind_folder_why_and_never_released_folders_skipped():
@@ -2722,7 +2756,8 @@ def test_a_cited_placeholder_stub_is_a_source_unwritten_problem():
         "the placeholder."
     )
     assert problem["stops"] == "The release on Wed 30 Sep will leave it out."
-    assert (problem["when"], problem["bites"]) == ("2026-09-30T10:00:00+02:00", "soon")
+    # The copy ships by default an hour before the 10:00 entry.
+    assert (problem["when"], problem["bites"]) == ("2026-09-30T09:00:00+02:00", "soon")
     assert problem["fix"]["repo"] == f"{COURSE}/course-materials-f2026"
     # Written: no problem.
     doc = _render(
@@ -3352,3 +3387,225 @@ def test_an_assignment_carries_its_semester_side_name():
     doc = _render(semester=_semester(sched=sched))
     row = next(a for a in doc["assignments"] if a["slug"] == "assignment-2")
     assert row["semester_name"] == "project-2"
+
+
+# ------------------------------------------------------------------ sessions without files
+
+SESSIONS = (
+    WEEKLY
+    + """\
+events:
+  lab-2-only-group:
+    kind: lab
+    number: 2
+    title: Trees
+    event_datetime: 2026-10-15T18:00
+  lab-1-group-2:
+    kind: lab
+    number: 1
+    event_datetime: 2026-10-09T18:00
+"""
+)
+
+
+def test_a_session_event_fills_its_kinds_week():
+    # Week 2's only lab is an `events:` session: not a week with no lab.
+    facts = _semester(sched=_sched(SESSIONS))
+    before = datetime(2026, 9, 30, 9, 0, tzinfo=UTC)
+    assert status_json.empty_week_problems(facts, before, frozenset()) == []
+
+
+def test_this_week_lists_a_session_event_under_its_kind():
+    sched = _sched(SESSIONS)
+    now = datetime(2026, 10, 13, 9, 0, tzinfo=UTC)
+    rows = status_json.this_week(sched, [], [], now, planned_rows(sched))
+    (lab,) = [r for r in rows if r["ref"] == "lab-2-only-group"]
+    assert (lab["kind"], lab["title"], lab["state"]) == ("lab", "Trees", "planned")
+    early = status_json.this_week(
+        sched, [], [], datetime(2026, 10, 8, 9, 0, tzinfo=UTC), planned_rows(sched)
+    )
+    (group,) = [r for r in early if r["ref"] == "lab-1-group-2"]
+    assert group["title"] == "Lab 1"
+
+
+def test_this_week_titles_a_session_as_the_release_it_repeats():
+    # No `title:` of its own: the lab 1 release's, as on the site row.
+    sched = _sched(SESSIONS.replace("  lab_1:\n", "  lab_1:\n    title: Regression\n"))
+    week = status_json.this_week(
+        sched, [], [], datetime(2026, 10, 8, 9, 0, tzinfo=UTC), planned_rows(sched)
+    )
+    (group,) = [r for r in week if r["ref"] == "lab-1-group-2"]
+    assert (group["kind"], group["title"]) == ("lab", "Regression")
+
+
+def test_a_session_event_is_never_nothing_to_release():
+    facts = _semester(sched=_sched(SESSIONS))
+    now = datetime(2026, 9, 30, 9, 0, tzinfo=UTC)
+    ids = {p["id"] for p in status_json.nothing_to_release_problems(facts, now)}
+    assert not any("group" in i for i in ids)
+
+
+# --------------------------------------------------------- folder kinds at any depth
+
+
+# A repo shaped like the Maths course's: kinds one level down, solutions denied.
+MATHS_TREE = {
+    "": {
+        "students": "dir",
+        "solutions": "dir",
+        "readings": "dir",
+        "m4ds": "dir",
+        "SYLLABUS.md": "file",
+    },
+    "students": {"lectures": "dir", "labs": "dir", "notes.md": "file"},
+    "solutions": {"labs": "dir"},
+    "readings": {"week1": "dir"},
+    "m4ds": {"chapter1": "dir", "labs-old": "dir"},
+}
+
+
+def _facts(monkeypatch, tree, declared=None, releaseignore=None, listed=None):
+    monkeypatch.setattr(status_json, "top_level", _repo_tree(tree, listed))
+    monkeypatch.setattr(
+        status_json, "_declaration", lambda org, repo: declared or Declared()
+    )
+    monkeypatch.setattr(
+        status_json,
+        "get_file_content",
+        lambda org, repo, path: releaseignore if path == ".releaseignore" else None,
+    )
+    return status_json._materials_facts(COURSE, "maths-materials")
+
+
+def _found(m) -> dict[str, list[str]]:
+    (kind,) = [c for c in status_json.materials_checks(m) if c["id"] == "kind_folder"]
+    return {d["kind"]: d["folders"] for d in kind["detail"]}
+
+
+def test_a_kind_folder_one_level_down_counts_like_a_top_folder(monkeypatch):
+    m = _facts(monkeypatch, MATHS_TREE)
+    # Reported by its path; solutions/labs is never released, so it is not one.
+    assert _found(m) == {
+        "lecture": ["students/lectures"],
+        "lab": ["students/labs"],
+        "readings": ["readings"],
+        "exam": [],
+        "drop-in": [],
+        "other": [],
+    }
+    unmet = [c["id"] for c in status_json.materials_checks(m) if not c["done"]]
+    assert "kind_folder" not in unmet
+    assert not [u for u in unmet if u.startswith("kind_folder:")]
+
+
+def test_deeper_folders_stay_supporting_files_unless_declared(monkeypatch):
+    tree = {
+        "": {"course": "dir"},
+        "course": {"2026": "dir"},
+        "course/2026": {"Labs": "dir", "lectures": "dir"},
+    }
+    m = _facts(monkeypatch, tree)
+    assert _found(m)["lab"] == [] and _found(m)["lecture"] == []
+    # Declared, the deep path counts, found whatever its case on GitHub.
+    m = _facts(monkeypatch, tree, Declared(kinds={"course/2026/labs": "lab"}))
+    assert _found(m)["lab"] == ["course/2026/Labs"]
+    assert _found(m)["lecture"] == []
+    # A declared path that is not there is no folder.
+    m = _facts(monkeypatch, tree, Declared(kinds={"course/2027/labs": "lab"}))
+    assert _found(m)["lab"] == []
+
+
+def test_a_declaration_wins_over_the_name_at_every_depth(monkeypatch):
+    tree = {"": {"labs": "dir", "readings": "dir"}}
+    m = _facts(monkeypatch, tree, Declared(kinds={"labs": "readings"}))
+    assert _found(m)["readings"] == ["labs", "readings"]
+    assert _found(m)["lab"] == []
+    # Declared supporting files: not a kind folder, so the check is not met by it.
+    m = _facts(
+        monkeypatch, {"": {"readings": "dir"}}, Declared(kinds={"readings": "assets"})
+    )
+    assert _found(m)["readings"] == []
+    (kind,) = [c for c in status_json.materials_checks(m) if c["id"] == "kind_folder"]
+    assert kind["done"] is False
+    m = _facts(monkeypatch, MATHS_TREE, Declared(kinds={"students/labs": "assets"}))
+    assert _found(m)["lab"] == []
+
+
+def test_a_withheld_folder_is_no_kind_folder_at_either_level(monkeypatch):
+    tree = {**MATHS_TREE, "": {**MATHS_TREE[""], ".releaseignore": "file"}}
+    m = _facts(monkeypatch, tree, releaseignore="students/labs/\nreadings/\n")
+    assert _found(m)["lab"] == [] and _found(m)["readings"] == []
+    assert _found(m)["lecture"] == ["students/lectures"]
+
+
+def test_only_unkinded_top_folders_are_listed_unless_a_path_is_declared(monkeypatch):
+    listed: list[str] = []
+    _facts(monkeypatch, MATHS_TREE, listed=listed)
+    # readings/ is a kind folder: what is inside is of its kind. solutions/ is denied.
+    assert sorted(listed) == ["", "m4ds", "students"]
+    # Inside a kind folder only a declared path counts, at the cost of its listing.
+    listed.clear()
+    tree = {**MATHS_TREE, "readings": {"labs": "dir", "Extra": "dir"}}
+    m = _facts(
+        monkeypatch, tree, Declared(kinds={"readings/extra": "lab"}), listed=listed
+    )
+    assert _found(m)["lab"] == ["readings/Extra", "students/labs"]
+    assert sorted(listed) == ["", "m4ds", "readings", "students"]
+
+
+def test_a_missing_kind_is_a_suggestion_never_a_failure():
+    m = _materials("m", PLANNED, folders=("students/lectures",), releaseignore="x\n")
+    checks = status_json.materials_checks(m)
+    by_id = {c["id"]: c for c in checks}
+    # One kind folder: the needed check is done and the repo is ready.
+    assert by_id["kind_folder"]["done"] is True
+    assert status_json.materials_state(m, checks) == "ready"
+    lab = by_id["kind_folder:lab"]
+    assert lab == {
+        "id": "kind_folder:lab",
+        "label": "No labs folder found",
+        "done": False,
+        "why": (
+            "Pick the folder that holds labs under Folder kinds, or leave it if this "
+            "course has none."
+        ),
+        "need": "suggested",
+    }
+    assert by_id["kind_folder:readings"]["label"] == "No readings folder found"
+    # Only the folder kinds: exam and drop-in belong to schedule entries.
+    assert [c["id"] for c in checks if c["id"].startswith("kind_folder:")] == [
+        "kind_folder:lab",
+        "kind_folder:readings",
+    ]
+
+
+def test_a_repo_with_no_kind_folder_is_open_as_before():
+    for folders in ((), ("code",), ("data",)):
+        m = _materials("m", PLANNED, folders=folders, releaseignore="x\n")
+        checks = status_json.materials_checks(m)
+        assert [c["id"] for c in checks if not c["done"]] == ["kind_folder"]
+        assert status_json.materials_state(m, checks) == "todo"
+
+
+def test_a_missing_kind_is_a_suggested_course_todo_for_the_kind_folder_check():
+    m = _materials("cm", PLANNED, folders=("lectures", "readings"), releaseignore="x\n")
+    facts = _course(materials=[m])
+    checks = {m.repo: status_json.materials_checks(m)}
+    todos = status_json.course_todo(facts, checks)
+    (lab,) = [t for t in todos if t["id"] == "materials:cm:kind_folder:lab"]
+    assert (lab["check"], lab["need"], lab["screen"], lab["entry"]) == (
+        "kind_folder",
+        "suggested",
+        "materials",
+        "cm",
+    )
+    # A course that teaches no labs sets it aside, like any suggestion.
+    facts.meta["set_aside"] = ["materials:cm:kind_folder:lab"]
+    (lab,) = [
+        t
+        for t in status_json.course_todo(
+            facts, checks, frozenset(facts.meta["set_aside"])
+        )
+        if t["id"] == "materials:cm:kind_folder:lab"
+    ]
+    assert lab["set_aside"] is True

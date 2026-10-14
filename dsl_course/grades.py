@@ -187,6 +187,10 @@ INFO_COMMENT = "toolkit-owned, shown for information only - nothing is declared 
 # group sheet, the student's on an individual one. Always written where `questions:`
 # exist, all optional; a blank cell is never sent.
 QUESTION_FEEDBACK_KEY = "feedback_per_question"
+# The grader's say over one SUBMISSION UNIT's late penalty, beside its `info:`: `apply` (the
+# late rule's own arithmetic, and what an absent key means), `waive`, or the whole penalty
+# as a percent or fraction (`10%`, `0.1`). Never seeded: it appears when a grader writes it.
+LATE_PENALTY_KEY = "late_penalty"
 _SCORE_COMMENT = "yours: the question names and maxima come from grading_config.yml"
 _SEP = " · "  # what separates the facts on one header line
 # Inline comments line up at one column across the whole sheet, so the maxima read as a
@@ -763,6 +767,11 @@ def _you_fill_in_sentence(spec: SheetSpec) -> str:
     fields.append(f"{spec.score_key}{qualifier}")
     if spec.questions:
         fields.append(f"{QUESTION_FEEDBACK_KEY} (optional, one per question)")
+    if spec.collects_commits:
+        fields.append(
+            f"{LATE_PENALTY_KEY} (optional, on a late unit: apply, waive, "
+            "or the whole penalty as 10%)"
+        )
     return (
         f"You fill in: {', '.join(fields)}. Anything you type is never touched. Nothing "
         f"reaches a student until you run Distribute grades. YAML comments you add are "
@@ -927,22 +936,85 @@ def penalty_rate(text: object) -> Decimal | None:
     return read_penalty(text)[0]
 
 
+class LateChoice(NamedTuple):
+    """A unit's `late_penalty` (`LATE_PENALTY_KEY`), read once: `apply` (what an absent or
+    blank one means too), `waive`, `set` - the whole penalty is `fraction` - or `invalid`,
+    which nobody can apply."""
+
+    mode: str
+    fraction: Decimal | None = None
+
+
+def late_choice(late_penalty: object) -> LateChoice:
+    """The grader's `late_penalty` as a `LateChoice`: a percent or fraction (`10%`, `0.1`)
+    sets the whole penalty; anything else that is not apply or waive is `invalid`. A set
+    penalty of nothing (`0%`) IS a waiver, and reads as one everywhere it is shown."""
+    text = "" if late_penalty is None else str(late_penalty).strip()
+    if text.casefold() in ("", "apply"):
+        return LateChoice("apply")
+    if text.casefold() == "waive":
+        return LateChoice("waive")
+    fraction = read_penalty(text)[0]
+    if fraction is None:
+        return LateChoice("invalid")
+    return LateChoice("waive") if fraction == 0 else LateChoice("set", fraction)
+
+
+class Penalty(NamedTuple):
+    """What a unit loses for lateness (`effective_penalty`): `fraction` of its earned
+    total, and the `mode` of the grader's `LateChoice` behind it."""
+
+    fraction: Decimal
+    mode: str
+
+
+def effective_penalty(
+    rate: object, days_late: object, late_penalty: object = None
+) -> Penalty:
+    """The fraction of the earned total a unit loses for lateness, and why.
+
+    `late_penalty` is the grader's say (`late_choice`): absent or `apply` is `rate x
+    days_late`, `waive` is nothing, and a percent or fraction (`set`) is the WHOLE penalty
+    in place of that arithmetic. A unit that is not late loses nothing whatever is written.
+    An `invalid` one keeps the late rule's arithmetic - not a penalty anybody can apply,
+    so `sheet_hold_reasons` holds a late unit for a hand decision rather than guess.
+
+    An assignment with NO late rule (`rate` None) takes nothing off, and whatever
+    `late_penalty` says is ignored (`apply`): there is no policy for it to waive or
+    override, so it neither deducts nor holds (`ignored_late_penalties` counts it for the
+    preview)."""
+    per_day = as_decimal(rate)
+    if per_day is None:
+        return Penalty(Decimal(0), "apply")
+    choice = late_choice(late_penalty)
+    days = as_decimal(days_late)
+    if days is None or days <= 0 or choice.mode == "waive":
+        return Penalty(Decimal(0), choice.mode)
+    if choice.fraction is not None:
+        return Penalty(choice.fraction, choice.mode)
+    return Penalty(per_day * days, choice.mode)
+
+
 def final_grade(
-    total: object, rate: object, days_late: object, adjustment: object
+    total: object,
+    rate: object,
+    days_late: object,
+    adjustment: object,
+    late_penalty: object = None,
 ) -> Decimal | None:
-    """`total x (1 - rate x days_late) + adjustment`, floored at 0.
+    """`total x (1 - penalty) + adjustment`, floored at 0, where the penalty is `rate x
+    days_late` unless the grader waived or set it (`effective_penalty`).
 
     Derived on OUTPUT and never stored: the sheet has no `final_grade` field, so there is
     no stale cell for this to disagree with. A blank adjustment is 0 and a blank rate or
     day count is no penalty, so an assignment with no late policy needs no special case.
     A total that is not a number gets no arithmetic at all and comes back None - the caller
-    distributes the mark exactly as the grader typed it."""
+    distributes the mark exactly as the grader typed it. A `late_penalty` nobody can read
+    leaves the late rule's arithmetic here, and the unit held (`sheet_hold_reasons`)."""
     earned = as_decimal(total)
     if earned is None:
         return None
-    penalty, days = as_decimal(rate), as_decimal(days_late)
-    if penalty is not None and days is not None and days > 0:
-        earned *= Decimal(1) - penalty * days
+    earned *= Decimal(1) - effective_penalty(rate, days_late, late_penalty).fraction
     return max(Decimal(0), earned + (as_decimal(adjustment) or Decimal(0)))
 
 
@@ -2118,7 +2190,9 @@ def penalty_display(spec, days: int) -> str:
 
     The same function as the gradebook's, deliberately: those are the two places one
     student reads one deduction, and two renderers of it drifted apart above two decimal
-    places the moment one of them rounded."""
+    places the moment one of them rounded. The late rule's own figure only: a grader's
+    `late_penalty` (waived, set by hand) reaches the student with their marks, through
+    Distribute grades, never on a receipt posted before them."""
     return _penalty_display(penalty_rate(spec.late_penalty_per_day), days)
 
 
@@ -2494,16 +2568,31 @@ def total_points(spec: SheetSpec | GradingSpec) -> str:
     return _plain(sum(maxima, Decimal(0)))
 
 
-def _penalty_display(rate: Decimal | None, days_late: object) -> str:
-    """What the late days cost, in the words the student is told them in: `-20%`.
+def _percent_off(fraction: Decimal) -> str:
+    """`-20%`, rounded to two decimals, because `rate` is a hundredth of whatever the course
+    wrote and the product carries its trailing digits: `3.333%` for three days is a
+    deduction, not `-9.999%`."""
+    return f"-{_plain((fraction * 100).quantize(Decimal('0.01')))}%"
 
-    Rounded to two decimals, because `rate` is a hundredth of whatever the course wrote and
-    the product carries its trailing digits: `3.333%` for three days is a deduction, not
-    `-9.999%`."""
+
+def _penalty_display(
+    rate: Decimal | None, days_late: object, late_penalty: object = None
+) -> str:
+    """What the late days cost, in the words the student is told them in: `-20%` as the
+    late rule computes it, `waived` (a set `0%` too), or `-10% (set by hand)`
+    (`effective_penalty`). Empty for a unit that is not late. A `late_penalty` nobody can
+    read shows the late rule's figure, because that is what applies as things stand: the
+    unit's mark is held (`sheet_hold_reasons`). A receipt never passes `late_penalty`
+    (`penalty_display`): the grader's choice reaches a student only with their marks."""
     days = as_decimal(days_late)
-    if rate is None or days is None or days <= 0:
+    if days is None or days <= 0:
         return ""
-    return f"-{_plain((rate * days * 100).quantize(Decimal('0.01')))}%"
+    penalty = effective_penalty(rate, days, late_penalty)
+    if penalty.mode == "waive":
+        return "waived"
+    if penalty.mode == "set":
+        return f"{_percent_off(penalty.fraction)} (set by hand)"
+    return _percent_off(penalty.fraction) if rate is not None else ""
 
 
 def _submitted_display(value: object, external: bool = False) -> str:
@@ -2623,11 +2712,13 @@ def student_view(
     score = block.get(spec.score_key)
     days_late = info.get("days_late")
     rate = penalty_rate(spec.late_penalty_per_day)
+    late_penalty = block.get(LATE_PENALTY_KEY)
     final = final_grade(
         score_total(score, spec.questions),
         rate,
         days_late,
         person.get("adjustment_individual"),
+        late_penalty,
     )
     return _allowlisted(
         {
@@ -2652,7 +2743,7 @@ def student_view(
                 info.get("submitted"), not spec.collects_commits
             ),
             "days_late": days_late,
-            "penalty": _penalty_display(rate, days_late),
+            "penalty": _penalty_display(rate, days_late, late_penalty),
             "team": unit_key if spec.is_group else None,
             "team_feedback": block.get("feedback_group") if spec.is_group else None,
         }
@@ -2665,6 +2756,7 @@ HOLD_REASONS = {
     "penalty": "a mark no late penalty can be applied to",
     "score": "a non-numeric value in a per-question map",
     "adjustment": "a non-numeric adjustment",
+    "late_penalty": "a late penalty that is not apply, waive or a percentage",
     "question": "a question the assignment does not declare",
     "duplicate": "a handle in more than one submission unit",
     "returned": "another of their marks held, one they have already been sent",
@@ -2741,8 +2833,21 @@ def sheet_hold_reasons(
             recorded.add(fault.key)
             faults.append(fault)
 
+    # No late rule: nothing a `late_penalty` could apply to (`effective_penalty`).
+    has_rule = penalty_rate(spec.late_penalty_per_day) is not None
     for unit_key, block in _units(spec, sheet):
-        fault = _score_fault(spec, block.get(spec.score_key))
+        # An unreadable `late_penalty` holds only a LATE unit: on an on-time one, or under
+        # no late rule, there is nothing for it to apply to (`effective_penalty`), so it
+        # holds nobody's mark.
+        days = as_decimal((block.get(INFO_KEY) or {}).get("days_late"))
+        fault = _score_fault(spec, block.get(spec.score_key)) or (
+            "late_penalty"
+            if has_rule
+            and days is not None
+            and days > 0
+            and late_choice(block.get(LATE_PENALTY_KEY)).mode == "invalid"
+            else ""
+        )
         for handle, person in _people(spec, unit_key, block).items():
             # Folded, as the gradebooks are (`build_gradebooks`): `Alice` in one team and
             # `alice` in another is one student in two units.
@@ -2777,6 +2882,13 @@ _HOLD_FAULT = {
         ),
         "correct the adjustment on {at} - a word processor's minus sign is not one",
     ),
+    "late_penalty": (
+        (
+            "the late penalty on this line is not apply, waive or a percentage, so "
+            "nothing for this unit is sent"
+        ),
+        "write apply, waive or the whole penalty as a percentage (10%) on {at}",
+    ),
     "question": (
         (
             "this line marks a question the assignment does not declare, so nothing "
@@ -2801,6 +2913,8 @@ _HOLD_PLAIN = {
     "student or team.",
     "adjustment": "{where} has an adjustment that is not a number, so nothing is "
     "returned for that student.",
+    "late_penalty": "{where} has a late penalty that is not apply, waive or a "
+    "percentage, so nothing is returned for that student or team.",
     "question": "{where} marks a question the assignment does not have, so nothing is "
     "returned for that student or team.",
     "duplicate": "{where} lists a student who is also in another team or entry, so "
@@ -2822,6 +2936,8 @@ def _hold_field(spec: SheetSpec, reason: str) -> str:
     """The key a hold reason is about - the one thing in the fault's heading that is safe
     to name, because it is the toolkit's own vocabulary rather than anything a grader
     typed."""
+    if reason == "late_penalty":
+        return LATE_PENALTY_KEY
     return (
         spec.score_key if reason in ("score", "question") else "adjustment_individual"
     )
@@ -2839,6 +2955,8 @@ def _hold_line(
     base = (spec.container_key, unit)
     if reason in ("score", "question"):
         path = base + (spec.score_key,)
+    elif reason == "late_penalty":
+        path = base + (LATE_PENALTY_KEY,)
     elif reason == "adjustment":
         path = base + (
             ("members", handle, "adjustment_individual")
@@ -2988,22 +3106,38 @@ def semester_sheet_faults(
     found.extend(faults)
 
 
-def needs_hand_decision(view: dict) -> bool:
-    """Whether this mark needs a person to settle it: a score that is not a number, under
-    a late penalty that cannot be applied to it.
+def needs_hand_decision(spec: SheetSpec, block: dict) -> bool:
+    """Whether this unit's mark needs a person to settle it: a score that is not a number,
+    under a late penalty that takes something off (`effective_penalty`).
 
     `pass`, two days late, is not `-20% of pass`. The distribute dry run counts these so
     that a grader decides them before anything is sent, rather than after a student reads
     it.
 
     A row with NOTHING typed in it yet is not one of them - there is no decision to take
-    about a mark nobody has written. It carries a penalty (the toolkit counted the days)
-    and no `final_grade`, which is how the two are told apart."""
-    return (
-        "penalty" in view
-        and "final_grade" in view
-        and as_decimal(view["final_grade"]) is None
+    about a mark nobody has written - nor is one whose penalty is waived or nothing: it
+    takes nothing off, so there is nothing to decide."""
+    score = block.get(spec.score_key)
+    if score_total(score, spec.questions) is not None or not _verbatim(score):
+        return False
+    info = block.get(INFO_KEY) or {}
+    penalty = effective_penalty(
+        penalty_rate(spec.late_penalty_per_day),
+        info.get("days_late"),
+        block.get(LATE_PENALTY_KEY),
     )
+    return penalty.fraction > 0
+
+
+def undecided_marks(spec: SheetSpec, sheet: dict) -> dict[str, str]:
+    """`{handle: "penalty"}` for everyone in this sheet whose mark needs a person to settle
+    it (`needs_hand_decision`) - the shape `sheet_hold_reasons` gives."""
+    return {
+        handle: "penalty"
+        for unit_key, block in _units(spec, sheet)
+        if needs_hand_decision(spec, block)
+        for handle in _people(spec, unit_key, block)
+    }
 
 
 def _views_from_sheet(spec: SheetSpec, sheet: dict) -> dict[str, dict]:
@@ -3807,6 +3941,19 @@ def _not_marked(spec: SheetSpec, sheet: dict) -> dict[str, list[str]]:
     return out
 
 
+def ignored_late_penalties(spec: SheetSpec, sheet: dict) -> int:
+    """How many units carry a `late_penalty` on an assignment with no late rule - which
+    `effective_penalty` ignores, so the preview says so rather than let a grader believe
+    their waive or override did something."""
+    if penalty_rate(spec.late_penalty_per_day) is not None:
+        return 0
+    return sum(
+        1
+        for _unit, block in _units(spec, sheet)
+        if not is_blank(block.get(LATE_PENALTY_KEY))
+    )
+
+
 def _adjusted_count(spec: SheetSpec, sheet: dict) -> int:
     """How many individual adjustments a grader has written into one sheet - the dry run
     reports it, because an adjustment is the one thing in the file no arithmetic explains."""
@@ -3930,11 +4077,11 @@ def _hold_undecided(
 ) -> dict[str, dict[str, tuple[str, str]]]:
     """Take every mark that still needs a person out of the books, and say whose it was.
 
-    Two kinds arrive here. `reasons` is what a grader TYPED that cannot be acted on
-    (`sheet_hold_reasons`); the rest is arithmetic that could not be done - `pass`, two
-    days late, is not `pass minus 20%`. Sending either puts a line a student can read
-    where a decision should have been, and the dry run that counted it has already gone
-    by. So the mark is HELD: no gradebook entry, no column in the registrar's export, no
+    Two kinds arrive in `reasons`: what a grader TYPED that cannot be acted on
+    (`sheet_hold_reasons`), and arithmetic that could not be done (`undecided_marks`) -
+    `pass`, two days late, is not `pass minus 20%`. Sending either puts a line a student
+    can read where a decision should have been, and the dry run that counted it has
+    already gone by. So the mark is HELD: no gradebook entry, no column in the registrar's export, no
     email, until a grader settles it in the sheet. Nothing else that student has is held
     with it - unless the held mark is one they were already sent (`_hold_returned`).
 
@@ -3951,9 +4098,7 @@ def _hold_undecided(
     }
     for handle, book in books.items():
         for slug, view in list(book.items()):
-            reason = (folded.get(slug) or {}).get(handle.casefold()) or (
-                "penalty" if needs_hand_decision(view) else ""
-            )
+            reason = (folded.get(slug) or {}).get(handle.casefold())
             if not reason:
                 continue
             held.setdefault(slug, {})[handle] = (view.get("team") or handle, reason)
@@ -4433,10 +4578,12 @@ def distribute(
         # None: the export is missing or unreadable while gradebooks went out already.
         told_known = _already_returned(wd) is not None
 
+    # What a grader typed outranks the arithmetic, as one reason per handle.
     held = _hold_undecided(
         books,
         {
-            slug: sheet_hold_reasons(specs[slug], sheet)
+            slug: undecided_marks(specs[slug], sheet)
+            | sheet_hold_reasons(specs[slug], sheet)
             for slug, sheet in sheets.items()
         },
     )
@@ -4727,6 +4874,9 @@ def _preview(
     PUBLIC repo. Who would get what goes into the issue, in the private semester-config."""
     told_grades, columns = told
     not_marked = {slug: _not_marked(specs[slug], sheets[slug]) for slug in sheets}
+    ignored = {
+        slug: ignored_late_penalties(specs[slug], sheets[slug] or {}) for slug in sheets
+    }
     exported = {slug for book in books.values() for slug in book}
     for slug in sorted(sheets):
         spec = specs[slug]
@@ -4753,6 +4903,11 @@ def _preview(
         partly = sum(1 for blank in not_marked[slug].values() if blank)
         if partly:
             log(f"    {partly} unit(s) have unmarked questions")
+        if ignored[slug]:
+            log(
+                f"    {ignored[slug]} unit(s) carry a late_penalty, but the assignment "
+                f"has no late policy - ignored"
+            )
         if stray := _undeclared_feedback(spec, units):
             log(
                 f"    WARNING: {stray} unit(s) give feedback on a question the "
@@ -4780,6 +4935,7 @@ def _preview(
             students,
             told_grades,
             not_marked,
+            ignored,
             first_email=first_email,
             moment=moment,
             notify=notify,
@@ -4798,6 +4954,7 @@ _HOLD_PREVIEW = {
     "penalty": "was late, and their mark is not a number a late penalty can come off",
     "score": "has a question mark that is not a number",
     "adjustment": "has an adjustment that is not a number",
+    "late_penalty": "has a late penalty that is not apply, waive or a percentage",
     "question": "has a mark for a question the assignment does not have",
     "duplicate": "is in more than one team",
     "returned": "has another mark held that they were already sent, so nothing of "
@@ -4814,6 +4971,7 @@ def _preview_body(
     students: list[roster.Student],
     told: dict[str, dict[str, str]],
     not_marked: dict[str, dict[str, list[str]]],
+    ignored: dict[str, int] | None = None,
     *,
     first_email: set[str],
     moment: datetime,
@@ -4917,6 +5075,15 @@ def _preview_body(
         ),
         "Each preview replaces this text; the real run closes this issue.",
     ]
+    # A `late_penalty` on an assignment with no late policy: ignored, and said so.
+    no_policy = [
+        f"- **{slug}** has no late policy, so the `late_penalty` on "
+        f"{plural(n, 'unit', 'units')} is ignored: nothing comes off."
+        for slug, n in sorted((ignored or {}).items())
+        if n
+    ]
+    if no_policy:
+        head += ["", *no_policy]
     tail = []
     if emailed:
         # Rendered exactly as the send renders it, course name and all: a preview that

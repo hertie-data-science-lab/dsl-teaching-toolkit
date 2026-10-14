@@ -198,6 +198,14 @@ def test_the_penalty_shown_is_the_days_times_the_rate():
     assert grades.penalty_display(spec(late_penalty_per_day=None), 2) == ""
 
 
+def test_a_receipt_quotes_the_late_rule_never_the_graders_choice():
+    # A grader's waive or hand-set penalty reaches the student with their marks, through
+    # Distribute grades; a receipt posted before them quotes the late rule alone.
+    assert "2 days late (-20%)" in grades.receipt(
+        spec(), course.RECEIPT_UPDATED, sha=SHA, days=2
+    )
+
+
 def test_the_marker_keys_on_the_commit_as_well_as_the_event():
     # Per COMMIT, so a re-run over the same pin says nothing while a genuinely new push
     # still earns its own receipt.

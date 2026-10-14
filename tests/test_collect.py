@@ -5398,6 +5398,30 @@ def test_a_later_push_earns_an_updated_receipt_and_an_unchanged_pin_earns_none(
     assert "2 days late (-20%)" in body
 
 
+def test_a_receipt_never_quotes_the_graders_late_penalty(monkeypatch):
+    # A waive written on the sheet before marks go out is the grader's working decision;
+    # it reaches the student with their marks (Distribute grades), never on a receipt.
+    recorded = (
+        "submissions:\n"
+        "  ada-l:\n"
+        "    late_penalty: waive\n"
+        "    info:\n"
+        "      submitted: '2026-10-03T22:14+02:00'\n"
+        "      days_late: 0\n"
+    )
+    _sheet_env(
+        monkeypatch,
+        targets=SOLO_TARGETS[:1],
+        existing=(recorded, "old-sha"),
+        pins={"assignment-1-ada-l": collect.Pin(SHA, "2026-10-06T07:30:00Z")},
+    )
+    posted = _receipt_env(monkeypatch)
+    _refresh(monkeypatch, now=datetime(2026, 10, 6, 12, tzinfo=BERLIN))
+    ((_repo, body, _dry),) = posted
+    assert "2 days late (-20%)" in body
+    assert "waived" not in body
+
+
 def test_the_cutoff_posts_the_final_receipt(monkeypatch):
     _sheet_env(
         monkeypatch,

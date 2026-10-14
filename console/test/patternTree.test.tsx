@@ -94,3 +94,16 @@ describe('the withheld tree’s rows (decision 0024 rule 10)', () => {
     expect(css).toContain('.file-tree:not(.select) summary .ft-toggle { margin-left: auto; }');
   });
 });
+
+describe('the withheld tree’s folder counts', () => {
+  it('says how many files a folder withholds and how many reach students, side by side', () => {
+    const files = ['labs/01/lab.pdf', 'labs/01/notes.md', 'labs/02/lab.pdf', 'labs/02/key.pdf', 'labs/.DS_Store', 'labs/solutions/a.py'];
+    const out = render(<PatternTree files={files} patterns={['*.pdf', '!labs/01/lab.pdf']} onChange={() => {}} />);
+    // Withheld: labs/02/lab.pdf, labs/02/key.pdf, and the never-material .DS_Store. Released:
+    // labs/01/lab.pdf and labs/01/notes.md; never the denylisted solutions/.
+    expect(out).toContain('<span class="ft-name">labs/</span><span class="chip amber">3 withheld · 2 released to students</span>');
+    expect(out).toContain('<span class="ft-name">02/</span><span class="chip amber">2 withheld · 0 released to students</span>');
+    // A folder with nothing withheld says nothing.
+    expect(render(<PatternTree files={files} patterns={[]} onChange={() => {}} />)).not.toContain('released to students</span><span class="chip amber">');
+  });
+});

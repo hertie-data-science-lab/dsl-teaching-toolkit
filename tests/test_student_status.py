@@ -73,6 +73,11 @@ events:
     kind: exam
     event_datetime: 2026-10-28T09:00
     title: Midterm
+  lecture-1-online:
+    kind: lecture
+    number: 1
+    details: The same lecture, online.
+    event_datetime: 2026-09-09T18:00
 assignments:
   assignment-1:
     course_source_repo: assignment-1-f2026
@@ -678,3 +683,45 @@ def test_an_undated_event_is_a_dateless_row_with_no_when():
     (row,) = [r for r in student_status.event_rows(facts) if r["id"] == "resit"]
     assert row["when"] is None and row["dateless"] is True and row["tbc"] is True
     assert row["sort_at"].startswith(facts.sched.semester_end.isoformat())
+
+
+def test_a_session_event_is_a_row_of_its_kind_with_nothing_to_ship():
+    # An `events:` entry of a policy kind: "Lecture 1" with the release's title, on the
+    # Lectures tab, no files and nothing pending - and no exam/special-event row.
+    rows = {r["id"]: r for r in _render()["rows"]}
+    row = rows["lecture-1-online"]
+    assert (row["kind"], row["title"], row["subtitle"]) == (
+        "lecture",
+        "Lecture 1",
+        "Intro",
+    )
+    assert row["details"] == "The same lecture, online."
+    assert row["released"] is True and row["no_materials"] is True
+    assert row["links"] == [] and row["tabs"] == ["lecture"]
+    assert row["when"].startswith("2026-09-09T18:00")
+    assert not rows["lecture_01"]["no_materials"]
+    assert "lecture-1-online" not in {
+        r["id"] for r in student_status.event_rows(_facts())
+    }
+
+
+def test_a_whole_day_session_is_all_day_for_the_student_console():
+    # A session dated with no time: the console prints the day and no 09:00.
+    facts = _facts()
+    facts.sched.sessions.append(
+        schedule.Event("field-trip", "Field trip", NOW.date(), "lab", number=7)
+    )
+    rows = {r["id"]: r for r in student_status.release_rows(facts, _extra(facts))}
+    assert rows["field-trip"]["all_day"] is True
+    assert rows["lecture-1-online"]["all_day"] is False
+
+
+def test_a_release_with_an_empty_deploy_ships_nothing_like_a_session():
+    # The site's `no_materials` test: no copies, no readings - never "not released yet".
+    facts = _facts()
+    facts.sched.releases.append(
+        schedule.Release("lab_04", NOW, [], kind="lab", number=4)
+    )
+    rows = {r["id"]: r for r in student_status.release_rows(facts, _extra(facts))}
+    assert rows["lab_04"]["no_materials"] is True
+    assert rows["lab_04"]["released"] is True

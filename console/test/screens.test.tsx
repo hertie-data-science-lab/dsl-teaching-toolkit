@@ -225,6 +225,29 @@ describe('S6 schedule and S11 release', () => {
     const groups = weekGroups(rows, (r) => r.when, termOf(status, parseSchedule(SCHEDULE), '2026-09-23'), 'Europe/Berlin', 'all');
     expect(groups.at(-1)).toMatchObject({ label: 'No date yet', rows: [{ entry: 'lab9' }] });
   });
+  it('lists a session with nothing to ship as a row of its kind, and edits it on the release sheet with nothing to release', () => {
+    // A second group of lecture 5: `events:` with kind lecture and number 5, titled by its release.
+    const online = SCHEDULE.replace('events:\n', 'events:\n  s5-online:\n    kind: lecture\n    number: 5\n    details: Online, for group 2.\n    event_datetime: 2026-10-09T18:00\n');
+    const withOnline = new StaticFiles({ [`${COHORT_ORG}/semester-config/schedule.yml`]: online }, {}, TREE);
+    const out = html(<ScheduleScreen {...props({ files: withOnline })} />);
+    const row = /<li class="trow lec[^"]*" data-entry="s5-online">.*?<\/li>/.exec(out)?.[0] ?? '';
+    expect(row).toContain('<span class="k">Lecture</span>');
+    expect(row).toContain('<b>Lecture 5</b>: Trees and ensembles');
+    expect(row).toContain('Online, for group 2.');
+    expect(row).not.toContain('not yet released');
+    const sheet = text(<ScheduleScreen {...props({ files: withOnline, entry: 's5-online' })} />);
+    expect(sheet).toContain('Nothing to release: a session of its own');
+    expect(sheet).toContain('Add what to release');
+    expect(sheet).not.toContain('Give it a number first');
+  });
+  it('titles a session only from a shown release with a number, as the site does', () => {
+    const lab = { ...STATUS.releases![0], id: 'lab-9', kind: 'lab', number: 9, title: 'Attention' };
+    const session = SCHEDULE.replace('events:\n', 'events:\n  lab-9-b:\n    kind: lab\n    number: 9\n    event_datetime: 2026-10-09T18:00\n');
+    const nameOf = (r: NonNullable<Status['releases']>[number]) => scheduleRows({ ...STATUS, releases: [...STATUS.releases!, r] }, parseSchedule(session), NOW, 'Europe/Berlin').find((x) => x.entry === 'lab-9-b')?.name;
+    expect(nameOf(lab)).toBe('Attention');
+    expect(nameOf({ ...lab, show_on_site: false })).toBe('');
+    expect(nameOf({ ...lab, id: 'lab-extra', number: null })).toBe('');
+  });
   it('shows Type, Details as markdown and State, with events from schedule.yml', () => {
     const out = html(<ScheduleScreen {...props()} />);
     expect(out).toContain('<span>Details</span>');
@@ -300,11 +323,15 @@ describe('S6 schedule and S11 release', () => {
     for (const l of ['From: repo', 'From: path', 'To: repo', 'To: path', 'Release at']) expect(out).toContain(`>${l}`);
     const t = text(<ScheduleScreen {...props({ entry: 's5' })} />);
     expect(t).toContain('Name the repo and path where the files will be, even if they are not written yet. At release time the engine copies whatever is at that path.');
-    expect(t).toContain('Ships the files at this moment, before or after the session. Leave blank to ship when the session starts.');
-    // One line, its own time blank: the default is the entry's.
+    expect(t).toContain('Ships the files at this moment, before or after the session. Filled in with the default, an hour before the session; clear the date to go back to it.');
+    // One line, its own time unset: the boxes hold the default, an hour before the 10:00 session.
     expect(out.match(/class="deploy"/g)).toHaveLength(1);
-    expect(out).toContain('id="e-d0-at" placeholder="2026-10-08" value/>');
-    expect(out).toContain('>Add another</button>');
+    expect(out).toContain('id="e-d0-at" value="2026-10-08"/>');
+    expect(out).toContain('id="e-d0-att" value="09:00"/>');
+    expect(t).not.toContain('default: 2026');
+    expect(out).toContain('>Add another release item(s)</button>');
+    // Kind and Title infer silently; the dialog does not describe the site row.
+    for (const gone of ['inferred from where it lands', 'from the folder name', 'On the student site this row shows', 'without the colon']) expect(t).not.toContain(gone);
   });
   it('never says a folder is missing when the repo could not be read, or was listed only in part', () => {
     const withTree = (tree: TreeState): Files => Object.assign(Object.create(files), { tree: () => tree });
@@ -455,13 +482,15 @@ describe('S14 site and S18 operations', () => {
     expect(out).not.toContain('layout: home');
     expect(out).toContain('2026-09-21-scikit');
   });
-  it('fills the site’s Liquid in the home text preview with the semester’s values, leaving an unknown tag visible', () => {
+  it('fills the site’s Liquid in the home text preview with the semester’s values, as students see it, and names an unset key', () => {
     const liquid = new StaticFiles({
       [`${COHORT_ORG}/${COHORT_ORG}.github.io/index.md`]: '---\nlayout: home\n---\nWelcome to **{{ site.course_name }}**, {{ site.course_semester }}, in [{{site.github_org}}]({{ site.dsl_org_url }}). {{ site.mystery }}\n',
       [`${COHORT_ORG}/${COHORT_ORG}.github.io/_config.yml`]: 'course_name: "Course Name (Code)"\ndsl_org_url: "https://github.com/hertie-data-science-lab"\n',
     });
     const out = html(<SiteScreen {...props({ files: liquid })} />);
-    expect(out).toContain(`Welcome to <b>Machine Learning</b>, Fall 2026, in <a href="https://github.com/hertie-data-science-lab" target="_blank" rel="noopener">${COHORT_ORG}</a>. {{ site.mystery }}`);
+    expect(out).toContain(`Welcome to <b>Machine Learning</b>, Fall 2026, in <a href="https://github.com/hertie-data-science-lab" target="_blank" rel="noopener">${COHORT_ORG}</a>.</p>`);
+    expect(out).not.toContain('{{ site.mystery }}</p>');
+    expect(out).toContain('Not set in _config.yml: mystery - this text shows nothing for it.');
   });
   it('lists operations with the outcome sentence, details fold and the run', () => {
     const out = html(<OperationsScreen {...props()} />);

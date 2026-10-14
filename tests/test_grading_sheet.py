@@ -335,7 +335,8 @@ def test_the_header_carries_the_status_line_and_what_the_toolkit_fills():
             TEAMS,
             (
                 "feedback_group, adjustment_individual, feedback_individual, "
-                "notes_not_shared_with_students, score_group."
+                "notes_not_shared_with_students, score_group, late_penalty (optional, on a "
+                "late unit: apply, waive, or the whole penalty as 10%)."
             ),
         ),
         (
@@ -343,7 +344,8 @@ def test_the_header_carries_the_status_line_and_what_the_toolkit_fills():
             SOLO,
             (
                 "adjustment_individual, feedback_individual, "
-                "notes_not_shared_with_students, score_individual."
+                "notes_not_shared_with_students, score_individual, late_penalty (optional, on a "
+                "late unit: apply, waive, or the whole penalty as 10%)."
             ),
         ),
     ],
@@ -890,3 +892,134 @@ def test_a_question_marked_from_another_file_names_it_beside_its_maximum():
     ][:2]
     assert q1.endswith("# /15")
     assert q2.endswith("# /10 · report.tex")
+
+
+# ------------------------------------------------ the grader's say over a late penalty
+
+
+@pytest.mark.parametrize(
+    "late_penalty,expected",
+    [
+        (None, Decimal("0.20")),  # absent: the late rule's own arithmetic
+        ("", Decimal("0.20")),
+        ("apply", Decimal("0.20")),
+        ("Waive", Decimal(0)),
+        ("15%", Decimal("0.15")),  # the WHOLE penalty, not a rate per day
+        (0.15, Decimal("0.15")),
+        ("0%", Decimal(0)),
+        # Nobody can apply these: the late rule's arithmetic, and the unit held.
+        ("15", Decimal("0.20")),  # bare: neither 1500% nor silently 15%
+        ("waived", Decimal("0.20")),
+        ("half", Decimal("0.20")),
+        (True, Decimal("0.20")),
+    ],
+)
+def test_effective_penalty_reads_apply_waive_or_the_whole_penalty(
+    late_penalty, expected
+):
+    penalty = grades.effective_penalty(penalty_rate("10%"), 2, late_penalty)
+    assert penalty.fraction == expected
+
+
+@pytest.mark.parametrize(
+    "late_penalty,mode",
+    [
+        (None, "apply"),
+        (" Apply ", "apply"),
+        ("WAIVE", "waive"),
+        ("15%", "set"),
+        ("0.15", "set"),
+        ("15", "invalid"),
+        ("waived", "invalid"),
+        # a set penalty of nothing is a waiver, and reads as one
+        ("0%", "waive"),
+        ("0", "waive"),
+    ],
+)
+def test_late_choice_reads_the_graders_say_once(late_penalty, mode):
+    assert grades.late_choice(late_penalty).mode == mode
+    assert grades.effective_penalty(penalty_rate("10%"), 2, late_penalty).mode == mode
+
+
+def test_a_unit_that_is_not_late_loses_nothing_whatever_is_written():
+    for late_penalty in (None, "apply", "waive", "15%", "half"):
+        penalty = grades.effective_penalty(penalty_rate("10%"), 0, late_penalty)
+        assert penalty.fraction == 0
+
+
+def test_final_grade_applies_the_penalty_the_grader_chose():
+    rate = penalty_rate("10%")
+    assert final_grade(20, rate, 2, None) == Decimal(16)
+    assert final_grade(20, rate, 2, None, "apply") == Decimal(16)
+    assert final_grade(20, rate, 2, None, "waive") == Decimal(20)
+    assert final_grade(20, rate, 2, None, "5%") == Decimal(19)
+    assert final_grade(20, rate, 2, "+1", "0.5") == Decimal(11)
+    # no late rule at all: there is nothing to waive or override, so it is ignored
+    assert final_grade(20, None, 2, None, "10%") == Decimal(20)
+    # unreadable: the late rule's arithmetic, and the unit held (below)
+    assert final_grade(20, rate, 2, None, "half") == Decimal(16)
+
+
+def test_a_late_penalty_nobody_can_apply_holds_the_unit_on_its_own_line():
+    text = """teams:
+  team-alpha:
+    info:
+      days_late: 2
+    late_penalty: half
+    score_group:
+      Q1: 12
+    members:
+      ada-l:
+        adjustment_individual: null
+      ben-k:
+        adjustment_individual: null
+  team-beta:
+    late_penalty: waive
+    score_group:
+      Q1: 9
+    members:
+      cy-d:
+        adjustment_individual: null
+"""
+    spec = group(questions=QUESTIONS)
+    held = sheet_hold_reasons(spec, yaml.safe_load(text))
+    assert held == {"ada-l": "late_penalty", "ben-k": "late_penalty"}
+    (fault,) = sheet_faults("a3", text, spec)
+    assert fault.lineno == 5 and fault.field == "late_penalty"
+    assert "apply, waive or a percentage" in fault.what
+    _pii_free([fault], "team-alpha", "ada-l", "ben-k", "half")
+
+
+def test_an_unreadable_late_penalty_holds_no_unit_that_is_on_time():
+    # Nothing can apply to an on-time unit, so nothing it says can hold the mark.
+    sheet = yaml.safe_load(
+        """submissions:
+  ada-l:
+    info:
+      days_late: 0
+    late_penalty: half
+    score:
+      Q1: 12
+  ben-k:
+    late_penalty: half
+    score:
+      Q1: 9
+  cy-d:
+    info:
+      days_late: 1
+    late_penalty: half
+    score:
+      Q1: 9
+"""
+    )
+    ruled = individual(questions=QUESTIONS, late_penalty_per_day="10%")
+    assert sheet_hold_reasons(ruled, sheet) == {"cy-d": "late_penalty"}
+    # No late rule: nothing for it to apply to either, so it holds nobody.
+    assert sheet_hold_reasons(individual(questions=QUESTIONS), sheet) == {}
+
+
+def test_a_set_penalty_of_nothing_reads_as_waived():
+    rate = penalty_rate("10%")
+    assert grades._penalty_display(rate, 2, "0%") == "waived"
+    assert grades._penalty_display(rate, 2, "waive") == "waived"
+    assert final_grade(20, rate, 2, None, "0%") == Decimal(20)

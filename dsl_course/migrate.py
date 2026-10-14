@@ -1231,7 +1231,8 @@ def position_numbers(
     A readings row is not stamped: a number there joins it to that lecture."""
     out: dict[tuple[str, str], int] = {}
     # Undated entries never had a position (`undated_unnumbered` names them instead).
-    rows = [r for r in planned_rows(sched, aliases) if not r.undated]
+    # Nor had an `events:` session (it postdates 0020).
+    rows = [r for r in planned_rows(sched, aliases) if not r.undated and not r.session]
     lectures: set[int] = set()
     position = 0
     for r in rows:

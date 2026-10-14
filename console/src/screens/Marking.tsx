@@ -7,8 +7,8 @@ import { readTable, writeTable } from '../edit/csv';
 import { useSave } from '../edit/save';
 import { YamlText, type Path } from '../edit/yamlText';
 import { Invalid } from '../forms/Form';
-import { assignmentTitle, fmtDay, fmtWhen, str } from '../model/format';
-import { NOTES_KEY, cellValue, finalGrade, penaltyText, questionFile, questionPoints, readSheet, round, scoreTotal, type Unit } from '../model/marks';
+import { assignmentTitle, fmtDay, fmtWhen, plural, str } from '../model/format';
+import { NOTES_KEY, cellValue, effectivePenalty, finalGrade, num, overrideText, overrideValue, penaltyText, questionFile, questionPoints, readSheet, round, scoreTotal, type Penalty, type Unit } from '../model/marks';
 import { SOURCE_WORD, resolve, valueWord } from '../model/cascade';
 import { assignmentSettings, sheetName } from './RunSettings';
 import { penaltyRate } from '../model/policy';
@@ -57,6 +57,8 @@ export function MarksTab(p: TabProps) {
   const [edits, setEdits] = useState<Record<string, unknown>>({});
   // Folds, by unit: `m:<unit>` hides a team's members, `q:<unit>` shows its feedback per question.
   const [folds, setFolds] = useState<Record<string, boolean>>({});
+  // The late-penalty override box as typed, by unit: the sheet gets `15%`, the box keeps `15.`.
+  const [typed, setTyped] = useState<Record<string, string>>({});
   const [save, runSave, setSave] = useSave(env);
   const name = sheetName(p, a.slug);
   const path = `grading_sheets/${name}.yml`;
@@ -76,7 +78,7 @@ export function MarksTab(p: TabProps) {
   const scope = cohortScope(p);
   const head = (
     <div class="page-head">
-      <div><h2 class="h1">{assignmentTitle(a)} <Hint doc="10-grade-and-return-assignments.md">You enter {qs.length ? 'points per question' : 'one score'}, feedback students see, an adjustment and private notes that are never shared. {group ? 'A team’s marks and feedback reach every member once you return marks.' : 'Nothing reaches a student until you return marks.'}</Hint></h2><p class="lede">{a.marks.filled} of {a.marks.total} marked. {rate !== null ? `Totals and late penalties (${round(rate * 100)}% of the total per late day) are worked out for you.` : 'Totals are worked out for you; no late penalty applies.'}</p></div>
+      <div><h2 class="h1">{assignmentTitle(a)} <Hint doc="10-grade-and-return-assignments.md">You enter {qs.length ? 'points per question' : 'one score'}, feedback students see, an adjustment and private notes that are never shared. {rate !== null ? 'A late unit’s penalty can be waived (untick it) or overridden with the whole penalty as a percentage. ' : ''}{group ? 'A team’s marks and feedback reach every member once you return marks.' : 'Nothing reaches a student until you return marks.'}</Hint></h2><p class="lede">{a.marks.filled} of {a.marks.total} marked. {rate !== null ? `Totals and late penalties (${round(rate * 100)}% of the total per late day) are worked out for you.` : 'Totals are worked out for you; no late penalty applies.'}</p></div>
       <div class="actions"><OpButtons def={returnMarks(scope, asgRef(a, group), a.marks.filled, name, lateUntil(a, now, tz, year))} /></div>
     </div>
   );
@@ -112,6 +114,36 @@ export function MarksTab(p: TabProps) {
     <td class="sys">{str(u.info?.autograde)}</td>,
     <td class="sys">{str(u.info?.completion)}</td>,
   ];
+  // A late unit's penalty (`late_penalty`): ticked writes `apply`, unticked `waive`; an override
+  // is the whole penalty and implies applied, and clearing it writes `apply` back - or, on a unit
+  // whose sheet has no `late_penalty` key, drops the edit, so no key is written and nothing reads
+  // as changed.
+  const lateOf = (u: Unit) => v(u.latePenaltyPath, u.latePenalty);
+  const setLate = (u: Unit, value: string) => {
+    if (value !== 'apply' || (u.latePenalty !== null && u.latePenalty !== undefined)) return set(u.latePenaltyPath, value);
+    const { [key(u.latePenaltyPath)]: _drop, ...rest } = edits;
+    setEdits(rest);
+  };
+  // What the unit loses for lateness, worked out once for its late cell and its final grades.
+  const lateFor = (u: Unit) => effectivePenalty(rate, u.info?.days_late, lateOf(u));
+  const lateCell = (u: Unit, pen: Penalty) => {
+    const days = num(u.info?.days_late);
+    // No late rule: nothing to waive or override, so no controls (the engine ignores the key).
+    if (!pen.late || days === null || rate === null) return <td class="pen" />;
+    const computed = penaltyText(effectivePenalty(rate, days), rate);
+    const late = `${plural(days, 'day')} late`;
+    return (
+      <td class="pen">
+        {penaltyText(pen, rate)}
+        <label class="check late-apply">
+          <input type="checkbox" checked={pen.mode !== 'waive'} onChange={(e) => { const on = (e.target as HTMLInputElement).checked; setTyped({ ...typed, [u.key]: '' }); setLate(u, on ? 'apply' : 'waive'); }} />
+          <span>Apply late penalty ({computed ? `${computed}, ${late}` : late})</span>
+        </label>
+        <input class="ovr" type="text" inputMode="decimal" placeholder="Override %" aria-label={`Late penalty override for ${u.key}, as a percentage`} value={typed[u.key] ?? overrideText(lateOf(u))} onInput={(e) => { const raw = (e.target as HTMLInputElement).value; setTyped({ ...typed, [u.key]: raw }); setLate(u, overrideValue(raw)); }} />
+        {pen.mode === 'bad' ? <Invalid>Write a percentage, or clear it: held until then.</Invalid> : null}
+      </td>
+    );
+  };
   const toggle = (k: string, open: boolean, label: string, text: string) => (
     <button class="fold-toggle" type="button" aria-expanded={open} aria-label={label} onClick={() => setFolds({ ...folds, [k]: !open })}>{open ? '▾' : '▸'} {text}</button>
   );
@@ -120,7 +152,7 @@ export function MarksTab(p: TabProps) {
   // The unit's own row: its score per question, and (on a group sheet) the team's feedback.
   const unitRow = (u: Unit) => {
     const total = scoreTotal(scoreOf(u), questions);
-    const days = u.info?.days_late;
+    const pen = lateFor(u);
     const nosub = u.info !== null && !u.info?.submitted;
     const scoreCells = qs.length
       ? qs.map(([q, m]) => <td>{input([...u.scorePath, q], (u.score as Record<string, unknown> | null)?.[q] ?? null, 'q', `${q}${outOf(m)} for ${u.key}`)}</td>)
@@ -135,8 +167,8 @@ export function MarksTab(p: TabProps) {
           <td>{input([...pr.base, 'feedback_individual'], pr.feedback, 'fb', `Feedback for ${u.key}`, false, true)}</td>
           <td>{input([...pr.base, 'adjustment_individual'], pr.adjustment, 'adj', `Adjustment for ${u.key}`)}</td>
           <td>{input([...pr.base, NOTES_KEY], pr.notes, 'pn', `Private notes for ${u.key}`, false)}</td>
-          <td class="pen">{penaltyText(rate, days)}</td>
-          <td class="calc">{round(finalGrade(total, rate, days, v([...pr.base, 'adjustment_individual'], pr.adjustment)))}</td>
+          {lateCell(u, pen)}
+          <td class="calc">{round(finalGrade(total, pen, v([...pr.base, 'adjustment_individual'], pr.adjustment)))}</td>
         </tr>
       );
     }
@@ -147,7 +179,7 @@ export function MarksTab(p: TabProps) {
           <b>{u.key}</b><br /><span class="footnote">{u.people.length} member{u.people.length === 1 ? '' : 's'}</span>{qToggle}
         </td>{info(u)}{scoreCells}
         <td>{u.feedbackPath ? input(u.feedbackPath, u.feedback, 'fb', `Team feedback for ${u.key}`, false, true) : null}</td>
-        <td /><td /><td class="pen">{penaltyText(rate, days)}</td><td class="calc">{round(finalGrade(total, rate, days, 0))}</td>
+        <td /><td />{lateCell(u, pen)}<td class="calc">{round(finalGrade(total, pen, 0))}</td>
       </tr>
     );
   };
@@ -160,20 +192,20 @@ export function MarksTab(p: TabProps) {
       <td colSpan={5} />
     </tr>
   );
-  const memberRows = (u: Unit) => u.people.map((pr) => {
+  const memberRows = (u: Unit) => {
     const total = scoreTotal(scoreOf(u), questions);
-    const days = u.info?.days_late;
-    return (
+    const pen = lateFor(u);
+    return u.people.map((pr) => (
       <tr class="member-row">
         <td style="padding-left:22px"><span class="slug">{pr.handle}</span></td>
         <td class="sys" colSpan={4} /><td colSpan={Math.max(1, qs.length)} />
         <td>{input([...pr.base, 'feedback_individual'], pr.feedback, 'fb', `Feedback for ${pr.handle}`, false, true)}</td>
         <td>{input([...pr.base, 'adjustment_individual'], pr.adjustment, 'adj', `Adjustment for ${pr.handle}`)}</td>
         <td>{input([...pr.base, NOTES_KEY], pr.notes, 'pn', `Private notes for ${pr.handle}`, false)}</td>
-        <td class="pen" /><td class="calc">{round(finalGrade(total, rate, days, v([...pr.base, 'adjustment_individual'], pr.adjustment)))}</td>
+        <td class="pen" /><td class="calc">{round(finalGrade(total, pen, v([...pr.base, 'adjustment_individual'], pr.adjustment)))}</td>
       </tr>
-    );
-  });
+    ));
+  };
   const rows = sheet.units.flatMap((u) => [
     unitRow(u),
     ...(qs.length && qOpen(u) ? [questionRow(u)] : []),
@@ -183,7 +215,10 @@ export function MarksTab(p: TabProps) {
     const out = new YamlText(file.text);
     for (const [k, val] of Object.entries(edits)) out.assign(JSON.parse(k) as Path, val);
     const ok = await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path }, out.text, file.sha, { message: `marks: ${a.slug}, ${changed} ${sheet.group ? 'team' : 'student'}${changed === 1 ? '' : 's'}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] });
-    if (ok) setEdits({});
+    if (ok) {
+      setEdits({});
+      setTyped({});
+    }
   };
   return (
     <>

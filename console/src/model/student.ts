@@ -17,6 +17,7 @@ import { DEFAULT_DEST_REPO, DEFAULT_TIMEZONE } from './policy';
 import { COURSE_REPO, STUDENT_STATUS_PATH } from './names';
 import { dataUrl, extOf, viewKind } from './viewer';
 import { ghUrl } from '../ui/bits';
+import { homeText } from './siteText';
 
 /** One row of the semester calendar. `when` is wall-clock time in the semester's timezone ("2026-09-22T10:00:00") or a full ISO instant; null for a row with no date yet (`dateless`). */
 export interface ScheduleRow {
@@ -35,6 +36,8 @@ export interface ScheduleRow {
   assignment?: string;
   /** False for a session whose materials are not out yet. */
   released: boolean;
+  /** A session with nothing to ship (an `events:` lab, the site's `no_materials`): no files, never pending, never news. Absent from older engines: false. */
+  noMaterials?: boolean;
   /** Released files: `path` within `repo` when they live in a materials repo the console can open. */
   links: FileLink[];
   /** The date is provisional ("TBC"); the row still happens when it says. */
@@ -362,6 +365,7 @@ function rowsOf(dir: string, file: string, fm: Record<string, unknown>, org: str
     details: str(fm.details),
     allDay: fm.hide_time === true,
     released: fm.unreleased !== true,
+    noMaterials: fm.no_materials === true,
     links: [] as FileLink[],
     tbc: fm.tbc === true,
     dateless: fm.dateless === true,
@@ -551,6 +555,7 @@ export function factsFromStatus(doc: Obj): SemesterFacts {
       details: str(r.details),
       assignment: r.assignment ? str(r.assignment) : undefined,
       released: r.released === true,
+      noMaterials: r.no_materials === true,
       links,
       tbc: r.tbc === true,
       dateless: r.dateless === true,
@@ -661,22 +666,6 @@ export class StatusFileSource implements StudentData {
     if (!doc || !READ_SCHEMAS.includes(str(doc.schema))) return this.site.facts(org);
     return factsFromStatus(doc);
   }
-}
-
-/**
- * The site's home page (`index.md`, the instructors' own) as plain markdown: `{{ site.x }}`
- * filled from `_config.yml`, an `{% if site.x %}` block kept only when x is set, and any other
- * Liquid tag dropped. Enough for what a home page carries; the site itself is the reference.
- * `keep` (the instructor's preview) leaves a tag about a key `cfg` lacks, and any other tag,
- * as written, so it shows.
- */
-export function homeText(body: string, cfg: Record<string, unknown>, keep = false): string {
-  const val = (k: string) => str(cfg[k]);
-  const known = (k: string) => !keep || cfg[k] != null;
-  const out = body
-    .replace(/\{%-?\s*if\s+site\.(\w+)\s*-?%\}([\s\S]*?)\{%-?\s*endif\s*-?%\}/g, (m: string, k: string, inner: string) => (!known(k) ? m : val(k) ? inner : ''))
-    .replace(/\{\{-?\s*site\.(\w+)\s*-?\}\}/g, (m: string, k: string) => (known(k) ? val(k) : m));
-  return keep ? out : out.replace(/\{%[\s\S]*?%\}|\{\{[\s\S]*?\}\}/g, '').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 function yamlOf(text: string | undefined): Record<string, unknown> {

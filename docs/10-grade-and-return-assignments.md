@@ -52,15 +52,22 @@ teams:
 | `feedback_group`, `feedback_individual` | you | yes (own + team) |
 | `feedback_per_question` (where questions are declared; the team's on a group sheet) | you, optional | yes: a list after the overall feedback, inside the team's quote on a group sheet; a blank cell is not sent |
 | `score_group` | you | never shown as-is; each member's gradebook shows only the final grade it derives - the score itself too, but only for a team with no repo of its own (`shared_dropbox_repo`, `external`) |
-| `adjustment_individual` | you - the ONLY override, in both shapes | **no** - only the final grade it produced |
+| `adjustment_individual` | you - the ONLY override of the mark, in both shapes | **no** - only the final grade it produced |
+| `late_penalty` (per student or team, beside `info:`; optional) | you: `apply` (the default), `waive`, or the whole penalty as `15%` / `0.15` | with their marks (Distribute grades), the penalty that applied: `-20%`, `waived` or `-15% (set by hand)`; a submission receipt quotes the late rule's own figure only |
 | `notes_not_shared_with_students` | you | **never** |
 | final grade | derived on output, never stored | yes |
 
-The final mark is `total × (1 − rate × days_late) + adjustment`, floored at 0. A
+The final mark is `total × (1 − rate × days_late) + adjustment`, floored at 0. A late
+unit's `late_penalty` changes the middle term: `waive` (or `0%`) takes nothing off, and `15%` takes
+off 15% in place of `rate × days_late`; a unit that is not late loses nothing whatever it
+says. The console's Marks tab writes it for you: untick **Apply late penalty**, or type an
+override. An assignment with no late penalty (`late_penalty_per_day` unset) has nothing to waive or
+override: the Marks tab offers neither, any `late_penalty` written is ignored, and the Distribute
+preview says so. A penalty changed after marks were returned goes out again as a changed mark. A
 non-numeric score (`pass`, `A-`) is passed through verbatim with no arithmetic - unless a
 late penalty applies to it, which no arithmetic can do: that mark is **held**. Nothing is
 posted, written or emailed for it, the preview and the run both count it (`held`), and it
-goes out as soon as you put a number (or waive the penalty with `adjustment_individual`). The question names, the `# /N` maxima and the whole
+goes out as soon as you put a number (or write `late_penalty: waive`). The question names, the `# /N` maxima and the whole
 header come from `grading_config.yml` and `schedule.yml` and are re-emitted on every write - so
 edit them **there**, never in the sheet. The toolkit writes the file only when the data or
 that header really moved, so your quoting and spacing survive the quarter-hourly tick; YAML
@@ -71,7 +78,8 @@ by hand.
 ### When a sheet has something nobody can act on
 
 The quarter-hourly tick reads every sheet. Anything it cannot use - a save that does not
-parse, a key written twice, a mark or an adjustment that is not a number, a question
+parse, a key written twice, a mark or an adjustment that is not a number, a late unit's
+`late_penalty` that is not `apply`, `waive` or a percentage, a question
 `grading_config.yml` does not declare, a handle in two submission units (however it is
 capitalised), a team's `members:` that is not one entry per member - opens **one** issue in
 `semester-config` (*grading sheets have entries the grader cannot read*) listing each by file
@@ -194,10 +202,19 @@ A preview waits for nothing.
 ## Autograding (optional)
 
 Off unless you ask for it. `autograde: true` in the template's `grading_config.yml` runs the
-hidden tests from its `solution` branch at the cutoff, against the frozen pin, in a sandbox with the token stripped. The
+hidden tests from its `solution` branch at the late cutoff, against the frozen pin, in a sandbox with the token stripped. The
 count lands in `info.autograde` (`7/9`) for your information only - it is never a mark by
 itself and a student never sees it. Per-test detail goes to `semester-config/.system/autograde/`.
 To regrade, delete `.system/autograde/<slug>/`.
+
+**Writing the tests.** One test function per behaviour, named for it: the per-test detail lists
+each test by name with pass or fail. Import the student's module by its starter
+name (`from starter import fit`) - the runner puts the submission on `sys.path`. Plain
+`assert`s, `pytest.approx` for numbers, `pytest.raises` for errors; count on the standard
+library and pytest, nothing more.
+
+**Worked example:** the demo course's [tests folder](https://github.com/hertie-dsl-demo-course-e1234/assignment-1-f2026/tree/solution/tests) - ten tests and a
+[README](https://github.com/hertie-dsl-demo-course-e1234/assignment-1-f2026/blob/solution/tests/README.md) on adapting them to your assignment.
 
 ### Tests in another language: `tests/run.sh`
 

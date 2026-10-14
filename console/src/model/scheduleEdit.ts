@@ -4,9 +4,11 @@
 // file already spelt it.
 
 import { obj, type YamlText } from '../edit/yamlText';
-import { kebab, labelNumber } from './format';
+import { kebab, labelNumber, sessionNumber } from './format';
 import { solutionBeforeCutoff } from './labels';
+import { EMPTY_ENTRY_KIND } from './materialsRules';
 import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO } from './policy';
+import { isSession } from './schedule';
 
 export type Block = 'releases' | 'assignments' | 'events';
 
@@ -15,16 +17,23 @@ export interface DeployDraft {
   folder: string;
   dest: string;
   path: string;
-  /** Its own release time (`deploy_datetime`); blank ships it at the entry's time. */
+  /** Its own release time (`deploy_datetime`); blank ships it at the default (`defaultDeployAt`). */
   atDate: string;
   atTime: string;
   /** Its index in the file's `deploy:` list; none for a line added here. */
   src?: number;
 }
 
+/**
+ * A session's draft, whichever block holds it: what it releases (`deploys`) decides that on
+ * save (`sessionBlock`). With none, a session kind is written under `events:` (a session with
+ * nothing to ship, a lab's second group); with one or more, under `releases:`.
+ */
 export interface ReleaseDraft {
-  kind: 'releases';
+  kind: 'session';
   id: string;
+  /** The block the entry was read from; undefined for a new one. A save moves it from here, never from the first block its id is in. */
+  block?: 'releases' | 'events';
   type: string;
   /** The row's number (decision 0020). Undefined until proposed; '' while the box is empty. */
   number?: number | '';
@@ -57,6 +66,7 @@ export interface AssignmentDraft {
   tbc: boolean;
 }
 
+/** An exam or a special event: no deploys, ever. */
 export interface EventDraft {
   kind: 'events';
   id: string;
@@ -124,10 +134,24 @@ export function whenOf(raw: unknown, date: string, time: string): unknown {
   return joinWhen(date, time);
 }
 
-/** Which block an entry id is in. */
+/** Which block an entry id is in: the first that has it. */
 export function blockOf(doc: Raw, id: string): Block | null {
   for (const b of ['releases', 'assignments', 'events'] as Block[]) if (id in obj(doc[b])) return b;
   return null;
+}
+
+const EVENTS_KEY = 'events:';
+
+/** The sheet's key for a row: its id, or `events:<id>` for an `events:` entry whose id an earlier block also has. */
+export function entryKey(doc: Raw, block: Block, id: string): string {
+  return block === 'events' && blockOf(doc, id) !== 'events' ? `${EVENTS_KEY}${id}` : id;
+}
+
+/** A sheet key's block and id (`entryKey` reversed): the block is null when the file has no such entry. */
+export function keyEntry(doc: Raw, key: string): [Block | null, string] {
+  if (!key.startsWith(EVENTS_KEY)) return [blockOf(doc, key), key];
+  const id = key.slice(EVENTS_KEY.length);
+  return [id in obj(doc.events) ? 'events' : null, id];
 }
 
 /** The sheet's key for an entry: "semester", "archive", or the id (ids are unique across blocks in practice). */
@@ -138,11 +162,11 @@ export function readDraft(doc: Raw, key: string): Draft | null {
     const date = splitWhen(a?.event_datetime)[0];
     return { kind: 'archive', on: a !== null, when: date ? 'date' : 'days', date, title: s(a?.title), details: s(a?.details), show: a?.show_on_site !== false, tbc: a?.tbc === true, graceDays: typeof a?.grace_days === 'number' ? a.grace_days : ARCHIVE_GRACE_DAYS };
   }
-  const b = blockOf(doc, key);
+  const [b, id] = keyEntry(doc, key);
   if (!b) return null;
-  const e = obj(obj(doc[b])[key]);
-  const common = { id: key, title: s(e.title), details: s(e.details), show: e.show_on_site !== false, tbc: e.tbc === true };
-  const number = entryNumber(key, e) ?? '';
+  const e = obj(obj(doc[b])[id]);
+  const common = { id, title: s(e.title), details: s(e.details), show: e.show_on_site !== false, tbc: e.tbc === true };
+  const number = entryNumber(id, e) ?? '';
   if (b === 'releases') {
     const [date, time] = splitWhen(e.event_datetime);
     const deploys = (Array.isArray(e.deploy) ? e.deploy : []).map((d: unknown, src: number) => {
@@ -150,7 +174,7 @@ export function readDraft(doc: Raw, key: string): Draft | null {
       const [atDate, atTime] = splitWhen(x.deploy_datetime);
       return { repo: s(x.course_source_repo), folder: s(x.course_source_path), dest: s(x.semester_dest_repo), path: s(x.semester_dest_path), atDate, atTime, src };
     });
-    return { kind: 'releases', ...common, type: s(e.kind), number, date, time, deploys };
+    return { kind: 'session', ...common, block: 'releases', type: s(e.kind), number, date, time, deploys };
   }
   if (b === 'assignments') {
     const [handoutDate, handoutTime] = splitWhen(e.handout_datetime);
@@ -162,7 +186,18 @@ export function readDraft(doc: Raw, key: string): Draft | null {
     };
   }
   const [date, time] = splitWhen(e.event_datetime);
-  return { kind: 'events', ...common, type: s(e.kind) || 'special_event', date, time, tbc: common.tbc || s(e.event_datetime).toLowerCase() === 'tbc' };
+  const tbc = common.tbc || s(e.event_datetime).toLowerCase() === 'tbc';
+  const type = s(e.kind).trim().toLowerCase();
+  // A session with nothing to ship is a session's draft with no deploys (`sessionBlock`).
+  // A session's own number is the FIRST in its label (`lab-01-group-2` is Lab 1), as the engine reads it.
+  const sessionNo = Number.isInteger(e.number) && (e.number as number) > 0 ? (e.number as number) : sessionNumber(id) ?? '';
+  if (isSession(type)) return { kind: 'session', ...common, block: 'events', tbc, type, number: sessionNo, date, time, deploys: [] };
+  return { kind: 'events', ...common, type: type || 'special_event', date, time, tbc };
+}
+
+/** The block a session's draft is written under: `releases:` when it releases something (or its kind is no session kind), else `events:`. */
+export function sessionBlock(d: ReleaseDraft): 'releases' | 'events' {
+  return d.deploys.length || !isSession(d.type || EMPTY_ENTRY_KIND) ? 'releases' : 'events';
 }
 
 /** A value to write: `v`, unless it is the default and the file did not already spell it. */
@@ -183,14 +218,21 @@ function display(raw: Raw, d: { title: string; details: string; show: boolean; t
  */
 function numberValue(d: ReleaseDraft | AssignmentDraft, raw: Raw, fresh: boolean): number | undefined {
   if (d.number === undefined || d.number === '') return undefined;
-  return fresh || 'number' in raw || d.number !== labelNumber(d.id) ? d.number : undefined;
+  const own = d.kind === 'session' && sessionBlock(d) === 'events' ? sessionNumber(d.id) : labelNumber(d.id);
+  return fresh || 'number' in raw || d.number !== own ? d.number : undefined;
 }
 
 /** The entry as it goes into the file, merged over what the file has (none: a new entry). */
 export function entryValue(d: ReleaseDraft | AssignmentDraft | EventDraft, rawEntry: unknown): Raw {
   const raw = obj(rawEntry);
   const fresh = rawEntry === undefined;
-  if (d.kind === 'releases') {
+  if (d.kind === 'session' && sessionBlock(d) === 'events') {
+    return {
+      ...raw, deploy: undefined, kind: d.type || EMPTY_ENTRY_KIND, number: numberValue(d, raw, fresh), ...display(raw, d),
+      event_datetime: whenOf(raw.event_datetime, d.date, d.time) ?? 'tbc', tbc: d.date ? keep(raw.tbc, d.tbc, false) : undefined,
+    };
+  }
+  if (d.kind === 'session') {
     const rawDeploys = Array.isArray(raw.deploy) ? raw.deploy : [];
     return {
       ...raw,
@@ -255,8 +297,17 @@ export function writeDraft(y: YamlText, d: Draft, doc: Raw): void {
     });
     return;
   }
-  if (d.kind === 'releases') dropRemovedDeploys(y, d, obj(doc.releases)[d.id]);
-  y.assign([d.kind, d.id], entryValue(d, obj(doc[d.kind])[d.id]));
+  // A session moves between `releases:` and `events:` as it gains or loses what it releases.
+  // It leaves the block it was READ from: an id another block also has is never taken for it
+  // (`draftErrors` refuses the clash). A draft built by hand with no `block` is looked up.
+  const block = d.kind === 'session' ? sessionBlock(d) : d.kind;
+  const from = d.kind === 'session' ? (d.block ?? (d.id ? blockOf(doc, d.id) : null)) : d.id in obj(doc[d.kind]) ? d.kind : null;
+  if (from && from !== block) {
+    // The block it leaves stays a mapping (`releases: {}`), as the schema wants, when it was its last entry.
+    if (Object.keys(obj(doc[from])).length === 1) y.set([from], {});
+    else y.delete([from, d.id]);
+  } else if (d.kind === 'session' && block === 'releases') dropRemovedDeploys(y, d, obj(doc.releases)[d.id]);
+  y.assign([block, d.id], entryValue(d, obj(doc[from ?? block])[d.id]));
 }
 
 /**
@@ -268,7 +319,7 @@ function dropRemovedDeploys(y: YamlText, d: ReleaseDraft, rawEntry: unknown): vo
   const raw = obj(rawEntry).deploy;
   if (!Array.isArray(raw) || !d.deploys.length) return;
   const kept = d.deploys.map((dp) => dp.src).filter((i): i is number => i !== undefined);
-  for (let i = raw.length - 1; i >= 0; i--) if (!kept.includes(i)) y.delete([d.kind, d.id, 'deploy', i]);
+  for (let i = raw.length - 1; i >= 0; i--) if (!kept.includes(i)) y.delete(['releases', d.id, 'deploy', i]);
 }
 
 /**
@@ -329,9 +380,9 @@ const spelledKind: KindOf = (_key, entry) => s(obj(entry).kind) || 'lecture';
  */
 const UNNUMBERED_KINDS = ['readings', 'assets'];
 
-/** Whether an entry must carry a number (decision 0020): every assignment, and every release row the site shows of a numbered kind. */
+/** Whether an entry must carry a number (decision 0020): every assignment, and every release row the site shows of a numbered kind. A session with nothing to ship (`events:`) takes its key's or none. */
 export function needsNumber(d: ReleaseDraft | AssignmentDraft, kind: string): boolean {
-  return d.kind === 'assignments' || (d.show && !UNNUMBERED_KINDS.includes(kind));
+  return d.kind === 'assignments' || (d.show && sessionBlock(d) === 'releases' && !UNNUMBERED_KINDS.includes(kind));
 }
 
 /**
@@ -356,17 +407,42 @@ export function nextNumber(doc: Raw, kind: string, kindOf: KindOf = spelledKind)
  * A new entry's draft with its number proposed (`nextNumber`), when it has none yet; any other
  * draft as it is. `kind` is a release's kind as the engine will read it (its own, else the one
  * inferred from its folder). Readings get no proposal, so only a number typed in is kept. A
- * supporting-files entry carries none: it is no row.
+ * supporting-files entry carries none: it is no row. Nor does a session with nothing to ship
+ * (`events:`) get one: the next release number is not its number, so it keeps only one typed in,
+ * and the site shows its kind alone, or its release's number when it repeats one.
  */
 export function withNumber<T extends Draft>(d: T, doc: Raw, kindOf: KindOf = spelledKind, kind?: string): T {
-  if ((d.kind !== 'assignments' && d.kind !== 'releases') || d.id) return d;
+  if ((d.kind !== 'assignments' && d.kind !== 'session') || d.id) return d;
+  if (d.kind === 'session' && sessionBlock(d) === 'events') return d;
   const k = d.kind === 'assignments' ? 'assignment' : kind || d.type || 'lecture';
   if (k === 'assets') return d.number === undefined ? d : { ...d, number: undefined };
   const n = d.number === undefined ? nextNumber(doc, k, kindOf) : null;
   return n === null ? d : { ...d, number: n };
 }
 
-/** A new line of what to release: from `repo`, at the entry's time. */
+/**
+ * When a copy that names no release time ships, as the two boxes show it: an hour before a
+ * timed session (the engine's `_default_ship_times`, on the wall clock), the day's start for a
+ * whole-day one (no time), nothing for an undated one.
+ */
+export function defaultDeployAt(date: string, time: string): [string, string] {
+  if (!date || !time) return [date, ''];
+  const [y, mo, d] = date.split('-').map(Number);
+  const [h, mi] = time.split(':').map(Number);
+  const at = new Date(Date.UTC(y, mo - 1, d, h, mi) - 3_600_000).toISOString();
+  return [at.slice(0, 10), at.slice(11, 16)];
+}
+
+/**
+ * A copy's release time as typed into its boxes (prefilled with the default): emptied, or back
+ * at the default, it is blank again, so no `deploy_datetime` is written and the file stays minimal.
+ */
+export function deployAt(session: { date: string; time: string }, date: string, time: string): Pick<DeployDraft, 'atDate' | 'atTime'> {
+  const [dd, dt] = defaultDeployAt(session.date, session.time);
+  return !date || (date === dd && time === dt) ? { atDate: '', atTime: '' } : { atDate: date, atTime: time };
+}
+
+/** A new line of what to release: from `repo`, at the default time. */
 export const blankDeploy = (repo: string): DeployDraft => ({ repo, folder: '', dest: '', path: '', atDate: '', atTime: '' });
 
 export function blankDraft(type: string, defaults: { repo: string }): ReleaseDraft | AssignmentDraft | EventDraft {
@@ -374,7 +450,7 @@ export function blankDraft(type: string, defaults: { repo: string }): ReleaseDra
   if (type === 'handout')
     return { kind: 'assignments', ...common, template: '', manual: false, handoutDate: '', handoutTime: '10:00', dueDate: '', dueTime: '23:59', solutionOn: false, solutionDate: '', solutionTime: '' };
   if (type === 'exam' || type === 'special_event') return { kind: 'events', ...common, type, date: '', time: '' };
-  return { kind: 'releases', ...common, type, date: '', time: '10:00', deploys: [blankDeploy(defaults.repo)] };
+  return { kind: 'session', ...common, type, date: '', time: '10:00', deploys: [blankDeploy(defaults.repo)] };
 }
 
 /** A sheet moment as the engine reads it, sortable: a bare day at its start, or (a due date) its end. */
@@ -389,7 +465,7 @@ function moment(when: string, endOfDay = false): string {
  */
 export function draftErrors(d: Draft, others?: { templateUsers?: (template: string) => number; doc?: Raw; kind?: string }, cutoff?: string | null): Record<string, string> {
   const e: Record<string, string> = {};
-  if (d.kind === 'releases' || d.kind === 'assignments') {
+  if (d.kind === 'session' || d.kind === 'assignments') {
     const kind = d.kind === 'assignments' ? 'assignment' : others?.kind ?? (d.type || 'lecture');
     if (d.number === '' || d.number === undefined) {
       if (needsNumber(d, kind)) e.number = 'A number is needed.';
@@ -398,8 +474,12 @@ export function draftErrors(d: Draft, others?: { templateUsers?: (template: stri
     } else if (!(Number.isInteger(d.number) && d.number >= 1 && d.number <= 999)) e.number = 'A whole number from 1 to 999.';
     else if (d.kind === 'assignments' && !d.id && others?.doc && takenKeys(others.doc).has(assignmentKey(d.number))) e.number = `${assignmentKey(d.number)} is already in this schedule.`;
   }
-  if (d.kind === 'releases') {
-    if (!d.date) e.date = 'When is needed.';
+  if (d.kind === 'session') {
+    if (!d.date && sessionBlock(d) === 'releases') e.date = 'When is needed.';
+    // One label, one block: the same key under both `releases:` and `events:` is two rows nobody can tell apart.
+    const home = d.block ?? sessionBlock(d);
+    const other = home === 'releases' ? 'events' : 'releases';
+    if (d.id && others?.doc && d.id in obj(others.doc[other])) e.block = `${d.id} is already ${other === 'releases' ? 'a release' : 'a session'} in schedule.yml. Rename one of them there.`;
     d.deploys.forEach((dp, i) => {
       if (!dp.repo) e[`deploy${i}.repo`] = 'Choose the repo.';
       if (!dp.folder) e[`deploy${i}.folder`] = 'Name the folder or file.';

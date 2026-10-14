@@ -1,4 +1,5 @@
 import { PERSON } from '../src/tiers/people';
+import { AUTOGRADE_EXAMPLE } from '../src/ui/bits';
 import { render } from 'preact-render-to-string';
 import { describe, expect, it } from 'vitest';
 import gradingSchema from '../schemas/grading_config.schema.json';
@@ -41,6 +42,17 @@ describe('the tiered form', () => {
     expect(out).toContain('Written by hand');
     expect(out).toContain(STARTER_COPY.derived.hint);
     expect(out).toContain('aria-label="About Written by hand"');
+  });
+
+  it('puts a field hint in a ? named for the field, with its docs link', () => {
+    const out = render(<SchemaForm id="t" schema={null} tiers={{ f: { tier: 'default', label: 'Colour', hint: { text: 'x', doc: 'y.md' } } }} values={{}} onChange={() => {}} />);
+    expect(out).toContain('aria-label="About Colour"');
+    expect(out).toMatch(/<a href="[^"]*\/y\.md"/);
+  });
+
+  it('links the autograde hint to the worked demo example', () => {
+    const out = render(<SchemaForm id="t" schema={null} tiers={{ autograde: tiers.autograde }} values={fromConfig({})} onChange={() => {}} />);
+    expect(out).toContain(`href="${AUTOGRADE_EXAMPLE}"`);
   });
 
   it('counts only non-default Advanced fields', () => {

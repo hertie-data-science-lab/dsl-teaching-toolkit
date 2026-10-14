@@ -9,6 +9,12 @@ import { Alert, Check, Eye, Ext, Fail, Skip } from './icons';
 
 export const DOCS = 'https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/main/docs/';
 export const SOON = 'Coming in this build';
+/**
+ * The worked, annotated autograde example the Run automatic tests hint links to: the demo
+ * org's PUBLIC assignment template, whose solution branch carries the tests/ folder. Public so
+ * any instructor can open it; move the link if that repo is renamed or made private.
+ */
+export const AUTOGRADE_EXAMPLE = 'https://github.com/hertie-dsl-demo-course-e1234/assignment-1-f2026/tree/solution/tests';
 
 export { encPath };
 

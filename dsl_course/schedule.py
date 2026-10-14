@@ -8,7 +8,7 @@ lifecycle, `events` are display-only calendar rows.
                                      # below are interpreted; GitHub cron itself is UTC
     releases:                        # the auto-release plan - label ->
       lecture_02:                    # {event_datetime + deploys}. Each deploy ships at its
-        event_datetime: 2026-09-15T10:00   # deploy_datetime (default: the event itself).
+        event_datetime: 2026-09-15T10:00   # deploy_datetime (default: an hour before the event).
         title: Linear regression           # the session's name - the site's TITLE column
         details: Least squares by hand     # its DETAILS column, and the session's own page
         number: 2                          # the row's number; without it, the
@@ -22,7 +22,7 @@ lifecycle, `events` are display-only calendar rows.
             course_source_path: lectures/02_intro        # are the only required keys;
             semester_dest_repo: materials                  # semester_dest_repo, semester_dest_path
             semester_dest_path: lectures/02_intro          # and deploy_datetime are optional.
-            deploy_datetime: 2026-09-15T09:00
+            deploy_datetime: 2026-09-14T18:00     # the evening before
     assignments:                     # each assignment's TIMINGS. The key is a label;
       assignment-1:                  # course_source_repo names the COURSE-org repo
         course_source_repo: assignment-neural-nets   # it hands out from, and is REQUIRED.
@@ -34,14 +34,19 @@ lifecycle, `events` are display-only calendar rows.
                                      # cutoff is due + `late_window_days` (assignments.yml).
         marks_return_datetime: 2026-10-27  # optional: marks go back then, once all marked
     events:                          # display-only rows - nothing deploys, the site just
-      mid-term:                      # shows them. `kind` is `exam` or `special_event`
-        kind: exam                   # (the default when omitted). `event_datetime` is a
-        title: MidTerm Exam          # whole day, or a full datetime when the start time
-        details: Open book, 2 hours  # is known.
+      mid-term:                      # shows them. `kind` is `exam`, `special_event` (the
+        kind: exam                   # default when omitted) or any policy kind (lab, ...).
+        title: MidTerm Exam          # `event_datetime` is a whole day, or a full datetime
+        details: Open book, 2 hours  # when the start time is known.
         event_datetime: 2026-11-03
       project-clinic:
         title: Project Clinic
         event_datetime: 2026-10-14T10:00
+      lab-01-group-2:                # a session with nothing to ship: a "Lab 1" row,
+        kind: lab                    # no files. `number:` as on a release; the title
+        number: 1                    # defaults to the release of the same kind+number.
+        details: Group 2, room 2.32
+        event_datetime: 2026-09-17T18:00
     semester_start: 2026-09-07
     semester_end: 2026-12-18
     archive:                         # OPTIONAL - and the SWITCH: with no block, nothing
@@ -132,6 +137,7 @@ from .gh_contents import (
     yaml_mark_line,
 )
 from .log import CLIParser, log, log_err
+from .materials import ASSETS_KIND
 from .releaseignore import RELEASEIGNORE, excluded_in_tree
 from .repos import default_branch, repo_missing
 
@@ -269,10 +275,16 @@ class Deploy:
     """One source->dest copy: a path in a COURSE-org source repo copied into a SEMESTER-org
     dest repo. `semester_dest_path` defaults to `course_source_path` (mirror).
 
-    `deploy_datetime` optionally overrides the copy's own ship time; unset, it ships at
-    the parent entry's `event_datetime`. This is what disaggregates the class from its
-    materials: the entry's `event_datetime` is the session the site announces, a deploy's
-    `deploy_datetime` ships the files an hour (or a week) before or after it."""
+    `deploy_datetime` optionally overrides the copy's own ship time; unset on a materials
+    copy (a `releases:` entry's `deploy:`), it ships an hour before the parent entry's
+    `event_datetime` (`_default_ship_times` fills it in at parse time, so every reader
+    sees the moment the copy actually ships). A whole-day event has no clock time, so its
+    copies ship at the day's start; a `tbc` entry's have no time at all. The hour-before
+    default is for materials only: a release the scheduler synthesises for an
+    assignment's hand-out (and the solution riding on it) ships at its own hand-out or
+    solution time, unchanged. This is what disaggregates the class from its materials: the entry's
+    `event_datetime` is the session the site announces, a deploy's `deploy_datetime`
+    ships the files an hour (or a week) before or after it."""
 
     course_source_repo: str
     course_source_path: str
@@ -349,8 +361,12 @@ class Release:
         return not self.deploy and not self.assignment
 
     def due_deploys(self, now: datetime) -> list[Deploy]:
-        """The deploys whose own ship time (`deploy_datetime`, else this entry's
-        `event_datetime`) has arrived. An undated (TBC) entry's deploys can never be due -
+        """The deploys whose own ship time has arrived: `deploy_datetime`, else this
+        entry's `event_datetime`. A materials copy from `releases:` already carries its
+        hour-before default in `deploy_datetime` (`_default_ship_times`, at parse), so the
+        `event_datetime` fallback is left to a whole-day entry's copies (the day's start).
+        A synthesised hand-out or solution release ships at its own hand-out/solution
+        time, never an hour early. An undated (TBC) entry's deploys can never be due -
         except one carrying its own explicit `deploy_datetime`."""
         return [
             d
@@ -444,7 +460,9 @@ class Event:
     # A bare date = whole day; a datetime = real start time; None = `event_datetime: tbc`
     # (the site shows a TBC row). `tbc: true` next to a real date = provisional, "(TBC)".
     when: date | datetime | None
-    # 'exam' | 'special_event'. Exams render as their own (red) row on the site.
+    # 'exam' | 'special_event' on `Schedule.events`; a content kind (lecture, lab, ...)
+    # on `Schedule.sessions` - a row of that kind with no files. Exams render as their
+    # own row.
     kind: str = "special_event"
     tbc: bool = False
     # Display-only: the row's Details cell. `title` says which row this is, `details` what
@@ -455,6 +473,9 @@ class Event:
     # fires nothing, so this is the whole of what it does here; the twin of a silent
     # release, for a date faculty keep in the file without publishing it.
     show_on_site: bool = True
+    # A session's own `number:` ("Lab 1"); the row's number is resolved with the
+    # label's (`schedule_plan.planned_rows`), as on a release.
+    number: int | None = None
 
 
 @dataclass
@@ -502,7 +523,11 @@ class Schedule:
     semester_start: date | None = None
     semester_end: date | None = None
     assignments: dict[str, AssignmentEntry] = field(default_factory=dict)
+    # The `events:` entries: `events` the exams and special events, `sessions` those of
+    # a content kind (`EVENT_KINDS`) - a session with nothing to ship (a lab's second
+    # group), a row of its kind (`schedule_plan.planned_rows`).
     events: list[Event] = field(default_factory=list)
+    sessions: list[Event] = field(default_factory=list)
     # The `archive:` block, or None where the semester wrote none - see `ArchiveRow`, which
     # holds every key of it. None IS "nobody asked for archiving", which is a different
     # answer from an ArchiveRow whose `when` could not be derived. Resolved by `parse` and
@@ -534,6 +559,12 @@ class Schedule:
     # nothing that reads one (a cutoff, a hand out) can act for this semester until it is
     # fixed. The fault is in `faults` like any other.
     instance_unparseable: bool = False
+
+    @property
+    def all_events(self) -> list[Event]:
+        """Every `events:` entry, sessions among them: what a reader that counts or dates
+        the block wants, as against a renderer that shows exams and sessions apart."""
+        return self.events + self.sessions
 
 
 @dataclass
@@ -800,8 +831,12 @@ def not_migrated_keys(
 
 
 KNOWN_EVENT = frozenset(
-    {"kind", "title", "details", "event_datetime", "tbc", "show_on_site"}
+    {"kind", "number", "title", "details", "event_datetime", "tbc", "show_on_site"}
 )
+# The kinds an `events:` entry may declare besides `special_event`: every content kind
+# that is a row (supporting files never are, decision 0026). `exam` keeps its own row;
+# any other makes a session with nothing to ship (`Schedule.sessions`).
+EVENT_KINDS = tuple(k for k in policy.content_kinds() if k != ASSETS_KIND)
 
 
 def _flag_unknown_keys(
@@ -967,8 +1002,8 @@ def _flagged_details(
 def _parse_deploy(raw: object, tz: ZoneInfo, drops: Drops, label: str) -> list[Deploy]:
     """Parse a release's `deploy:` - a list (or a single mapping) of source->dest copies.
     Entries missing course_source_repo/course_source_path are skipped (nothing to copy).
-    A malformed `deploy_datetime` parses to None - the copy ships at the entry's
-    event_datetime, and the unusable value is flagged (see `_flag_bad_value`)."""
+    A malformed `deploy_datetime` parses to None - the copy ships at the entry's default
+    (`_default_ship_times`), and the unusable value is flagged (see `_flag_bad_value`)."""
     items = [raw] if isinstance(raw, dict) else (raw or [])
     out: list[Deploy] = []
     for i, d in enumerate(items):
@@ -1013,14 +1048,36 @@ def _parse_deploy(raw: object, tz: ZoneInfo, drops: Drops, label: str) -> list[D
                     tz,
                     drops,
                     where,
-                    "this copy ships at the entry's `event_datetime` instead of the "
-                    "time written here",
+                    "this copy ships an hour before the entry's `event_datetime` "
+                    "instead of the time written here",
                     lines,
                 ),
                 lines=lines,
             )
         )
     return out
+
+
+# How long before its session a copy with no `deploy_datetime` ships.
+DEFAULT_DEPLOY_LEAD = timedelta(hours=1)
+
+
+def _default_ship_times(deploys: list[Deploy], raw_when: object, tz: ZoneInfo) -> None:
+    """Give each copy that names no `deploy_datetime` its default: an hour before the
+    entry's timed `event_datetime`. A whole-day event has no clock time to count back
+    from, so its copies keep shipping at the day's start (the entry's `when`, 00:00); a
+    `tbc` entry has no time, so nothing is filled and nothing fires. An explicit
+    `deploy_datetime` is never touched.
+
+    Materials only (`_parse_releases`): a synthesised hand-out or solution release ships
+    at its own time. Applied on every parse, so an existing file's copies that never named
+    a time moved to an hour before their session when this default shipped."""
+    when = _coerce_date_or_datetime(raw_when, tz)
+    if not isinstance(when, datetime):
+        return
+    for d in deploys:
+        if d.deploy_datetime is None:
+            d.deploy_datetime = when - DEFAULT_DEPLOY_LEAD
 
 
 def _is_tbc(value: object) -> bool:
@@ -1117,11 +1174,13 @@ def _parse_releases(raw: object, tz: ZoneInfo, drops: Drops) -> list[Release]:
         number = _parse_number(
             entry, where, drops, lines, "the row is numbered from its label instead"
         )
+        deploys = _parse_deploy(entry.get("deploy"), tz, drops, str(label))
+        _default_ship_times(deploys, raw_when, tz)
         out.append(
             Release(
                 label=str(label),
                 when=when,
-                deploy=_parse_deploy(entry.get("deploy"), tz, drops, str(label)),
+                deploy=deploys,
                 kind=kind,
                 number=number,
                 title=str(entry.get("title") or ""),
@@ -1415,9 +1474,13 @@ def _parse_assignments(
     return out
 
 
-def _parse_events(raw: object, tz: ZoneInfo, drops: Drops) -> list[Event]:
-    """Parse `events:` (label -> {type, title, event_datetime}) into display-only rows,
-    in calendar order.
+def _parse_events(
+    raw: object, tz: ZoneInfo, drops: Drops
+) -> tuple[list[Event], list[Event]]:
+    """Parse `events:` (label -> {kind, title, event_datetime}) into display-only rows,
+    in calendar order: `(events, sessions)` (`Schedule`). `kind:` is `special_event` (the
+    default), `exam`, or another content kind (`EVENT_KINDS`), which makes a session;
+    anything else is flagged and shown as a special event.
 
     `event_datetime` is a whole-day date, or a full datetime when the start time is known
     (the website then shows that time instead of its placeholder). `event_datetime: tbc`
@@ -1429,7 +1492,7 @@ def _parse_events(raw: object, tz: ZoneInfo, drops: Drops) -> list[Event]:
         raw, drops, "events", "label", "no calendar rows appear on the site"
     )
     if mapping is None:
-        return out
+        return out, []
     for label, entry in mapping.items():
         where = f"events.{label}"
         if not isinstance(entry, dict):
@@ -1459,8 +1522,8 @@ def _parse_events(raw: object, tz: ZoneInfo, drops: Drops) -> list[Event]:
             "that setting is ignored",
             lines,
         )
-        kind = str(entry.get("kind") or "").strip().lower()
-        if kind and kind not in ("exam", "special_event"):
+        kind = str(entry.get("kind") or "").strip().lower() or "special_event"
+        if kind != "special_event" and kind not in EVENT_KINDS:
             # A typo'd `kind` (e.g. `exma`) still shows the row, but as a plain special
             # event - the exam styling, and "this is an exam", quietly disappear.
             _flag_bad_value(
@@ -1468,8 +1531,29 @@ def _parse_events(raw: object, tz: ZoneInfo, drops: Drops) -> list[Event]:
                 where,
                 "kind",
                 kind,
-                "the row is shown as a plain special event, not an exam "
-                "(expected 'exam' or 'special_event')",
+                "the row is shown as a plain special event, not an exam or a session "
+                "(expected `special_event` "
+                f"or one of {', '.join(EVENT_KINDS)})",
+                lines,
+            )
+            kind = "special_event"
+        number = _parse_number(
+            entry, where, drops, lines, "the row is numbered from its label instead"
+        )
+        if (
+            number is None
+            and kind in EVENT_KINDS
+            and kind != "exam"
+            and len(_DIGITS.findall(str(label))) > 1
+        ):
+            # `lab-01-group-2` is read as Lab 1 (`session_number`): say so, so a label
+            # meant as Lab 2 is numbered rather than quietly shown as the first.
+            first = session_number(None, str(label))
+            drops.note(
+                where,
+                "number",
+                f"the label carries more than one number and no `number:` - number it "
+                f"or it reads as {policy.numbered_title(kind, first)}",
                 lines,
             )
         out.append(
@@ -1487,9 +1571,8 @@ def _parse_events(raw: object, tz: ZoneInfo, drops: Drops) -> list[Event]:
                     lines,
                 ),
                 when=when,
-                # anything other than the two known values -> the display-only default:
-                # a typo'd `type` still shows the row (flagged above, not silent)
-                kind="exam" if kind == "exam" else "special_event",
+                kind=kind,
+                number=number,
                 tbc=tbc,
             )
         )
@@ -1501,7 +1584,10 @@ def _parse_events(raw: object, tz: ZoneInfo, drops: Drops) -> list[Event]:
             epoch if e.when is None else _instant(e.when, tz),
         )
     )
-    return out
+    shown_alone = ("exam", "special_event")
+    return [e for e in out if e.kind in shown_alone], [
+        e for e in out if e.kind not in shown_alone
+    ]
 
 
 KNOWN_ARCHIVE = frozenset(
@@ -1667,7 +1753,8 @@ def parse(meta: dict, instance: settings.Instance | None = None) -> Schedule:
                 meta.get("assignments"), tz, drops, instance.dests
             )
         ),
-        events=_parse_events(meta.get("events"), tz, drops),
+        events=(events := _parse_events(meta.get("events"), tz, drops))[0],
+        sessions=events[1],
         archive=_parse_archive(meta, semester_end, drops),
         dropped=drops.report + _instance_report(instance, meta, assignments, drops),
         faults=drops.faults,
@@ -1845,6 +1932,18 @@ def own_number(number: int | None, key: str) -> int | None:
     """An entry's number (decision 0020): its `number:`, else the number its label or key
     carries (`lecture_03`, `assignment-3`: the instructor typed it). Never a position."""
     return number or label_number(key)
+
+
+_DIGITS = re.compile(r"\d+")
+
+
+def session_number(number: int | None, label: str) -> int | None:
+    """An `events:` session's number: its `number:`, else the FIRST number in its label -
+    `lab-01-group-2` is a group of Lab 1, not Lab 2. A release keeps `own_number`."""
+    if number:
+        return number
+    m = _DIGITS.search(label)
+    return int(m.group()) if m else None
 
 
 def assignment_pages(sched: Schedule) -> list[AssignmentPage]:
@@ -2484,7 +2583,9 @@ def _validate_report(sched: Schedule, source: str) -> str:
         (
             f"  {len(sched.releases)} release(s), "
             f"{sum(len(r.deploy) for r in sched.releases)} deploy(s) | "
-            f"{len(sched.assignments)} assignment(s) | {len(sched.events)} event(s)"
+            f"{len(sched.assignments)} assignment(s) | "
+            f"{len(sched.all_events)} event(s)"
+            + (f", {n} of them session(s)" if (n := len(sched.sessions)) else "")
         ),
     ]
     if sched.dropped:

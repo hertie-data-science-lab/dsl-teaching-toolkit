@@ -4,9 +4,11 @@
 // visibility, the late rule, the submit link) is that semester's assignments.yml. The form
 // works on a flat model; `toConfig` turns it back into the file's shape.
 
+import { h } from 'preact';
 import { questionFile, questionPoints, questionsFromRows } from '../model/marks';
 import { helpOf, labelOf } from '../model/labels';
 import { FORMAT_KEYS, SUBMIT_VIA_DEFAULT, SUBMIT_VIA_KEYS } from '../model/policy';
+import { AUTOGRADE_EXAMPLE } from '../ui/bits';
 import { opt, type Tiers, type Values } from './types';
 
 export { VISIBILITY } from '../model/cascade';
@@ -99,6 +101,18 @@ export function toConfig(v: Values): Record<string, unknown> {
   };
 }
 
+/** The `?` beside "Run automatic tests on submissions". */
+const AUTOGRADE_HINT = {
+  text: [
+    'Hidden pytest tests you keep in the template’s tests/ folder on the solution branch run at the late cutoff on each submission’s frozen state, in a sandbox. ' +
+      'The pass count (for example 7/10) reaches the grading sheet’s info.autograde and the Marks tab as information for the marker: never a mark, never shown to students. ' +
+      'Tests use the standard library and pytest, nothing more; for other languages, add a tests/run.sh. ',
+    h('a', { href: AUTOGRADE_EXAMPLE, target: '_blank', rel: 'noopener' }, 'A worked, annotated example'),
+    '.',
+  ],
+  doc: '10-grade-and-return-assignments.md#autograding-optional',
+};
+
 /** The template's own fields; `formats` is the format picker beside them, not a tier. */
 export function settingsTiers(): Tiers {
   return {
@@ -112,8 +126,8 @@ export function settingsTiers(): Tiers {
       options: SUBMIT.map(([v, l, s]) => opt(v, l, s)),
     },
     autograde: {
-      tier: 'default', label: 'Run automatic tests on submissions', widget: 'radio', default: 'false', defaultLabel: 'default: off',
-      options: [opt('true', 'On', 'Tests suggest a mark. Marker has final discretion.'), opt('false', 'Off', 'Marked purely by hand.')],
+      tier: 'default', label: 'Run automatic tests on submissions', widget: 'radio', default: 'false', defaultLabel: 'default: off', hint: AUTOGRADE_HINT,
+      options: [opt('true', 'On', 'Tests give the marker a pass count.'), opt('false', 'Off', 'Marked purely by hand.')],
       forced: (v) => (isDrop(v) ? { value: undefined, reason: 'A shared drop box holds every student’s work in one repo, so tests cannot run per student.' } : null),
       check: (x) => (x === undefined || x === 'true' || x === 'false' ? null : `The file says “${String(x)}”. Choose on or off.`),
     },

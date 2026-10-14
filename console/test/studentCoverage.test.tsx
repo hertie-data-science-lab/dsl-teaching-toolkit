@@ -11,7 +11,8 @@ import { discoverEstate, invitationUrl, pendingOrgs, type Semester } from '../sr
 import { forgetMine, forgetMyTeams, knownAuditor, parseGradebook, patchLines, readMine, readReceipts, teamOf, threadKind, type Mine } from '../src/model/mine';
 import { forgetStudentPrefs, lastVisit, markVisit } from '../src/model/prefs';
 import type { KeyStore } from '../src/auth/types';
-import { SiteSource, homeText, pictureOf, sitePicture, type SemesterAssignment, type SemesterFacts } from '../src/model/student';
+import { SiteSource, pictureOf, sitePicture, type SemesterAssignment, type SemesterFacts } from '../src/model/student';
+import { homeText, unsetSiteKeys } from '../src/model/siteText';
 import { weekItems } from '../src/model/week';
 import { ArchivedSemester, AuditorNote } from '../src/screens/Student';
 import { AssignmentsView, YourMarks } from '../src/screens/StudentAssignments';
@@ -389,7 +390,7 @@ describe('9. the About block', () => {
     expect(f.announcements).toEqual([{ when: '2026-09-22T09:00:00', title: 'Room change', details: 'From this week the lab meets in **room 2.30**.' }]);
     expect(f.syllabus).toMatchObject({ repo: 'materials', path: 'SYLLABUS.md', name: 'SYLLABUS.md' });
     expect(homeText('{% if site.x %}A{% endif %}{{ site.y }}{% include z.html %}', { x: 'on', y: 'B' })).toBe('AB');
-    expect(homeText('{% if site.x %}A{% endif %}{{ site.y }} {{ site.z }}{% include z.html %}', { x: 'on', y: 'B' }, true)).toBe('AB {{ site.z }}{% include z.html %}');
+    expect(unsetSiteKeys('{% if site.x %}A{% endif %}{{ site.y }} {{ site.z }}{% if site.w %}{{ site.z }}{% endif %}', { x: 'on', y: 'B', w: '' })).toEqual(['w', 'z']);
   });
 
   it('shows them on the semester’s Home (decision 0035 rule 4), and a new announcement as a week line', async () => {

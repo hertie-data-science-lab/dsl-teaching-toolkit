@@ -14,9 +14,11 @@ import { GitHubClient } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
 import { StaticFiles } from './staticFiles';
 import { POLICY, penaltyRate } from '../src/model/policy';
-import { finalGrade, questionFile, questionPoints, questionsFromRows, readSheet, scoreTotal } from '../src/model/marks';
-import { assignmentKey, blankDeploy, blankDraft, draftErrors, freshId, needsNumber, nextNumber, readDraft, unnumberedId, withNumber, writeDraft, type ArchiveDraft, type AssignmentDraft, type ReleaseDraft } from '../src/model/scheduleEdit';
+import { labelNumber, sessionNumber } from '../src/model/format';
+import { effectivePenalty, finalGrade, lateChoice, overrideText, overrideValue, penaltyText, questionFile, questionPoints, questionsFromRows, readSheet, scoreTotal } from '../src/model/marks';
+import { assignmentKey, blankDeploy, blankDraft, defaultDeployAt, deployAt, draftErrors, entryKey, freshId, needsNumber, nextNumber, readDraft, sessionBlock, unnumberedId, withNumber, writeDraft, type ArchiveDraft, type AssignmentDraft, type ReleaseDraft } from '../src/model/scheduleEdit';
 import { cutoffOf } from '../src/screens/RunSettings';
+import { validSchedule } from '../src/model/cascade';
 import { StatusStore, type Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
 import { DispatchAdapter } from '../src/ops/adapter';
@@ -187,17 +189,103 @@ describe('the schedule entry sheet model', () => {
     expect(y.text).toBe('releases:\n  lab-3:\n    event_datetime: 2026-10-08T10:00\n    deploy:\n      - course_source_repo: m\n        course_source_path: labs/03_solutions   # later\n        deploy_datetime: 2026-10-12T18:00\n');
   });
 
-  it('saves a release with nothing to release: the last line can be removed', () => {
-    const src = 'releases:\n  s5:\n    event_datetime: 2026-10-08T10:00\n    kind: lecture\n    deploy:\n      - course_source_repo: m\n        course_source_path: l\n';
+  it('moves a session with nothing left to release to events, and back when it gains a line', () => {
+    const src = 'releases:\n  s5:\n    event_datetime: 2026-10-08T10:00\n    kind: lecture\n    title: Trees\n    deploy:\n      - course_source_repo: m\n        course_source_path: l\n';
     const y = new YamlText(src);
     const doc = y.toJS() as Record<string, unknown>;
     const d = { ...(readDraft(doc, 's5') as ReleaseDraft), deploys: [] };
-    expect(draftErrors({ ...d, number: 5 }, { kind: 'lecture' })).toEqual({});
+    // No number is asked of it: an event takes its key's (s5), as on a release.
+    expect(draftErrors(d, { kind: 'lecture' })).toEqual({});
     writeDraft(y, d, doc);
-    expect(y.text).toBe('releases:\n  s5:\n    event_datetime: 2026-10-08T10:00\n    kind: lecture\n');
+    const out = parse(y.text);
+    expect(out.releases).toEqual({});
+    expect(validSchedule(out)).toBe(true);
+    expect(out.events.s5).toEqual({ event_datetime: '2026-10-08T10:00', kind: 'lecture', title: 'Trees' });
+    // Read back it is the same sheet, with nothing to release; a line moves it back.
+    const doc2 = y.toJS() as Record<string, unknown>;
+    const back = readDraft(doc2, 's5') as ReleaseDraft;
+    expect(back).toEqual({ ...d, block: 'events' });
+    writeDraft(y, { ...back, deploys: [{ ...blankDeploy('m'), folder: 'l' }] }, doc2);
+    const again = parse(y.text);
+    expect(again.events).toEqual({});
+    expect(again.releases.s5).toEqual({ event_datetime: '2026-10-08T10:00', kind: 'lecture', title: 'Trees', deploy: [{ course_source_repo: 'm', course_source_path: 'l' }] });
   });
 
-  it('writes a line’s own release time only when given; blank ships at the entry’s time', () => {
+  it('numbers a session by the first number in its label, as the engine does', () => {
+    expect(sessionNumber('lab-01-group-2')).toBe(1);
+    expect(labelNumber('lab-01-group-2')).toBe(2);
+    const y = new YamlText('events:\n  lab-01-group-2:\n    event_datetime: 2026-09-17T18:00\n    kind: lab\n');
+    const doc = y.toJS() as Record<string, unknown>;
+    const d = readDraft(doc, 'lab-01-group-2') as ReleaseDraft;
+    expect(d.number).toBe(1);
+    // Its own number is the label's: nothing is written for it.
+    writeDraft(y, { ...d, details: 'Group 2' }, doc);
+    expect(parse(y.text).events['lab-01-group-2']).toEqual({ event_datetime: '2026-09-17T18:00', kind: 'lab', details: 'Group 2' });
+  });
+
+  it('edits the events: session when a release shares its label, and never deletes the release', () => {
+    const src = 'releases:\n  lab-01:\n    event_datetime: 2026-09-16T08:00\n    kind: lab\n    deploy:\n      - course_source_repo: m\n        course_source_path: labs/01\nevents:\n  lab-01:\n    event_datetime: 2026-09-17T18:00\n    kind: lab\n    details: Group 2\n';
+    const y = new YamlText(src);
+    const doc = y.toJS() as Record<string, unknown>;
+    // The events row opens under its own key, and reads the session, not the release.
+    expect(entryKey(doc, 'events', 'lab-01')).toBe('events:lab-01');
+    expect(entryKey(doc, 'releases', 'lab-01')).toBe('lab-01');
+    const d = readDraft(doc, entryKey(doc, 'events', 'lab-01')) as ReleaseDraft;
+    expect([d.id, d.block, d.details, d.deploys]).toEqual(['lab-01', 'events', 'Group 2', []]);
+    // The label under both blocks is refused, either way round.
+    expect(draftErrors(d, { doc, kind: 'lab' }).block).toBe('lab-01 is already a release in schedule.yml. Rename one of them there.');
+    expect(draftErrors(readDraft(doc, 'lab-01') as ReleaseDraft, { doc, kind: 'lab' }).block).toBe('lab-01 is already a session in schedule.yml. Rename one of them there.');
+    // Even written, the session's edit stays under events: and the release is untouched.
+    writeDraft(y, { ...d, details: 'Group 2, room B' }, doc);
+    const out = parse(y.text);
+    expect(out.events['lab-01'].details).toBe('Group 2, room B');
+    expect(out.releases['lab-01'].deploy).toHaveLength(1);
+  });
+
+  it('writes a new session with nothing to release under events: its kind, its number, TBC without a date', () => {
+    const y = new YamlText('releases:\n  lab-1:\n    event_datetime: 2026-09-16T08:00\n    kind: lab\n    title: Intro\n    deploy:\n      - course_source_repo: m\n        course_source_path: labs/01\n');
+    const doc = y.toJS() as Record<string, unknown>;
+    const d = { ...(blankDraft('lab', { repo: 'm' }) as ReleaseDraft), deploys: [], number: 1 as const, details: 'Group 2', date: '2026-09-17', time: '18:00' };
+    expect(draftErrors(d, { kind: 'lab' })).toEqual({});
+    expect(sessionBlock(d)).toBe('events');
+    const id = freshId(doc, sessionBlock(d), 'lab-1');
+    expect(id).toBe('lab-1-b');
+    writeDraft(y, { ...d, id }, doc);
+    expect(parse(y.text).events[id]).toEqual({ event_datetime: '2026-09-17T18:00', kind: 'lab', number: 1, details: 'Group 2' });
+    expect(validSchedule(parse(y.text))).toBe(true);
+    expect(parse(y.text).releases['lab-1'].deploy).toHaveLength(1);
+    // Without a date it is TBC; a release still needs one.
+    const tbc = { ...d, date: '', time: '' };
+    expect(draftErrors(tbc, { kind: 'lab' })).toEqual({});
+    writeDraft(y, { ...tbc, id: 'lab-2' }, doc);
+    expect(parse(y.text).events['lab-2'].event_datetime).toBe('tbc');
+    expect(draftErrors({ ...tbc, deploys: [{ ...blankDeploy('m'), folder: 'l' }] }, { kind: 'lab' }).date).toBe('When is needed.');
+  });
+
+  it('keeps an exam or a special event on its own sheet, and an unknown kind is a special event', () => {
+    const doc = { events: { mid: { kind: 'exam', event_datetime: '2026-11-03' }, clinic: { event_datetime: '2026-11-04' }, odd: { kind: 'assets', event_datetime: '2026-11-05' }, lab: { kind: 'lab', event_datetime: '2026-11-06' }, talk: { kind: 'lecture', event_datetime: '2026-11-07T10:00' } } };
+    expect(readDraft(doc, 'mid')?.kind).toBe('events');
+    // A session kind is a session's sheet, whichever block holds it: a lab, a lecture.
+    expect(readDraft(doc, 'lab')?.kind).toBe('session');
+    expect(readDraft(doc, 'talk')).toMatchObject({ kind: 'session', type: 'lecture', deploys: [] });
+    expect(readDraft(doc, 'clinic')).toMatchObject({ kind: 'events', type: 'special_event' });
+    expect(readDraft(doc, 'odd')?.kind).toBe('events');
+  });
+
+  it('defaults a line’s release time to an hour before a timed session, the day’s start for a whole-day one', () => {
+    expect(defaultDeployAt('2026-10-08', '10:00')).toEqual(['2026-10-08', '09:00']);
+    expect(defaultDeployAt('2026-10-08', '00:30')).toEqual(['2026-10-07', '23:30']);
+    expect(defaultDeployAt('2026-10-08', '')).toEqual(['2026-10-08', '']);
+    expect(defaultDeployAt('', '10:00')).toEqual(['', '']);
+    const session = { date: '2026-10-08', time: '10:00' };
+    // Back at the default, or the date emptied: blank, so nothing is written.
+    expect(deployAt(session, '2026-10-08', '09:00')).toEqual({ atDate: '', atTime: '' });
+    expect(deployAt(session, '', '09:00')).toEqual({ atDate: '', atTime: '' });
+    expect(deployAt(session, '2026-10-08', '08:00')).toEqual({ atDate: '2026-10-08', atTime: '08:00' });
+    expect(deployAt(session, '2026-10-08', '')).toEqual({ atDate: '2026-10-08', atTime: '' });
+  });
+
+  it('writes a line’s own release time only when given; blank ships at the default', () => {
     const src = 'releases:\n  s5:\n    event_datetime: 2026-10-08T10:00\n    deploy:\n      - course_source_repo: m\n        course_source_path: l\n        deploy_datetime: 2026-10-07T09:00\n';
     const y = new YamlText(src);
     const doc = y.toJS() as Record<string, unknown>;
@@ -306,9 +394,52 @@ describe('marks arithmetic, as grades.py does it', () => {
     expect(penaltyRate('10%')).toBe(0.1);
     expect(penaltyRate('0.1')).toBe(0.1);
     expect(penaltyRate('10')).toBeNull();
-    expect(finalGrade(50, 0.1, 2, 4)).toBeCloseTo(44);
-    expect(finalGrade(10, 0.5, 3, -2)).toBe(0);
-    expect(finalGrade(null, 0.1, 1, 5)).toBeNull();
+    expect(finalGrade(50, effectivePenalty(0.1, 2), 4)).toBeCloseTo(44);
+    expect(finalGrade(10, effectivePenalty(0.5, 3), -2)).toBe(0);
+    expect(finalGrade(null, effectivePenalty(0.1, 1), 5)).toBeNull();
+  });
+
+  it('takes the late penalty the grader chose, as grades.effective_penalty does', () => {
+    expect(effectivePenalty(0.1, 2).fraction).toBeCloseTo(0.2);
+    expect(effectivePenalty(0.1, 2, 'apply').fraction).toBeCloseTo(0.2);
+    expect(effectivePenalty(0.1, 2, 'waive').fraction).toBe(0);
+    expect(effectivePenalty(0.1, 2, '15%').fraction).toBeCloseTo(0.15);
+    expect(effectivePenalty(0.1, 2, 0.15).fraction).toBeCloseTo(0.15);
+    expect(effectivePenalty(0.1, 0, '15%').fraction).toBe(0);
+    // No late rule: the engine ignores late_penalty, so nothing comes off whatever it says.
+    expect(effectivePenalty(null, 2, '15%').fraction).toBe(0);
+    // Nobody can apply these: the late rule's arithmetic, and the engine holds the unit.
+    expect(effectivePenalty(0.1, 2, 'half')).toMatchObject({ mode: 'bad', fraction: 0.2 });
+    expect(effectivePenalty(0.1, 2, '15').mode).toBe('bad');
+    expect(lateChoice(' Waive ')).toEqual({ mode: 'waive' });
+    expect(lateChoice('15%')).toEqual({ mode: 'set', set: 0.15 });
+    expect(lateChoice(null)).toEqual({ mode: 'apply' });
+    expect(finalGrade(20, effectivePenalty(0.1, 2, 'waive'), null)).toBe(20);
+    expect(finalGrade(20, effectivePenalty(0.1, 2, '5%'), 1)).toBe(20);
+    expect(finalGrade(20, effectivePenalty(0.1, 2, 'half'), null)).toBeCloseTo(16);
+    expect(penaltyText(effectivePenalty(0.1, 2), 0.1)).toBe('−20%');
+    expect(penaltyText(effectivePenalty(0.1, 2, 'waive'), 0.1)).toBe('waived');
+    expect(penaltyText(effectivePenalty(0.1, 2, '15%'), 0.1)).toBe('−15% (set by hand)');
+    expect(penaltyText(effectivePenalty(0.1, 0, 'waive'), 0.1)).toBe('');
+    expect(penaltyText(effectivePenalty(null, 2), null)).toBe('');
+    expect(overrideValue('15')).toBe('15%');
+    expect(overrideValue(' 12.5% ')).toBe('12.5%');
+    expect(overrideValue('')).toBe('apply');
+    expect(overrideValue('half')).toBe('half');
+    // Not a penalty anybody can apply: written as typed, and held.
+    expect(overrideValue('150')).toBe('150');
+    expect(overrideValue('-5')).toBe('-5');
+    // A set penalty of nothing is a waiver: written as one, and an existing `0%` reads as one.
+    expect(overrideValue('0')).toBe('waive');
+    expect(overrideValue('0%')).toBe('waive');
+    expect(lateChoice('0%')).toEqual({ mode: 'waive' });
+    expect(penaltyText(effectivePenalty(0.1, 2, '0%'), 0.1)).toBe('waived');
+    expect(overrideText('0%')).toBe('');
+    expect(overrideText('15%')).toBe('15');
+    expect(overrideText(0.15)).toBe('15');
+    expect(overrideText('apply')).toBe('');
+    expect(overrideText('waive')).toBe('');
+    expect(overrideText(' half ')).toBe('half');
   });
 
   it('reads a question given as {points, file} and keeps file: on a save', () => {
@@ -456,6 +587,7 @@ describe('editing screens', () => {
     expect(out).toContain('Total / 40');
     expect(out).toContain('−20%');
     expect(out).toContain('<td class="calc">28.2</td>');
+    expect(out).toContain('Apply late penalty (−20%, 2 days late)');
     expect(out).toContain('Return marks to 0 students');
   });
   it('marks reads a question marked from another file by its points', () => {
@@ -603,6 +735,9 @@ describe('explicit numbers in the entry sheet (decision 0020)', () => {
     expect(nextNumber(doc, 'assignment')).toBe(3);
     const lab = blankDraft('lab', { repo: 'm' }) as ReleaseDraft;
     expect(withNumber(lab, doc, kindOf).number).toBe(4);
+    // A session with nothing to ship is proposed no number: the next release's is not its own.
+    expect(withNumber({ ...lab, deploys: [] }, doc, kindOf).number).toBeUndefined();
+    expect(withNumber({ ...lab, deploys: [], number: 2 }, doc, kindOf).number).toBe(2);
     // Readings are numbered only to join a lecture: nothing is proposed.
     expect(withNumber(blankDraft('readings', { repo: 'm' }) as ReleaseDraft, doc, kindOf).number).toBeUndefined();
     // A draft whose kind is inferred takes that kind's number; readings keep only one typed in.
@@ -617,8 +752,10 @@ describe('explicit numbers in the entry sheet (decision 0020)', () => {
     expect((readDraft(doc, 'lab_03') as ReleaseDraft).number).toBe(3);
     const intro = readDraft(doc, 'intro') as ReleaseDraft;
     expect(intro.number).toBe('');
-    const ok = { ...intro, date: '2026-09-10', deploys: [] };
+    const ok = { ...intro, date: '2026-09-10', deploys: [{ ...blankDeploy('m'), folder: 'l' }] };
     expect(draftErrors(ok, { kind: 'lecture' }).number).toBe('A number is needed.');
+    // With nothing to release it is an `events:` session: no number is asked of it.
+    expect(draftErrors({ ...ok, deploys: [] }, { kind: 'lecture' }).number).toBeUndefined();
     expect(draftErrors({ ...ok, show: false }, { kind: 'lecture' }).number).toBeUndefined();
     expect(draftErrors(ok, { kind: 'readings' }).number).toBeUndefined();
     // A readings key that carries a number joins that lecture: clearing the field cannot undo it.
@@ -627,7 +764,8 @@ describe('explicit numbers in the entry sheet (decision 0020)', () => {
   });
 
   it('writes number: when typed, and leaves a label-numbered entry as it is written', () => {
-    const src = 'releases:\n  intro:\n    event_datetime: 2026-09-10T10:00\n    kind: lecture\n  lecture-2:\n    event_datetime: 2026-09-17T10:00\n';
+    const copy = '    deploy:\n      - course_source_repo: m\n        course_source_path: l\n';
+    const src = `releases:\n  intro:\n    event_datetime: 2026-09-10T10:00\n    kind: lecture\n${copy}  lecture-2:\n    event_datetime: 2026-09-17T10:00\n${copy}`;
     const y = new YamlText(src);
     const d0 = y.toJS() as Record<string, unknown>;
     writeDraft(y, { ...(readDraft(d0, 'intro') as ReleaseDraft), number: 1 }, d0);

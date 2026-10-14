@@ -6,10 +6,10 @@ import { compileAll, matchRules } from '../edit/glob';
 import { invalidText, saveSteps, type SaveState, type Step } from '../edit/save';
 import { YamlText, deepEqual } from '../edit/yamlText';
 import { Field, Invalid } from '../forms/Form';
-import { KIND_LABEL, RELEASE_WORD, TYPE_CLASS, TYPE_LABEL, siteRowWord, fmtDay, fmtTime, fmtWhen, heldSentence, markWord, releaseIdent, repoWords, sortKey } from '../model/format';
+import { KIND_LABEL, RELEASE_WORD, TYPE_CLASS, TYPE_LABEL, siteRowWord, fmtDay, fmtTime, fmtWhen, heldSentence, kindIdent, markWord, releaseIdent, repoWords, sortKey } from '../model/format';
 import { needsANumber, parseSchedule, scheduleRows, type Block, type Row } from '../model/schedule';
 import {
-  assignmentKey, blankDeploy, blankDraft, blockOf, draftErrors, freshId, needsNumber, nextNumber, readDraft, unnumberedId, withNumber, writeDraft,
+  assignmentKey, blankDeploy, blankDraft, defaultDeployAt, entryKey, keyEntry, deployAt, draftErrors, freshId, needsNumber, nextNumber, readDraft, sessionBlock, unnumberedId, withNumber, writeDraft,
   type AssignmentDraft, type KindOf, type ArchiveDraft, type DeployDraft, type Draft, type EventDraft, type ReleaseDraft, type SemesterDraft,
 } from '../model/scheduleEdit';
 import type { Assignment, Release } from '../model/types';
@@ -90,7 +90,7 @@ export function useSchedFile(p: CohortProps): SchedFile | null | 'loading' {
 export function scheduleAfter(sf: SchedFile, drafts: Draft[], removed: Record<string, Block> = {}): { text: string } | { error: string } {
   const y = new YamlText(sf.text);
   for (const d of drafts) writeDraft(y, d, sf.doc);
-  for (const [id, b] of Object.entries(removed)) y.delete([b, id]);
+  for (const [k, b] of Object.entries(removed)) y.delete([b, keyEntry(sf.doc, k)[1]]);
   return validSchedule(y.toJS()) ? { text: y.text } : { error: invalidText('the schedule', validSchedule) };
 }
 
@@ -146,7 +146,7 @@ function FolderCheck({ p, dp, i, onSuggest }: { p: ReadyProps; dp: DeployDraft; 
  * none and whose copies are as saved has the engine's answer in status; the local rule covers the
  * rest (a draft): from where its first copy lands. */
 export function inferredKind(p: ReadyProps, d: ReleaseDraft, saved: Draft | null = null): string {
-  if (saved?.kind === 'releases' && !saved.type && deepEqual(saved.deploys, d.deploys)) {
+  if (saved?.kind === 'session' && !saved.type && deepEqual(saved.deploys, d.deploys)) {
     const engine = (p.status.releases ?? []).find((r) => r.id === saved.id)?.kind;
     if (engine) return engine;
   }
@@ -172,12 +172,12 @@ function ReleaseForm({ p, d, set, errors, repos, inferred }: { p: ReadyProps; d:
   return (
     <>
       <div class="row-2">
-        <F id="e-type" k="type" d={d} set={set} t={{ tier: 'default', label: 'Kind', widget: 'select', defaultLabel: 'default: inferred from where it lands', reason: 'Sets the row’s tab, colour and name.', options: [{ value: '', label: `${KIND_LABEL[inferred] ?? inferred} (inferred)` }, ...kinds.map((k) => ({ value: k, label: KIND_LABEL[k] ?? k }))] }} />
-        <F id="e-title" k="title" d={d} set={set} t={{ tier: 'default', label: 'Title', defaultLabel: 'from the folder name', reason: 'The name, shown after the identifier. Plain text.' }} />
+        <F id="e-type" k="type" d={d} set={set} t={{ tier: 'default', label: 'Kind', widget: 'select', reason: 'Sets the row’s tab, colour and name.', options: [{ value: '', label: `${KIND_LABEL[inferred] ?? inferred} (inferred)` }, ...kinds.map((k) => ({ value: k, label: KIND_LABEL[k] ?? k }))] }} />
+        <F id="e-title" k="title" d={d} set={set} t={{ tier: 'default', label: 'Title', reason: 'The name, shown after the identifier. Plain text.' }} />
       </div>
       <NumberField d={d} set={set as Setter<ReleaseDraft | AssignmentDraft>} errors={errors} kind={d.type || inferred} />
       <div class="row-2">
-        <F id="e-date" k="date" d={d} set={set} error={errors.date} t={{ tier: 'ask', label: 'When', widget: 'date', reason: `Automation releases at this time, ${tz}.` }} />
+        <F id="e-date" k="date" d={d} set={set} error={errors.date} t={{ tier: 'ask', label: 'When', widget: 'date', reason: d.deploys.length ? `In ${tz}. Automation releases the files an hour before, unless a line sets its own time (Advanced).` : 'Leave the date empty and the student site shows TBC.' }} />
         <F id="e-time" k="time" d={d} set={set} t={{ tier: 'ask', label: 'At', widget: 'time' }} />
       </div>
       <F id="e-det" k="details" d={d} set={set} t={MD('Details (as displayed to students)', 'Shown to students under the title.')} />
@@ -187,6 +187,8 @@ function ReleaseForm({ p, d, set, errors, repos, inferred }: { p: ReadyProps; d:
         {d.deploys.map((dp, i) => {
           const tree = dp.repo ? p.files.tree(p.course.org, dp.repo) : null;
           const adv = [dp.dest && dp.dest !== DEFAULT_DEST_REPO, !!dp.path, !!(dp.atDate || dp.atTime)].filter(Boolean).length;
+          // The release time's boxes show the default until a time of its own is set.
+          const [atDate, atTime] = dp.atDate || dp.atTime ? [dp.atDate, dp.atTime] : defaultDeployAt(d.date, d.time);
           return (
             <div class="deploy">
               <div class="deploy-head">Deploy {i + 1}<button class="x" type="button" aria-label={`Remove deploy ${i + 1}`} onClick={() => set({ deploys: d.deploys.filter((_, j) => j !== i) })}>&times;</button></div>
@@ -217,16 +219,17 @@ function ReleaseForm({ p, d, set, errors, repos, inferred }: { p: ReadyProps; d:
                     <div class="field"><label for={`e-d${i}-path`}>To: path <span class="default">default: same as From</span></label><input type="text" id={`e-d${i}-path`} placeholder={dp.folder} value={dp.path} onInput={(e) => setDeploy(i, { path: (e.target as HTMLInputElement).value })} /></div>
                   </div>
                   <div class="row-2">
-                    <div class="field"><label for={`e-d${i}-at`}>Release at <span class="default">default: {d.date ? `${d.date}${d.time ? ` ${d.time}` : ''}` : 'when the session starts'}</span></label> <Hint small label="About the release time">Ships the files at this moment, before or after the session. Leave blank to ship when the session starts.</Hint><input type="date" id={`e-d${i}-at`} placeholder={d.date} value={dp.atDate} onInput={(e) => setDeploy(i, { atDate: (e.target as HTMLInputElement).value })} />{errors[`deploy${i}.at`] ? <Invalid>{errors[`deploy${i}.at`]}</Invalid> : null}</div>
-                    <div class="field"><label for={`e-d${i}-att`}>At</label><input type="time" id={`e-d${i}-att`} placeholder={d.time} value={dp.atTime} onInput={(e) => setDeploy(i, { atTime: (e.target as HTMLInputElement).value })} /></div>
+                    <div class="field"><label for={`e-d${i}-at`}>Release at <Hint small label="About the release time">Ships the files at this moment, before or after the session. Filled in with the default, an hour before the session; clear the date to go back to it.</Hint></label><input type="date" id={`e-d${i}-at`} value={atDate} onInput={(e) => setDeploy(i, deployAt(d, (e.target as HTMLInputElement).value, atTime))} />{errors[`deploy${i}.at`] ? <Invalid>{errors[`deploy${i}.at`]}</Invalid> : null}</div>
+                    <div class="field"><label for={`e-d${i}-att`}>At</label><input type="time" id={`e-d${i}-att`} value={atTime} onInput={(e) => setDeploy(i, deployAt(d, atDate, (e.target as HTMLInputElement).value))} /></div>
                   </div>
                 </div>
               </details>
             </div>
           );
         })}
-        {d.deploys.length ? null : <p class="why">Nothing is released for this entry; its row still shows on the student site.</p>}
-        <div><button class="btn small quiet" type="button" onClick={() => set({ deploys: [...d.deploys, blankDeploy(repos[0] ?? '')] })}>{d.deploys.length ? 'Add another' : 'Add what to release'}</button></div>
+        {d.deploys.length ? null : <p class="why">Nothing to release: a session of its own (a second lab group, say), saved under events. Its row still shows on the student site, without files.</p>}
+        {errors.block ? <Invalid>{errors.block}</Invalid> : null}
+        <div><button class="btn small quiet" type="button" onClick={() => set({ deploys: [...d.deploys, blankDeploy(repos[0] ?? '')] })}>{d.deploys.length ? 'Add another release item(s)' : 'Add what to release'}</button></div>
       </div>
       {d.id ? <a class="textlink" href={`#release-${d.id}`}>Open release details</a> : null}
     </>
@@ -413,7 +416,7 @@ function KindHelp() {
   return (
     <Hint label="About the kinds of entry" doc="07-schedule-releases.md">
       <span class="kind-help">
-        <span><b>Lecture, Lab, Readings</b>: a session’s materials. The student site shows a dated row of that kind, linking the files once they are out. At the release time, automation copies the files you name from the course repo into the semester’s materials.</span>
+        <span><b>Lecture, Lab, Readings</b>: a session’s materials. The student site shows a dated row of that kind, linking the files once they are out. At the release time, automation copies the files you name from the course repo into the semester’s materials. With nothing to release (a second lab group), the row shows without files.</span>
         <span><b>Assignment</b>: work students hand in. The site shows its hand out and due date and gives it a page. At the hand out, automation creates the repos students work in from the template (none when work is handed in outside GitHub); it collects at the late cutoff, and returns marks at their return date or when you press Return marks.</span>
         <span><b>Exam</b>: a dated row on the student site and in the calendar. Nothing is copied or collected.</span>
         <span><b>Event</b>: any other dated row, such as a guest talk or a reading week. Nothing is copied or collected.</span>
@@ -428,10 +431,7 @@ function identOf(d: Draft, row: Row | undefined, kind: string): string {
   if (row) return row.ident;
   if (d.kind === 'assignments') return d.number ? `Assignment ${d.number}` : 'Assignment';
   if (d.kind === 'events') return d.type === 'exam' ? 'Exam' : 'Event';
-  if (d.kind === 'releases') {
-    const word = KIND_LABEL[kind] ?? kind;
-    return d.number ? `${word} ${d.number}` : word;
-  }
+  if (d.kind === 'session') return kindIdent(kind, d.number || null);
   return '';
 }
 
@@ -464,7 +464,9 @@ function View(p: ReadyProps) {
   const rows = scheduleRows(status, sched, now, tz);
   const assignmentOf = new Map((status.assignments ?? []).map((a) => [a.slug, a]));
   const key = p.entry;
-  const current = key && key !== 'new' && key !== 'semester' && key !== 'archive' ? rows.find((r) => r.entry === key) : undefined;
+  // A row's sheet key: its id, qualified for an `events:` entry whose id a release also has.
+  const rowKey = (r: { block: Block; entry: string }) => (r.entry === 'semester' || r.entry === 'archive' ? r.entry : entryKey(doc, r.block, r.entry));
+  const current = key && key !== 'new' && key !== 'semester' && key !== 'archive' ? rows.find((r) => rowKey(r) === key) : undefined;
   const repos = (status.course?.materials ?? []).map((m) => m.repo);
   const templates = status.course?.templates ?? [];
   const [newRun, setNewRun] = useState<Values>({});
@@ -475,7 +477,7 @@ function View(p: ReadyProps) {
   const kindOf: KindOf = (k, e) => statusKind[k] ?? (String((e as { kind?: unknown })?.kind ?? '') || 'lecture');
   // A release's kind as the engine will read it: its own, else the one its folder implies.
   const inferredOf = (d: ReleaseDraft): string => inferredKind(p, d, d.id ? baseOf(d.id) : null);
-  const kindFor = (d: Draft): string | undefined => (d.kind === 'releases' ? d.type || inferredOf(d) : undefined);
+  const kindFor = (d: Draft): string | undefined => (d.kind === 'session' ? d.type || inferredOf(d) : undefined);
   // A new entry shows the number it will get until one is typed (decision 0020).
   const prefill = (d: Draft): Draft => withNumber(d, doc, kindOf, kindFor(d));
   const draftOf = (k: string): Draft | null => (drafts[k] ? prefill(drafts[k]) : baseOf(k));
@@ -526,9 +528,9 @@ function View(p: ReadyProps) {
     let newId: string | null = null;
     const written = dirtyKeys.map((k): Draft => {
       const d = prefill(drafts[k]);
-      if (k !== 'new' || !(d.kind === 'releases' || d.kind === 'assignments' || d.kind === 'events')) return d;
+      if (k !== 'new' || !(d.kind === 'session' || d.kind === 'assignments' || d.kind === 'events')) return d;
       newId = d.kind === 'assignments' ? assignmentKey(d.number)
-        : d.kind === 'releases' ? (d.number ? freshId(doc, 'releases', `${kindFor(d)}-${d.number}`) : unnumberedId(doc, kindFor(d) ?? 'lecture', d.title))
+        : d.kind === 'session' ? (d.number ? freshId(doc, sessionBlock(d), `${kindFor(d)}-${d.number}`) : unnumberedId(doc, kindFor(d) ?? 'lecture', d.title))
         : freshId(doc, d.kind, d.title || 'event');
       return { ...d, id: newId };
     });
@@ -579,20 +581,21 @@ function View(p: ReadyProps) {
     }
     if (!filters[r.block]) continue;
     const rel = r.block === 'releases' ? (status.releases ?? []).find((x) => x.id === r.entry) : undefined;
-    const gone = !!removed[r.entry];
+    const rk = rowKey(r);
+    const gone = !!removed[rk];
     const ref = rel ? releaseRef(rel, tz, year) : null;
     const m = rowMark(marks, r);
     const st = gone ? (
-      <><span>Removed.</span><button class="textlink" type="button" style="min-height:0;padding:0" onClick={() => { const n = { ...removed }; delete n[r.entry]; setRemoved(n); }}>Undo</button></>
+      <><span>Removed.</span><button class="textlink" type="button" style="min-height:0;padding:0" onClick={() => { const n = { ...removed }; delete n[rk]; setRemoved(n); }}>Undo</button></>
     ) : m ? <><ReleaseMarks m={m} entry={r.entry} />{m.late ? <a class="textlink" href={`#release-${r.entry}`}>Details</a> : null}</>
-      : rel && !ref ? <><span class="st-note">{NOTHING_TO_RELEASE}</span><a class="textlink" href={`#schedule-${r.entry}`}>Edit</a></>
+      : rel && !ref ? <><span class="st-note">{NOTHING_TO_RELEASE}</span><a class="textlink" href={`#schedule-${rk}`}>Edit</a></>
       : ref && rel?.state === 'planned' ? <><span class="st-chip">planned</span><OpOpen def={releaseEarly(scope, ref)} cls="btn small" label="Release early" /></>
       : <span class="st-chip">{r.state}</span>;
     items.push(
-      <li class={`trow ${TYPE_CLASS[r.type] ?? 'evt'}${markClass(m)}${key === r.entry ? ' current' : ''}${gone ? ' removed' : ''}${r.show ? '' : ' off-site'}`} data-entry={r.entry}>
+      <li class={`trow ${TYPE_CLASS[r.type] ?? 'evt'}${markClass(m)}${key === rk ? ' current' : ''}${gone ? ' removed' : ''}${r.show ? '' : ' off-site'}`} data-entry={r.entry}>
         <span class="k">{siteRowWord(r.type)}</span>
         <span class="d">{r.when ? fmtDay(r.when, tz, year) : 'No date yet'}{r.when && fmtTime(r.when, tz) ? <span>{fmtTime(r.when, tz)}{r.tbc ? ' (TBC)' : ''}</span> : r.tbc && r.when ? <span>(TBC)</span> : null}</span>
-        <span class="ttl"><a href={`#schedule-${r.entry}`}><b>{r.ident}</b>: {r.name}</a></span>
+        <span class="ttl"><a href={`#schedule-${rk}`}><b>{r.ident}</b>: {r.name}</a></span>
         <Details r={r} a={r.block === 'assignments' ? assignmentOf.get(r.entry) : undefined} now={now} />
         <span class="st">{st}</span>
       </li>,
@@ -621,17 +624,15 @@ function View(p: ReadyProps) {
         // inferred from the folder), so a kind or folder change takes that kind's next number.
         // Typing in the Number field (clearing it included) is the instructor's own number.
         // Readings get no proposal (`nextNumber` is null), so their number is always typed and stays.
-        if (key === 'new' && d.kind === 'releases' && next.kind === 'releases' && !('number' in patch) && d.number === nextNumber(doc, kindFor(d)!, kindOf)) next = { ...next, number: undefined };
+        if (key === 'new' && d.kind === 'session' && next.kind === 'session' && !('number' in patch) && d.number === nextNumber(doc, kindFor(d)!, kindOf)) next = { ...next, number: undefined };
         setDraft(key, next);
       };
-      const rel = d.kind === 'releases' && key !== 'new' ? (status.releases ?? []).find((x) => x.id === key) : undefined;
+      const rel = d.kind === 'session' && key !== 'new' ? (status.releases ?? []).find((x) => x.id === key) : undefined;
       const ref = rel ? releaseRef(rel, tz, year) : null;
       const ident = identOf(d, current, kindFor(d) ?? '');
       const title = d.kind === 'semester' ? <>Semester dates</> : d.kind === 'archive' ? <><b>Archive</b>: {d.title || 'Semester archived'} <ArchiveHelp org={p.cohort.org} /></> : <><b>{ident}</b>: {d.title || (current?.name ?? 'Untitled')}</>;
-      const eyebrow = d.kind === 'semester' ? 'Semester' : d.kind === 'archive' ? 'Archive' : d.kind === 'assignments' ? 'Assignment entry' : `${TYPE_LABEL[d.kind === 'releases' ? d.type || 'lecture' : d.type] ?? ''}${d.date ? `, ${fmtDay(d.date, tz, year)}${d.time ? ` ${d.time}` : ''}` : ''}`;
+      const eyebrow = d.kind === 'semester' ? 'Semester' : d.kind === 'archive' ? 'Archive' : d.kind === 'assignments' ? 'Assignment entry' : `${TYPE_LABEL[d.kind === 'session' ? d.type || 'lecture' : d.type] ?? ''}${d.date ? `, ${fmtDay(d.date, tz, year)}${d.time ? ` ${d.time}` : ''}` : ''}`;
       const probs = (status.problems ?? []).filter((x) => x.fix?.entry === key && x.fix.path === 'schedule.yml');
-      const two = d.kind === 'releases' || d.kind === 'assignments';
-      const siteTitle = d.kind === 'semester' ? '' : d.title || current?.name || '';
       sheet = (
         <div class="entry" role="dialog" aria-labelledby="entry-title">
           <div class="entry-head">
@@ -643,16 +644,11 @@ function View(p: ReadyProps) {
             {close}
           </div>
           <div class="entry-body">
-            {d.kind !== 'semester' ? (
-              <div class="site-note">
-                On the student site this row shows {two ? <><b>{ident}</b> on one line and “{siteTitle}” below it, without the colon.</> : <>only the bold title, <b>{siteTitle || (d.kind === 'archive' ? 'Semester archived' : '')}</b>.</>}
-              </div>
-            ) : null}
             {/* A release that will be skipped says so once: the chip above, and the folder check (or, for a missing number, the line below). */}
             {probs.length && rel?.state !== 'will_be_skipped' ? <ProblemCards list={probs} /> : null}
             <div class="form">
               {d.kind !== 'semester' && d.kind !== 'archive' ? <div class="field"><span class="label">Identifier</span><div class="ident">{ident}<span>derived, as the student site does</span></div></div> : null}
-              {d.kind === 'releases' ? <ReleaseForm p={p} d={d} set={set} errors={errors} repos={repos} inferred={inferredOf(d)} />
+              {d.kind === 'session' ? <ReleaseForm p={p} d={d} set={set} errors={errors} repos={repos} inferred={inferredOf(d)} />
                 : d.kind === 'assignments' ? <AssignmentForm p={p} d={d} set={set} errors={errors} templates={templates} isNew={key === 'new'} tiered={tiered} run={{ values: newRun, set: (v) => { setNewRun(v); if (save.kind !== 'busy') setSave({ kind: 'idle' }); }, errors: newRunErrors(d) }} />
                 : d.kind === 'events' ? <EventForm d={d} set={set} errors={errors} />
                 : d.kind === 'semester' ? <SemesterForm d={d} set={set} errors={errors} />
@@ -671,9 +667,9 @@ function View(p: ReadyProps) {
             <SaveLine state={save} />
             <div class="savebar">
               <button class="btn" type="button" disabled={save.kind === 'busy' || !dirty} onClick={() => void doSave()}>Save</button>
-              <EditFile org={p.cohort.org} repo={CONFIG_REPO} path="schedule.yml" exists={schedExists} line={key !== 'new' && key !== 'semester' ? lineOf(sf.text, key, key === 'archive' ? 0 : 2) : undefined} />
-              {key !== 'new' && key !== 'semester' && key !== 'archive' && blockOf(doc, key) && !removed[key] ? (
-                <button class="btn small quiet" type="button" style="margin-left:auto" onClick={() => { setRemoved({ ...removed, [key]: blockOf(doc, key)! }); if (typeof location !== 'undefined') location.hash = '#schedule'; }}>Remove</button>
+              <EditFile org={p.cohort.org} repo={CONFIG_REPO} path="schedule.yml" exists={schedExists} line={key !== 'new' && key !== 'semester' ? lineOf(sf.text, keyEntry(doc, key)[1], key === 'archive' ? 0 : 2) : undefined} />
+              {key !== 'new' && key !== 'semester' && key !== 'archive' && keyEntry(doc, key)[0] && !removed[key] ? (
+                <button class="btn small quiet" type="button" style="margin-left:auto" onClick={() => { setRemoved({ ...removed, [key]: keyEntry(doc, key)[0]! }); if (typeof location !== 'undefined') location.hash = '#schedule'; }}>Remove</button>
               ) : null}
             </div>
           </div>

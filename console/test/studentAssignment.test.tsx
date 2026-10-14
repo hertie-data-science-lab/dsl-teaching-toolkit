@@ -59,6 +59,11 @@ describe('the Assignments tab', () => {
     expect(t).toMatch(/^ Your marks Assignment Mark Late penalty Assignment 1: Regression 18 \/ 20 -10% Semester total: 18 Your gradebook on GitHub/);
     expect(t).toContain('returned 18 / 20');
     expect(t).toContain('Mark 18 / 20 Late penalty -10% Feedback Good.');
+    // A penalty the marker waived or set by hand reads as the engine wrote it.
+    for (const penalty of ['waived', '-5% (set by hand)']) {
+      const marked = parseGradebook(`assignments:\n  a1:\n    final_grade: '18'\n    penalty: ${penalty}\n`);
+      expect(text(<AssignmentsView org={ORG} facts={facts([A])} mine={mine({ gradebook: marked })} now={NOW} studentView={false} receipts={{}} login={LOGIN} />)).toContain(`Late penalty ${penalty}`);
+    }
     expect(stateWord('returned', gb!.entries.a1)).toBe('returned 18 / 20');
     expect(stateWord('open', undefined)).toBe('open');
     // No mark yet: no table; the Student view says whose marks show here; an auditor gets nothing.

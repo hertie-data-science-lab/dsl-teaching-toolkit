@@ -1377,6 +1377,30 @@ def test_the_dry_run_says_who_gets_what_in_a_private_issue_and_logs_none_of_it(
         assert private not in printed
 
 
+def test_the_preview_says_a_late_penalty_without_a_late_policy_is_ignored(
+    tmp_path, monkeypatch
+):
+    late = _SHEET.replace("days_late: 0", "days_late: 2").replace(
+        "    score_individual: 43\n",
+        "    late_penalty: 15%\n    score_individual: 43\n",
+    )
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": late},
+        # A late window with no penalty: the pair is set together, so no late rule.
+        grading="title: Neural networks\nlate_window_days: 7\n",
+        dry_run=True,
+    )
+    body = out["preview"][0]["body"]
+    assert (
+        "- **assignment-1** has no late policy, so the `late_penalty` on 1 unit is "
+        "ignored: nothing comes off." in body
+    )
+    assert "### ⚠️ Fix these first - held back, not sent (0)" in body
+    assert "- **assignment-1** · `ada-l` (Ada) · 43 (new)" in body
+
+
 def test_a_second_dry_run_rewrites_the_preview_rather_than_opening_another(
     tmp_path, monkeypatch
 ):

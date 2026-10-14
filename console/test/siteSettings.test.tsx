@@ -15,6 +15,7 @@ import type { Status } from '../src/model/types';
 import { DispatchAdapter } from '../src/ops/adapter';
 import { OpsSession } from '../src/ops/session';
 import { SiteScreen } from '../src/screens/Site';
+import { homeText } from '../src/model/siteText';
 import { StaticFiles } from './staticFiles';
 import example from './fixtures/status.example.json';
 import { FakeGitHub, json, type Seen } from './fake';
@@ -30,11 +31,13 @@ const COURSE_YML = '# INSTRUCTOR-OWNED\ncourse_name: Machine Learning\ncourse_co
 const SCHEDULE = '# INSTRUCTOR-OWNED\ntimezone: Europe/Berlin\nsemester_start: 2026-09-07\nsemester_end: 2026-12-18\n';
 const CONFIG = '# INSTRUCTOR-OWNED\ncourse_name: "Machine Learning"\n\n# --- Institution ---\nschoolname: "Hertie School"\nschoolurl: "https://hertie-school.org/en/datasciencelab"\ndsl_org_url: "https://github.com/hertie-data-science-lab"\naddress: |\n    Data Science Lab\n    Hertie School\n\nplugins:\n  - jekyll-remote-theme\n';
 
+const HOME = 'Welcome to {{ site.course_name }}.\n\n{% if site.content_repo %}Materials live in {{ site.content_repo }}.{% endif %}\n';
+
 const files = new StaticFiles({
   [`${COURSE_ORG}/.github/dsl-course.yml`]: COURSE_YML,
   [`${ORG}/semester-config/schedule.yml`]: SCHEDULE,
   [`${ORG}/${SITE}/_config.yml`]: CONFIG,
-  [`${ORG}/${SITE}/index.md`]: '---\nlayout: home\n---\nWelcome.\n',
+  [`${ORG}/${SITE}/index.md`]: `---\nlayout: home\n---\n${HOME}`,
 });
 
 let root: HTMLElement | null = null;
@@ -108,6 +111,27 @@ describe('Site settings', () => {
   it('shows the semester label and org as what they are, not as fields', async () => {
     await mount();
     expect(section('Semester and org').textContent).toContain('from the semester org’s name');
+  });
+});
+
+describe('Home text', () => {
+  it('previews what students see, and names the site keys _config.yml does not set', async () => {
+    await mount();
+    const prev = q('.md-prev');
+    expect(prev.textContent).toBe(`What students see${homeText(HOME, { course_name: 'Machine Learning' })}`);
+    expect(prev.textContent).not.toContain('{%');
+    expect(prev.textContent).not.toContain('content_repo');
+    expect(q('#site-home').closest('.section')!.querySelector('p.footnote')!.textContent).toBe('Not set in _config.yml: content_repo - this text shows nothing for it.');
+  });
+});
+
+describe('Institution', () => {
+  it('sits in a collapsed Advanced fold at the bottom of the settings', async () => {
+    await mount();
+    const fold = section('Institution').closest('details')!;
+    expect(fold.open).toBe(false);
+    expect(fold.querySelector('summary')!.textContent).toBe('Advanced');
+    expect(fold.parentElement!.lastElementChild).toBe(fold);
   });
 });
 

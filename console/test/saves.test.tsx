@@ -211,6 +211,31 @@ describe('Save on the schedule’s new release, its kind inferred from the folde
     expect(out.lecture.show_on_site).toBe(false);
   });
 
+  it('drops the proposed number when a new lab loses its deploy and becomes a session, and keeps a typed one', async () => {
+    const add = async (number?: string) => {
+      const gh = github(), f = files({ [`${COHORT_ORG}/semester-config/schedule.yml`]: sched });
+      await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'new' })} />);
+      await click(button('Lab'));
+      expect(q<HTMLInputElement>('#e-num').value).toBe('3');
+      if (number !== undefined) await type('#e-num', number);
+      await type('#e-title', 'Clinic');
+      await click(q('button[aria-label="Remove deploy 1"]'));
+      await type('#e-date', '2026-10-01');
+      await click(buttons('Save')[0]);
+      await settle(() => puts(gh, 'schedule.yml').length > 0);
+      const out = parse(body(puts(gh, 'schedule.yml')[0]));
+      render(null, root!);
+      return out;
+    };
+    const proposed = await add();
+    expect(Object.keys(proposed.releases)).toEqual(['lab-2']);
+    expect(Object.keys(proposed.events)).toEqual(['lab-clinic']);
+    expect(proposed.events['lab-clinic']).not.toHaveProperty('number');
+    const typed = await add('2');
+    expect(Object.keys(typed.events)).toEqual(['lab-2-b']);
+    expect(typed.events['lab-2-b'].number).toBe(2);
+  });
+
   it('writes no number for a readings folder', async () => {
     const gh = github(), f = files({ [`${COHORT_ORG}/semester-config/schedule.yml`]: sched });
     const out = await addRelease(gh, f, 'readings/week_3');
@@ -243,6 +268,48 @@ describe('Save on the schedule’s new release, its kind inferred from the folde
     const out = parse(body(puts(gh, 'schedule.yml')[0])).releases;
     expect(out['readings-week']).not.toHaveProperty('number');
     expect(out['readings-week'].kind).toBe('readings');
+  });
+});
+
+describe('A release line’s own time, prefilled with the default', () => {
+  const sched = 'timezone: Europe/Berlin\nreleases:\n  lab-2:\n    event_datetime: 2026-09-15T10:00\n    kind: lab\n    deploy:\n      - course_source_repo: course-materials-f2026\n        course_source_path: labs/02_x\n';
+  const at = () => [q<HTMLInputElement>('#e-d0-at').value, q<HTMLInputElement>('#e-d0-att').value];
+  async function open(gh: FakeGitHub) {
+    const f = files({ [`${COHORT_ORG}/semester-config/schedule.yml`]: sched });
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'lab-2' })} />);
+  }
+  async function save(gh: FakeGitHub) {
+    await click(buttons('Save')[0]);
+    await settle(() => puts(gh, 'schedule.yml').length > 0);
+    return parse(body(puts(gh, 'schedule.yml')[0])).releases['lab-2'].deploy[0];
+  }
+
+  it('shows an hour before the session, and follows the session while it is the default', async () => {
+    const gh = github();
+    await open(gh);
+    expect(at()).toEqual(['2026-09-15', '09:00']);
+    expect(root!.textContent).not.toContain('default: 2026');
+    await type('#e-time', '00:30');
+    expect(at()).toEqual(['2026-09-14', '23:30']);
+  });
+
+  it('writes no deploy_datetime when set back to the default, or the date is cleared', async () => {
+    const gh = github();
+    await open(gh);
+    await type('#e-d0-att', '08:00');
+    await type('#e-d0-att', '09:00');
+    await type('#e-d0-at', '2026-09-14');
+    await type('#e-d0-at', '');
+    expect(at()).toEqual(['2026-09-15', '09:00']);
+    await type('#e-title', 'Intro');
+    expect(await save(gh)).toEqual({ course_source_repo: 'course-materials-f2026', course_source_path: 'labs/02_x' });
+  });
+
+  it('writes a changed time', async () => {
+    const gh = github();
+    await open(gh);
+    await type('#e-d0-att', '08:00');
+    expect((await save(gh)).deploy_datetime).toBe('2026-09-15T08:00');
   });
 });
 
@@ -292,6 +359,113 @@ describe('Save on the marks grid', () => {
     expect(sheet.teams['team-alpha'].score_group).toEqual({ Q1: 4 });
     expect(sheet.teams['team-alpha'].feedback_per_question).toEqual({ Q1: 'Clear proof.' });
     expect(sheet.teams['team-alpha'].members['anna-a'].adjustment_individual).toBe(1);
+  });
+});
+
+describe('the late penalty on the marks grid', () => {
+  const LATE = TEAM_SHEET.replace('days_late: 0', 'days_late: 2');
+  const late = () => files({ [`${COHORT_ORG}/semester-config/grading_sheets/assignment-3.yml`]: LATE });
+  const BOX = 'input[aria-label="Late penalty override for team-alpha, as a percentage"]';
+  const tick = () => q<HTMLInputElement>('.late-apply input');
+  const saved = async (gh: FakeGitHub) => {
+    await click(button('Save marks'));
+    await settle(() => puts(gh, 'grading_sheets/assignment-3.yml').length > 0);
+    return parse(body(puts(gh, 'grading_sheets/assignment-3.yml')[0])).teams['team-alpha'];
+  };
+
+  it('offers nothing on a unit that is not late', async () => {
+    const f = files();
+    await mount(envOf(github(), f), <AssignmentScreen {...props(f, { entry: 'assignment-3', tab: 'marks' })} />);
+    expect(root!.querySelector('.late-apply')).toBeNull();
+    expect(root!.querySelector(BOX)).toBeNull();
+  });
+
+  it('unticking waives it, and the total shows the mark without it', async () => {
+    const gh = github(), f = late();
+    await mount(envOf(gh, f), <AssignmentScreen {...props(f, { entry: 'assignment-3', tab: 'marks' })} />);
+    expect(tick().checked).toBe(true);
+    expect(q('.late-apply').textContent).toMatch(/^Apply late penalty \(.*2 days late\)$/);
+    await type('input[aria-label="Q1 (out of 5) for team-alpha"]', '4');
+    await click(tick());
+    expect(tick().checked).toBe(false);
+    expect(q('tr.team-row td.pen').textContent).toContain('waived');
+    expect(q('tr.team-row td.calc').textContent).toBe('4');
+    expect((await saved(gh)).late_penalty).toBe('waive');
+  });
+
+  it('an override is the whole penalty and keeps it applied', async () => {
+    const gh = github(), f = late();
+    await mount(envOf(gh, f), <AssignmentScreen {...props(f, { entry: 'assignment-3', tab: 'marks' })} />);
+    await type('input[aria-label="Q1 (out of 5) for team-alpha"]', '4');
+    await type(BOX, '25');
+    expect(tick().checked).toBe(true);
+    expect(q('tr.team-row td.pen').textContent).toContain('−25% (set by hand)');
+    expect(q('tr.team-row td.calc').textContent).toBe('3');
+    expect((await saved(gh)).late_penalty).toBe('25%');
+  });
+
+  it('clearing the override or re-ticking on a sheet with no late_penalty writes nothing', async () => {
+    const gh = github(), f = late();
+    await mount(envOf(gh, f), <AssignmentScreen {...props(f, { entry: 'assignment-3', tab: 'marks' })} />);
+    await type(BOX, '25');
+    await type(BOX, '');
+    expect(tick().checked).toBe(true);
+    expect(root!.textContent).toContain('No unsaved changes');
+    await click(tick());
+    await click(tick());
+    expect(tick().checked).toBe(true);
+    expect(root!.textContent).toContain('No unsaved changes');
+  });
+
+  it('ticking a unit that carries a late_penalty writes apply', async () => {
+    const gh = github(), f = files({ [`${COHORT_ORG}/semester-config/grading_sheets/assignment-3.yml`]: LATE.replace('    feedback_group:\n', '    late_penalty: waive\n    feedback_group:\n') });
+    await mount(envOf(gh, f), <AssignmentScreen {...props(f, { entry: 'assignment-3', tab: 'marks' })} />);
+    expect(tick().checked).toBe(false);
+    await click(tick());
+    expect((await saved(gh)).late_penalty).toBe('apply');
+  });
+
+  it('unticking an override waives it', async () => {
+    const gh = github(), f = late();
+    await mount(envOf(gh, f), <AssignmentScreen {...props(f, { entry: 'assignment-3', tab: 'marks' })} />);
+    await type(BOX, '25');
+    await click(tick());
+    expect(q<HTMLInputElement>(BOX).value).toBe('');
+    expect((await saved(gh)).late_penalty).toBe('waive');
+  });
+
+  it('an override of 0 waives it, and the tickbox follows', async () => {
+    const gh = github(), f = late();
+    await mount(envOf(gh, f), <AssignmentScreen {...props(f, { entry: 'assignment-3', tab: 'marks' })} />);
+    await type(BOX, '0');
+    expect(tick().checked).toBe(false);
+    expect(q('tr.team-row td.pen').textContent).toContain('waived');
+    expect((await saved(gh)).late_penalty).toBe('waive');
+  });
+
+  it('shows nothing on an on-time unit, whatever its late_penalty says', async () => {
+    const f = files({ [`${COHORT_ORG}/semester-config/grading_sheets/assignment-3.yml`]: TEAM_SHEET.replace('    feedback_group:\n', '    late_penalty: half\n    feedback_group:\n') });
+    await mount(envOf(github(), f), <AssignmentScreen {...props(f, { entry: 'assignment-3', tab: 'marks' })} />);
+    expect(q('tr.team-row td.pen').textContent).toBe('');
+    expect(root!.querySelector(BOX)).toBeNull();
+  });
+
+  it('offers no penalty controls when the assignment has no late rule', async () => {
+    const f = files({ [`${COHORT_ORG}/semester-config/grading_sheets/assignment-3.yml`]: LATE.replace('    feedback_group:\n', '    late_penalty: 15%\n    feedback_group:\n') });
+    const noRule: Loaded = { ...ready, status: { ...ready.status!, assignments: [solo, { ...team, settings: {} }] } } as Loaded;
+    await mount(envOf(github(), f), <AssignmentScreen {...props(f, { entry: 'assignment-3', tab: 'marks', loaded: noRule })} />);
+    await type('input[aria-label="Q1 (out of 5) for team-alpha"]', '4');
+    expect(root!.querySelector('.late-apply')).toBeNull();
+    expect(root!.querySelector(BOX)).toBeNull();
+    // The engine ignores the key: nothing comes off.
+    expect(q('tr.team-row td.calc').textContent).toBe('4');
+  });
+
+  it('says so beside a penalty nobody can apply', async () => {
+    const f = files({ [`${COHORT_ORG}/semester-config/grading_sheets/assignment-3.yml`]: LATE.replace('    feedback_group:\n', '    late_penalty: half\n    feedback_group:\n') });
+    await mount(envOf(github(), f), <AssignmentScreen {...props(f, { entry: 'assignment-3', tab: 'marks' })} />);
+    expect(q<HTMLInputElement>(BOX).value).toBe('half');
+    expect(q('tr.team-row td.pen').textContent).toContain('held until then');
   });
 });
 

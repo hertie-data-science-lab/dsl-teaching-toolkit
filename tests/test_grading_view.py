@@ -14,12 +14,13 @@ from __future__ import annotations
 
 import pytest
 
-from dsl_course import roster
+from dsl_course import grades, roster
 from dsl_course.grades import (
     NOTES_KEY,
     STUDENT_VIEW_KEYS,
     SheetSpec,
     _cell,
+    _marks_digest,
     build_gradebooks,
     load_sheets,
     needs_hand_decision,
@@ -260,7 +261,9 @@ def test_a_score_no_arithmetic_applies_to_is_passed_through_as_typed():
     )
     assert view["final_grade"] == "pass"
     assert view["penalty"] == "-20%"
-    assert needs_hand_decision(view), "a penalty on `pass` must reach a person"
+    assert needs_hand_decision(
+        individual_spec(late_penalty_per_day="10%", late_window_days=7), block
+    ), "a penalty on `pass` must reach a person"
 
 
 @pytest.mark.parametrize(
@@ -275,7 +278,7 @@ def test_a_score_no_arithmetic_applies_to_is_passed_through_as_typed():
 )
 def test_a_mark_nobody_has_to_decide_is_not_flagged(block):
     spec = individual_spec(late_penalty_per_day="10%", late_window_days=7)
-    assert not needs_hand_decision(student_view(spec, "ada-l", block, "ada-l"))
+    assert not needs_hand_decision(spec, block)
 
 
 def test_an_individual_keeps_their_own_per_question_breakdown():
@@ -508,3 +511,92 @@ def test_load_sheets_reads_every_sheet_in_a_semester_config_checkout(tmp_path):
 
 def test_load_sheets_is_empty_where_no_assignment_has_been_handed_out(tmp_path):
     assert load_sheets(tmp_path) == {}
+
+
+# ------------------------------------------------ a late penalty waived or set by hand
+
+
+@pytest.mark.parametrize(
+    "late_penalty,penalty,final",
+    [
+        (None, "-20%", "16"),
+        ("apply", "-20%", "16"),
+        ("waive", "waived", "20"),
+        ("15%", "-15% (set by hand)", "17"),
+    ],
+)
+def test_the_penalty_text_says_what_applied(late_penalty, penalty, final):
+    spec = individual_spec(late_penalty_per_day="10%", late_window_days=7)
+    block = {"info": {"days_late": 2}, "score_individual": 20}
+    if late_penalty is not None:
+        block["late_penalty"] = late_penalty
+    view = student_view(spec, "ada-l", block, "ada-l")
+    assert (view["penalty"], view["final_grade"]) == (penalty, final)
+
+
+def test_a_team_members_view_carries_the_teams_penalty():
+    block = {
+        "info": {"days_late": 2},
+        "late_penalty": "waive",
+        "score_group": {"Q1": 10},
+        "members": {"eli-r": {"adjustment_individual": None}},
+    }
+    view = student_view(group_spec(), "team-beta", block, "eli-r")
+    assert (view["penalty"], view["final_grade"]) == ("waived", "10")
+
+
+def test_an_on_time_unit_shows_no_penalty_whatever_is_written():
+    spec = individual_spec(late_penalty_per_day="10%", late_window_days=7)
+    block = {"info": {"days_late": 0}, "score_individual": 20, "late_penalty": "15%"}
+    view = student_view(spec, "ada-l", block, "ada-l")
+    assert "penalty" not in view and view["final_grade"] == "20"
+
+
+def test_a_waived_penalty_on_pass_needs_no_hand_decision():
+    spec = individual_spec(late_penalty_per_day="10%", late_window_days=7)
+    block = {"info": {"days_late": 2}, "score_individual": "pass"}
+    assert needs_hand_decision(spec, block)
+    block["late_penalty"] = "waive"
+    assert not needs_hand_decision(spec, block)
+    block["late_penalty"] = "5%"
+    assert needs_hand_decision(spec, block)
+
+
+@pytest.mark.parametrize("late_penalty", ["waive", "15%", "half"])
+def test_no_late_rule_ignores_any_late_penalty(late_penalty):
+    # No policy to waive or override: nothing comes off, nothing is held, nothing shown.
+    spec = individual_spec(late_penalty_per_day=None)
+    block = {"info": {"days_late": 2}, "score_individual": 20}
+    block["late_penalty"] = late_penalty
+    view = student_view(spec, "ada-l", block, "ada-l")
+    assert (view.get("penalty", ""), view["final_grade"]) == ("", "20")
+    assert grades.sheet_hold_reasons(spec, {"submissions": {"ada-l": block}}) == {}
+    block["score_individual"] = "pass"
+    assert not needs_hand_decision(spec, block)
+    assert grades.ignored_late_penalties(spec, {"submissions": {"ada-l": block}}) == 1
+    ruled = individual_spec(late_penalty_per_day="10%")
+    assert grades.ignored_late_penalties(ruled, {"submissions": {"ada-l": block}}) == 0
+
+
+def test_only_a_unit_whose_penalty_moved_its_mark_is_mailed_again():
+    spec = individual_spec(late_penalty_per_day="10%", late_window_days=7)
+
+    def digests(sheet: dict) -> dict[str, str]:
+        books = build_gradebooks({"assignment-1": (spec, sheet)})
+        return {handle: _marks_digest(book) for handle, book in books.items()}
+
+    def sheet(**late_penalty) -> dict:
+        units = {
+            handle: {"info": {"days_late": 2}, "score_individual": 20}
+            for handle in ("ada-l", "ben-k")
+        }
+        for handle, value in late_penalty.items():
+            units[handle]["late_penalty"] = value
+        return {"submissions": units}
+
+    before = digests(sheet())
+    # `apply` is what an absent key means: nobody is told anything new
+    assert digests(sheet(**{"ada-l": "apply"})) == before
+    waived = digests(sheet(**{"ada-l": "waive"}))
+    assert waived["ada-l"] != before["ada-l"]
+    assert waived["ben-k"] == before["ben-k"]

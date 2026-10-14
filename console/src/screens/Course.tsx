@@ -128,8 +128,9 @@ export function todoLine(t: Todo, c: CourseStatus): { label: string; hint?: stri
   const check = t.check ?? '';
   if (t.kind === 'template') return TEMPLATE_TODO[check] ?? { label: t.text };
   if (check === 'syllabus') return { label: SYLLABUS_LABEL, hint: SYLLABUS_HINT };
-  const row = c.materials?.find((m) => m.repo === t.repo)?.checks?.find((k) => k.id === check);
-  return { label: row?.label ?? t.text, hint: CHECK_HINT[check] };
+  // By the to-do's id (`materials:<repo>:<check id>`): a suggested `kind_folder:<kind>` is its own row.
+  const row = c.materials?.find((m) => m.repo === t.repo)?.checks?.find((k) => t.id.endsWith(`:${k.id}`));
+  return { label: row?.label ?? t.text, hint: CHECK_HINT[row?.id ?? check] };
 }
 
 /**

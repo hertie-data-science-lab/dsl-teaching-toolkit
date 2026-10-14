@@ -8,7 +8,8 @@ import { Field, SchemaForm, fieldErrors } from '../forms/Form';
 import { ago, fmtWhen, kebab, str } from '../model/format';
 import type { FileState } from '../model/files';
 import { parseInstructors } from '../model/people';
-import { bodyOf, frontMatter, homeText } from '../model/student';
+import { bodyOf, frontMatter } from '../model/student';
+import { homeText, unsetSiteKeys } from '../model/siteText';
 import type { Outcome } from '../model/types';
 import { outcomePath } from '../ops/adapter';
 import { updateSite } from '../ops/defs';
@@ -114,6 +115,7 @@ function Site(p: ReadyProps) {
   const cfg = useYaml(cfgFile);
   const synced = useMemo(() => syncedValues(p.course, p.cohort), [p.course, p.cohort]);
   const siteVars = useMemo(() => ({ ...cfg?.doc, ...Object.fromEntries(Object.entries(synced).filter(([, v]) => !!v)) }), [cfg, synced]);
+  const unset = useMemo(() => unsetSiteKeys(shown, siteVars), [shown, siteVars]);
   const saveHome = async () => {
     if (home.kind !== 'ready' || body === null) return;
     const front = home.text.slice(0, home.text.length - bodyOf(home.text).length);
@@ -145,8 +147,9 @@ function Site(p: ReadyProps) {
         <section class="panel section">
           <h2>Home text</h2>
           {home.kind === 'loading' ? <Loading what="Reading the home page" /> : home.kind === 'ready' ? (
-            <Field id="site-home" k="home" t={{ tier: 'ask', label: 'Home page', widget: 'markdown', reason: 'The first thing students read.' }} value={shown} values={{}} set={(_, v) => setBody(String(v ?? ''))} shown={(t) => homeText(t, siteVars, true)} />
+            <Field id="site-home" k="home" t={{ tier: 'ask', label: 'Home page', widget: 'markdown', reason: 'The first thing students read.' }} value={shown} values={{}} set={(_, v) => setBody(String(v ?? ''))} shown={(t) => homeText(t, siteVars)} />
           ) : <p class="footnote">No home page yet: it appears when the site is set up.</p>}
+          {home.kind === 'ready' && unset.length ? <p class="footnote">Not set in _config.yml: {unset.join(', ')} - this text shows nothing for {unset.length === 1 ? 'it' : 'them'}.</p> : null}
           <SaveBar state={homeSave} onSave={() => void saveHome()} small disabled={body === null || body === homeBody} file={{ org: p.cohort.org, repo, path: 'index.md', exists: home.kind !== 'absent' }} />
         </section>
         <section class="panel section">
@@ -257,7 +260,7 @@ function SemesterGroup({ p }: { p: ReadyProps }) {
   );
 }
 
-/** The institution keys of the site's `_config.yml`: the sync never rewrites them, so they are saved in the site repo. */
+/** The institution keys of the site's `_config.yml`, folded under Advanced: the sync never rewrites them, so they are saved in the site repo. */
 function InstitutionGroup({ p, repo, file, cfg }: { p: ReadyProps; repo: string; file: FileState; cfg: ReturnType<typeof useYaml> }) {
   const y = cfg?.y, doc = cfg?.doc ?? null;
   const base: Values = useMemo(() => Object.fromEntries(Object.keys(INSTITUTION).map((k) => [k, str(doc?.[k])])), [doc]);
@@ -271,13 +274,18 @@ function InstitutionGroup({ p, repo, file, cfg }: { p: ReadyProps; repo: string;
     await run({ owner: p.cohort.org, repo, path: '_config.yml' }, out.text, file.sha, { message: 'site: edit the site settings, from the DSL Teaching Console' });
   };
   return (
-    <div class="form-section">
-      <h3>Institution</h3>
-      {file.kind === 'loading' ? <Loading what="Reading _config.yml" /> : file.kind === 'absent' ? <p class="footnote">No _config.yml yet: it appears when the site is set up.</p> : null}
-      {y?.errors.length ? <CheckLine cls="bad">_config.yml does not parse ({y.errors[0]}); fix it with Edit the file directly.</CheckLine> : null}
-      {doc ? <SchemaForm id="ss-inst" schema={null} tiers={INSTITUTION} values={cur} onChange={set} /> : null}
-      <SaveBar state={save} onSave={() => void doSave()} small disabled={!doc || unchanged} file={{ org: p.cohort.org, repo, path: '_config.yml', exists: file.kind !== 'absent' }} />
-    </div>
+    <details class="fold">
+      <summary>Advanced</summary>
+      <div class="fold-body">
+        <div class="form-section">
+          <h3>Institution</h3>
+          {file.kind === 'loading' ? <Loading what="Reading _config.yml" /> : file.kind === 'absent' ? <p class="footnote">No _config.yml yet: it appears when the site is set up.</p> : null}
+          {y?.errors.length ? <CheckLine cls="bad">_config.yml does not parse ({y.errors[0]}); fix it with Edit the file directly.</CheckLine> : null}
+          {doc ? <SchemaForm id="ss-inst" schema={null} tiers={INSTITUTION} values={cur} onChange={set} /> : null}
+          <SaveBar state={save} onSave={() => void doSave()} small disabled={!doc || unchanged} file={{ org: p.cohort.org, repo, path: '_config.yml', exists: file.kind !== 'absent' }} />
+        </div>
+      </div>
+    </details>
   );
 }
 
@@ -288,7 +296,6 @@ function SiteSettings({ p, repo, cfgFile, cfg }: { p: ReadyProps; repo: string; 
       <div class="form">
         <CourseGroup p={p} />
         <SemesterGroup p={p} />
-        <InstitutionGroup p={p} repo={repo} file={cfgFile} cfg={cfg} />
         <div class="form-section">
           <h3>Semester and org</h3>
           <dl class="kv">
@@ -296,6 +303,7 @@ function SiteSettings({ p, repo, cfgFile, cfg }: { p: ReadyProps; repo: string; 
             <dt>GitHub org</dt><dd>{p.cohort.org} <span class="footnote">the semester org itself</span></dd>
           </dl>
         </div>
+        <InstitutionGroup p={p} repo={repo} file={cfgFile} cfg={cfg} />
       </div>
     </section>
   );

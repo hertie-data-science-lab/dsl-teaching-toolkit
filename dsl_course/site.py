@@ -809,6 +809,12 @@ class _Row:
         """The kind tabs that list this row (`site_repo.row_tabs`)."""
         return row_tabs(self.kind, bool(self.readings or self.readings_pending))
 
+    @property
+    def no_materials(self) -> bool:
+        """It ships nothing - no copies, no readings, landed or not: an `events:` session,
+        or a release with an empty `deploy:`."""
+        return not (self.landed or self.readings or self.readings_pending or self.dests)
+
 
 def _row_entry(
     semester_org: str, row: _Row, live_repos: frozenset[str] = frozenset()
@@ -825,11 +831,13 @@ def _row_entry(
     readings attached to it that have not landed yet. `off_schedule`: a `show_on_site: false`
     row, left off the schedule and the Updates box. `undated`: an off-plan folder.
     `dateless`: an `event_datetime: tbc` entry - on the schedule and its tab, with no
-    `date:` ("TBC" is printed instead), and never in the Updates box. `sort_at` is where
-    every dated or dateless row sorts (`schedule_plan.planned_rows`; the date itself on a
-    dated row): the templates order by it and show only `date:`."""
-    label = policy.kind_label(row.kind)
-    title = f"{label} {row.number}" if row.number is not None else label
+    `date:` ("TBC" is printed instead), and never in the Updates box. `no_materials`: a row
+    that ships nothing (`_Row.no_materials`) - never "not yet released", never in the
+    Updates box. `hide_time`: a whole-day row (its date has no time), so the site and the
+    student console print no placeholder 09:00. `sort_at` is where every dated or dateless row sorts
+    (`schedule_plan.planned_rows`; the date itself on a dated row): the templates order
+    by it and show only `date:`."""
+    title = policy.numbered_title(row.kind, row.number)
     # `row_name`, so an entry that declares `title: Lab 1` renders "Lab 1" and not
     # "Lab 1 / Lab 1" - faculty repeat the identifier as readily in the plan as in a README.
     subtitle, details = row_name(row.subtitle, title), row.details
@@ -840,7 +848,9 @@ def _row_entry(
         + [(READINGS_LINKS, item.links) for item in row.readings]
     )
     flags, body = "", ""
-    if not row.landed and not row.readings:
+    if row.no_materials:
+        flags = "no_materials: true\n"
+    elif not row.landed and not row.readings:
         flags = "unreleased: true\n"
         where = ", ".join(_dest_link(semester_org, d, live_repos) for d in row.dests)
         # Italic, with the lead in bold: this is the one line on an unreleased row.
@@ -862,6 +872,10 @@ def _row_entry(
         flags += "readings_pending: true\n"
     if row.sort_at is None:
         flags += f'undated: true\norder: "{q(row.order)}"\n'
+    # A whole-day row (a bare date - an `events:` session written without a time) has no
+    # clock: `iso_when` fills in 09:00 and the theme would print it as an appointment.
+    if isinstance(row.when, date) and not isinstance(row.when, datetime):
+        flags += "hide_time: true\n"
     return (
         f"---\n"
         f"kind: {row.kind}\n"
@@ -953,13 +967,14 @@ def _site_rows(
     aliases: Aliases,
     hosted: Hosted,
 ) -> tuple[dict[str, str], list[str]]:
-    """The `_lectures` collection - one file per site row (`schedule_plan.site_rows`),
-    plus the off-plan folders' rows - and the kind tabs it needs.
+    """The `_lectures` collection - one file per site row (`schedule_plan.site_rows`,
+    the `events:` sessions among them), plus the off-plan folders' rows - and the kind
+    tabs it needs.
 
     Every row the schedule shows is written, released or not, so the whole term reads as
     a syllabus from the day it is written. A silent readings row is written only once
     something has landed, and never when all it landed is root files."""
-    built: list[tuple[str, _Row]] = []
+    built: list[tuple[str, _Row, bool]] = []  # (key, row, an `events:` session)
     for sr in site_rows(rows):
         r = sr.row
         landed = _row_landed(
@@ -1001,13 +1016,19 @@ def _site_rows(
             readings_pending=pending,
             dests=list(dict.fromkeys([*r.dests, *pending_dests])),
         )
-        built.append((r.key, row))
-    built += _offplan_rows(semester_org, rows, allow, live_repos, aliases, hosted)
+        built.append((r.key, row, r.session))
+    built += [
+        (key, row, False)
+        for key, row in _offplan_rows(
+            semester_org, rows, allow, live_repos, aliases, hosted
+        )
+    ]
     out: dict[str, str] = {}
-    tabs: dict[str, None] = {}
-    for key, row in built:
+    # Sessions name their files last, whatever their date: a session never takes the row
+    # file of the release it shares a number with (`lab-01.md` stays the release's).
+    for key, row, _session in sorted(built, key=lambda b: b[2]):
         out[_row_filename(row, key, out)] = _row_entry(semester_org, row, live_repos)
-        tabs |= dict.fromkeys(row.tabs)
+    tabs = dict.fromkeys(tab for _key, row, _session in built for tab in row.tabs)
     return out, list(tabs)
 
 

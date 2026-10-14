@@ -22,7 +22,7 @@ Three blocks carry the whole semester, and each is defined by what it **does**:
 
 - **`releases:`** - the entries that **deploy**: file(s) copied from course org staging -> the semester org, where students can access them.
 - **`assignments:`** - each assignment's whole lifecycle: hand-out, due date, grading.
-- **`events:`** - **display-only** calendar rows. Nothing deploys; the row simply appears on the semester site.
+- **`events:`** - **display-only** calendar rows. Nothing deploys; the row simply appears on the semester site (an exam, a clinic, or a session with nothing to ship).
 
 Two scalars sit alongside them - `semester_start:` and `semester_end:` - which bookend the semester and render as rows of their own. An optional `archive:` block freezes the semester read-only - writing it is what turns that on.
 
@@ -47,7 +47,7 @@ Each entry is one row on the semester site, in date order. The site names the ro
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|
-| `event_datetime` | **yes** | - | when the class happens - what the site's schedule shows, and the default fire time for this entry's deploys |
+| `event_datetime` | **yes** | - | when the class happens - what the site's schedule shows; this entry's deploys ship an hour before it by default |
 | `deploy` (nested entry) | no | - | the copies this entry ships (a nested list - see below) |
 | `number` | unless the label carries one | the label's number | the row's number (`Lecture 3`); the console fills in the next one |
 | `kind` | no | inferred | the row's kind: one of the institution's kinds (Hertie: `lecture`, `lab`, `readings`, `exam`, `drop-in`, `assets`, `other`). Left out, it is inferred once from the folder the first copy lands in: `lectures`/`lecture` -> lecture, `labs`/`lab`/`tutorials` -> lab, `readings`/`reading`/`literature` -> readings, anything else -> assets (supporting files: released, never a row), unless the source repo's own `materials.yml` aliases say otherwise; an entry with no copies yet is a lecture ([02](02-add-materials-to-course.md#materialsyml)). The folder is the top folder of the DESTINATION path (for a copy into the repo's root: the copied name when it names a kind, as `lectures` copied whole does, else the destination repo), matched whatever its case. The console shows the inferred kind for you to confirm. An unknown value is flagged by **Validate schedule** and shown as `other`. Each kind gets its own tab on the site |
@@ -57,7 +57,7 @@ Each entry is one row on the semester site, in date order. The site names the ro
 | `show_on_site` | no | `true` | `false` releases **silently**: the deploys ship exactly as written and the entry is no row of its own (its files are in the semester site's All Materials). Readings are the exception; see [Silent releases](#silent-releases) |
 
 
-NB: **the calendar event is not the release.** If nothing needs to ship at all, the row belongs under `events:`, not here.
+NB: **the calendar event is not the release.** If nothing needs to ship at all, the row belongs under `events:` with the same `kind:`, not here (see [Sessions with nothing to ship](#sessions-with-nothing-to-ship)).
 
 ### Silent releases
 
@@ -90,7 +90,9 @@ Nested under `deploy:` we have the following:
 | `course_source_path` | **yes** | - | the folder or file to copy, relative to `course_source_repo` - or `/` for the whole repo |
 | `semester_dest_repo` | no | `materials` | the semester repo to copy into - created on first release |
 | `semester_dest_path` | no | mirrors `course_source_path` | where it lands, relative to `semester_dest_repo` |
-| `deploy_datetime` | no | the entry's `event_datetime` | ship this one copy earlier (or later) than the class it belongs to |
+| `deploy_datetime` | no | an hour before the entry's `event_datetime` (a whole-day `event_datetime`: the day's start) | ship this one copy at another time, earlier or later than the class it belongs to |
+
+NB: the hour-before default is for these materials copies only - an assignment's hand-out and solution ship at their own `handout_datetime` / `solution_datetime`. It also applies to a file written before it existed: a copy with no `deploy_datetime` there now ships an hour before its session.
 
 NB: `semester_dest_repo` is yours to choose - one shared `materials` repo, or one repo for lectures, another for labs etc; any non-existent repo and/or directory structure specified between `semester_dest_repo` and `semester_dest_path` is created on release if non-exist.
 
@@ -107,7 +109,7 @@ releases:
     deploy:
       - course_source_repo: course-materials-f2026
         course_source_path: lectures/02_intro
-# -> lands at materials/lectures/02_intro when the class starts (the event_datetime)
+# -> lands at materials/lectures/02_intro an hour before the class (09:00)
 
   lab_02:
     event_datetime: 2026-09-17T14:00
@@ -128,13 +130,13 @@ releases:
       - course_source_repo: course-materials-f2026 # item 1
         course_source_path: lectures/02_intro
         semester_dest_repo: lecture_materials
-        deploy_datetime: 2026-09-15T09:00   # is released 1h early
+        deploy_datetime: 2026-09-14T18:00   # released the evening before
       - course_source_repo: course-materials-f2026 # item 2
         course_source_path: readings/02_intro
         semester_dest_repo: lecture_materials   
 
   lab_02:
-    event_datetime: 2026-09-17T14:00   # the lab session, which the undefined deploy_datetime will default to
+    event_datetime: 2026-09-17T14:00   # the lab session; with no deploy_datetime its copy ships an hour before (13:00)
     deploy:
       - course_source_repo: course-materials-f2026
         course_source_path: labs/02_intro
@@ -153,7 +155,7 @@ second copy into the same session folder is how solutions reach students after t
     title: Your first classifier
     deploy:
       - course_source_repo: course-materials-f2026
-        course_source_path: labs/02_intro          # the empty scripts, at lab time
+        course_source_path: labs/02_intro          # the empty scripts, an hour before the lab
       - course_source_repo: course-materials-f2026
         course_source_path: solutions/labs/02_intro   # staged OUTSIDE labs/02_intro
         semester_dest_path: labs/02_intro/solutions
@@ -162,7 +164,7 @@ second copy into the same session folder is how solutions reach students after t
 
 Both land on the same Lab row; the solutions links appear at 18:00 and never overwrite the
 scripts. **Stage the solutions outside the folder you release as the lab** - a `solutions/`
-inside `labs/02_intro` ships with the 14:00 copy.
+inside `labs/02_intro` ships with the 13:00 copy.
 
 ## `assignments:` 
 
@@ -228,13 +230,14 @@ Adding or renaming an assignment wakes **Sync membership**, which rewrites `seme
 
 ## `events:` 
 
-Could be an exam, a drop-in clinic, a guest lecture, a revision session: anything students should see on the calendar that releases no files.
+Could be an exam, a drop-in clinic, a guest lecture, a revision session, a second lab group: anything students should see on the calendar that releases no files.
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|
 | `event_datetime` | **yes** | - | when it happens; as displayed on the deployed site schedule |
-| `kind` | no | `special_event` | e.g. `exam` or `special_event` - affects which colour the row takes |
-| `title` | no | prettified label | the row label on the site |
+| `kind` | no | `special_event` | `special_event`, `exam`, or any other row kind of `releases:` (`lecture`, `lab`, ...) - see below. An unknown value is flagged and shown as `special_event` |
+| `number` | no | the FIRST number in the label (`lab-01-group-2` is Lab 1) | a session's number (`Lab 1`); a label with two numbers and no `number:` is flagged by **Validate schedule** |
+| `title` | no | prettified label | the row label on the site; a session's defaults to the title of the shown release of the same kind and number |
 | `details` | no | - | what the row's Details column says: the room, the format, what to bring. There is no default - an exam with no `details:` says nothing, rather than the "Details to be confirmed." the toolkit used to write into every one |
 | `tbc` | no | `false` | the date is provisional: the site marks it **(TBC)** |
 | `show_on_site` | no | `true` | `false` keeps the row in this file and off the site |
@@ -256,6 +259,30 @@ events:
     event_datetime: tbc # site will show just TBC, no proposed datetime
                        # sorted end-of-term until a real date replaces
 ```
+
+### Sessions with nothing to ship
+
+An event of a row kind (`lecture`, `lab`, `readings`, ...) is a session of that kind with no files: a row named like a release (`Lab 1`), in its colour, on the Schedule and its kind's tab, never "not yet released" and never in Updates. It counts for its week (no *Missing lab*), and is never *Nothing to release*. Two lab groups, one handout:
+
+```yaml
+releases:
+  lab-01:                               # group 1, with the files
+    kind: lab
+    title: Introduction
+    event_datetime: 2026-09-16T08:00
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: labs/01_intro
+        deploy_datetime: 2026-09-15T18:00  # the evening before group 1
+events:
+  lab-01-group-2:                       # group 2: "Lab 1 - Introduction", no files
+    kind: lab
+    number: 1                           # the label alone says 1 too; numbered, it is never flagged
+    details: Group 2, room 2.32
+    event_datetime: 2026-09-17T18:00
+```
+
+In the console it is the same sheet as a release: leave **What to release** empty and it is saved here; add a line and it moves to `releases:`.
 
 ## `archive:`
 
@@ -338,9 +365,9 @@ Parsed schedule.yml
   11 release(s), 19 deploy(s) | 3 assignment(s) | 4 event(s)
 ```
 
-**Empty weeks.** Each week of the term still to come (counted from `semester_start`, as the Dashboard's week strip numbers them) with nothing dated in it (no release, hand-out, due date, late cutoff, exam, event or archive) is an *Empty week* problem on the console's Dashboard. A week with something dated but no lecture, lab or readings release - for each of those kinds the semester runs weekly, that is, with a dated release in at least half (rounded up) of the weeks that have anything dated - is a *Missing lab* (etc.) problem instead; a hand-out or exam does not count, and one further-readings entry does not make readings weekly. An intentional gap (a reading or exam week) is dismissed with **Set aside**, which adds `empty_week:<monday>` (or `empty_week:<monday>:<kind>`, the Monday of the week's first day) to the course's `set_aside:` list.
+**Empty weeks.** Each week of the term still to come (counted from `semester_start`, as the Dashboard's week strip numbers them) with nothing dated in it (no release, hand-out, due date, late cutoff, exam, event or archive) is an *Empty week* problem on the console's Dashboard. A week with something dated but no lecture, lab or readings release or session - for each of those kinds the semester runs weekly, that is, with a dated release in at least half (rounded up) of the weeks that have anything dated - is a *Missing lab* (etc.) problem instead; a hand-out or exam does not count, and one further-readings entry does not make readings weekly. An intentional gap (a reading or exam week) is dismissed with **Set aside**, which adds `empty_week:<monday>` (or `empty_week:<monday>:<kind>`, the Monday of the week's first day) to the course's `set_aside:` list.
 
-**Nothing to release.** A dated release still to come with no `deploy:` (or an empty one) is a *Nothing to release* problem: under **Coming up** until its date is within the next 7 days, then a problem. A release whose copies were all dropped is not one: the dropped copy is the problem. Its row still shows; if the session really ships nothing, **Set aside** adds `nothing_to_release:<label>` to the same list.
+**Nothing to release.** A dated release still to come with no `deploy:` (or an empty one) is a *Nothing to release* problem: under **Coming up** until its date is within the next 7 days, then a problem. A release whose copies were all dropped is not one: the dropped copy is the problem. Its row still shows, as a session with nothing to ship does (never "not yet released", never in Updates); if the session really ships nothing, move it to [`events:`](#sessions-with-nothing-to-ship), or **Set aside** adds `nothing_to_release:<label>` to the same list.
 
 Three other ways to check, none of them required:
 
@@ -408,7 +435,7 @@ An entry that is valid YAML but not a valid *schedule* entry is **dropped**: it 
 | no valid `due_datetime` on an `assignments:` entry | no deadline, no submission snapshot, no autograding |
 | a `deploy` item missing `course_source_repo` or `course_source_path` | that one copy never ships |
 
-Kept rather than dropped - the entry still runs on its documented fallback, and the fallback is reported alongside the drops (so `--validate` catches it): a malformed `handout_datetime` (**nothing is ever handed out**), `marks_return_datetime` (marks go back by hand) or `deploy_datetime` (the copy ships at the `event_datetime`); an unknown `kind:` on an event (shown as a plain special event); a typo'd or unknown key at any level; and an unknown `timezone:` (falls back to `Europe/Berlin`). A key that left this file - an assignment's `title`, `grading_datetime` or `semester_dest_repo`, a release's `assignment`, `enrolment` - is `NOT_MIGRATED`, naming where it lives now; an assignment carrying one is dropped until the migration moves it.
+Kept rather than dropped - the entry still runs on its documented fallback, and the fallback is reported alongside the drops (so `--validate` catches it): a malformed `handout_datetime` (**nothing is ever handed out**), `marks_return_datetime` (marks go back by hand) or `deploy_datetime` (the copy ships at its default, an hour before the `event_datetime`); an unknown `kind:` on an event (shown as a plain special event); a typo'd or unknown key at any level; and an unknown `timezone:` (falls back to `Europe/Berlin`). A key that left this file - an assignment's `title`, `grading_datetime` or `semester_dest_repo`, a release's `assignment`, `enrolment` - is `NOT_MIGRATED`, naming where it lives now; an assignment carrying one is dropped until the migration moves it.
 
 An empty `deploy:` - the key written with nothing under it - is flagged too. It parses as "no copies", so the entry becomes a display-only row that ships nothing; if that is what you meant, delete the key (or write `deploy: []`) and the flag goes away.
 
