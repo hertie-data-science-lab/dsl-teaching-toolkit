@@ -10,6 +10,7 @@ import { SchemaForm, effective, fieldErrors } from '../forms/Form';
 import type { Outcome } from '../model/types';
 import { Check, Eye, Fail, Skip } from '../ui/icons';
 import { Prop, runUrl } from '../ui/bits';
+import { Hint } from '../ui/Hint';
 import type { Result } from './adapter';
 import { modeOf, opSpec } from './registry';
 import type { Current, OpDef, OpsSession } from './session';
@@ -197,6 +198,13 @@ export function targetOf(def: OpDef, values: Record<string, unknown>): string | 
   return typeof def.target === 'function' ? def.target(values) : def.target;
 }
 
+/** The `?` an operation carries beside its verb, one paragraph per line of its text. */
+function VerbHint({ def }: { def: OpDef }) {
+  const h = def.verbHint;
+  if (!h) return null;
+  return <Hint label={h.label}><b class="para">{h.label}</b>{h.text.map((x) => <span class="para">{x}</span>)}</Hint>;
+}
+
 /** The panel and its minimised bar. Renders nothing when no operation is open. */
 export function OpPanel() {
   const env = useEnv();
@@ -250,9 +258,11 @@ export function OpPanel() {
       <>
         <p class="op-intro">{d.intro}</p>
         {d.confirm ? <p class="op-confirm">{d.confirm}</p> : null}
+        {d.facts?.length ? <div class="op-facts">{d.facts.map((f) => <p>{f}</p>)}</div> : null}
         <Options c={c} ops={ops} />
         {c.error ? <p class="check-line bad"><span>{c.error}</span></p> : null}
         {c.dry ? <OutcomeView result={c.dry} def={d} url={c.progress?.htmlUrl} stopped={c.stopped} /> : null}
+        {c.dry && d.dryExtra ? <div key={String(c.dry.outcome?.run_id ?? c.dry.outcome?.summary ?? '')}>{d.dryExtra}</div> : null}
       </>
     );
     const verb = (
@@ -262,12 +272,13 @@ export function OpPanel() {
     );
     foot =
       mode === 'direct' || mode === 'previewOnly' ? (
-        <div class="actions">{verb}<button class="btn quiet" type="button" onClick={() => ops.close()}>Cancel</button></div>
+        <div class="actions">{verb}<VerbHint def={d} /><button class="btn quiet" type="button" onClick={() => ops.close()}>Cancel</button></div>
       ) : (
         <div class="actions">
           <button class="btn" type="button" disabled={invalid} onClick={() => void ops.start('preview')}>{d.previewLabel ?? (c.dry ? 'Preview again' : 'Preview')}</button>
           {d.previewProposed ? <Prop /> : null}
           {verb}
+          <VerbHint def={d} />
         </div>
       );
   }
@@ -295,7 +306,7 @@ export function OpPanel() {
 
 /**
  * The buttons a screen shows for an operation: Preview (filled) and the verb, which is never
- * held back for want of a preview; a direct op shows only the verb.
+ * held back for want of a preview; a direct op shows only the verb. The verb's `?`, if any, follows it.
  */
 export function OpButtons({ def, small, label, previewLabel = def.previewLabel ?? 'Preview', verbCls }: { def: OpDef; small?: boolean; label?: string; previewLabel?: string; verbCls?: string }) {
   const env = useEnv();
@@ -304,11 +315,12 @@ export function OpButtons({ def, small, label, previewLabel = def.previewLabel ?
   const sz = small ? ' small' : '';
   const verb = label ?? def.verb;
   if (mode === 'direct' || mode === 'previewOnly')
-    return <button class={verbCls ?? `btn${sz}`} type="button" onClick={() => ops?.open(def)}>{verb}</button>;
+    return <><button class={verbCls ?? `btn${sz}`} type="button" onClick={() => ops?.open(def)}>{verb}</button><VerbHint def={def} /></>;
   return (
     <>
       <button class={`btn${sz}`} type="button" onClick={() => ops?.open(def, 'preview')}>{previewLabel}</button>
       <button class={verbCls ?? `btn${sz} outline`} type="button" onClick={() => ops?.open(def, 'run')}>{verb}</button>
+      <VerbHint def={def} />
     </>
   );
 }
