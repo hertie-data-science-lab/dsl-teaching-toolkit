@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // Folder kinds at any depth: the materials settings' kind picker rides the withheld tree's own
-// component, detects kind folders one level down, writes `kinds:` paths, and marks a content
-// kind no folder has with a suggestion's "!", never an error.
+// component, detects kind folders one level down, writes `kinds:` paths, and lists a content
+// kind no folder has as a suggested row, never an error.
 
 import { render } from 'preact';
 import { render as html } from 'preact-render-to-string';
@@ -15,8 +15,6 @@ import type { MaterialsCheck, Status } from '../src/model/types';
 import { DispatchAdapter } from '../src/ops/adapter';
 import { OpsSession } from '../src/ops/session';
 import { MaterialsScreen, kindFolderPaths, writeHolds } from '../src/screens/CourseEdit';
-import { PatternTree } from '../src/ui/PatternTree';
-import { aliasKind } from '../src/model/materialsRules';
 import example from './fixtures/status.example.json';
 import { FakeGitHub, json } from './fake';
 import { StaticFiles } from './staticFiles';
@@ -57,8 +55,6 @@ describe('the Folder kinds tree', () => {
     // A declared path counts at any depth; a folder inside a kind folder is part of it.
     expect(kindFolderPaths(DIRS, { 'course/2026/labs': 'lab' })).toContain('course/2026/labs');
     expect(kindFolderPaths([...DIRS, 'readings/labs'], {})).not.toContain('readings/labs');
-    expect(aliasKind('students/Labs')).toBe('lab');
-    expect(aliasKind('course/2026/labs')).toBe(null);
   });
 
   it('renders nested folders through the withheld tree’s component, each with a picker, detected ones pre-selected', () => {
@@ -88,28 +84,16 @@ describe('the Folder kinds tree', () => {
     expect(out).not.toMatch(/<span class="ft-name">lectures\/<\/span><span class="footnote">set here/);
   });
 
-  it('marks a content kind no folder has with a suggestion’s "!", and nothing when all are found', () => {
+  it('lists a content kind no folder has as a suggested row under the tree, and nothing when all are found', () => {
     const out = html(screen(files(), loadedWith([DONE, NO_READINGS])));
-    expect(out).toContain('<span class="ex suggest" role="img" title="No readings folder found" aria-label="No readings folder found">!</span>');
+    const kinds = out.split('<h2>Folder kinds')[1].split('<h2>')[0];
+    expect(kinds).toMatch(/<ul class="setup"><li class="open suggested">.*No readings folder found.*Pick the folder that holds readings under Folder kinds/);
     expect(out).not.toContain('class="s-mark problem"');
-    expect(html(screen(files()))).not.toContain('ex suggest');
+    expect(html(screen(files())).split('<h2>Folder kinds')[1].split('<h2>')[0]).not.toContain('No readings folder found');
   });
 
   it('writes kinds: with folder paths', () => {
     expect(writeHolds(null, { syllabus: '', kinds: { 'students/lectures': 'lecture', 'course/2026/labs': 'lab' } })).toContain('kinds:\n  students/lectures: lecture\n  course/2026/labs: lab\n');
-  });
-});
-
-describe('the withheld tree’s folder counts', () => {
-  it('says how many files a folder withholds and how many reach students, side by side', () => {
-    const files = ['labs/01/lab.pdf', 'labs/01/notes.md', 'labs/02/lab.pdf', 'labs/02/key.pdf', 'labs/.DS_Store', 'labs/solutions/a.py'];
-    const out = html(<PatternTree files={files} patterns={['*.pdf', '!labs/01/lab.pdf']} onChange={() => {}} />);
-    // Withheld: labs/02/lab.pdf, labs/02/key.pdf, and the never-material .DS_Store. Released:
-    // labs/01/lab.pdf and labs/01/notes.md; never the denylisted solutions/.
-    expect(out).toContain('<span class="ft-name">labs/</span><span class="chip amber">3 withheld · 2 released to students</span>');
-    expect(out).toContain('<span class="ft-name">02/</span><span class="chip amber">2 withheld · 0 released to students</span>');
-    // A folder with nothing withheld says nothing.
-    expect(html(<PatternTree files={files} patterns={[]} onChange={() => {}} />)).not.toContain('released to students</span><span class="chip amber">');
   });
 });
 

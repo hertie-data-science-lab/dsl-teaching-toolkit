@@ -275,17 +275,17 @@ describe('materials settings: syllabus file and folder kinds', () => {
   const tree = ['E1282.pdf', 'lectures/01/a.pdf', 'Tutorials/01/b.ipynb', 'quiz/q1.md', 'datasets/x.csv'];
   const withYml = new StaticFiles({ [`${COURSE_ORG}/${MAT}/materials.yml`]: 'syllabus: E1282.pdf\nkinds:\n  quiz: exam\n' }, {}, { [`${COURSE_ORG}/${MAT}`]: tree });
 
-  it('gives each top-level folder its kind and says where it came from, lectures, labs, readings, then supporting files', () => {
-    expect(folderKinds(['lectures', 'Tutorials', 'quiz', 'datasets', 'readings', 'img', 'Labs'], { quiz: 'exam' })).toEqual([
-      { folder: 'lectures', kind: 'lecture', from: 'name' },
-      { folder: 'Labs', kind: 'lab', from: 'name' },
-      { folder: 'Tutorials', kind: 'lab', from: 'name' },
-      { folder: 'readings', kind: 'readings', from: 'name' },
-      { folder: 'quiz', kind: 'exam', from: 'declared' },
+  it('gives each folder its kind label: declared, else by its name, else supporting files', () => {
+    expect(folderKinds(['lectures', 'Tutorials', 'quiz', 'datasets', 'readings', 'img', 'Labs'], { quiz: 'exam' })).toEqual({
+      lectures: 'Lecture',
+      Labs: 'Lab',
+      Tutorials: 'Lab',
+      readings: 'Readings',
+      quiz: 'Exam',
       // Decision 0031 rule 10: a folder no name covers is supporting files by default.
-      { folder: 'datasets', kind: 'assets', from: 'default' },
-      { folder: 'img', kind: 'assets', from: 'name' },
-    ]);
+      datasets: 'Supporting files',
+      img: 'Supporting files',
+    });
   });
   it('shows the kinds and the declared syllabus, and edits that file', () => {
     const out = render(<MaterialsScreen {...cp({ entry: MAT, files: withYml })} />);

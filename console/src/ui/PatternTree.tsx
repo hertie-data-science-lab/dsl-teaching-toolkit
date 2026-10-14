@@ -40,15 +40,22 @@ interface Ctx extends Required<Pick<PatternTreeProps, 'patterns' | 'onChange' | 
 
 const defaultFixed = (path: string) => (neverMaterial(path) ? 'never copied' : null);
 
-function withheldCount(n: TreeNode, c: Ctx): number {
-  if (!n.children) return c.fixed(n.path) || withheldBy(c.rules, n.path) ? 1 : 0;
-  return n.children.reduce((sum, x) => sum + withheldCount(x, c), 0);
-}
-
-/** The files under a folder that reach students: not withheld, and never a denylisted or never-material one. */
-function releasedCount(n: TreeNode, c: Ctx): number {
-  if (!n.children) return c.fixed(n.path) || denylisted(n.path) || withheldBy(c.rules, n.path) ? 0 : 1;
-  return n.children.reduce((sum, x) => sum + releasedCount(x, c), 0);
+/**
+ * The files under a folder, in one walk: those withheld (fixed or by a line), and those that
+ * reach students (not withheld, and never a denylisted or never-material one).
+ */
+function counts(n: TreeNode, c: Ctx): { withheld: number; released: number } {
+  if (!n.children) {
+    const out = !!(c.fixed(n.path) || withheldBy(c.rules, n.path));
+    return { withheld: out ? 1 : 0, released: out || denylisted(n.path) ? 0 : 1 };
+  }
+  const sum = { withheld: 0, released: 0 };
+  for (const x of n.children) {
+    const k = counts(x, c);
+    sum.withheld += k.withheld;
+    sum.released += k.released;
+  }
+  return sum;
 }
 
 function Control({ n, dir, s, c }: { n: TreeNode; dir: boolean; s: Standing; c: Ctx }) {
@@ -98,7 +105,7 @@ function Node({ n, depth, c }: { n: TreeNode; depth: number; c: Ctx }) {
       </li>
     );
   }
-  const count = withheldCount(n, c);
+  const count = counts(n, c);
   return (
     <li class={`ft-dir${out ? ' ft-out' : ''}`}>
       <details open={depth === 0}>
@@ -106,7 +113,7 @@ function Node({ n, depth, c }: { n: TreeNode; depth: number; c: Ctx }) {
           {c.mode === 'select' ? control : null}
           <FolderHead name={n.name} />
           {c.kinds[n.path] ? <span class="chip">{c.kinds[n.path]}</span> : null}
-          {out ? <span class="chip amber">{c.withheldWord}</span> : count ? <span class="chip amber">{count} {c.withheldWord} · {releasedCount(n, c)} {c.releasedWord}</span> : null}
+          {out ? <span class="chip amber">{c.withheldWord}</span> : count.withheld ? <span class="chip amber">{count.withheld} {c.withheldWord} · {count.released} {c.releasedWord}</span> : null}
           <Why s={s} word={c.withheldWord} />
           {c.mode === 'exclude' ? control : null}
           {note}
