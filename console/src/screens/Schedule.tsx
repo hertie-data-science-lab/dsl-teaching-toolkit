@@ -161,7 +161,7 @@ function Err({ e }: { e?: string }) {
 function Toggle({ id, on, set, children, hint, disabled }: { id: string; on: boolean; set: (v: boolean) => void; children: preact.ComponentChildren; hint?: string; disabled?: boolean }) {
   return (
     <span class="sw-line">
-      <label class="sw" for={id}><input id={id} type="checkbox" role="switch" checked={on} disabled={disabled} onChange={(e) => set((e.target as HTMLInputElement).checked)} /> {children}</label>
+      <label class="switch" for={id}><input id={id} type="checkbox" role="switch" checked={on} disabled={disabled} onChange={(e) => set((e.target as HTMLInputElement).checked)} /> {children}</label>
       {hint ? <Hint small label="About this switch">{hint}</Hint> : null}
     </span>
   );

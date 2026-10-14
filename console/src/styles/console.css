@@ -455,10 +455,6 @@ table.grid td input:hover, table.grid td select:hover { border-color: var(--rule
 }
 .x { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 22px; line-height: 1; min-width: 34px; min-height: 34px; border-radius: 8px; }
 .x:hover { background: var(--sunk); color: var(--ink); }
-.kind-help { display: grid; gap: 6px; font-family: var(--font-body); font-weight: 400; font-size: 13.5px; }
-.kind-help > span { display: block; }
-.type-pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; }
-.type-pick button { font: inherit; font-family: var(--font-display); font-weight: 600; font-size: 14px; border-radius: 8px; padding: 10px; min-height: 44px; cursor: pointer; border: 1px solid var(--rule); color: var(--row-text); text-align: left; }
 
 .unsaved { position: sticky; bottom: calc(env(safe-area-inset-bottom, 0px) + 12px); z-index: 15; margin-top: 16px; display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; justify-content: space-between; padding: 10px 14px; background: var(--surface); border: 1.5px solid var(--ink-2); border-radius: 12px; box-shadow: var(--shadow); }
 .unsaved .u-text { font-weight: 600; font-size: 14px; }
@@ -1175,3 +1171,48 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .rows .r-files { grid-column: 1 / -1; margin-top: 6px; }
 .materials-tree .ft-count { font-size: 12px; color: var(--muted); }
 .materials-tree .ft-gh { margin-left: auto; font-size: 12px; color: var(--link); display: inline-flex; gap: 4px; align-items: center; }
+
+/* C1: the schedule editor's forms (decision 0038, forms mock-up v3) */
+.add-menu { display: grid; gap: 2px; }
+.add-menu button { display: flex; align-items: center; gap: 10px; width: 100%; font: inherit; font-size: 14px; color: var(--ink); background: none; border: 0; border-radius: 6px; padding: 8px 10px; min-height: 38px; text-align: left; cursor: pointer; }
+.add-menu button:hover { background: var(--sunk); }
+.add-menu button > i { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.add-menu button > span { margin-left: auto; font-size: 12.5px; color: var(--muted); }
+.add-menu .sep { border-top: 1px solid var(--rule); margin: 4px 0; }
+.kind-dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+.form .field > .lbl-row label { font-size: 14px; }
+.row-session, .row-attach, .row-tpl, .row-type, .row-assets, .row-3, .row-4, .row-adv { display: grid; gap: 12px; align-items: start; }
+.row-session { grid-template-columns: 90px minmax(0, 1fr); }
+.row-attach { grid-template-columns: minmax(0, 1fr) 220px; }
+.row-tpl { grid-template-columns: minmax(0, 1fr) 90px; }
+.row-type { grid-template-columns: 160px minmax(0, 1fr); }
+.row-assets { grid-template-columns: minmax(0, 1fr) 150px 100px; }
+.row-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.row-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.row-adv { grid-template-columns: 110px minmax(0, 1fr) minmax(0, 1fr); }
+.slot-row { padding-bottom: 8px; border-bottom: 1px dashed var(--rule); }
+.slot-row .slot-details { grid-column: 1 / -1; }
+@media (max-width: 560px) {
+  .row-session, .row-attach, .row-tpl, .row-type, .row-assets, .row-3, .row-4, .row-adv { grid-template-columns: minmax(0, 1fr); }
+}
+.sw-row { display: flex; flex-wrap: wrap; gap: 6px 18px; }
+.sw-line { display: inline-flex; align-items: center; }
+.sub-division { border-top: 1px solid var(--rule); }
+.bul { margin: 6px 0 0; padding-left: 18px; font-size: 12.5px; color: var(--muted); display: grid; gap: 2px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips .chip { font-family: var(--font-code); font-weight: 400; white-space: normal; overflow-wrap: anywhere; }
+.chip .sub { color: var(--muted); font-family: var(--font-body); }
+.file-chip { padding: 0 2px 0 4px; }
+.file-chip.bad { box-shadow: inset 0 0 0 1.5px var(--amber-ink); }
+.file-chip.current { box-shadow: inset 0 0 0 1.5px var(--ink-2); }
+.file-chip .chip-open { font: inherit; color: inherit; background: none; border: 0; padding: 2px 4px; cursor: pointer; text-align: left; }
+.file-chip .pub { font-family: var(--font-display); font-weight: 600; font-size: 11px; border: 1px solid var(--rule-strong); border-radius: 999px; background: var(--surface); color: var(--muted); padding: 0 7px; cursor: pointer; }
+.file-chip .pub.on { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
+.file-chip .x { font-size: 16px; min-width: 24px; min-height: 24px; }
+.chip-settings { border: 1px solid var(--rule); border-radius: 8px; padding: 10px 12px; background: var(--surface-2); }
+.pct { display: inline-flex; align-items: center; gap: 4px; }
+.pct input { width: 80px; }
+.pick-typed { display: flex; gap: 8px; align-items: center; }
+.pick-typed input { flex: 1; min-width: 0; }
+.picker { display: grid; gap: 12px; padding: 16px 18px; overflow-y: auto; }
+.danger-quiet { color: var(--bad-ink); }

@@ -4,6 +4,15 @@
 
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
+import G_LECTURE from './fixtures/schedule-forms/lecture.yml?raw';
+import G_LAB from './fixtures/schedule-forms/lab.yml?raw';
+import G_READINGS from './fixtures/schedule-forms/readings.yml?raw';
+import G_EXAM from './fixtures/schedule-forms/exam.yml?raw';
+import G_EVENT from './fixtures/schedule-forms/event.yml?raw';
+import G_ASSETS from './fixtures/schedule-forms/assets.yml?raw';
+import G_ASSIGNMENT from './fixtures/schedule-forms/assignment.yml?raw';
+import G_ASSIGNMENT_LW from './fixtures/schedule-forms/assignment-late-window.yml?raw';
+import G_SEMESTER from './fixtures/schedule-forms/semester.yml?raw';
 import { YamlText } from '../src/edit/yamlText';
 import { cutoffOf } from '../src/screens/RunSettings';
 import {
@@ -184,6 +193,66 @@ readings:
     writeDraft(y, { ...d, end: '2026-12-19' }, doc(t));
     expect(parse(y.text).semester.end).toEqual({ type: 'end', event_datetime: '2026-12-19' });
     expect(y.text).toContain('start:   {type: start, event_datetime: 2026-09-07}');
+  });
+});
+
+
+// Each form filled as the mock-up fills it, saved into a file holding only the timezone: the
+// result is the golden file, the YAML the mock-up shows beside that form.
+const TZ = 'timezone: Europe/Berlin\n';
+const file = (repo: string, path: string, x: Partial<EntryDraft['files'][number]> = {}) => ({ repo, path, toRepo: '', toPath: '', atDate: '', atTime: '', public: false, ...x });
+const at = (date: string, time = '', location = '', details = '') => ({ date, time, location, details });
+
+describe('golden files: each form writes the mock-up’s YAML', () => {
+  it('Lecture with its Readings sub-form', () => {
+    const d = newDraft('lecture', doc(TZ)) as EntryDraft;
+    const filled: EntryDraft = {
+      ...d, session: 5, title: 'Regularisation', slots: [at('2026-10-06', '10:00', 'Room 1.10')], details: 'Ridge, lasso and early stopping.',
+      files: [file('course-materials-f2026', 'lectures/05_regularisation'), file('lecture-code-f2026', 'mlpkg/regularise')],
+      twin: { ...emptyTwin(d), slots: [at('2026-10-05', '09:00')], guide: '- Goodfellow, Bengio & Courville (2016), ch. 7.\n', files: [file('course-materials-f2026', 'readings/05')] },
+    };
+    expect(save(TZ, filled).text).toBe(G_LECTURE);
+  });
+
+  it('Lab: its own number, two slots each with location and details', () => {
+    const d = { ...(newDraft('lab', doc(TZ)) as EntryDraft), session: 3 as const, number: 2 as const, title: 'Backprop by hand',
+      slots: [at('2026-09-16', '08:00', 'Lab 2.30', 'Group 1'), at('2026-09-17', '18:00', 'Lab 2.32', 'Group 2')], files: [file('course-materials-f2026', 'labs/02_backprop')] };
+    expect(save(TZ, d).text).toBe(G_LAB);
+  });
+
+  it('Readings on their own', () => {
+    const d = { ...(newDraft('readings', doc(TZ)) as EntryDraft), title: 'Background reading', slots: [at('2026-08-25', '09:00')], guide: '- Any linear algebra refresher.' };
+    expect(save(TZ, d).text).toBe(G_READINGS);
+  });
+
+  it('Exam', () => {
+    const d = { ...(newDraft('exam', doc(TZ)) as EntryDraft), title: 'Midterm exam', slots: [at('2026-10-20', '10:00', 'Room 2.32')], details: 'Bring a calculator.' };
+    expect(save(TZ, d).text).toBe(G_EXAM);
+  });
+
+  it('Event', () => {
+    const d = { ...(newDraft('other', doc(TZ)) as EntryDraft), title: 'Clinic drop-in', slots: [at('2026-10-01', '16:00', 'Room 1.10')], details: 'Optional' };
+    expect(save(TZ, d).text).toBe(G_EVENT);
+  });
+
+  it('Supporting files', () => {
+    const d = { ...(newDraft('assets', doc(TZ)) as EntryDraft), title: 'Datasets', slots: [at('2026-09-01', '08:00')], files: [file('course-materials-f2026', 'data')] };
+    expect(save(TZ, d).text).toBe(G_ASSETS);
+  });
+
+  it('Assignment: nothing but its number, template and dates when every run setting is inherited; a typed late window adds one line', () => {
+    const d = { ...(newDraft('assignment', doc(TZ)) as AssignmentDraft), number: 3, template: 'assignment-gradient-descent', handoutDate: '2026-10-13', handoutTime: '14:00', dueDate: '2026-10-27', dueTime: '23:59' };
+    expect(save(TZ, d).text).toBe(G_ASSIGNMENT);
+    expect(save(TZ, { ...d, run: { late_window_days: 5 } }).text).toBe(G_ASSIGNMENT_LW);
+  });
+
+  it('Semester: a break, then the archive, beside the start and end', () => {
+    const start = `${TZ}semester:\n  start:   {type: start, event_datetime: 2026-09-07}\n  end:     {type: end,   event_datetime: 2026-12-18}\n`;
+    const br = { ...(newDraft('semester', doc(start)) as SemesterEntryDraft), type: 'break' as const, title: 'Reading week', from: '2026-10-19', to: '2026-10-23' };
+    const withBreak = save(start, br).text;
+    const ar = { ...(newDraft('semester', doc(withBreak)) as SemesterEntryDraft), type: 'archive' as const, from: '2027-02-16' };
+    // show_on_site: true is the default, written only where the file already spells it (the mock-up's archive line spells it).
+    expect(save(withBreak, ar).text).toBe(G_SEMESTER);
   });
 });
 
