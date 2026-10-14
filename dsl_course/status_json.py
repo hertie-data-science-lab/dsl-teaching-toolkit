@@ -236,9 +236,9 @@ class CourseFacts:
     materials: list[MaterialsFacts] = field(default_factory=list)
     templates: list[TemplateFacts] = field(default_factory=list)
     public_site: bool = False
-    # `opencourse.yml` says `enabled: true` (and parses).
+    # `course.yml` `open_course_site:` says `enabled: true` (and parses).
     website_on: bool = False
-    # `opencourse.yml` is there but does not parse or validate.
+    # `open_course_site:` is there but does not parse or validate.
     website_unusable: bool = False
 
 
@@ -583,7 +583,7 @@ def problem_from_fault(
 
     `when` is the instant the fault bites: the fault's own `fires` (a release, a hand-out),
     except a template's, which bites at the first hand-out still to come that consumes the
-    template - `moments`, by template (none left: undated, `later`); an assignments.yml value's, at its assignment's hand-out -
+    template - `moments`, by template (none left: undated, `later`); a semester run setting's, at its assignment's hand-out -
     `slug_handouts`, by schedule key; and visibility drift's, which stands now. Undated
     without one; an undated source fault, and a course template's no dated hand-out
     cites, is marked `UNDATED_LATER`. `_tier` sets `bites`.
@@ -1419,7 +1419,7 @@ def course_verdict(
 
 
 def website_problem(org: str) -> dict:
-    """C6: `opencourse.yml` does not parse while the public website is on (decision 0034):
+    """C6: `open_course_site:` does not parse while the public website is on (decision 0034):
     the daily update stands still and students see a stale site."""
     return {
         "id": f"website:{_slugify(OPENCOURSE_FILE)}:WEBSITE",
@@ -1459,7 +1459,7 @@ def render_course(
     - C3 course.yml names the course and its code, and one course admin;
     - C4 any materials repo `ready` (decision 0022: the others are to-dos);
     - C5 any template `ready`;
-    - C6 `opencourse.yml` turns the public website on and its repo exists.
+    - C6 `open_course_site:` turns the public website on and its repo exists.
     C1-C3 are needed, C4-C6 suggested (`stage_need`, decision 0034); the description is a
     suggested to-do. `verdict` rolls them up with the `now`/`soon` course problems and the
     to-dos; `ready` is its `ready`. A suggested stage may be set aside in `course.yml`'s
@@ -2577,7 +2577,7 @@ def gather_semester(course_org: str, semester_org: str, now: datetime) -> Semest
         # which is in `sched.faults`, and no assignment until the file parses.
         sched.assignments = {}
     # The schedule.yml digest's own sources (`scheduler._preflight_sources`): the sources
-    # the plan cites, the entries the parser dropped (assignments.yml's with them), the
+    # the plan cites, the entries the parser dropped (semester.yml's with them), the
     # team-formation windows somebody is still waiting on (None = the roster could not be
     # read), and the marks due but not all written. Of the windows, only the shut ones
     # (`faculty_window_faults`): an open one is the students' to act on.

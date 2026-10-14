@@ -957,19 +957,6 @@ def file_link(
 _BROWSE_ALL = "browse the folder"
 
 
-def link_extensions(meta: dict) -> frozenset[str]:
-    """`site_link_extensions` from a course's `course.yml`, lowercased and dot-stripped.
-
-    The OPTIONAL allowlist narrowing what a session row links (see `shape_links`); absent
-    or empty means the default folder-shaped listing. A bare string
-    (`site_link_extensions: pdf, html`) is accepted alongside a list - it is the shape
-    faculty reach for first, and refusing it would only produce a silently unfiltered site."""
-    raw = meta.get("site_link_extensions") or []
-    if isinstance(raw, str):
-        raw = raw.replace(",", " ").split()
-    return frozenset(str(x).strip().lstrip(".").lower() for x in raw if str(x).strip())
-
-
 def shape_links(
     blobs: list[Link], tree_base: str, allow: frozenset[str], base: str = ""
 ) -> list[Link]:
@@ -986,7 +973,8 @@ def shape_links(
       folder's root links to the file; each immediate subfolder gets ONE link to its tree,
       named with its file count. Nothing to configure, and a course that keeps handouts in
       `handouts/` reaches them in one more click rather than losing them.
-    - ALLOWLIST (`site_link_extensions`) - only files with those extensions, at any depth,
+    - ALLOWLIST (`allow`; no course file sets it since decision 0039 dropped
+      `site_link_extensions`) - only files with those extensions, at any depth,
       plus one "browse the folder" link, so a file the list does not name is still one
       click away instead of invisible.
 

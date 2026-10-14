@@ -855,8 +855,8 @@ def provision_one(
 ) -> str:
     """Generate one submission repo and grant its members access.
 
-    `visibility` is a run setting (the semester's `assignments.yml`, else the course's or
-    the institution's default), and is acted on at CREATE only - see
+    `visibility` is a run setting (the assignment's schedule.yml entry, else the
+    semester's `semester.yml`, the course's or the institution's default), and is acted on at CREATE only - see
     `repos.set_visibility` for why a public repo is born private. A repo that already
     exists is never re-PATCHed: the tick re-fires every handed-out assignment, so that
     would nightly undo a deliberate change, and an edit to `visibility:` after hand-out is

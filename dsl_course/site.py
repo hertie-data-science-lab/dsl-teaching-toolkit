@@ -109,7 +109,6 @@ from .site_repo import (
     iso_when,
     kinds_yaml,
     landed_links,
-    link_extensions,
     links_block,
     liquid_raw,
     nav_yaml,
@@ -1518,9 +1517,9 @@ def sync_site(course_org: str, semester_org: str) -> int:
             nowhere to say otherwise, so it shows."""
             return hit is None or hit[1].show_on_site
 
-        # What a row LINKS, out of everything it released - the default
-        # folder-shaped listing unless this course declared an extension allowlist.
-        allow = link_extensions(meta)
+        # What a row LINKS, out of everything it released: the folder-shaped listing
+        # (decision 0039 dropped the course's `site_link_extensions` allowlist).
+        allow: frozenset[str] = frozenset()
         # The repos this semester actually releases into - the only ones the index and
         # the syllabus lookup may read (see `_indexable_repos`).
         indexable = sorted(set(content_repos) & _indexable_repos(sched))

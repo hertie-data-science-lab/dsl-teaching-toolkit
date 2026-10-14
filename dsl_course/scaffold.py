@@ -173,16 +173,17 @@ def _syllabus_sample() -> str:
 # The assignment's own definition, written from what New assignment was asked for.
 # INSTRUCTOR-OWNED from the moment it lands: nothing ever rewrites it, and every setting in
 # it is meant to be edited here afterwards. What the assignment IS, and nothing about how
-# one semester runs it: the run settings (`settings.RUN_KEYS`) live in each semester's
-# `assignments.yml`, and one written here is RUN_SETTING_IN_TEMPLATE.
+# one semester runs it: the run settings (`settings.RUN_KEYS`) live on each semester's
+# schedule.yml entry (else its semester.yml `defaults:`), and one written here is
+# RUN_SETTING_IN_TEMPLATE.
 _GRADING_STAMP = (
     "# INSTRUCTOR-OWNED - defines the assignment. "
     "Dates live in the semester's schedule.yml."
 )
 _RUN_SETTINGS_NOTE = (
     "# How each semester runs it - how teams form, the max team size, the late rule, who "
-    "can\n# read the repos, an external submit link - is set per semester in "
-    "semester-config/assignments.yml."
+    "can\n# read the repos, an external submit link - is set per semester on its "
+    "semester-config/schedule.yml entry."
 )
 _QUESTIONS_STUB = """\
 # questions:                  # OPTIONAL - the score skeleton, and the maximum shown beside
@@ -589,8 +590,8 @@ def _brief_stub(
         + "".join(f"{sentence}\n\n" for sentence in artefacts)
         + (
             "_Say where and how students hand in - nothing is collected from this repo. "
-            "`submit_url:` in the semester's `assignments.yml` puts that address on the "
-            "semester site as a button._\n"
+            "`submit_url:` on the assignment's entry in the semester's `schedule.yml` puts "
+            "that address on the semester site as a button._\n"
             if external
             else "_Say which files you expect back, and in what shape._\n"
         )
@@ -1185,7 +1186,7 @@ def scaffold_assignment(
     `grading_config.yml`, which is what the handout, the grading sheet and the Join-team
     form all read - so the answers given on the button are the ones the rest of the term
     obeys, and nothing has to be hand-edited in afterwards. How a semester runs it (the
-    run settings) is that semester's `assignments.yml`, never this file.
+    run settings) is that semester's schedule.yml entry, never this file.
 
     `formats` is the exception: it picks which starter stubs are seeded on `main`, one
     each with its model answer on `solution`, and nothing else. The grader reads whatever

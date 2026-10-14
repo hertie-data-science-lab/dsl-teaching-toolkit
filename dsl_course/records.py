@@ -53,7 +53,7 @@ RECORDS = {
     # set to before, so the unpause restores exactly that
     "migration_pause": "migration-pause.json",
     # the course org's `.github`: the run settings `migrate` took out of each template,
-    # for its semesters' `assignments.yml`
+    # for its semesters' 0.10 `assignments.yml`
     "migration_run_keys": "migration-run-keys.json",
     # semester-config: the releases plan `migrate` proposes for folders released outside
     # the plan, for faculty to copy into schedule.yml by hand (never merged by the tool)

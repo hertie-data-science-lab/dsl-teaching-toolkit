@@ -405,7 +405,7 @@ _(automatically bootstrapped from the central
 | [**Send enrolment codes**](https://github.com/{org}/.github/actions/workflows/send-codes.yml) | Emails each student their enrolment code. There is no button: a push to a semester's `students.csv` fires it, and it sends for real. | Automatic |
 | [**Sync membership**](https://github.com/{org}/.github/actions/workflows/sync-membership.yml) | Reconciles teams and access from `students.csv`, this org's `people:` block and each semester's `semester.yml`. Runs on a push to any of them and daily; a manual run walks every semester. | Auto-handled |
 | [**Sync site**](https://github.com/{org}/.github/actions/workflows/sync-site.yml) | Regenerates every semester's website from the org structure. Releases and schedule pushes already do; a manual run walks every semester. | Auto-handled |
-| [**Publish course website**](https://github.com/{org}/.github/actions/workflows/publish-site.yml) | **[OPTIONAL]** Builds the public open-courseware site `{org}.github.io` as `.github/opencourse.yml` says (off by default); a daily cron re-syncs it once on. | Auto-handled |
+| [**Publish course website**](https://github.com/{org}/.github/actions/workflows/publish-site.yml) | **[OPTIONAL]** Builds the public open-courseware site `{org}.github.io` as `.github/course.yml` `open_course_site:` says (off by default); a daily cron re-syncs it once on. | Auto-handled |
 | [**Refresh actions**](https://github.com/{org}/.github/actions/workflows/refresh-actions.yml) | Repopulates the dropdowns, re-equips content repos, and rebuilds this index. Runs itself nightly. | Auto-handled |
 | [**Scheduled release**](https://github.com/{org}/.github/actions/workflows/scheduled-release.yml) | Auto-releases whatever each semester's `schedule.yml` says is now due, about every 15 minutes. Manual runs default to a preview. | Auto-handled |
 | [**Console**](https://github.com/{org}/.github/actions/workflows/console.yml) | Runs what the Instructor Console asks for. Not for pressing by hand: the Console fills in the request and follows the run. | Auto-handled |
@@ -481,7 +481,7 @@ they only resolve for enrolled members (deliberate).
 **The public course website** (optional) - `Publish course website` builds `{org}.github.io`, a public
 open-courseware site for the course as a whole. Unlike the semester sites it **hosts** the shared lecture
 files (the source repos are private, so links would 404); readings are published either as a text-only
-reading list or as hosted files. It is off by default and driven by `.github/opencourse.yml` (the
+reading list or as hosted files. It is off by default and driven by `.github/course.yml` `open_course_site:` (the
 console's Public website section) - releases and refresh never touch it - and once on, a daily cron
 re-syncs it, so later materials edits reach it on their own.
 

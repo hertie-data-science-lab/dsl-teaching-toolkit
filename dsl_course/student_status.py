@@ -74,7 +74,6 @@ from .schedule_plan import (
 )
 from .site_repo import (
     landed_links,
-    link_extensions,
     people_cards,
     row_tabs,
 )
@@ -278,7 +277,8 @@ class StudentFacts:
     # `{(repo, path): text}` of every reading-list overlay that landed.
     overlays: dict[tuple[str, str], str] = field(default_factory=dict)
     syllabus: tuple[str, str] | None = None
-    # The course's `site_link_extensions` (`site_repo.link_extensions`): what a row lists.
+    # What a row lists beyond the folder-shaped default: nothing since decision 0039
+    # dropped the course's `site_link_extensions`.
     link_extensions: frozenset[str] = frozenset()
     # (instructors, teaching assistants) as site cards; None when semester.yml
     # declares nobody.
@@ -848,7 +848,6 @@ def gather(course: CourseFacts, facts: SemesterFacts, now: datetime) -> StudentF
     org, sched = facts.org, facts.sched
     extra = StudentFacts(
         handed_out=handed_out_assignments(list(facts.listing.values())),
-        link_extensions=link_extensions(course.meta or {}),
     )
     for key, entry in _public_assignments(sched):
         spec = facts.specs.get(key, grading_spec.GradingSpec())

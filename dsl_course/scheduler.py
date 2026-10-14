@@ -1040,7 +1040,7 @@ def _config_faults(
         ),
     )
     # The same pass checks the semester's own run settings against the handed-out repos:
-    # those faults are about assignments.yml, and go in its issue.
+    # those faults are about semester.yml's defaults, and go in their issue.
     if config_digest.GRADING_CONFIG in out:
         (
             out[config_digest.GRADING_CONFIG],
@@ -1958,7 +1958,7 @@ def run(
     preview: Summary | None = None
     if sched.instance_unparseable:
         # Every run setting is unknown, so nothing here may act on a default the semester
-        # did not choose. The tick stays green. The fault goes out on assignments.yml's own
+        # did not choose. The tick stays green. The fault goes out on semester.yml's defaults
         # digest, and the schedule.yml digest is HELD: its window, number, marks-return
         # and held-solution faults cannot be worked out without the settings, and syncing
         # it without them posted Cleared for each (and a mail), then New again once fixed.

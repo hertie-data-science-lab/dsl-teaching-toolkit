@@ -664,19 +664,6 @@ def test_public_links_lists_nested_files_when_nothing_sits_at_the_root(tmp_path)
     assert names == ["handouts/extra.pdf", "handouts/notes.pdf"]
 
 
-def test_link_extensions_accepts_a_list_or_a_bare_string():
-    assert site_repo.link_extensions(
-        {"site_link_extensions": [".PDF", "html"]}
-    ) == frozenset({"pdf", "html"})
-    # The shape faculty reach for first; refusing it would only mean a silently
-    # unfiltered site.
-    assert site_repo.link_extensions(
-        {"site_link_extensions": "pdf, html"}
-    ) == frozenset({"pdf", "html"})
-    assert site_repo.link_extensions({}) == frozenset()
-    assert site_repo.link_extensions({"site_link_extensions": []}) == frozenset()
-
-
 # --------------------------------------------------------------- reading lists + blocks
 def test_block_survives_an_indented_first_line():
     # Without the explicit `|2` indicator YAML would take the block's indentation from its

@@ -4,8 +4,8 @@ The course org's `<course-org>.github.io` is PUBLIC and opt-in. The `course-mate
 repos it publishes are private, so linking into them would 404 for the public; instead
 this HOSTS the chosen repo's files in the site repo (Jekyll serves any path not starting
 with `_`) and links to site-relative URLs. Session materials only - no assignments, no
-events, no semester repos. What it publishes is the course's `opencourse.yml`
-(`opencourse`): the Publish website operation and the daily update both read it,
+events, no semester repos. What it publishes is the course's `course.yml`
+`open_course_site:` (`opencourse`): the Publish website operation and the daily update both read it,
 and `enabled: false` stops both.
 
 Driven through `python3 -m dsl_course.site public-sync`, which delegates here.
@@ -70,7 +70,7 @@ from .site_repo import (
 PUBLIC_MATERIALS_DIR = "public-materials"
 
 # The open site is still built from one repo's folders (its own design, `openware`, is
-# not written yet): `readings` is the section `opencourse.yml`'s `readings_mode` governs,
+# not written yet): `readings` is the section `open_course_site.readings_mode` governs,
 # and a lab-kind section makes a lab row (`row_kind`). The semester site reads kinds from
 # the schedule.
 READINGS_SECTION = "readings"
@@ -145,7 +145,7 @@ def _withheld_from_site(root: Path, path: Path, withhold: tuple[str, ...] = ()) 
     it never calls `copy_tree` and the `ignore` hook never runs: it publishes filenames,
     and inlines the overlay's prose verbatim. Without this, a withheld reading was named on
     the open web and a withheld OVERLAY had its full text published there. `withhold` is
-    `opencourse.yml`'s list, judged from the clone's root."""
+    `open_course_site:`'s list, judged from the clone's root."""
     rel = path.relative_to(root).as_posix()
     return (
         has_denied_component(rel)
@@ -249,7 +249,7 @@ def _public_lecture_entry(
 
 def sync_public_site(course_org: str, oc: OpenCourse) -> int:
     """Build/refresh the PUBLIC course site `<course-org>.github.io` (open courseware)
-    from `oc`, the course's `opencourse.yml`.
+    from `oc`, the course's `open_course_site:`.
 
     The first run scaffolds the site (Pages), later runs re-sync it. Hosts the declared
     `source_repo`'s files - every section it
@@ -286,7 +286,7 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
                 return None
             # Three filters unioned, not one list: the denylist is what this toolkit
             # refuses to publish, `.releaseignore` is faculty's own for every copy, and
-            # `opencourse.yml`'s `withhold` theirs for this site alone. Anchored at the
+            # `open_course_site:`'s `withhold` theirs for this site alone. Anchored at the
             # CLONE root even though what gets copied is a session folder deep inside it.
             withhold = union_deny(
                 _publication_ignore, deny_for(src), deny_lines(src, oc.withhold)
@@ -432,9 +432,9 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
 
 
 def publish(course_org: str, *, daily: bool = False) -> int:
-    """Publish the public website as the course's `opencourse.yml` declares it.
+    """Publish the public website as the course's `open_course_site:` declares it.
 
-    `daily` is the cron's catch-up: a course with no `opencourse.yml`, or one that says
+    `daily` is the cron's catch-up: a course with no `open_course_site:`, or one that says
     `enabled: false`, is a one-line no-op there, since the cron ships in every course org
     and most never publish. Asked for by a person, the same answer is a refusal with the
     sentence that says what to change."""

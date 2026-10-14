@@ -36,7 +36,7 @@ OPENCOURSE_FILE = COURSE_CONFIG
 OPENCOURSE_REPO = ".github"
 READINGS_MODES = ("reading-list", "actual-readings", "none")
 DEFAULT_READINGS_MODE = READINGS_MODES[0]
-# What a new `opencourse.yml` keeps off a website that is not on yet: the engine's own
+# What a new `open_course_site:` keeps off a website that is not on yet: the engine's own
 # folder, and anything whose name says answers, assessment or marks. Word-shaped, and each
 # case by a character class: a pattern matches inside a name, so a bare `*exam*` would hide
 # `examples/` and `*marks*` `remarks.md`. Broader than the publication denylist, which
@@ -72,7 +72,7 @@ SCHEMA = {
 
 @dataclass(frozen=True)
 class OpenCourse:
-    """What `opencourse.yml` declares, defaults filled in."""
+    """What `open_course_site:` declares, defaults filled in."""
 
     enabled: bool = False
     source_repo: str = ""

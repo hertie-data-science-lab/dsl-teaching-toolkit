@@ -12,7 +12,7 @@ that makes `!` correct - is here.
 paths do not all have a clone to look at:
 
   deny_for(root) / excludes(root, path)   a local clone      (deploy, public_site, assign)
-  deny_lines(root, lines)                 a pattern list     (opencourse.yml's withhold)
+  deny_lines(root, lines)                 a pattern list     (open_course_site withhold)
   from_tree(paths, read)                  a GitHub tree      (assign's semester template,
                                                               schedule's source check)
 
@@ -211,7 +211,7 @@ def listed(lines: Iterable[str]) -> Ignore:
 
 
 def deny_lines(root: Path, lines: Iterable[str]) -> Deny:
-    """`deny_for` for a pattern list that lives in no file (`opencourse.yml`'s
+    """`deny_for` for a pattern list that lives in no file (`open_course_site:`'s
     `withhold:`): the same rule, read as if it were `root`'s own `.releaseignore`."""
     return _deny(root, listed(lines))
 

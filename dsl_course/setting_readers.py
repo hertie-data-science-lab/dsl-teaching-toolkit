@@ -1,6 +1,6 @@
 """setting_readers - how every assignment setting's value is read: one reader per key,
-shared by an assignment's `grading_config.yml`, the course's `assignment_defaults:`, the
-semester's `assignments.yml` and the institution's `policy.yml` defaults, so one value is
+shared by an assignment's `grading_config.yml` and schedule.yml entry, and the `defaults:`
+of `semester.yml`, `course.yml` and `institution.yml`, so one value is
 validated one way whichever file it is written in.
 
 A reader returns the usable value, or records a `Dropped` line and returns what the
@@ -389,7 +389,7 @@ def _submit_url(value: object, where: str, dropped: list[str]) -> str:
 
 
 # One reader per key, so the per-assignment file, the course-wide defaults block, the
-# semester's `assignments.yml` and the institution's policy validate the same value the same way and cannot drift into two vocabularies.
+# semester's `semester.yml` and the institution's file validate the same value the same way and cannot drift into two vocabularies.
 READERS = {
     "title": lambda v, w, d: str(v or "").strip(),
     "type": lambda v, w, d: _one_of(v, ASSIGNMENT_TYPES, "type", "individual", w, d),

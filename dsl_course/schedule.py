@@ -604,7 +604,7 @@ class Schedule:
     # snapshotted or graded for the semester, and the digest issue and the mail beside it are
     # how the person who has to fix it hears about that.
     unparseable: bool = False
-    # Set by `load` when `assignments.yml` is not YAML: its run settings are unknown, so
+    # Set by `load` when `semester.yml` is not YAML: its run settings are unknown, so
     # nothing that reads one (a cutoff, a hand out) can act for this semester until it is
     # fixed. The fault is in `faults` like any other.
     instance_unparseable: bool = False
