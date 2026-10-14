@@ -69,6 +69,9 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
      syllabus: E1282_syllabus.pdf   # default SYLLABUS.md
    ```
 
+   *The console sets it on the semester's Student site page, or on this repo's settings
+   page (Syllabus), which saves it for the newest semester.*
+
    *A `materials.yml` in this repo is not read. A folder's kind on the public site is its
    name in the institution's kinds (`lectures/`, `labs/`); any other folder is supporting
    files.*

@@ -97,6 +97,18 @@ describe('Site settings', () => {
     expect(puts(gh, '_config.yml')).toEqual([]);
   });
 
+  it('saves the syllabus the home page pins into semester.yml student_site (decision 0039)', async () => {
+    const gh = await mount();
+    const site = section('Student site');
+    expect(site.textContent).toContain('default: SYLLABUS.md');
+    await type('#ss-site-syllabus', 'Course.md');
+    await act(() => saveIn(site).click());
+    await settle(() => puts(gh, 'semester.yml').length > 0);
+    const [w] = puts(gh, 'semester.yml');
+    expect(w.url).toContain(`/repos/${ORG}/semester-config/contents/semester.yml`);
+    expect(body(w)).toContain('student_site:\n  syllabus: Course.md\n');
+  });
+
   it('saves the semester dates into schedule.yml, pointing at the Schedule', async () => {
     const gh = await mount();
     const sem = section('Semester dates');

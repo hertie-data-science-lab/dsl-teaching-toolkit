@@ -3,8 +3,8 @@
 // `semester.yml`, the Students and Teams pages write `students.csv`. Each starts from the file
 // as Bootstrap seeds it (`fixtures/config-forms/*.seed.yml`, exported by the engine) and must
 // come out as the mock-up's blocks, every line it did not touch kept byte for byte. The
-// golden files are the exact text; the mock-ups (`*.mockup.yml`) carry free comments no form
-// writes, so they are compared block by block.
+// golden files are the exact text; the mock-ups carry free comments no form writes, so their
+// values are compared block by block.
 
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
@@ -24,8 +24,19 @@ import courseSchema from '../schemas/course.schema.json';
 const read = (name: string) => readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
 const COURSE_SEED = read('config-forms/course.seed.yml');
 const SEMESTER_SEED = read('config-forms/semester.seed.yml');
-const COURSE_MOCK = parse(read('config-forms/course.mockup.yml'));
-const SEMESTER_MOCK = parse(read('config-forms/semester.mockup.yml'));
+// The mock-ups' values (design/mockups/course.yml and semester.yml).
+const COURSE_MOCK = {
+  course: { name: 'Deep Learning for Public Policy', code: 'E1394', description: 'One paragraph students see on every semester site and on the open course site.' },
+  people: { course_admins: [{ github_handle: 'janedoe', email: 'jane@hertie-school.org' }, { github_handle: 'asst01', email: 'alex@hertie-school.org' }] },
+  defaults: { max_team_size: 3, team_formation: 'self_select' },
+};
+const SEMESTER_MOCK = {
+  people: [
+    { github_handle: 'pteach', role: 'instructor', email: 'p@hertie-school.org', name: 'Dr P. Teach', title: 'Lecturer', photo: 'https://github.com/pteach.png', url: 'https://...' },
+    { github_handle: 'tahelp', role: 'teaching_assistant', email: 't@hertie-school.org', name: 'T. Help', start: '2026-09-01', end: '2027-01-31' },
+  ],
+  defaults: { late_window_days: 5 },
+};
 const yamlFile = (text: string) => ({ text, sha: 's', doc: obj(parse(text)), error: null });
 /** The lines of `after` that are not in `before`, and those of `before` gone from `after`. */
 function changed(before: string, after: string): { added: string[]; gone: string[] } {
@@ -126,7 +137,7 @@ describe('the semester’s settings: semester.yml (mock-up semester.yml)', () =>
     const final = 'text' in site ? site.text : '';
     expect(final).toBe(read('config-forms/semester.golden.yml'));
     const doc = parse(final);
-    expect(doc.people).toEqual(SEMESTER_MOCK.people.map((p: Record<string, unknown>) => Object.fromEntries(Object.entries(p).map(([k, v]) => [k, typeof v === 'object' ? String((v as Date).toISOString?.() ?? v).slice(0, 10) : v]))));
+    expect(doc.people).toEqual(SEMESTER_MOCK.people);
     expect(doc.defaults).toEqual({ late_window_days: SEMESTER_MOCK.defaults.late_window_days });
     expect(doc.student_site).toEqual({ syllabus: 'Syllabus.md' });
     expect(validSemesterBlocks(doc, ['people', 'defaults', 'student_site'])).toBe(true);
