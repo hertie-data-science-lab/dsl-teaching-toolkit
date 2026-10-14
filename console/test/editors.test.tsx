@@ -246,7 +246,7 @@ const FILES: Record<string, string> = {
     [`${COURSE_ORG}/assignment-3-f2026/grading_config.yml`]: 'type: group\n',
     [`${COHORT_ORG}/semester-config/assignments.yml`]: 'assignments:\n  assignment-3:\n    max_team_size: 3\n',
     [`${COURSE_ORG}/.github/dsl-course.yml`]: '# INSTRUCTOR-OWNED\norg: hertie-dsl-demo-course-e1234\ncourse_name: Machine Learning\ncourse_code: E1234\npeople:\n  course_admins:\n    - github_handle: a-example\n      email: a@staff.example.org\nassignment_defaults:\n  late_window_days: 10\n  late_penalty_per_day: 10%\n',
-    [`${COURSE_ORG}/.github/opencourse.yml`]: '# INSTRUCTOR-OWNED\nenabled: true   # false: nothing is published\nsource_repo: course-materials-f2026\nreadings_mode: reading-list\ninclude_lectures: true\nwithhold:\n  - "labs/"\n',
+    [`${COURSE_ORG}/.github/course.yml`]: '# INSTRUCTOR-OWNED\ncourse:\n  name: Machine Learning\nopen_course_site:\n  enabled: true   # false: nothing is published\n  source_repo: course-materials-f2026\n  publish:\n    kinds: [lectures, labs]\n    exclude: ["labs/"]\n',
     [`${COURSE_ORG}/course-materials-f2026/.releaseignore`]: 'solutions/\n',
 };
 const TREES = { [`${COURSE_ORG}/course-materials-f2026`]: ['SYLLABUS.md', 'lectures/01/slides.html', 'labs/01/solutions/a.py'] };
@@ -342,12 +342,12 @@ describe('editing screens', () => {
     expect(out).toContain(`<option value="${POLICY.licences[1].name}"`);
     // The website's on/off is a switch here, beside the link to its own tab.
     expect(out).toMatch(/<input type="checkbox" role="switch" id="cd-web" aria-describedby="cd-web-state" checked\/><span>Public OpenCourse website <span class="chip">Beta<\/span><\/span><\/label><span class="footnote" id="cd-web-state" aria-live="polite">On: updates daily<\/span> <a class="textlink" href="#website">Manage<\/a>/);
-    const off = new StaticFiles({ ...FILES, [`${COURSE_ORG}/.github/opencourse.yml`]: 'enabled: false\n' }, {}, TREES);
+    const off = new StaticFiles({ ...FILES, [`${COURSE_ORG}/.github/course.yml`]: 'open_course_site:\n  enabled: false\n' }, {}, TREES);
     expect(html(<DetailsScreen {...cp} files={off} />)).toContain('aria-describedby="cd-web-state"/><span>Public OpenCourse website <span class="chip">Beta</span></span></label><span class="footnote" id="cd-web-state" aria-live="polite">Off</span>');
-    const none = Object.fromEntries(Object.entries(FILES).filter(([k]) => !k.endsWith('opencourse.yml')));
+    const none = Object.fromEntries(Object.entries(FILES).filter(([k]) => !k.endsWith('/course.yml')));
     expect(html(<DetailsScreen {...cp} files={new StaticFiles(none, {}, TREES)} />)).toContain('aria-live="polite">Off</span>');
-    const broken = new StaticFiles({ ...FILES, [`${COURSE_ORG}/.github/opencourse.yml`]: 'enabled: [\n' }, {}, TREES);
-    expect(html(<DetailsScreen {...cp} files={broken} />)).toMatch(/id="cd-web" aria-describedby="cd-web-state" disabled\/>.*opencourse.yml does not parse; fix it in Manage\./);
+    const broken = new StaticFiles({ ...FILES, [`${COURSE_ORG}/.github/course.yml`]: 'open_course_site: [\n' }, {}, TREES);
+    expect(html(<DetailsScreen {...cp} files={broken} />)).toMatch(/id="cd-web" aria-describedby="cd-web-state" disabled\/>.*course.yml does not parse; fix it in Manage\./);
   });
   it('skips the account check when only a course admin handle’s case changes', async () => {
     const src = 'course_name: ML\npeople:\n  course_admins:\n    - github_handle: octo\n      email: o@x.edu\n';
@@ -374,7 +374,8 @@ describe('editing screens', () => {
   it('materials settings previews what is withheld, and nothing about the public website', () => {
     const out = html(<MaterialsScreen {...cp} entry="course-materials-f2026" />);
     expect(out).toMatch(/<span class="ft-name">slides.html<\/span><span class="chip ">released to students<\/span>/);
-    expect(out).toMatch(/<span class="ft-name">a.py<\/span><span class="chip amber">withheld<\/span><span class="footnote">withheld by <code>solutions\/<\/code><\/span>/);
+    // solutions/ is the institution denylist's too (decision 0040): never released, whatever the list says.
+    expect(out).toMatch(/<span class="ft-name">a.py<\/span><span class="chip amber">never released<\/span>/);
     expect(out).toContain('Weekly plan for the syllabus');
     // Copy opens the plan to copy; Write puts it into the syllabus (decision 0031 rule 9).
     expect(out).toContain('>Copy</button>');
@@ -403,17 +404,20 @@ describe('editing screens', () => {
     expect(out).toContain('aria-label="Withhold SYLLABUS.md"');
     expect(out).not.toContain('class="file-list"');
   });
-  it('the public website edits opencourse.yml and asks for the confirmation the engine’s missing preview needs', () => {
+  it('the public website edits course.yml and asks for the confirmation the engine’s missing preview needs', () => {
     const out = html(<WebsiteScreen {...cp} />);
     expect(out).toContain('Public OpenCourse website <span class="chip">Beta</span>');
     expect(out).toContain('Beta: leave this off for now - work in progress.');
     expect(out).toContain('<button class="btn" type="button">Publish website</button>');
-    expect(out).toContain(`<a class="btn quiet" href="https://github.com/${COURSE_ORG}/.github/edit/main/opencourse.yml" target="_blank" rel="noopener" title="${COURSE_ORG}/.github/opencourse.yml">Edit the file directly`);
+    expect(out).toContain(`<a class="btn quiet" href="https://github.com/${COURSE_ORG}/.github/edit/main/course.yml" target="_blank" rel="noopener" title="${COURSE_ORG}/.github/course.yml">Edit the file directly`);
     expect(out).not.toContain('New semester');
-    // No opencourse.yml yet: Create the file on GitHub opens GitHub's new-file page with the name filled in.
-    expect(html(<WebsiteScreen {...cp} files={new StaticFiles({}, {}, {})} />)).toContain(`href="https://github.com/${COURSE_ORG}/.github/new/main?filename=opencourse.yml"`);
+    // No course.yml yet: Create the file on GitHub opens GitHub's new-file page with the name filled in.
+    expect(html(<WebsiteScreen {...cp} files={new StaticFiles({}, {}, {})} />)).toContain(`href="https://github.com/${COURSE_ORG}/.github/new/main?filename=course.yml"`);
     expect(out).toContain('Source materials');
-    expect(out).toMatch(/<span class="ft-name">labs\/<\/span><span class="chip amber">kept off<\/span>/);
+    // One selection editor: the kind chips, and the tree's lines leave a folder out.
+    expect(out).toMatch(/<span class="ft-name">labs\/<\/span><span class="chip amber">left out<\/span>/);
+    expect(out).toMatch(/Lecture: In · 1/);
+    expect(out).toContain('Reading lists');
     expect(out).toContain('Keep the website updated');
     expect(out).not.toContain('Lives in');
     expect(out).toContain('href="#details"');

@@ -7,21 +7,16 @@
 // `schemas/materials.json` were answered by the engine and the tests hold this file to them.
 // Never-material names (`.DS_Store`, `.gitkeep`) and the list file itself never leave the repo.
 
-import rules from '../../schemas/materials.json';
+import { clutter, denylisted } from '../model/selection';
 import { compile, compileAll, matchRules, withheldBy, type Rule } from './glob';
 
 export type Badge = 'withheld' | 'released';
 
-/** `repos.PUBLICATION_DENYLIST` as whole-name regexes, matched per path component. */
-const fnmatch = (p: string) => new RegExp(`^${p.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`);
-const DENYLIST = rules.denylist.map(fnmatch);
-/** `repos.NEVER_MATERIAL`, matched per path component, case-insensitively. */
-const NEVER_MATERIAL = new Set(rules.never_material.map((x) => x.toLowerCase()));
-
 const parts = (path: string) => path.split('/').filter(Boolean).map((x) => x.toLowerCase());
-export const neverMaterial = (path: string) => parts(path).some((x) => NEVER_MATERIAL.has(x) || x === '.releaseignore');
-/** Never published whatever a list says: solutions, tests, grading files, `.env`. */
-export const denylisted = (path: string) => parts(path).some((x) => DENYLIST.some((re) => re.test(x)));
+/** Clutter (`selection.CLUTTER`) and the list file itself: never copied anywhere. */
+export const neverMaterial = (path: string) => clutter(path) || parts(path).includes('.releaseignore');
+/** The institution denylist (`selection.DENYLIST`): solutions, tests, grading files, `.env*`, `.git`, `.system`. */
+export { denylisted };
 
 export interface Badged {
   badges: Record<string, Badge>;
