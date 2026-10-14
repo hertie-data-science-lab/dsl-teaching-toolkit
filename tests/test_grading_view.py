@@ -1,11 +1,11 @@
 """What a student is shown: the allowlisted view, the private gradebook and the
-registrar's export.
+semester grades file.
 
 Marks and feedback go to ONE place, the student's gradebook, so that is the whole of what
 a student reads here. The promise these tests hold to is a privacy one, and it has three
-parts: a student sees their own final grade and their own feedback; they never see the
-grader's notes or any other `info:` fact; and no member of a team ever sees another
-member's marks, feedback or adjustment. Most of what follows is written as sentinels - a unique string in every field
+parts: a student sees their own marks - the score (their team's), their own adjustment,
+the final grade - and their own feedback; they never see the grader's notes or any other
+`info:` fact; and no member of a team ever sees another member's feedback or adjustment. Most of what follows is written as sentinels - a unique string in every field
 of every person - because that is the only way to assert the absence of a leak rather
 than the presence of the fields we happened to think of.
 """
@@ -171,16 +171,21 @@ def test_the_shared_team_feedback_reaches_every_members_own_gradebook():
         assert f"FEEDBACK-{handle}-SENTINEL" in page
 
 
-def test_a_gradebook_shows_the_final_grade_and_never_the_parts_it_came_from():
-    # The maintainer's call: the team's score and the member's own adjustment are the
-    # grader's working, not the student's result. Reading your own deduction beside the
-    # mark your team-mates share is the conversation this workflow exists to avoid.
-    for name, page in everything_a_student_reads().items():
-        assert TEAM_TOTAL not in page, f"the team score reached the {name}"
-        for mark in QUESTION_MARKS:
-            assert mark not in page, f"a question's mark reached the {name}"
-        for adjustment in ("-1", "-3", "+2"):
-            assert adjustment not in page, f"an adjustment reached the {name}"
+def test_a_gradebook_shows_the_parts_its_final_grade_came_from():
+    # The maintainer's call (14 Oct 2026): the numbers must add up, so a member's page
+    # shows the team's score and marks per question, and their OWN adjustment - and never
+    # a team-mate's.
+    books = sentinel_books()
+    for handle in MEMBERS:
+        page = render_readme(handle, books[handle], SENTINEL_TITLES)
+        assert f"**Score:** {TEAM_TOTAL} / 50" in page
+        assert "**Marks per question:** Q1 14 · Q2 13 · Q3 10 · Q4 6" in page
+        own = f"{ADJUSTMENTS[handle]:+d}"
+        assert f"adjustment {own}" in page
+        assert f"**Final grade:** {FINALS[handle]} / 50" in page
+        for other in set(MEMBERS) - {handle}:
+            theirs = f"{ADJUSTMENTS[other]:+d}"
+            assert theirs not in page + repr(books[handle]), f"{other} reached {handle}"
 
 
 def test_a_view_holds_nothing_the_allowlist_does_not_name():
@@ -208,7 +213,8 @@ def test_a_group_members_grade_is_the_team_total_plus_their_own_adjustment():
     assert view["final_grade"] == "40"  # 43 - 3
     assert view["max_points"] == "50"
     assert view["team"] == "team-alpha"
-    assert "score" not in view  # a group's score is the team's, not the member's
+    assert view["score"] == {"Q1": 14, "Q2": 13, "Q3": 10, "Q4": 6}  # the team's
+    assert view["adjustment"] == "-3"  # ben-k's own
 
 
 def test_an_external_groups_member_is_shown_the_team_score_in_their_gradebook():
@@ -337,7 +343,9 @@ def test_the_gradebook_readme_is_exactly_the_page_the_spec_shows():
         "| Assignment 1 · Neural networks from scratch | 40 / 50 | 3 Oct 22:14 | on time | team-alpha |\n"
         "\n"
         "## Assignment 1 · Neural networks from scratch\n"
-        "**Final grade:** 40 / 50\n"
+        "**Marks per question:** Q1 14 · Q2 13 · Q3 10 · Q4 6\n"
+        "\n"
+        "**Score:** 43 / 50 · on time · adjustment -3 · **Final grade:** 40 / 50\n"
         "\n"
         "Your section of the write-up repeats the Q4 error; see the team feedback.\n"
         "\n"
@@ -477,6 +485,107 @@ def test_an_on_time_mark_says_so_rather_than_leaving_the_line_out():
     assert readme[7] == "**Score:** 20 / 50 · on time · **Final grade:** 20 / 50"
 
 
+def test_a_late_team_member_sees_the_late_line_whatever_the_score():
+    # Review finding 9: a late team member used to see no late line at all. It prints
+    # whenever the unit was timed - with a score no arithmetic applies to as well.
+    block = {
+        "info": {"days_late": 2},
+        "late_penalty": "waive",
+        "score_group": "pass",
+        "members": {"eli-r": {}},
+    }
+    view = student_view(group_spec(), "team-beta", block, "eli-r")
+    readme = render_readme("eli-r", {"assignment-1": view}, {}).splitlines()
+    assert readme[7] == "2 days late · penalty waived · **Final grade:** pass / 50"
+
+
+def test_an_adjustment_alone_is_shown_with_the_score_it_moved():
+    spec = individual_spec(submit_via="external", questions={"Q1": "50"})
+    block = {"score_individual": 40, "adjustment_individual": "+2"}
+    view = student_view(spec, "ada-l", block, "ada-l")
+    assert view["adjustment"] == "+2"
+    readme = render_readme("ada-l", {"assignment-1": view}, {}).splitlines()
+    assert readme[7] == "**Score:** 40 / 50 · adjustment +2 · **Final grade:** 42 / 50"
+
+
+def test_a_zero_adjustment_is_no_adjustment_line():
+    block = {"score_individual": 40, "adjustment_individual": "0"}
+    view = student_view(individual_spec(), "ada-l", block, "ada-l")
+    assert "adjustment" not in view
+
+
+# Every shape a sheet can have, individual and group: what reaches the student is the same
+# rule in each, and only the option decides the marks and feedback per question.
+SHAPES = [
+    (group, via)
+    for group in (False, True)
+    for via in ("assignment_repo", "shared_dropbox_repo", "external")
+]
+
+
+def _shape_case(group: bool, via: str) -> tuple[SheetSpec, str, dict, str]:
+    spec = (group_spec if group else individual_spec)(
+        submit_via=via,
+        **(
+            {}
+            if group
+            else {
+                "questions": QUESTIONS,
+                "late_window_days": 7,
+                "late_penalty_per_day": "10%",
+            }
+        ),
+    )
+    person = {"adjustment_individual": -3, "feedback_individual": "OWN-FEEDBACK"}
+    block: dict = {
+        spec.score_key: {"Q1": 14, "Q2": 13, "Q3": 10, "Q4": 6},
+        "feedback_per_question": {"Q4": "Q4-FEEDBACK"},
+    }
+    if spec.collects_commits:
+        block["info"] = {"submitted": "2026-10-06T09:30+02:00", "days_late": 2}
+    if group:
+        block["members"] = {"ben-k": person}
+        return spec, "team-alpha", block, "ben-k"
+    return spec, "ben-k", block | person, "ben-k"
+
+
+@pytest.mark.parametrize(("group", "via"), SHAPES)
+@pytest.mark.parametrize("per_question", [True, False], ids=["per-question", "total"])
+def test_every_shape_shows_the_whole_breakdown(group, via, per_question):
+    spec, unit, block, handle = _shape_case(group, via)
+    view = student_view(spec, unit, block, handle, per_question)
+    late = spec.collects_commits
+    # 43, less 20% for two days late where the shape times a submission, then -3.
+    final = "31.4" if late else "40"
+    assert (view["final_grade"], view["adjustment"]) == (final, "-3")
+    assert view.get("penalty") == ("-20%" if late else None)
+    assert view["feedback"] == "OWN-FEEDBACK"
+    if per_question:
+        assert view["score"] == {"Q1": 14, "Q2": 13, "Q3": 10, "Q4": 6}
+        assert view["feedback_per_question"] == {"Q4": "Q4-FEEDBACK"}
+    else:
+        assert view["score"] == "43"
+        assert "feedback_per_question" not in view
+    readme = render_readme(handle, {"assignment-1": view}, TITLES)
+    assert ("**Marks per question:**" in readme) is per_question
+    assert ("Q4-FEEDBACK" in readme) is per_question
+    working = ["**Score:** 43 / 50"]
+    working += ["2 days late", "penalty -20%"] if late else []
+    working += ["adjustment -3", f"**Final grade:** {final} / 50"]
+    assert " · ".join(working) in readme
+
+
+def test_withholding_one_assignments_marks_per_question_leaves_the_others():
+    spec = individual_spec(questions={"Q1": "10", "Q2": "10"})
+    sheet = {"submissions": {"ada-l": {"score_individual": {"Q1": 9, "Q2": 8}}}}
+    books = build_gradebooks(
+        {"assignment-1": (spec, sheet), "assignment-2": (spec, sheet)},
+        withheld={"assignment-2"},
+    )
+    assert books["ada-l"]["assignment-1"]["score"] == {"Q1": 9, "Q2": 8}
+    assert books["ada-l"]["assignment-2"]["score"] == "17"
+
+
 def test_a_grade_with_no_score_behind_it_is_shown_on_its_own():
     # An assignment handed in off GitHub counts no days and a hand-marked one has no score
     # in the sheet, so there is no arithmetic to show - and `**Score:** 40 · **Final
@@ -608,3 +717,23 @@ def test_only_a_unit_whose_penalty_moved_its_mark_is_mailed_again():
     waived = digests(sheet(**{"ada-l": "waive"}))
     assert waived["ada-l"] != before["ada-l"]
     assert waived["ben-k"] == before["ben-k"]
+
+
+@pytest.mark.parametrize(
+    ("via", "mailed"), [("assignment_repo", False), ("external", True)]
+)
+def test_the_team_score_keys_the_email_only_where_it_always_did(via, mailed):
+    # A team with a repo of its own: its members' pages show the team's score only since
+    # 0.11.0, so the email does not key on it - the first run after the release would
+    # otherwise mail every such student to say nothing new. Its total still moves the
+    # final grade, which is keyed. A team with no repo always saw its score there.
+    spec = group_spec(submit_via=via)
+
+    def digest(score: dict) -> str:
+        sheet = sentinel_sheet()
+        sheet["teams"]["team-alpha"]["score_group"] = score
+        books = build_gradebooks({"assignment-1": (spec, sheet)})
+        return _marks_digest(books["ada-l"], {"assignment-1": spec})
+
+    same_total = digest({"Q1": 13, "Q2": 14, "Q3": 10, "Q4": 6})
+    assert (same_total != digest({"Q1": 14, "Q2": 13, "Q3": 10, "Q4": 6})) is mailed

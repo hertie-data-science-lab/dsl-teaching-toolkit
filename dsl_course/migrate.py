@@ -4002,5 +4002,15 @@ def main() -> int:
     return run(args.org, target.steps(), args.preview, target.pause)
 
 
+def _list_semester_grades_rename() -> None:
+    """0.11.0: the semester grades file's old name joins the layout step's moves, so a
+    semester that returned no marks since lists and moves it. (Return marks renames it on
+    its own first real run.)"""
+    SEMESTER_MOVES[records.RETIRED_SEMESTER_GRADES] = records.path("semester_gradebook")
+
+
+_list_semester_grades_rename()
+
+
 if __name__ == "__main__":
     sys.exit(main())

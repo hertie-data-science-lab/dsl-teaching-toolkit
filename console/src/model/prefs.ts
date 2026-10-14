@@ -2,7 +2,7 @@
 // current ones only, which All courses sections show the person's own rows only (on unless
 // switched off), when the student last opened each semester (for "new since your last visit"),
 // and a person's Profile (root folder, per-course folders, editor, the Open button's last
-// choice), one for both roles (decision 0027). Storage can be missing or refuse (a private
+// choice), one for both roles (decision 0027), and the unsaved marks on a mark sheet. Storage can be missing or refuse (a private
 // window, blocked site data); the console then shows every semester, calls nothing new, and
 // keeps Profile in memory until reload.
 
@@ -142,4 +142,28 @@ export function currentOnly(login: string, store: KeyStore | null = localStore()
 
 export function saveCurrentOnly(login: string, on: boolean, store: KeyStore | null = localStore()): void {
   writeText(store, currentKey(login), on ? '1' : '0'); // refused: the choice lasts until reload
+}
+
+// --------------------------------------------------------------------------- Marks drafts (WP-M1)
+
+const draftKey = (org: string, path: string) => `dsl-console-marks-draft:${org.toLowerCase()}:${path}`;
+
+/** Unsaved edits to one mark sheet (cell path as JSON -> value), the sheet's sha they were made against, and when. */
+export interface MarksDraft {
+  sha: string | null;
+  at: number;
+  edits: Record<string, unknown>;
+}
+
+/** The draft kept in this browser for one mark sheet, or null. */
+export function marksDraft(org: string, path: string, store: KeyStore | null = localStore()): MarksDraft | null {
+  const v = readJson<Partial<MarksDraft>>(store, draftKey(org, path));
+  if (!v || typeof v !== 'object' || !v.edits || typeof v.edits !== 'object' || Array.isArray(v.edits) || !Object.keys(v.edits).length) return null;
+  return { sha: typeof v.sha === 'string' ? v.sha : null, at: typeof v.at === 'number' ? v.at : 0, edits: v.edits };
+}
+
+/** Keep `draft` until it is saved or discarded; null clears it. Refused storage: nothing is kept. */
+export function saveMarksDraft(org: string, path: string, draft: MarksDraft | null, store: KeyStore | null = localStore()): void {
+  if (draft && Object.keys(draft.edits).length) writeJson(store, draftKey(org, path), draft);
+  else remove(store, draftKey(org, path));
 }

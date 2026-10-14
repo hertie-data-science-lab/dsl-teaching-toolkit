@@ -9,14 +9,14 @@ import { pastDue, phaseOf, submissionsOf, type Phase } from '../model/assignment
 import { RepoChip } from '../ui/SetupPanel';
 import { templateReadinessIn, tier } from '../model/readiness';
 import { Check } from '../ui/icons';
-import { collect, handout, returnMarks, updateCopies, type AsgRef } from '../ops/defs';
+import { collect, handout, updateCopies, type AsgRef } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
 import { useEffect } from 'preact/hooks';
 import { replaceHash, tabHref, type AssignmentTab } from '../router';
 import { ProblemCards } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { asgSummary } from './Cohort';
-import { MarksTab, TeamsTab, lateUntil } from './Marking';
+import { MarksTab, TeamsTab, requestReturnMarks } from './Marking';
 import { AssignmentRun, SemesterDefaults, sheetName } from './RunSettings';
 import { WithStatus, cohortName, cohortScope, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
@@ -156,6 +156,17 @@ export interface TabProps extends ReadyProps {
   tabs: preact.ComponentChildren;
 }
 
+/** Return marks from the Overview: the Marks tab's own panel, opened there, so its figures are always read from the sheet. */
+function ReturnFromMarks({ slug, label }: { slug: string; label: string }) {
+  const to = tabHref(slug, 'marks');
+  return (
+    <>
+      <a class="btn small" href={to} onClick={() => requestReturnMarks(slug, 'preview')}>Preview</a>
+      <a class="btn small outline" href={to} onClick={() => requestReturnMarks(slug, 'run')}>{label}</a>
+    </>
+  );
+}
+
 function Overview(p: TabProps) {
   const { status, now, a } = p;
   const tz = tzOf(status), year = yearOf(now, tz);
@@ -163,7 +174,6 @@ function Overview(p: TabProps) {
   // A group assignment is handed out when its teams start forming: each team's repo follows.
   const handedOut = cur >= 1;
   const late = a.state === 'late_window';
-  const lateTo = lateUntil(a, now, tz, year);
   // Teams form until the late cutoff.
   const cutoffPassed = a.state === 'marking' || a.state === 'returned';
   const marked = `${a.marks.filled} of ${a.marks.total} marked`;
@@ -263,7 +273,7 @@ function Overview(p: TabProps) {
               cur === 3 ? (
                 <>
                   <div class="sa-op"><span class="opname">Marks</span><a class="btn small quiet" href={tabHref(a.slug, 'marks')}>Open marks</a></div>
-                  <div class="sa-op"><span class="opname">Return marks</span><OpButtons def={returnMarks(scope, ref, a.marks.filled, sheetName(p, a.slug), lateTo)} small /></div>
+                  <div class="sa-op"><span class="opname">Return marks</span><ReturnFromMarks slug={a.slug} label="Return marks" /></div>
                   {late ? pushOps : null}
                 </>
               ) : null)}
@@ -271,7 +281,7 @@ function Overview(p: TabProps) {
               cur === 4 ? (
                 <>
                   <div class="sa-op"><span class="opname">Marks</span><a class="btn small quiet" href={tabHref(a.slug, 'marks')}>Open marks</a></div>
-                  <div class="sa-op"><span class="opname">Return changed marks</span><OpButtons def={returnMarks(scope, ref, a.marks.filled, sheetName(p, a.slug), lateTo)} small label="Return changed marks" /></div>
+                  <div class="sa-op"><span class="opname">Return changed marks</span><ReturnFromMarks slug={a.slug} label="Return changed marks" /></div>
                 </>
               ) : null)}
           </ul>

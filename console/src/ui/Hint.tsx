@@ -1,7 +1,7 @@
 // The one help pattern (decision 0018): a small round `?` whose popover opens on hover and on
 // keyboard focus, and closes on leave, blur or Escape. No click state: a tap focuses it. Its
 // wrapper is `.hint-wrap`: `p.hint` is a form field's note, and must not take its layout.
-// Inside a dialog (the schedule's entry sheet, a modal, the operation panel) the body scrolls and
+// Inside a dialog (the schedule's entry sheet, a modal, the operation panel, the marks grid) the body scrolls and
 // would clip it, so there it is fixed to the viewport beside its ?, and follows it on scroll.
 
 import type { ComponentChildren } from 'preact';
@@ -10,8 +10,8 @@ import { DOCS } from './bits';
 
 const GAP = 8; // between the ? and the popover, and the popover and the viewport's edge
 
-/** The boxes whose scrolling body would clip a popover placed inside it. */
-const BOXED = '[role="dialog"], .drawer';
+/** The boxes whose scrolling body would clip a popover placed inside it (the marks grid's scroller too). */
+const BOXED = '[role="dialog"], .drawer, .marks-wrap';
 
 /** `small` sets it beside a fact in a list rather than a heading. */
 export function Hint({ children, doc, label = 'About this page', small = false }: { children: ComponentChildren; doc?: string; label?: string; small?: boolean }) {

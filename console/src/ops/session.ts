@@ -26,7 +26,13 @@ export interface OpDef {
   title: string;
   intro: string;
   confirm?: string; // a warning line under the intro ("Their old codes stop working.")
+  /** Lines of figures under the intro ("Final: median 38, range 22–47, 2 held"). */
+  facts?: string[];
+  /** Shown under a preview's outcome, read afresh after each preview (who would be emailed). */
+  dryExtra?: ComponentChildren;
   verb: string;
+  /** A `?` beside the verb, wherever it shows: its name, and one paragraph per string. */
+  verbHint?: { label: string; text: string[] };
   running: string;
   cancel: string;
   args: Record<string, unknown>;

@@ -42,6 +42,7 @@ READ_DEFAULTS = (
     "visibility",
     "team_formation",
     "formats",
+    "marks_per_question",
 )
 
 _HEX = "^#[0-9a-fA-F]{6}$"
@@ -61,6 +62,7 @@ SCHEMA = {
                 "max_team_size": _WHOLE,
                 "visibility": {"type": "string", "enum": list(VISIBILITIES)},
                 "team_formation": {"type": "string", "enum": list(TEAM_FORMATIONS)},
+                "marks_per_question": {"type": "boolean"},
                 "formats": {
                     "type": "array",
                     "items": {"type": "string", "enum": list(FORMATS)},

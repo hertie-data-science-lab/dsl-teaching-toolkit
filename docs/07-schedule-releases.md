@@ -206,6 +206,7 @@ Beside `schedule.yml` in `semester-config`. Every key is optional; nearest wins:
 | `max_team_size` | both | group assignments only |
 | `visibility` | both | `private`, `public` or `student_choice`. Read when each repo is created: change it before the first hand out; afterwards a change is a problem, not a move |
 | `submit_url` | both | `submit_via: external` only: the site's Submit button (`https://` only) |
+| `marks_per_question` | both | `true` (default) or `false`: whether returned marks show each question's mark and feedback; the score, late penalty, adjustment and final grade are shown either way |
 | `semester_dest_repo` | per assignment | what this semester's repos are called (default: the key) |
 
 ```yaml

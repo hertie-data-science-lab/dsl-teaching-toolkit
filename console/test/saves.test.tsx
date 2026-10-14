@@ -63,7 +63,11 @@ function envOf(gh: FakeGitHub, f: StaticFiles): Env {
 }
 
 let root: HTMLElement | null = null;
+/** The team row's Final cell (its Score is the calc cell before it). */
+const finalOf = () => [...root!.querySelectorAll('tr.team-row td.calc')].pop()!.textContent;
+
 afterEach(() => {
+  localStorage.clear(); // the marks grid keeps unsaved marks in this browser
   if (root) render(null, root);
   root?.remove();
   root = null;
@@ -352,6 +356,7 @@ describe('Save on the marks grid', () => {
     await type('input[aria-label="Q1 (out of 5) for team-alpha"]', '4');
     await click(q('button[aria-label="Show feedback per question for team-alpha"]'));
     await type('textarea[aria-label="Feedback on Q1 for team-alpha"]', 'Clear proof.');
+    await click(button('Open all teams'));
     await type('input[aria-label="Adjustment for anna-a"]', '1');
     await click(button('Save marks'));
     await settle(() => puts(gh, 'grading_sheets/assignment-3.yml').length > 0);
@@ -366,7 +371,7 @@ describe('the late penalty on the marks grid', () => {
   const LATE = TEAM_SHEET.replace('days_late: 0', 'days_late: 2');
   const late = () => files({ [`${COHORT_ORG}/semester-config/grading_sheets/assignment-3.yml`]: LATE });
   const BOX = 'input[aria-label="Late penalty override for team-alpha, as a percentage"]';
-  const tick = () => q<HTMLInputElement>('.late-apply input');
+  const tick = () => q<HTMLInputElement>('input.late-switch');
   const saved = async (gh: FakeGitHub) => {
     await click(button('Save marks'));
     await settle(() => puts(gh, 'grading_sheets/assignment-3.yml').length > 0);
@@ -376,7 +381,7 @@ describe('the late penalty on the marks grid', () => {
   it('offers nothing on a unit that is not late', async () => {
     const f = files();
     await mount(envOf(github(), f), <AssignmentScreen {...props(f, { entry: 'assignment-3', tab: 'marks' })} />);
-    expect(root!.querySelector('.late-apply')).toBeNull();
+    expect(root!.querySelector('.late-switch')).toBeNull();
     expect(root!.querySelector(BOX)).toBeNull();
   });
 
@@ -384,12 +389,16 @@ describe('the late penalty on the marks grid', () => {
     const gh = github(), f = late();
     await mount(envOf(gh, f), <AssignmentScreen {...props(f, { entry: 'assignment-3', tab: 'marks' })} />);
     expect(tick().checked).toBe(true);
-    expect(q('.late-apply').textContent).toMatch(/^Apply late penalty \(.*2 days late\)$/);
+    expect(tick().getAttribute('role')).toBe('switch');
+    expect(tick().title).toBe('Apply the late penalty');
+    expect(q('tr.team-row td.pen .val').textContent).toBe('−20%');
     await type('input[aria-label="Q1 (out of 5) for team-alpha"]', '4');
     await click(tick());
     expect(tick().checked).toBe(false);
-    expect(q('tr.team-row td.pen').textContent).toContain('waived');
-    expect(q('tr.team-row td.calc').textContent).toBe('4');
+    // Waived: the figure forgiven stays, struck through, and the override box is off.
+    expect(q('tr.team-row td.pen .val.off').textContent).toBe('−20%');
+    expect(q<HTMLInputElement>(BOX).disabled).toBe(true);
+    expect(finalOf()).toBe('4');
     expect((await saved(gh)).late_penalty).toBe('waive');
   });
 
@@ -399,8 +408,9 @@ describe('the late penalty on the marks grid', () => {
     await type('input[aria-label="Q1 (out of 5) for team-alpha"]', '4');
     await type(BOX, '25');
     expect(tick().checked).toBe(true);
-    expect(q('tr.team-row td.pen').textContent).toContain('−25% (set by hand)');
-    expect(q('tr.team-row td.calc').textContent).toBe('3');
+    expect(q('tr.team-row td.pen .val').textContent).toBe('−25%');
+    expect(q(BOX).classList.contains('set')).toBe(true);
+    expect(finalOf()).toBe('3');
     expect((await saved(gh)).late_penalty).toBe('25%');
   });
 
@@ -439,7 +449,7 @@ describe('the late penalty on the marks grid', () => {
     await mount(envOf(gh, f), <AssignmentScreen {...props(f, { entry: 'assignment-3', tab: 'marks' })} />);
     await type(BOX, '0');
     expect(tick().checked).toBe(false);
-    expect(q('tr.team-row td.pen').textContent).toContain('waived');
+    expect(q('tr.team-row td.pen .val.off')).not.toBeNull();
     expect((await saved(gh)).late_penalty).toBe('waive');
   });
 
@@ -455,10 +465,10 @@ describe('the late penalty on the marks grid', () => {
     const noRule: Loaded = { ...ready, status: { ...ready.status!, assignments: [solo, { ...team, settings: {} }] } } as Loaded;
     await mount(envOf(github(), f), <AssignmentScreen {...props(f, { entry: 'assignment-3', tab: 'marks', loaded: noRule })} />);
     await type('input[aria-label="Q1 (out of 5) for team-alpha"]', '4');
-    expect(root!.querySelector('.late-apply')).toBeNull();
+    expect(root!.querySelector('.late-switch')).toBeNull();
     expect(root!.querySelector(BOX)).toBeNull();
     // The engine ignores the key: nothing comes off.
-    expect(q('tr.team-row td.calc').textContent).toBe('4');
+    expect(finalOf()).toBe('4');
   });
 
   it('says so beside a penalty nobody can apply', async () => {

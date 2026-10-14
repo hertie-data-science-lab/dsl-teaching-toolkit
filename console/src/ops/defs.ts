@@ -7,7 +7,8 @@
 import { COURSE_REPO } from '../model/names';
 import { ghUrl } from '../ui/bits';
 import { DEFAULT_DEST_REPO } from '../model/policy';
-import { HANDOUT, RETURN_MARKS, RETURN_MARKS_ALWAYS, releaseAdhoc as adhocTiers, updateCopies as copiesTiers } from '../tiers/ops';
+import { HANDOUT, RETURN_MARKS, RETURN_MARKS_ABOUT, RETURN_MARKS_ALWAYS, releaseAdhoc as adhocTiers, updateCopies as copiesTiers } from '../tiers/ops';
+import type { ComponentChildren } from 'preact';
 import type { OpDef } from './session';
 
 export interface Scope {
@@ -151,17 +152,30 @@ export function collect(s: Scope, a: AsgRef): OpDef {
   };
 }
 
+/** The late window still open at Return marks: the due date and the late cutoff as shown, and the late rule (`lateRule`). */
+export interface LateReturn {
+  due: string;
+  until: string;
+  rule: string | null;
+}
+
 /**
  * `name`: the assignment's semester-side name (`semester_dest_repo`, else its key), what the engine returns by.
- * `lateUntil`: the late cutoff as shown, while it has not passed; the dialog then says late work can still change marks (decision 0037).
+ * `late`: while the late cutoff has not passed, the dialog says late work can still change marks (decision 0037).
+ * `facts`: the Marks tab's lines from the mark sheet: who gets marks, who is skipped or held, and the final grades (`marks.spread`).
+ * `dryExtra`: shown under a preview, who would be emailed (the Marks tab reads the preview issue).
  */
-export function returnMarks(s: Scope, a: AsgRef, marked: number, name: string, lateUntil?: string | null): OpDef {
+export function returnMarks(s: Scope, a: AsgRef, marked: number, name: string, late?: LateReturn | null, facts?: string[], dryExtra?: ComponentChildren): OpDef {
   const units = `${a.units} ${a.group ? 'team' : 'student'}${a.units === 1 ? '' : 's'}`;
+  const unit = a.group ? 'team' : 'student';
   return {
     ...base(s, 'grades.return', a.slug), confirmInPanel: true, name: 'Return marks', title: a.title, where: 'Marking',
     intro: 'Sends each student their marks and feedback for this assignment, beside the ones already returned. Your private notes stay private.',
-    confirm: lateUntil ? `${units} can still submit late until ${lateUntil}. Their penalty updates and you return the changed marks again.` : undefined,
-    verb: `Return marks to ${marked} ${a.group ? 'teams' : 'students'}`, running: 'Returning marks', cancel: 'Stop; marks already returned stay returned',
+    confirm: late
+      ? `The deadline was ${late.due}, but ${units} can still submit late until ${late.until} (the late cutoff: due date plus the late window).${late.rule ? ` A late submission updates that ${unit}’s penalty (${late.rule}) and final grade.` : ''} Return marks again afterwards: only students whose marks changed are updated and emailed.`
+      : undefined,
+    facts, dryExtra,
+    verb: `Return marks to ${marked} ${a.group ? 'team' : 'student'}${marked === 1 ? '' : 's'}`, verbHint: RETURN_MARKS_ABOUT, running: 'Returning marks', cancel: 'Stop; marks already returned stay returned',
     args: { assignment: name }, options: RETURN_MARKS, fixed: RETURN_MARKS_ALWAYS,
     target: reposLike(s.cohortOrg ?? s.courseOrg, 'grades-'),
   };

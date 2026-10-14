@@ -29,7 +29,7 @@ import { cohortFlags } from '../src/ui/shell';
 import { DetailsScreen, MaterialsScreen, WebsiteScreen, courseFileAfter, detailsOf, missingAdmin } from '../src/screens/CourseEdit';
 import { AssignmentScreen } from '../src/screens/Assignments';
 import { ScheduleScreen } from '../src/screens/Schedule';
-import { lateUntil } from '../src/screens/Marking';
+import { lateReturn } from '../src/screens/Marking';
 import { InstructorsScreen, StudentsScreen } from '../src/screens/People';
 import type { CohortProps } from '../src/screens/types';
 import example from './fixtures/status.example.json';
@@ -504,10 +504,10 @@ describe('the operation panel', () => {
     const ref = { slug: 'assignment-2', title: 'Assignment 2: Regression', template: 'assignment-2-f2026', units: 48, group: false, when: 'Marking' };
     const dialog = (now: string) => {
       const env = saveEnv(new FakeGitHub());
-      env.ops.open(defs.returnMarks({ courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' }, ref, 40, 'assignment-2', lateUntil(a, Date.parse(now), 'Europe/Berlin', 2026)));
+      env.ops.open(defs.returnMarks({ courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' }, ref, 40, 'assignment-2', lateReturn(a, Date.parse(now), 'Europe/Berlin', 2026)));
       return render(<EnvCtx.Provider value={env}><OpPanel /></EnvCtx.Provider>);
     };
-    expect(dialog('2026-10-01T10:00:00+02:00')).toContain('<p class="op-confirm">48 students can still submit late until Wed 7 Oct 23:59. Their penalty updates and you return the changed marks again.</p>');
+    expect(dialog('2026-10-01T10:00:00+02:00')).toContain('<p class="op-confirm">The deadline was Sun 27 Sep 23:59, but 48 students can still submit late until Wed 7 Oct 23:59 (the late cutoff: due date plus the late window). A late submission updates that student’s penalty (10% of the total per day started) and final grade. Return marks again afterwards: only students whose marks changed are updated and emailed.</p>');
     const after = dialog('2026-10-08T10:00:00+02:00');
     expect(after).not.toContain('op-confirm');
     expect(after).not.toContain('can still submit late');
@@ -583,11 +583,12 @@ describe('editing screens', () => {
   it('marks computes the total with the penalty and adjustment', () => {
     const out = html(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'marks' })} />);
     expect(out).toContain('<h2 class="h1">Assignment 2: Regression <span class="hint-wrap">');
-    expect(out).toContain('Total / 40');
-    expect(out).toContain('−20%');
+    expect(out).toContain('Final / 40');
+    expect(out).toContain('<span class="val">−20%</span>');
     expect(out).toContain('<td class="calc">28.2</td>');
-    expect(out).toContain('Apply late penalty (−20%, 2 days late)');
-    expect(out).toContain('Return marks to 0 students');
+    expect(out).toContain('aria-label="Apply the late penalty for anna-a"');
+    // Marked, not held: the one student gets marks, and the pop-up says so.
+    expect(out).toContain('Return marks to 1 student<');
   });
   it('marks reads a question marked from another file by its points', () => {
     const tagged = new StaticFiles(
@@ -596,7 +597,7 @@ describe('editing screens', () => {
       TREES,
     );
     const out = html(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'marks', files: tagged })} />);
-    expect(out).toContain('Total / 40');
+    expect(out).toContain('Final / 40');
     expect(out).toContain('/ 25 · <code>report.tex</code>');
     expect(out).not.toContain('[object Object]');
   });

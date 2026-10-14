@@ -27,6 +27,7 @@ from dsl_course import (
     grading_spec,
     issues,
     receipts,
+    records,
     roster,
     settings,
     status_json,
@@ -276,9 +277,11 @@ def _distribute(
     listed: dict[str, dict] | None = _ANY_PRIVATE,
     due: datetime = _DUE_PASSED,
     exported: str | None = None,
+    exported_at: str = gradebook.SEMESTER_CSV_NAME,
     preview_issues: list[dict] | None = None,
     assignment: str | None = None,
     include_feedback: bool = False,
+    per_question: bool = True,
     intent_ok: bool = True,
     send_error: Exception | None = None,
 ) -> dict:
@@ -309,8 +312,8 @@ def _distribute(
         (cfg / gradebook.GRADEBOOK_DIR).mkdir(parents=True, exist_ok=True)
         (cfg / gradebook.GRADEBOOK_DIR / name).write_text("student: someone\n")
     if exported is not None:
-        (cfg / gradebook.SEMESTER_CSV_NAME).parent.mkdir(parents=True, exist_ok=True)
-        (cfg / gradebook.SEMESTER_CSV_NAME).write_text(exported)
+        (cfg / exported_at).parent.mkdir(parents=True, exist_ok=True)
+        (cfg / exported_at).write_text(exported)
     store = [] if preview_issues is None else preview_issues
     _fake_issues(monkeypatch, store)
 
@@ -406,6 +409,7 @@ def _distribute(
             dry_run=dry_run,
             assignment=assignment,
             include_feedback=include_feedback,
+            per_question=per_question,
         )
     except Exception as exc:
         if send_error is None:
@@ -463,6 +467,87 @@ def test_a_scoped_return_sends_that_assignment_beside_those_already_returned(
     assert header.endswith("assignment-0,assignment-1")
     # distribute never writes a sheet, scoped or not.
     assert not [p for p in cfg_files if p.startswith(grading_sheet.SHEETS_DIR)]
+
+
+def test_the_semester_grades_file_is_read_and_renamed_from_its_old_name(
+    tmp_path, monkeypatch
+):
+    # 0.11.0 renamed `.system/semester-gradebook.csv`. A scoped return before the first
+    # real run since must still know a0 went out (or it would refuse), and that run writes
+    # the new name and deletes the old in the SAME commit, so no reader sees both.
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-0": _SHEET, "assignment-1": _SHEET},
+        exported=(
+            "hertie_email,name,github_handle,assignment-0\nada@uni.edu,Ada,ada-l,43\n"
+        ),
+        exported_at=records.RETIRED_SEMESTER_GRADES,
+        assignment="assignment-1",
+    )
+    assert out["rc"] == 0
+    ((_repo, files, _d),) = out["gradebooks"]
+    assert "assignment-0" in files["grades.yml"]
+    ((_cfg, cfg_files, delete),) = out["config"]
+    assert gradebook.SEMESTER_CSV_NAME == ".system/semester-grades.csv"
+    assert (
+        cfg_files[gradebook.SEMESTER_CSV_NAME]
+        .splitlines()[0]
+        .endswith("assignment-0,assignment-1")
+    )
+    assert records.RETIRED_SEMESTER_GRADES in delete
+    # The commit before the emails writes the file under its new name too.
+    assert out["intent"] and gradebook.SEMESTER_CSV_NAME in out["intent"][0]
+
+
+def test_marks_per_question_can_be_withheld_for_the_assignment_returned(
+    tmp_path, monkeypatch
+):
+    sheet = _SHEET.replace(
+        "score_individual: 43", "score_individual:\n      Q1: 14\n      Q2: 9"
+    )
+    grading = _GRADING_YML + "questions:\n  Q1: 15\n  Q2: 10\n"
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": sheet},
+        grading=grading,
+        per_question=False,
+    )
+    ((_repo, files, _d),) = out["gradebooks"]
+    assert "score: '23'" in files["grades.yml"]
+    assert "Q1" not in files["grades.yml"] + files["README.md"]
+    assert (
+        "**Score:** 23 / 25 · on time · **Final grade:** 23 / 25" in files["README.md"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("setting", "override", "shown"),
+    [
+        ("", True, True),  # the institution's default
+        ("marks_per_question: false\n", True, False),  # the run setting
+        ("marks_per_question: true\n", False, False),  # the one-run override
+    ],
+    ids=["default", "run setting off", "override"],
+)
+def test_the_marks_per_question_run_setting_decides_what_a_return_shows(
+    tmp_path, monkeypatch, setting, override, shown
+):
+    sheet = _SHEET.replace(
+        "score_individual: 43", "score_individual:\n      Q1: 14\n      Q2: 9"
+    )
+    grading = _GRADING_YML + setting + "questions:\n  Q1: 15\n  Q2: 10\n"
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": sheet},
+        grading=grading,
+        per_question=override,
+    )
+    ((_repo, files, _d),) = out["gradebooks"]
+    assert ("Q1" in files["grades.yml"]) is shown
+    assert "**Final grade:** 23 / 25" in files["README.md"]
 
 
 _UNMARKED = _SHEET.replace("score_individual: 43", "score_individual:").replace(
@@ -546,9 +631,9 @@ def test_the_done_line_is_the_spec_counts_in_the_spec_order(
 
 
 def test_nothing_a_student_may_not_see_reaches_them(tmp_path, monkeypatch):
-    # The leak this design exists to close: the grader's private notes, and one member's
-    # adjustment. There is no team-wide channel for either to reach now - a group mark
-    # goes to each member's own gradebook and nowhere a team-mate reads.
+    # The leak this design exists to close: the grader's private notes. There is no
+    # team-wide channel for anything to reach now - a group mark goes to each member's own
+    # gradebook and nowhere a team-mate reads, so their own adjustment is shown there.
     out = _distribute(
         monkeypatch,
         tmp_path,
@@ -560,7 +645,7 @@ def test_nothing_a_student_may_not_see_reaches_them(tmp_path, monkeypatch):
     assert gb_repo == "grades-ada-l"  # the member's OWN repo, read by nobody else
     for page in (files["grades.yml"], files["README.md"]):
         assert "privately noted" not in page  # the grader's note
-        assert "-3" not in page  # the adjustment behind the final grade
+    assert "adjustment -3" in files["README.md"]  # their own, so 43 - 3 adds up
     # Their own feedback is theirs to read, and it is here rather than anywhere shared.
     assert "Your section repeats the Q4 error." in files["README.md"]
 

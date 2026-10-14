@@ -85,7 +85,7 @@ function ExportInfo({ org }: { org: string }) {
     <>
       <ul class="rows">
         {row('Roster', 'students.csv', 'students.csv')}
-        {row('Marks for the registrar', 'Written each time marks are returned', 'registrar')}
+        {row('Semester grades', 'Written each time marks are returned', 'registrar')}
         {row('Schedule', 'schedule.yml', 'schedule.yml')}
       </ul>
       <p class="footnote">Each opens on GitHub, where you can download it.</p>

@@ -2,7 +2,7 @@
 what reached it.
 
 Provisioning the repos, what a student is shown (`student_view`, the README), the
-registrar's export, and the distributed-records ledger (`distributed.csv`) that makes a
+semester grades file, and the distributed-records ledger (`distributed.csv`) that makes a
 re-run say nothing twice.
 """
 
@@ -80,13 +80,11 @@ GRADEBOOK_PERMISSION = (
 )
 SEMESTER_CSV_NAME = records.path(
     "semester_gradebook"
-)  # the wide faculty-only glance view
+)  # the semester grades file: the wide faculty-only glance view
 
 # What a gradebook says before its student has been marked in anything. The legend names
-# the keys `STUDENT_VIEW_KEYS` allows and no others: this is the first file a student opens,
-# and promising them a team score or their own adjustment - neither of which a gradebook
-# ever shows - contradicts the one thing the page is for. Replaced wholesale by
-# `render_readme` on the first distribute.
+# the keys `STUDENT_VIEW_KEYS` allows and no others: this is the first file a student opens.
+# Replaced wholesale by `render_readme` on the first distribute.
 _STARTER_README = (
     "# Your gradebook\n\n"
     "This private repository is viewable only by you. Grades and feedback for each "
@@ -95,7 +93,9 @@ _STARTER_README = (
     "| Field | Meaning |\n"
     "| --- | --- |\n"
     "| `final_grade` | Your mark for that assignment. This is the authoritative one. |\n"
-    "| `score` | Individual assignments only: the marks behind that total. |\n"
+    "| `score` | The marks behind that grade (your team's, on a group assignment), per "
+    "question where the assignment has questions. |\n"
+    "| `adjustment` | A change your marker made to your own grade, where there is one. |\n"
     "| `feedback` | Your marker's feedback on your own work. |\n"
     "| `feedback_per_question` | Feedback on each question, where there is any. |\n"
     "| `submitted`, `days_late`, `penalty` | When your work was recorded, and what any "
@@ -121,16 +121,15 @@ def render_yaml(book: dict) -> str:
 # names it. A denylist would have to be right about every key anyone ever adds; this has
 # to be right about nine.
 #
-# Deliberately absent: `notes_not_shared_with_students`, every `info:` fact but
-# `submitted` and `days_late` (`autograde`, `completion`, `contributions`), and - because
-# a gradebook shows the final grade and never its disaggregation - the team's score and
-# the member's own `adjustment_individual`. Those last two are INPUTS to the number the
-# student sees, not results, and the gradebook is the ONE place a mark is written: the
-# team's shared feedback reaches each member through `team_feedback` below, and the
-# adjustment stays between a member and their grader.
+# Deliberately absent: `notes_not_shared_with_students` and every `info:` fact but
+# `submitted` and `days_late` (`autograde`, `completion`, `contributions`). The score (the
+# team's, on a group assignment) and the student's OWN adjustment are shown: the page gives
+# the whole breakdown, so the numbers add up to the final grade (maintainer, 14 Oct 2026). A
+# team-mate's adjustment is never read (`student_view`).
 STUDENT_VIEW_KEYS = (
     "final_grade",  # derived on output, never stored - the authoritative mark
-    "score",  # individual assignments only: what the grader typed, per question or flat
+    "score",  # what the grader typed, per question or flat (the team's, on a group one)
+    "adjustment",  # this student's own adjustment_individual, signed: "+3", "-2"
     "max_points",  # the declared maxima summed, so a 40 reads as "40 / 50"
     "feedback",  # feedback_individual
     QUESTION_FEEDBACK_KEY,  # per question: the student's own, or the team's
@@ -239,6 +238,28 @@ def _penalty_display(
     return _percent_off(penalty.fraction) if rate is not None else ""
 
 
+def _adjustment_display(value: object) -> str:
+    """`+3`, `-2`: a student's own adjustment as their page shows it. "" for none, a zero,
+    or one that is not a number (that unit is held: `sheet_hold_reasons`)."""
+    amount = as_decimal(value)
+    if amount is None or amount == 0:
+        return ""
+    return f"+{_plain(amount)}" if amount > 0 else f"-{_plain(-amount)}"
+
+
+def _shown_score(score: object, questions: dict | None, per_question: bool) -> object:
+    """The score as the student's page carries it: the marked questions, or - with marks per
+    question withheld (`per_question` off) - their total alone. A flat score, or one no
+    arithmetic applies to, is the same either way."""
+    marked = _marked(score)
+    if not marked:
+        return score
+    if per_question:
+        return marked
+    total = score_total(score, questions)
+    return _plain(total) if total is not None else None
+
+
 def _submitted_display(value: object, external: bool = False) -> str:
     """A recorded submission time as a person reads it: `3 Oct 22:14`.
 
@@ -291,7 +312,11 @@ def _allowlisted(fields: dict) -> dict:
 
 
 def student_view(
-    spec: SheetSpec, unit_key: str, block: dict | None, handle: str
+    spec: SheetSpec,
+    unit_key: str,
+    block: dict | None,
+    handle: str,
+    per_question: bool = True,
 ) -> dict:
     """What ONE student may be shown of one submission unit's grading-sheet entry.
 
@@ -302,9 +327,15 @@ def student_view(
     the grader's private notes, and a team-mate's marks - are both closed structurally.
 
     The final grade is DERIVED here (the score total, the late penalty, then this member's
-    own adjustment) because the sheet has no field for it. A score no arithmetic applies
-    to - `pass`, `A-` - is passed through exactly as typed, and `needs_hand_decision`
-    flags it where a penalty would have applied to a number."""
+    own adjustment) because the sheet has no field for it, and every part of it is shown
+    beside it: the score (the team's on a group assignment), the late penalty and this
+    member's own adjustment. A score no arithmetic applies to - `pass`, `A-` - is passed
+    through exactly as typed, and `needs_hand_decision` flags it where a penalty would have
+    applied to a number.
+
+    `per_question` off (the Return marks option "Include marks per question") withholds
+    the marks per question and the feedback per question: the score is then the total
+    alone. The final grade, late penalty and adjustment are the same either way."""
     block = block or {}
     info = block.get(INFO_KEY) or {}
     person = _people(spec, unit_key, block).get(handle) if spec.is_group else block
@@ -313,31 +344,25 @@ def student_view(
     days_late = info.get("days_late")
     rate = penalty_rate(spec.late_penalty_per_day)
     late_penalty = block.get(LATE_PENALTY_KEY)
+    adjustment = person.get("adjustment_individual")
     final = final_grade(
         score_total(score, spec.questions),
         rate,
         days_late,
-        person.get("adjustment_individual"),
+        adjustment,
         late_penalty,
     )
     return _allowlisted(
         {
             "final_grade": _plain(final) if final is not None else _verbatim(score),
-            # A group's score is the TEAM's: it reaches the team in the team's own repo,
-            # and reaches the member only through the final grade derived from it. Unless
-            # there IS no team repo - a shape that creates none makes the gradebook the
-            # only place that score can be read at all, and withholding it there would
-            # leave a team with a grade nobody was ever shown the marks behind.
-            # `STUDENT_VIEW_KEYS` is untouched: the allowlist stays the guarantee.
-            "score": (
-                None
-                if (spec.is_group and spec.creates_unit_repos)
-                else (_marked(score) or score)
-            ),
+            "score": _shown_score(score, spec.questions, per_question),
+            "adjustment": _adjustment_display(adjustment),
             "max_points": total_points(spec),
             "feedback": person.get("feedback_individual"),
-            QUESTION_FEEDBACK_KEY: question_feedback(
-                spec, block.get(QUESTION_FEEDBACK_KEY)
+            QUESTION_FEEDBACK_KEY: (
+                question_feedback(spec, block.get(QUESTION_FEEDBACK_KEY))
+                if per_question
+                else None
             ),
             "submitted": _submitted_display(
                 info.get("submitted"), not spec.collects_commits
@@ -384,20 +409,25 @@ def undecided_marks(spec: SheetSpec, sheet: dict) -> dict[str, str]:
     }
 
 
-def _views_from_sheet(spec: SheetSpec, sheet: dict) -> dict[str, dict]:
+def _views_from_sheet(
+    spec: SheetSpec, sheet: dict, per_question: bool = True
+) -> dict[str, dict]:
     """Every student's view of one grading sheet, keyed by handle."""
     views: dict[str, dict] = {}
     for unit_key, block in _units(spec, sheet):
         for handle in _people(spec, unit_key, block):
-            views[handle] = student_view(spec, unit_key, block, handle)
+            views[handle] = student_view(spec, unit_key, block, handle, per_question)
     return views
 
 
 def build_gradebooks(
     sources: dict[str, tuple[SheetSpec, dict]],
+    withheld: frozenset[str] | set[str] = frozenset(),
 ) -> dict[str, dict[str, dict]]:
     """Pivot every assignment's grading sheet into `{handle: {slug: view}}` - one book per
     student, one entry per assignment they have a mark or a word of feedback on.
+    `withheld` names the assignments whose marks per question are withheld
+    (`student_view`'s `per_question` off).
 
     Assignments are folded in sorted order, so a re-run renders byte-identical files and
     only a gradebook that really changed is committed and emailed. An empty view is not an
@@ -405,7 +435,9 @@ def build_gradebooks(
     books: dict[str, dict[str, dict]] = {}
     canonical: dict[str, str] = {}  # fold key -> the first spelling seen for it
     for slug in sorted(sources):
-        for handle, view in _views_from_sheet(*sources[slug]).items():
+        for handle, view in _views_from_sheet(
+            *sources[slug], slug not in withheld
+        ).items():
             if not view:
                 continue
             key = canonical.setdefault(handle.casefold(), handle)
@@ -495,29 +527,48 @@ def _readme_row(title: str, view: dict) -> str:
 
 
 def _readme_grade_line(view: dict, grade: str) -> str:
-    """The final grade, and - where a deadline moved it - the arithmetic that produced it:
-    `**Score:** 20 / 50 · 2 days late · penalty -20% · **Final grade:** 16 / 50`.
+    """The final grade, and - where a deadline or an adjustment moved it - the arithmetic
+    that produced it:
+    `**Score:** 20 / 50 · 2 days late · penalty -20% · adjustment +2 · **Final grade:** 18 / 50`.
 
     A student cannot reconstruct that from the final grade alone, and without it a
     deduction reads as a harsh mark. It used to be the opening line of the feedback comment
     on their own repo; that channel is closed, and the gradebook is the only place any of
     it is written now.
 
-    Written only where there is a separate score AND something timed it. A hand-marked unit
-    has a final grade and no score behind it, an `external` assignment counts no days, and
-    a team's score is not in a member's view at all (`student_view`) - in each of those the
-    final grade is the whole of what there is to say, and `**Score:** 40 · **Final grade:**
-    40` would be arithmetic theatre. The helpers are the display ones the table already
-    uses, so a row and its section cannot word the same fact differently."""
+    The late part is written whenever something timed the unit, with or without a score to
+    take it from (a `pass` two days late still says so). Where nothing timed it and there is
+    no adjustment - an `external` assignment, a hand-marked one - the final grade is the
+    whole of what there is to say, and `**Score:** 40 · **Final grade:** 40` would be
+    arithmetic theatre. The helpers are the display ones the table already uses, so a row
+    and its section cannot word the same fact differently."""
     total = score_total(view.get("score"))
     late = _late_display(view.get("days_late"))
-    if total is None or not late:
+    adjustment = view.get("adjustment")
+    if not late and not adjustment:
         return f"**Final grade:** {grade}"
-    facts = [f"**Score:** {_over_max(_plain(total), view.get('max_points'))}", late]
+    facts = []
+    if total is not None:
+        facts.append(f"**Score:** {_over_max(_plain(total), view.get('max_points'))}")
+    if late:
+        facts.append(late)
     if view.get("penalty"):
         facts.append(f"penalty {view['penalty']}")
+    if adjustment:
+        facts.append(f"adjustment {adjustment}")
     facts.append(f"**Final grade:** {grade}")
     return _SEP.join(facts)
+
+
+def _readme_question_marks(view: dict) -> str:
+    """`**Marks per question:** Q1 14 · Q2 13`, or "" where the view carries no marks per
+    question (a flat score, or marks per question withheld)."""
+    score = view.get("score")
+    if not isinstance(score, dict) or not score:
+        return ""
+    return "**Marks per question:** " + _SEP.join(
+        f"{name} {str(value).strip()}" for name, value in score.items()
+    )
 
 
 def _readme_section(title: str, view: dict) -> str:
@@ -525,7 +576,15 @@ def _readme_section(title: str, view: dict) -> str:
     student's own feedback verbatim, and the team's feedback as a blockquote that says who
     else has read it."""
     grade = _over_max(view.get("final_grade", ""), view.get("max_points"))
-    parts = [f"## {title}" + (f"\n{_readme_grade_line(view, grade)}" if grade else "")]
+    marks = "\n\n".join(
+        line
+        for line in (
+            _readme_question_marks(view),
+            _readme_grade_line(view, grade) if grade else "",
+        )
+        if line
+    )
+    parts = [f"## {title}" + (f"\n{marks}" if marks else "")]
     if not is_blank(view.get("feedback")):
         parts.append(str(view["feedback"]).strip())
     per_question = "\n".join(
@@ -572,11 +631,9 @@ def _question_item(name: str, text: str) -> str:
 def render_readme(handle: str, book: dict[str, dict], titles: dict[str, str]) -> str:
     """One student's gradebook README - the file they actually open.
 
-    The privacy line, one row per assignment, then a section per assignment with their
-    feedback. It gives the final grade and never the sum behind it: the team's score and
-    their own adjustment are their grader's working, and a student reading their own
-    deduction beside their team-mates' shared mark is exactly the conversation this
-    workflow exists to avoid.
+    The privacy line, one row per assignment, then a section per assignment: the marks per
+    question, the score with the late penalty and the student's own adjustment beside the
+    final grade they produce, then the feedback.
 
     `handle` is the student the book belongs to; the text names nobody - the repo is
     already private to them - and takes it so that every per-student write reads the
@@ -602,7 +659,7 @@ def render_readme(handle: str, book: dict[str, dict], titles: dict[str, str]) ->
 def render_registrar_csv(
     students: list[roster.Student], books: dict[str, dict[str, dict]]
 ) -> str:
-    """The registrar's export: one row per ENROLLED student, one column per assignment,
+    """The semester grades file: one row per ENROLLED student, one column per assignment,
     each cell the final grade exactly as that student was told it.
 
     Every enrolled student is a row, marked or not, and a student who has not onboarded
@@ -846,7 +903,7 @@ DISTRIBUTED_HEADER = (
     "issue",
 )
 # Marks and feedback go to ONE place, the student's gradebook, so the channels are the
-# gradebook, the registrar's export and the email.
+# gradebook, the semester grades file and the email.
 CHANNEL_GRADEBOOK = "gradebook"
 CHANNEL_EMAIL = "email"
 # `{(target, assignment, channel): (content hash, when, issue number or "")}`
@@ -930,12 +987,20 @@ def _retired_gradebook_files(wd: Path) -> list[str]:
     return sorted(f"{GRADEBOOK_DIR}/{p.name}" for p in folder.glob("*.yml"))
 
 
-def _told_grades(wd: Path) -> tuple[dict[str, dict[str, str]], set[str]]:
-    """`({handle (casefolded): {slug: final grade}}, the export's columns)` as the last
-    real run exported them, so the preview can say which grades a run would CHANGE and
-    which columns it would ADD. Empty when there is no export yet or it cannot be read,
-    and every grade and column is then new."""
+def semester_grades_file(wd: Path) -> Path:
+    """The semester grades file in a semester-config checkout: at its name, or - until the
+    first real run after 0.11.0 renames it - at `records.RETIRED_SEMESTER_GRADES`."""
     path = wd / SEMESTER_CSV_NAME
+    retired = wd / records.RETIRED_SEMESTER_GRADES
+    return retired if not path.is_file() and retired.is_file() else path
+
+
+def _told_grades(wd: Path) -> tuple[dict[str, dict[str, str]], set[str]]:
+    """`({handle (casefolded): {slug: final grade}}, the file's columns)` as the last
+    real run wrote the semester grades file, so the preview can say which grades a run
+    would CHANGE and which columns it would ADD. Empty when there is no file yet or it
+    cannot be read, and every grade and column is then new."""
+    path = semester_grades_file(wd)
     if not path.is_file():
         return {}, set()
     try:
@@ -955,10 +1020,10 @@ def _told_grades(wd: Path) -> tuple[dict[str, dict[str, str]], set[str]]:
 
 def _already_returned(wd: Path) -> set[str] | None:
     """The assignments students have already been told a mark for: each with at least one
-    non-empty cell in the registrar export the last real run wrote. None when that cannot
-    be told - the export is there and cannot be read, or it is missing while gradebooks
-    have already been written (`distributed.csv` has rows)."""
-    path = wd / SEMESTER_CSV_NAME
+    non-empty cell in the semester grades file the last real run wrote. None when that
+    cannot be told - the file is there and cannot be read, or it is missing while
+    gradebooks have already been written (`distributed.csv` has rows)."""
+    path = semester_grades_file(wd)
     if not path.is_file():
         distributed, _ = _read_distributed(wd)
         return None if distributed else set()

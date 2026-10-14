@@ -4,7 +4,8 @@ value comes from.
 Every value is read by its key's reader (`setting_readers`).
 
 The cascade: a RUN setting (`RUN_KEYS`: how teams form, the team cap, the late pair, the
-repo visibility, the external submit link) resolves nearest-first through four layers -
+repo visibility, the external submit link, whether returned marks show each question)
+resolves nearest-first through four layers -
 
     assignment   semester-config/assignments.yml  assignments.<slug>.<key>
     semester     semester-config/assignments.yml  defaults.<key>
@@ -53,6 +54,7 @@ COURSE_DEFAULT_KEYS = (
     "max_team_size",
     "late_window_days",
     "late_penalty_per_day",
+    "marks_per_question",
     "formats",
     "submit_via",
     "team_formation",
@@ -92,6 +94,8 @@ RUN_KEYS = (
     "late_penalty_per_day",
     "visibility",
     "submit_url",
+    # Return marks shows the marks and feedback per question (`gradebook.student_view`).
+    "marks_per_question",
 )
 LATE_PAIR = ("late_window_days", "late_penalty_per_day")
 SOURCES = ("assignment", "semester", "course", "institution")

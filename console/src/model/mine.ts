@@ -42,6 +42,8 @@ export interface MarkEntry {
   submitted: string;
   daysLate: string;
   penalty: string;
+  /** The student's own adjustment, signed ("+3", "-2"); '' when there is none. */
+  adjustment: string;
   team: string;
   teamFeedback: string;
 }
@@ -83,6 +85,7 @@ export function markEntry(v: unknown): MarkEntry {
     submitted: flat(b.submitted),
     daysLate: flat(b.days_late),
     penalty: flat(b.penalty),
+    adjustment: flat(b.adjustment),
     team: flat(b.team),
     teamFeedback: flat(b.team_feedback),
   };

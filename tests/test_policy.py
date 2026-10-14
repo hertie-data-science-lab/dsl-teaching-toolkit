@@ -28,6 +28,7 @@ def test_the_shipped_policy_carries_hertie_values():
         "max_team_size": 5,
         "visibility": "private",
         "team_formation": "self_select",
+        "marks_per_question": True,
         "formats": ["ipynb"],
         "timezone": "Europe/Berlin",
         "archive": {"grace_days": 60},

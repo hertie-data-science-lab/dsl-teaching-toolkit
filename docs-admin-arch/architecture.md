@@ -460,7 +460,7 @@ why `autograde_score` is faculty-reviewed before distribution and never shown to
 `collect` creates at handout, refreshes each tick and seals at the cutoff. `distribute` then fans
 out what a grader typed there: a comment on each submission repo's Feedback issue, each student's
 private `grades-<handle>` gradebook (provisioned by `ensure_gradebooks` on the way in), the
-registrar export, and an email saying there is something new to read. Everything the toolkit owns
+semester grades file, and an email saying there is something new to read. Everything the toolkit owns
 sits under `info:`; everything else is the grader's and is never rewritten. Nothing is said twice -
 every send is recorded in `.system/gradebook/distributed.csv`, so a re-run after one correction reaches one
 student.
