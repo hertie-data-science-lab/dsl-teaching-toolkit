@@ -54,7 +54,7 @@ from time import time as clock
 
 import yaml
 
-from . import cadence, policy, records, schedule, seed, settings, status
+from . import cadence, legacy, policy, records, schedule, seed, settings, status
 from .bootstrap_course import semester_scaffold
 from .central import CENTRAL
 from .config import read_course, read_semester
@@ -65,15 +65,9 @@ from .course import (
     COURSE_HUB_TOPIC,
     INSTRUCTORS_FILE,
     JOIN_REPO,
-    LEGACY_SUBMIT_VIA,
     MAINTAINING_FILE,
     MATERIALS_REPO_PREFIX,
     MIGRATE_DRIVER,
-    OLD_CONFIG_REPO,
-    OLD_JOIN_REPO,
-    OLD_PEOPLE_FILE,
-    OLD_SEMESTER_TOPIC,
-    RETIRED_COURSE_KEYS,
     SEMESTER_TOPIC,
     SETTING_PLACEHOLDER,
     SOLUTION_BRANCH,
@@ -84,17 +78,15 @@ from .course import (
 )
 from .derive import derivable_sources, starter_mode
 from .discovery import (
-    OLD_SEMESTERS_PATH,
     SEMESTERS_PATH,
     TEMPLATE_TOPIC,
     central_ref_for,
     discover_content_repos,
     discover_semesters,
     is_assignment_template,
-    is_untopicked_template,
     list_org_repos,
 )
-from .faults import NOT_MIGRATED, NotMigrated
+from .faults import NOT_MIGRATED, RunSettingInTemplate
 from .gh_commits import first_landed
 from .gh_contents import (
     LINES,
@@ -129,9 +121,8 @@ from .schedule_plan import (
     offplan_folders,
     planned_rows,
 )
-from .setting_readers import RENAMED_SETTINGS, read_settings
+from .setting_readers import read_settings
 from .settings import ASSIGNMENT_DEFAULTS_KEY, RUN_KEYS
-from .sync_faculty import retired_course_faults
 from .team_formation import TEAM_LOCK_PATH, sync_team_lock, team_lock_content
 from .welcome import (
     RETIRED_JOIN_FORMS,
@@ -148,6 +139,28 @@ from .workflows_place import (
     TEMPLATE_WORKFLOWS,
     content_workflow_files,
 )
+
+# The old names this migration rewrites, every one of them out of `legacy`.
+OLD_CONFIG_REPO = legacy.old_name(CONFIG_REPO, legacy.SEMESTER_ORG)
+OLD_JOIN_REPO = legacy.old_name(JOIN_REPO, legacy.SEMESTER_ORG)
+OLD_PEOPLE_FILE = legacy.old_name(INSTRUCTORS_FILE, legacy.SEMESTER_ORG)
+OLD_SEMESTER_TOPIC = legacy.old_name(SEMESTER_TOPIC, legacy.SEMESTER_TOPICS)
+OLD_SEMESTERS_PATH = legacy.old_name(SEMESTERS_PATH, legacy.COURSE_GITHUB)
+OLD_TEMPLATE_PREFIX = legacy.old_name(TEMPLATE_TOPIC, legacy.COURSE_REPOS)
+RETIRED_COURSE_KEYS = tuple(legacy.renames(legacy.COURSE_CONFIG))
+LEGACY_SUBMIT_VIA = legacy.renames(legacy.GRADING_CONFIG)
+RENAMED_SETTINGS = legacy.renames(legacy.SETTINGS)
+
+
+def is_untopicked_template(row: dict) -> bool:
+    """An assignment template by its old mark only - an `assignment-*` GitHub template
+    without the topic, which the topic step stamps."""
+    return (
+        row["name"].startswith(OLD_TEMPLATE_PREFIX)
+        and bool(row.get("isTemplate"))
+        and not is_assignment_template(row)
+    )
+
 
 # ------------------------------------------------------------------ the old layout
 # Where each record lived before decision 0010, in semester-config: a path, or a folder
@@ -326,7 +339,7 @@ def formats_line(line: str, indent: str = "") -> str:
 
 def submit_via_line(line: str, indent: str = "") -> str:
     """One `submit_via: github` line (at `indent`) in the canonical word
-    (`course.LEGACY_SUBMIT_VIA`), its comment kept at its column; any other line
+    (`LEGACY_SUBMIT_VIA`), its comment kept at its column; any other line
     unchanged."""
     match = re.match(rf"^{indent}submit_via:(.*)$", line)
     if not match:
@@ -351,7 +364,7 @@ def grading_config_keys(text: str) -> str:
 
 
 def course_config_keys(text: str) -> str:
-    """The course `dsl-course.yml`: every retired key (`course.RETIRED_COURSE_KEYS` -
+    """The course `dsl-course.yml`: every retired key (`RETIRED_COURSE_KEYS` -
     `org`, `org_name`, `cohort_defaults`, `semester_defaults`) removed with its block, and
     under `assignment_defaults:` `format:` -> `formats:` and `submit_via: github` ->
     `assignment_repo`. `assignment_defaults` stays: it is the course layer of the cascade
@@ -2164,7 +2177,7 @@ def _meta_faults(text: str | None) -> list[str]:
     an old spelling in the course layer), named."""
     meta = _yaml(text)
     defaults = meta.get(ASSIGNMENT_DEFAULTS_KEY)
-    bad = [f.field for f in retired_course_faults(meta)]
+    bad = [key for key in RETIRED_COURSE_KEYS if key in meta]
     bad += [
         f"{ASSIGNMENT_DEFAULTS_KEY}.{key}"
         for key in RENAMED_SETTINGS
@@ -2181,7 +2194,7 @@ def _grading_clean(text: str | None) -> bool:
         return True
     try:
         spec = parse_grading_spec(text)
-    except NotMigrated:
+    except RunSettingInTemplate:
         return False
     return not any(NOT_MIGRATED in d for d in spec.dropped)
 
@@ -2584,7 +2597,7 @@ class Semester:
             )
             try:
                 spec = parse_grading_spec(text or "")
-            except (NotMigrated, yaml.YAMLError):
+            except (RunSettingInTemplate, yaml.YAMLError):
                 spec = parse_grading_spec("")
             old, new = (
                 str(entry["title"]).strip(),

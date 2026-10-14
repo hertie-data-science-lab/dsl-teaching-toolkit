@@ -250,8 +250,7 @@ def _declared_admin_emails(course_org: str, now: datetime) -> list[str]:
     """The `email:` of each active course admin in the course org's `dsl-course.yml`,
     or none when the file declares none or cannot be read.
 
-    Guarded like `_teaching_contacts`: every caller is about to tell somebody something,
-    and `mailer.course_admin_addresses` falls back to the org secret on an empty list."""
+    Guarded like `_teaching_contacts`: every caller is about to tell somebody something."""
     try:
         faculty = sync_faculty.load_faculty(course_org) or {}
     except Exception as exc:
@@ -384,8 +383,7 @@ def route_course(
 
     Two things differ, and both follow from the file being the course's rather than a
     semester's. The addresses are the course ADMINS' - their own `email:` in
-    `dsl-course.yml` when any admin declares one, else the org SECRET
-    (`mailer.course_admin_addresses`) - and every admin gets every course mail, so there
+    `dsl-course.yml` (`mailer.course_admin_addresses`) - and every admin gets every course mail, so there
     is no handle-to-address routing here. And the person git names is @mentioned on the
     issue rather than addressed: the issue is where the line is, and the mail goes to the
     people who own the course.
@@ -400,13 +398,12 @@ def route_course(
         mailer.course_admin_addresses(_declared_admin_emails(course_org, now))
     )
     if not to:
-        # A COUNT and the variable's NAME, never an address and never who is missing one:
+        # A COUNT, never an address and never who is missing one:
         # this runs in the course org's public `.github`. `_deliver` then says that the
         # digest @mention is the only channel left.
         log(
             f"  [skip] {len(list(admins))} addressee(s) without email - "
-            f"no admin declares `email:` and {mailer.COURSE_ADMIN_ENV} is not set "
-            f"on {course_org}"
+            f"no admin declares `email:` in {course_org}'s dsl-course.yml"
         )
     bot = _bot()
     mention: list[str] = []
@@ -963,8 +960,6 @@ def notify_overwritten_edits(
     by_login: dict[str, list[tuple[str, str]]],
     issue_url: str | None,
     now: datetime,
-    *,
-    dry_run: bool = False,
 ) -> Unsent:
     """Mail each person whose edit to a generated file the site sync just rebuilt over.
     Never raises.
@@ -1059,7 +1054,7 @@ def notify_overwritten_edits(
             # not a run that broke.
             lambda _keys: False,
             "overwritten edit(s)",
-            dry_run,
+            dry_run=False,
         )
     except Exception as exc:
         log_err(

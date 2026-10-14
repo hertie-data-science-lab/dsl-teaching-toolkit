@@ -1,7 +1,7 @@
 # Uncomment and fill in at least one course admin (if you passed --admins at
 # bootstrap, this is already filled in for you). `email:` is optional and is where a
 # fault in this file is emailed; this file is PUBLIC, so leave it out to keep an address
-# private - the course then mails the org secret DSL_COURSE_ADMIN_EMAILS instead.
+# private - the digest issue then @mentions whoever last edited the file instead.
 # people:
 #   course_admins:
 #     - github_handle: "adminhandle"    # required - grants the `course-admin` team

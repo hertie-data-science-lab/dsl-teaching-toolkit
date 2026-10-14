@@ -1080,9 +1080,8 @@ def test_no_mail_transport_says_so_once_and_never_raises(wired, capsys):
 # --------------------------------------------- a fault in the COURSE org's own config
 #
 # The course org's dsl-course.yml and semester registry decide whether the course is synced
-# at all. Their addressees are the course ADMINS, out of an org secret - never out of the
-# public file half these faults are in - so there is no handle to address one of them by,
-# and git's answer goes to the digest's @mention instead of to the To line.
+# at all. Their addressees are the course ADMINS, by the `email:` each declares in
+# dsl-course.yml, and git's answer goes to the digest's @mention instead of to the To line.
 
 COURSE_ISSUE = "https://github.com/Course-Org/.github/issues/3"
 ADMINS = ("lonny@x.edu", "luis@x.edu")
@@ -1123,13 +1122,14 @@ def _mail_course(faults, routing, reminder=None):
 
 @pytest.fixture
 def admins(monkeypatch):
-    """The `DSL_COURSE_ADMIN_EMAILS` org secret, as a course org's workflows read it."""
+    """The course admins' declared `email:`s, comma-separated (None: nobody declares one),
+    as `notify` reads them out of the course's dsl-course.yml."""
 
     def _set(value: str | None) -> None:
-        if value is None:
-            monkeypatch.delenv(mailer.COURSE_ADMIN_ENV, raising=False)
-        else:
-            monkeypatch.setenv(mailer.COURSE_ADMIN_ENV, value)
+        emails = [a.strip() for a in (value or "").split(",") if a.strip()]
+        monkeypatch.setattr(
+            notify.sync_faculty, "course_admin_emails", lambda *a, **k: emails
+        )
 
     return _set
 
@@ -1142,7 +1142,7 @@ def test_a_course_fault_is_addressed_to_the_admins_and_mentions_the_committer(
     routing = notify.route_course(COURSE, [_course_fault()], NOW)
     (routed,) = routing.by_key.values()
     # The admins act on it; the person git names is @mentioned on the issue, because the
-    # secret is a flat address list with no handle to match them against.
+    # admins are mailed as one group, with no handle to match the committer against.
     assert routed.to == ADMINS and routed.cc == ()
     assert routing.logins == ["JanG"]
 
@@ -1190,24 +1190,19 @@ def test_the_course_subject_names_the_course_and_no_semester(wired, admins):
     assert "dsl-course.yml#L8" in sent.one["body"]
 
 
-def test_a_course_org_with_no_admin_secret_says_so_without_naming_anyone(
+def test_a_course_org_with_no_admin_address_says_so_without_naming_anyone(
     wired, admins, capsys
 ):
-    # Appendix H's degraded mode: a count and the variable's name, in a PUBLIC repo's log.
+    # Appendix H's degraded mode: a count and where to declare one, in a PUBLIC repo's log.
     admins(None)
     sent = wired(blame={8: "JanG"})
     routing = notify.route_course(COURSE, [_course_fault()], NOW, ["jan-g", "lonny"])
     assert _mail_course([_course_fault()], routing).addressees == 0
     out = capsys.readouterr().out
     assert "[skip] 2 addressee(s) without email" in out
-    assert mailer.COURSE_ADMIN_ENV in out
+    assert "no admin declares `email:`" in out
     assert "the digest @mention is the only channel" in out
     assert sent.calls == 0
-
-
-def test_a_stray_comma_in_the_secret_costs_nobody_a_mail(admins):
-    admins(" lonny@x.edu ,, not-an-address, luis@x.edu")
-    assert mailer.course_admin_addresses() == ("lonny@x.edu", "luis@x.edu")
 
 
 def test_no_course_admin_address_ever_reaches_the_log(wired, admins, capsys):
@@ -1245,9 +1240,9 @@ SITE_ISSUE = "https://github.com/Semester-f2026/semester-f2026.github.io/issues/
 SHA = "a1b2c3d4e5f67890"
 
 
-def _overwritten(by_login, dry_run=False) -> notify.Unsent:
+def _overwritten(by_login) -> notify.Unsent:
     return notify.notify_overwritten_edits(
-        SEMESTER, SITE, COURSE, by_login, SITE_ISSUE, NOW, dry_run=dry_run
+        SEMESTER, SITE, COURSE, by_login, SITE_ISSUE, NOW
     )
 
 
@@ -1426,16 +1421,14 @@ DECLARED = {
 }
 
 
-def test_an_admin_email_in_dsl_course_yml_beats_the_org_secret(wired, admins):
-    admins(", ".join(ADMINS))
+def test_an_admin_email_in_dsl_course_yml_is_where_the_mail_goes(wired):
     wired(blame={8: "JanG"}, course_people=DECLARED)
     routing = notify.route_course(COURSE, [_course_fault()], NOW)
     (routed,) = routing.by_key.values()
     assert routed.to == ("lonny@own.edu",)
 
 
-def test_a_semester_with_no_address_falls_back_to_the_declared_admins(wired, admins):
-    admins(", ".join(ADMINS))
+def test_a_semester_with_no_address_falls_back_to_the_declared_admins(wired):
     wired(blame={131: "JanG"}, people={"people": {}}, course_people=DECLARED)
     routing = notify.route(SEMESTER, COURSE, [_fault()], NOW)
     assert routing.by_key[_KEY].to == ("lonny@own.edu",)

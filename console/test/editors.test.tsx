@@ -29,7 +29,6 @@ import { cohortFlags } from '../src/ui/shell';
 import { DetailsScreen, MaterialsScreen, WebsiteScreen, courseFileAfter, detailsOf, missingAdmin } from '../src/screens/CourseEdit';
 import { AssignmentScreen } from '../src/screens/Assignments';
 import { ScheduleScreen } from '../src/screens/Schedule';
-import { parseHash } from '../src/router';
 import { lateReturn } from '../src/screens/Marking';
 import { InstructorsScreen, StudentsScreen } from '../src/screens/People';
 import type { CohortProps } from '../src/screens/types';
@@ -609,7 +608,6 @@ describe('editing screens', () => {
     expect(out).toContain('Students and instructors keep read access; nothing is deleted');
     expect(out).toContain('Archive Fall 2026');
     expect(out).not.toContain('Preview first');
-    expect(parseHash('#archive')).toEqual({ screen: 'schedule', entry: 'archive' });
   });
   it('a semester archived before it had a status counts as archived', () => {
     expect(cohortFlags({ kind: 'absent', archived: true })).toEqual({ problems: null, archived: true });

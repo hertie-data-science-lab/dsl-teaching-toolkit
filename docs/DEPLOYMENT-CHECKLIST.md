@@ -74,9 +74,9 @@ passing, revokes on the next sync. This org's `instructors`/`teaching_assistants
 display-only cards; TAs are declared per semester in [`instructors.yml`](#instructorsyml).
 Runbook: [05](05-manage-teaching-team.md).
 
-An admin's `email` is optional. When any admin has one, a fault in this file is mailed to
-those addresses; when none has, it goes to the `DSL_COURSE_ADMIN_EMAILS` org secret (retiring
-after one release). This file is public, so an address written here is public too.
+An admin's `email` is optional: a fault in this file is mailed to it. This file is public,
+so an address written here is public too; without one, the digest issue's @mention is the
+only channel.
 
 `assignment_defaults:` (optional) is this course's defaults for its assignments:
 `max_team_size`, `late_window_days`, `late_penalty_per_day`, `team_formation`,
@@ -260,8 +260,8 @@ solution branch  solution/ + grading_config.yml + tests/       -> faculty-only; 
 `title`, `type`, `submit_via`, `formats` (a list; the first is the runnable one), `questions`,
 `autograde`, `completion_check`, `grader_pdf`, `tests`, `starter`. How a semester runs it -
 team formation, team size, the late rule, `visibility`, `submit_url` - is that semester's
-[`assignments.yml`](07-schedule-releases.md#assignmentsyml---how-this-semester-runs-each-assignment); one of those keys written here makes the whole template
-NOT_MIGRATED. The button writes it from its five inputs plus the course's `assignment_defaults:`; every key
+[`assignments.yml`](07-schedule-releases.md#assignmentsyml---how-this-semester-runs-each-assignment); one of those keys written here refuses the whole template
+(`RUN_SETTING_IN_TEMPLATE`). The button writes it from its five inputs plus the course's `assignment_defaults:`; every key
 is documented inline in the generated file and in
 [Add an assignment](03-add-assignment-to-course.md). Two of them drive the cutoff:
 `autograde: true` runs `tests/` (or `tests/run.sh`, in any language), and `completion_check`
@@ -483,10 +483,8 @@ fully read goes red and opens an issue naming the bad entry.
 | `solution_datetime:` malformed, or not after `handout_datetime` | dropped - the solution waits for a human |
 | `solution_datetime:` before the late cutoff | refused by the check on push; at run time held and shown at the cutoff, with a digest warning |
 | `handout_datetime:` unparseable | kept, but nothing is ever handed out |
-| `title:`, `grading_datetime:`, `semester_dest_repo:` on an assignment | NOT_MIGRATED - the entry is dropped until the migration moves them |
 | `deploy_datetime:` unparseable | kept - that copy ships at its default, an hour before the `event_datetime` |
 | unknown `kind:` on an event, unknown key, unknown `timezone:` | kept, on the documented fallback |
-| `type:` on a release or an event | NOT_MIGRATED - the row is placed as if it had no `kind:` |
 
 Verify with `python3 -m dsl_course.schedule --semester-org <SEMESTER> --validate`. Full account:
 [Schedule releases -> Dropped entries](07-schedule-releases.md#dropped-entries).

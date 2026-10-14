@@ -67,13 +67,13 @@ date: 2026-09-25T10:00:00
 title: "Midterm Exam"
 ---
 `,
-  '_events/cohort-archived.md': `---
+  '_events/semester-archived.md': `---
 ${HEAD}
 type: special_event
 date: 2027-01-12T09:00:00
 hide_time: true
-title: "Cohort archived"
-details: "This cohort is archived on 2027-01-12: every repository in it becomes read-only."
+title: "Semester archived"
+details: "This semester is archived on 2027-01-12: every repository in it becomes read-only."
 ---
 `,
   '_events/term-start.md': `---

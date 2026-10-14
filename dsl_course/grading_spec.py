@@ -30,7 +30,7 @@ from .course import (
 from .discovery import (
     assignment_rows,
 )
-from .faults import NOT_MIGRATED, ConfigFault, NotMigrated, moved_text
+from .faults import ConfigFault, RunSettingInTemplate
 from .gh_contents import (
     get_file_content,
     yaml_mark_line,
@@ -52,7 +52,6 @@ from .setting_readers import (
     as_decimal,
     question_files,
     read_settings,
-    refuse_renamed,
 )
 
 # ------------------------------------------------- the assignment's own definition
@@ -63,10 +62,6 @@ from .setting_readers import (
 # everything else in it exists to shape the grading sheet - which is this module's. The
 # names `collect` still spells are re-exported there, so no caller had to move.
 GRADING_FILE = "grading_config.yml"  # on the template's solution branch
-# The name it had before the rename. The engine stopped reading that one, so a template
-# still carrying it declares NOTHING - which looks exactly like an assignment nobody has
-# configured, and grades like one.
-LEGACY_GRADING_FILE = "grading.yml"
 
 
 # The institution's defaults, read once: the run settings of a spec nobody has resolved yet.
@@ -125,8 +120,8 @@ class GradingSpec(_Shape):
     # How `main`'s starter is written (decision 0028): `derived` | `handwritten`, or None
     # when the file predates the key - `derive.starter_mode` then reads the markers.
     starter: str | None = None
-    # The file still carries an old key (decisions 0009, 0012): refused whole, and nothing
-    # hands out or grades from it until it is migrated.
+    # The file carries a run setting (decision 0009): refused whole, and nothing hands out
+    # or grades from it until it is fixed.
     not_migrated: bool = False
     dropped: tuple[str, ...] = ()
     # `{run key: layer}` - where each run setting's value came from (`with_run_settings`).
@@ -208,13 +203,9 @@ def _cross_check(values: dict, dropped: list[str]) -> None:
 
 
 # What a template's `grading_config.yml` reads: every setting but the run settings, which
-# are how ONE semester runs the assignment and live in its `assignments.yml` (decision
-# 0009). A run key still written here is NOT_MIGRATED.
+# are how ONE semester runs the assignment (decision 0009). A run key still written here
+# is RUN_SETTING_IN_TEMPLATE.
 TEMPLATE_KEYS = tuple(k for k in SPEC_KEYS if k not in settings.RUN_KEYS)
-RUN_KEYS_HOME = (
-    f"it is set per semester in {CONFIG_REPO}/{ASSIGNMENTS_FILE}, where the migration "
-    f"moves it"
-)
 
 
 def parse_grading_spec(text: str) -> GradingSpec:
@@ -228,20 +219,12 @@ def parse_grading_spec(text: str) -> GradingSpec:
     data = yaml.safe_load(text) if text.strip() else {}
     if not isinstance(data, dict):
         data = {}
-    # A file that still names its starters under the old key alone has not migrated, and
-    # is refused WHOLE: read without them, it would grade as an assignment with no
-    # starter at all - the completion check off, the runnable format gone - and say nothing.
-    if "format" in data and "formats" not in data:
-        raise NotMigrated("format", "formats", GRADING_FILE)
-    # A run setting here is refused WHOLE too: read without it, the assignment would run
+    # A run setting here is refused WHOLE: read without it, the assignment would run
     # on the semester's defaults instead of the rule this file wrote, and say nothing.
     for key in settings.RUN_KEYS:
         if key in data:
-            raise NotMigrated(
-                key, ASSIGNMENTS_FILE, GRADING_FILE, moved_text(key, RUN_KEYS_HOME)
-            )
+            raise RunSettingInTemplate(key, GRADING_FILE)
     dropped: list[str] = []
-    data = refuse_renamed(data, GRADING_FILE, dropped)
     values = read_settings(data, TEMPLATE_KEYS, GRADING_FILE, dropped)
     if values.get("questions"):
         values["question_files"] = (
@@ -305,7 +288,7 @@ def declared_grading_spec(
         return None
     try:
         spec = parse_grading_spec(text)
-    except NotMigrated as exc:
+    except RunSettingInTemplate as exc:
         # Refused, and SAYS so: the lock reads it as no definition (its Join-team form
         # refuses), and the handout and the grader refuse to act on it.
         log_err(f"  ! {template}/{GRADING_FILE}: {exc} - refused")
@@ -423,7 +406,7 @@ def grading_spec_faults(
     created with, and the template alone would give the digest a second answer."""
     try:
         spec = parse_grading_spec(text)
-    except NotMigrated as exc:
+    except RunSettingInTemplate as exc:
         return [
             _spec_fault(
                 slug,
@@ -434,8 +417,8 @@ def grading_spec_faults(
                 f"out or graded until it is",
                 field=exc.old,
                 lineno=key_lines(text).get((exc.old,)),
-                fix="run the migration, which rewrites it",
-                code=NOT_MIGRATED,
+                fix=f"move `{exc.old}:` to the assignment's entry in schedule.yml",
+                code=exc.code,
             )
         ], None
     except yaml.YAMLError as exc:
@@ -516,8 +499,6 @@ def _spec_fix(dropped: Dropped) -> str:
     "Correct the value" is not an instruction about a line whose KEY is the mistake: a
     setting that moved here from schedule.yml, or a plain misspelling, has no value to
     correct."""
-    if dropped.code == NOT_MIGRATED:
-        return "run the migration, which rewrites it to the new name"
     if dropped.field not in SPEC_KEYS:
         return f"remove the line above, or spell it as one of: {', '.join(SPEC_KEYS)}"
     allowed = f" (allowed: {'/'.join(dropped.allowed)})" if dropped.allowed else ""
@@ -564,8 +545,7 @@ def grading_config_faults(
         fires = schedule.grading_cutoff_datetime(sched, slug)
         text = _grading_text(course_org, template)
         if text is None:
-            faults += _undeclared_faults(slug, template, course_org, fires)
-            continue
+            continue  # declares nothing: graded as an individual, hand-marked one
         # Nothing to compare a file against until the assignment has gone out. Archived
         # repos are left out: one is read-only and a finished semester is meant to stay
         # frozen, so nothing it says can be anybody's fault.
@@ -716,41 +696,6 @@ def _org_settings_faults(semester_org: str) -> list[ConfigFault]:
                 f"them and cannot set them - and they are the one-time semester-org step "
                 f"in docs/DEPLOYMENT-CHECKLIST.md"
             ),
-        )
-    ]
-
-
-def _undeclared_faults(
-    slug: str, template: str, course_org: str, fires: datetime | None
-) -> list[ConfigFault]:
-    """The one fault a template with NO `grading_config.yml` can still have: it is
-    carrying the file under the name the engine stopped reading.
-
-    An assignment that declares nothing is not a fault - it grades as an individual
-    hand-marked one, which is a real choice - so this asks the question only when there is
-    a file to find, and pays one API read for it only on a template that has no definition
-    at all."""
-    try:
-        legacy = get_file_content(
-            course_org, template, LEGACY_GRADING_FILE, ref=SOLUTION_BRANCH
-        )
-    except RuntimeError:
-        return []  # cannot say; `get_file_content` has already said why
-    if legacy is None:
-        return []
-    return [
-        _spec_fault(
-            slug,
-            template,
-            course_org,
-            fires,
-            f"this assignment is defined in `{LEGACY_GRADING_FILE}`, which nothing "
-            f"reads any more - it grades on the toolkit's defaults",
-            file=LEGACY_GRADING_FILE,
-            fix=f"rename `{LEGACY_GRADING_FILE}` to `{GRADING_FILE}` on the template's "
-            f"`{SOLUTION_BRANCH}` branch",
-            plain=f"{slug} keeps its settings in {LEGACY_GRADING_FILE}, which is no "
-            f"longer read, so it is marked on the toolkit's defaults.",
         )
     ]
 

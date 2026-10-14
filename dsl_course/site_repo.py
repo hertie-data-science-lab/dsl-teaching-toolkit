@@ -36,10 +36,6 @@ from .log import Summary, log, log_err, log_ok, log_step, plural
 from .readings import is_reading_overlay
 from .repos import has_never_material_component, repo_exists, repo_is_archived
 
-# RETIRED (decision 0016): the settings an older publish committed into the site repo.
-# `opencourse.yml` holds them now; every publish deletes this, the migration reads it.
-PUBLISH_CONFIG = "_publish-config.yml"
-
 # The shared Jekyll theme, and the ref every generated site pins it at.
 #
 # Pinned, because sites used to track its `main`: a theme PR reached all six live sites
@@ -391,25 +387,6 @@ _SEMESTER_PAGES = (
         "Saved in your local browser only.",
     ),
 )
-
-# A page the sync wrote for a tab the PUBLIC site no longer has (its Assignments tab).
-_RETIRED_PAGES = re.compile(
-    r"\A---\nlayout: (assignments|materials|profile)\ntitle: .*\npermalink: /"
-)
-
-
-def retired_pages(site_wd: Path, names: Iterable[str]) -> tuple[str, ...]:
-    """Those of `names` that are a retired tab's page the sync wrote (never one somebody
-    wrote by hand)."""
-    pages = []
-    for name in names:
-        try:
-            text = (site_wd / name).read_text(encoding="utf-8")
-        except OSError:
-            continue
-        if _RETIRED_PAGES.match(text):
-            pages.append(name)
-    return tuple(pages)
 
 
 def console_yaml(semester_org: str, console: bool) -> str:

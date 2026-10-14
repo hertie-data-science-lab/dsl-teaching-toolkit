@@ -10,8 +10,6 @@ from fnmatch import fnmatch
 from typing import NamedTuple
 
 from . import run
-from .course import RETIRED_REPO_NAMES
-from .faults import NOT_MIGRATED
 from .ghcli import (
     ALL,
     FILES,
@@ -484,67 +482,22 @@ def default_branch(org: str, name: str, *, fallback: str | None = None) -> str:
     raise RuntimeError(f"could not read {org}/{name}'s default branch: {detail}")
 
 
-SUPERSEDED_DESCRIPTIONS = {
-    # Claimed "enrolled students only", but grant_read_teams gives the `auditors` team read
-    # on every released repo too - so the repo table students land on carried a false claim
-    # about who can see the materials.
-    "Released course materials (enrolled students only)": (
-        "Released lectures, labs, readings, & other materials"
-    ),
-    # The wording that replaced the one above, superseded in its turn. A chain, not a
-    # rewrite: an org still on the oldest string has to reach the newest in one pass, so
-    # every link keeps pointing at the CURRENT text rather than at its immediate successor.
-    "Released lectures, labs, readings, and other materials": (
-        "Released lectures, labs, readings, & other materials"
-    ),
-    "Course materials (lectures/readings by session)": (
-        "Course materials (lectures/labs/readings/datasets/other) by session"
-    ),
-    # The site repo is generated and rewritten on every sync (site.py stamps that inside the
-    # repo itself), so its description says so where faculty see it: on the org's landing
-    # page, beside the repos they SHOULD open. "on push" went with it - true but about the
-    # mechanism, and the reader wants to know whether to touch it.
-    "Course website (auto-deployed on push)": (
-        "[do not touch]: Course website (auto-deployed)"
-    ),
-    # The wording before that one. Found on a semester scaffolded early enough to predate the
-    # rename, which is the whole reason this table is a mapping and not a single pair: a
-    # description set at creation stays until something converges it, so every wording we
-    # have ever written needs a row here or that org keeps it forever.
-    "Cohort course website (auto-deployed on push)": (
-        "[do not touch]: Course website (auto-deployed)"
-    ),
-}
+# Repo descriptions we have since reworded, old -> the CURRENT wording (never the next link:
+# an org on the oldest string must reach the newest in one pass). A description is set only
+# at creation, so a rewording reaches an existing repo through this table or not at all.
+# Emptied once every live org had converged (one Refresh after 14 Oct 2026).
+SUPERSEDED_DESCRIPTIONS: dict[str, str] = {}
 
 # Per TIER, because one old wording wants two different new ones. A semester org's `.github`
 # is machine-owned scaffolding faculty never open; a COURSE org's is where they actually
 # work - it holds dsl-course.yml and every workflow they run. A flat old -> new mapping
 # cannot tell those apart, so the tier picks the table. Same forcing function as above: a
 # reworded literal must be added here or convergence silently stops.
-# The semester config repo's description, as bootstrap_course creates it.
-_CONFIG_REPO_DESCRIPTION = (
-    "[visible to instructors only]: Everything you configure for this semester is here - "
-    "student roster, teams, schedule, and marking. Students never see it, and no PII "
-    "leaves this repo."
-)
-SUPERSEDED_SEMESTER_DESCRIPTIONS = {
-    "Org profile and configuration": "[do not touch]: Org profile and configuration",
-    "PRIVATE cohort config - roster (students.csv). No PII leaves here.": (
-        _CONFIG_REPO_DESCRIPTION
-    ),
-    # The wording before "cohort" and "term" became "semester" (decision 0012).
-    "[visible to instructors only]: Everything you configure for this cohort is here - "
-    "student roster, teams, term schedule, and marking. Students never see it, and no "
-    "PII leaves this repo.": _CONFIG_REPO_DESCRIPTION,
-}
+SUPERSEDED_SEMESTER_DESCRIPTIONS: dict[str, str] = {}
 # Descriptions that carry the repo's own name, so no one literal can key them: the old
 # ENDING -> the new one. `assign` names each semester-side template `<slug> - ...`.
-SUPERSEDED_DESCRIPTION_ENDINGS = {
-    " - cohort assignment template": " - semester assignment template",
-}
-SUPERSEDED_COURSE_DESCRIPTIONS = {
-    "Org profile and configuration": "[control panel]: Org profile & configuration",
-}
+SUPERSEDED_DESCRIPTION_ENDINGS: dict[str, str] = {}
+SUPERSEDED_COURSE_DESCRIPTIONS: dict[str, str] = {}
 
 
 class Converged(NamedTuple):
@@ -642,16 +595,7 @@ def create_repo(
 
     Sets `description` only on creation. Bringing an EXISTING repo's description up to a
     reworded one is converge_descriptions' job, off the listing the refresh already
-    holds - not this function's, which would have to pay a read per call to find out.
-
-    Refuses a RETIRED name (`course.RETIRED_REPO_NAMES`): a repo created there would end
-    the redirect GitHub keeps from the renamed one, and with it every link already sent."""
-    if name in RETIRED_REPO_NAMES:
-        log_err(
-            f"refused to create {org}/{name}: that name was retired and redirects to "
-            f"its renamed repo - {NOT_MIGRATED}: run the migration"
-        )
-        return False
+    holds - not this function's, which would have to pay a read per call to find out."""
     if f"{org}/{name}".casefold() in _repos:
         # This run has already read the repo object, so it is there: the POST would only
         # be refused. A release asks this of its dest on every tick.

@@ -9,7 +9,7 @@ import { act } from 'preact/test-utils';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Course } from '../src/model/discovery';
 import { StaticFiles } from './staticFiles';
-import { inWeeks, parseSchedule, scheduleRows, termOf, weekGroups, weekOf } from '../src/model/schedule';
+import { parseSchedule, scheduleRows, termOf, weekGroups, weekOf } from '../src/model/schedule';
 import type { Status } from '../src/model/types';
 import { CohortScreen, headerLine } from '../src/screens/Cohort';
 import example from './fixtures/status.example.json';
@@ -80,11 +80,6 @@ describe('term weeks', () => {
     expect(weekGroups(rows, (r) => r.when, term, TZ, [7, 3, 4]).map((g) => g.key)).toEqual([3, 7]);
   });
 
-  it('keep undated items apart from the dated ones in the selected weeks', () => {
-    const items = [{ w: '2026-10-08T10:00:00+02:00' }, { w: '2026-09-22T10:00' }, { w: undefined }];
-    expect(inWeeks(items, (i) => i.w, [3], term, TZ)).toEqual({ dated: [items[1]], undated: [items[2]] });
-    expect(inWeeks(items, (i) => i.w, [], term, TZ).dated).toHaveLength(2);
-  });
 });
 
 describe('the header line', () => {

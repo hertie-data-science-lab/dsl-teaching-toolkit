@@ -16,7 +16,6 @@ from pathlib import Path
 
 from . import mailer, records, roster, schedule
 from .course import (
-    ASSIGNMENTS_FILE,
     CONFIG_REPO,
     GRADEBOOK_PREFIX,
     MARKS_RETURNED_NOTE,
@@ -40,7 +39,6 @@ from .gradebook import (
     CHANNEL_EMAIL,
     CHANNEL_GRADEBOOK,
     DISTRIBUTED_PATH,
-    NOTIFIED_PATH,
     SEMESTER_CSV_NAME,
     Distributed,
     _already_returned,
@@ -790,9 +788,8 @@ def distribute(
             # be defaults nobody wrote, and leaving it out of the books would take an
             # already-returned mark away from every gradebook.
             log_err(
-                f"{', '.join(refused)}: {GRADING_FILE} is NOT_MIGRATED (an old key, or "
-                f"a run setting that moved to {ASSIGNMENTS_FILE}) - nothing sent; run "
-                f"the migration"
+                f"{', '.join(refused)}: {GRADING_FILE} is refused (an old key, or a run "
+                f"setting) - nothing sent; see its digest issue"
             )
             return 1
         misshapen = sorted(slug for slug in sources if _misshapen(*sources[slug]))
@@ -812,7 +809,7 @@ def distribute(
         if not per_question:
             withheld |= {assignment} if assignment else set(sources)
         books, unknown = _on_the_roster(build_gradebooks(sources, withheld), students)
-        distributed, migrating = _read_distributed(wd)
+        distributed = _read_distributed(wd)
         retired = _retired_gradebook_files(wd)
         old_grades = records.RETIRED_SEMESTER_GRADES
         retired_grades = [old_grades] if (wd / old_grades).is_file() else []
@@ -1016,7 +1013,7 @@ def distribute(
             ),
             now=now,
             counts=counts,
-            delete=[*([NOTIFIED_PATH] if migrating else []), *retired],
+            delete=retired,
             retired=retired_grades,
         )
 
@@ -1413,7 +1410,7 @@ def sample_message(
 ) -> tuple[str, str]:
     """The notification's `(subject, body)` rendered with PLACEHOLDERS, for the preview.
 
-    `update_message` with a placeholder in place of a student - see `mailer.sample_of`."""
+    `update_message` with a placeholder in place of a student - see `mailer.sample_message_of`."""
     return mailer.sample_message_of(
         lambda student: update_message(
             student, semester_org, course_name, "<feedback>" if feedback else ""

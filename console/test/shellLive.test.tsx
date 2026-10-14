@@ -51,39 +51,14 @@ describe('the shell on a real URL', () => {
     expect(el.querySelector('#view .field')).not.toBeNull();
     expect(location.hash).toBe('#profile');
   });
-
-  it('lands a student’s old #setup on Profile, and their #marks and #join on Assignments (decision 0035)', async () => {
-    const el = await mount(`/?semester=${NLP.org}#setup`);
-    expect(location.hash).toBe('#profile');
-    expect(el.querySelector('.sidenav')).toBeNull();
-    expect(el.querySelector('#view .field')).not.toBeNull();
-    for (const old of ['#marks', '#join']) {
-      const s = await mount(`/?semester=${NLP.org}${old}`);
-      expect(location.hash).toBe('#assignments');
-      expect(s.querySelector('.sidenav [aria-current="page"]')?.textContent).toBe('Assignments');
-    }
-  });
-
-  it('rewrites an instructor’s #setup to #profile and shows Profile', async () => {
-    const el = await mount('/#setup');
-    expect(location.hash).toBe('#profile');
-    expect(el.querySelector('.sidenav')).toBeNull();
-    expect(el.querySelector('#view .field')).not.toBeNull();
-  });
-
-  it('treats ?semester= of a semester the person has no role in as instructor screens', async () => {
-    await mount('/?semester=hertie-other-f2026#setup');
-    expect(location.hash).toBe('#profile');
-  });
 });
 
 describe('the course banner (decision 0031 rule 11)', () => {
-  // The course's names check reads its .github tree; an empty one is a migrated course.
-  const migrated = () => new FakeGitHub().on('GET', new RegExp(`^/repos/${course.org}/\\.github/git/trees/HEAD`), { sha: 'r', truncated: false, tree: [] });
+  const gh = () => new FakeGitHub().on('GET', new RegExp(`^/repos/${course.org}/\\.github/git/trees/HEAD`), { sha: 'r', truncated: false, tree: [] });
   const settle = async () => { for (let i = 0; i < 10; i++) await act(async () => {}); };
   const crumbs = (el: HTMLElement) => [...el.querySelectorAll('#view .crumbs > a, #view .crumbs > span:not([aria-hidden])')].map((c) => [c.textContent, c.getAttribute('href')]);
   it('opens every instructor semester page with the course as the one h1, the semester line, the Student view pill and the semester on GitHub', async () => {
-    const el = await mount(`/?cohort=${cohort.org}#schedule`, migrated());
+    const el = await mount(`/?cohort=${cohort.org}#schedule`, gh());
     await settle();
     const banner = el.querySelector('#view .course-banner')!;
     expect(banner.querySelector('h1')?.textContent).toBe('Machine Learning');
@@ -98,14 +73,14 @@ describe('the course banner (decision 0031 rule 11)', () => {
   });
 
   it('on the Dashboard the semester crumb is plain', async () => {
-    const el = await mount(`/?cohort=${cohort.org}#dashboard`, migrated());
+    const el = await mount(`/?cohort=${cohort.org}#dashboard`, gh());
     await settle();
     expect(crumbs(el).at(-1)).toEqual(['Fall 2026', null]);
     expect(el.querySelector('#view .course-banner .btn.small.quiet')?.textContent).toBe('Student view');
   });
 
   it('heads the course Dashboard with New semester and no semester line; Dashboard is the current page and the title', async () => {
-    const el = await mount(`/?course=${course.org}#course`, migrated());
+    const el = await mount(`/?course=${course.org}#course`, gh());
     await settle();
     const banner = el.querySelector('#view .course-banner')!;
     expect(banner.querySelector('h1')!.textContent).toContain('Machine Learning');
@@ -123,7 +98,7 @@ describe('the course banner (decision 0031 rule 11)', () => {
   });
 
   it('heads Course details with the course banner, no right side, and the page title as an h2', async () => {
-    const el = await mount(`/?course=${course.org}#details`, migrated());
+    const el = await mount(`/?course=${course.org}#details`, gh());
     await settle();
     const banner = el.querySelector('#view .course-banner')!;
     expect(banner.classList.contains('plain')).toBe(true);

@@ -89,12 +89,11 @@ def _install_fakes(monkeypatch) -> dict[str, str]:
             dest.mkdir(parents=True, exist_ok=True)
             if spec == f"{COURSE}/{SOURCE}":
                 _seed_source(dest)
-            else:  # the site repo, with the settings file an older publish left
+            else:  # the site repo
                 (dest / "_config.yml").write_text(
                     'course_name: "x"\ncourse_code: "y"\ncourse_semester: "z"\n'
                     'course_description: "One paragraph description of the course."\n'
                 )
-                (dest / site_repo.PUBLISH_CONFIG).write_text(f"source_repo: {SOURCE}\n")
             return (0, "")
         return (0, "")
 
@@ -227,13 +226,6 @@ def test_nothing_to_publish_at_all_is_an_error():
     # No file sections and no readings - refuse before touching a single repo.
     oc = _oc(readings_mode="none", include_lectures=False)
     assert public_site.sync_public_site(COURSE, oc) == 1
-
-
-def test_a_publish_deletes_the_settings_file_an_older_publish_left(published):
-    # opencourse.yml holds the settings now (decision 0016); the old file goes.
-    files = published(readings_mode="actual-readings")
-    assert site_repo.PUBLISH_CONFIG not in files
-    assert "_config.yml" in files
 
 
 def test_withhold_keeps_its_paths_off_the_site(published):

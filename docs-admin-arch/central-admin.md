@@ -136,15 +136,6 @@ Bootstrap semester forwards it down to a semester. Unset on an org, fault mail g
 Nothing converges it onto an org bootstrapped before it existed - that is one command, in
 [maintainers.md](../docs/reference/maintainers.md#secrets-an-org-carries).
 
-A sixth, `DSL_COURSE_ADMIN_EMAILS`, answers the same *who hears* question one level down: a
-fault in a COURSE org's own `dsl-course.yml` or semester registry stops that course being
-synced at all, and the people who can fix it are its course admins. Comma-separated, and the
-fallback: an admin's optional `email:` in `dsl-course.yml` wins when any admin has one (that
-file is public, so the secret keeps an address private). It travels the same route (a
-repository variable here, an org secret there) and is set on COURSE orgs only: every course-level mail is sent
-from the course org's `.github`. Unset, the digest issue's `cc @<course>/course-admin` is
-the only channel and the run log says so.
-
 **Status: live on `hertie-dsl-demo-course-e1234`, `hertie-intro-to-data-science-c11`,
 `hertie-maths-data-science-C23` and `hertie-nlp-e1282`.**
 

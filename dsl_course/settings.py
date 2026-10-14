@@ -15,7 +15,7 @@ resolves nearest-first through four layers -
 and `effective` says which layer answered. The late pair is ONE rule: whichever layer
 states either half states both, the other half absent meaning none (`_late_pair`).
 `assignments.yml` is optional: absent, both of its layers are empty. A template's
-`grading_config.yml` states no run setting (a run key there is NOT_MIGRATED). This is the
+`grading_config.yml` states no run setting (a run key there is RUN_SETTING_IN_TEMPLATE). This is the
 ONE module that reads `assignment_defaults`, and the one parser of `assignments.yml`
 (`parse_instance`): its `semester_dest_repo` per assignment is read here too, for
 `schedule.load`.
@@ -41,7 +41,7 @@ from .gh_contents import (
     yaml_mark_line,
 )
 from .log import log_err
-from .setting_readers import read_settings, refuse_renamed
+from .setting_readers import read_settings
 
 # What a COURSE may set once for every assignment under it, in `dsl-course.yml`
 # `assignment_defaults:` - the course layer of the cascade below. The run settings among
@@ -76,7 +76,6 @@ def parse_assignment_defaults(raw: object) -> dict:
         log_err(f"  ! {_DEFAULTS_WHERE}: must be a block of settings - ignored")
         return {}
     dropped: list[str] = []
-    raw = refuse_renamed(raw, _DEFAULTS_WHERE, dropped)
     values = read_settings(raw, COURSE_DEFAULT_KEYS, _DEFAULTS_WHERE, dropped)
     for line in dropped:
         log_err(line)

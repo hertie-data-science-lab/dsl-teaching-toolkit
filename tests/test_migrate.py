@@ -33,14 +33,12 @@ from dsl_course.course import (
     CONFIG_REPO,
     INSTRUCTORS_FILE,
     JOIN_REPO,
-    OLD_CONFIG_REPO,
-    OLD_JOIN_REPO,
-    OLD_SEMESTER_TOPIC,
     SEMESTER_TOPIC,
     SUBMIT_VIA,
 )
 from dsl_course.faults import NOT_MIGRATED
 from dsl_course.gh_contents import blob_sha, load_yaml_lines
+from dsl_course.migrate import OLD_CONFIG_REPO, OLD_JOIN_REPO, OLD_SEMESTER_TOPIC
 from dsl_course.opencourse import OpenCourse
 from dsl_course.welcome import template
 
@@ -720,6 +718,11 @@ def test_the_rename_brings_an_old_description_to_the_current_wording(
         "- student roster, teams, term schedule, and marking. Students never see it, and "
         "no PII leaves this repo."
     )
+    monkeypatch.setattr(
+        repos,
+        "SUPERSEDED_SEMESTER_DESCRIPTIONS",
+        {old: old.replace("cohort", "semester").replace("term schedule", "schedule")},
+    )
     want = repos.current_description(old, "semester")
     assert want and "semester" in want
     fake._repo(SEM, OLD_CONFIG_REPO)["description"] = old
@@ -730,6 +733,9 @@ def test_the_rename_brings_an_old_description_to_the_current_wording(
 
 
 def test_the_re_render_plan_lists_what_it_deletes(fake, semester, monkeypatch, capsys):
+    monkeypatch.setattr(
+        migrate, "RETIRED_JOIN_FORMS", (".github/ISSUE_TEMPLATE/join.yml",)
+    )
     assert _main(monkeypatch, SEM, "--no-preview") == 0
     fake.tree(SEM, JOIN_REPO)[migrate.RETIRED_JOIN_FORMS[0]] = b"old form"
     capsys.readouterr()
@@ -911,24 +917,6 @@ def test_a_semester_without_a_welcome_repo_still_migrates(
     del fake.repos[(SEM, OLD_JOIN_REPO)]
     fake.add(SEM, JOIN_REPO, {"README.md": b"# Join\n"})
     assert _main(monkeypatch, SEM, "--no-preview") == 0
-
-
-def test_a_schedule_the_rewrite_cannot_fix_fails_the_keys_verify(
-    fake, semester, monkeypatch, capsys
-):
-    # A flow-style entry the line rewrite does not reach: the new engine still refuses
-    # it, so the step must not pass.
-    fake.tree(SEM, OLD_CONFIG_REPO)["schedule.yml"] = (
-        b"assignments:\n  a1: {cohort_dest_repo: m}\n"
-    )
-    # The preview fails where the run would stop; the run stops there before its pause.
-    assert _main(monkeypatch, SEM) == 1
-    out, err = capsys.readouterr()
-    assert "will stop here: schedule.yml would still say NOT_MIGRATED" in out
-    assert "the run would stop at keys" in err and "cohort_dest_repo" in err
-    assert _main(monkeypatch, SEM, "--no-preview") == 1
-    assert "the run would stop at keys" in capsys.readouterr().err
-    assert fake.commits == [] and fake.dispatches == []
 
 
 def test_an_unconvertible_people_yml_stops_before_anything_is_written(
@@ -1484,6 +1472,9 @@ def test_the_course_re_render_is_checked_in_every_repo_it_writes(
 ):
     # A refresh that re-renders `.github` only: the content repo and the template still
     # differ, and a retired workflow is still in the template - the verify names each.
+    monkeypatch.setattr(
+        migrate, "RETIRED_WORKFLOWS", (".github/workflows/release-code.yml",)
+    )
     fake.tree(COURSE, "assignment-1-f2026")[migrate.RETIRED_WORKFLOWS[0]] = b"old"
     monkeypatch.setattr(
         migrate.seed,
@@ -1505,6 +1496,7 @@ def test_a_renamed_org_workflow_is_planned_as_a_deletion_and_verified_gone(
     fake, course, monkeypatch, capsys
 ):
     old = ".github/workflows/archive-cohort.yml"
+    monkeypatch.setattr(migrate.seed, "RETIRED_GITHUB_WORKFLOWS", (old,))
     fake.tree(COURSE, ".github")[old] = b"old button"
     assert _main(monkeypatch, COURSE) == 0
     capsys.readouterr()
@@ -1810,7 +1802,7 @@ def test_the_course_config_rewrite_strips_the_retired_keys_and_keeps_the_rest():
         "  max_team_size: 4\n"
     )
     assert migrate.course_config_keys(got) == got
-    assert migrate.retired_course_faults(yaml.safe_load(got)) == []
+    assert not set(yaml.safe_load(got)) & set(migrate.RETIRED_COURSE_KEYS)
 
 
 # ------------------------------------ assignments.yml: the run settings move (WP-B2)
@@ -2968,21 +2960,6 @@ def test_a_course_file_left_not_migrated_stops_the_preview(
     out, err = capsys.readouterr()
     assert "will stop here: dsl-course.yml would still say NOT_MIGRATED" in out
     assert "`assignment_defaults.format` is still NOT_MIGRATED" in err
-
-
-def test_a_template_left_not_migrated_stops_the_preview(
-    fake, course, monkeypatch, capsys
-):
-    # A flow mapping the line rewrite cannot reach, with a run key it can strip: the
-    # rewrite has work, and leaves `format` behind for the verify to refuse.
-    fake.tree(COURSE, "assignment-1-f2026", "solution")["grading_config.yml"] = (
-        b"{format: ipynb, autograde: true}\n# late_window_days: 3\n"
-    )
-    assert _main(monkeypatch, COURSE) == 1
-    assert (
-        "will stop here: assignment-1-f2026@solution/grading_config.yml would still "
-        "say NOT_MIGRATED"
-    ) in capsys.readouterr().out
 
 
 # -------------------------------- a stripped title against the template's (MIG-7)

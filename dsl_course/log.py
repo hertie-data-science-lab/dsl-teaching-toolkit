@@ -9,8 +9,6 @@ import os
 import sys
 from collections.abc import Callable
 
-from .faults import moved_text, not_migrated_text
-
 
 def log(msg: str) -> None:
     print(msg, flush=True)
@@ -140,33 +138,6 @@ def add_preview_flag(parser: argparse.ArgumentParser, help: str) -> None:
     )
 
 
-# Old CLI spellings (decision 0012), old -> new. None is ever parsed as its new flag - and,
-# with `allow_abbrev=False`, none is prefix-matched onto one either (`--format` would
-# otherwise resolve to `--formats`, `--solution` to `--solution-datetime`). A command line
-# that spells one is refused as NOT_MIGRATED, naming the new flag - unless the CLI still
-# defines that spelling for a meaning of its own (`status --format`, `list_orgs --format`).
-# A value that is not a flag says where a RETIRED flag's fact comes from now.
-OLD_FLAGS = {
-    "--cohort-org": "--semester-org",
-    "--all-cohorts": "--all-semesters",
-    "--list-cohorts": "--list-semesters",
-    "--cohort-dest-repo": "--semester-dest-repo",
-    "--cohort-dest-path": "--semester-dest-path",
-    "--cohort": "--semester",
-    "--tag": "--semester",
-    "--format": "--formats",
-    "--solution": "--solution-datetime now",
-    "--dry-run": "--preview",
-    "--no-dry-run": "--no-preview",
-    "--write": "--no-preview",
-    "--master-org": "--course-org",
-    "--source-org": "--course-org",
-    "--slug": "--assignment",
-    "--deadline": "the deadline comes from schedule.yml, drop it",
-    "--group": "group or individual comes from grading_config.yml, drop it",
-}
-
-
 # What runs once per process, after the first command line that parses (see CLIParser).
 # `ghcli` registers the API budget line here: this module cannot import it (ghcli logs
 # through this one), and a process that never imports ghcli makes no GitHub call anyway.
@@ -190,8 +161,7 @@ def _run_start_hooks(parser: CLIParser) -> None:
 
 
 class CLIParser(argparse.ArgumentParser):
-    """Every CLI's parser: no abbreviations, old flags refused as NOT_MIGRATED, and the
-    start-of-run hooks (`on_cli_start`) run once the command line has parsed.
+    """Every CLI's parser: no abbreviations, and the start-of-run hooks (`on_cli_start`) run once the command line has parsed.
 
     After the whole parse (`parse_args`, which a subcommand's parser never reaches), so
     `--help` and a usage error exit before any hook runs; once per process, so a CLI the
@@ -212,32 +182,6 @@ class CLIParser(argparse.ArgumentParser):
         super().__init__(*args, **kwargs)
         self.budget_stop = budget_stop
         self.read_once = read_once
-
-    def _known_flags(self) -> set[str]:
-        flags = set(self._option_string_actions)
-        for action in self._actions:
-            if isinstance(action, argparse._SubParsersAction):
-                for sub in action.choices.values():
-                    flags |= (
-                        sub._known_flags()
-                        if isinstance(sub, CLIParser)
-                        else set(sub._option_string_actions)
-                    )
-        return flags
-
-    def parse_known_args(self, args=None, namespace=None):
-        argv = sys.argv[1:] if args is None else list(args)
-        known = self._known_flags()
-        for token in argv:
-            flag = str(token).split("=", 1)[0]
-            if flag in OLD_FLAGS and flag not in known:
-                new = OLD_FLAGS[flag]
-                self.error(
-                    not_migrated_text(flag, new)
-                    if new.startswith("--")
-                    else moved_text(flag, new)
-                )
-        return super().parse_known_args(args, namespace)
 
     def parse_args(self, args=None, namespace=None):
         parsed = super().parse_args(args, namespace)

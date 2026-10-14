@@ -882,18 +882,12 @@ def test_no_syllabus_means_no_key_at_all():
     assert pinned["syllabus"] == "https://c.github.io/files/m/S.html"
 
 
-def test_a_public_site_has_no_assignments_tab(tmp_path):
+def test_a_public_site_has_no_assignments_tab():
     # The public site lists no assignments, so it gets no tab that would say "none yet"
-    # forever; one an older sync wrote is retired, and a hand-written page stays.
+    # forever.
     assert "assignments.md" not in site_repo.theme_pages(semester=False)
     nav = yaml.safe_load(site_repo.nav_yaml(semester=False))["items"]
     assert "/assignments/" not in [i["url"] for i in nav]
-    (tmp_path / "assignments.md").write_text(
-        "---\nlayout: assignments\ntitle: Assignments\npermalink: /assignments/\n---\n"
-    )
-    assert site_repo.retired_pages(tmp_path, ("assignments.md",)) == ("assignments.md",)
-    (tmp_path / "assignments.md").write_text("---\ntitle: Our projects\n---\nHi.\n")
-    assert site_repo.retired_pages(tmp_path, ("assignments.md",)) == ()
 
 
 def test_the_banner_links_this_semester_in_the_console_where_the_course_opts_in():

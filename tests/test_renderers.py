@@ -629,10 +629,11 @@ def test_undated_dropdown_options_leave_the_default_to_github():
 
 def test_content_repos_get_both_buttons_and_lose_the_retired_one(monkeypatch):
     # Refresh actions re-renders every run-from-repo workflow (so a fix reaches live
-    # courses) - and removes release-code.yml, whose CLI no longer exists now that
-    # Release materials takes any path. All of it in ONE commit: the buttons always change
-    # together, and a burst of near-identical commits is noise in a repo faculty read.
+    # courses) - and removes a retired one. All of it in ONE commit: the buttons always
+    # change together, and a burst of near-identical commits is noise in a repo faculty read.
     commits = []
+    retired = (".github/workflows/release-code.yml",)
+    monkeypatch.setattr(workflows_place, "RETIRED_WORKFLOWS", retired)
 
     def fake_put_files(org, repo, files, message, *, delete=()):
         commits.append((files, list(delete), message))
@@ -661,7 +662,7 @@ def test_content_repos_get_both_buttons_and_lose_the_retired_one(monkeypatch):
             ".github/workflows/release-assignment.yml",
         }
     )
-    assert deleted == [".github/workflows/release-code.yml"]
+    assert deleted == list(retired)
     # The materials button seeded into a content repo is that repo's own variant.
     materials = yaml.safe_load(pushed[".github/workflows/release-materials.yml"])
     trigger = materials.get("on", materials.get(True))
@@ -713,6 +714,8 @@ def test_the_org_level_buttons_land_as_one_commit(monkeypatch):
     # writes turned each such edit into a wall of near-identical commits in the repo whose
     # history faculty actually browse. The retired buttons ride along in the same commit
     # rather than earning three more.
+    retired = (".github/workflows/propagate-cohort.yml",)
+    monkeypatch.setattr(seed, "RETIRED_GITHUB_WORKFLOWS", retired)
     monkeypatch.setattr(seed, "discover_semesters", lambda org: ["Semester-f2026"])
     monkeypatch.setattr(
         seed, "discover_content_repos", lambda org: ["course-materials"]
@@ -739,16 +742,8 @@ def test_the_org_level_buttons_land_as_one_commit(monkeypatch):
     )  # three grading buttons became two, the two end-of-term ones, the team nudge, Console
     assert ".github/workflows/console.yml" in files
     assert all(path.startswith(".github/workflows/") for path in files)
-    assert deleted == list(seed.RETIRED_GITHUB_WORKFLOWS)
-    # A renamed button is deleted under its old name and written under the new one.
-    for old in (
-        "propagate-cohort.yml",
-        "archive-cohort.yml",
-        "bootstrap-cohort.yml",
-        "check-cohort-setup.yml",
-    ):
-        assert f".github/workflows/{old}" in deleted
-        assert f".github/workflows/{old}" not in files
+    assert deleted == list(retired)
+    assert retired[0] not in files
     assert ".github/workflows/check-semester-setup.yml" in files
     assert ".github/workflows/archive-semester.yml" in files
 
@@ -2556,12 +2551,8 @@ def test_the_release_pass_itself_carries_the_transport():
     assert step["env"][mailer.MAINTAINER_ENV] == _secret_ref(mailer.MAINTAINER_ENV)
 
 
-# Where a fault in a COURSE org's OWN config is emailed: the two steps that check
-# dsl-course.yml and the semester registry, and nowhere else. An address list has no business
-# in the env of a workflow that never reads it.
-COURSE_ADMIN_CARRIERS = ("scheduler", "sync_membership")
-
-
+# The two steps that check dsl-course.yml and the semester registry mail a fault in them to
+# the course admins, so they carry the transport.
 @pytest.mark.parametrize(
     ("name", "command"),
     [
@@ -2569,22 +2560,12 @@ COURSE_ADMIN_CARRIERS = ("scheduler", "sync_membership")
         ("sync_membership", "--check-course-config"),
     ],
 )
-def test_the_course_config_check_carries_the_admin_addresses(name, command):
+def test_the_course_config_check_carries_the_transport(name, command):
     steps = [
         s for job in workflow_jobs(ALL_RENDERED[name]).values() for s in job["steps"]
     ]
     step = next(s for s in steps if command in str(s.get("run", "")))
-    # The transport AND the list: a step carrying one and not the other can mail, and has
-    # nobody to tell.
     assert set(mailer.GRAPH_ENV) <= set(step["env"])
-    assert step["env"][mailer.COURSE_ADMIN_ENV] == _secret_ref(mailer.COURSE_ADMIN_ENV)
-
-
-def test_no_other_workflow_is_handed_the_admin_addresses():
-    for name, rendered in ALL_RENDERED.items():
-        if name in COURSE_ADMIN_CARRIERS:
-            continue
-        assert mailer.COURSE_ADMIN_ENV not in rendered, name
 
 
 def test_a_push_to_either_course_config_file_checks_it_within_the_minute():
@@ -2604,11 +2585,11 @@ def test_a_push_to_either_course_config_file_checks_it_within_the_minute():
     assert run.index("--check-course-config") < run.index("dsl_course.sync_membership")
 
 
-def test_the_manual_sync_button_is_not_given_the_addresses():
+def test_the_manual_sync_button_is_not_given_the_transport():
     # Somebody is standing at that run and reads its log; the automatic job is the one
     # with nobody watching.
     steps = workflow_jobs(ALL_RENDERED["sync_membership"])["sync-dispatch"]["steps"]
-    assert all(mailer.COURSE_ADMIN_ENV not in (s.get("env") or {}) for s in steps)
+    assert all(not set(mailer.GRAPH_ENV) & set(s.get("env") or {}) for s in steps)
 
 
 def test_a_semester_bootstrap_forwards_the_maintainer_address_to_the_new_org():

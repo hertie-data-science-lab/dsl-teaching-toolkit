@@ -221,7 +221,7 @@ function CourseGroup({ p }: { p: ReadyProps }) {
   const { env, cur, set, save, setSave, run, unchanged } = useDraftSave(base);
   const doSave = async () => {
     if (!before || !meta || file.kind !== 'ready') return;
-    await saveCourseFile(env, [run, setSave], { org: course.org, migrated: p.courseMigrated, file, meta, before, after: { ...before, about: { ...before.about, ...cur } }, errs: fieldErrors(null, ABOUT, cur) });
+    await saveCourseFile(env, [run, setSave], { org: course.org, file, meta, before, after: { ...before, about: { ...before.about, ...cur } }, errs: fieldErrors(null, ABOUT, cur) });
   };
   return (
     <div class="form-section">

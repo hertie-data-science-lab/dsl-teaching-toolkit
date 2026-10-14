@@ -44,9 +44,9 @@ afterEach(() => {
   root?.remove();
   root = null;
 });
-async function mount(env: Env, f: StaticFiles, l: Loaded = loaded, migrated?: boolean) {
+async function mount(env: Env, f: StaticFiles, l: Loaded = loaded) {
   root ??= document.body.appendChild(document.createElement('div'));
-  await act(() => render(<EnvCtx.Provider value={env}><DetailsScreen course={course} loaded={l} cohortStates={{}} files={f} now={0} migrated={migrated} /></EnvCtx.Provider>, root!));
+  await act(() => render(<EnvCtx.Provider value={env}><DetailsScreen course={course} loaded={l} cohortStates={{}} files={f} now={0} /></EnvCtx.Provider>, root!));
 }
 async function flip() {
   await act(() => root!.querySelector<HTMLInputElement>('#cd-web')!.click());
@@ -141,11 +141,6 @@ describe('the public website switch in Course details', () => {
     expect(word()).toBe('Could not read the website settings.');
     await flip();
     expect(gh.seen.filter((s) => s.method === 'PUT')).toEqual([]);
-    render(null, root!);
-    const g = new StaticFiles({ [`${ORG}/.github/dsl-course.yml`]: META });
-    await mount(envOf(gh, g), g, loaded, false);
-    expect(input().disabled).toBe(true);
-    expect(word()).toBe('Not yet: the console has not confirmed this course uses the current names.');
   });
 });
 

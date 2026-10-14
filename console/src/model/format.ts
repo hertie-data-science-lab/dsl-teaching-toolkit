@@ -169,11 +169,6 @@ export function verdictTags(v: Verdict): string[] {
   return [...coming, ...(v.suggestions ? [plural(v.suggestions, 'suggestion')] : [])];
 }
 
-/** The verdict as one line: "Ready for a new semester · 3 suggestions". */
-export function verdictWords(v: Verdict): string {
-  return [verdictMain(v), ...verdictTags(v)].join(' · ');
-}
-
 /** A repo's chip words: Has a problem, Not ready, Ready. */
 export const REPO_CHIP: Record<RepoReadiness['state'], string> = { problem: 'Has a problem', not_ready: 'Not ready', ready: 'Ready' };
 

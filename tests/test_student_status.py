@@ -200,6 +200,8 @@ def _extra(facts: SemesterFacts) -> student_status.StudentFacts:
         readmes={
             "assignment-1": README_1,
             "assignment-2-project": "# Project\n\nBuild it.",
+            # Read, but not handed out: nothing of it may reach the public file.
+            "assignment-3": README_3,
         },
         caps={"assignment-2-project": 3},
         overlays={

@@ -641,7 +641,15 @@ def test_a_retired_button_left_on_a_template_is_withheld_too(monkeypatch):
     # whose nightly refresh has not run yet still carries the file - and the semester copy
     # frozen from it is what students generate off. So the strip reads what may never be
     # in a student repo, which keeps the retired paths in it.
-    retired = workflows_place.RETIRED_WORKFLOWS[0]
+    assert set(workflows_place.RETIRED_WORKFLOWS) <= set(
+        workflows_place.NEVER_IN_STUDENT_REPOS
+    )
+    retired = ".github/workflows/release-code.yml"
+    monkeypatch.setattr(
+        assign,
+        "NEVER_IN_STUDENT_REPOS",
+        (*workflows_place.NEVER_IN_STUDENT_REPOS, retired),
+    )
     deleted = _template_tree(
         monkeypatch, {retired: "name: Release code", "starter.py": ""}
     )
@@ -3580,4 +3588,4 @@ def test_every_about_line_fits_inside_githubs_cap():
     # About line now carries the cutoff sentence as well as the note.
     what = "assignment-10-neural-networks-from-scratch - shared submission drop box"
     for shape in course.SHAPE_NOTES:
-        assert len(assign._about(what, shape)) <= course.MAX_REPO_DESCRIPTION, shape
+        assert len(assign._about(what, shape)) <= 350, shape  # GitHub's cap

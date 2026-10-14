@@ -44,14 +44,11 @@ from .central import MissingCentralRef
 from .course import (
     CONFIG_REPO,
     FACULTY_TEAMS,
-    OLD_SEMESTER_TOPIC,
     SEMESTER_TEAMS,
-    SEMESTER_TOPIC,
     semester_of,
 )
 from .discovery import (
     being_set_up,
-    carries_old_semester_topic,
     central_ref_for,
     discover_assignment_repos,
     discover_assignments,
@@ -63,7 +60,6 @@ from .discovery import (
     student_repo_names,
     unregister_semester,
 )
-from .faults import NOT_MIGRATED, not_migrated_text
 from .gh_contents import get_file_content, put_file, put_files
 from .gh_teams import converge_org_settings, create_role_teams
 from .ghcli import bot_token, gh
@@ -324,23 +320,8 @@ def github_workflow_files(course_org: str, central_ref: str) -> dict[str, bytes]
 
 
 # Retired org-level workflows - removed from orgs seeded before the change, so faculty never
-# see two workflows for one job. sync-enrolment/sync-teams were consolidated into
-# sync-membership.yml; status.yml became check-cohort-setup.yml (same workflow, a name that
-# says what it checks); the three grading buttons became two - Collect submissions
-# refreshes the grading sheet, Distribute grades sends what a grader typed into it, and the
-# preview PR is gone; and the four `*-cohort*.yml` files took the semester's name.
-RETIRED_GITHUB_WORKFLOWS = (
-    ".github/workflows/sync-enrolment.yml",
-    ".github/workflows/sync-teams.yml",
-    ".github/workflows/status.yml",
-    ".github/workflows/grade-assignment.yml",
-    ".github/workflows/sync-gradebooks.yml",
-    ".github/workflows/render-grades.yml",
-    ".github/workflows/propagate-cohort.yml",
-    ".github/workflows/archive-cohort.yml",
-    ".github/workflows/bootstrap-cohort.yml",
-    ".github/workflows/check-cohort-setup.yml",
-)
+# see two workflows for one job. Emptied once every live org had refreshed (14 Oct 2026).
+RETIRED_GITHUB_WORKFLOWS: tuple[str, ...] = ()
 
 
 def seed_github_workflows(course_org: str, central_ref: str) -> int:
@@ -614,7 +595,6 @@ def refresh(course_org: str, *, course_only: bool = False) -> int:
             f"Refreshing join workflows + semester-config system files "
             f"in {len(semesters)} semester org(s)"
         )
-    not_migrated: list[str] = []
     for semester in [] if course_only else semesters:
         # ONE listing of the semester: the archived flag below, and the convergence sweep +
         # profile rebuild at the end of the loop, are all read off this same snapshot. The
@@ -630,21 +610,6 @@ def refresh(course_org: str, *, course_only: bool = False) -> int:
         # the writes below are what give it one.
         if config_repo is not None and config_repo.get("archived"):
             log(f"  [skip] {semester} (archived semester - left frozen)")
-            continue
-        if carries_old_semester_topic(listing):
-            # Nothing is written into a semester the migration has not reached - its repos
-            # are still under their old names, so every write would land beside them. A
-            # semester archived before the rename carries the old topic for ever and is
-            # frozen anyway. Reported and carried on past, never a red refresh.
-            if all(r.get("archived") for r in listing):
-                log(f"  [skip] {semester} (archived semester - left frozen)")
-                continue
-            not_migrated.append(semester)
-            print(
-                f"::error::{semester}: "
-                f"{not_migrated_text(OLD_SEMESTER_TOPIC, SEMESTER_TOPIC)}",
-                flush=True,
-            )
             continue
         failures += refresh_join_workflows(semester)
         # SYSTEM-owned files only (see welcome.CONFIG_SYSTEM_FILES): the semester's own
@@ -667,11 +632,6 @@ def refresh(course_org: str, *, course_only: bool = False) -> int:
         # Last, so it describes the semester this refresh has just converged.
         status_misses += refresh_status(course_org, semester)
     status_misses += refresh_status(course_org)
-    if not_migrated:
-        log_err(
-            f"{NOT_MIGRATED}: {len(not_migrated)} semester org(s) still carry "
-            f"`{OLD_SEMESTER_TOPIC}` - run the migration: {', '.join(not_migrated)}"
-        )
     if status_misses:
         # A warning, not a failure: status.json is the console's view, and an org that
         # never opens the console must not have its nightly refresh go red over it. The

@@ -476,18 +476,15 @@ def not_migrated_fault(
     *,
     where: str,
     file: str,
-    field: str = "",
     in_repo: str = CONFIG_REPO,
-    lineno: int | None = None,
 ) -> ConfigFault:
     """The ConfigFault for an old spelling in a hand-edited file."""
     return ConfigFault(
         where,
         not_migrated_text(old, new),
-        field=field or old,
+        field=old,
         file=file,
         in_repo=in_repo,
-        lineno=lineno,
         fix_text="run the migration, which rewrites it to the new name",
         code=NOT_MIGRATED,
     )
@@ -503,6 +500,28 @@ class Unusable(RuntimeError):
     message text is not something to match on. The two are opposite jobs - a file faculty
     have to fix is a CONTENT fault, so the run skips it, stays green and lets the digest
     carry it, while a read that failed is the toolkit's own problem and earns the red X."""
+
+
+# A run setting (`settings.RUN_KEYS`) written in a template's `grading_config.yml`: how one
+# semester runs the assignment, never what the assignment is. Refused whole, as an old
+# spelling is: read without it, the assignment would run on the defaults and say nothing.
+RUN_SETTING_IN_TEMPLATE = "RUN_SETTING_IN_TEMPLATE"
+
+
+def run_setting_text(key: str) -> str:
+    return (
+        f"`{key}` is a run setting: set it on the assignment entry in schedule.yml, "
+        f"not in grading_config.yml"
+    )
+
+
+class RunSettingInTemplate(Unusable):
+    """A run setting in a template's `grading_config.yml` (`RUN_SETTING_IN_TEMPLATE`)."""
+
+    def __init__(self, key: str, where: str = "") -> None:
+        text = run_setting_text(key)
+        super().__init__(f"{where}: {text}" if where else text)
+        self.old, self.code = key, RUN_SETTING_IN_TEMPLATE
 
 
 class NotMigrated(Unusable):

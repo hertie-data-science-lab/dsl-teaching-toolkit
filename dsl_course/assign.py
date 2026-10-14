@@ -204,7 +204,7 @@ def _about(what: str, shape: str) -> str:
     Set at CREATION and never patched afterwards, like every other description the toolkit
     writes (`repos.generate_from_template`); a reworded one reaches existing repos through
     `repos.converge_descriptions` or not at all. Which is also why the notes are capped:
-    GitHub TRUNCATES a description past `course.MAX_REPO_DESCRIPTION` rather than refusing
+    GitHub TRUNCATES a description past 350 characters rather than refusing
     it, so a note that outgrew the cap would lose its second half and say nothing about
     it."""
     note = shape_note(shape)
@@ -1805,9 +1805,8 @@ def provision_all(
     gspec = load_grading_spec(course_org, template, semester_org=semester_org, slug=key)
     if gspec.not_migrated:
         log_err(
-            f"{template}/grading_config.yml is NOT_MIGRATED (an old key, or a run "
-            f"setting that moved to assignments.yml) - run the migration; nothing is "
-            f"handed out"
+            f"{template}/grading_config.yml is refused (an old key, or a run setting) - "
+            f"see its digest issue; nothing is handed out"
         )
         return 1, False
     group = gspec.is_group

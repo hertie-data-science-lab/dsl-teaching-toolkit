@@ -37,7 +37,8 @@ Live example: [`example-course/course-org/assignment-linear-regression/`](../exa
      `grading_config.yml` later. See [derived or by hand](assignment-starter.md).
    - How each semester RUNS it - how teams form, the max team size, the late window and
      penalty, who may read the repos, an external submit link - is not asked here and
-     never written into `grading_config.yml` (a run setting there is `NOT_MIGRATED`). It
+     never written into `grading_config.yml` (a run setting there refuses the whole file as
+     `RUN_SETTING_IN_TEMPLATE`). It
      is that semester's `semester-config/assignments.yml`, else the course's
      `assignment_defaults:` in `.github/dsl-course.yml`, else the institution's (Hertie:
      teams of 5, `late_penalty_per_day: 10%` per day started, `late_window_days: 10`).

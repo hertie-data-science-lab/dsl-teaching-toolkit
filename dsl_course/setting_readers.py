@@ -24,9 +24,7 @@ from .course import (
     SUBMIT_VIA,
     TEAM_FORMATIONS,
     VISIBILITIES,
-    canonical_submit_via,
 )
-from .faults import NOT_MIGRATED, not_migrated_text
 
 
 def as_decimal(value: object) -> Decimal | None:
@@ -181,23 +179,6 @@ def read_formats(
         )
     )
     return None
-
-
-# Settings RENAMED (decision 0012), old -> new. The old key is never read: it is dropped
-# as NOT_MIGRATED, which names the new one, and the setting takes its default meanwhile.
-RENAMED_SETTINGS = {"format": "formats"}
-
-
-def refuse_renamed(data: dict, where: str, dropped: list[str]) -> dict:
-    """`data` without its old keys, each one noted in `dropped` as NOT_MIGRATED."""
-    out = dict(data)
-    for old, new in RENAMED_SETTINGS.items():
-        if old in out:
-            del out[old]
-            dropped.append(
-                Dropped(where, old, not_migrated_text(old, new), code=NOT_MIGRATED)
-            )
-    return out
 
 
 def _boolean(value: object, field: str, where: str, dropped: list[str]) -> bool:
@@ -416,11 +397,8 @@ READERS = {
         v, TEAM_FORMATIONS, "team_formation", None, w, d
     ),
     "max_team_size": _team_cap,
-    # `canonical_submit_via` first, so the legacy `github` spelling reads as
-    # `assignment_repo` and never earns a Dropped warning; `shared` (renamed before it
-    # ever shipped) has no alias and is Dropped like any other unrecognised word.
     "submit_via": lambda v, w, d: _one_of(
-        canonical_submit_via(v), SUBMIT_VIA, "submit_via", "assignment_repo", w, d
+        v, SUBMIT_VIA, "submit_via", "assignment_repo", w, d
     ),
     "visibility": lambda v, w, d: _one_of(v, VISIBILITIES, "visibility", None, w, d),
     "submit_url": _submit_url,

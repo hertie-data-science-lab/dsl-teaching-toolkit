@@ -2431,13 +2431,6 @@ def _rows(plan) -> dict[str, dict]:
     return {name: _front(text) for name, text in plan.collections["_lectures"].items()}
 
 
-def _linked(plan) -> set[str]:
-    """Every URL any row links."""
-    return {
-        link["url"] for row in _rows(plan).values() for link in row.get("links") or []
-    }
-
-
 def _reaches(linked: set[str], org: str, repo: str, path: str) -> bool:
     """Whether a released file is one click from a row: linked itself, or inside a
     folder a row links."""

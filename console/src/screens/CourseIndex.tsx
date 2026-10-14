@@ -30,7 +30,7 @@ function termLabel(repo: string): string | null {
  * The course org's repos that are none of infra, materials or templates, but that a schedule
  * can still release from: not archived, not `.github` or the org's `.github.io`, not an
  * assignment template (by topic, decision 0014) and not a repo the course status already
- * lists (its materials repos and templates, and any not migrated yet).
+ * lists (its materials repos and templates).
  */
 export function otherRepos(org: string, repos: GhRepo[], known: string[]): GhRepo[] {
   const skip = new Set([COURSE_REPO, `${org}.github.io`.toLowerCase(), ...known.map((k) => k.toLowerCase())]);

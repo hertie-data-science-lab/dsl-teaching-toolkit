@@ -10,7 +10,15 @@ from datetime import date
 import pytest
 import yaml
 
-from dsl_course import bootstrap_course, course, policy, scaffold, schedule, settings
+from dsl_course import (
+    bootstrap_course,
+    course,
+    legacy,
+    policy,
+    scaffold,
+    schedule,
+    settings,
+)
 from dsl_course.ops.registry import REGISTRY
 from dsl_course.ops.request import RequestError, parse_request
 from dsl_course.welcome import template
@@ -215,7 +223,7 @@ def test_an_unusable_grace_days_is_flagged_and_the_sixty_days_stand():
 
 def test_the_course_template_offers_the_course_layer_and_nothing_retired():
     text = template("course/dsl-course.yml")
-    for key in course.RETIRED_COURSE_KEYS:
+    for key in legacy.renames(legacy.COURSE_CONFIG):
         assert f"\n{key}:" not in text and f"# {key}:" not in text
     block = yaml.safe_load(text.format(course_name="C", course_code="E1"))
     # Every line commented: the course layer is optional, absent = the institution's.

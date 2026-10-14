@@ -453,7 +453,7 @@ function Overview(p: ReadyProps) {
   const [selected, setSelected] = useState<number[]>(thisWeek);
   // Every problem with its time, once per render (decision 0034): now or soon are the strip's red
   // counts and the Problems tab; later ones are Coming up.
-  const aside = useSetAside({ org: p.course.org, files: p.files, migrated: p.courseMigrated, write: p.course.write });
+  const aside = useSetAside({ org: p.course.org, files: p.files, write: p.course.write });
   // An empty week the course set aside leaves the moment the list says so, before the status is rewritten.
   const tiered = useMemo(() => tier(status).filter(({ p: x }) => !(x.aside && aside.list?.includes(x.id))), [status, aside.list?.join('\n')]);
   const marks = useMemo(() => releaseMarks(status, tiered, now), [status, tiered, now]);

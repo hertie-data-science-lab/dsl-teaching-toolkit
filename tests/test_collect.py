@@ -37,7 +37,7 @@ from dsl_course import (
     settings,
 )
 from dsl_course.collect import Target
-from dsl_course.faults import NotMigrated, Severity
+from dsl_course.faults import RunSettingInTemplate, Severity
 from dsl_course.roster import Student
 from dsl_course.schedule import Schedule
 from tests.conftest import ROSTER_HEADER
@@ -142,12 +142,12 @@ def test_parse_grading_spec_reads_what_the_grading_sheet_needs():
 
 
 @pytest.mark.parametrize("key", settings.RUN_KEYS)
-def test_a_run_setting_in_the_template_is_not_migrated(key):
+def test_a_run_setting_in_the_template_is_refused(key):
     # Refused WHOLE: read without it, the assignment would run on the semester's defaults
     # instead of the rule the file wrote.
-    with pytest.raises(NotMigrated) as exc:
+    with pytest.raises(RunSettingInTemplate) as exc:
         collect.parse_grading_spec(f"{key}: 3\n")
-    assert "assignments.yml" in str(exc.value)
+    assert "schedule.yml" in str(exc.value)
 
 
 def test_the_group_shape_reads_off_type_and_team_formation():
@@ -325,21 +325,6 @@ def test_shared_renamed_before_it_shipped_has_no_alias_and_is_dropped(capsys):
         "is not one of assignment_repo/shared_dropbox_repo/external"
         in capsys.readouterr().err
     )
-
-
-def test_the_legacy_github_spelling_reads_as_assignment_repo_with_no_warning(capsys):
-    # Live INSTRUCTOR-OWNED `grading_config.yml` files in real course orgs carry
-    # `submit_via: github` for ever, so the alias must read clean - no Dropped line - and
-    # drive exactly the shape a fresh `assignment_repo` config would.
-    spec = collect.parse_grading_spec("submit_via: github\n")
-    assert spec.submit_via == "assignment_repo"
-    assert spec.dropped == ()
-    assert capsys.readouterr().err == ""
-    canonical = collect.parse_grading_spec("submit_via: assignment_repo\n")
-    assert spec.has_receipts_issue is canonical.has_receipts_issue is True
-    assert spec.collects_commits is canonical.collects_commits is True
-    assert spec.creates_unit_repos is canonical.creates_unit_repos is True
-    assert spec.submit_shape == canonical.submit_shape == "assignment-repo-private"
 
 
 def test_visibility_says_nothing_about_an_assignment_that_creates_no_repo(monkeypatch):
@@ -6270,15 +6255,6 @@ def test_the_grading_moment_is_the_late_cutoff(monkeypatch):
     assert _collect_configs(monkeypatch)[0].fires == DUE_AT
 
 
-def test_a_template_still_using_the_pre_rename_filename_says_so(monkeypatch):
-    # `grading.yml` is read by nothing, so the assignment grades on the defaults while the
-    # file that was meant to define it sits right there.
-    (fault,) = _collect_configs(monkeypatch, text=None, legacy="type: group\n")
-    assert fault.file == "grading.yml"
-    assert "nothing reads any more" in fault.what
-    assert fault.fix().startswith("rename `grading.yml` to `grading_config.yml`")
-
-
 def test_an_assignment_that_declares_nothing_at_all_is_not_a_fault(monkeypatch):
     # Undeclared is a real choice: an individual, hand-marked assignment.
     assert _collect_configs(monkeypatch, text=None, legacy=None) == []
@@ -7310,4 +7286,4 @@ def test_the_refresh_button_refuses_a_refused_definition(monkeypatch, capsys):
         collect.refresh_assignment_sheet("Course", "assignment-1-f2026", "Semester")
         == 1
     )
-    assert written == [] and "NOT_MIGRATED" in capsys.readouterr().err
+    assert written == [] and "is refused" in capsys.readouterr().err

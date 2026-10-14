@@ -24,14 +24,9 @@ PATH = Path(__file__).resolve().parents[1] / "orgs.yml"
 _ORG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*$")
 
 
-def parse(text: str) -> frozenset[str]:
-    """The registered course orgs in `text`, casefolded (GitHub's names are not
-    case-sensitive). Raises on anything that is not `course_orgs:` and a list of org names."""
-    return frozenset(o.casefold() for o in parse_names(text))
-
-
 def parse_names(text: str) -> tuple[str, ...]:
-    """The registered course orgs in `text` as the file spells them, in its order."""
+    """The registered course orgs in `text` as the file spells them, in its order. Raises
+    on anything that is not `course_orgs:` and a list of org names."""
     try:
         doc = yaml.safe_load(text)
     except yaml.YAMLError as exc:
@@ -57,9 +52,5 @@ def names() -> tuple[str, ...]:
 
 
 def course_orgs() -> frozenset[str]:
-    """The registered course orgs, casefolded."""
+    """The registered course orgs, casefolded (GitHub's names are not case-sensitive)."""
     return frozenset(o.casefold() for o in names())
-
-
-def registered(org: str) -> bool:
-    return org.casefold() in course_orgs()
