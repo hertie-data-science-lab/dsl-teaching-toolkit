@@ -29,6 +29,7 @@ from dsl_course import (
     settings,
     workflows_place,
 )
+from tests.conftest import run_settings
 
 
 class FakeRepo:
@@ -693,9 +694,8 @@ def test_an_unasked_run_setting_leaves_the_semester_layer_to_answer(fake, monkey
     written = _solution_files(monkeypatch)
     assert scaffold.scaffold_assignment("Org", "Assignment 1", ["ipynb"], "group") == 0
     text = written["grading_config.yml"]
-    monkeypatch.setattr(
-        settings,
-        "_assignments_text",
+    run_settings(
+        monkeypatch,
         lambda org: (
             "defaults:\n  late_window_days: 3\n  late_penalty_per_day: 5%\n"
             "  visibility: public\n  team_formation: assigned\n  max_team_size: 2\n"
@@ -1561,7 +1561,7 @@ def test_a_fresh_materials_repo_has_no_publish_file(fake):
 # ------------------------------------------------- confirming the withheld patterns
 
 
-def _confirm(monkeypatch, text, *, preview=False, ok=True):
+def _confirm(monkeypatch, text, *, ok=True):
     written = []
     monkeypatch.setattr(
         scaffold,
@@ -1575,7 +1575,7 @@ def _confirm(monkeypatch, text, *, preview=False, ok=True):
             written.append((path, content.decode(), sha)) or ok
         ),
     )
-    return scaffold.confirm_withheld("Org", "cm", preview), written
+    return scaffold.confirm_withheld("Org", "cm"), written
 
 
 def test_confirm_marks_the_seeded_list_reviewed_and_changes_nothing_else(monkeypatch):
@@ -1599,9 +1599,7 @@ def test_confirm_on_a_reviewed_list_writes_nothing(monkeypatch):
     assert "already reviewed" in summary.text
 
 
-def test_confirm_previews_by_default_and_creates_an_absent_file(monkeypatch):
-    summary, written = _confirm(monkeypatch, None, preview=True)
-    assert written == [] and summary.text.startswith("Would mark")
+def test_confirm_creates_an_absent_file(monkeypatch):
     _, written = _confirm(monkeypatch, None)
     assert written[0][1] == f"{releaseignore.REVIEWED_MARK}\n"
 

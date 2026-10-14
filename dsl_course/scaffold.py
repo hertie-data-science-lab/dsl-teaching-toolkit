@@ -68,7 +68,6 @@ from .ghcli import GIT_ENV, clone, gh, git, is_already_exists
 from .log import (
     CLIParser,
     Summary,
-    add_preview_flag,
     log,
     log_err,
     log_ok,
@@ -1534,7 +1533,7 @@ def scaffold_site(org: str) -> int:
 CONFIRM_COMMIT = "chore: confirm the withheld patterns reviewed"
 
 
-def confirm_withheld(org: str, repo: str, preview: bool = True) -> Summary:
+def confirm_withheld(org: str, repo: str) -> Summary:
     """The Confirm of a materials repo's "Withheld patterns reviewed" (plan 0.11.0 9b
     ruling 6): `.releaseignore` gains `releaseignore.REVIEWED_MARK`, and nothing else in
     it changes, so a course that withholds nothing can say so without an edit. A list
@@ -1545,9 +1544,6 @@ def confirm_withheld(org: str, repo: str, preview: bool = True) -> Summary:
     if reviewed(text):
         log_ok(f"{where} is already reviewed")
         return Summary(f"{where} is already reviewed; nothing to confirm.")
-    if preview:
-        log(f"would mark {where} reviewed")
-        return Summary(f"Would mark {where} reviewed; nothing was written.")
     if not put_file(
         org, repo, RELEASEIGNORE, confirmed(text).encode(), CONFIRM_COMMIT, sha
     ):
@@ -1626,10 +1622,9 @@ def main() -> int:
     pc = sub.add_parser("confirm-withheld")
     pc.add_argument("--org", required=True)
     pc.add_argument("--repo", required=True, help="The materials repo")
-    add_preview_flag(pc, "Say what would be written; write nothing (default).")
     args = parser.parse_args()
     if args.cmd == "confirm-withheld":
-        return confirm_withheld(args.org, args.repo, args.preview)
+        return confirm_withheld(args.org, args.repo)
     if args.cmd == "assignment":
         answers = resolve_answers(
             {"formats": args.formats, "submit_via": args.submit_via},

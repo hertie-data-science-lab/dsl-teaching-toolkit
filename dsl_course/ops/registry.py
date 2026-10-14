@@ -699,8 +699,6 @@ _OPS = (
         doc="docs/08-release-materials-to-cohort.md",
         module="scaffold",
         argv=_confirm_withheld,
-        preview_flag="--preview",
-        real_flag="--no-preview",
     ),
     Operation(
         name="assignment.create",
