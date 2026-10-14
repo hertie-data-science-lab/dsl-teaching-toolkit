@@ -4,6 +4,7 @@
 // visibility, the late rule, the submit link) is that semester's assignments.yml. The form
 // works on a flat model; `toConfig` turns it back into the file's shape.
 
+import { h } from 'preact';
 import { questionFile, questionPoints, questionsFromRows } from '../model/marks';
 import { helpOf, labelOf } from '../model/labels';
 import { FORMAT_KEYS, SUBMIT_VIA_DEFAULT, SUBMIT_VIA_KEYS } from '../model/policy';
@@ -100,18 +101,15 @@ export function toConfig(v: Values): Record<string, unknown> {
 }
 
 /** The `?` beside "Run automatic tests on submissions". */
-export const AUTOGRADE_HINT = {
-  label: 'About automatic tests',
-  text:
-    'Hidden pytest tests you keep in the template’s tests/ folder on the solution branch; students never see them. ' +
-    'They run once, at the late cutoff, on each submission as it was frozen, in a sandbox. ' +
-    'You get a pass count such as 7/10 in the grading sheet’s info.autograde and on the Marks tab, with per-test detail in the semester’s private .system/autograde/. ' +
-    'It informs the marker: it is never a mark and never shown to students; you still enter the marks. ' +
-    'To write them: one test per behaviour, import the student’s module by its starter name, plain asserts, the standard library plus what the runner installs. ' +
-    'Other languages: a tests/run.sh.',
-  link: { label: 'A worked, annotated example', href: 'https://github.com/hertie-dsl-demo-course-e1234/assignment-1-f2026/tree/solution/tests' },
+const AUTOGRADE_HINT = {
+  text: [
+    'Hidden pytest tests you keep in the template’s tests/ folder on the solution branch run at the late cutoff on each submission’s frozen state, in a sandbox. ' +
+      'The pass count (for example 7/10) reaches the grading sheet’s info.autograde and the Marks tab as information for the marker: never a mark, never shown to students. ' +
+      'Tests use the standard library and pytest, nothing more; for other languages, add a tests/run.sh. ',
+    h('a', { href: 'https://github.com/hertie-dsl-demo-course-e1234/assignment-1-f2026/tree/solution/tests', target: '_blank', rel: 'noopener' }, 'A worked, annotated example'),
+    '.',
+  ],
   doc: '10-grade-and-return-assignments.md#autograding-optional',
-  docLabel: 'How autograding works',
 };
 
 /** The template's own fields; `formats` is the format picker beside them, not a tier. */
@@ -128,7 +126,7 @@ export function settingsTiers(): Tiers {
     },
     autograde: {
       tier: 'default', label: 'Run automatic tests on submissions', widget: 'radio', default: 'false', defaultLabel: 'default: off', hint: AUTOGRADE_HINT,
-      options: [opt('true', 'On', 'Tests suggest a mark. Marker has final discretion.'), opt('false', 'Off', 'Marked purely by hand.')],
+      options: [opt('true', 'On', 'Tests give the marker a pass count.'), opt('false', 'Off', 'Marked purely by hand.')],
       forced: (v) => (isDrop(v) ? { value: undefined, reason: 'A shared drop box holds every student’s work in one repo, so tests cannot run per student.' } : null),
       check: (x) => (x === undefined || x === 'true' || x === 'false' ? null : `The file says “${String(x)}”. Choose on or off.`),
     },

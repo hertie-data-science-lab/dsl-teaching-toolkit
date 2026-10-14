@@ -194,7 +194,7 @@ A preview waits for nothing.
 ## Autograding (optional)
 
 Off unless you ask for it. `autograde: true` in the template's `grading_config.yml` runs the
-hidden tests from its `solution` branch at the cutoff, against the frozen pin, in a sandbox with the token stripped. The
+hidden tests from its `solution` branch at the late cutoff, against the frozen pin, in a sandbox with the token stripped. The
 count lands in `info.autograde` (`7/9`) for your information only - it is never a mark by
 itself and a student never sees it. Per-test detail goes to `semester-config/.system/autograde/`.
 To regrade, delete `.system/autograde/<slug>/`.

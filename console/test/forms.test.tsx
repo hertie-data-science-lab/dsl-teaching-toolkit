@@ -4,8 +4,7 @@ import { describe, expect, it } from 'vitest';
 import gradingSchema from '../schemas/grading_config.schema.json';
 import { SchemaForm, effective, fieldErrors, layout } from '../src/forms/Form';
 import { opSpec } from '../src/ops/registry';
-import { DOCS } from '../src/ui/bits';
-import { AUTOGRADE_HINT, STARTER_COPY, fromConfig, settingsTiers, starterOf, toConfig } from '../src/tiers/grading';
+import { STARTER_COPY, fromConfig, settingsTiers, starterOf, toConfig } from '../src/tiers/grading';
 import { RETURN_MARKS, releaseAdhoc } from '../src/tiers/ops';
 import { matches } from '../src/edit/glob';
 import { diffRoster, readTable, writeTable } from '../src/edit/csv';
@@ -44,14 +43,15 @@ describe('the tiered form', () => {
     expect(out).toContain('aria-label="About Written by hand"');
   });
 
-  it('explains automatic tests in a ? beside the setting, linking the docs and the worked example', () => {
+  it('puts a field hint in a ? named for the field, with its docs link', () => {
+    const out = render(<SchemaForm id="t" schema={null} tiers={{ f: { tier: 'default', label: 'Colour', hint: { text: 'x', doc: 'y.md' } } }} values={{}} onChange={() => {}} />);
+    expect(out).toContain('aria-label="About Colour"');
+    expect(out).toMatch(/<a href="[^"]*\/y\.md"/);
+  });
+
+  it('links the autograde hint to the worked demo example', () => {
     const out = render(<SchemaForm id="t" schema={null} tiers={{ autograde: tiers.autograde }} values={fromConfig({})} onChange={() => {}} />);
-    expect(out).toContain('aria-label="About automatic tests"');
-    expect(out).toContain('never shown to students');
-    expect(out).toContain(`href="${DOCS}10-grade-and-return-assignments.md#autograding-optional"`);
-    expect(out).toContain('>How autograding works</a>');
-    expect(out).toContain(`href="${AUTOGRADE_HINT.link.href}" target="_blank"`);
-    expect(out).toContain('>A worked, annotated example</a>');
+    expect(out).toContain('href="https://github.com/hertie-dsl-demo-course-e1234/assignment-1-f2026/tree/solution/tests"');
   });
 
   it('counts only non-default Advanced fields', () => {
