@@ -3474,3 +3474,52 @@ def test_supporting_files_default_off_the_site():
     )
     shown = {r.label: r.show_on_site for r in sched.releases}
     assert shown == {"data": False, "l1": True}
+
+
+def test_a_folder_that_sweeps_up_a_solution_is_warned_about(monkeypatch):
+    # Decision 0040: a folder copy leaves the institution denylist behind, so a lab folder
+    # holding its `solutions/` ships without them - said at commit time, as a warning.
+    tree = [
+        "labs",
+        "labs/01",
+        "labs/01/lab.ipynb",
+        "labs/01/solutions",
+        "labs/01/solutions/a.ipynb",
+    ]
+    _org(monkeypatch, {"cm": tree})
+    faults = schedule.source_faults(
+        Schedule(releases=[_release("lab-1", "labs/01")]), "Course-Org"
+    )
+    assert len(faults) == 1 and "leaves behind" in faults[0].line()
+    assert (
+        faults[0].severity(datetime(2026, 9, 8, 9, 0, tzinfo=BERLIN))
+        is Severity.WARNING
+    )
+
+
+def test_a_solution_released_by_its_own_path_is_no_fault(monkeypatch):
+    # The Maths shape (coordinator ruling on PR #478): naming the denylisted folder
+    # outright ships exactly it, and nothing is said.
+    tree = [
+        "solutions",
+        "solutions/labs",
+        "solutions/labs/02_lab",
+        "solutions/labs/02_lab/a.ipynb",
+    ]
+    _org(monkeypatch, {"cm": tree})
+    s = Schedule(releases=[_release("lab-2", "solutions/labs/02_lab")])
+    assert schedule.source_faults(s, "Course-Org") == []
+
+
+def test_a_copy_may_be_made_public_and_anything_else_is_flagged():
+    # `public: true` (the console's per-file toggle on a readings entry) hosts the copy
+    # on the semester site whatever `student_site.host` says (decision 0040).
+    files = [
+        {"from_course_repo": "cm", "from_path": "readings/01/a.pdf", "public": True},
+        {"from_course_repo": "cm", "from_path": "readings/01/b.pdf"},
+        {"from_course_repo": "cm", "from_path": "readings/01/c.pdf", "public": "yes"},
+    ]
+    drops = schedule.Drops()
+    out = schedule._parse_files(files, BERLIN, drops, "readings.r1")
+    assert [d.public for d in out] == [True, False, False]
+    assert len(drops.report) == 1 and "public" in drops.report[0]

@@ -292,6 +292,14 @@ describe('materials settings: the syllabus file is the newest semester’s semes
     expect(withSyllabus('# c\nstudent_site:\n  syllabus: Syllabus.md\n', 'SYLLABUS.md')).toEqual({ text: '# c\n' });
     expect(withSyllabus('people: [\n', 'x.md')).toEqual({ error: 'semester.yml does not parse; fix it with Edit the file directly.' });
   });
+  it('offers Confirm on the withheld patterns while they are not reviewed (decision 0040 rule 7)', () => {
+    const materials = STATUS.course!.materials.map((m) => ({ ...m, checks: m.checks?.map((c) => (c.id === 'withheld' ? { ...c, done: false } : c)) }));
+    const open: Loaded = { kind: 'ready', status: { ...STATUS, course: { ...STATUS.course!, materials } }, sha: 's', stale: [] };
+    const t = text(<MaterialsScreen {...cp({ entry: MAT, cohortStates: { [COHORT_ORG]: open, [OLD_ORG]: archived } })} />);
+    const withheld = t.slice(t.indexOf('Withheld from students'));
+    expect(withheld).toContain('Withheld patterns reviewed');
+    expect(withheld).toContain('Confirm');
+  });
   it('the public website shows its settings from course.yml’s open_course_site, off when there is none', () => {
     const meta = new StaticFiles({ [`${COURSE_ORG}/.github/course.yml`]: 'course:\n  name: ML\n  description: About ML.\n' });
     const t = text(<WebsiteScreen {...cp({ files: meta })} />);

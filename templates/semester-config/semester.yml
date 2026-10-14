@@ -25,3 +25,4 @@
 # The semester's student site (public, no sign-in).
 # student_site:
 #   syllabus: SYLLABUS.md             # the released path the home page pins
+#   host: {{kinds: [lectures, labs, exams, events], types: [html, pdf]}}   # viewable copies on this public site; left out = every kind but readings (copyright), html and pdf

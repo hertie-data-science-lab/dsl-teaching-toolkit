@@ -20,6 +20,7 @@ import yaml
 from dsl_course import gh_contents, ghcli, policy, public_site, site, site_repo
 from dsl_course.faults import Unusable
 from dsl_course.opencourse import OpenCourse
+from dsl_course.selection import Selection
 from tests.conftest import entry_links
 
 COURSE = "Course-Org"
@@ -27,8 +28,22 @@ SOURCE = "course-materials-f2026"
 SERVED = f"public-materials/{SOURCE}"
 
 
-def _oc(**kwargs) -> OpenCourse:
-    return OpenCourse(enabled=True, source_repo=SOURCE, **kwargs)
+# `publish.kinds` (decision 0040): the default, and the default with the readings hosted.
+LECTURES_LABS = ("lectures", "labs")
+WITH_READINGS = (*LECTURES_LABS, "readings")
+
+
+def _oc(
+    kinds: tuple[str, ...] = LECTURES_LABS,
+    reading_lists: bool = True,
+    exclude: tuple[str, ...] = (),
+) -> OpenCourse:
+    return OpenCourse(
+        enabled=True,
+        source_repo=SOURCE,
+        publish=Selection(kinds=kinds, exclude=exclude),
+        reading_lists=reading_lists,
+    )
 
 
 def _seed_source(root: Path) -> None:
@@ -141,7 +156,7 @@ def published(monkeypatch):
 
 
 def test_publishes_every_discovered_section_not_just_lectures(published):
-    files = published(readings_mode="none")
+    files = published(reading_lists=False)
     # labs/ and lecture/ are hosted and linked, though neither is named "lectures"
     assert f"{SERVED}/session-1/labs/lab.ipynb" in files
     assert f"{SERVED}/session-1/labs/data/rows.csv" in files  # nested file too
@@ -159,7 +174,7 @@ def test_publishes_every_discovered_section_not_just_lectures(published):
 def test_labs_are_their_own_rows_not_part_of_the_session_row(published):
     # As on the semester site: `kind: lab` is what the labs page selects on, and a lab
     # linked from the session row too would appear twice.
-    files = published(readings_mode="none")
+    files = published(reading_lists=False)
     assert "kind: lab" in files["_lectures/lab-02.md"]
     assert "type:" not in files["_lectures/lab-02.md"]
     assert 'title: "Lab 2"' in files["_lectures/lab-02.md"]
@@ -171,23 +186,23 @@ def test_labs_are_their_own_rows_not_part_of_the_session_row(published):
 
 
 def test_session_with_no_content_gets_no_page(published):
-    files = published(readings_mode="none")
+    files = published(reading_lists=False)
     assert "_lectures/lab-01.md" in files
     assert "_lectures/session-02.md" in files
     assert "_lectures/session-03.md" not in files  # session 3 is readings-only
     assert "_lectures/lab-03.md" not in files
 
 
-def test_reading_list_mode_publishes_citations_as_text_only(published):
-    files = published(readings_mode="reading-list")
+def test_reading_lists_publish_citations_as_text_only(published):
+    files = published()
     s1 = files["_lectures/session-01.md"]
     assert "reading_list: |" in s1 and "Smith 2020" in s1
     assert "- paper.pdf" in s1  # named, not hosted
     assert not [p for p in files if "/readings/" in p]  # no reading bytes served
 
 
-def test_actual_readings_mode_hosts_and_links_readings(published):
-    files = published(readings_mode="actual-readings")
+def test_readings_as_a_published_kind_are_hosted_and_linked(published):
+    files = published(kinds=WITH_READINGS, reading_lists=False)
     assert f"{SERVED}/session-1/readings/paper.pdf" in files
     s1 = files["_lectures/session-01.md"]
     assert ("reading", "paper.pdf") in entry_links(s1)
@@ -195,8 +210,8 @@ def test_actual_readings_mode_hosts_and_links_readings(published):
     assert "github.com" not in s1  # public links are always site-relative
 
 
-def test_readings_only_when_file_sections_are_off(published):
-    files = published(readings_mode="actual-readings", include_lectures=False)
+def test_readings_only_when_no_other_kind_is_published(published):
+    files = published(kinds=("readings",), reading_lists=False)
     assert f"{SERVED}/session-1/readings/paper.pdf" in files
     assert not [p for p in files if "/labs/" in p or "/lecture/" in p]
     # session 2 has labs + lecture but no readings -> nothing to publish for it
@@ -206,7 +221,7 @@ def test_readings_only_when_file_sections_are_off(published):
 def test_people_are_written_even_when_the_clone_has_no_data_dir(published):
     # People ride in the plan's `files` like any other tracked file, so the write must
     # create `_data/` itself - the site template does not necessarily ship one.
-    files = published(readings_mode="none")
+    files = published(reading_lists=False)
     assert "_data/people.yml" in files
     assert "instructors:" in files["_data/people.yml"]
 
@@ -217,7 +232,10 @@ def test_an_archived_site_repo_is_a_quiet_skip_not_a_daily_failure(monkeypatch, 
     committed = _install_fakes(monkeypatch)
     monkeypatch.setattr(site_repo, "repo_is_archived", lambda org, name: True)
     assert (
-        public_site.sync_public_site(COURSE, _oc(readings_mode="actual-readings")) == 0
+        public_site.sync_public_site(
+            COURSE, _oc(kinds=WITH_READINGS, reading_lists=False)
+        )
+        == 0
     )
     assert not committed  # nothing was even cloned
     assert "is archived" in capsys.readouterr().out
@@ -225,24 +243,22 @@ def test_an_archived_site_repo_is_a_quiet_skip_not_a_daily_failure(monkeypatch, 
 
 def test_nothing_to_publish_at_all_is_an_error():
     # No file sections and no readings - refuse before touching a single repo.
-    oc = _oc(readings_mode="none", include_lectures=False)
+    oc = _oc(kinds=(), reading_lists=False)
     assert public_site.sync_public_site(COURSE, oc) == 1
 
 
-def test_withhold_keeps_its_paths_off_the_site(published):
-    # opencourse.yml's own list, on top of the repo's .releaseignore: anchored at the
+def test_exclude_keeps_its_paths_off_the_site(published):
+    # `publish.exclude`, on top of the repo's .releaseignore: anchored at the
     # clone root like it, while the copies are session folders deep inside.
-    files = published(readings_mode="actual-readings", withhold=("labs/02_*/",))
+    files = published(kinds=WITH_READINGS, reading_lists=False, exclude=("labs/02_*/",))
     assert f"{SERVED}/session-1/labs/lab.ipynb" in files
     assert f"{SERVED}/session-2/labs/lab.ipynb" not in files
     assert "_lectures/lab-02.md" not in files  # nothing left to show: no page
 
 
-def test_withhold_holds_in_reading_list_mode_too(published):
+def test_exclude_holds_for_reading_lists_too(published):
     # Naming a file IS publishing it in this mode, which never copies anything.
-    page = published(readings_mode="reading-list", withhold=("*.pdf",))[
-        "_lectures/session-01.md"
-    ]
+    page = published(exclude=("*.pdf",))["_lectures/session-01.md"]
     assert "Smith 2020" in page
     assert "paper" not in page
 
@@ -276,7 +292,7 @@ def test_an_off_website_is_refused_when_asked_and_quiet_daily(monkeypatch, oc):
 
 
 def test_an_enabled_website_publishes_what_the_file_declares(monkeypatch):
-    oc = _oc(readings_mode="none", withhold=("labs/",))
+    oc = _oc(reading_lists=False, exclude=("labs/",))
     built = _publish_with(monkeypatch, oc)
     assert public_site.publish(COURSE) == 0
     assert public_site.publish(COURSE, daily=True) == 0
@@ -308,7 +324,7 @@ def test_the_public_site_never_publishes_what_sits_beside_the_material(published
     # `tests/` and
     # a `.env` with a live key were all published with it. No release decision made any of
     # those; they are what "copy the folder" means.
-    files = published(readings_mode="actual-readings")
+    files = published(kinds=WITH_READINGS, reading_lists=False)
     assert f"{SERVED}/session-1/labs/lab.ipynb" in files  # the material still ships
     for leaked in (
         f"{SERVED}/session-1/labs/solution/answers.ipynb",
@@ -326,7 +342,7 @@ def test_the_public_site_honours_a_faculty_releaseignore(published):
     # own, and nothing here could have guessed either of these names. Anchored at the
     # CLONE root even though what gets copied is a session folder several levels down -
     # a rule that only worked from the folder being copied would be no rule at all.
-    files = published(readings_mode="actual-readings")
+    files = published(kinds=WITH_READINGS, reading_lists=False)
     assert f"{SERVED}/session-1/labs/lab.ipynb" in files  # the material still ships
     for withheld in (
         f"{SERVED}/session-1/labs/draft-notes.md",
@@ -341,7 +357,7 @@ def test_junk_a_machine_left_behind_is_never_published_as_material(published):
     # think to write `.DS_Store` into a `.releaseignore`. A session folder is copied
     # wholesale, so a semester site listed a `.gitkeep` and a `.DS_Store` among its course
     # materials and counted them into its session totals.
-    files = published(readings_mode="actual-readings")
+    files = published(kinds=WITH_READINGS, reading_lists=False)
     assert f"{SERVED}/session-1/labs/lab.ipynb" in files  # the material still ships
     for junk in (
         f"{SERVED}/session-1/labs/.gitkeep",
@@ -355,15 +371,15 @@ def test_junk_a_machine_left_behind_is_never_published_as_material(published):
 def test_reading_list_mode_does_not_name_junk_either(published):
     # The listing path, which never runs a copytree filter: in `reading-list` mode naming
     # a file IS publishing it, so the same rule has to hold as a predicate.
-    page = published(readings_mode="reading-list")["_lectures/session-01.md"]
+    page = published()["_lectures/session-01.md"]
     assert "Smith 2020" in page  # the citation list still publishes
     assert "checkpoint" not in page
 
 
-def test_reading_list_mode_does_not_name_a_withheld_reading(published):
+def test_a_reading_list_does_not_name_a_withheld_reading(published):
     # `reading-list` is the DEFAULT and hosts nothing, so it never copies and the copytree
     # ignore hook never runs. Naming a file IS publishing it in this mode.
-    files = published(readings_mode="reading-list")
+    files = published()
     page = files["_lectures/session-01.md"]
     assert "Smith 2020" in page  # the citation list still publishes
     assert "embargoed" not in page
@@ -372,7 +388,7 @@ def test_reading_list_mode_does_not_name_a_withheld_reading(published):
 def test_the_releaseignore_itself_is_never_published(published):
     # The one entry on PUBLICATION_DENYLIST that a semester release deliberately DOES carry.
     # Its contents name what was held back, and this destination is a world-readable page.
-    files = published(readings_mode="actual-readings")
+    files = published(kinds=WITH_READINGS, reading_lists=False)
     assert not [p for p in files if Path(p).name == ".releaseignore"]
 
 
@@ -381,13 +397,13 @@ def test_a_symlink_cannot_smuggle_a_denied_file_onto_the_public_site(published):
     # it: `handout.pdf -> solution/answers.ipynb` is a name nothing would refuse, and the
     # copy used to resolve it and publish the answers themselves. Copied AS a link, it
     # points at a folder that was never copied, and so carries nothing.
-    files = published(readings_mode="actual-readings")
+    files = published(kinds=WITH_READINGS, reading_lists=False)
     assert f"{SERVED}/session-1/labs/lab.ipynb" in files
     assert "the answers" not in files.get(f"{SERVED}/session-1/labs/handout.pdf", "")
 
 
 def test_supporting_files_sections_are_no_row(published):
-    files = published(readings_mode="none")
+    files = published(reading_lists=False)
     assert not [p for p in files if p.startswith(f"{SERVED}/session-1/data/")]
     # An unkinded section is supporting files too (decision 0031 rule 10), whatever a
     # materials.yml says.

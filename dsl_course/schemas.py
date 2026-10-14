@@ -26,6 +26,7 @@ from . import (
     policy,
     records,
     releaseignore,
+    selection,
     site_repo,
     status_json,
     student_status,
@@ -70,7 +71,6 @@ from .ops.registry import (
     public_view,
 )
 from .ops.request import REQUEST_JSON_SCHEMA
-from .repos import NEVER_MATERIAL, PUBLICATION_DENYLIST
 from .roster import FIELDS as ROSTER_FIELDS
 from .roster import REQUIRED_FIELDS as ROSTER_REQUIRED
 from .roster import ROLE_AUDITOR, ROLE_ENROLLED, SYSTEM_FIELDS, SYSTEM_PATH, TEAM_PREFIX
@@ -101,7 +101,7 @@ DEFAULT_OUT = Path("console/schemas")
 
 # The schema-level types of the keys whose parser accepts more than a string. Anything not
 # named here is a string: the parsers read dates, paths and titles as text.
-_FLAGS = {"tbc", "show_on_site"}
+_FLAGS = {"tbc", "show_on_site", "public"}
 # semester.yml `people:` entry keys (sync_faculty and the site read them by name; no
 # constant holds them).
 PEOPLE_ENTRY_KEYS = (
@@ -755,7 +755,10 @@ def course_schema() -> dict:
             {TOOLKIT_REF_KEY: toolkit_ref, "student_console": {"type": "boolean"}},
         )
     )
-    site = dict(opencourse.SCHEMA)
+    site = json.loads(json.dumps(opencourse.SCHEMA))
+    site["properties"]["publish"] = _selection_schema(
+        {opencourse.READING_LISTS: {"type": "boolean"}}
+    )
     top = {
         COURSE_BLOCK: course,
         PEOPLE_BLOCK: _obj({"course_admins": {"type": "array", "items": admin}}),
@@ -769,7 +772,7 @@ def course_schema() -> dict:
 
 def semester_schema() -> dict:
     """The semester org's `semester-config/semester.yml` (decision 0039)."""
-    site = _obj({"syllabus": _str()})
+    site = _obj({"syllabus": _str(), "host": _selection_schema()})
     top = {
         PEOPLE_BLOCK: {"type": "array", "items": _person()},
         DEFAULTS_BLOCK: _defaults(DEFAULT_FILE_KEYS),
@@ -878,13 +881,10 @@ def withheld_paths(paths: tuple[str, ...], lines: tuple[str, ...]) -> list[str]:
 
 def materials_json() -> dict:
     """The materials-repo rules the console applies itself: the topic that marks one, the
-    names never released or never published, and the withhold rule as cases answered by
-    the engine."""
+    line a reviewed list carries, and the withhold rule as cases answered by the engine."""
     return {
         "topic": materials.MATERIALS_TOPIC,
         "reviewed_mark": releaseignore.REVIEWED_MARK,
-        "denylist": list(PUBLICATION_DENYLIST),
-        "never_material": sorted(NEVER_MATERIAL),
         "cases": [
             {
                 "name": name,
@@ -893,6 +893,119 @@ def materials_json() -> dict:
                 "withheld": withheld_paths(_TREE, lines),
             }
             for name, lines in WITHHOLD_CASES
+        ],
+    }
+
+
+def _selection_schema(extra: dict | None = None) -> dict:
+    """One Selection (`selection.parse`), plus a use's own keys."""
+    lists = {"type": "array", "items": _str()}
+    return _obj(
+        {
+            "kinds": {"type": "array", "items": _enum(selection.kind_names())},
+            "types": lists,
+            "include": lists,
+            "exclude": lists,
+            **(extra or {}),
+        }
+    )
+
+
+# The golden vectors of `selection_json`: (name, use, `.releaseignore` lines, floor). Run
+# over `_TREE`, each path's kind its top folder's (`_KIND_OF`), by the engine's own
+# `selection.select`; the console's mirror (`console/src/model/selection.ts`) is tested
+# against the answers.
+_KIND_OF = {"lectures": "lectures", "labs": "labs", "readings": "readings"}
+_HTML = selection.exact_pattern("a[b]/notes.pdf")
+SELECTION_CASES: tuple[tuple[str, dict | None, tuple[str, ...], dict | None], ...] = (
+    ("a release: the denylist only", None, (), None),
+    ("a release with a .releaseignore", None, ("lectures/**", "!lectures/09_*/"), None),
+    ("the host default", "host", (), None),
+    ("the publish default", "publish", (), None),
+    ("kinds and types", {"kinds": ["lectures"], "types": ["html"]}, (), None),
+    ("include beats kinds", {"kinds": [], "include": ["readings/**/*.pdf"]}, (), None),
+    (
+        "exclude beats include",
+        {"kinds": ["lectures", "labs"], "include": ["*.pdf"], "exclude": ["labs/"]},
+        (),
+        None,
+    ),
+    ("a kindless path by include only", {"kinds": [], "include": [_HTML]}, (), None),
+    (
+        "include with a negation",
+        {"kinds": [], "include": ["*.pdf", "!labs/**"]},
+        (),
+        None,
+    ),
+    ("no kinds key keeps every kind", {"types": ["pdf"]}, (), None),
+    ("the .releaseignore before the use", "host", ("*.html",), None),
+    (
+        "a floor",
+        {"kinds": ["lectures", "readings"]},
+        (),
+        {"never": ["readings"], "exclude": ["*.svg"]},
+    ),
+)
+
+
+def _selected(
+    use: dict | str | None, lines: tuple[str, ...], limit: dict | None
+) -> list[str]:
+    dirs = {
+        "/".join(p.split("/")[:i]) for p in _TREE for i in range(1, p.count("/") + 1)
+    }
+    ignore = releaseignore.listed(lines)
+    if use == "host":
+        sel = selection.host_default()
+    elif use == "publish":
+        sel = selection.publish_default()
+    else:
+        sel = None if use is None else selection.parse(use, "case")
+    return list(
+        selection.select(
+            _TREE,
+            lambda p: _KIND_OF.get(p.split("/")[0]),
+            use=sel,
+            withheld=lambda p: ignore.excludes(p, lambda rel: rel in dirs),
+            limit=selection.Floor(**{k: tuple(v) for k, v in limit.items()})
+            if limit
+            else None,
+        )
+    )
+
+
+def selection_json() -> dict:
+    """The one Selection rule (decision 0040) for the console's mirror: the institution
+    denylist and clutter names, the kinds, each use's defaults, the institution's floors,
+    and golden vectors answered by `selection.select`."""
+    return {
+        "denylist": list(selection.DENYLIST),
+        "clutter": sorted(selection.CLUTTER),
+        "kinds": list(selection.kind_names()),
+        "readings": selection.READINGS,
+        "type_aliases": {"htm": "html"},
+        "defaults": {
+            "host": selection.host_default().as_data(),
+            "publish": selection.publish_default().as_data(),
+        },
+        "floor": {
+            use: {
+                "never": list(selection.floor(use).never),
+                "exclude": list(selection.floor(use).exclude),
+            }
+            for use in selection.FLOOR_USES
+        },
+        "cases": [
+            {
+                "name": name,
+                "paths": list(_TREE),
+                "kinds_by_folder": _KIND_OF,
+                "use": use,
+                "releaseignore": list(lines),
+                "floor": limit,
+                "kept": _selected(use, lines, limit),
+            }
+            for name, use, lines, limit in SELECTION_CASES
         ],
     }
 
@@ -918,6 +1031,7 @@ def all_schemas() -> dict[str, dict]:
         "names.json": names_json(),
         "labels.json": labels_json(),
         "materials.json": materials_json(),
+        "selection.json": selection_json(),
         # The institution file the engine runs on (`policy.load`): the site block and its
         # contacts, the defaults, kinds, selection floor and licences, so the console holds
         # no literal of its own.

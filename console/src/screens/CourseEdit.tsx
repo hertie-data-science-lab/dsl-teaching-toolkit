@@ -4,7 +4,7 @@
 
 import { useRef, useState } from 'preact/hooks';
 import { useEnv, type Env } from '../env';
-import { badgeFiles, denylisted, neverMaterial } from '../edit/badges';
+import { badgeFiles } from '../edit/badges';
 import { invalidText, useSave, type SaveState } from '../edit/save';
 import { YamlText, blank, compact, deepEqual, isObj, obj, render, type Path } from '../edit/yamlText';
 import { SchemaForm, fieldErrors } from '../forms/Form';
@@ -13,8 +13,10 @@ import { defaultsOf, placeBlock, statedDefaults, uncommentIn, withDefaults } fro
 import { courseBlock } from '../model/discovery';
 import { withMark } from '../model/materialsRepo';
 import { sameHandle } from '../model/people';
+import { KINDS } from '../model/policy';
+import { FLOORS, PUBLISH_DEFAULT, readSel, type Sel } from '../model/selection';
 import { institutionDefaults, rawBlock, semesterFile, validCourseFile, validSemesterBlocks, validSemesterFile, writeBlock } from '../model/settings';
-import { generateSyllabus, publishWebsite, type Scope } from '../ops/defs';
+import { confirmWithheld, generateSyllabus, publishWebsite, type Scope } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
 import { ABOUT, COURSE_FACTS, defaultsTiers } from '../tiers/course';
 import { WEBSITE_OFF_LIVE, publishWebsite as publishTiers } from '../tiers/ops';
@@ -22,7 +24,7 @@ import type { Values } from '../tiers/types';
 import { CheckLine, EditFile, Loading } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveBar } from '../ui/edit';
-import { PatternTree } from '../ui/PatternTree';
+import { SelectionEditor } from '../ui/SelectionEditor';
 import { Check, Ext } from '../ui/icons';
 import { OpenButton } from '../ui/OpenButton';
 import { courseOf, MaterialsChecklist } from './Course';
@@ -31,6 +33,9 @@ import { materialsReadiness } from '../model/readiness';
 import { courseScope } from './common';
 import type { CourseProps } from './types';
 import { CONFIG_REPO, COURSE_FILE, COURSE_REPO, DEFAULT_SYLLABUS, SEMESTER_FILE } from '../model/names';
+
+/** `course.yml`'s public-website block. */
+const OPEN_SITE = 'open_course_site';
 
 
 /** The course's newest semester, for the course-page ops the engine runs per semester. */
@@ -177,9 +182,9 @@ export function WebsiteSwitch(p: CourseProps) {
   const file = p.files.file(course.org, COURSE_REPO, COURSE_FILE);
   const y = file.kind === 'ready' ? new YamlText(file.text) : null;
   const broken = !!y?.errors.length;
-  const before = websiteOf(y && !broken ? obj(y.toJS()) : {});
+  const before = websiteOf(y && !broken ? obj(obj(y.toJS())[OPEN_SITE]) : {});
   const busy = save.kind === 'busy';
-  // Only a file that was read may be written.
+  // Only a file that was read may be written: course.yml is seeded with the course.
   const known = file.kind === 'ready';
   const flip = async (on: boolean) => {
     if (file.kind !== 'ready') return;
@@ -193,7 +198,7 @@ export function WebsiteSwitch(p: CourseProps) {
   };
   const word =
     file.kind === 'loading' ? 'Not known yet.'
-    : file.kind === 'error' || file.kind === 'absent' ? 'Could not read the website settings.'
+    : file.kind === 'error' ? 'Could not read the website settings.'
     : broken ? `${COURSE_FILE} does not parse; fix it in Manage.`
     : busy ? save.text
     : before.enabled ? 'On: updates daily' : 'Off';
@@ -328,9 +333,8 @@ function PatternBox({ id, text, onText, flash }: { id: string; text: string; onT
 }
 
 /** The withhold tree over a repo beside its pattern box (two-way; stacked on narrow screens), and the rules that match nothing. */
-function WithholdEditor({ id, label, files, text, onText, loading, partial, kinds, withheldWord, releasedWord, fixed }: {
+function WithholdEditor({ id, label, files, text, onText, loading, partial }: {
   id: string; label: string; files: string[]; text: string; onText: (t: string) => void; loading: boolean; partial: boolean;
-  kinds?: Record<string, string>; withheldWord: string; releasedWord: string; fixed?: (path: string) => string | null;
 }) {
   const [flash, setFlash] = useState<Flash | null>(null);
   const b = badgeFiles(files, linesOf(text));
@@ -345,7 +349,7 @@ function WithholdEditor({ id, label, files, text, onText, loading, partial, kind
       <div class="grid-2 withhold">
         <div>
           {loading ? <Loading what="Reading the repo" /> : (
-            <PatternTree files={files} patterns={linesOf(text)} onChange={fromTree} kinds={kinds} withheldWord={withheldWord} releasedWord={releasedWord} fixed={fixed} />
+            <SelectionEditor files={files} value={{ exclude: linesOf(text) }} onChange={(sel) => fromTree(sel.exclude ?? [])} inWord="released to students" outWord="withheld" />
           )}
         </div>
         <div>
@@ -361,40 +365,38 @@ function WithholdEditor({ id, label, files, text, onText, loading, partial, kind
   );
 }
 
+/** `course.yml` `open_course_site:` as the website screen edits it (decision 0040: `publish` is a Selection plus `reading_lists`). */
 export interface Website {
   enabled: boolean;
   source_repo: string;
-  readings_mode: string;
-  include_lectures: boolean;
-  /** The withhold list as the textarea shows it. */
-  withhold: string;
+  /** The selection as written. */
+  publish: Sel;
+  reading_lists: boolean;
 }
 
-/** course.yml's `open_course_site:` with the engine's defaults (`opencourse.parse`) filled in. */
-export function websiteOf(meta: Record<string, unknown>): Website {
-  const doc = obj(meta[SITE_BLOCK]);
-  return {
-    enabled: doc.enabled === true,
-    source_repo: String(doc.source_repo ?? ''),
-    readings_mode: String(doc.readings_mode ?? 'reading-list'),
-    include_lectures: doc.include_lectures !== false,
-    withhold: Array.isArray(doc.withhold) ? doc.withhold.map(String).join('\n') : '',
-  };
+/** `open_course_site:`'s settings with the engine's defaults (`opencourse.parse`) filled in. */
+export function websiteOf(site: Record<string, unknown>): Website {
+  const pub = obj(site.publish);
+  return { enabled: site.enabled === true, source_repo: String(site.source_repo ?? ''), publish: readSel(pub), reading_lists: pub.reading_lists !== false };
 }
 
-/** The public website's block of course.yml (decision 0039). */
-export const SITE_BLOCK = 'open_course_site';
-
-/** course.yml after `after` is written into its `open_course_site:`, key by key, or why it would not be valid. */
+/** `course.yml` after `after`, key by key under `open_course_site:`, or why it would not be valid. */
 export function websiteFileAfter(text: string, before: Website, after: Website): { text: string } | { error: string } {
   const y = new YamlText(text);
   if (y.errors.length) return { error: `${COURSE_FILE} does not parse; fix it with Edit the file directly.` };
-  const val = (w: Website) => ({ ...w, withhold: w.withhold.split('\n').map((l) => l.trim()).filter(Boolean) });
-  const b = val(before), a = val(after);
-  const fresh = !isObj(y.get([SITE_BLOCK]));
-  for (const k of Object.keys(a) as (keyof Website)[]) if (!deepEqual(b[k], a[k]) || fresh) y.assign([SITE_BLOCK, k], a[k] === '' ? null : a[k]);
-  if (a.enabled && !a.source_repo) return { error: 'Choose the source materials before turning the website on.' };
-  return validCourseFile(y.toJS() ?? {}) ? { text: y.text } : { error: invalidText(COURSE_FILE, validCourseFile) };
+  if (after.enabled && !after.source_repo) return { error: 'Choose the source materials before turning the website on.' };
+  const publish = (w: Website) => ({ ...w.publish, ...(w.reading_lists ? {} : { reading_lists: false }) });
+  if (before.enabled !== after.enabled) y.assign([OPEN_SITE, 'enabled'], after.enabled);
+  if (before.source_repo !== after.source_repo) y.assign([OPEN_SITE, 'source_repo'], after.source_repo || null);
+  if (!deepEqual(publish(before), publish(after))) y.assign([OPEN_SITE, 'publish'], publish(after));
+  return validCourseFile(y.toJS()) ? { text: y.text } : { error: invalidText(COURSE_FILE, validCourseFile) };
+}
+
+/** The open site's kind of a path: its top folder in the institution's kinds (`materials.folder_kind`), as `publish.kinds` names it. */
+export function folderKindOf(path: string): string {
+  const top = path.split('/')[0].toLowerCase();
+  const k = KINDS.find((x) => !x.system && (x.plural === top || x.key === top));
+  return k ? (k.plural ?? k.key) : 'assets';
 }
 
 /**
@@ -420,8 +422,8 @@ export function WebsiteScreen(p: CourseProps) {
   const published = c?.stages?.C6 === 'done';
   const file = p.files.file(course.org, COURSE_REPO, COURSE_FILE);
   const y = file.kind === 'ready' ? new YamlText(file.text) : null;
-  const facts = y && !y.errors.length ? obj(y.toJS()) : {};
-  const before = websiteOf(facts);
+  const doc = y && !y.errors.length ? obj(y.toJS()) : {};
+  const before = websiteOf(obj(doc[OPEN_SITE]));
   const [draft, setDraft] = useState<Website | null>(null);
   const [save, runSave, setSave] = useSave(env);
   const d = draft ?? before;
@@ -429,19 +431,20 @@ export function WebsiteScreen(p: CourseProps) {
     setDraft({ ...d, ...patch });
     if (save.kind !== 'busy') setSave({ kind: 'idle' });
   };
+  const facts = obj(doc.course);
   const src = d.source_repo || newestRepo(repos) || '';
   const tree = p.files.tree(course.org, src);
   const files = tree.kind === 'ready' ? tree.paths.filter((x) => !x.dir).map((x) => x.path) : [];
   const gh = p.files.repos(course.org);
   const siteExists = gh.kind === 'ready' && gh.repos.some((r) => r.name.toLowerCase() === `${course.org}.github.io`.toLowerCase());
   const doSave = async () => {
-    if (y?.errors.length || file.kind !== 'ready') return;
+    if (file.kind !== 'ready' || y?.errors.length) return;
     const out = websiteFileAfter(file.text, before, { ...d, source_repo: d.source_repo || (d.enabled ? src : '') });
     if ('error' in out) return setSave({ kind: 'bad', text: out.error });
     if (await runSave({ owner: course.org, repo: COURSE_REPO, path: COURSE_FILE }, out.text, file.sha, { message: 'course: edit the public website settings, from the DSL Teaching Console', statusRepo: [course.org, COURSE_REPO] })) setDraft(null);
   };
-  const values: Values = { enabled: d.enabled, source_repo: src, readings_mode: d.readings_mode, include_lectures: d.include_lectures };
-  const onForm = (nv: Values) => set({ enabled: nv.enabled === true, source_repo: String(nv.source_repo ?? ''), readings_mode: String(nv.readings_mode ?? 'reading-list'), include_lectures: nv.include_lectures !== false });
+  const values: Values = { enabled: d.enabled, source_repo: src, reading_lists: d.reading_lists };
+  const onForm = (nv: Values) => set({ enabled: nv.enabled === true, source_repo: String(nv.source_repo ?? ''), reading_lists: nv.reading_lists !== false });
   return (
     <>
       <div class="page-head">
@@ -467,18 +470,19 @@ export function WebsiteScreen(p: CourseProps) {
           <h2>About the course</h2>
           <dl class="kv">
             <dt>Address</dt><dd>{published ? <a href={websiteUrl(course.org)} target="_blank" rel="noopener">{course.org}.github.io <Ext /></a> : `${course.org}.github.io`}</dd>
-            <Fact label="Description" value={courseBlock(facts).description} />
-            <Fact label="Contact" value={obj(facts[SITE_BLOCK]).contact} />
-            <Fact label="Licence" value={courseBlock(facts).licence} />
+            <Fact label="Description" value={facts.description} />
+            <Fact label="Contact" value={obj(doc[OPEN_SITE]).contact} />
+            <Fact label="Licence" value={facts.licence} />
           </dl>
           <p class="footnote"><a href="#details">Change these in Course details</a></p>
         </section>
       </div>
       {src ? (
         <section class="panel section">
-          <h2>Kept off the website <Hint label="About keeping files off the website">Click a file or folder to keep it off the public website; click again to put it back. A course whose website is off starts with the system folder kept off, and anything whose name has the word solution, exam, grade, marks or private in it. Files withheld from students, solutions, tests and grading files never appear anyway.</Hint></h2>
-          <WithholdEditor id="ws-withhold" label="Kept-off patterns" files={files} text={d.withhold} onText={(t) => set({ withhold: t })} loading={tree.kind === 'loading'} partial={tree.kind === 'ready' && tree.truncated}
-            withheldWord="kept off" releasedWord="public" fixed={(f) => (neverMaterial(f) || denylisted(f) ? 'never public' : null)} />
+          <h2>What it publishes <Hint label="About what the website publishes">Pick the kinds of files the website publishes, then click a file or folder to leave it out; click again to put it back. Readings are copyrighted: their chip turns red when the files are published. Solutions, tests, grading files and anything withheld from students never appear.</Hint></h2>
+          {tree.kind === 'loading' ? <Loading what="Reading the repo" /> : (
+            <SelectionEditor files={files} value={d.publish} onChange={(publish) => set({ publish })} defaults={PUBLISH_DEFAULT} kindOf={folderKindOf} floor={FLOORS.open_course_site_publish} inWord="published" outWord="left out" />
+          )}
         </section>
       ) : null}
       <section class="panel section">
@@ -552,6 +556,8 @@ export function MaterialsScreen(p: CourseProps) {
     if ('error' in out) return setSylSave({ kind: 'bad', text: out.error });
     if (await runSyl({ owner: semOrg, repo: CONFIG_REPO, path: SEMESTER_FILE }, out.text, semReady.sha, { message: 'semester: choose the syllabus file, from the DSL Teaching Console', statusRepo: [semOrg, CONFIG_REPO] })) setSyl(null);
   };
+  // "Withheld patterns reviewed" (decision 0040 rule 7): a suggestion, Confirm marks it without an edit.
+  const reviewCheck = m?.checks?.find((c) => c.id === 'withheld');
   const ignDraft = ign ?? ignText;
   // What Save writes: a list that withholds nothing is marked reviewed.
   const ignOut = withMark(ignDraft.endsWith('\n') || !ignDraft ? ignDraft : `${ignDraft}\n`);
@@ -607,9 +613,14 @@ export function MaterialsScreen(p: CourseProps) {
         <section class="panel section">
           <h2>Withheld from students <Hint label="About withheld files">Everything in this repo is released to students as it stands, by the schedule or by hand, unless a line here withholds it. Click a file or folder to withhold it; click again to release it. Use it for solutions, drafts and anything private.</Hint></h2>
           {tree.kind === 'absent' || tree.kind === 'error' ? <p class="footnote">Could not read the repo’s files.</p> : (
-            <WithholdEditor id="ign-pat" label="Withheld patterns" files={files} text={ign ?? ignText} onText={setIgn} loading={tree.kind === 'loading'} partial={partial}
-              withheldWord="withheld" releasedWord="released to students" />
+            <WithholdEditor id="ign-pat" label="Withheld patterns" files={files} text={ign ?? ignText} onText={setIgn} loading={tree.kind === 'loading'} partial={partial} />
           )}
+          {reviewCheck && !reviewCheck.done ? (
+            <div class="actions">
+              <ul class="setup"><ItemRow it={{ id: 'withheld', label: reviewCheck.label, kind: 'step', need: 'suggested', state: 'open', why: reviewCheck.why ?? undefined }} /></ul>
+              {scope ? <OpButtons def={confirmWithheld(courseScope(p), repo)} small label="Confirm" /> : null}
+            </div>
+          ) : null}
           <p class="footnote">This reads the repo’s top-level .releaseignore; one in a subfolder still applies there.</p>
           <SaveBar state={ignSave} onSave={() => void saveIgn()} small disabled={ignFile.kind === 'loading' || (ignFile.kind === 'ready' && ignOut === ignText)} file={ignRef} />
         </section>

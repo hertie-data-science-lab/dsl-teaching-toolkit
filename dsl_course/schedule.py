@@ -122,6 +122,7 @@ from .gh_contents import (
 from .log import CLIParser, log, log_err
 from .releaseignore import RELEASEIGNORE, excluded_in_tree
 from .repos import default_branch, repo_missing
+from .selection import swept
 
 SCHEDULE_PATH = SCHEDULE_FILE
 
@@ -279,6 +280,9 @@ class Deploy:
     semester_dest_repo: str = DEFAULT_DEST_REPO
     semester_dest_path: str | None = None
     deploy_datetime: datetime | None = None
+    # `public: true` = the semester site hosts this copy whatever `student_site.host`'s
+    # `kinds` say (decision 0040; the console's per-file toggle on a readings entry).
+    public: bool = False
     # The line each of this copy's keys is written on, as the loader saw them (see
     # `_LineLoader`), plus "" for the line the copy itself opens on. A fault cites the
     # line of the FIELD it names (`_line_of`), because that is the line to go and edit -
@@ -768,7 +772,14 @@ KNOWN_ENTRY = frozenset(
 KNOWN_READINGS = KNOWN_ENTRY | {"reading_guide"}
 KNOWN_SLOT = frozenset({"at", "location", "details"})
 KNOWN_FILE = frozenset(
-    {"from_course_repo", "from_path", "to_semester_repo", "to_path", "release_datetime"}
+    {
+        "from_course_repo",
+        "from_path",
+        "to_semester_repo",
+        "to_path",
+        "release_datetime",
+        "public",
+    }
 )
 KNOWN_ASSIGNMENT = frozenset(
     {
@@ -1011,6 +1022,16 @@ def _parse_files(
             lines,
         )
         dest_path = d.get("to_path")
+        public = d.get("public", False)
+        if not isinstance(public, bool):
+            _flag_bad_value(
+                drops,
+                here,
+                "public",
+                public,
+                "the copy is not hosted on the site (write `public: true` or `false`)",
+                lines,
+            )
         out.append(
             Deploy(
                 course_source_repo=str(src_repo),
@@ -1027,6 +1048,7 @@ def _parse_files(
                     "first slot) instead of the time written here",
                     lines,
                 ),
+                public=public is True,
                 lines=lines,
             )
         )
@@ -2592,7 +2614,30 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
                     )
                 )
                 continue
-            if clean in paths:
+            # A folder copy leaves the institution denylist behind (decision 0040): said
+            # here, so a lab folder holding its `solutions/` is not a surprise. Naming the
+            # denylisted path itself ships it, and is never warned about.
+            below = [p[len(clean) + 1 :] for p in paths if p.startswith(f"{clean}/")]
+            left = [p for p in below if swept(p)]
+            if left:
+                out.append(
+                    SourceFault(
+                        w.where,
+                        f"{len(left)} file(s) in it are solutions, tests, grading files "
+                        "or secrets, which a folder release leaves behind - release them "
+                        "by naming their own path",
+                        w.fires,
+                        field="from_path",
+                        kind=FaultKind.WITHHELD,
+                        file=SCHEDULE_PATH,
+                        ceiling=Severity.WARNING,
+                        lineno=w.lineno("from_path"),
+                        repo=repo,
+                        path=clean,
+                    )
+                )
+                continue
+            if clean in paths or below:
                 continue
             out.append(
                 SourceFault(

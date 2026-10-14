@@ -91,10 +91,6 @@ export function publishWebsite(repos: string[], siteExists = false): Tiers {
       reason: siteExists ? WEBSITE_OFF_LIVE : 'Off: nothing is published.',
     },
     source_repo: { tier: 'ask', label: 'Source materials', widget: 'select', reason: 'The website is built from this repo. Publishing replaces the live site.', options: repos.map((r) => opt(r, r)) },
-    readings_mode: {
-      tier: 'default', label: 'Readings', widget: 'select', default: 'reading-list', defaultLabel: 'default: reading list', reason: 'Publishing the readings themselves needs their licences.',
-      options: [opt('reading-list', 'Reading list only'), opt('actual-readings', 'The readings themselves'), opt('none', 'None')],
-    },
-    include_lectures: { tier: 'default', label: 'Include lectures', widget: 'checkbox', default: true, defaultLabel: 'default: on' },
+    reading_lists: { tier: 'default', label: 'Reading lists', widget: 'checkbox', default: true, defaultLabel: 'default: on', reason: 'Each session’s reading list, as text. The readings themselves are published only when Readings is In below.' },
   };
 }

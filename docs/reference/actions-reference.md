@@ -61,7 +61,7 @@ Full flow: [Grade and return assignments](../10-grade-and-return-assignments.md)
 
 | Action | Op | Effect |
 | --- | --- | --- |
-| **Publish course website** (workflow) | `course.publish_website` | Build/refresh a **public** `<course-org>.github.io` sharing one materials repo's lectures + readings, as the course's `.github/course.yml` `open_course_site:` says (edit it on the console's Public website tab): `enabled`, `source_repo`, `readings_mode` = `reading-list` (citations only, default), `actual-readings` (host the files) or `none`, `include_lectures`, and `withhold` (paths kept off the site, `.releaseignore` syntax). No inputs; a daily cron re-publishes from the file. `enabled: false` (the default) stops both. |
+| **Publish course website** (workflow) | `course.publish_website` | Build/refresh a **public** `<course-org>.github.io` sharing one materials repo's lectures + readings, as the course's `.github/course.yml` `open_course_site:` says (edit it on the console's Public website tab): `enabled`, `source_repo` and `publish` (which files: [11](../11-configure-cohort-site.md#what-the-public-sites-show)). No inputs; a daily cron re-publishes from the file. `enabled: false` (the default) stops both. |
 
 ## Why did I get this email?
 

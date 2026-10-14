@@ -1,0 +1,86 @@
+{
+  "cases": [
+    {
+      "host": {
+        "exclude": [],
+        "include": [],
+        "kinds": [
+          "lectures",
+          "labs",
+          "exams",
+          "drop-ins",
+          "events"
+        ],
+        "types": [
+          "html"
+        ]
+      },
+      "hosted": [
+        "lectures/01_week-1/slides.html",
+        "lectures/01_week-1/slides_files/figure/plot.svg"
+      ],
+      "name": "fixture"
+    },
+    {
+      "host": {
+        "exclude": [],
+        "include": [],
+        "kinds": [
+          "lectures",
+          "labs",
+          "exams",
+          "drop-ins",
+          "events"
+        ],
+        "types": [
+          "html",
+          "pdf"
+        ]
+      },
+      "hosted": [
+        "clinic/notes.pdf",
+        "exams/mock.pdf",
+        "lectures/01_week-1/handouts/extra/further-notes.pdf",
+        "lectures/01_week-1/slides.html",
+        "lectures/01_week-1/slides.pdf",
+        "lectures/01_week-1/slides_files/figure/plot.svg",
+        "lectures/02_week-2/slides.pdf"
+      ],
+      "name": "default"
+    }
+  ],
+  "kinds": {
+    "SYLLABUS.md": "assets",
+    "clinic/notes.pdf": "drop-ins",
+    "exams/mock.pdf": "exams",
+    "labs/01_week-1/Lab_Session_1.ipynb": "labs",
+    "labs/02_week-2/Lab_Session_2.ipynb": null,
+    "lectures/01_week-1/Deck.PPTX": "lectures",
+    "lectures/01_week-1/demo.py": "lectures",
+    "lectures/01_week-1/handouts/extra/further-notes.pdf": "lectures",
+    "lectures/01_week-1/lab.pdf-notes/README.md": "lectures",
+    "lectures/01_week-1/slides.html": "lectures",
+    "lectures/01_week-1/slides.pdf": "lectures",
+    "lectures/01_week-1/slides_files/figure/plot.svg": "lectures",
+    "lectures/02_week-2/slides.pdf": "lectures",
+    "readings/01_week-1/schmidhuber-1997.pdf": "readings",
+    "readings/extra/attention.pdf": "readings"
+  },
+  "paths": [
+    "SYLLABUS.md",
+    "labs/01_week-1/Lab_Session_1.ipynb",
+    "lectures/01_week-1/Deck.PPTX",
+    "lectures/01_week-1/demo.py",
+    "lectures/01_week-1/lab.pdf-notes/README.md",
+    "lectures/01_week-1/handouts/extra/further-notes.pdf",
+    "lectures/01_week-1/slides.html",
+    "lectures/01_week-1/slides_files/figure/plot.svg",
+    "lectures/01_week-1/slides.pdf",
+    "lectures/02_week-2/slides.pdf",
+    "readings/01_week-1/schmidhuber-1997.pdf",
+    "readings/extra/attention.pdf",
+    "clinic/notes.pdf",
+    "exams/mock.pdf",
+    "labs/02_week-2/Lab_Session_2.ipynb"
+  ]
+}

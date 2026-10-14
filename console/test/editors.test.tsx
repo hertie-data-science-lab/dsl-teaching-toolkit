@@ -238,7 +238,7 @@ const groupStatus: Status = {
   assignments: [...(STATUS.assignments ?? []), { slug: 'assignment-3', number: 3, title: 'Group project', template: 'assignment-3-f2026', state: 'teams_forming', handout: '2026-09-20T10:00:00+02:00', due: '2026-10-20T23:59:00+02:00', grading_cutoff_datetime: '2026-10-30T23:59:00+02:00', solution_shown: null, units: 12, submissions: 0, teams: 1, marks: { filled: 0, total: 12 }, returned: false, problem: true, settings: { max_team_size: { value: 3, source: 'entry' }, team_formation: { value: 'self_select', source: 'institution' } } }],
 };
 const ready: Loaded = { kind: 'ready', status: groupStatus, sha: 's', stale: [] };
-const SITE = 'open_course_site:\n  enabled: true   # false: nothing is published\n  source_repo: course-materials-f2026\n  readings_mode: reading-list\n  include_lectures: true\n  withhold:\n    - "labs/"\n';
+const SITE = 'open_course_site:\n  enabled: true   # false: nothing is published\n  source_repo: course-materials-f2026\n  publish:\n    kinds: [lectures, labs]\n    exclude: ["labs/"]\n';
 const COURSE_YML = `# INSTRUCTOR-OWNED\ncourse:\n  name: Machine Learning\n  code: E1234\npeople:\n  course_admins:\n    - github_handle: a-example\n      email: a@staff.example.org\ndefaults:\n  late_window_days: 10\n  late_penalty_per_day: 10%\n${SITE}`;
 const FILES: Record<string, string> = {
     ...rosterFiles(COHORT_ORG, 'email,name,role,team:3,github_handle,github_id,enrol_code,code_sent_at\nanna@x.org,Anna Adams,enrolled,team-alpha,anna-a,101,SECRET1,2026-09-02T09:30:00Z\nben@x.org,Ben Baker,enrolled,team-alpha,ben-b,102,SECRET2,2026-09-02T09:30:00Z\ncarla@x.org,Carla Cohen,,,carla-c,103,SECRET3,2026-09-02T09:30:00Z\n'),
@@ -379,7 +379,8 @@ describe('editing screens', () => {
   it('materials settings previews what is withheld, and nothing about the public website', () => {
     const out = html(<MaterialsScreen {...cp} entry="course-materials-f2026" />);
     expect(out).toMatch(/<span class="ft-name">slides.html<\/span><span class="chip ">released to students<\/span>/);
-    expect(out).toMatch(/<span class="ft-name">a.py<\/span><span class="chip amber">withheld<\/span><span class="footnote">withheld by <code>solutions\/<\/code><\/span>/);
+    // solutions/ is the institution denylist's too (decision 0040): a folder release leaves it behind; only naming it ships it.
+    expect(out).toMatch(/<span class="ft-name">a.py<\/span><span class="chip amber">only if named<\/span>/);
     expect(out).toContain('Weekly plan for the syllabus');
     // Copy opens the plan to copy; Write puts it into the syllabus (decision 0031 rule 9).
     expect(out).toContain('>Copy</button>');
@@ -418,7 +419,10 @@ describe('editing screens', () => {
     // No course.yml yet: Create the file on GitHub opens GitHub's new-file page with the name filled in.
     expect(html(<WebsiteScreen {...cp} files={new StaticFiles({}, {}, {})} />)).toContain(`href="https://github.com/${COURSE_ORG}/.github/new/main?filename=course.yml"`);
     expect(out).toContain('Source materials');
-    expect(out).toMatch(/<span class="ft-name">labs\/<\/span><span class="chip amber">kept off<\/span>/);
+    // One selection editor: the kind chips, and the tree's lines leave a folder out.
+    expect(out).toMatch(/<span class="ft-name">labs\/<\/span><span class="chip amber">left out<\/span>/);
+    expect(out).toMatch(/Lecture: In · 1/);
+    expect(out).toContain('Reading lists');
     expect(out).toContain('Keep the website updated');
     expect(out).not.toContain('Lives in');
     expect(out).toContain('href="#details"');

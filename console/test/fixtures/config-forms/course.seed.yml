@@ -30,21 +30,11 @@ defaults:   # every key present; uncomment to override. The comment shows the in
 open_course_site:   # the public website, an open version of one materials repo
   enabled: false   # false: nothing is published
   source_repo:    # the materials repo it is built from
-  readings_mode: reading-list   # reading-list, actual-readings or none
-  include_lectures: true   # publish the repo's files
   # contact: course@example.edu   # the site's contact; unset = the institution's
-  # Paths kept off the website, as in .releaseignore. A course whose website is
-  # off starts with the system folder kept off, and anything whose name has the
-  # word solution, exam, grade, marks or private in it:
-  withhold:
-  - .system/
-  - '[Ss]olution*'
-  - '*[-_.][Ss]olution*'
-  - '*[Ee]xam'
-  - '*[Ee]xams'
-  - '*[Ee]xam[-_.]*'
-  - '[Gg]rade*'
-  - '*[-_.][Gg]rade*'
-  - '[Mm]arks*'
-  - '*[-_.][Mm]arks*'
-  - '*[Pp]rivate*'
+  # Which files it publishes: `kinds` (lectures, labs, readings, ...), `types`,
+  # `include` and `exclude` (as in .releaseignore). Reading lists are text; the
+  # readings themselves only when `readings` is listed. Solutions, tests and
+  # grading files never appear.
+  publish:
+    kinds: [lectures, labs]
+    reading_lists: true
