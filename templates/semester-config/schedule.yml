@@ -102,7 +102,7 @@
 
 # The term's own dates: one `semester:` block, each entry with a `type`.
 semester:
-  # start:                          # the site's "Semester starts" row; week 1 begins here
+  # start:                          # the site's "Semester starts" row (optional `title`, `details`); week 1 begins here
   #   type: start
   #   event_datetime:
   # end:                            # the default archive date counts from it

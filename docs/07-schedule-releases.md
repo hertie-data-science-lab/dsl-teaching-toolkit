@@ -188,7 +188,7 @@ semester:
     type: archive
 ```
 
-- **`start`, `end`**: the "Semester starts" / "Semester ends" rows; week 1 begins on the start, and the default archive date counts from the end. One of each.
+- **`start`, `end`**: the "Semester starts" / "Semester ends" rows (optional `title` renames one, `details` fills its Details column); week 1 begins on the start, and the default archive date counts from the end. One of each.
 - **`break`**: `from` and `to` (both days included), optional `title`, `details`, `show_on_site`. A grey band on the schedule, and its weeks are never an *Empty week*. Any number.
 - **`archive`**: at most one - see below.
 
