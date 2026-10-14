@@ -505,6 +505,28 @@ class Unusable(RuntimeError):
     carry it, while a read that failed is the toolkit's own problem and earns the red X."""
 
 
+# A run setting (`settings.RUN_KEYS`) written in a template's `grading_config.yml`: how one
+# semester runs the assignment, never what the assignment is. Refused whole, as an old
+# spelling is: read without it, the assignment would run on the defaults and say nothing.
+RUN_SETTING_IN_TEMPLATE = "RUN_SETTING_IN_TEMPLATE"
+
+
+def run_setting_text(key: str) -> str:
+    return (
+        f"`{key}` is a run setting: set it on the assignment entry in schedule.yml, "
+        f"not in grading_config.yml"
+    )
+
+
+class RunSettingInTemplate(Unusable):
+    """A run setting in a template's `grading_config.yml` (`RUN_SETTING_IN_TEMPLATE`)."""
+
+    def __init__(self, key: str, where: str = "") -> None:
+        text = run_setting_text(key)
+        super().__init__(f"{where}: {text}" if where else text)
+        self.old, self.code = key, RUN_SETTING_IN_TEMPLATE
+
+
 class NotMigrated(Unusable):
     """An old spelling where only the new one is read (see NOT_MIGRATED). `Unusable`, so
     every consumer stops for it exactly as for a file it cannot read, and an unattended

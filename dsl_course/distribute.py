@@ -16,7 +16,6 @@ from pathlib import Path
 
 from . import mailer, records, roster, schedule
 from .course import (
-    ASSIGNMENTS_FILE,
     CONFIG_REPO,
     GRADEBOOK_PREFIX,
     MARKS_RETURNED_NOTE,
@@ -767,9 +766,8 @@ def distribute(
             # be defaults nobody wrote, and leaving it out of the books would take an
             # already-returned mark away from every gradebook.
             log_err(
-                f"{', '.join(refused)}: {GRADING_FILE} is NOT_MIGRATED (an old key, or "
-                f"a run setting that moved to {ASSIGNMENTS_FILE}) - nothing sent; run "
-                f"the migration"
+                f"{', '.join(refused)}: {GRADING_FILE} is refused (an old key, or a run "
+                f"setting) - nothing sent; see its digest issue"
             )
             return 1
         misshapen = sorted(slug for slug in sources if _misshapen(*sources[slug]))

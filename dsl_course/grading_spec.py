@@ -30,7 +30,7 @@ from .course import (
 from .discovery import (
     assignment_rows,
 )
-from .faults import NOT_MIGRATED, ConfigFault, NotMigrated, moved_text
+from .faults import NOT_MIGRATED, ConfigFault, NotMigrated, RunSettingInTemplate
 from .gh_contents import (
     get_file_content,
     yaml_mark_line,
@@ -119,8 +119,8 @@ class GradingSpec(_Shape):
     # How `main`'s starter is written (decision 0028): `derived` | `handwritten`, or None
     # when the file predates the key - `derive.starter_mode` then reads the markers.
     starter: str | None = None
-    # The file still carries an old key (decisions 0009, 0012): refused whole, and nothing
-    # hands out or grades from it until it is migrated.
+    # The file still carries an old key (decision 0012) or a run setting (0009): refused
+    # whole, and nothing hands out or grades from it until it is fixed.
     not_migrated: bool = False
     dropped: tuple[str, ...] = ()
     # `{run key: layer}` - where each run setting's value came from (`with_run_settings`).
@@ -202,13 +202,11 @@ def _cross_check(values: dict, dropped: list[str]) -> None:
 
 
 # What a template's `grading_config.yml` reads: every setting but the run settings, which
-# are how ONE semester runs the assignment and live in its `assignments.yml` (decision
-# 0009). A run key still written here is NOT_MIGRATED.
+# are how ONE semester runs the assignment (decision 0009). A run key still written here
+# is RUN_SETTING_IN_TEMPLATE.
 TEMPLATE_KEYS = tuple(k for k in SPEC_KEYS if k not in settings.RUN_KEYS)
-RUN_KEYS_HOME = (
-    f"it is set per semester in {CONFIG_REPO}/{ASSIGNMENTS_FILE}, where the migration "
-    f"moves it"
-)
+# A refusal of the whole file: an old spelling, or a run setting.
+REFUSED = (NotMigrated, RunSettingInTemplate)
 
 
 def parse_grading_spec(text: str) -> GradingSpec:
@@ -231,9 +229,7 @@ def parse_grading_spec(text: str) -> GradingSpec:
     # on the semester's defaults instead of the rule this file wrote, and say nothing.
     for key in settings.RUN_KEYS:
         if key in data:
-            raise NotMigrated(
-                key, ASSIGNMENTS_FILE, GRADING_FILE, moved_text(key, RUN_KEYS_HOME)
-            )
+            raise RunSettingInTemplate(key, GRADING_FILE)
     dropped: list[str] = []
     data = refuse_renamed(data, GRADING_FILE, dropped)
     values = read_settings(data, TEMPLATE_KEYS, GRADING_FILE, dropped)
@@ -299,7 +295,7 @@ def declared_grading_spec(
         return None
     try:
         spec = parse_grading_spec(text)
-    except NotMigrated as exc:
+    except REFUSED as exc:
         # Refused, and SAYS so: the lock reads it as no definition (its Join-team form
         # refuses), and the handout and the grader refuse to act on it.
         log_err(f"  ! {template}/{GRADING_FILE}: {exc} - refused")
@@ -417,7 +413,7 @@ def grading_spec_faults(
     created with, and the template alone would give the digest a second answer."""
     try:
         spec = parse_grading_spec(text)
-    except NotMigrated as exc:
+    except REFUSED as exc:
         return [
             _spec_fault(
                 slug,
@@ -428,8 +424,12 @@ def grading_spec_faults(
                 f"out or graded until it is",
                 field=exc.old,
                 lineno=key_lines(text).get((exc.old,)),
-                fix="run the migration, which rewrites it",
-                code=NOT_MIGRATED,
+                fix=(
+                    "run the migration, which rewrites it"
+                    if exc.code == NOT_MIGRATED
+                    else f"move `{exc.old}:` to the assignment's entry in schedule.yml"
+                ),
+                code=exc.code,
             )
         ], None
     except yaml.YAMLError as exc:

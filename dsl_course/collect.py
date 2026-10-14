@@ -1817,8 +1817,8 @@ def sync_sheet(
     if gspec.not_migrated:
         # A refused definition is a default shape and late rule nobody wrote: refreshing
         # off it rewrites a group sheet in the individual shape. Not a failed write - the
-        # digest carries the NOT_MIGRATED fault, and the hourly tick asks again.
-        log(f"  [skip] {path} - {GRADING_FILE} is NOT_MIGRATED; run the migration")
+        # digest carries the fault, and the hourly tick asks again.
+        log(f"  [skip] {path} - {GRADING_FILE} is refused; see its digest issue")
         return SheetWrite(True)
     spec = sheet_spec(sched, key, slug, gspec, is_group)
     entry = sched.assignments.get(key)
@@ -3333,8 +3333,8 @@ def refresh_assignment_sheet(
     gspec = load_grading_spec(course_org, template, semester_org=semester_org, slug=key)
     if gspec.not_migrated:
         log_err(
-            f"{template}/{GRADING_FILE} is NOT_MIGRATED (an old key, or a run setting "
-            f"that moved to assignments.yml) - run the migration; nothing is refreshed"
+            f"{template}/{GRADING_FILE} is refused (an old key, or a run setting) - "
+            f"see its digest issue; nothing is refreshed"
         )
         return 1
     is_group = gspec.is_group
@@ -3405,9 +3405,8 @@ def collect(
     gspec = load_grading_spec(course_org, template, semester_org=semester_org, slug=key)
     if gspec.not_migrated:
         log_err(
-            f"{template}/grading_config.yml is NOT_MIGRATED (an old key, or a run "
-            f"setting that moved to assignments.yml) - run the migration; nothing is "
-            f"graded"
+            f"{template}/{GRADING_FILE} is refused (an old key, or a run setting) - "
+            f"see its digest issue; nothing is graded"
         )
         return 1
     # SSOT: the grading pin is the assignment's late CUTOFF (due + `late_window_days`);

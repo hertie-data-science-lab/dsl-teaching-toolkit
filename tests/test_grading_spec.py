@@ -79,12 +79,23 @@ def test_half_a_late_rule_is_never_completed_from_the_default(
 
 
 @pytest.mark.parametrize("key", ["late_window_days", "visibility", "max_team_size"])
-def test_a_run_setting_in_the_template_is_not_migrated(key):
+def test_a_run_setting_in_the_template_is_refused(key):
     # Refused WHOLE: read without it, the assignment would run on the semester's defaults
     # instead of the rule the file wrote, and say nothing (decision 0009).
-    with pytest.raises(grading_spec.NotMigrated) as raised:
+    with pytest.raises(grading_spec.RunSettingInTemplate) as raised:
         grading_spec.parse_grading_spec(f"title: A1\n{key}: 3\n")
-    assert raised.value.old == key and "assignments.yml" in str(raised.value)
+    assert raised.value.old == key and "schedule.yml" in str(raised.value)
+
+
+def test_a_run_setting_in_the_template_files_its_own_fault_code():
+    faults, spec = grading_spec.grading_spec_faults(
+        "a1", "a1", "C", "late_window_days: 3\n", None
+    )
+    assert spec is None
+    assert [f.code for f in faults] == ["RUN_SETTING_IN_TEMPLATE"]
+    assert "move `late_window_days:` to the assignment's entry in schedule.yml" in (
+        faults[0].fix()
+    )
 
 
 def test_a_question_may_name_the_file_it_is_marked_from():

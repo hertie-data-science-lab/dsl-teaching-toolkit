@@ -37,7 +37,7 @@ from dsl_course import (
     settings,
 )
 from dsl_course.collect import Target
-from dsl_course.faults import NotMigrated, Severity
+from dsl_course.faults import RunSettingInTemplate, Severity
 from dsl_course.roster import Student
 from dsl_course.schedule import Schedule
 from tests.conftest import ROSTER_HEADER
@@ -142,12 +142,12 @@ def test_parse_grading_spec_reads_what_the_grading_sheet_needs():
 
 
 @pytest.mark.parametrize("key", settings.RUN_KEYS)
-def test_a_run_setting_in_the_template_is_not_migrated(key):
+def test_a_run_setting_in_the_template_is_refused(key):
     # Refused WHOLE: read without it, the assignment would run on the semester's defaults
     # instead of the rule the file wrote.
-    with pytest.raises(NotMigrated) as exc:
+    with pytest.raises(RunSettingInTemplate) as exc:
         collect.parse_grading_spec(f"{key}: 3\n")
-    assert "assignments.yml" in str(exc.value)
+    assert "schedule.yml" in str(exc.value)
 
 
 def test_the_group_shape_reads_off_type_and_team_formation():
@@ -7286,4 +7286,4 @@ def test_the_refresh_button_refuses_a_refused_definition(monkeypatch, capsys):
         collect.refresh_assignment_sheet("Course", "assignment-1-f2026", "Semester")
         == 1
     )
-    assert written == [] and "NOT_MIGRATED" in capsys.readouterr().err
+    assert written == [] and "is refused" in capsys.readouterr().err

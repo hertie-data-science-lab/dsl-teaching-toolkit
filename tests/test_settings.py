@@ -154,11 +154,16 @@ def test_a_value_the_reader_refuses_leaves_the_next_layer_to_answer(monkeypatch)
 
 
 @pytest.mark.parametrize("key", settings.RUN_KEYS)
-def test_a_run_key_in_a_template_is_not_migrated(monkeypatch, key):
-    # A template states what the assignment IS; how a semester runs it is assignments.yml.
-    with pytest.raises(faults.NotMigrated) as caught:
+def test_a_run_key_in_a_template_is_refused_by_its_own_code(monkeypatch, key):
+    # A template states what the assignment IS; how a semester runs it is not its to say.
+    with pytest.raises(faults.RunSettingInTemplate) as caught:
         grading_spec.parse_grading_spec(f"type: group\n{key}: 3\n")
-    assert caught.value.old == key and settings.ASSIGNMENTS_FILE in str(caught.value)
+    assert caught.value.old == key
+    assert caught.value.code == faults.RUN_SETTING_IN_TEMPLATE
+    assert str(caught.value) == (
+        f"grading_config.yml: `{key}` is a run setting: set it on the assignment entry "
+        f"in schedule.yml, not in grading_config.yml"
+    )
     monkeypatch.setattr(
         grading_spec, "_grading_text", lambda org, template: f"{key}: 3\n"
     )

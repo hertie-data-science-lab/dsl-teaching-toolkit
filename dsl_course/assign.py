@@ -1805,9 +1805,8 @@ def provision_all(
     gspec = load_grading_spec(course_org, template, semester_org=semester_org, slug=key)
     if gspec.not_migrated:
         log_err(
-            f"{template}/grading_config.yml is NOT_MIGRATED (an old key, or a run "
-            f"setting that moved to assignments.yml) - run the migration; nothing is "
-            f"handed out"
+            f"{template}/grading_config.yml is refused (an old key, or a run setting) - "
+            f"see its digest issue; nothing is handed out"
         )
         return 1, False
     group = gspec.is_group
