@@ -86,6 +86,7 @@ from .collect import (
 from .course import (
     CONFIG_REPO,
     CUTOFF_SENTENCE,
+    NO_TEAMS,
     SELF_SELECT,
     SOLUTION_BRANCH,
     SOLUTION_DIR,
@@ -1825,9 +1826,10 @@ def provision_all(
             # need different words: telling a course whose teams the teaching team
             # allocates to wait for students to self-select points them at a form that
             # refuses every request (see templates/join/team-formation.yml).
-            # The EFFECTIVE value, off the settings cascade like every other reader's:
-            # an assignment nobody declared `assigned` for self-selects.
+            # The EFFECTIVE value, off the settings cascade like every other reader's: an
+            # assignment no layer gives a formation forms no team (decision 0039).
             self_select = gspec.team_formation_resolved == SELF_SELECT
+            undeclared = gspec.team_formation_resolved == NO_TEAMS
             # THE HANDOUT MOMENT IS NOW, whatever the CSV says. The brief is what hands
             # out; the repos follow each team as it forms, which is the whole point of the
             # rolling provisioning below - so the moment belongs on record here and not
@@ -1863,6 +1865,10 @@ def provision_all(
             how = (
                 "students self-select via the 'Join team' issue, or seed the CSV"
                 if self_select
+                else "no layer sets its `team_formation` (its schedule.yml entry, "
+                "semester.yml or course.yml `defaults:`), so nobody forms teams: set "
+                "`self_select` or `assigned`, or fill the CSV"
+                if undeclared
                 else "this assignment allocates teams (`team_formation: assigned`), so "
                 "the instructors fill the CSV - the Join-team form refuses it"
             )

@@ -41,9 +41,9 @@ from .course import (
     CONFIG_REPO,
     COURSE_CONFIG,
     DEFAULTS_BLOCK,
+    NO_TEAMS,
     PEOPLE_BLOCK,
     SCHEDULE_FILE,
-    SELF_SELECT,
     SEMESTER_FILE,
     STUDENT_SITE_BLOCK,
 )
@@ -94,14 +94,10 @@ DEFAULT_KEYS = (
 )
 # The same, as the files spell them, in the order the seeded skeletons write them.
 DEFAULT_FILE_KEYS = tuple(FILE_NAMES.get(key, key) for key in DEFAULT_KEYS)
-# `submit_via` answers New assignment's box of that name when it is left at
-# `course.COURSE_DEFAULT_CHOICE` (`scaffold.resolve_answers`); a course may still write it
-# in `defaults:` (not in the fixed set: kept pending the maintainer's ruling).
-COURSE_ASKED_KEYS = ("submit_via",)
-# `team_formation` when no layer states it. Decision 0039 takes it out of the institution
-# file; until the maintainer rules on what "absent everywhere" means for a group template,
-# the engine keeps the value it has always fallen back to.
-TEAM_FORMATION_FALLBACK = SELF_SELECT
+# `team_formation` when no layer states it: none, so no team is formed and the assignment
+# runs individually (decision 0039 rule 2; maintainer's ruling 2026-10-14). The 0.11.0
+# migration writes the old institutional `self_select` into each semester that relied on it.
+TEAM_FORMATION_FALLBACK = NO_TEAMS
 
 _REPO_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
 # `semester.yml`'s blocks (decision 0039).
@@ -224,9 +220,7 @@ def parse_course_defaults(raw: object) -> dict:
         log_err(f"  ! {_COURSE_WHERE}: must be a block of settings - ignored")
         return {}
     dropped: list[str] = []
-    values = read_defaults(
-        raw, _COURSE_WHERE, dropped, (*DEFAULT_KEYS, *COURSE_ASKED_KEYS)
-    )
+    values = read_defaults(raw, _COURSE_WHERE, dropped)
     for line in dropped:
         log_err(line)
     return {key: value for key, value in values.items() if value is not None}

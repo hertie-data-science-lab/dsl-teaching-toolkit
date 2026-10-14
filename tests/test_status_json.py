@@ -789,11 +789,12 @@ def test_a_shape_with_no_repo_per_unit_is_open_once_handed_out(via, kind):
     assert row["state"] == "declared"
 
 
-def test_a_group_assignment_nobody_declared_a_formation_for_is_forming_teams(
+def test_a_group_assignment_nobody_declared_a_formation_for_is_blocked(
     monkeypatch,
 ):
-    # The spec as the engine reads it (the cascade, every layer empty): the institution's
-    # `self_select` answers, so the state is teams_forming, never blocked.
+    # The spec as the engine reads it (the cascade, every layer empty): no formation
+    # (decision 0039), so no team can form and the assignment is blocked until a layer
+    # sets one.
     run_settings(monkeypatch, lambda org: None)
     monkeypatch.setattr(settings, "org_meta", lambda org: {})
     group = grading_spec.with_run_settings(
@@ -801,7 +802,7 @@ def test_a_group_assignment_nobody_declared_a_formation_for_is_forming_teams(
     )
     doc = _render(semester=_semester(specs={"assignment-2": group}))
     row = next(a for a in doc["assignments"] if a["slug"] == "assignment-2")
-    assert row["state"] == "teams_forming"
+    assert row["state"] == "blocked"
 
 
 def test_marks_are_counted_off_the_sheet_and_returned_once_every_unit_is():

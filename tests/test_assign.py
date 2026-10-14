@@ -1547,7 +1547,9 @@ def test_a_group_handout_with_no_teams_yet_waits_on_the_cron_and_fails_on_the_bu
     monkeypatch.setattr(
         assign,
         "load_grading_spec",
-        lambda org, template, **_: grading_spec.GradingSpec(type="group"),
+        lambda org, template, **_: grading_spec.GradingSpec(
+            type="group", team_formation="self_select"
+        ),
     )
     monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
     path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
@@ -1592,12 +1594,13 @@ def test_a_group_handout_with_no_teams_records_the_moment_it_went_out(
     assert recorded == [("SEMESTER", "project")]
 
 
-def test_a_group_assignment_nobody_declared_a_formation_for_waits_on_students(
+def test_a_group_assignment_nobody_declared_a_formation_for_forms_no_team(
     tmp_path, monkeypatch, capsys
 ):
-    # Read through the real cascade, every layer silent: the institution's `self_select`
-    # answers, so the wait names the students and not the teaching team. The REAL read,
-    # not the file's autouse stub, off a template that says only `type: group`.
+    # Read through the real cascade, every layer silent: no formation (decision 0039 -
+    # absent everywhere forms no team), so nobody is told to self-select and the button
+    # says which key to set. The REAL read, not the file's autouse stub, off a template
+    # that says only `type: group`.
     monkeypatch.setattr(assign, "load_grading_spec", grading_spec.load_grading_spec)
     monkeypatch.setattr(assign.teams, "load", lambda semester_org: {})
     monkeypatch.setattr(assign.teams, "teams_for", lambda rows, slug: {})
@@ -1615,10 +1618,11 @@ def test_a_group_assignment_nobody_declared_a_formation_for_waits_on_students(
         )
 
     assert run(scheduled=True) == (0, False)
-    assert "the first team forms" in capsys.readouterr().out
+    assert "the first team forms" not in capsys.readouterr().out
     assert run() == (1, False)
     err = capsys.readouterr().err
-    assert "students self-select" in err and "team_formation: assigned" not in err
+    assert "students self-select" not in err and "team_formation: assigned" not in err
+    assert "no layer sets its `team_formation`" in err
 
 
 def test_an_allocated_assignment_with_no_teams_names_the_teaching_team(
