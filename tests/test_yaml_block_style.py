@@ -28,8 +28,9 @@ import yaml
 
 from dsl_course import bootstrap_course, welcome
 from dsl_course.gradebook import build_gradebooks, render_yaml
-from dsl_course.grading_sheet import SheetSpec, dump_sheet, new_sheet
+from dsl_course.grading_sheet import SheetSpec, dump_sheet
 from dsl_course.scaffold import _grading_config
+from tests.conftest import new_sheet
 
 ROOT = Path(__file__).resolve().parents[1]
 

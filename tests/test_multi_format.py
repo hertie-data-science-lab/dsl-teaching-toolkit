@@ -15,6 +15,7 @@ from dsl_course import (
     grading_spec,
     scaffold,
 )
+from tests.conftest import new_sheet
 from tests.test_collect import _QUESTION_NB, _capture_archive, _checkout
 from tests.test_distribute import ROSTER_ADA, _distribute, _schedule_with
 from tests.test_scaffold import _solution_files, fake  # noqa: F401 - the fixture
@@ -71,7 +72,7 @@ def test_a_two_format_template_is_scaffolded_derived_collected_and_returned(
     # the sheet: one total, a feedback cell per question, the file named beside Q2
     spec = grading_spec.sheet_spec(sched, "assignment-1", "assignment-1", gspec, False)
     assert spec.question_files == {"Q2": "starter.tex"}
-    sheet = grading_sheet.new_sheet(spec, [("ada-l", ["ada-l"])])
+    sheet = new_sheet(spec, [("ada-l", ["ada-l"])])
     block = sheet["submissions"]["ada-l"]
     assert block[grading_sheet.QUESTION_FEEDBACK_KEY] == {"Q1": None, "Q2": None}
     assert "# /5 · starter.tex" in grading_sheet.dump_sheet(sheet, spec, "OPEN")

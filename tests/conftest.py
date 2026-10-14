@@ -24,6 +24,7 @@ from dsl_course import (
     gh_contents,
     gh_teams,
     ghcli,
+    grading_sheet,
     grading_spec,
     issues,
     log,
@@ -42,6 +43,22 @@ from dsl_course import (
 # same columns out by hand), and five test files each carried their own copy of it - so a
 # column added to FIELDS left five fixtures describing a roster that no longer exists.
 ROSTER_HEADER = ",".join(roster.FIELDS)
+
+
+def new_sheet(
+    spec: grading_sheet.SheetSpec, units: list[tuple[str, list[str]]]
+) -> dict:
+    """A brand-new sheet: every unit present from the moment of handout, every human field
+    blank. A sheet that arrives complete is one a grader can start typing into as soon as
+    anything is in, and one whose missing row is visibly missing.
+
+    `units` is `[(unit key, member handles)]`: for an individual assignment the key IS the
+    handle and the list holds only it; for a group one the key is the team name."""
+    return {
+        spec.container_key: {
+            unit: grading_sheet._fresh_block(spec, members) for unit, members in units
+        }
+    }
 
 
 def split_grading(text: str | None) -> tuple[str | None, str | None]:

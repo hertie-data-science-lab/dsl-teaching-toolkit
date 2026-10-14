@@ -285,20 +285,6 @@ def _fresh_block(spec: SheetSpec, members: list[str], info: dict | None = None) 
     return block
 
 
-def new_sheet(spec: SheetSpec, units: list[tuple[str, list[str]]]) -> dict:
-    """A brand-new sheet: every unit present from the moment of handout, every human field
-    blank. A sheet that arrives complete is one a grader can start typing into as soon as
-    anything is in, and one whose missing row is visibly missing.
-
-    `units` is `[(unit key, member handles)]`: for an individual assignment the key IS the
-    handle and the list holds only it; for a group one the key is the team name."""
-    return {
-        spec.container_key: {
-            unit: _fresh_block(spec, members) for unit, members in units
-        }
-    }
-
-
 def _merged_people(existing: object, members: list[str]) -> object:
     """A team's `members:` mapping brought up to date: everyone already there is kept
     exactly as found, and a member who joined the team since the last write is appended

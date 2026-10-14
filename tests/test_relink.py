@@ -23,7 +23,7 @@ from dsl_course import (
     teams,
 )
 from dsl_course.gh_contents import blob_sha, read_csv
-from tests.conftest import ROSTER_HEADER, repo_row
+from tests.conftest import ROSTER_HEADER, new_sheet, repo_row
 
 ORG = "Semester"
 OLD, NEW = "oldacct", "newacct"
@@ -45,7 +45,7 @@ def sheet_text(new_entry: str | None = None, status: str = "FROZEN at the cutoff
     units = [(OLD, [OLD]), ("bob", ["bob"])]
     if new_entry is not None:
         units.append((NEW, [NEW]))
-    sheet = grading_sheet.new_sheet(SPEC, units)
+    sheet = new_sheet(SPEC, units)
     sheet["submissions"][OLD]["score_individual"]["q1"] = "4"
     sheet["submissions"][OLD]["feedback_individual"] = "Good work.\nKeep going."
     if new_entry:
@@ -54,7 +54,7 @@ def sheet_text(new_entry: str | None = None, status: str = "FROZEN at the cutoff
 
 
 def group_sheet_text() -> str:
-    sheet = grading_sheet.new_sheet(GROUP, [("team-x", [OLD, "bob"])])
+    sheet = new_sheet(GROUP, [("team-x", [OLD, "bob"])])
     sheet["teams"]["team-x"]["members"][OLD]["feedback_individual"] = "led the analysis"
     return grading_sheet.dump_sheet(sheet, GROUP, "open")
 

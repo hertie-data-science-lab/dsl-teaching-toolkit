@@ -29,7 +29,6 @@ from dsl_course.grading_sheet import (
     final_grade,
     key_lines,
     merge_sheet,
-    new_sheet,
     parse_sheet,
     penalty_rate,
     score_total,
@@ -37,6 +36,7 @@ from dsl_course.grading_sheet import (
     sheet_hold_reasons,
     sheet_path,
 )
+from tests.conftest import new_sheet
 
 QUESTIONS = {"Q1": "15", "Q2": "10"}
 PERSON_KEYS = ["adjustment_individual", "feedback_individual", NOTES_KEY]
