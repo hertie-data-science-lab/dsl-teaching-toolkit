@@ -28,6 +28,9 @@
       "colour": "#a94442",
       "key": "lecture",
       "label": "Lecture",
+      "numbered": true,
+      "plural": "lectures",
+      "shown": true,
       "system": false
     },
     {
@@ -35,6 +38,9 @@
       "colour": "#3c763d",
       "key": "lab",
       "label": "Lab",
+      "numbered": true,
+      "plural": "labs",
+      "shown": true,
       "system": false
     },
     {
@@ -42,6 +48,9 @@
       "colour": "#2b6a60",
       "key": "readings",
       "label": "Readings",
+      "numbered": false,
+      "plural": "readings",
+      "shown": true,
       "system": false
     },
     {
@@ -49,6 +58,9 @@
       "colour": "#2b2f36",
       "key": "exam",
       "label": "Exam",
+      "numbered": false,
+      "plural": "exams",
+      "shown": true,
       "system": false
     },
     {
@@ -56,13 +68,19 @@
       "colour": "#1f5fa8",
       "key": "assignment",
       "label": "Assignment",
+      "numbered": true,
+      "plural": "assignments",
+      "shown": true,
       "system": true
     },
     {
       "background": "#ead9f6",
       "colour": "#7b3fb8",
-      "key": "term",
+      "key": "semester",
       "label": "Semester",
+      "numbered": false,
+      "plural": "semesters",
+      "shown": true,
       "system": true
     },
     {
@@ -70,6 +88,9 @@
       "colour": "#7d6230",
       "key": "archive",
       "label": "Archive",
+      "numbered": false,
+      "plural": "archives",
+      "shown": true,
       "system": true
     },
     {
@@ -77,6 +98,9 @@
       "colour": "#8f4a1c",
       "key": "drop-in",
       "label": "Drop-in",
+      "numbered": true,
+      "plural": "drop-ins",
+      "shown": true,
       "system": false
     },
     {
@@ -84,6 +108,9 @@
       "colour": "#4a5560",
       "key": "assets",
       "label": "Supporting files",
+      "numbered": false,
+      "plural": "assets",
+      "shown": false,
       "system": false
     },
     {
@@ -91,6 +118,9 @@
       "colour": "#7d6230",
       "key": "other",
       "label": "Event",
+      "numbered": false,
+      "plural": "other",
+      "shown": true,
       "system": false
     }
   ],

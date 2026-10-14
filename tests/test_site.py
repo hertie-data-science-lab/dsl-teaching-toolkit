@@ -263,9 +263,9 @@ def test_a_row_with_nothing_to_say_is_not_announced():
     )
 
 
-def test_term_date_entry_hides_the_placeholder_time():
-    out = site._term_date_entry("Semester starts", date(2026, 9, 7))
-    assert "kind: term_date" in out
+def test_semester_entry_hides_the_placeholder_time():
+    out = site._semester_entry("Semester starts", date(2026, 9, 7))
+    assert "kind: semester" in out
     assert "date: 2026-09-07T09:00:00" in out
     assert "hide_time: true" in out  # a term boundary is a whole day, not a 09:00 slot
     # The name is the row's TITLE. It used to be `name:`, which the theme prints in the
@@ -1596,7 +1596,7 @@ def test_marks_expected_shows_only_where_the_entry_says_show_on_site(
     assert "marks-assignment-1.md" not in plan_for({})
 
 
-def test_term_date_rows_only_when_the_schedule_pins_the_bounds(monkeypatch, tmp_path):
+def test_semester_rows_only_when_the_schedule_pins_the_bounds(monkeypatch, tmp_path):
     plan = _plan(
         monkeypatch,
         tmp_path,

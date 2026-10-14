@@ -768,7 +768,7 @@ def test_the_kinds_data_carries_every_policy_kind_with_its_label_and_colours():
         "system": False,
         "tab": "/labs/",
     }
-    assert next(k for k in kinds if k["key"] == "term")["tab"] == ""
+    assert next(k for k in kinds if k["key"] == "semester")["tab"] == ""
 
 
 def test_no_nav_tab_can_point_at_a_page_this_site_does_not_get():

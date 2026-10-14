@@ -33,7 +33,7 @@ from .faults import Unusable
 from .fs import copy_tree, union_deny
 from .ghcli import clone
 from .log import Summary, log, log_err, log_step
-from .materials import ASSETS_KIND, MATERIALS_FILE, Declared, infer_kind
+from .materials import MATERIALS_FILE, Declared, infer_kind
 from .materials import parse as parse_materials
 from .opencourse import OPENCOURSE_FILE, OpenCourse
 from .opencourse import read as read_opencourse
@@ -103,13 +103,15 @@ def _declared(src: Path) -> Declared:
 def shown_sections(sections: list[str], kinds: dict[str, str]) -> list[str]:
     """The sections that get rows: a supporting-files one (`data/`, `img/`, and any
     folder no alias names) never does (decisions 0026 rule 3, 0031 rule 10)."""
-    return [s for s in sections if infer_kind(s, kinds) != ASSETS_KIND]
+    return [s for s in sections if infer_kind(s, kinds) in policy.shown_kinds()]
 
 
 def row_kind(section: str, kinds: dict[str, str]) -> str:
-    """The open site's row for a section: 'lab' for a lab-kind one (`labs/`,
-    `tutorials/`, or so declared), else 'lecture' (the session row)."""
-    return "lab" if infer_kind(section, kinds) == "lab" else "lecture"
+    """The open site's row for a section: its kind when the open site has a row of that
+    kind (`ROW_NOUN`: a lab-kind one, `labs/`, `tutorials/` or so declared), else
+    'lecture' (the session row)."""
+    kind = infer_kind(section, kinds)
+    return kind if kind in ROW_NOUN else "lecture"
 
 
 def _publication_ignore(dirpath: str, names: list[str]) -> set[str]:

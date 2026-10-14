@@ -451,19 +451,11 @@ _KIND_ICONS = {
 _KIND_ICON = "fas fa-folder"
 
 
-def tab_word(word: str) -> str:
-    """A kind's key or label as a tab name: `lab` -> `labs`, `readings` stays. No
-    inflection library: one trailing `s`."""
-    return word if word.endswith("s") else f"{word}s"
-
-
 def kind_tab(kind: dict) -> _ThemePage:
-    """The tab page listing one kind's rows: `lecture` -> Lectures at `/lectures/`, the
-    permalinks every existing site already has."""
-    # `other` is where an unknown kind lands: its tab says so, whatever the row label.
-    other = kind["key"] == policy.FALLBACK_KIND
-    slug_ = "other" if other else tab_word(kind["key"])
-    title = "Other" if other else tab_word(kind["label"])
+    """The tab page listing one kind's rows, named by the kind's policy `plural`:
+    `lecture` -> Lectures at `/lectures/`, the permalinks every existing site already has."""
+    slug_ = kind["plural"]
+    title = slug_[:1].upper() + slug_[1:]
     return _ThemePage(
         f"{slug_}.md",
         "kind",

@@ -156,7 +156,7 @@ TEAM_KEYS = ("name", "members", "cap")
 INSTRUCTOR_KEYS = ("name", "title", "webpage", "picture", "role", "email")
 ANNOUNCEMENT_KEYS = ("when", "title", "details")
 SYLLABUS_KEYS = ("repo", "path")
-KIND_KEYS = ("label", "colour", "background", "tab")
+KIND_KEYS = ("label", "plural", "colour", "background", "tab")
 OFFERING_KEYS = ("title", "url")
 
 _S, _SN = {"type": "string"}, {"type": ["string", "null"]}
@@ -509,7 +509,7 @@ def event_rows(facts: SemesterFacts) -> list[dict]:
         ("term-end", "Semester ends", sched.semester_end),
     ):
         if when is not None:
-            out.append(_row(id_, "term_date", when, title, all_day=True))
+            out.append(_row(id_, "semester", when, title, all_day=True))
     archive = sched.archive
     if archive and archive.when and archive.show_on_site:
         details = (archive.details or "").replace("{date}", archive.when.isoformat())
@@ -734,6 +734,7 @@ def render(
         "kinds": {
             k["key"]: {
                 "label": k["label"],
+                "plural": k["plural"],
                 "colour": k["colour"],
                 "background": k["background"],
                 # A kind the engine makes rows for itself has no tab (`kinds_yaml`).

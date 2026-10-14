@@ -34,7 +34,7 @@
     }
 
     // Schedule row colours - one hue per event category, matching the bold label
-    // colour set inline in each _includes/schedule_row_<type>.html:
+    // colour _includes/schedule_row.html sets from _data/kinds.yml (the policy's kinds):
     //
     //   lecture        #f2dede  label #a94442   red
     //   lab            #dff0d8  label #3c763d   green
@@ -45,7 +45,7 @@
     //                                           the "Assignment due" label)
     //   exam           #e6e8ec  label #2b2f36   grey
     //   special_event  #fbf2d5  label #7d6230   amber
-    //   term_date      #ead9f6  label #7b3fb8   violet
+    //   semester       #ead9f6  label #7b3fb8   violet
     //
     // All backgrounds sit at the same pale tonal level, so body text (#111) and
     // links keep >5:1 contrast on every row; each label clears 4.5:1 on its own
@@ -76,7 +76,7 @@
         background-color: #fbf2d5;
     }
 
-    .table-row-term_date {
+    .table-row-semester {
         background-color: #ead9f6;
     }
 

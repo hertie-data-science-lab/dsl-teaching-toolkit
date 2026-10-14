@@ -928,14 +928,14 @@ def _named(m: MaterialsFacts) -> dict[str, str | None]:
 
 
 def _kinds_found(named: Mapping[str, str | None]) -> list[dict]:
-    """Every content kind but supporting files, in the policy's order, each with the
+    """Every content kind that is shown (not supporting files), in the policy's order, each with the
     released folders of that kind (paths, `students/lectures`; `named`, from `_named`);
     empty for a kind no folder has, so the console shows which kinds are present and
     which are not."""
     return [
         {"kind": kind, "folders": [f for f, k in named.items() if k == kind]}
         for kind in policy.content_kinds()
-        if kind != ASSETS_KIND
+        if kind in policy.shown_kinds()
     ]
 
 
@@ -955,11 +955,6 @@ def _kind_folder_why(released: list[str]) -> str:
     return "Only supporting files so far; set a folder's kind under Folder kinds."
 
 
-def _noun(kind: str) -> str:
-    """A folder kind as a plural noun: lectures, labs, readings."""
-    return kind if kind.endswith("s") else f"{kind}s"
-
-
 def _missing_kind_rows(found: list[dict], shown: list[str]) -> list[tuple]:
     """One suggested row per folder kind (lectures, labs, readings) with no folder, once
     the repo has a folder of some content kind: a course that teaches no labs sets
@@ -972,11 +967,11 @@ def _missing_kind_rows(found: list[dict], shown: list[str]) -> list[tuple]:
     return [
         (
             f"kind_folder:{kind}",
-            f"No {_noun(kind)} folder found",
+            f"No {policy.plural_of(kind)} folder found",
             SUGGESTED,
             False,
             (
-                f"Pick the folder that holds {_noun(kind)} under Folder kinds, or "
+                f"Pick the folder that holds {policy.plural_of(kind)} under Folder kinds, or "
                 "leave it if this course has none."
             ),
         )

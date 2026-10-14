@@ -137,7 +137,6 @@ from .gh_contents import (
     yaml_mark_line,
 )
 from .log import CLIParser, log, log_err
-from .materials import ASSETS_KIND
 from .releaseignore import RELEASEIGNORE, excluded_in_tree
 from .repos import default_branch, repo_missing
 
@@ -834,9 +833,9 @@ KNOWN_EVENT = frozenset(
     {"kind", "number", "title", "details", "event_datetime", "tbc", "show_on_site"}
 )
 # The kinds an `events:` entry may declare besides `special_event`: every content kind
-# that is a row (supporting files never are, decision 0026). `exam` keeps its own row;
-# any other makes a session with nothing to ship (`Schedule.sessions`).
-EVENT_KINDS = tuple(k for k in policy.content_kinds() if k != ASSETS_KIND)
+# that is a row (`shown`; supporting files never are, decision 0026). `exam` keeps its own
+# row; any other makes a session with nothing to ship (`Schedule.sessions`).
+EVENT_KINDS = tuple(k for k in policy.content_kinds() if k in policy.shown_kinds())
 
 
 def _flag_unknown_keys(

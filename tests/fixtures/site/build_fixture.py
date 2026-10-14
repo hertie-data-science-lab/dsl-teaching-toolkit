@@ -468,8 +468,8 @@ def _events() -> dict[str, str]:
         "03-resit-exam.md": site._event_row(
             "exam", "Resit Exam", end, tbc=True, dateless=True
         ),
-        "term-start.md": site._term_date_entry("Semester starts", date(2026, 9, 7)),
-        "term-end.md": site._term_date_entry("Semester ends", end),
+        "term-start.md": site._semester_entry("Semester starts", date(2026, 9, 7)),
+        "term-end.md": site._semester_entry("Semester ends", end),
         # Inside its notice window and with a sentence, which is the only shape that
         # carries `announce: true` - the one row the Updates box takes off the schedule.
         "semester-archived.md": site._archive_entry(
