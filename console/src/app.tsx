@@ -68,6 +68,20 @@ export function createDeps(): AppDeps {
   return { auth, client };
 }
 
+/**
+ * The console route a click follows in place (`?...` links), or null to leave it to the
+ * browser: a link with a target (`View here` opens a new tab), and a modifier or non-primary
+ * click (new tab or window), keep the browser's own behaviour.
+ */
+export function inAppHref(e: MouseEvent): string | null {
+  const a = (e.target as Element)?.closest?.('a');
+  const href = a?.getAttribute('href');
+  if (!a || !href || !href.startsWith('?')) return null;
+  if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return null;
+  const target = a.getAttribute('target');
+  return target && target !== '_self' ? null : href;
+}
+
 export function App({ state: s }: { state: AppState }) {
   const auth = s.auth;
 
@@ -77,9 +91,8 @@ export function App({ state: s }: { state: AppState }) {
       s.search.value = location.search;
     };
     const onClick = (e: MouseEvent) => {
-      const a = (e.target as Element)?.closest?.('a');
-      const href = a?.getAttribute('href');
-      if (!a || !href || !href.startsWith('?') || e.metaKey || e.ctrlKey || e.shiftKey) return;
+      const href = inAppHref(e);
+      if (!href) return;
       e.preventDefault();
       history.pushState(null, '', href);
       sync();
