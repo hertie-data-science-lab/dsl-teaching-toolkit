@@ -473,6 +473,24 @@ describe('the marking screen', () => {
     expect(q('.marking').classList.contains('full')).toBe(false);
   });
 
+  it('names the submission from status.json’s semester-side name, and links the Completion cell to the executed notebook', async () => {
+    const renamed: Loaded = { ...ready, status: { ...ready.status!, assignments: [{ ...solo, semester_name: 'assignment-2-resit', submit_shape: 'shared-dropbox-repo' }] } } as Loaded;
+    const nb = SHEET.replace('      autograde: 8/10\n', '      autograde: 8/10\n      completion: errors:2\n').replace('      autograde: 5/10\n', '      autograde: 5/10\n      completion: not-attempted\n');
+    const f = files(nb, CONFIG.replace('formats: [py]', 'formats: [ipynb]'));
+    await mount(envOf(github(), f), <AssignmentScreen {...props(f, { loaded: renamed })} />);
+    const nbUrl = `https://github.com/${COHORT_ORG}/semester-config/blob/HEAD/.system/autograde/assignment-2/ada-l.ipynb`;
+    const ada = [...root!.querySelectorAll('tr.unit-row')][0];
+    expect(ada.querySelectorAll('td.sys')[3].querySelector('a')!.getAttribute('href')).toBe(nbUrl);
+    // Nothing was run for a submission never attempted: no notebook to link.
+    expect([...root!.querySelectorAll('tr.unit-row')][1].querySelectorAll('td.sys')[3].querySelector('a')).toBeNull();
+    await click(q('button[aria-label="Open feedback for ada-l"]'));
+    expect([...root!.querySelectorAll<HTMLAnchorElement>('.md-links a')].map((l) => [l.textContent, l.getAttribute('href')])).toEqual([
+      ['Submission folder', `https://github.com/${COHORT_ORG}/assignment-2-resit-submissions/tree/HEAD/ada-l`],
+      ['Test results (8/10)', `https://github.com/${COHORT_ORG}/semester-config/blob/HEAD/.system/autograde/assignment-2/ada-l.json`],
+      ['Executed notebook', nbUrl],
+    ]);
+  });
+
   it('links the Tests cell to the per-test results the cutoff archived', async () => {
     await marks();
     const link = q<HTMLAnchorElement>('td.sys.auto a');

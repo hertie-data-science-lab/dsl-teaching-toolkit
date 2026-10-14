@@ -436,15 +436,22 @@ export function MarksTab(p: TabProps) {
     );
   };
   // The row's submission, where GitHub holds it: the student's or team's repo, or their folder in the drop box.
-  const via = str(cfg.submit_via);
+  // The stem and the shape are status.json's (`semester_name`, `submit_shape`); an older status falls back to the sheet name and the template.
+  const stem = a.semester_name || name;
+  const shape = a.submit_shape ?? ({ external: 'external', shared_dropbox_repo: 'shared-dropbox-repo' } as Record<string, string>)[str(cfg.submit_via)] ?? '';
   const submissionOf = (u: Unit): DrawerLink | null => {
-    if (external || via === 'external') return null;
-    if (via === 'shared_dropbox_repo') return { href: `https://github.com/${org}/${name}-submissions/tree/HEAD/${encodeURIComponent(u.key)}`, text: 'Submission folder' };
-    return { href: `https://github.com/${org}/${name}-${u.key}`, text: 'Submission repo' };
+    if (external || shape === 'external') return null;
+    if (shape === 'shared-dropbox-repo') return { href: `https://github.com/${org}/${stem}-submissions/tree/HEAD/${encodeURIComponent(u.key)}`, text: 'Submission folder' };
+    return { href: `https://github.com/${org}/${stem}-${u.key}`, text: 'Submission repo' };
   };
-  // The per-test results the cutoff archived (collect: `.system/autograde/<slug>/<unit>.json` in semester-config).
-  const testsOf = (u: Unit): string | null =>
-    runs.tests && u.info !== null && !blank(u.info.autograde) ? `https://github.com/${org}/${CONFIG_REPO}/blob/HEAD/${NAMES.records.autograde}/${encodeURIComponent(name)}/${encodeURIComponent(u.key)}.json` : null;
+  // What the cutoff archived beside the sheet (collect: `.system/autograde/<slug>/<unit>.json` and `.ipynb` in semester-config).
+  const archived = (u: Unit, ext: string) => `https://github.com/${org}/${CONFIG_REPO}/blob/HEAD/${NAMES.records.autograde}/${encodeURIComponent(name)}/${encodeURIComponent(u.key)}.${ext}`;
+  const testsOf = (u: Unit): string | null => (runs.tests && u.info !== null && !blank(u.info.autograde) ? archived(u, 'json') : null);
+  // The executed notebook exists only where the check ran it: clean, or with errors (collect `_check_completion`).
+  const notebookOf = (u: Unit): string | null => {
+    const c = str(u.info?.completion);
+    return runs.completion && (c === 'ran-clean' || c.startsWith('errors:')) ? archived(u, 'ipynb') : null;
+  };
   // "—" where the template does not run the check, whatever the sheet carries (a key can outlive the
   // setting that wrote it), and where this unit's sheet has no such fact; blank until the cutoff fills it.
   const fact = (u: Unit, k: 'autograde' | 'completion') => (!(k === 'autograde' ? runs.tests : runs.completion) || (u.info !== null && !(k in u.info)) ? '—' : str(u.info?.[k]));
@@ -465,7 +472,7 @@ export function MarksTab(p: TabProps) {
       <td class="sys">{submittedShort(u.info?.submitted) || (u.info ? 'Nothing' : '—')}</td>,
       <td class="sys num">{str(u.info?.days_late)}</td>,
       ...(showTests ? [<td class={`sys${runs.tests && !blank(u.info?.autograde) ? ' auto' : ''}`}>{testsOf(u) ? <a href={testsOf(u)!} target="_blank" rel="noopener" title="Which tests passed, in semester-config">{fact(u, 'autograde')}</a> : fact(u, 'autograde')}</td>] : []),
-      ...(showCompletion ? [<td class="sys">{fact(u, 'completion')}</td>] : []),
+      ...(showCompletion ? [<td class="sys">{notebookOf(u) ? <a href={notebookOf(u)!} target="_blank" rel="noopener" title="The notebook as the check ran it, in semester-config">{fact(u, 'completion')}</a> : fact(u, 'completion')}</td>] : []),
     ];
   };
   // Layout A: the penalty, its switch, and the override box on one line.
@@ -644,7 +651,11 @@ export function MarksTab(p: TabProps) {
     const u = drawerUnit;
     const qBoxes = (label: (q: string) => string): DrawerBox[] =>
       qs.map(([q, m]) => ({ path: [...u.questionFeedbackPath, q], field: `qfb:${q}`, heading: `Feedback on ${q}${outOf(m)}`, label: label(q), value: str(v([...u.questionFeedbackPath, q], u.questionFeedback[q] ?? null)) }));
-    const links = [submissionOf(u), ...(testsOf(u) ? [{ href: testsOf(u)!, text: `Test results (${str(u.info?.autograde)})` }] : [])].filter((l): l is DrawerLink => l !== null);
+    const links = [
+      submissionOf(u),
+      ...(testsOf(u) ? [{ href: testsOf(u)!, text: `Test results (${str(u.info?.autograde)})` }] : []),
+      ...(notebookOf(u) ? [{ href: notebookOf(u)!, text: 'Executed notebook' }] : []),
+    ].filter((l): l is DrawerLink => l !== null);
     let eyebrow: string, title: string, sub: string | undefined, boxes: DrawerBox[], viewOf: Person | null;
     if (drawerMember) {
       const pr = drawerMember, nm = realName(pr.handle);

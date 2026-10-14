@@ -87,8 +87,8 @@ behind the **Adjustments** chip. Every column header has a `?`; the **From the s
 folds its columns into one (folded to begin with in a window narrower than 1400px; your choice is kept). Drag a column's edge to resize it (double-click puts it back; widths are kept
 in this browser). The grid holds marks and numbers: Feedback and Private notes show one line each
 (✎ counts the questions with their own feedback), and clicking one opens the row's **side panel**
-with the overall feedback, the feedback per question, the private notes, links to the submission
-and (with automatic tests) the per-test results, the assignment's **snippets** (reusable comments:
+with the overall feedback, the feedback per question, the private notes, links to the submission,
+the per-test results (with automatic tests) and the executed notebook (with the completion check), the assignment's **snippets** (reusable comments:
 one click puts one into the feedback box you were last in; **Edit snippets** changes the list, saved
 with Save marks) and that student's Student view. While it is open it follows the row you work in;
 Escape or × closes it. The filters (All, Unmarked, Late,
@@ -247,7 +247,7 @@ Off unless you ask for it. `autograde: true` in the template's `grading_config.y
 hidden tests from its `solution` branch at the late cutoff, against the frozen pin, in a sandbox with the token stripped. The
 count lands in `info.autograde` (`7/9`) for your information only - it is never a mark by
 itself and a student never sees it. Per-test detail goes to `semester-config/.system/autograde/<slug>/<unit>.json`;
-the Marks tab's Tests cell links to it.
+the Marks tab's Tests cell links to it, and its Completion cell to the executed notebook beside it.
 To regrade, delete `.system/autograde/<slug>/`.
 
 **Writing the tests.** One test function per behaviour, named for it: the per-test detail lists
