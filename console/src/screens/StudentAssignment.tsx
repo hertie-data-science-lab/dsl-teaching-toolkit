@@ -20,7 +20,8 @@ import { Hint } from '../ui/Hint';
 import { Ext } from '../ui/icons';
 import { OpenButton } from '../ui/OpenButton';
 import { GhMd, LazyFold } from '../ui/rendered';
-import { FileLinkItem, FileList, useYourSetup } from './StudentFiles';
+import { useYourSetup } from '../ui/FileRow';
+import { FileLinkItem, FileList } from './StudentFiles';
 import { JoinRequests, TeamForm, TeamList } from './StudentJoin';
 
 /** Files the semester's rows for `slug` (its hand-out and due rows) carry, if any: listed with their menu (rule 10). */

@@ -11,7 +11,8 @@ import { assignmentHref } from '../router';
 import { Md } from '../ui/bits';
 import { Ext } from '../ui/icons';
 import { GhMd } from '../ui/rendered';
-import { FileLinkItem, fileHref, useYourSetup } from './StudentFiles';
+import { useYourSetup } from '../ui/FileRow';
+import { FileLinkItem, fileHref } from './StudentFiles';
 import { PersonCard } from './StudentInstructors';
 
 /** Display-only rows (the site's `_events`, and the rows the engine makes): never news, and on a kind tab only as the kind's own event. */
