@@ -180,20 +180,28 @@ def marks_due(
     return faults, ready
 
 
-def dispatch_refusal(course_org: str, semester_org: str, assignment: str) -> str:
+def dispatch_refusal(
+    course_org: str, semester_org: str, assignment: str
+) -> tuple[str, schedule.Schedule | None]:
     """Why a `return-marks` dispatch may not send, or "". Its payload is written by
     whoever holds a bot token, so nothing in it is trusted: the semester must be one the
     course registers, and the assignment one whose `marks_return_datetime` has come with
-    every unit marked and nothing returned yet."""
+    every unit marked and nothing returned yet.
+
+    Also the schedule it read (None when it refused before reading one), so the return
+    that follows reads it once."""
     registered = {o.casefold() for o in discover_semesters(course_org)}
     if semester_org.casefold() not in registered:
-        return f"{semester_org} is not a semester of {course_org} - nothing sent"
+        return f"{semester_org} is not a semester of {course_org} - nothing sent", None
     sched = schedule.load(semester_org)
     _faults, ready = marks_due(course_org, semester_org, sched, datetime.now(UTC))
     names = {schedule.semester_name(k, sched.assignments[k]) for k in ready}
     if not assignment or assignment not in names:
-        return f"{assignment or 'no assignment'} is not due for return - nothing sent"
-    return ""
+        refusal = (
+            f"{assignment or 'no assignment'} is not due for return - nothing sent"
+        )
+        return refusal, sched
+    return "", sched
 
 
 def _not_marked(spec: SheetSpec, sheet: dict) -> dict[str, list[str]]:
@@ -666,6 +674,7 @@ def distribute(
     receipt_note: bool = False,
     include_feedback: bool = False,
     assignment: str | None = None,
+    sched: schedule.Schedule | None = None,
 ) -> int:
     """Send every mark a grader has written where it has to go: each student's private
     gradebook, the registrar's export, and an email saying there is something new to read.
@@ -704,7 +713,7 @@ def distribute(
         ensure_gradebooks(semester_org, dry_run=dry_run, existing=listed)
     )
     course_org = course_org_for_semester(semester_org)
-    sched = schedule.load(semester_org)
+    sched = sched if sched is not None else schedule.load(semester_org)
     students = roster.load(semester_org)
     moment = datetime.now(UTC)
     now = moment.isoformat(timespec="seconds")

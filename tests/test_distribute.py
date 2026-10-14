@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -21,6 +22,7 @@ from dsl_course import (
     distribute,
     ghcli,
     gradebook,
+    grades,
     grading_sheet,
     grading_spec,
     issues,
@@ -1908,9 +1910,31 @@ def test_a_return_marks_dispatch_sends_only_what_is_due_and_marked(monkeypatch):
         distribute.schedule, "load", lambda org: _schedule_with("a1", "a2")
     )
     monkeypatch.setattr(distribute, "marks_due", lambda c, s, sched, now: ([], ["a1"]))
-    assert distribute.dispatch_refusal("C", "sem", "a1") == ""
-    assert "not due" in distribute.dispatch_refusal("C", "Sem", "a2")
-    assert "not a semester" in distribute.dispatch_refusal("C", "Other", "a1")
+    assert distribute.dispatch_refusal("C", "sem", "a1")[0] == ""
+    assert "not due" in distribute.dispatch_refusal("C", "Sem", "a2")[0]
+    assert "not a semester" in distribute.dispatch_refusal("C", "Other", "a1")[0]
+
+
+def test_a_dispatched_return_reads_the_schedule_once(monkeypatch):
+    # The dispatch check and the return both need the plan: the check hands on what it
+    # read, so one run reads schedule.yml once.
+    loads: list[str] = []
+    sched = _schedule_with("a1")
+    monkeypatch.setattr(distribute, "discover_semesters", lambda org: ["Sem"])
+    monkeypatch.setattr(
+        distribute.schedule, "load", lambda org: loads.append(org) or sched
+    )
+    monkeypatch.setattr(distribute, "marks_due", lambda c, s, sched, now: ([], ["a1"]))
+    given: dict = {}
+    monkeypatch.setattr(grades, "distribute", lambda org, **kw: given.update(kw) or 0)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["grades", "distribute", "--semester-org", "Sem", "--assignment", "a1"]
+        + ["--dispatched-by", "C"],
+    )
+    assert grades.main() == 0
+    assert loads == ["Sem"] and given["sched"] is sched
 
 
 # ------------------------------------------------ the record written before the emails

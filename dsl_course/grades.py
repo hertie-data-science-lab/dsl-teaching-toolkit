@@ -72,8 +72,9 @@ def main() -> int:
     # A read helper that couldn't reach the API raises; in an Actions log a one-line
     # error beats a traceback, and the run still goes red.
     try:
+        sched = None  # read once per run: the dispatch check hands on what it read
         if args.dispatched_by:
-            refusal = dispatch_refusal(
+            refusal, sched = dispatch_refusal(
                 args.dispatched_by, args.semester_org, args.assignment
             )
             if refusal:
@@ -86,6 +87,7 @@ def main() -> int:
             receipt_note=args.receipt_note,
             include_feedback=args.include_feedback,
             assignment=args.assignment or None,
+            sched=sched,
         )
     except RuntimeError as exc:
         log_err(str(exc))
