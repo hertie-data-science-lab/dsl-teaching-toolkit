@@ -26,7 +26,7 @@ describe('the Updates box', () => {
     const f = factsFromStatus(doc({ archive_datetime: '2027-01-31' }));
     const u = homeUpdates(f, NOW);
     expect(u.map((x) => ('row' in x ? x.row.id : 'assignment' in x ? x.assignment.slug : 'news' in x ? x.news.title : 'archive'))).toEqual(
-      ['readings_02', 'assignment-2-project', 'Room change', 'assignment-1', 'lecture_01-2', 'lecture_01'],
+      ['readings_02', 'assignment-2-project', 'Room change', 'assignment-1', 'lecture_01'],
     );
     // Unreleased sessions, events, due dates and an assignment not handed out are not news.
     expect(JSON.stringify(u)).not.toContain('lecture_02');

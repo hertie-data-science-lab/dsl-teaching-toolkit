@@ -366,6 +366,7 @@ def _row(
     readings_pending: bool = False,
     tabs: list[str] | None = None,
     no_materials: bool = False,
+    repeat: bool = False,
 ) -> dict:
     return {
         "id": id_,
@@ -394,13 +395,17 @@ def _row(
         # It ships nothing (an `events:` session): nothing pends, and it is never news
         # (the site's `no_materials`).
         "no_materials": no_materials,
+        # An entry's later slot (the site's `repeat`): its files shipped with the first,
+        # so it is never news.
+        "repeat": repeat,
     }
 
 
 def release_rows(facts: SemesterFacts, extra: StudentFacts) -> list[dict]:
     """A row per slot of each entry the site shows (`schedule_plan.site_rows`; a second
     slot's id is `<key>-2`, as the site names its file), numbered as the site numbers
-    it, with the files it has landed and the readings attached to it. A row that ships nothing is `no_materials`, as on the site."""
+    it, with the files it has landed and the readings attached to it. A row that ships
+    nothing is `no_materials`, and a later slot `repeat`, as on the site."""
     out = []
     for sr in site_rows(planned_rows(facts.sched)):
         r = sr.row
@@ -436,6 +441,7 @@ def release_rows(facts: SemesterFacts, extra: StudentFacts) -> list[dict]:
                 # Readings attached, landed or not: the site's own test.
                 tabs=row_tabs(r.kind, bool(sr.readings)),
                 no_materials=nothing,
+                repeat=r.slot > 0,
             )
         )
     return out

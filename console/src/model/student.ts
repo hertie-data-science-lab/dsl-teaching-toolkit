@@ -38,6 +38,8 @@ export interface ScheduleRow {
   released: boolean;
   /** A session with nothing to ship (an `events:` lab, the site's `no_materials`): no files, never pending, never news. Absent from older engines: false. */
   noMaterials?: boolean;
+  /** An entry's later slot (the site's `repeat`): the same files as its first, so never news. Absent from older engines: false. */
+  repeat?: boolean;
   /** Released files: `path` within `repo` when they live in a materials repo the console can open. */
   links: FileLink[];
   /** The date is provisional ("TBC"); the row still happens when it says. */
@@ -365,6 +367,7 @@ function rowsOf(dir: string, file: string, fm: Record<string, unknown>, org: str
     allDay: fm.hide_time === true,
     released: fm.unreleased !== true,
     noMaterials: fm.no_materials === true,
+    repeat: fm.repeat === true,
     links: [] as FileLink[],
     tbc: fm.tbc === true,
     dateless: fm.dateless === true,
@@ -552,6 +555,7 @@ export function factsFromStatus(doc: Obj): SemesterFacts {
       assignment: r.assignment ? str(r.assignment) : undefined,
       released: r.released === true,
       noMaterials: r.no_materials === true,
+      repeat: r.repeat === true,
       links,
       tbc: r.tbc === true,
       dateless: r.dateless === true,

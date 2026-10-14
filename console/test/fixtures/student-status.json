@@ -114,7 +114,8 @@
       "tabs": [
         "semester"
       ],
-      "no_materials": false
+      "no_materials": false,
+      "repeat": false
     },
     {
       "id": "lecture_01",
@@ -164,7 +165,8 @@
         "lecture",
         "readings"
       ],
-      "no_materials": false
+      "no_materials": false,
+      "repeat": false
     },
     {
       "id": "lecture_01-2",
@@ -200,7 +202,8 @@
       "tabs": [
         "lecture"
       ],
-      "no_materials": false
+      "no_materials": false,
+      "repeat": true
     },
     {
       "id": "assignment-1:handout",
@@ -223,7 +226,8 @@
       "tabs": [
         "assignment"
       ],
-      "no_materials": false
+      "no_materials": false,
+      "repeat": false
     },
     {
       "id": "assignment-2-project:handout",
@@ -246,7 +250,8 @@
       "tabs": [
         "assignment"
       ],
-      "no_materials": false
+      "no_materials": false,
+      "repeat": false
     },
     {
       "id": "assignment-1:due",
@@ -269,7 +274,8 @@
       "tabs": [
         "due"
       ],
-      "no_materials": false
+      "no_materials": false,
+      "repeat": false
     },
     {
       "id": "lecture_02",
@@ -292,7 +298,8 @@
       "tabs": [
         "lecture"
       ],
-      "no_materials": false
+      "no_materials": false,
+      "repeat": false
     },
     {
       "id": "lecture_03",
@@ -315,7 +322,8 @@
       "tabs": [
         "lecture"
       ],
-      "no_materials": false
+      "no_materials": false,
+      "repeat": false
     },
     {
       "id": "assignment-3:handout",
@@ -338,7 +346,8 @@
       "tabs": [
         "assignment"
       ],
-      "no_materials": false
+      "no_materials": false,
+      "repeat": false
     },
     {
       "id": "midterm",
@@ -361,7 +370,8 @@
       "tabs": [
         "exam"
       ],
-      "no_materials": false
+      "no_materials": false,
+      "repeat": false
     },
     {
       "id": "assignment-2-project:due",
@@ -384,7 +394,8 @@
       "tabs": [
         "due"
       ],
-      "no_materials": false
+      "no_materials": false,
+      "repeat": false
     },
     {
       "id": "assignment-3:due",
@@ -407,7 +418,8 @@
       "tabs": [
         "due"
       ],
-      "no_materials": false
+      "no_materials": false,
+      "repeat": false
     },
     {
       "id": "term-end",
@@ -430,7 +442,8 @@
       "tabs": [
         "semester"
       ],
-      "no_materials": false
+      "no_materials": false,
+      "repeat": false
     }
   ],
   "assignments": [
