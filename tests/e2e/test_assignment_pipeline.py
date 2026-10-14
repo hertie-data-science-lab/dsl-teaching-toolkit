@@ -63,6 +63,7 @@ import yaml
 
 from dsl_course import (
     central,
+    cli,
     collect,
     course,
     discovery,
@@ -77,7 +78,9 @@ from dsl_course import (
     seed,
     team_formation,
 )
+from dsl_course.gh_teams import acting_login
 from dsl_course.log import log
+from dsl_course.ops.registry import REGISTRY
 
 from . import allowlist, cleanup, drive, estate, schedule_edit, shapes, student
 
@@ -94,7 +97,8 @@ SEMESTER_ORG = "hertie-dsl-demo-f2026"
 
 # Every seeded workflow lives in the course org's `.github` repo.
 CONTROL_REPO = f"{COURSE_ORG}/.github"
-NEW_ASSIGNMENT = "new-assignment.yml"
+# Decision 0041: New assignment is a Console op, so the harness asks the Console workflow.
+CONSOLE = "console.yml"
 SCHEDULED_RELEASE = "scheduled-release.yml"
 COLLECT_SUBMISSIONS = "collect-submissions.yml"
 DISTRIBUTE_GRADES = "distribute-grades.yml"
@@ -493,7 +497,7 @@ def _write_schedule(run_id: str, handout: datetime, due: datetime) -> Stage:
     keyed on the run, so removing it at teardown takes the whole run out in one edit
     whatever it got as far as adding.
 
-    The push is itself a driver now: the semester's seeded `dispatch-scheduled-release.yml`
+    The push is itself a driver now: the semester's seeded `dispatch.yml`
     fires the course org's Scheduled release from every schedule.yml push, so the edit
     starts a real tick. It is waited out here rather than raced, so the pass dispatched
     next is the one whose log and artefacts the stage after it reads."""
@@ -543,26 +547,32 @@ def _dispatch_scheduler(name: str) -> Stage:
 
 
 def _scaffold(run_id: str) -> Stage:
-    """Press New assignment once per shape, waiting each one out.
+    """Ask the Console for New assignment once per shape, waiting each one out.
 
-    SERIALLY, and that is the single biggest cost in the run: the button ends by
-    re-rendering the org's own workflows (the assignment dropdowns), so two presses in
-    flight at once would race each other's commit into `.github`."""
+    SERIALLY, and that is the single biggest cost in the run: the op ends by re-rendering
+    the org's own workflows (the assignment dropdowns), so two runs in flight at once
+    would race each other's commit into `.github`. The request is the one the Console and
+    `python -m dsl_course` send, made as the harness's own `gh` login - the actor the
+    Console workflow checks it against."""
+    actor = acting_login()
+    assert actor, "gh is not signed in"
     conclusions: dict[str, str] = {}
     for shape in shapes.SHAPES:
-        created = drive.dispatch(
-            CONTROL_REPO,
-            NEW_ASSIGNMENT,
-            {
-                "assignment_name": shapes.title(run_id, shape),
-                "assignment_number": cleanup.ASSIGNMENT_NUMBER,
-                "semester": f"{run_id}-{shape.name}",
-                "formats": "py",
-                "type": "individual",
-                "submit_via": shape.submit_via,
-                "autograde": shape.autograde,
-            },
+        request = cli.request_text(
+            REGISTRY["assignment.create"],
+            actor,
+            COURSE_ORG,
+            None,
+            [
+                f"name={shapes.title(run_id, shape)}",
+                "formats=py",
+                "type=individual",
+                f"submit_via={shape.submit_via}",
+                f"autograde={str(shape.autograde).lower()}",
+            ],
+            False,
         )
+        created = drive.dispatch(CONTROL_REPO, CONSOLE, {"request": request})
         conclusions[shape.name] = drive.wait_for_run(CONTROL_REPO, created)
     return Stage("scaffold", detail={"conclusions": conclusions})
 

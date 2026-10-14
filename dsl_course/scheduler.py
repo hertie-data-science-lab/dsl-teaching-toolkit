@@ -1376,7 +1376,7 @@ _CALLED_OFF_COMMENT = (
     "This notice no longer matches `semester-config/schedule.yml`: the archive date has "
     "been moved, or the `archive:` block taken away - and a semester with no block is "
     "never archived automatically. Nothing was archived. If the semester should still be "
-    "archived, the **Archive semester** button does it."
+    "archived, the Instructor Console's **Archive** does it."
 )
 
 

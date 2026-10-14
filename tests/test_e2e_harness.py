@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import dataclasses
 import importlib
+import json
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -33,6 +34,7 @@ from dsl_course import (
     settings,
     team_formation,
 )
+from dsl_course.ops.request import parse_request
 from tests.e2e import (
     allowlist,
     cleanup,
@@ -313,7 +315,7 @@ def test_the_harness_waits_on_the_group_the_renderer_declares():
 
 
 def test_a_schedule_push_that_drives_no_tick_is_not_an_error(monkeypatch):
-    # `dispatch-scheduled-release.yml` is only in semesters that have refreshed since it
+    # `dispatch.yml` is only in semesters that have refreshed since it
     # shipped. Where it is not, the edit starts nothing and the harness carries on to its
     # own dispatch rather than timing out.
     monkeypatch.setattr(drive, "_runs", lambda repo, workflow, limit=30: [{"id": 1}])
@@ -1487,6 +1489,7 @@ submissions:
 def _stub_estate(monkeypatch, module) -> list[tuple[str, dict]]:
     """Answer every live call the walk makes. Returns the dispatch log."""
     dispatched: list[tuple[str, dict]] = []
+    monkeypatch.setattr(module, "acting_login", lambda: "e2e-bot")
 
     def content(org, repo, path, ref=""):
         if path.endswith("schedule.yml"):
@@ -1603,14 +1606,21 @@ def test_the_walk_presses_new_assignment_once_per_shape_with_its_own_answers(
     module = _pipeline_module(monkeypatch)
     dispatched = _stub_estate(monkeypatch, module)
     module._walk(RUN, {})
-    presses = [i for w, i in dispatched if w == module.NEW_ASSIGNMENT]
+    presses = [json.loads(i["request"]) for w, i in dispatched if w == module.CONSOLE]
     assert len(presses) == len(shapes.SHAPES)
-    for shape, inputs in zip(shapes.SHAPES, presses, strict=True):
-        assert inputs["semester"] == f"{RUN}-{shape.name}"
-        assert inputs["submit_via"] == shape.submit_via
-        assert "visibility" not in inputs  # the semester's, in assignments.yml
-        assert inputs["autograde"] is shape.autograde
-        assert inputs["assignment_number"] == cleanup.ASSIGNMENT_NUMBER
+    for shape, request in zip(shapes.SHAPES, presses, strict=True):
+        # The request the Console sends (decision 0041), and one it would accept.
+        parse_request(json.dumps(request))
+        assert (request["op"], request["actor"], request["preview"]) == (
+            "assignment.create",
+            "e2e-bot",
+            False,
+        )
+        args = request["args"]
+        assert args["name"] == shapes.title(RUN, shape)
+        assert args["submit_via"] == shape.submit_via
+        assert "visibility" not in args  # the semester's, in assignments.yml
+        assert args["autograde"] is shape.autograde
 
 
 def test_the_walk_drives_the_ticks_in_the_order_the_passes_need(monkeypatch):

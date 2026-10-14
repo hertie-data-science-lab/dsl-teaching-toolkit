@@ -243,7 +243,7 @@ def test_a_cli_the_console_runs_in_process_does_not_read_it_again(
     queue.append((0, _headers(4900, 100)))
     ran = []
 
-    def run(raw):
+    def run(raw, listener=None):
         # What `console.run` does with a dispatch op, minus the request handling.
         ran.append(console.run_cli("notify", RUN_FAILED))
         return 0

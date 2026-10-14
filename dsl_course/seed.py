@@ -1,14 +1,9 @@
-"""dsl-course seed -- render + place the run-from-repo faculty & instructors workflows.
+"""dsl-course seed -- render + place the course org's workflows, and converge the org.
 
-The Release / Provision actions live INSIDE course content (and assignment-template)
-repos, so faculty & instructors trigger them from the repo they're working in. The repo the workflow
-runs in is the default SOURCE; the action pushes into a chosen semester org/repo.
-
-The semester org input is a GitHub `choice` dropdown. GitHub can't populate a dropdown
-live, so its options are rendered into the YAML from the semester registry and
-refreshed on demand: `refresh` reads the course org's .github/semesters.yml
-`semesters:` list (maintained by `bootstrap --semester --course X`, or by hand) and re-pushes
-the content actions to every course repo. No cron, no app.
+Decision 0041: every manual operation is a Console op (`python -m dsl_course <op>` on a
+laptop), so the course `.github` carries only the Console's workflow, the crons, the
+`repository_dispatch` targets and the two grading workflows; the content repos and
+assignment templates carry no workflow, and each refresh deletes the retired ones.
 
 This module is the placement + CLI layer; the three jobs it used to also do live next to
 it, and every caller imports them from their owning module:
@@ -18,15 +13,15 @@ it, and every caller imports them from their owning module:
 - profile_readme  - the org landing page + `.github` repo README.
 
 CLI:
-  refresh --course-org X   re-render the content actions into every course repo with
-                           fresh semester/course-source-repo/assignment dropdowns, converge
+  refresh --course-org X   re-render the org's workflows with fresh dropdowns, delete
+                           the retired ones from every content repo and template, converge
                            each materials repo's SYSTEM-owned files (maintainer guide,
                            syllabus example) and its seeded stubs, rebuild
                            the org profile README, and re-push each registered semester's
                            join workflows + semester-config SYSTEM-owned files (the
                            schema README, the dispatchers, the schedule validator).
-                           (Run by the Bootstrap-semester
-                           workflow, and by Refresh actions - on demand and on its nightly
+                           (Run by the Console after New semester,
+                           New materials and New assignment, and by Refresh actions - on its nightly
                            cron, which is how an org converges on its central ref
                            without anyone pressing anything.)
 """
@@ -80,25 +75,13 @@ from .workflows_place import (
 )
 from .workflows_render import (
     for_placement,
-    render_archive_semester,
-    render_bootstrap_semester,
-    render_central_release,
     render_collect_submissions,
     render_console,
-    render_derive_student_version,
     render_distribute_grades,
-    render_generate_syllabus,
-    render_new_assignment,
-    render_new_materials,
-    render_open_team_formation,
-    render_patch_assignment,
-    render_propagate_semester,
-    render_provision,
     render_publish_site,
     render_refresh,
     render_scheduler,
     render_send_codes,
-    render_status,
     render_sync_membership,
     render_sync_site,
 )
@@ -271,44 +254,16 @@ def github_workflow_files(course_org: str, central_ref: str) -> dict[str, bytes]
     # A semester the wizard has listed but Bootstrap has not set up has nothing a button
     # could release into, so no dropdown offers it yet.
     semesters = [s for s in discover_semesters(course_org) if not being_set_up(s)]
-    source_repos = discover_content_repos(course_org)
-    materials = discover_materials_repos(course_org)
     assignments = discover_assignments(course_org)
     rendered = {
-        ".github/workflows/release-materials.yml": render_central_release(
-            source_repos, semesters, materials
-        ),
-        ".github/workflows/release-assignment.yml": render_provision(
-            semesters, assignments
-        ),
         ".github/workflows/collect-submissions.yml": render_collect_submissions(
             semesters, assignments
         ),
-        ".github/workflows/patch-assignment.yml": render_patch_assignment(
-            semesters, assignments
-        ),
-        ".github/workflows/new-materials.yml": render_new_materials(materials),
-        ".github/workflows/generate-syllabus.yml": render_generate_syllabus(
-            source_repos, semesters, materials
-        ),
-        ".github/workflows/new-assignment.yml": render_new_assignment(),
-        ".github/workflows/derive-student-version.yml": render_derive_student_version(
-            assignments
-        ),
-        ".github/workflows/sync-site.yml": render_sync_site(semesters),
+        ".github/workflows/sync-site.yml": render_sync_site(),
         ".github/workflows/publish-site.yml": render_publish_site(),
-        ".github/workflows/sync-membership.yml": render_sync_membership(semesters),
+        ".github/workflows/sync-membership.yml": render_sync_membership(),
         ".github/workflows/send-codes.yml": render_send_codes(),
         ".github/workflows/distribute-grades.yml": render_distribute_grades(semesters),
-        ".github/workflows/open-team-formation.yml": render_open_team_formation(
-            semesters
-        ),
-        ".github/workflows/propagate-semester.yml": render_propagate_semester(
-            semesters
-        ),
-        ".github/workflows/archive-semester.yml": render_archive_semester(semesters),
-        ".github/workflows/bootstrap-semester.yml": render_bootstrap_semester(),
-        ".github/workflows/check-semester-setup.yml": render_status(semesters),
         ".github/workflows/refresh-actions.yml": render_refresh(),
         ".github/workflows/scheduled-release.yml": render_scheduler(),
         ".github/workflows/console.yml": render_console(),
@@ -320,14 +275,27 @@ def github_workflow_files(course_org: str, central_ref: str) -> dict[str, bytes]
 
 
 # Retired org-level workflows - removed from orgs seeded before the change, so faculty never
-# see two workflows for one job. Emptied once every live org had refreshed (14 Oct 2026).
-RETIRED_GITHUB_WORKFLOWS: tuple[str, ...] = ()
+# see two workflows for one job. Emptied once every live org has refreshed (decision 0042).
+# Decision 0041: the manual buttons the Console and `python -m dsl_course <op>` now run.
+RETIRED_GITHUB_WORKFLOWS: tuple[str, ...] = (
+    ".github/workflows/release-materials.yml",
+    ".github/workflows/release-assignment.yml",
+    ".github/workflows/new-materials.yml",
+    ".github/workflows/new-assignment.yml",
+    ".github/workflows/bootstrap-semester.yml",
+    ".github/workflows/patch-assignment.yml",
+    ".github/workflows/generate-syllabus.yml",
+    ".github/workflows/derive-student-version.yml",
+    ".github/workflows/open-team-formation.yml",
+    ".github/workflows/propagate-semester.yml",
+    ".github/workflows/archive-semester.yml",
+    ".github/workflows/check-semester-setup.yml",
+)
 
 
 def seed_github_workflows(course_org: str, central_ref: str) -> int:
-    """Seed/refresh the org-level workflows into the course org's .github repo: the
-    CENTRAL Release materials (course-source-repo dropdown), Release assignment, plus Sync
-    membership / Bootstrap semester / Refresh.
+    """Seed/refresh the org-level workflows into the course org's .github repo
+    (`github_workflow_files`), deleting the retired ones.
 
     All of them land as ONE commit (and the retired ones go in the same commit). They are
     rendered from one set of inputs by shared helpers, so in practice they change together:
@@ -475,13 +443,14 @@ def _converge_org(
 
 
 def refresh(course_org: str, *, course_only: bool = False) -> int:
-    """Refresh both layers: the run-from-repo actions in every content repo and
-    assignment template, AND the central org-level workflows in .github; converge each
+    """Refresh both layers: the run-from-repo workflows in every content repo and
+    assignment template (none hosted now; the retired ones deleted), AND the central
+    org-level workflows in .github; converge each
     materials repo's SYSTEM-owned files (maintainer guide, syllabus example) and its
     seeded stubs; repopulate dropdowns; converge each org's repo descriptions, faculty-team
     access and machinery topics (_converge_org_metadata) and rebuild its profile README
     off the same listing; re-push every registered semester's join workflows, its
-    semester-config SYSTEM-owned files (README contract, dispatch-sync*.yml,
+    semester-config SYSTEM-owned files (README contract, dispatch.yml,
     validate-schedule.yml) (skipping semesters whose repos are archived) - never its own config, which stays create-if-missing; (Free-plan
     workaround) propagate the token as a repo secret so those private repos can
     authenticate; and stamp the heartbeat that keeps this org's crons from being
@@ -563,11 +532,8 @@ def refresh(course_org: str, *, course_only: bool = False) -> int:
         # The materials repos only: this sweep also returns the code and dataset repos.
         if repo in materials:
             failures += scaffold.refresh_materials_system_files(course_org, repo)
-    # An assignment template hosts the hand-out button and nothing else (see
-    # `TEMPLATE_WORKFLOWS`), so faculty can release the assignment they are editing
-    # without leaving its Actions tab. Here as well as at New assignment, so a template
-    # scaffolded before this - or one whose seed failed - gets the button on the next
-    # nightly run rather than never.
+    # An assignment template hosts no workflow now (`TEMPLATE_WORKFLOWS`); this deletes the
+    # retired hand-out button from one seeded before decision 0041.
     # The LIVE templates only. An archived repo is read-only: the placement and the secret
     # both 403, and a template a faculty member archived on purpose would red this cron
     # every night from then on, for a repo nobody is going to release from again. Same

@@ -1,0 +1,99 @@
+# SYSTEM-OWNED - do not edit, edits here are overwritten. This workflow is re-seeded
+# from the central DSL teaching toolkit by 'Refresh actions' (nightly).
+name: Dispatch to the course org
+
+# Seeded into a semester's private semester-config repo as .github/workflows/dispatch.yml.
+# Its only job: when a hand-edited file here changes, wake the course org's workflows that
+# read it, so the edit takes effect NOW rather than at their next cron. One file, one
+# `paths` map (below): which event each changed file fires, by repository_dispatch (not
+# workflow_dispatch), so each workflow's ungated automatic path picks it up.
+#
+#   scheduled-release  every file: an edited release, handout or solution moment takes
+#                      effect within the minute, and the scheduler's pre-flight checks
+#                      instructors.yml, students.csv and teams.csv and mails a fault to
+#                      whoever pushed it. Scoped to this semester (driver semester-config).
+#                      Grading sheets are deliberately not here: they are saved all day.
+#   sync-membership    students.csv, teams.csv, instructors.yml (access lands at once),
+#                      schedule.yml and assignments.yml (it rewrites assignments.lock.yml,
+#                      the mirror the Join-team form reads).
+#   sync-site          schedule.yml, assignments.yml, instructors.yml, and teams.csv (an
+#                      assignment page lists the teams that have room).
+#   send-codes         students.csv: a roster push is the only way codes are sent. The send
+#                      fills only blank codes and mails only rows with no `code_sent_at`, so
+#                      its own write-back fires one more run that finds nobody to mail.
+#
+# Every event is idempotent on the receiving side, so firing on a push that changed nothing
+# relevant costs one run and nothing else.
+#
+# Reads the course org from THIS semester's own .system/dsl-course.yml `course:` pointer
+# (single source of truth) with `yq`, preinstalled on GitHub's runners, so a quoted value
+# or a trailing comment reads as the org it names. Runs under secrets.DSL_BOT_TOKEN, which
+# needs Contents read here and Actions write on the course org's .github (both granted by
+# bootstrap).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - schedule.yml
+      - assignments.yml
+      - instructors.yml
+      - students.csv
+      - teams.csv
+
+# Everything here authenticates with DSL_BOT_TOKEN (reading this org's pointer, and
+# dispatching to the course org - neither of which the ambient token can do), so the
+# ambient GITHUB_TOKEN is dropped to zero scopes.
+permissions: {}
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Wake the course org's workflows for what changed
+        env:
+          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          SEMESTER_ORG: ${{ github.repository_owner }}
+          REPO: ${{ github.repository }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          # The paths map: an event, then the files whose change fires it.
+          paths="
+          scheduled-release schedule.yml assignments.yml instructors.yml students.csv teams.csv
+          sync-membership students.csv teams.csv instructors.yml schedule.yml assignments.yml
+          sync-site schedule.yml assignments.yml instructors.yml teams.csv
+          send-codes students.csv
+          "
+          course_org=$(gh api "repos/$SEMESTER_ORG/__CONFIG_REPO__/contents/__POINTER__" \
+            --jq '.content | @base64d' | yq -r '.course // ""')
+          if [ -z "$course_org" ]; then
+            echo "::error::no 'course:' in $SEMESTER_ORG/__CONFIG_REPO__/__POINTER__ - can't find the course org to dispatch to."
+            exit 1
+          fi
+          # What this push changed, one name per line. A new branch (no `before`) or a
+          # compare that fails counts as every file: an extra run is safe, a missed one is not.
+          every="schedule.yml assignments.yml instructors.yml students.csv teams.csv"
+          changed=$(gh api "repos/$REPO/compare/$BEFORE...$AFTER" --jq '.files[].filename' 2>/dev/null) \
+            || changed="$every"
+          [ "${BEFORE//0/}" = "" ] && changed="$every"
+          changed=$(tr ' ' '\n' <<<"$changed")
+          failed=0
+          while read -r event files; do
+            [ -n "$event" ] || continue
+            hit=""
+            for file in $files; do
+              grep -qxF "$file" <<<"$changed" && hit=1
+            done
+            [ -n "$hit" ] || continue
+            args=(-f "event_type=$event" -f "client_payload[semester_org]=$SEMESTER_ORG")
+            [ "$event" = scheduled-release ] && args+=(-f "client_payload[driver]=__CONFIG_REPO__")
+            if gh api "repos/$course_org/.github/dispatches" "${args[@]}" </dev/null; then
+              echo "fired $event"
+            else
+              echo "::error::could not fire $event in $course_org"
+              failed=1
+            fi
+          done <<<"$paths"
+          exit "$failed"

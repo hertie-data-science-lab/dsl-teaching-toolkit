@@ -80,7 +80,7 @@ def test_the_shipped_scripts_carry_the_config_repo_substituted():
         assert f"const CONFIG = '{CONFIG_REPO}'" in text
         assert "__CONFIG_REPO__" not in text
     files = welcome.config_system_files("main")
-    dispatcher = files[".github/workflows/dispatch-scheduled-release.yml"].decode()
+    dispatcher = files[".github/workflows/dispatch.yml"].decode()
     assert f"client_payload[driver]={CONFIG_REPO}" in dispatcher
     assert not any(b"__CONFIG_REPO__" in body for body in files.values())
 
@@ -92,7 +92,7 @@ def test_the_pointer_lives_in_the_config_repo_and_the_dispatchers_read_it_there(
     files = welcome.config_system_files("main")
     pointer = f"{CONFIG_REPO}/contents/{records.path('pointer')}"
     for path, body in files.items():
-        if path.startswith(".github/workflows/dispatch-"):
+        if path == ".github/workflows/dispatch.yml":
             assert pointer in body.decode(), path
             assert "__POINTER__" not in body.decode(), path
 

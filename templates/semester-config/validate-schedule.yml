@@ -92,7 +92,7 @@ jobs:
       - run: pip install -r central/requirements.txt
 
       # The course org this semester belongs to, read from its own dsl-course.yml (the same
-      # single source of truth dispatch-sync.yml reads - no org name baked in at bootstrap
+      # single source of truth dispatch.yml reads - no org name baked in at bootstrap
       # time). A semester's dsl-course.yml is SYSTEM-OWNED and always names `course:`, so an
       # empty answer here is an API error or a token that lost its scope - infrastructure,
       # not anything in the file that was just pushed. It used to be swallowed, which meant

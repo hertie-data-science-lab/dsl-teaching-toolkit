@@ -17,7 +17,6 @@ from dsl_course import (
     profile_readme,
     seed,
     welcome,
-    workflows_place,
 )
 from dsl_course.central import CENTRAL, CENTRAL_REF, CENTRAL_REF_PLACEHOLDER
 from dsl_course.team_formation import LockWrite
@@ -157,33 +156,6 @@ def test_every_org_level_workflow_is_pinned_to_the_orgs_ref(monkeypatch):
         raw = content.decode()
         assert CENTRAL_REF_PLACEHOLDER not in raw, path
         refs = _central_checkout_refs(raw)
-        assert refs and set(refs) == {"main"}, path
-
-
-def test_the_run_from_repo_buttons_are_pinned_too(monkeypatch):
-    # They live in the content repos rather than in `.github`, and are written by a
-    # different module - so they are the easy half to leave behind on the old tier.
-    written: dict[str, bytes] = {}
-    monkeypatch.setattr(
-        workflows_place,
-        "put_files",
-        lambda org, repo, files, message, **k: written.update(files) or True,
-    )
-
-    assert (
-        workflows_place.push_content_workflows(
-            "Course",
-            "course-materials-f2026",
-            ["Semester-f2026"],
-            [],
-            "main",
-            workflows=workflows_place.RELEASE_WORKFLOWS,
-        )
-        == 0
-    )
-    assert written
-    for path, content in written.items():
-        refs = _central_checkout_refs(content.decode())
         assert refs and set(refs) == {"main"}, path
 
 
