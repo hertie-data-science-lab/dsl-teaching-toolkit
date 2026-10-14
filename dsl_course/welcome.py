@@ -395,7 +395,7 @@ def refresh_join_workflows(org: str) -> int:
 # and the workflows that make the repo act on what they put in it, as
 # `(path in the repo, template file)`.
 #
-# HARD INVARIANT: nothing the semester edits may join this table. students.csv, teams.csv,
+# HARD INVARIANT: nothing the semester edits may join this table. students.csv,
 # schedule.yml and instructors.yml hold the semester's LIVE state (enrol codes, onboarded
 # handles); they are seeded create-if-missing by bootstrap_course and stay that way.
 # Adding one here would have the nightly refresh overwrite it every night.

@@ -151,7 +151,7 @@ _FIX: dict[tuple[FaultKind, bool, bool], str] = {
 # leads with it ("Until they are fixed: ...") because "students.csv has 1 entry the
 # toolkit cannot use" says nothing about whether anybody's term is affected, and the
 # answer differs sharply per file: a bad roster header stops every enrolment, a bad
-# teams.csv row stops one.
+# a team cell stops one.
 CONSEQUENCE = {
     "schedule.yml": (
         "that entry is not scheduled: nothing releases, hands out or grades from it"
@@ -537,7 +537,7 @@ def header_fault(file: str, missing: list[str]) -> ConfigFault:
     """The fault a CSV whose header cannot be read produces - one per file, not per row,
     because a header nobody can read costs the whole file.
 
-    Built here rather than in each reader so students.csv, teams.csv and the sheets say the
+    Built here rather than in each reader so students.csv and the sheets say the
     same thing. It names the columns that are MISSING (a constant of the toolkit's) and not
     the ones it found: a file whose header row was deleted has cell values there, and this
     text travels to an email and an issue - see the privacy rule in CLAUDE.md."""
@@ -568,7 +568,7 @@ def csv_row_fault(
     written.
 
     ROW AND COLUMN ONLY. Never the cell: a roster cell is a name, an address, a handle or
-    an enrolment code, a teams.csv cell is a handle or a team name a student typed into a
+    an enrolment code, a team cell is a handle or a team name a student typed into a
     public form, and this text travels to an email, to a digest issue and to a run log.
     The row number is enough to open the file at the line. `fix` adds to the remedy."""
     return ConfigFault(

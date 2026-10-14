@@ -535,7 +535,7 @@ def one_per_unit(targets: list[Target]) -> list[Target]:
     carrying the same key are one unit, however they got there. The UNIT and not the repo,
     which is also what makes a shared drop box - fifty units, one repo - parse. It
     happens - two roster rows sharing a `github_handle` (the same person entered twice, or
-    a handle pasted into the wrong row), a team listed twice in teams.csv.
+    a handle pasted into the wrong row), a team cell naming a faculty team.
 
     Unfiltered, the duplicate is not merely wasted work. `grading_sheet.merge_sheet` walks the
     units in order, popping each one out of the sheet it read: the first pass merges the
@@ -586,14 +586,14 @@ def submission_targets(
     is the one thing a wrong answer cannot be recovered from.
 
     `slug` is the semester-side NAME (`schedule.semester_name`), which is what every repo here
-    is named after. `teams_key` is the SCHEDULE KEY, which is what teams.csv is keyed on -
+    is named after. `teams_key` is the SCHEDULE KEY, which is what the team cells are keyed on -
     the Join-team form validates the assignment against `assignments:` in schedule.yml and
     writes that key. The two differ whenever `semester_dest_repo` is set, and looking teams
     up by the name then found none, so a group assignment silently had no targets at all.
     Defaults to `slug` for the (usual) case where they are the same.
 
     `is_group` is decided upstream, off the template's grading_config.yml `type:`
-    and passed in; it is NEVER inferred from teams.csv here. teams.csv is student-writable (a
+    and passed in; it is NEVER inferred from the team cells here. the team cells are student-writable (a
     "Join team" issue can add a row against an individual assignment), so trusting its rows to
     decide the assignment's KIND would let a student turn an individual assignment into a group
     one - it is read only to enumerate a KNOWN-group assignment's teams."""
@@ -609,7 +609,7 @@ def submission_targets(
                 f"no teams for `{key}` in {semester_org}/{CONFIG_REPO}/students.csv."
             )
             return []
-        # teams.csv is student-writable (the "Join team" issue appends rows), so its
+        # the team cells are student-writable (the "Join team" issue writes them), so its
         # handles pass the SAME roster allowlist `assign.provision_all` vets them through
         # before they are handed out - `sync_teams.vet_groups` is that one allowlist.
         # Unvetted, a typo'd or invented handle earned a block of its OWN in the grading
@@ -1266,7 +1266,7 @@ def snapshot_assignment(
     `is_group` is REQUIRED (keyword-only): it decides which repos are frozen, so a silent
     default would let a forgetful future caller pin individual repos for a group assignment.
     The caller resolves it once, upstream, off the template's `type:` - it is never guessed here
-    from student-writable teams.csv.
+    from the student-writable team cells.
 
     `listing` is the semester's repos keyed by name, off the ONE listing the caller's tick
     already holds (`discovery.listing_by_name`). It is read for `pushed_at` alone - the
@@ -3581,13 +3581,13 @@ def collect(
             )
 
         # Targets: one per team (group) or one per onboarded student (individual). Repos
-        # are named after the semester-side `slug`; teams.csv is keyed on the schedule `key`.
+        # are named after the semester-side `slug`; the team cells are keyed on the schedule `key`.
         targets = submission_targets(
             semester_org, slug, is_group, key, shared=gspec.submit_shared
         )
         if not targets:
             # Nothing to grade at a passed deadline: a semester with nobody onboarded, or a
-            # group assignment whose teams.csv has no teams. On the cron path that is a "not
+            # group assignment whose team cells has no teams. On the cron path that is a "not
             # yet" - the skip record is fire-once, so writing it would retire the assignment
             # before anyone could submit. On a button press it is the operator's answer, and
             # left unrecorded the cron came back every hour and went red every hour.

@@ -14,7 +14,7 @@ Idempotent: existing repos are left alone.
     where <slug> is the template name minus a trailing -fYYYY / -sYYYY.
 
 For a `type: group` assignment it instead makes ONE repo per team, `semester/<slug>-<team>`, and grants the
-GitHub Team materialised from semester-config/teams.csv (see dsl_course.sync_teams) - so
+GitHub Team materialised from the team columns of semester-config/students.csv (see dsl_course.sync_teams) - so
 membership changes propagate to access. Grades are never written here; they go to each
 student's private gradebook repo (see dsl_course.gradebook), so a possibly-public team repo
 never carries marks.
@@ -1772,7 +1772,7 @@ def provision_all(
     # TWO names, and they are not interchangeable.
     #   `slug`: the semester-side NAME - `semester_dest_repo`, else the schedule key. Every
     #     repo made here, and every snapshot/autograde/grades artefact, is named after it.
-    #   `key`: the SCHEDULE KEY. teams.csv is keyed on it - the Join-team form
+    #   `key`: the SCHEDULE KEY. the team cells are keyed on it - the Join-team form
     #     validates the assignment against `assignments:` in schedule.yml and writes that
     #     key - and `sync_teams.desired_teams` derives its GitHub team slugs from it.
     # They differ exactly when `semester_dest_repo` is set. Keying the lookup or the team slug
@@ -1816,12 +1816,12 @@ def provision_all(
 
     # WHAT the assignment is handed out to, in the sheet's own vocabulary and known to
     # every shape: (unit, [member handles]). Individual = one per onboarded student; group
-    # = one per team from teams.csv, keyed on `key`. The repo names and the Submission receipts issue
+    # = one per team from the team cells, keyed on `key`. The repo names and the Submission receipts issue
     # bodies are the github arm's, and are built there.
     if group:
         groups = teams.teams_for(teams.load(semester_org), key)
         if not groups:
-            # WHO fills teams.csv is the assignment's own declaration, and the two answers
+            # WHO fills the team cells are the assignment's own declaration, and the two answers
             # need different words: telling a course whose teams the teaching team
             # allocates to wait for students to self-select points them at a form that
             # refuses every request (see templates/join/team-formation.yml).
@@ -1872,19 +1872,19 @@ def provision_all(
                 f"{how}."
             )
             return 1, False
-        # teams.csv is student-writable (the "Join team" issue appends rows), so its
+        # the team cells are student-writable (the "Join team" issue writes them), so its
         # handles must pass the SAME roster allowlist sync_teams applies: only enrolled,
         # onboarded roster handles - never a typo or a stranger's login that would be INVITED
         # into the private semester org (and granted `maintain` on a repo) by ensure_team.
         # `vet_groups` is that one allowlist; the reporting below is this path's own.
         #
-        # The team NAME from teams.csv (and, below, the student's handle) is what the
+        # The team NAME from the team cells (and, below, the student's handle) is what the
         # GRADING SHEET is keyed on - the same key `collect.submission_targets` uses, so
         # the handout's rows and every later refresh's rows are the same rows.
         sheet_units: list[tuple[str, list[str]]] = []
         for team, vetted, rejected in sync_teams.vet_groups(groups, participants):
             for m in rejected:
-                # Names a handle a STUDENT typed into teams.csv, and this workflow's log is
+                # Names a handle a STUDENT typed into the team cells, and this workflow's log is
                 # world-readable - so the handle is verbose-only and the actionable line
                 # below names nobody. Same split as sync_teams' own rejection log.
                 log_person(

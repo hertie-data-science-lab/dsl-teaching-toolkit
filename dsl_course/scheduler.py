@@ -495,7 +495,7 @@ def _snapshot_passed_deadlines(
         # template that cannot be found leaves both at the parse's own defaults.
         gspec = load_grading_spec(course_org, template) if template else None
         is_group = gspec is not None and gspec.is_group
-        # `name` names the repos, `slug` (the schedule key) is what teams.csv is keyed on.
+        # `name` names the repos, `slug` (the schedule key) is what the team cells are keyed on.
         # A FAILED freeze counts; NOTHING_TO_FREEZE (nobody handed out yet) does not, and
         # neither writes a snapshot file - which is what keeps the autograde phase off an
         # assignment that would otherwise score write-once zeros for the whole semester.
@@ -842,7 +842,7 @@ def _preflight_sources(
     `None` is this tick failing to work those out at all, and it SKIPS the sync entirely,
     on the rule `_config_faults` states: absent from the map is not the same as no faults.
     An empty list is what closes the issue, so syncing the digest without the windows would
-    tell a semester whose teams.csv merely hit a rate limit that its standing team-formation
+    tell a semester whose team cells merely hit a rate limit that its standing team-formation
     fault had been fixed - a Cleared comment and a mail on one tick, and the same fault
     filed again as New on the next. Left exactly as it was instead, and the source faults
     wait a tick with it: a missed one is picked up by the next.
@@ -1589,9 +1589,9 @@ def _team_formation_phase(
 ) -> tuple[int, bool]:
     """Bring the team-formation lock up to this moment. Returns `(errors, lock_changed)`.
 
-    `windows` is this tick's roster x teams.csv diff, already read for the pre-flight's
+    `windows` is this tick's roster x the team cells diff, already read for the pre-flight's
     fault (`_release_phase`) and handed on rather than read again - it costs students.csv,
-    teams.csv and a definition per assignment. None is a semester this tick could not read.
+    the team cells and a definition per assignment. None is a semester this tick could not read.
 
     The window it carries is computed from datetimes, so nothing else in the semester has to
     happen for one to open or shut - and until this ran on the tick, nothing did: the lock
@@ -1775,7 +1775,7 @@ def _release_phase(
         ],
     )
     # The same treatment for every other file faculty edit by hand: a roster nobody can be
-    # enrolled from, a instructors.yml entry that grants nothing, a teams.csv row that will not
+    # enrolled from, a instructors.yml entry that grants nothing, a team cell that will not
     # materialise. Each has its own digest issue and its own mail, and none of them can
     # red this run either.
     errors += _preflight_configs(course_org, semester_org, sched, now, dry_run)
@@ -1851,7 +1851,7 @@ def _release_phase(
     # semester state to write, read and get wrong for a page that is a day stale at worst.
     if (release_changed or lock_changed) and defer_site_sync:
         # A run fired by a semester-config push, which (for schedule.yml, instructors.yml or
-        # teams.csv) started Sync site too: rendering here as well pushed the site repo
+        # the team cells) started Sync site too: rendering here as well pushed the site repo
         # alongside it and lost the race. Queued behind Sync site's own concurrency group
         # instead, so the render lands after this release.
         errors += _request_site_sync(course_org, semester_org)
