@@ -1,0 +1,50 @@
+# INSTRUCTOR-OWNED - yours to edit freely; edits here are not overwritten.
+#
+# This course across every semester: who it is, who owns it, the defaults its semesters
+# inherit, and its open course site. Reference: docs/01-new-course-org.md
+course:
+  name: Deep Learning for Public Policy
+  code: E1394
+  # description: One paragraph students see on every semester site and the open course site.
+  # toolkit_version_ref: release   # absent = release. Pins this course and its semesters to one ref of the toolkit (`main` is the demo course's; a 40-character SHA holds a course still).
+  # licence: CC BY-NC-SA 4.0       # one of the institution's licences; absent = the first
+
+# The course's owners: org admins on this course and every semester under it, mailed about
+# a fault in this file, and shown as the course leads on the open course site. A semester's
+# instructors and TAs are declared in that semester's semester-config/semester.yml.
+people:
+  course_admins:
+    - github_handle: "janedoe"    # grants the `course-admin` team
+
+defaults:   # every key present; uncomment to override. The comment shows the inherited value and its source.
+  # timezone: Europe/Berlin                 (institution)
+  # late_window_days: 10                    (institution)
+  # late_penalty_per_day: 10%               (institution)
+  # max_team_size: 5                        (institution)
+  # assignment_repo_visibility: private     (institution)
+  # archive_grace_days: 60                  (institution)
+  # materials_repo: materials               (institution)
+  # marks_per_question: true                (institution)
+  # team_formation:                         (self_select | assigned; not set above)
+
+open_course_site:   # the public website, an open version of one materials repo
+  enabled: false   # false: nothing is published
+  source_repo:    # the materials repo it is built from
+  readings_mode: reading-list   # reading-list, actual-readings or none
+  include_lectures: true   # publish the repo's files
+  # contact: course@example.edu   # the site's contact; unset = the institution's
+  # Paths kept off the website, as in .releaseignore. A course whose website is
+  # off starts with the system folder kept off, and anything whose name has the
+  # word solution, exam, grade, marks or private in it:
+  withhold:
+  - .system/
+  - '[Ss]olution*'
+  - '*[-_.][Ss]olution*'
+  - '*[Ee]xam'
+  - '*[Ee]xams'
+  - '*[Ee]xam[-_.]*'
+  - '[Gg]rade*'
+  - '*[-_.][Gg]rade*'
+  - '[Mm]arks*'
+  - '*[-_.][Mm]arks*'
+  - '*[Pp]rivate*'

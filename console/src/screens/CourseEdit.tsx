@@ -6,14 +6,14 @@ import { useRef, useState } from 'preact/hooks';
 import { useEnv, type Env } from '../env';
 import { badgeFiles, denylisted, neverMaterial } from '../edit/badges';
 import { invalidText, useSave, type SaveState } from '../edit/save';
-import { YamlText, blank, compact, deepEqual, isObj, obj, type Path } from '../edit/yamlText';
+import { YamlText, blank, compact, deepEqual, isObj, obj, render, type Path } from '../edit/yamlText';
 import { SchemaForm, fieldErrors } from '../forms/Form';
 import { termRank } from '../model/catalogue';
-import { defaultsOf, statedDefaults, withDefaults } from '../model/config';
+import { defaultsOf, placeBlock, statedDefaults, uncommentIn, withDefaults } from '../model/config';
 import { courseBlock } from '../model/discovery';
 import { withMark } from '../model/materialsRepo';
 import { sameHandle } from '../model/people';
-import { institutionDefaults, rawBlock, semesterFile, validCourseFile, validSemesterFile, writeBlock } from '../model/settings';
+import { institutionDefaults, rawBlock, semesterFile, validCourseFile, validSemesterBlocks, validSemesterFile, writeBlock } from '../model/settings';
 import { generateSyllabus, publishWebsite, type Scope } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
 import { ABOUT, COURSE_FACTS, defaultsTiers } from '../tiers/course';
@@ -72,10 +72,17 @@ export type Details = ReturnType<typeof detailsOf>;
 
 /** course.yml's text with `after` written over `before`, only what changed: the fields at their paths, the admins, then the `defaults:` skeleton. */
 export function writeDetails(text: string, before: Details, after: Details, meta: Record<string, unknown>): string {
-  const y = new YamlText(text);
+  let y = new YamlText(text);
   for (const k of Object.keys({ ...before.about, ...after.about })) {
     if (deepEqual(before.about[k], after.about[k])) continue;
-    y.assign(ABOUT_PATHS[k], blank(after.about[k]) ? undefined : after.about[k]);
+    const path = ABOUT_PATHS[k], value = blank(after.about[k]) ? undefined : after.about[k];
+    // A key the seed shows commented takes its comment's place.
+    const placed = value !== undefined && y.get(path) === undefined && path.length === 2 ? uncommentIn(y.text, String(path[0]), String(path[1]), value) : null;
+    if (placed !== null) {
+      y = new YamlText(placed);
+      continue;
+    }
+    y.assign(path, value);
     const block = ABOUT_PATHS[k].slice(0, -1), left = y.get(block);
     if (left === null || (isObj(left) && !Object.keys(left).length)) y.delete(block);
   }
@@ -488,10 +495,13 @@ const isMarkdown = (path: string) => /\.(md|markdown)$/i.test(path);
 
 /** `semester.yml` with `student_site.syllabus` set: the default writes no key, and an emptied block goes. */
 export function withSyllabus(text: string, syllabus: string): { text: string } | { error: string } {
-  const y = new YamlText(text);
+  let y = new YamlText(text);
   if (y.errors.length) return { error: `${SEMESTER_FILE} does not parse; fix it with Edit the file directly.` };
-  writeBlock(y, ['student_site'], obj(y.get(['student_site'])), { syllabus: syllabus === DEFAULT_SYLLABUS ? undefined : syllabus }, ['syllabus']);
-  return validSemesterFile(y.toJS() ?? {}) ? { text: y.text } : { error: invalidText(SEMESTER_FILE, validSemesterFile) };
+  const want = syllabus === DEFAULT_SYLLABUS ? undefined : syllabus;
+  // A semester.yml with no block gets it where the seed shows it commented.
+  if (want !== undefined && y.get(['student_site']) === undefined) y = new YamlText(placeBlock(y.text, 'student_site', render({ student_site: { syllabus: want } })));
+  else writeBlock(y, ['student_site'], obj(y.get(['student_site'])), { syllabus: want }, ['syllabus']);
+  return validSemesterBlocks(y.toJS(), ['student_site']) ? { text: y.text } : { error: invalidText(SEMESTER_FILE, validSemesterFile) };
 }
 
 /** The syllabus select's choices: the default, the repo's top-level Markdown files, and the current value if it is neither. */

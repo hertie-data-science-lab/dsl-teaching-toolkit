@@ -19,8 +19,6 @@ export interface CohortProps {
   heartbeat?: Heartbeat | null;
   /** A template for the schedule editor's new entry (`?template=`, from New assignment). */
   prefill?: string;
-  /** The course's status: what the semester's own defaults inherit (decision 0039). */
-  courseLoaded?: Loaded;
 }
 
 /** A semester screen whose status is ready. */

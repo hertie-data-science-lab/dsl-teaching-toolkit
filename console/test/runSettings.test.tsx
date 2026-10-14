@@ -8,6 +8,7 @@ import { render } from 'preact-render-to-string';
 import { describe, expect, it } from 'vitest';
 import type { Course } from '../src/model/discovery';
 import { StaticFiles } from './staticFiles';
+import { rosterFiles } from './roster';
 import type { Loaded } from '../src/model/status';
 import type { Assignment, Status } from '../src/model/types';
 import * as defs from '../src/ops/defs';
@@ -59,8 +60,8 @@ const SCHEDULE = [
   '    due_datetime: 2026-09-20T23:59',
   '',
 ].join('\n');
-const ASSIGNMENTS = '# INSTRUCTOR-OWNED\ndefaults:\n  late_window_days: 5\n  late_penalty_per_day: 5%\n';
-const COURSE_FILE = 'course_name: Machine Learning\nassignment_defaults:\n  max_team_size: 4\n';
+const SEMESTER = '# INSTRUCTOR-OWNED\ndefaults:\n  late_window_days: 5\n  late_penalty_per_day: 5%\n';
+const COURSE_FILE = 'course:\n  name: Machine Learning\ndefaults:\n  max_team_size: 4\n';
 const TEAM_SHEET = [
   'teams:',
   '  team-alpha:',
@@ -89,8 +90,8 @@ const SOLO_SHEET = 'submissions:\n  carla-c:\n    info:\n      submitted: 2026-0
 
 const base: Record<string, string> = {
   [`${COHORT_ORG}/semester-config/schedule.yml`]: SCHEDULE,
-  [`${COHORT_ORG}/semester-config/assignments.yml`]: ASSIGNMENTS,
-  [`${COURSE_ORG}/.github/dsl-course.yml`]: COURSE_FILE,
+  [`${COHORT_ORG}/semester-config/semester.yml`]: SEMESTER,
+  [`${COURSE_ORG}/.github/course.yml`]: COURSE_FILE,
   [`${COURSE_ORG}/assignment-2-f2026/grading_config.yml`]: 'type: individual\nsubmit_via: assignment_repo\nquestions:\n  Q1: 10\n',
   [`${COURSE_ORG}/assignment-3-f2026/grading_config.yml`]: 'type: group\nquestions:\n  Q1: 5\n  Q2: {points: 5, file: report.tex}\n',
   [`${COHORT_ORG}/semester-config/grading_sheets/assignment-3.yml`]: TEAM_SHEET,
@@ -100,7 +101,7 @@ const filesWith = (over: Record<string, string> = {}) => new StaticFiles({ ...ba
 const props = (over: Partial<CohortProps> = {}): CohortProps => ({ course, cohort, loaded: ready, files: filesWith(), now: NOW, ...over });
 const html = (v: preact.VNode) => render(v);
 
-describe('the Overview form: schedule entry and assignments.yml block as one', () => {
+describe('the Overview form: the schedule entry, its run settings inline', () => {
   it('shows the timings, the computed late cutoff and each run setting with its value and source', () => {
     const out = html(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'overview' })} />);
     expect(out).toContain('How this semester runs it');
@@ -148,7 +149,7 @@ describe('the Overview form: schedule entry and assignments.yml block as one', (
   });
 
   it('opens the field of a setting this assignment sets, with Use the default', () => {
-    const files = filesWith({ [`${COHORT_ORG}/semester-config/assignments.yml`]: `${ASSIGNMENTS}assignments:\n  assignment-2:\n    visibility: public\n` });
+    const files = filesWith({ [`${COHORT_ORG}/semester-config/schedule.yml`]: SCHEDULE.replace('    due_datetime: 2026-09-27T23:59\n', '    due_datetime: 2026-09-27T23:59\n    assignment_repo_visibility: public\n') });
     const out = html(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'overview', files })} />);
     expect(out).toContain('Public, set for this assignment');
     expect(out).toContain('<option value="public" selected');
@@ -189,7 +190,8 @@ describe('the semester’s defaults', () => {
     await act(() => change.click());
     const dialog = root.querySelector('[role="dialog"]')!;
     expect(dialog.getAttribute('aria-modal')).toBe('true');
-    expect(dialog.textContent).toContain('Defaults for this semester’s assignments');
+    expect(dialog.textContent).toContain('Defaults for this semester');
+    expect(dialog.textContent).toContain('Timezone');
     expect(dialog.querySelector<HTMLInputElement>('#sd-late_window_days')!.value).toBe('5');
     expect(dialog.textContent).toContain('this course’s default: up to 4');
     expect(dialog.textContent).toContain('institution default: Students form their own');
@@ -240,7 +242,7 @@ describe('the semester’s defaults', () => {
   });
 
   it('are asked once in New semester, as an optional card', () => {
-    const stated = new StaticFiles({ [`${COHORT_ORG}/semester-config/semester.yml`]: ASSIGNMENTS });
+    const stated = new StaticFiles({ [`${COHORT_ORG}/semester-config/semester.yml`]: SEMESTER });
     expect(cardsDone(stated, COHORT_ORG).defaults).toBe(true);
     // The seeded skeleton states nothing: every key is a comment.
     const seeded = new StaticFiles({ [`${COHORT_ORG}/semester-config/semester.yml`]: 'defaults:   # skeleton\n  # max_team_size: 5\n' });
@@ -285,7 +287,7 @@ describe('the marks grid: teams > students > questions', () => {
 
   it('reads a renamed entry’s mark sheet by its semester-side name', () => {
     const files = filesWith({
-      [`${COHORT_ORG}/semester-config/assignments.yml`]: `${ASSIGNMENTS}assignments:\n  assignment-2:\n    semester_dest_repo: assignment-2-resit\n`,
+      [`${COHORT_ORG}/semester-config/schedule.yml`]: SCHEDULE.replace('    due_datetime: 2026-09-27T23:59\n', '    due_datetime: 2026-09-27T23:59\n    repo_name: assignment-2-resit\n'),
       [`${COHORT_ORG}/semester-config/grading_sheets/assignment-2.yml`]: 'submissions: {}\n',
       [`${COHORT_ORG}/semester-config/grading_sheets/assignment-2-resit.yml`]: SOLO_SHEET,
     });
@@ -294,13 +296,13 @@ describe('the marks grid: teams > students > questions', () => {
     expect(out).toContain('grading_sheets/assignment-2-resit.yml');
   });
 
-  it('reads a renamed entry’s teams by its semester-side name', () => {
+  it('reads an entry’s teams from its number’s column of students.csv, whatever its repos are called', () => {
     const files = filesWith({
-      [`${COHORT_ORG}/semester-config/assignments.yml`]: `${ASSIGNMENTS}assignments:\n  assignment-3:\n    semester_dest_repo: assignment-3-resit\n`,
-      [`${COHORT_ORG}/semester-config/teams.csv`]: 'assignment,team,github_handle\nassignment-3,team-old,anna-a\nassignment-3-resit,team-resit,ben-b\n',
-      [`${COHORT_ORG}/semester-config/students.csv`]: 'hertie_email,name,role,github_handle\nanna@x.org,Anna Adams,enrolled,anna-a\nben@x.org,Ben Baker,enrolled,ben-b\n',
+      [`${COHORT_ORG}/semester-config/schedule.yml`]: SCHEDULE.replace('    due_datetime: 2026-09-20T23:59', '    due_datetime: 2026-09-20T23:59\n    repo_name: assignment-3-resit'),
+      ...rosterFiles(COHORT_ORG, 'email,name,role,team:2,team:3,github_handle\nanna@x.org,Anna Adams,enrolled,team-old,,anna-a\nben@x.org,Ben Baker,enrolled,,team-resit,ben-b\n'),
     });
-    const out = html(<AssignmentScreen {...props({ entry: 'assignment-3', tab: 'teams', files })} />);
+    const three: Loaded = { ...ready, status: { ...status, assignments: [solo, { ...STATUS.assignments![0], slug: 'assignment-3', number: 3, template: 'assignment-3-f2026', teams: 1 }] } };
+    const out = html(<AssignmentScreen {...props({ entry: 'assignment-3', tab: 'teams', files, loaded: three })} />);
     expect(out).toContain('team-resit');
     expect(out).not.toContain('team-old');
   });

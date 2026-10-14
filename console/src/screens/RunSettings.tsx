@@ -12,7 +12,7 @@ import { Field, SchemaForm, fieldErrors } from '../forms/Form';
 import { Modal } from '../ui/Modal';
 import {
   LATE_PAIR, REPO_NAME_RE, RUN_KEYS, semesterName, SOURCE_WORD, courseDefaults, effectiveOf, effectiveWord, lateWord, over, scheduleFile, semesterDefaults, semesterFile, usableBlock,
-  fileValue, validSchedule, validSemesterFile, valueWord, type Block, type Effectives, type RunKey, type YamlFile,
+  fileValue, validSchedule, validSemesterBlocks, validSemesterFile, valueWord, type Block, type Effectives, type RunKey, type YamlFile,
 } from '../model/settings';
 import { defaultsOf, semesterInheritance, statedDefaults, withDefaults } from '../model/config';
 import { addDays, fmtWhen } from '../model/format';
@@ -43,10 +43,8 @@ export function assignmentSettings(p: Pick<ReadyProps, 'status'>, key: string): 
 }
 
 /** The semester-side name of the assignment with schedule key `key` (`schedule.semester_name`): what its mark
- *  sheet and Return marks key on. The engine's answer (status.json), else the schedule entry's `repo_name`, else the key. */
-export function sheetName(p: Pick<ReadyProps, 'files' | 'cohort'> & { status?: ReadyProps['status'] }, key: string): string {
-  const said = p.status?.assignments?.find((a) => a.slug === key)?.semester_name;
-  if (said) return said;
+ *  sheet and Return marks key on. The schedule entry's `repo_name`, else the key while the schedule is read. */
+export function sheetName(p: Pick<ReadyProps, 'files' | 'cohort'>, key: string): string {
   const f = scheduleFile(p.files, p.cohort.org);
   return f && f !== 'loading' ? semesterName(f.doc, key) : key;
 }
@@ -88,14 +86,13 @@ export function SemesterDefaults({ p }: { p: ReadyProps }) {
   );
 }
 
-/** What this semester's own defaults fall back to: the course's effective values (its status), else the semester's answer where it is not the semester's own. */
-export const semesterInherited = (p: Pick<ReadyProps, 'status' | 'courseLoaded'>): Effectives =>
-  semesterInheritance(p.courseLoaded?.kind === 'ready' ? courseDefaults(p.courseLoaded.status) : undefined, semesterDefaults(p.status));
+/** What this semester's own defaults fall back to: the course's effective values (the status's course block), else the semester's answer where it is not the semester's own. */
+export const semesterInherited = (p: Pick<ReadyProps, 'status'>): Effectives => semesterInheritance(courseDefaults(p.status), semesterDefaults(p.status));
 
 /** semester.yml with its `defaults:` stating `after` (form values), or why it would not be valid. */
 export function semesterDefaultsAfter(f: YamlFile, after: Values, inherited: Effectives): { text: string } | { error: string } {
   const text = withDefaults(f.text, statedDefaults(after), inherited);
-  return validSemesterFile(new YamlText(text).toJS() ?? {}) ? { text } : { error: invalidText(SEMESTER_FILE, validSemesterFile) };
+  return validSemesterBlocks(new YamlText(text).toJS(), ['defaults']) ? { text } : { error: invalidText(SEMESTER_FILE, validSemesterFile) };
 }
 
 function DefaultsForm({ p, f, draft, setDraft }: { p: ReadyProps; f: YamlFile; draft: Values | null; setDraft: (v: Values | null) => void }) {

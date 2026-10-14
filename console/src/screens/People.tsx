@@ -5,7 +5,8 @@ import { useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import { EMAIL_RE, diffRoster, missingColumns, readTable, writeTable, type RosterDiff } from '../edit/csv';
 import { saveSteps, useSave, type SaveState, type Step } from '../edit/save';
-import { YamlText } from '../edit/yamlText';
+import { YamlText, render } from '../edit/yamlText';
+import { placeBlock } from '../model/config';
 import { Field, SchemaForm, fieldErrors } from '../forms/Form';
 import { assignmentTitle, fmtShort } from '../model/format';
 import { ROLE_WORD, ROSTER_HEADER, ROSTER_SAVE_NOTE, SYSTEM_HEADER, TEAM_PREFIX, parseInstructors, pendingSummary, roleSplit, sameHandle, systemByEmail, teamColumn, type Person } from '../model/people';
@@ -329,7 +330,8 @@ function formOf(x: Person, raw: Record<string, unknown>): Record<string, unknown
   return { github_handle: x.handle, email: x.email, role: x.role, name: x.name || undefined, title: x.title || undefined, photo: x.photo || undefined, url: x.url || undefined, start: x.start || undefined, end: x.end || undefined, show_email: raw.show_email === true };
 }
 
-function entryOf(v: Record<string, unknown>, raw: Record<string, unknown>): Record<string, unknown> {
+/** A person as semester.yml `people:` writes them: the form's values over the entry's own keys. */
+export function entryOf(v: Record<string, unknown>, raw: Record<string, unknown>): Record<string, unknown> {
   const t = (k: string) => (typeof v[k] === 'string' && (v[k] as string).trim() ? (v[k] as string).trim() : undefined);
   return {
     ...raw, github_handle: t('github_handle'), email: t('email'), role: t('role'), name: t('name'), title: t('title'), photo: t('photo'), url: t('url'), start: t('start'), end: t('end'),
@@ -386,7 +388,9 @@ function Instructors(p: ReadyProps) {
     }
     const idx = editing.idx;
     const done = await write((t) => {
-      if (idx === 'new') t.set(['people', people.length], entryOf(v, {}));
+      // The first person goes where the seed shows its commented example.
+      if (idx === 'new' && t.get(['people']) === undefined) t.text = placeBlock(t.text, 'people', render({ people: [entryOf(v, {})] }));
+      else if (idx === 'new') t.set(['people', people.length], entryOf(v, {}));
       else t.assign(['people', idx], entryOf(v, rawOf(idx)));
     }, `${before ? 'edit' : 'add'} ${handle || String(v.name).trim()}`);
     if (done) setEditing(null);

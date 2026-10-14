@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // The Site tab's settings, clicked through against a fake GitHub: each value is saved into
-// the file the sync reads it from (dsl-course.yml, schedule.yml, or the site's own
+// the file the sync reads it from (course.yml, schedule.yml, or the site's own
 // _config.yml, byte for byte except the key changed), and Add an announcement creates a file.
 
 import { render } from 'preact';
@@ -27,14 +27,14 @@ const USER = { login: 'a-example', id: 1, name: 'A. Example', email: null, avata
 const cohort = { org: ORG, term: 'f2026', termLabel: 'Fall 2026' };
 const course: Course = { org: COURSE_ORG, name: 'Machine Learning', code: 'E1234', description: '', write: true, admins: [], cohorts: [cohort], meta: {} };
 const loaded: Loaded = { kind: 'ready', status: example as unknown as Status, sha: 's', stale: [] };
-const COURSE_YML = '# INSTRUCTOR-OWNED\ncourse_name: Machine Learning\ncourse_code: E1234\npeople:\n  course_admins:\n    - github_handle: a-example\n      email: a@staff.example.org\n';
+const COURSE_YML = '# INSTRUCTOR-OWNED\ncourse:\n  name: Machine Learning\n  code: E1234\npeople:\n  course_admins:\n    - github_handle: a-example\n      email: a@staff.example.org\n';
 const SCHEDULE = '# INSTRUCTOR-OWNED\ntimezone: Europe/Berlin\nsemester:\n  start: {type: start, event_datetime: 2026-09-07}\n  end: {type: end, event_datetime: 2026-12-18}\n';
 const CONFIG = '# INSTRUCTOR-OWNED\ncourse_name: "Machine Learning"\n\n# --- Institution ---\nschoolname: "Hertie School"\nschoolurl: "https://hertie-school.org/en/datasciencelab"\ndsl_org_url: "https://github.com/hertie-data-science-lab"\naddress: |\n    Data Science Lab\n    Hertie School\n\nplugins:\n  - jekyll-remote-theme\n';
 
 const HOME = 'Welcome to {{ site.course_name }}.\n\n{% if site.content_repo %}Materials live in {{ site.content_repo }}.{% endif %}\n';
 
 const files = new StaticFiles({
-  [`${COURSE_ORG}/.github/dsl-course.yml`]: COURSE_YML,
+  [`${COURSE_ORG}/.github/course.yml`]: COURSE_YML,
   [`${ORG}/semester-config/schedule.yml`]: SCHEDULE,
   [`${ORG}/${SITE}/_config.yml`]: CONFIG,
   [`${ORG}/${SITE}/index.md`]: `---\nlayout: home\n---\n${HOME}`,
@@ -82,18 +82,18 @@ describe('Site settings', () => {
     expect(body(w)).toBe(CONFIG.replace('schoolname: "Hertie School"', 'schoolname: Hertie School of Governance'));
   });
 
-  it('saves the course name into dsl-course.yml and says the site follows at the next sync', async () => {
+  it('saves the course name into course.yml and says the site follows at the next sync', async () => {
     const gh = await mount();
     const course = section('Course');
     expect(course.textContent).toContain('Saved to Course details; the site updates at the next sync.');
     expect(course.querySelector('a.textlink')!.getAttribute('href')).toBe(`?course=${COURSE_ORG}#details`);
-    expect(course.querySelector('a.edit-file')!.getAttribute('title')).toBe(`${COURSE_ORG}/.github/dsl-course.yml`);
+    expect(course.querySelector('a.edit-file')!.getAttribute('title')).toBe(`${COURSE_ORG}/.github/course.yml`);
     await type('#ss-course-course_name', 'Machine Learning II');
     await act(() => saveIn(course).click());
-    await settle(() => puts(gh, 'dsl-course.yml').length > 0);
-    const [w] = puts(gh, 'dsl-course.yml');
-    expect(w.url).toContain(`/repos/${COURSE_ORG}/.github/contents/dsl-course.yml`);
-    expect(body(w)).toBe(COURSE_YML.replace('course_name: Machine Learning', 'course_name: Machine Learning II'));
+    await settle(() => puts(gh, 'course.yml').length > 0);
+    const [w] = puts(gh, 'course.yml');
+    expect(w.url).toContain(`/repos/${COURSE_ORG}/.github/contents/course.yml`);
+    expect(body(w)).toBe(COURSE_YML.replace('  name: Machine Learning', '  name: Machine Learning II'));
     expect(puts(gh, '_config.yml')).toEqual([]);
   });
 

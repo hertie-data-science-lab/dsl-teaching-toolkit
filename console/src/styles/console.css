@@ -205,7 +205,7 @@ button.wk { font: inherit; text-align: left; cursor: pointer; align-content: sta
 .no-problems svg { width: 14px; height: 14px; }
 
 /* Setup: a calm checklist, deliberately unlike the red problem cards beside it. */
-/* A checklist row's mark column and the gap after it; the materials kinds fold (.s-kinds) lines up with the labels by them. */
+/* A checklist row's mark column and the gap after it. */
 :root { --setup-mark: 18px; --setup-gap: 10px; }
 .setup { list-style: none; margin: 0; padding: 0; }
 .setup li { display: grid; grid-template-columns: var(--setup-mark) minmax(0, 1fr); column-gap: var(--setup-gap); row-gap: 1px; padding: 7px 0; }
@@ -1044,10 +1044,6 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 
 /* T3: materials checklist kinds fold (a sibling of the Needed/Suggested lists since 0034, so not
    under .setup, lined up with the checklist labels); withheld tree toggles right-aligned on folders too */
-.s-kinds { margin-left: calc(var(--setup-mark) + var(--setup-gap)); border-top: 0; padding-top: 2px; }
-.s-kinds > summary { min-height: 0; font-size: 13px; }
-.s-kinds .fold-body { list-style: none; margin: 0; padding: 4px 0 0; gap: 2px; font-size: 13.5px; color: var(--ink-2); }
-.s-kinds li { display: block; padding: 0; }
 .file-tree:not(.select) summary .ft-toggle { margin-left: auto; }
 
 /* T2: course chrome (decision 0024 rules 1-5) */
@@ -1089,7 +1085,6 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .file-tree .ft-closed, .file-tree .ft-opened { display: inline-flex; }
 .file-tree details[open] > summary .ft-closed, .file-tree details:not([open]) > summary .ft-opened { display: none; }
 .file-tree .ft-out > .ft-name, .file-tree .ft-out > details > summary > .ft-name { color: var(--muted); text-decoration: line-through; }
-.file-tree .ft-kind { margin-left: auto; font-size: 12px; padding: 1px 6px; min-height: 0; }
 .pattern-box { position: relative; background: var(--surface); border-radius: 6px; }
 .pattern-box textarea.code, .pattern-box .pattern-mirror { font-family: var(--font-code); font-size: 13px; line-height: 1.5; padding: 6px 9px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .pattern-box textarea.code { position: relative; background: transparent; min-height: 240px; }
@@ -1112,8 +1107,6 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .all-courses-head .actions { gap: 8px 16px; }
 .all-courses-head .my-only { min-height: 0; align-items: center; }
 .all-courses-head .my-only input { margin-top: 0; }
-.s-kinds .k-mark { display: inline-grid; place-items: center; width: 14px; margin-right: 4px; color: var(--ok); vertical-align: -1px; }
-.s-kinds .k-mark svg { width: 10px; height: 10px; }
 
 /* U1: the course code on its own quiet line under a card's title (decision 0031 rule 1) */
 .cohort-card .cc-name .cc-code { font-size: 12px; letter-spacing: 0.02em; margin-top: 2px; }

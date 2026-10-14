@@ -19,6 +19,7 @@ import type { CohortProps } from '../src/screens/types';
 import example from './fixtures/status.example.json';
 import { FakeGitHub, json, type Seen } from './fake';
 import { StaticFiles } from './staticFiles';
+import { rosterFiles } from './roster';
 
 const COURSE_ORG = 'hertie-dsl-demo-course-e1234';
 const COHORT_ORG = 'hertie-dsl-demo-f2026';
@@ -29,12 +30,12 @@ const STATUS = { ...(example as unknown as Status), students: { rows: 3, codes_s
 const ready: Loaded = { kind: 'ready', status: STATUS, sha: 's', stale: [] };
 
 const ROSTER =
-  'hertie_email,name,role,github_handle,github_id,enrol_code,code_sent_at\n' +
+  'email,name,role,github_handle,github_id,enrol_code,code_sent_at\n' +
   'anna@x.org,Anna Adams,enrolled,anna-a,101,SECRET1,2026-09-02T09:30:00Z\n' +
   'ben@x.org,Ben Baker,enrolled,,,SECRET2,2026-09-02T09:30:00Z\n' +
   'cara@x.org,Cara Cole,Auditor,,,,\n';
 
-const files = () => new StaticFiles({ [`${COHORT_ORG}/semester-config/students.csv`]: ROSTER });
+const files = () => new StaticFiles(rosterFiles(COHORT_ORG, ROSTER));
 const github = () => new FakeGitHub().on('PUT', /\/contents\//, json({ content: { sha: 'b1' }, commit: { sha: 'c1' } })).on('GET', /\/check-runs/, { check_runs: [] });
 
 function envOf(gh: FakeGitHub, f: StaticFiles): Env {
@@ -171,9 +172,7 @@ describe('Edit roster: add and remove', () => {
     expect(puts(gh)).toHaveLength(1);
     const text = body(puts(gh)[0]);
     expect(text).not.toContain('anna@x.org');
-    expect(text).toContain('ben@x.org,Ben B. Baker,enrolled,');
-    expect(text).toContain('cara@x.org,Cara Cole,Auditor,');
-    expect(text).toContain('dan@x.org,Dan Dorn,enrolled,');
+    expect(text).toBe('email,name,role\nben@x.org,Ben B. Baker,enrolled\ncara@x.org,Cara Cole,Auditor\ndan@x.org,Dan Dorn,enrolled\n');
     expect((puts(gh)[0].body as { message: string }).message).toBe('roster: 1 added, 1 removed, 1 changed, from the DSL Teaching Console');
   });
 

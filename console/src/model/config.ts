@@ -121,3 +121,36 @@ export function withDefaults(text: string, after: Block, inherited: Effectives):
   }
   return [...lines.slice(0, at + 1), ...block, ...lines.slice(end)].join('\n');
 }
+
+/**
+ * `text` with `key: value` written over the seed's commented `# key:` line inside the
+ * top-level `block:` (the seeds show every optional key as a comment where it belongs), or
+ * null when there is no such line or the value does not fit on one line.
+ */
+export function uncommentIn(text: string, block: string, key: string, value: unknown): string | null {
+  const line = scalar(value);
+  if (line.includes('\n')) return null;
+  const lines = text.split('\n');
+  const at = lines.findIndex((l) => new RegExp(`^${block}\\s*:\\s*(#.*)?$`).test(l));
+  if (at < 0) return null;
+  for (let i = at + 1; i < lines.length && /^\s+\S/.test(lines[i]); i++) {
+    const m = commentRe(key).exec(lines[i]);
+    if (m) {
+      lines[i] = `${m[1]}${key}: ${line}`;
+      return lines.join('\n');
+    }
+  }
+  return null;
+}
+
+/**
+ * `text` with a new top-level block (`rendered`, block YAML) placed where the seed shows its
+ * commented example (`# key:` at column 0, and the comment lines under it), else at the end.
+ */
+export function placeBlock(text: string, key: string, rendered: string): string {
+  const lines = text.split('\n');
+  let at = lines.findIndex((l) => new RegExp(`^#\\s*${key}\\s*:`).test(l));
+  if (at < 0) return `${text}${text === '' || text.endsWith('\n') ? '' : '\n'}${rendered}`;
+  while (at + 1 < lines.length && lines[at + 1].startsWith('#')) at++;
+  return [...lines.slice(0, at + 1), rendered.replace(/\n$/, ''), ...lines.slice(at + 1)].join('\n');
+}

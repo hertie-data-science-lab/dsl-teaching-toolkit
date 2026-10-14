@@ -24,6 +24,7 @@ import type { CohortProps } from '../src/screens/types';
 import example from './fixtures/status.example.json';
 import { FakeGitHub, fileBody, json, type Seen } from './fake';
 import { StaticFiles } from './staticFiles';
+import { rosterFiles } from './roster';
 
 // ------------------------------------------------------------------ the hold rules, golden vectors from the engine's tests
 
@@ -604,8 +605,8 @@ describe('unsaved marks', () => {
 });
 
 describe('teams and people on the grid', () => {
-  const ROSTER = `${COHORT_ORG}/semester-config/students.csv`;
-  const roster = 'hertie_email,name,role,github_handle\nana@x.org,Ana Lopez,enrolled,ana-l\nben@x.org,Ben Okafor,enrolled,ben-k\n';
+  // The names from students.csv, the handles from the engine's roster, joined on email.
+  const roster = rosterFiles(COHORT_ORG, 'email,name,role,github_handle\nana@x.org,Ana Lopez,enrolled,ana-l\nben@x.org,Ben Okafor,enrolled,ben-k\n');
   const TEAMS = [
     'teams:',
     '  geneva:',
@@ -636,7 +637,7 @@ describe('teams and people on the grid', () => {
   const teamFiles = (sheet = TEAMS) => new StaticFiles({
     [`${COURSE_ORG}/assignment-2-f2026/grading_config.yml`]: 'type: group\nquestions:\n  Q1: 10\n  Q2: 10\n',
     [SHEET_PATH]: sheet,
-    [ROSTER]: roster,
+    ...roster,
   });
   const mountTeams = (f = teamFiles()) => mount(envOf(github(), f), <AssignmentScreen {...props(f, { loaded })} />);
 
@@ -683,7 +684,7 @@ describe('teams and people on the grid', () => {
 
   it('names an individual student, handle under the name, and keeps Adjustment behind its chip', async () => {
     const f = files();
-    (f as unknown as { map: Record<string, string> }).map[ROSTER] = roster;
+    Object.assign((f as unknown as { map: Record<string, string> }).map, roster);
     await marks(f);
     const ada = [...root!.querySelectorAll('tr.unit-row')][1];
     expect(ada.querySelector('td')!.textContent).toContain('Ben Okaforben-k');

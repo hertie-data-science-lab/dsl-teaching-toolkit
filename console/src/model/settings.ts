@@ -235,6 +235,14 @@ export const validSchedule = validator(scheduleSchema);
 /** `.github/course.yml` and `semester-config/semester.yml` (decision 0039). */
 export const validCourseFile = validator(courseFileSchema);
 export const validSemesterFile = validator(semesterFileSchema);
+
+/**
+ * Whether the blocks of `doc` a form wrote are valid against the semester schema. Only those:
+ * a display-only person in `people:` (a name, no handle) is one the schema's required keys
+ * refuse and the engine reads, and a save elsewhere in the file must not be refused for it.
+ */
+export const validSemesterBlocks = (doc: unknown, blocks: string[]): boolean =>
+  validSemesterFile(Object.fromEntries(blocks.filter((b) => b in obj(doc)).map((b) => [b, obj(doc)[b] ?? null])));
 export const validGrading = validator(gradingSchema);
 
 /**
