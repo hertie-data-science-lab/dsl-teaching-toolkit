@@ -125,7 +125,7 @@ jobs:
               // mint a real GitHub team for any assignment at all.
               //
               // The toolkit writes the file, so its shape is fixed (see
-              // dsl_course.grades.team_lock_text): two-space assignment keys, four-space
+              // dsl_course.team_formation.team_lock_text): two-space assignment keys, four-space
               // scalars under them. `undefined` = no lock file; `null` = a slug it does
               // not carry.
               //
@@ -184,7 +184,7 @@ jobs:
                 return entry && entry.formation !== null ? entry : null;
               };
               // The close date is written as a bare ISO day and read by a student, so it is
-              // spoken as one - `26th Oct`, dsl_course.grades.spoken_day's spelling, which
+              // spoken as one - `26th Oct`, dsl_course.gradebook.spoken_day's spelling, which
               // the mail and the semester site use too. Anything that is not one is printed
               // as it stands rather than guessed at.
               const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];

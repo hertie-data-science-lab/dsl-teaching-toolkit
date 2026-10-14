@@ -16,7 +16,7 @@ Idempotent: existing repos are left alone.
 For a `type: group` assignment it instead makes ONE repo per team, `semester/<slug>-<team>`, and grants the
 GitHub Team materialised from semester-config/teams.csv (see dsl_course.sync_teams) - so
 membership changes propagate to access. Grades are never written here; they go to each
-student's private gradebook repo (see dsl_course.grades), so a possibly-public team repo
+student's private gradebook repo (see dsl_course.gradebook), so a possibly-public team repo
 never carries marks.
 
 For `submit_via: external` - handed in off GitHub (Moodle, Kaggle, in class) - it creates
@@ -61,7 +61,17 @@ from pathlib import Path
 
 import yaml
 
-from . import grades, records, roster, schedule, site, sync_teams, teams
+from . import (
+    gradebook,
+    receipts,
+    records,
+    roster,
+    schedule,
+    site,
+    sync_teams,
+    team_formation,
+    teams,
+)
 from .access import (
     FACULTY_READ_ACCESS,
     grant_faculty,
@@ -463,7 +473,7 @@ def push_solution(semester_org: str, repo: str, sol_dir: Path) -> bool:
 # One patch, one comment. The digest is over the paths and the CONTENT written, so a second
 # press that changes nothing says nothing, and a genuinely different correction to the same
 # path is a new note rather than a silent one. Same idea as the `dsl-receipt:` marker the
-# grading receipts carry - see `grades.post_marked_comment`, which is what enforces it.
+# grading receipts carry - see `receipts.post_marked_comment`, which is what enforces it.
 PATCH_MARKER = "<!-- dsl-patch:{digest} -->"
 
 # What one submission repo came to. Counted into the summary line; per-repo detail goes
@@ -643,7 +653,7 @@ def note_the_patch(
 
     And only where the LISTING says the repo is still private. `row` is this repo's row of
     the listing `patch_released` already holds, and the same guard every other write into
-    a Submission receipts issue takes (`grades.receipts_thread_policy`): a thread in a public repo
+    a Submission receipts issue takes (`receipts.receipts_thread_policy`): a thread in a public repo
     is a thread the internet reads, and this one names the files a student was handed
     wrong. Optimistic like `repos.listed_is_private` - a row nobody could read answers
     private - because the cost of being wrong the other way is a note nobody gets."""
@@ -653,13 +663,13 @@ def note_the_patch(
             f"patched, the note is not posted"
         )
         return False
-    found = grades.find_receipts_issue(semester_org, repo)
-    if isinstance(found, grades.IssueLookupFailed) or found is None:
+    found = receipts.find_receipts_issue(semester_org, repo)
+    if isinstance(found, receipts.IssueLookupFailed) or found is None:
         log_person(
             f"    {semester_org}/{repo}: no Submission receipts issue to post the patch note on"
         )
         return False
-    return grades.post_marked_comment(
+    return receipts.post_marked_comment(
         semester_org, repo, found[0], patch_note(paths, on), marker
     )
 
@@ -850,7 +860,7 @@ def provision_one(
     `repos.set_visibility` for why a public repo is born private. A repo that already
     exists is never re-PATCHed: the tick re-fires every handed-out assignment, so that
     would nightly undo a deliberate change, and an edit to `visibility:` after hand-out is
-    reported as a fault instead (`grades._visibility_faults`).
+    reported as a fault instead (`grading_spec._visibility_faults`).
 
     It also decides the unit's own PERMISSION. `maintain` is the floor for everything the
     toolkit owns the flag on, and it deliberately excludes GitHub's visibility switch;
@@ -938,7 +948,7 @@ def provision_one(
         # has ever heard of (`course.github_visibility`); and a `public` flip that FAILED
         # leaves the repo exactly as `/generate` made it. Writing the INTENTION there hid
         # the failure from the one reader that exists to catch it - the digest's
-        # `grades._visibility_faults` compares these rows against the file.
+        # `grading_spec._visibility_faults` compares these rows against the file.
         listed_as = github_visibility(visibility)
         if visibility == "public" and not set_visibility(
             semester_org, repo, "public", person=True
@@ -954,7 +964,7 @@ def provision_one(
         # per student per hourly tick for the rest of the term, for an issue that does not
         # go away - and the refresh pass opens a missing one lazily when it first has
         # something to say.
-        if receipts_thread_body and not grades.ensure_receipts_issue(
+        if receipts_thread_body and not receipts.ensure_receipts_issue(
             semester_org, repo, receipts_thread_body
         ):
             # Reported in the RETURN value, not just the log. The issue is where the
@@ -1598,7 +1608,7 @@ def _release_units(
     # FIRE-ONCE marker is deliberately not written for it (`can_hold_solution` gates it in
     # `provision_all`), which leaves an instructor who corrects the shape able to release
     # it on a later run. The plan and the definition are edited by different people, so
-    # the digest reports the disagreement as well (`grades.grading_spec_faults`).
+    # the digest reports the disagreement as well (`grading_spec.grading_spec_faults`).
     if solution and not gspec.can_hold_solution:
         log(
             f"  (model solution not pushed - {slug}'s repos are public or "
@@ -1614,7 +1624,7 @@ def _release_units(
     # unit it was given a body for. The derived rule decides it, so nothing here re-states
     # which shapes have a thread and which do not.
     solo_body = (
-        grades.receipts_thread_body(spec)
+        receipts.receipts_thread_body(spec)
         if gspec.has_receipts_issue and not group
         else ""
     )
@@ -1624,7 +1634,7 @@ def _release_units(
         repo = submission_repo(slug, unit)
         units.append((repo, members, teams.team_slug(key, unit) if group else None))
         feedback_bodies[repo] = (
-            grades.receipts_thread_body(spec, unit, members)
+            receipts.receipts_thread_body(spec, unit, members)
             if gspec.has_receipts_issue and group
             else solo_body
         )
@@ -2031,7 +2041,7 @@ def provision_all(
     # an hour to write a file `put_file` then finds unchanged. Not counted into `failed`:
     # the repos are out, and Sync membership rewrites it on every schedule.yml push anyway.
     if changed:
-        grades.sync_team_lock(
+        team_formation.sync_team_lock(
             semester_org=semester_org, course_org=course_org, sched=sched
         )
 
@@ -2060,7 +2070,7 @@ def provision_all(
     # is a call per student who has none yet, and everything ahead of it is what a semester
     # is waiting on - the repos, then the page that tells them where to find them.
     if changed:
-        grades.ensure_gradebooks(semester_org, existing=listing)
+        gradebook.ensure_gradebooks(semester_org, existing=listing)
 
     failed = site_failed or any(k.startswith("failed") for k in results)
     # Record the release only when every solution push in this run landed, and only when

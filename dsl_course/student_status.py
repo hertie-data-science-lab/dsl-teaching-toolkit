@@ -34,7 +34,14 @@ from datetime import date, datetime
 
 import yaml
 
-from . import grades, policy, records, schedule, teams
+from . import (
+    grading_spec,
+    policy,
+    records,
+    schedule,
+    team_formation,
+    teams,
+)
 from .course import (
     CONFIG_REPO,
     CUTOFF_SENTENCE,
@@ -566,7 +573,7 @@ def render_assignments(
     shape note wait for the hand-out, as the site's did."""
     out = []
     for key, entry in _public_assignments(facts.sched):
-        spec = facts.specs.get(key, grades.GradingSpec())
+        spec = facts.specs.get(key, grading_spec.GradingSpec())
         name = schedule.semester_name(key, entry)
         title = identifier(name)
         out_now = handed_out(name, entry, extra.handed_out, now)
@@ -624,7 +631,7 @@ def render_assignments(
                     schedule.solution_held_until(facts.sched, key)
                     or entry.solution_datetime
                 ),
-                "max_points": _number(grades.total_points(spec)),
+                "max_points": _number(grading_spec.total_points(spec)),
                 "handed_out": out_now,
                 "brief": brief,
                 "tbc": entry.tbc,
@@ -634,7 +641,7 @@ def render_assignments(
 
 
 def _number(text: str) -> int | float | None:
-    """`grades.total_points`'s "10" / "7.5" as a number; None when there is no total."""
+    """`grading_spec.total_points`'s "10" / "7.5" as a number; None when there is no total."""
     if not text:
         return None
     return int(text) if text.lstrip("-").isdigit() else float(text)
@@ -818,7 +825,7 @@ def gather(course: CourseFacts, facts: SemesterFacts, now: datetime) -> StudentF
         link_extensions=link_extensions(course.meta or {}),
     )
     for key, entry in _public_assignments(sched):
-        spec = facts.specs.get(key, grades.GradingSpec())
+        spec = facts.specs.get(key, grading_spec.GradingSpec())
         name = schedule.semester_name(key, entry)
         if handed_out(name, entry, extra.handed_out, now):
             extra.readmes[key] = (
@@ -826,7 +833,7 @@ def gather(course: CourseFacts, facts: SemesterFacts, now: datetime) -> StudentF
                 or ""
             )
         if spec.is_group and spec.team_formation_resolved == SELF_SELECT:
-            extra.caps[key] = grades.team_cap(course.org, spec, org, key)
+            extra.caps[key] = team_formation.team_cap(course.org, spec, org, key)
     # The reading lists: the prose overlays of every readings copy that has landed.
     for sr in site_rows(planned_rows(sched, lambda repo: facts.aliases.get(repo, {}))):
         own = [sr.row] if sr.row.kind == "readings" else []

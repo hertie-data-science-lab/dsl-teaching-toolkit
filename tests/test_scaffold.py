@@ -21,7 +21,7 @@ from dsl_course import (
     derive,
     gh_contents,
     ghcli,
-    grades,
+    grading_spec,
     policy,
     releaseignore,
     repos,
@@ -310,7 +310,7 @@ def test_the_definition_records_every_starter_the_first_runnable(fake, monkeypat
 
     assert scaffold.scaffold_assignment("Org", "Assignment 1", ["rmd", "ipynb"]) == 0
 
-    spec = grades.parse_grading_spec(written["grading_config.yml"])
+    spec = grading_spec.parse_grading_spec(written["grading_config.yml"])
     assert spec.dropped == ()
     assert spec.formats == ("rmd", "ipynb")
     assert spec.format == "rmd"
@@ -667,7 +667,7 @@ def test_the_generated_definition_carries_the_answers_and_the_course_defaults(
         )
         == 0
     )
-    spec = grades.parse_grading_spec(written["grading_config.yml"])
+    spec = grading_spec.parse_grading_spec(written["grading_config.yml"])
     assert spec.dropped == ()
     assert (
         spec.title == "Neural networks: from scratch"
@@ -683,7 +683,7 @@ def test_the_generated_definition_carries_the_answers_and_the_course_defaults(
         for key in settings.RUN_KEYS
     )
     assert "semester-config/assignments.yml" in text
-    resolved = grades.with_run_settings(spec, "Org")
+    resolved = grading_spec.with_run_settings(spec, "Org")
     assert (resolved.max_team_size, resolved.late_window_days) == (3, 7)
     assert dict(resolved.sources)["late_window_days"] == "course"
     assert text.startswith("# INSTRUCTOR-OWNED")
@@ -702,8 +702,8 @@ def test_an_unasked_run_setting_leaves_the_semester_layer_to_answer(fake, monkey
             "  visibility: public\n  team_formation: assigned\n  max_team_size: 2\n"
         ),
     )
-    monkeypatch.setattr(grades, "_grading_text", lambda org, template: text)
-    spec = grades.load_grading_spec("Org", "t", semester_org="Sem", slug="a1")
+    monkeypatch.setattr(grading_spec, "_grading_text", lambda org, template: text)
+    spec = grading_spec.load_grading_spec("Org", "t", semester_org="Sem", slug="a1")
     assert (spec.late_window_days, spec.late_penalty_per_day) == (3, "5%")
     assert (spec.visibility, spec.team_formation, spec.max_team_size) == (
         "public",
@@ -724,7 +724,7 @@ def test_the_default_shape_is_seeded_as_assignment_repo_never_github(fake, monke
     text = written["grading_config.yml"]
     assert "\nsubmit_via: assignment_repo" in text
     assert "github" not in text
-    spec = grades.parse_grading_spec(text)
+    spec = grading_spec.parse_grading_spec(text)
     assert spec.submit_via == "assignment_repo" and spec.dropped == ()
 
 
@@ -746,7 +746,7 @@ def test_a_shared_drop_box_is_seeded_hand_marked_and_parses_clean(fake, monkeypa
         == 0
     )
     text = written["grading_config.yml"]
-    spec = grades.parse_grading_spec(text)
+    spec = grading_spec.parse_grading_spec(text)
     assert spec.dropped == ()
     assert not spec.autograde and not spec.grader_pdf
     assert not spec.runs_completion_check
@@ -813,7 +813,7 @@ def test_the_cutoff_switches_are_written_out_with_their_defaults(fake, monkeypat
     for fmt, notebook in (("ipynb", True), ("py", False)):
         assert scaffold.scaffold_assignment("Org", "Assignment 1", [fmt]) == 0
         text = written["grading_config.yml"]
-        spec = grades.parse_grading_spec(text)
+        spec = grading_spec.parse_grading_spec(text)
         assert spec.dropped == ()
         assert (spec.completion_check, spec.grader_pdf) == (notebook, False)
         assert f"completion_check: {str(notebook).lower()}" in text
@@ -826,8 +826,8 @@ def test_a_course_with_no_defaults_gets_the_institution_late_policy(fake, monkey
     written = _solution_files(monkeypatch)
     monkeypatch.setattr(settings, "course_defaults", lambda org: {})
     assert scaffold.scaffold_assignment("Org", "Assignment 1", ["py"]) == 0
-    spec = grades.with_run_settings(
-        grades.parse_grading_spec(written["grading_config.yml"]), "Org"
+    spec = grading_spec.with_run_settings(
+        grading_spec.parse_grading_spec(written["grading_config.yml"]), "Org"
     )
     assert (spec.late_window_days, spec.late_penalty_per_day) == (
         policy.defaults()["late_window_days"],

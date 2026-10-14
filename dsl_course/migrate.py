@@ -106,14 +106,7 @@ from .gh_contents import (
     top_level,
 )
 from .ghcli import forget_all, gh, git
-from .grades import (
-    GRADING_FILE,
-    TEAM_LOCK_PATH,
-    assignment_title,
-    parse_grading_spec,
-    sync_team_lock,
-    team_lock_content,
-)
+from .grading_spec import GRADING_FILE, assignment_title, parse_grading_spec
 from .log import CLIParser, add_preview_flag, log, log_err, log_ok, log_step
 from .materials import MATERIALS_TOPIC, is_materials_repo, kinds_reader
 from .opencourse import OPENCOURSE_FILE, READINGS_MODES, OpenCourse
@@ -138,6 +131,7 @@ from .schedule_plan import (
 from .setting_readers import RENAMED_SETTINGS, read_settings
 from .settings import ASSIGNMENT_DEFAULTS_KEY, RUN_KEYS
 from .sync_faculty import retired_course_faults
+from .team_formation import TEAM_LOCK_PATH, sync_team_lock, team_lock_content
 from .welcome import (
     RETIRED_JOIN_FORMS,
     config_system_files,
@@ -2577,7 +2571,7 @@ class Semester:
     def title_notes(self, meta: dict) -> list[str]:
         """`assignments.<key>: title "old" -> "new"` for each `title:` the keys step
         strips that is not the name the assignment takes from now on (its template's,
-        `grades.assignment_title`): for faculty to check, nothing is written."""
+        `grading_spec.assignment_title`): for faculty to check, nothing is written."""
         entries = meta.get("assignments")
         out = []
         for key, entry in entries.items() if isinstance(entries, dict) else ():

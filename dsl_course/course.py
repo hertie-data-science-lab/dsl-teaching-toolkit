@@ -55,7 +55,7 @@ JOIN_COURSE_MARKER = "<!-- dsl:join-course -->"
 JOIN_TEAM_MARKER = "<!-- dsl:join-team -->"
 OLD_JOIN_REPO = "welcome"
 RETIRED_REPO_NAMES = frozenset({OLD_CONFIG_REPO, OLD_JOIN_REPO})
-# The per-student gradebook repo: grades-<handle> (grades.py creates them, discovery reads
+# The per-student gradebook repo: grades-<handle> (gradebook.py creates them, discovery reads
 # them back). Named here so the reader and the writer cannot drift.
 GRADEBOOK_PREFIX = "grades-"
 # Topics on an org's `.github` repo that say which TIER the org is (bootstrap_course stamps
@@ -123,7 +123,7 @@ SANDBOX_USER = "dsl-sandbox"
 
 # The closed vocabularies of `grading_config.yml`. Here rather than beside the parser
 # because three layers spell them: `workflows_render` builds the New assignment dropdowns
-# from them, `scaffold` writes the chosen values into the file, and `grades` reads them
+# from them, `scaffold` writes the chosen values into the file, and `grading_spec` reads them
 # back - and a dropdown offering a word the reader would refuse is a form that lies.
 # Named for where the work LANDS. `assignment_repo` = one repo per unit, pushed to;
 # `external` = handed in off GitHub (Moodle, Kaggle, in class), so no repo is created at
@@ -194,7 +194,7 @@ NO_TEAMS = "none"
 NO_STARTER = "none"
 # The stand-in the scaffold seeds where a setting has no sensible default but a shape worth
 # showing (`submit_url`). Here because two layers have to agree on it: `scaffold` writes it
-# into the file and `grades` refuses to act on a line still carrying it, which is what a
+# into the file and `grading_spec` refuses to act on a line still carrying it, which is what a
 # commented example turning into a live one otherwise costs a semester.
 SETTING_PLACEHOLDER = "CHANGE-ME"
 FORMATS = ("ipynb", "py", "rmd", "qmd", "latex", NO_STARTER)
@@ -533,7 +533,7 @@ def receipts_issue_body(
 
     There is no variant for an assignment handed in off GitHub: a Submission receipts issue exists
     only where the shape HAS one (`has_receipts_issue`), and no run ever opens one for any
-    other shape (`grades.receipts_thread_policy`), so a body describing one would be words
+    other shape (`receipts.receipts_thread_policy`), so a body describing one would be words
     nobody could reach."""
     lines = [RECEIPTS_ISSUE_MARKS[0], f"**Due:** {due_display}"]
     if late_policy_line:
@@ -576,7 +576,7 @@ def late_rule(window_days: int | None, penalty: str | None) -> str:
     semester site, and a second spelling of it elsewhere is how one semester comes to read two
     different rules for one deadline.
 
-    NOT `grades.late_policy`, which answers a different question: that is this rule against
+    NOT `receipts.late_policy`, which answers a different question: that is this rule against
     a real cutoff DATE (`accepted until Sunday 11 October 2026, 23:59 ...`), which only an
     assignment with a due date on record can be told."""
     if not window_days:

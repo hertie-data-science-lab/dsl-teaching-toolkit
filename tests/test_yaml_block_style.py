@@ -27,13 +27,8 @@ import pytest
 import yaml
 
 from dsl_course import bootstrap_course, welcome
-from dsl_course.grades import (
-    SheetSpec,
-    build_gradebooks,
-    dump_sheet,
-    new_sheet,
-    render_yaml,
-)
+from dsl_course.gradebook import build_gradebooks, render_yaml
+from dsl_course.grading_sheet import SheetSpec, dump_sheet, new_sheet
 from dsl_course.scaffold import _grading_config
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -107,7 +102,7 @@ PY_FILES = sorted((ROOT / "dsl_course").glob("*.py"))
 
 
 def _gradebook() -> str:
-    """One student's `grades.yml` - the `yaml.safe_dump` path (grades.render_yaml)."""
+    """One student's `grades.yml` - the `yaml.safe_dump` path (gradebook.render_yaml)."""
     sources = {
         slug: (
             SheetSpec(slug=slug, title=slug, is_group=False),
@@ -120,7 +115,7 @@ def _gradebook() -> str:
 
 
 def _grading_sheet_dump() -> str:
-    """One assignment's grading sheet - the `_SheetDumper` path (grades.dump_sheet). It has
+    """One assignment's grading sheet - the `_SheetDumper` path (grading_sheet.dump_sheet). It has
     its own dumper, so PyYAML's default is not what keeps this one block style."""
     spec = SheetSpec(
         slug="assignment-1",
@@ -159,10 +154,10 @@ def _semester_registry_dump() -> str:
 # them passes it explicitly. Flow style at the document root is a single braced line with
 # no `- ` at all, so FLOW_ITEM can't see it - assert on the braces/brackets instead.
 DUMPED = {
-    "grades-<handle>/grades.yml (grades.render_yaml)": _gradebook,
+    "grades-<handle>/grades.yml (gradebook.render_yaml)": _gradebook,
     "list_orgs --yaml inventory": _inventory_dump,
     "semesters.yml (discovery)": _semester_registry_dump,
-    "grading_sheets/<slug>.yml (grades.dump_sheet)": _grading_sheet_dump,
+    "grading_sheets/<slug>.yml (grading_sheet.dump_sheet)": _grading_sheet_dump,
 }
 
 # Every runtime-generated faculty-facing artefact rendered from templates or string

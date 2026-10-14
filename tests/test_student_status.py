@@ -15,7 +15,13 @@ from pathlib import Path
 
 import pytest
 
-from dsl_course import grades, roster, schedule, schemas, student_status
+from dsl_course import (
+    grading_spec,
+    roster,
+    schedule,
+    schemas,
+    student_status,
+)
 from dsl_course.gh_contents import load_yaml_lines
 from dsl_course.materials import Declared
 from dsl_course.schema_check import validate
@@ -162,16 +168,16 @@ def _facts() -> SemesterFacts:
     ]
     facts.teams = {"assignment-2-project": {"red-team": ["octocat", "hubot"]}}
     group = dataclasses.replace(
-        grades.GradingSpec(),
+        grading_spec.GradingSpec(),
         type="group",
         team_formation="self_select",
         max_team_size=3,
         questions={"Q1": "4", "Q2": "6"},
     )
     facts.specs = {
-        "assignment-1": dataclasses.replace(grades.GradingSpec(), title=""),
+        "assignment-1": dataclasses.replace(grading_spec.GradingSpec(), title=""),
         "assignment-2-project": group,
-        "assignment-3": grades.GradingSpec(),
+        "assignment-3": grading_spec.GradingSpec(),
     }
     facts.dest_paths = {
         "materials": {
@@ -630,7 +636,7 @@ def test_gather_reads_briefs_only_for_what_is_out(monkeypatch):
     monkeypatch.setattr(student_status, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(student_status, "yaml_file", lambda *a: INSTRUCTORS)
     monkeypatch.setattr(student_status, "read_materials", lambda org, repo: Declared())
-    monkeypatch.setattr(student_status.grades, "team_cap", lambda *a, **k: 3)
+    monkeypatch.setattr(student_status.team_formation, "team_cap", lambda *a, **k: 3)
     facts = _facts()
     extra = student_status.gather(_course(), facts, NOW)
     readme_reads = [r for r in reads if r[2] == "README.md"]

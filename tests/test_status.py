@@ -9,7 +9,7 @@ from datetime import date
 
 from dsl_course import (
     config_digest,
-    grades,
+    grading_sheet,
     mailer,
     roster,
     schedule,
@@ -127,7 +127,7 @@ def _stub_every_read(monkeypatch, standing=None):
     monkeypatch.setattr(status, "org_meta", lambda org: {"course_name": "Course"})
     monkeypatch.setattr(status, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(roster, "load", lambda org: [])
-    monkeypatch.setattr(grades, "sheet_slugs", lambda org: [])
+    monkeypatch.setattr(grading_sheet, "sheet_slugs", lambda org: [])
     monkeypatch.setattr(teams, "load", lambda org: {})
     monkeypatch.setattr(schedule, "load", lambda org: schedule.Schedule())
     monkeypatch.setattr(sync_faculty, "load_semester_faculty", lambda org: None)

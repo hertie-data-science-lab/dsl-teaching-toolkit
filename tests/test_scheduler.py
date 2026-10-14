@@ -22,7 +22,9 @@ from dsl_course import (
     config_digest,
     course,
     deploy,
+    distribute,
     ghcli,
+    grading_sheet,
     materials,
     notify,
     repos,
@@ -34,13 +36,12 @@ from dsl_course import (
 )
 from dsl_course import collect as collect_mod
 from dsl_course import faults as faults_mod
-from dsl_course import grades as grades_mod
 from dsl_course import issues as issues_mod
 from dsl_course import schedule as schedule_mod
 from dsl_course import settings as settings_mod
 from dsl_course.collect import Target
 from dsl_course.faults import ConfigFault, Unusable
-from dsl_course.grades import GradingSpec, LockWrite
+from dsl_course.grading_spec import GradingSpec
 from dsl_course.schedule import (
     ArchiveRow,
     AssignmentEntry,
@@ -48,6 +49,7 @@ from dsl_course.schedule import (
     Release,
     Schedule,
 )
+from dsl_course.team_formation import LockWrite
 
 BERLIN = ZoneInfo("Europe/Berlin")
 WHEN = datetime(2026, 9, 15, 14, 0, tzinfo=BERLIN)
@@ -4883,7 +4885,7 @@ _AFTER_MARKS = datetime(2026, 10, 28, tzinfo=timezone.utc)
 
 
 def _sheet_reads(monkeypatch, scores: dict[str, object], marker: bool = False):
-    """The two reads `grades.marks_due` makes: the fire-once marker and the sheet."""
+    """The two reads `distribute.marks_due` makes: the fire-once marker and the sheet."""
     reads: list[str] = []
     sheet = yaml.safe_dump(
         {"submissions": {h: {"score_individual": v} for h, v in scores.items()}}
@@ -4895,12 +4897,12 @@ def _sheet_reads(monkeypatch, scores: dict[str, object], marker: bool = False):
             return '{"returned": "x"}' if marker else None
         return sheet
 
-    monkeypatch.setattr(grades_mod, "get_file_content", get)
+    monkeypatch.setattr(distribute, "get_file_content", get)
     monkeypatch.setattr(
-        grades_mod,
+        distribute,
         "sheet_specs",
         lambda course, sched: {
-            "assignment-1": grades_mod.SheetSpec(
+            "assignment-1": grading_sheet.SheetSpec(
                 slug="assignment-1", title="A1", is_group=False
             )
         },
@@ -4911,18 +4913,18 @@ def _sheet_reads(monkeypatch, scores: dict[str, object], marker: bool = False):
 def test_a_fully_marked_sheet_is_ready_at_its_marks_return_datetime(monkeypatch):
     _sheet_reads(monkeypatch, {"ada-l": 7, "bo-b": 9})
     sched = _assignments(**{"assignment-1": _marks_entry()})
-    assert grades_mod.marks_due("C", "S", sched, _AFTER_MARKS) == ([], ["assignment-1"])
+    assert distribute.marks_due("C", "S", sched, _AFTER_MARKS) == ([], ["assignment-1"])
     # Before the moment nothing is read at all.
     reads = _sheet_reads(monkeypatch, {"ada-l": 7})
     before = datetime(2026, 10, 20, tzinfo=timezone.utc)
-    assert grades_mod.marks_due("C", "S", sched, before) == ([], [])
+    assert distribute.marks_due("C", "S", sched, before) == ([], [])
     assert reads == []
 
 
 def test_an_unfinished_sheet_is_a_fault_that_counts_and_names_nobody(monkeypatch):
     _sheet_reads(monkeypatch, {"ada-l": 7, "bo-b": None, "cy-c": ""})
     sched = _assignments(**{"assignment-1": _marks_entry()})
-    faults, ready = grades_mod.marks_due("C", "S", sched, _AFTER_MARKS)
+    faults, ready = distribute.marks_due("C", "S", sched, _AFTER_MARKS)
     assert ready == []
     (fault,) = faults
     assert "2 of 3 unit(s) unmarked" in fault.what
@@ -4938,8 +4940,8 @@ def test_an_unfinished_sheet_is_a_fault_that_counts_and_names_nobody(monkeypatch
 def test_a_returned_assignment_reads_no_sheet_and_raises_nothing(monkeypatch):
     reads = _sheet_reads(monkeypatch, {"ada-l": None}, marker=True)
     sched = _assignments(**{"assignment-1": _marks_entry()})
-    assert grades_mod.marks_due("C", "S", sched, _AFTER_MARKS) == ([], [])
-    assert reads == [grades_mod.marks_return_record("assignment-1")]
+    assert distribute.marks_due("C", "S", sched, _AFTER_MARKS) == ([], [])
+    assert reads == [distribute.marks_return_record("assignment-1")]
 
 
 def test_the_tick_asks_distribute_grades_to_return_the_due_assignment(monkeypatch):

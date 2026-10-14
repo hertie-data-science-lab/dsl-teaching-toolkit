@@ -111,16 +111,15 @@ from .collect import (
 )
 from .course import COURSE_ADMIN_TEAM, shared_repo, submission_repo
 from .deploy import deploy_many
+from .distribute import marks_due
 from .faults import ConfigFault, FaultKind, Severity, Unusable
 from .gh_contents import WITHHELD_ROOT_STUBS, root_stub_unwritten
 from .ghcli import gh, start_budget
-from .grades import (
+from .grading_sheet import sheet_path
+from .grading_spec import (
     grading_config_faults,
     load_grading_spec,
-    marks_due,
     semester_sheet_faults,
-    sheet_path,
-    sync_team_lock,
 )
 from .log import (
     CLIParser,
@@ -137,6 +136,7 @@ from .materials import kinds_reader
 from .repos import listed_is_private, set_visibility
 from .schedule import Release, grading_cutoff_datetime
 from .schedule_plan import deploy_dest
+from .team_formation import sync_team_lock
 
 # --------------------------------------------------------------------------- pure core
 

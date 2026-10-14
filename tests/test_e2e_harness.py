@@ -23,12 +23,15 @@ from dsl_course import (
     collect,
     course,
     ghcli,
-    grades,
+    gradebook,
+    grading_sheet,
+    grading_spec,
     repos,
     roster,
     scaffold,
     schedule,
     settings,
+    team_formation,
 )
 from tests.e2e import (
     allowlist,
@@ -749,7 +752,7 @@ def test_the_lock_file_goes_back_even_when_the_walk_died_before_distribute(monke
     # back: cleanup sweeps by run id, and this file carries none.
     module = _pipeline_module(monkeypatch)
     assert module._config_restore(b"assignments: {}\n", None) == {
-        grades.TEAM_LOCK_PATH: b"assignments: {}\n"
+        team_formation.TEAM_LOCK_PATH: b"assignments: {}\n"
     }
 
 
@@ -768,9 +771,9 @@ def test_a_lock_file_that_was_not_there_is_restored_by_deleting_it(monkeypatch):
         },
     )
     assert module._config_restore(None, recorded) == {
-        grades.TEAM_LOCK_PATH: None,
-        grades.SEMESTER_CSV_NAME: CRLF_CSV,
-        grades.DISTRIBUTED_PATH: b"target,channel\n",
+        team_formation.TEAM_LOCK_PATH: None,
+        gradebook.SEMESTER_CSV_NAME: CRLF_CSV,
+        gradebook.DISTRIBUTED_PATH: b"target,channel\n",
     }
 
 
@@ -1182,7 +1185,7 @@ def test_the_config_the_harness_writes_parses_to_the_shape_it_meant(shape):
     # The whole run rests on these two files: the template's `submit_via` and the
     # semester's run settings, and a value the parser drops hands out the DEFAULT shape
     # under another name.
-    template = grades.parse_grading_spec(shapes.configure(_seeded(shape), shape))
+    template = grading_spec.parse_grading_spec(shapes.configure(_seeded(shape), shape))
     block = yaml.safe_dump({"assignments": {"a": shapes.run_settings(shape)}})
     (fault,) = settings.parse_instance(block).faults or (None,)
     assert fault is None
@@ -1245,7 +1248,12 @@ def test_the_definition_is_read_off_the_solution_branch(monkeypatch):
     )
     assert shapes.read_config("course-org", "assignment-90-x") == ("title: x\n", "sha1")
     assert seen == [
-        ("course-org", "assignment-90-x", grades.GRADING_FILE, course.SOLUTION_BRANCH)
+        (
+            "course-org",
+            "assignment-90-x",
+            grading_spec.GRADING_FILE,
+            course.SOLUTION_BRANCH,
+        )
     ]
 
 
@@ -1267,7 +1275,9 @@ def test_the_definition_is_written_back_on_the_solution_branch(monkeypatch):
     )
     shapes.write_config("course-org", "assignment-90-x", "title: x\n", "sha1")
     args, kw = calls[0]
-    assert f"repos/course-org/assignment-90-x/contents/{grades.GRADING_FILE}" in args
+    assert (
+        f"repos/course-org/assignment-90-x/contents/{grading_spec.GRADING_FILE}" in args
+    )
     assert f"branch={course.SOLUTION_BRANCH}" in args
     # The sha the text was READ at, so a commit that landed in between is refused rather
     # than silently reverted.
@@ -1472,7 +1482,7 @@ submissions:
     info:
     score_individual:
     feedback_individual:
-    {grades.NOTES_KEY}:
+    {grading_sheet.NOTES_KEY}:
 """
 
 
@@ -1483,7 +1493,7 @@ def _stub_estate(monkeypatch, module) -> list[tuple[str, dict]]:
     def content(org, repo, path, ref=""):
         if path.endswith("schedule.yml"):
             return SCHEDULE
-        if path.startswith(f"{grades.SHEETS_DIR}/"):
+        if path.startswith(f"{grading_sheet.SHEETS_DIR}/"):
             return SHEET_TEXT
         if path.startswith("_assignments/"):
             return '---\nsubmit_shape: "assignment-repo-private"\n---\n'
@@ -1499,7 +1509,7 @@ def _stub_estate(monkeypatch, module) -> list[tuple[str, dict]]:
     monkeypatch.setattr(module.schedule_edit, "put_schedule", lambda *a, **k: True)
     monkeypatch.setattr(module.schedule_edit, "put_instance", lambda *a, **k: True)
     monkeypatch.setattr(module.discovery, "list_org_repos", lambda org: [])
-    monkeypatch.setattr(module.grades, "find_receipts_issue", lambda org, repo: None)
+    monkeypatch.setattr(module.receipts, "find_receipts_issue", lambda org, repo: None)
     monkeypatch.setattr(
         module.repos,
         "direct_collaborators",

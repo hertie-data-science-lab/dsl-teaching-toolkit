@@ -71,7 +71,8 @@ from .faults import (
     parse_moment,
     zone_name,
 )
-from .grades import GRADING_FILE, SHEETS_DIR
+from .grading_sheet import SHEETS_DIR
+from .grading_spec import GRADING_FILE
 from .issues import (
     Issue,
     close_issues_titled,

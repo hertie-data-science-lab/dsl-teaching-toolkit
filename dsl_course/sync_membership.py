@@ -52,9 +52,10 @@ from .discovery import (
 from .faults import Unusable
 from .gh_contents import read_error
 from .gh_teams import acting_login, membership_changes, reset_membership_changes
-from .grades import ensure_gradebooks, sync_team_lock
+from .gradebook import ensure_gradebooks
 from .log import CLIParser, Summary, add_preview_flag, log_err, log_ok, plural
 from .repos import direct_collaborators_by_repo
+from .team_formation import sync_team_lock
 from .welcome import refresh_join_team_form
 
 # What a semester's hand-edited config can be wrong in a way this sync cannot act on: a CSV

@@ -46,7 +46,10 @@ from zoneinfo import ZoneInfo
 import yaml
 
 from . import (
-    grades,
+    distribute,
+    gradebook,
+    grading_sheet,
+    grading_spec,
     policy,
     records,
     roster,
@@ -290,12 +293,12 @@ class SemesterFacts:
     # The semester's view of the course-side templates it cites: every value in their
     # grading_config.yml that will not grade as written. Rolled up as COURSE problems.
     template_faults: list[ConfigFault] = field(default_factory=list)
-    specs: dict[str, grades.GradingSpec] = field(
+    specs: dict[str, grading_spec.GradingSpec] = field(
         default_factory=dict
     )  # by schedule key
     sheets: dict[str, dict] = field(default_factory=dict)  # by semester-side name
     # `{schedule key: its name}`: the template's title, else its README heading
-    # (`grades.assignment_title`).
+    # (`grading_spec.assignment_title`).
     titles: dict[str, str] = field(default_factory=dict)
     # `{handle, casefolded: when its gradebook was last written}`, off distributed.csv.
     # A gradebook holds every assignment, so its record names none.
@@ -375,8 +378,8 @@ STOPS = {
     teams.TEAMS_PATH: (
         "That row is ignored: the team is not created or the member not added."
     ),
-    grades.SHEETS_DIR: "That sheet is not updated, and none of its marks are returned.",
-    grades.GRADING_FILE: "Marking uses the toolkit's default for that value.",
+    grading_sheet.SHEETS_DIR: "That sheet is not updated, and none of its marks are returned.",
+    grading_spec.GRADING_FILE: "Marking uses the toolkit's default for that value.",
     COURSE_CONFIG: (
         "Automation skips this course: instructor access and semesters are not updated."
     ),
@@ -417,10 +420,10 @@ _FILES = {
     ),
     roster.ROSTER_PATH: _Where("roster", "semester", "K5", "roster", "ROSTER"),
     teams.TEAMS_PATH: _Where("teams", "semester", "K5", "teams", "TEAMS"),
-    grades.GRADING_FILE: _Where(
+    grading_spec.GRADING_FILE: _Where(
         "template", "course", "C5", "template", "GRADING_CONFIG"
     ),
-    grades.LEGACY_GRADING_FILE: _Where(
+    grading_spec.LEGACY_GRADING_FILE: _Where(
         "template", "course", "C5", "template", "GRADING_CONFIG"
     ),
     COURSE_CONFIG: _Where("course", "course", "C3", "course", "COURSE"),
@@ -551,18 +554,18 @@ def plain_text(fault: ConfigFault, filed: _Where, entry: str) -> str:
 
 
 def _where_filed(fault: ConfigFault) -> _Where:
-    if fault.where == grades.ORG_SETTINGS:
+    if fault.where == grading_spec.ORG_SETTINGS:
         return _ORG
     if fault.field == "marks_return_datetime" and fault.file == schedule.SCHEDULE_PATH:
         return _MARKS_DUE
     if fault.per_semester and fault.file == ASSIGNMENTS_FILE:
         return _HANDED_OUT_SETTING
     if fault.per_semester and fault.file in (
-        grades.GRADING_FILE,
-        grades.LEGACY_GRADING_FILE,
+        grading_spec.GRADING_FILE,
+        grading_spec.LEGACY_GRADING_FILE,
     ):
         return _SEMESTER_TEMPLATE
-    if fault.file.startswith(f"{grades.SHEETS_DIR}/"):
+    if fault.file.startswith(f"{grading_sheet.SHEETS_DIR}/"):
         return _SHEET
     return _FILES.get(fault.file, _OTHER)
 
@@ -629,9 +632,9 @@ def problem_from_fault(
         if filed.kind == "template":
             entry = fault.in_repo
         elif filed is _SHEET:
-            entry = fault.file.removeprefix(f"{grades.SHEETS_DIR}/").removesuffix(
-                ".yml"
-            )
+            entry = fault.file.removeprefix(
+                f"{grading_sheet.SHEETS_DIR}/"
+            ).removesuffix(".yml")
         else:
             entry = _entry_of(fault.where)
         text = plain_text(fault, filed, entry)
@@ -640,8 +643,10 @@ def problem_from_fault(
             if fault.consequence
             else _cost(fault.what)
             or STOPS.get(fault.file)
-            or STOPS.get(grades.SHEETS_DIR if filed is _SHEET else "", "")
-            or STOPS.get(grades.GRADING_FILE if filed.kind == "template" else "", "")
+            or STOPS.get(grading_sheet.SHEETS_DIR if filed is _SHEET else "", "")
+            or STOPS.get(
+                grading_spec.GRADING_FILE if filed.kind == "template" else "", ""
+            )
         )
     fix = {
         "repo": f"{fault.in_org or org}/{fault.in_repo}",
@@ -661,7 +666,7 @@ def problem_from_fault(
             "line": None,
             "screen": None,
             "entry": None,
-            "url": grades.MEMBER_PRIVILEGES_URL.format(org=owner),
+            "url": grading_spec.MEMBER_PRIVILEGES_URL.format(org=owner),
         }
     elif fault.ref and fault.ref != "main":
         fix["ref"] = fault.ref
@@ -1929,7 +1934,7 @@ def release_state(
 
 
 def sheet_counts(
-    sheet: dict | None, spec: grades.SheetSpec | None
+    sheet: dict | None, spec: grading_sheet.SheetSpec | None
 ) -> tuple[int, int, int | None]:
     """`(marked units, units on the sheet, units with a submission recorded)` off one
     parsed grading sheet. Submissions are None where the assignment collects no commits."""
@@ -1939,11 +1944,13 @@ def sheet_counts(
     if not isinstance(container, dict):
         return 0, 0, None
     blocks = [b for b in container.values() if isinstance(b, dict)]
-    filled = sum(not grades.is_blank(b.get(spec.score_key)) for b in blocks)
+    filled = sum(not grading_sheet.is_blank(b.get(spec.score_key)) for b in blocks)
     if not spec.collects_commits:
         return filled, len(blocks), None
     submitted = sum(
-        not grades.is_blank((b.get(grades.INFO_KEY) or {}).get("submitted"))
+        not grading_sheet.is_blank(
+            (b.get(grading_sheet.INFO_KEY) or {}).get("submitted")
+        )
         for b in blocks
     )
     return filled, len(blocks), submitted
@@ -1967,7 +1974,7 @@ def assignment_state(
     now: datetime,
     entry: schedule.AssignmentEntry,
     cutoff: datetime | None,
-    spec: grades.GradingSpec,
+    spec: grading_spec.GradingSpec,
     units: int,
     returned: bool,
     out: bool = False,
@@ -2002,7 +2009,7 @@ def assignment_state(
 
 def marks_returned(
     sheet: dict | None,
-    spec: grades.SheetSpec | None,
+    spec: grading_sheet.SheetSpec | None,
     returned_at: dict[str, datetime],
     changed: datetime | None,
 ) -> bool:
@@ -2033,7 +2040,7 @@ def _problem_entries(problems: list[dict]) -> set[str]:
     return {p["fix"].get("entry") for p in problems if p["fix"].get("entry")}
 
 
-def run_settings(spec: grades.GradingSpec) -> dict[str, dict]:
+def run_settings(spec: grading_spec.GradingSpec) -> dict[str, dict]:
     """Each run setting's effective value and the layer it came from (`settings`), so the
     console shows "5 days, this course's default" without a cascade of its own."""
     sources = dict(spec.sources)
@@ -2053,13 +2060,13 @@ def render_assignments(
     sheet_specs = {}
     for k, e in facts.sched.assignments.items():
         name = schedule.semester_name(k, e)
-        gspec = facts.specs.get(k, grades.GradingSpec())
-        sheet_specs[name] = grades.sheet_spec(
+        gspec = facts.specs.get(k, grading_spec.GradingSpec())
+        sheet_specs[name] = grading_spec.sheet_spec(
             facts.sched, k, name, gspec, gspec.is_group
         )
     rows = []
     for slug, entry in facts.sched.assignments.items():
-        spec = facts.specs.get(slug, grades.GradingSpec())
+        spec = facts.specs.get(slug, grading_spec.GradingSpec())
         name = schedule.semester_name(slug, entry)
         cutoff = schedule.grading_cutoff_datetime(facts.sched, slug)
         units = len(assignment_rows(facts.listing, name)) if facts.listing else 0
@@ -2069,7 +2076,7 @@ def render_assignments(
         # The automatic return's once-only record is written only when every unit went
         # back, so it settles the question: a later sheet commit that changes no gradebook
         # leaves `distributed_at` where it was, and the comparison would say marking.
-        returned = grades.marks_return_record(name) in facts.config_paths or (
+        returned = distribute.marks_return_record(name) in facts.config_paths or (
             total > 0
             and filled == total
             and marks_returned(
@@ -2475,9 +2482,9 @@ def semester_inputs(facts: SemesterFacts, course: CourseFacts) -> dict[str, str 
         sync_faculty.SEMESTER_PEOPLE_PATH: paths.get(sync_faculty.SEMESTER_PEOPLE_PATH),
         roster.ROSTER_PATH: paths.get(roster.ROSTER_PATH),
         teams.TEAMS_PATH: paths.get(teams.TEAMS_PATH),
-        grades.SHEETS_DIR: paths.get(grades.SHEETS_DIR),
+        grading_sheet.SHEETS_DIR: paths.get(grading_sheet.SHEETS_DIR),
         f"course/{COURSE_CONFIG}": (course.github_paths or {}).get(COURSE_CONFIG),
-        grades.TEAM_LOCK_PATH: paths.get(grades.TEAM_LOCK_PATH),
+        team_formation.TEAM_LOCK_PATH: paths.get(team_formation.TEAM_LOCK_PATH),
     }
 
 
@@ -2771,11 +2778,11 @@ def gather_course(course_org: str) -> CourseFacts:
                 topic=is_assignment_template(row),
             )
             text = get_file_content(
-                course_org, name, grades.GRADING_FILE, ref=SOLUTION_BRANCH
+                course_org, name, grading_spec.GRADING_FILE, ref=SOLUTION_BRANCH
             )
             spec = None
             if text is not None:
-                t.faults, spec = grades.grading_spec_faults(
+                t.faults, spec = grading_spec.grading_spec_faults(
                     name, name, course_org, text, None
                 )
             if not hands_out_starter(spec):
@@ -2800,7 +2807,7 @@ def gather_course(course_org: str) -> CourseFacts:
     return facts
 
 
-def hands_out_starter(spec: grades.GradingSpec | None) -> bool:
+def hands_out_starter(spec: grading_spec.GradingSpec | None) -> bool:
     """Whether the template hands out a starter to check: not with `format: none` (no
     starter file), nor with `submit_via: external` (no repo is created). A file that does
     not parse keeps the check."""
@@ -2840,16 +2847,18 @@ def _outcomes(semester_org: str, paths: dict[str, str]) -> list[dict]:
 
 
 def _returned_at(semester_org: str) -> dict[str, datetime]:
-    text = get_file_content(semester_org, schedule.CONFIG_REPO, grades.DISTRIBUTED_PATH)
+    text = get_file_content(
+        semester_org, schedule.CONFIG_REPO, gradebook.DISTRIBUTED_PATH
+    )
     if not text:
         return {}
     try:
-        records = grades.parse_distributed(text)
+        records = gradebook.parse_distributed(text)
     except Unusable:
         return {}
     out: dict[str, datetime] = {}
     for (target, assignment, channel), (_digest, when, _issue) in records.items():
-        if channel != grades.CHANNEL_GRADEBOOK or assignment:
+        if channel != gradebook.CHANNEL_GRADEBOOK or assignment:
             continue
         try:
             at = datetime.fromisoformat(when)
@@ -2883,7 +2892,7 @@ def gather_semester(course_org: str, semester_org: str, now: datetime) -> Semest
         *schedule.source_faults(sched, course_org),
         *sched.faults,
         *faculty_window_faults(sched, windows),
-        *grades.marks_due(course_org, semester_org, sched, now)[0],
+        *distribute.marks_due(course_org, semester_org, sched, now)[0],
     ]
     facts.people = sync_faculty.read_semester_people(semester_org, facts.people_faults)
     try:
@@ -2895,36 +2904,38 @@ def gather_semester(course_org: str, semester_org: str, now: datetime) -> Semest
         facts.teams = teams.load(semester_org, facts.teams_faults, known)
     except Unusable:
         facts.teams = {}
-    # `grades.semester_sheet_faults`, with each sheet read once for the faults and the marks.
-    sheet_specs = grades.sheet_specs(course_org, sched)
+    # `grading_spec.semester_sheet_faults`, with each sheet read once for the faults and the marks.
+    sheet_specs = grading_spec.sheet_specs(course_org, sched)
     sheet_texts = {
         name: get_file_content(
-            semester_org, schedule.CONFIG_REPO, grades.sheet_path(name)
+            semester_org, schedule.CONFIG_REPO, grading_sheet.sheet_path(name)
         )
         for name in sorted(sheet_specs)
     }
     for name, text in sheet_texts.items():
         if text is not None:
-            facts.sheet_faults += grades.sheet_faults(name, text, sheet_specs[name])
-    grades.grading_config_faults(
+            facts.sheet_faults += grading_sheet.sheet_faults(
+                name, text, sheet_specs[name]
+            )
+    grading_spec.grading_config_faults(
         course_org, semester_org, sched, facts.template_faults, facts.listing
     )
     for slug, entry in sched.assignments.items():
-        facts.specs[slug] = grades.load_grading_spec(
+        facts.specs[slug] = grading_spec.load_grading_spec(
             course_org, entry.course_source_repo, semester_org=semester_org, slug=slug
         )
-        facts.titles[slug] = grades.assignment_title(
+        facts.titles[slug] = grading_spec.assignment_title(
             course_org, entry.course_source_repo, facts.specs[slug], slug
         )
         name = schedule.semester_name(slug, entry)
         text = sheet_texts[name]
         if text:
             try:
-                facts.sheets[name] = grades.parse_sheet(text)
-            except grades.SheetUnreadable:
+                facts.sheets[name] = grading_sheet.parse_sheet(text)
+            except grading_sheet.SheetUnreadable:
                 pass  # its fault is in sheet_faults
             facts.sheet_changed[name] = last_commit_at(
-                semester_org, schedule.CONFIG_REPO, grades.sheet_path(name)
+                semester_org, schedule.CONFIG_REPO, grading_sheet.sheet_path(name)
             )
     facts.returned_at = _returned_at(semester_org)
     for repo in sorted(

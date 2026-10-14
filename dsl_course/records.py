@@ -31,7 +31,7 @@ RECORDS = {
     # real run of it goes ahead only straight after (`assign.preview_first`)
     "solution_preview": "solution-preview.json",
     # one marker per assignment whose marks automation returned at its
-    # `marks_return_datetime` (`grades.marks_due`)
+    # `marks_return_datetime` (`distribute.marks_due`)
     "marks_returned": "marks-returned",
     "gradebook": "gradebook",
     "distributed": "gradebook/distributed.csv",

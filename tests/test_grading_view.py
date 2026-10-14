@@ -14,20 +14,22 @@ from __future__ import annotations
 
 import pytest
 
-from dsl_course import grades, roster
-from dsl_course.grades import (
-    NOTES_KEY,
+from dsl_course import (
+    distribute,
+    grading_sheet,
+    roster,
+)
+from dsl_course.distribute import _marks_digest
+from dsl_course.gradebook import (
     STUDENT_VIEW_KEYS,
-    SheetSpec,
     _cell,
-    _marks_digest,
     build_gradebooks,
-    load_sheets,
     needs_hand_decision,
     render_readme,
     render_registrar_csv,
     student_view,
 )
+from dsl_course.grading_sheet import NOTES_KEY, SheetSpec, load_sheets
 
 TITLE = "Neural networks from scratch"
 QUESTIONS = {"Q1": "15", "Q2": "15", "Q3": "10", "Q4": "10"}
@@ -570,12 +572,18 @@ def test_no_late_rule_ignores_any_late_penalty(late_penalty):
     block["late_penalty"] = late_penalty
     view = student_view(spec, "ada-l", block, "ada-l")
     assert (view.get("penalty", ""), view["final_grade"]) == ("", "20")
-    assert grades.sheet_hold_reasons(spec, {"submissions": {"ada-l": block}}) == {}
+    assert (
+        grading_sheet.sheet_hold_reasons(spec, {"submissions": {"ada-l": block}}) == {}
+    )
     block["score_individual"] = "pass"
     assert not needs_hand_decision(spec, block)
-    assert grades.ignored_late_penalties(spec, {"submissions": {"ada-l": block}}) == 1
+    assert (
+        distribute.ignored_late_penalties(spec, {"submissions": {"ada-l": block}}) == 1
+    )
     ruled = individual_spec(late_penalty_per_day="10%")
-    assert grades.ignored_late_penalties(ruled, {"submissions": {"ada-l": block}}) == 0
+    assert (
+        distribute.ignored_late_penalties(ruled, {"submissions": {"ada-l": block}}) == 0
+    )
 
 
 def test_only_a_unit_whose_penalty_moved_its_mark_is_mailed_again():

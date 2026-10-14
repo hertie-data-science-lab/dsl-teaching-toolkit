@@ -19,7 +19,15 @@ from pathlib import Path
 import pytest
 import yaml
 
-from dsl_course import course, policy, records, roster, teams, welcome
+from dsl_course import (
+    course,
+    policy,
+    records,
+    roster,
+    team_formation,
+    teams,
+    welcome,
+)
 
 WELCOME = Path(__file__).resolve().parents[1] / "templates" / "join"
 TEMPLATES = [
@@ -461,9 +469,8 @@ def test_an_absent_lock_file_is_told_apart_from_an_unknown_slug():
 @needs_js
 def test_the_scanner_is_not_confused_by_the_files_own_header():
     # Every line of the header is a comment, and the file always carries one.
-    from dsl_course import grades
 
-    real = grades.team_lock_text(
+    real = team_formation.team_lock_text(
         {
             "project": (
                 "self_select",
@@ -490,9 +497,8 @@ def test_an_empty_close_date_is_still_a_line_the_scanner_reads():
     # The writer emits `team_formation_closes:` with nothing after it rather than dropping
     # the line, so the shape the scanner sees never changes; it has to come back as the
     # empty string, not as the next entry's date or as a parse miss.
-    from dsl_course import grades
 
-    real = grades.team_lock_text(
+    real = team_formation.team_lock_text(
         {
             "early": ("self_select", 3, "closed", "", ""),
             "later": ("self_select", 4, "open", "2026-11-30", ""),
@@ -759,9 +765,8 @@ _PAGE = "https://semester.github.io/assignments/02-assignment-2.html"
 def _lock_for(
     window: str, closes: str = "2026-10-04", cap: int = 4, page: str = _PAGE
 ) -> str:
-    from dsl_course import grades
 
-    return grades.team_lock_text(
+    return team_formation.team_lock_text(
         {"assignment-2": ("self_select", cap, window, closes, page)}
     )
 
@@ -1351,9 +1356,8 @@ def test_the_splice_replaces_the_field_and_leaves_the_rest_of_the_form_alone():
 def test_only_the_assignments_whose_window_is_open_are_offered():
     # Offering a slug the workflow would refuse is inviting a student to be refused, and
     # the refusal arrives minutes later as a comment.
-    from dsl_course import grades
 
-    lock = grades.team_lock_text(
+    lock = team_formation.team_lock_text(
         {
             "a1": ("none", 5, "none", "", ""),
             "a2": ("self_select", 4, "closed", "2026-09-01", "https://c.github.io/a2"),
@@ -1387,9 +1391,8 @@ def test_a_semester_whose_lock_cannot_be_read_gets_the_free_text_form(monkeypatc
 
 
 def test_a_lock_with_nothing_open_pushes_the_not_needed_form(monkeypatch):
-    from dsl_course import grades
 
-    lock = grades.team_lock_text(
+    lock = team_formation.team_lock_text(
         {"a2": ("self_select", 4, "closed", "2026-09-01", "https://c.github.io/a2")}
     )
     monkeypatch.setattr(welcome, "get_file_content", lambda *a, **k: lock)
@@ -1409,9 +1412,9 @@ def test_the_targeted_refresh_pushes_the_form_alone(monkeypatch):
     # The tick that moves the lock calls this, and it must not turn into the whole seeding
     # pass: `refresh_join_workflows` writes six files and ensures three labels, none of
     # which moves with the calendar. One file, one commit, one blob compare.
-    from dsl_course import grades, welcome
+    from dsl_course import welcome
 
-    lock = grades.team_lock_text(
+    lock = team_formation.team_lock_text(
         {"a3": ("self_select", 4, "open", "2026-10-04", "https://c.github.io/a3")}
     )
     monkeypatch.setattr(welcome, "get_file_content", lambda *a, **k: lock)

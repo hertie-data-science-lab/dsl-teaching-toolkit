@@ -41,7 +41,7 @@ By the engine's own rule the push is therefore ONE DAY LATE, and every assertion
 
 One-off setup: every onboarded enrolled student in the demo semester must already have their
 `grades-<handle>` gradebook - run
-`python3 -c "from dsl_course import grades; grades.ensure_gradebooks('<semester>')"` once.
+`python3 -c "from dsl_course import gradebook; gradebook.ensure_gradebooks('<semester>')"` once.
 The handout provisions them otherwise, and a repo this run created is estate drift the
 teardown cannot take back - it is the student's namespace, not the run's.
 
@@ -68,10 +68,14 @@ from dsl_course import (
     discovery,
     gh_contents,
     ghcli,
-    grades,
+    gradebook,
+    grading_sheet,
+    grading_spec,
+    receipts,
     repos,
     roster,
     seed,
+    team_formation,
 )
 from dsl_course.log import log
 
@@ -318,17 +322,17 @@ def _preflight(run_id: str) -> None:
 
     # The handout provisions a missing gradebook now, and a repo it created is estate drift
     # no namespace sweep can undo (it is not this run's namespace - it is the student's).
-    # Run `grades.ensure_gradebooks` once by hand and this passes for ever after.
+    # Run `gradebook.ensure_gradebooks` once by hand and this passes for ever after.
     listed = {row["name"] for row in discovery.list_org_repos(SEMESTER_ORG)}
     assert f"{course.GRADEBOOK_PREFIX}{student.handle()}" in listed, (
         "the test student has no gradebook yet - the handout would create it and the "
-        "teardown could not take it back; run grades.ensure_gradebooks once"
+        "teardown could not take it back; run gradebook.ensure_gradebooks once"
     )
     short = missing_gradebooks(students, listed)
     assert not short, (
         f"{short} onboarded student(s) in {SEMESTER_ORG} have no gradebook - the handout "
         f"would create them and the teardown could not take them back; run "
-        f"grades.ensure_gradebooks('{SEMESTER_ORG}') once"
+        f"gradebook.ensure_gradebooks('{SEMESTER_ORG}') once"
     )
 
     for org in (COURSE_ORG, SEMESTER_ORG):
@@ -583,7 +587,7 @@ def _sheet(slug: str) -> str:
     """This assignment's grading sheet, as semester-config holds it right now."""
     return (
         gh_contents.get_file_content(
-            SEMESTER_ORG, course.CONFIG_REPO, grades.sheet_path(slug)
+            SEMESTER_ORG, course.CONFIG_REPO, grading_sheet.sheet_path(slug)
         )
         or ""
     )
@@ -594,7 +598,7 @@ def _receipts_issue(repo: str):
     there is none (a repo with no issue, and a shape with no repo alike), or the
     `LOOKUP_FAILED` sentinel - which is deliberately NOT collapsed into None, because
     "there is no issue" is exactly what four of the five shapes are asserting."""
-    return grades.find_receipts_issue(SEMESTER_ORG, repo) if repo else None
+    return receipts.find_receipts_issue(SEMESTER_ORG, repo) if repo else None
 
 
 def _issue_comments(repo: str) -> list[str]:
@@ -697,7 +701,7 @@ def _mark_the_sheet(slug: str, feedback: str) -> str:
     makes one - not a re-dump from the parsed sheet, because half of what is being tested
     is that the toolkit leaves a hand-edited file alone."""
     read = gh_contents.get_file_with_sha(
-        SEMESTER_ORG, course.CONFIG_REPO, grades.sheet_path(slug)
+        SEMESTER_ORG, course.CONFIG_REPO, grading_sheet.sheet_path(slug)
     )
     assert read is not None, f"{slug}'s grading sheet is not there to mark"
     text, sha = read
@@ -705,15 +709,15 @@ def _mark_the_sheet(slug: str, feedback: str) -> str:
         text.replace("    score_individual:\n", f"    score_individual: {E2E_SCORE}\n")
         .replace("    feedback_individual:\n", f"    feedback_individual: {feedback}\n")
         .replace(
-            f"    {grades.NOTES_KEY}:\n",
-            f"    {grades.NOTES_KEY}: {E2E_PRIVATE_NOTE}\n",
+            f"    {grading_sheet.NOTES_KEY}:\n",
+            f"    {grading_sheet.NOTES_KEY}: {E2E_PRIVATE_NOTE}\n",
         )
     )
     assert marked != text, f"{slug}'s sheet had no blank cells to type into"
     assert gh_contents.put_file(
         SEMESTER_ORG,
         course.CONFIG_REPO,
-        grades.sheet_path(slug),
+        grading_sheet.sheet_path(slug),
         marked.encode(),
         "e2e: mark the assignment",
         expected_sha=sha,
@@ -729,16 +733,16 @@ def _shared_state(student_handle: str) -> dict[str, bytes | None]:
     the teardown hands back, and what "changed nothing" is measured against. The estate
     check compares blob shas, and a round trip through text is not the same blob - see
     `file_bytes` for what it loses."""
-    gradebook = f"{course.GRADEBOOK_PREFIX}{student_handle}"
+    book = f"{course.GRADEBOOK_PREFIX}{student_handle}"
     return {
         "registrar": cleanup.file_bytes(
-            SEMESTER_ORG, course.CONFIG_REPO, grades.SEMESTER_CSV_NAME
+            SEMESTER_ORG, course.CONFIG_REPO, gradebook.SEMESTER_CSV_NAME
         ),
         "distributed": cleanup.file_bytes(
-            SEMESTER_ORG, course.CONFIG_REPO, grades.DISTRIBUTED_PATH
+            SEMESTER_ORG, course.CONFIG_REPO, gradebook.DISTRIBUTED_PATH
         ),
-        "grades_yml": cleanup.file_bytes(SEMESTER_ORG, gradebook, "grades.yml"),
-        "readme": cleanup.file_bytes(SEMESTER_ORG, gradebook, "README.md"),
+        "grades_yml": cleanup.file_bytes(SEMESTER_ORG, book, "grades.yml"),
+        "readme": cleanup.file_bytes(SEMESTER_ORG, book, "README.md"),
     }
 
 
@@ -746,11 +750,13 @@ def _lock_state() -> bytes | None:
     """`assignments.lock.yml` as it stands, or None if the semester has none yet.
 
     Read BEFORE the walk, unlike everything in `_shared_state`: the handout is what moves
-    this file (`assign.provision_all` ends in `grades.sync_team_lock`, and every schedule
+    this file (`assign.provision_all` ends in `team_formation.sync_team_lock`, and every schedule
     push dispatches the membership sync, which writes it too), so by the time distribute
     runs it already carries this run's assignments. Recording it at step 12 would hand back
     the drift instead of the file."""
-    return cleanup.file_bytes(SEMESTER_ORG, course.CONFIG_REPO, grades.TEAM_LOCK_PATH)
+    return cleanup.file_bytes(
+        SEMESTER_ORG, course.CONFIG_REPO, team_formation.TEAM_LOCK_PATH
+    )
 
 
 def _config_restore(
@@ -767,10 +773,10 @@ def _config_restore(
     existed - and `cleanup.restore_files` deletes those rather than writing them;
     `gh_contents.put_files` in turn drops a delete for a path that is not there, so an
     absent-then-still-absent file costs no commit."""
-    files: dict[str, bytes | None] = {grades.TEAM_LOCK_PATH: lock}
+    files: dict[str, bytes | None] = {team_formation.TEAM_LOCK_PATH: lock}
     if recorded is not None:
-        files[grades.SEMESTER_CSV_NAME] = recorded.detail["registrar"]
-        files[grades.DISTRIBUTED_PATH] = recorded.detail["distributed"]
+        files[gradebook.SEMESTER_CSV_NAME] = recorded.detail["registrar"]
+        files[gradebook.DISTRIBUTED_PATH] = recorded.detail["distributed"]
     return files
 
 
@@ -1096,7 +1102,7 @@ def test_every_template_declares_the_shape_it_was_handed_out_as(pipeline, shape)
     # the harness held: a config written to the wrong branch, or one the parser drops,
     # hands out the DEFAULT shape - and every assertion below it would then be about
     # `github/private` wearing another name.
-    spec = grades.load_grading_spec(COURSE_ORG, pipeline.slug(shape))
+    spec = grading_spec.load_grading_spec(COURSE_ORG, pipeline.slug(shape))
     assert spec.submit_via == shape.submit_via
     assert spec.submit_shape == shape.key
     assert spec.submit_url == shape.submit_url
@@ -1149,7 +1155,7 @@ def test_a_feedback_issue_exists_only_where_the_shape_has_one(pipeline, shape):
 def test_every_shape_gets_a_grading_sheet_with_the_students_row(pipeline, shape):
     # Including `external`, which creates no repo at all: the sheet is how it is marked,
     # and a shape with nothing to clone still has a semester to grade.
-    sheet = grades.parse_sheet(
+    sheet = grading_sheet.parse_sheet(
         pipeline.stages["at_handout"].detail["sheets"][shape.name]
     )
     assert pipeline.student in sheet["submissions"]
@@ -1173,7 +1179,7 @@ def test_no_shape_records_an_issue_channel(pipeline, shape):
     recorded = _text(pipeline.stages["distribute"].detail["after"]["distributed"])
     rows = [line for line in recorded.splitlines()[1:] if pipeline.student in line]
     assert not [
-        r for r in rows if f",{pipeline.slug(shape)},{grades.CHANNEL_ISSUE}," in r
+        r for r in rows if f",{pipeline.slug(shape)},{gradebook.CHANNEL_ISSUE}," in r
     ]
 
 
@@ -1216,7 +1222,7 @@ def test_the_freeze_timed_the_submission_by_githubs_own_push_record(pipeline):
     # The sheet's half of the same fact. `info.submitted_note` exists only for the two
     # rungs built from the student's clock - `COMMIT_ONLY_NOTE` and `SUSPECT_NOTE` - so a
     # row GitHub timed carries none at all.
-    info = grades.parse_sheet(
+    info = grading_sheet.parse_sheet(
         pipeline.stages["artefacts"].detail["sheets"][PRIVATE.name]
     )["submissions"][pipeline.student]["info"]
     assert "submitted_note" not in info, info.get("submitted_note")
@@ -1234,18 +1240,18 @@ def test_the_autograde_marker_was_written(pipeline):
 def test_the_sheet_is_created_at_handout_with_the_students_row(pipeline):
     # Created empty and dated, not at the first mark: a grader has to be able to plan
     # around it, and a missing row must be visibly missing.
-    sheet = grades.parse_sheet(
+    sheet = grading_sheet.parse_sheet(
         pipeline.stages["at_handout"].detail["sheets"][PRIVATE.name]
     )
     block = sheet["submissions"][pipeline.student]
-    assert set(block) >= {"info", "score_individual", grades.NOTES_KEY}
+    assert set(block) >= {"info", "score_individual", grading_sheet.NOTES_KEY}
     assert block["score_individual"] is None
     # `info:` carries exactly the facts THIS assignment's toolkit will fill, and
     # `autograde` exists only where hidden tests will run. The run asks New assignment for
     # autograding, but the shape is read off the template's own grading config rather than
     # written down here twice.
     expected = {"submitted": None, "days_late": None}
-    if grades.load_grading_spec(COURSE_ORG, pipeline.slug(PRIVATE)).autograde:
+    if grading_spec.load_grading_spec(COURSE_ORG, pipeline.slug(PRIVATE)).autograde:
         expected["autograde"] = None
     assert block["info"] == expected
 
@@ -1257,12 +1263,12 @@ def test_the_handout_sheets_header_says_open_and_nothing_submitted(pipeline):
 
 
 def test_the_due_date_fills_info_from_the_students_own_push(pipeline):
-    sheet = grades.parse_sheet(
+    sheet = grading_sheet.parse_sheet(
         pipeline.stages["after_due"].detail["sheets"][PRIVATE.name]
     )
     info = sheet["submissions"][pipeline.student]["info"]
     assert info["submitted"], "the refresh recorded no submission time"
-    # `parse_sheet` hands back what the file says, as text (`grades._SheetLoader`): a mark
+    # `parse_sheet` hands back what the file says, as text (`grading_sheet._SheetLoader`): a mark
     # a grader typed must come back the way they typed it, so `1` here is "1". ONE, not
     # 0: the due date was moved back a day after the push (see the module docstring).
     assert int(info["days_late"]) == EXPECTED_DAYS_LATE
@@ -1339,7 +1345,9 @@ def test_collect_submissions_over_an_unchanged_semester_writes_nothing(pipeline)
 def test_the_cutoff_freezes_the_sheet(pipeline):
     sheet_text = pipeline.stages["artefacts"].detail["sheets"][PRIVATE.name]
     assert "# Status: FROZEN " in sheet_text
-    info = grades.parse_sheet(sheet_text)["submissions"][pipeline.student]["info"]
+    info = grading_sheet.parse_sheet(sheet_text)["submissions"][pipeline.student][
+        "info"
+    ]
     assert info["submitted"]
     assert int(info["days_late"]) == EXPECTED_DAYS_LATE  # text, like every scalar
 
@@ -1349,7 +1357,9 @@ def test_the_cutoff_freezes_the_sheet(pipeline):
 
 def _info(pipeline, stage: str, shape: shapes.Shape) -> dict:
     """The student's `info:` block on one shape's sheet, as one stage recorded it."""
-    sheet = grades.parse_sheet(pipeline.stages[stage].detail["sheets"][shape.name])
+    sheet = grading_sheet.parse_sheet(
+        pipeline.stages[stage].detail["sheets"][shape.name]
+    )
     return sheet["submissions"][pipeline.student]["info"]
 
 
@@ -1371,8 +1381,8 @@ def test_every_sheet_header_states_the_cutoff_the_engine_computed(pipeline, shap
     # the engine computed the same one - open while it is ahead, frozen once it is past.
     open_text = pipeline.stages["after_due"].detail["sheets"][shape.name]
     frozen_text = pipeline.stages["artefacts"].detail["sheets"][shape.name]
-    ahead = grades._display_moment(pipeline.stages["due"].detail["cutoff"])
-    passed = grades._display_moment(pipeline.stages["cutoff"].detail["cutoff"])
+    ahead = grading_spec._display_moment(pipeline.stages["due"].detail["cutoff"])
+    passed = grading_spec._display_moment(pipeline.stages["cutoff"].detail["cutoff"])
     if not shape.collects_commits:
         assert "no late arithmetic" in open_text
         assert "# Status: submitted outside GitHub" in frozen_text
@@ -1573,7 +1583,7 @@ def test_a_commit_by_the_folders_own_owner_earns_no_note(pipeline):
         pipeline.stages["artefacts"].detail["snapshots"][SHARED.name]
     )
     assert rows[pipeline.student].note == ""
-    info = grades.parse_sheet(
+    info = grading_sheet.parse_sheet(
         pipeline.stages["artefacts"].detail["sheets"][SHARED.name]
     )["submissions"][pipeline.student]["info"]
     assert "submitted_note" not in info, info.get("submitted_note")
@@ -1627,11 +1637,11 @@ def test_the_real_run_adds_a_column_per_assignment_to_the_registrar_export(pipel
 
 def test_the_real_run_records_what_it_sent(pipeline):
     recorded = _text(pipeline.stages["distribute"].detail["after"]["distributed"])
-    assert recorded.splitlines()[0] == ",".join(grades.DISTRIBUTED_HEADER)
+    assert recorded.splitlines()[0] == ",".join(gradebook.DISTRIBUTED_HEADER)
     rows = [line for line in recorded.splitlines()[1:] if pipeline.student in line]
     # The gradebook is the only channel a `silent` press records, and the only one a
     # mark reaches a student by at all.
-    assert {row.split(",")[2] for row in rows} == {grades.CHANNEL_GRADEBOOK}
+    assert {row.split(",")[2] for row in rows} == {gradebook.CHANNEL_GRADEBOOK}
 
 
 def test_distribute_says_nothing_twice(pipeline):

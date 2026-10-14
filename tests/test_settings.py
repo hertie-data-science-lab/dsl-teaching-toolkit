@@ -8,7 +8,13 @@ from pathlib import Path
 
 import pytest
 
-from dsl_course import faults, grades, policy, schedule, settings
+from dsl_course import (
+    faults,
+    grading_spec,
+    policy,
+    schedule,
+    settings,
+)
 
 PACKAGE = Path(settings.__file__).parent
 # The real read, before conftest's autouse fixture answers it with "no file".
@@ -150,17 +156,21 @@ def test_a_value_the_reader_refuses_leaves_the_next_layer_to_answer(monkeypatch)
 def test_a_run_key_in_a_template_is_not_migrated(monkeypatch, key):
     # A template states what the assignment IS; how a semester runs it is assignments.yml.
     with pytest.raises(faults.NotMigrated) as caught:
-        grades.parse_grading_spec(f"type: group\n{key}: 3\n")
+        grading_spec.parse_grading_spec(f"type: group\n{key}: 3\n")
     assert caught.value.old == key and settings.ASSIGNMENTS_FILE in str(caught.value)
-    monkeypatch.setattr(grades, "_grading_text", lambda org, template: f"{key}: 3\n")
-    assert grades.load_grading_spec("C", "t").not_migrated
+    monkeypatch.setattr(
+        grading_spec, "_grading_text", lambda org, template: f"{key}: 3\n"
+    )
+    assert grading_spec.load_grading_spec("C", "t").not_migrated
 
 
 def test_load_grading_spec_carries_effective_values_and_their_sources(
     monkeypatch, course, semester
 ):
-    monkeypatch.setattr(grades, "_grading_text", lambda org, template: "type: group\n")
-    spec = grades.load_grading_spec(
+    monkeypatch.setattr(
+        grading_spec, "_grading_text", lambda org, template: "type: group\n"
+    )
+    spec = grading_spec.load_grading_spec(
         "C", "assignment-2-f2026", semester_org="Sem", slug="a2"
     )
     sources = dict(spec.sources)
@@ -173,9 +183,12 @@ def test_a_course_visibility_says_nothing_about_an_assignment_with_no_repo(
     monkeypatch, course
 ):
     monkeypatch.setattr(
-        grades, "_grading_text", lambda org, template: "submit_via: external\n"
+        grading_spec, "_grading_text", lambda org, template: "submit_via: external\n"
     )
-    assert grades.load_grading_spec("C", "assignment-1-f2026").visibility == "private"
+    assert (
+        grading_spec.load_grading_spec("C", "assignment-1-f2026").visibility
+        == "private"
+    )
 
 
 def _names_the_block(node: ast.AST) -> bool:
@@ -244,7 +257,7 @@ def test_the_digest_checks_the_spec_the_handout_resolves(monkeypatch):
     )
     template = "type: individual\nsubmit_via: assignment_repo\n"
     handed_out = [{"visibility": "public"}] * 3
-    faults, spec = grades.grading_spec_faults(
+    faults, spec = grading_spec.grading_spec_faults(
         "a1",
         "assignment-1-f2026",
         "C",
@@ -290,8 +303,10 @@ def test_an_assignment_block_typo_leaves_the_semester_default_to_answer(
     good = "public" if key == "visibility" else "assigned"
     text = f"defaults:\n  {key}: {good}\nassignments:\n  a1:\n    {key}: {typo}\n"
     monkeypatch.setattr(settings, "_assignments_text", lambda org: text)
-    monkeypatch.setattr(grades, "_grading_text", lambda org, template: "type: group\n")
-    spec = grades.load_grading_spec("C", "t", semester_org="Sem", slug="a1")
+    monkeypatch.setattr(
+        grading_spec, "_grading_text", lambda org, template: "type: group\n"
+    )
+    spec = grading_spec.load_grading_spec("C", "t", semester_org="Sem", slug="a1")
     assert getattr(spec, key) == good and dict(spec.sources)[key] == "semester"
     # ...and the refused line is a fault on assignments.yml, at its line.
     (fault,) = settings.parse_instance(text).faults

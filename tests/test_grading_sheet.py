@@ -15,8 +15,12 @@ from decimal import Decimal
 import pytest
 import yaml
 
-from dsl_course import grades
-from dsl_course.grades import (
+from dsl_course import (
+    gradebook,
+    grading_sheet,
+    grading_spec,
+)
+from dsl_course.grading_sheet import (
     INFO_COMMENT,
     NOTES_KEY,
     SheetSpec,
@@ -804,7 +808,9 @@ def test_the_line_scan_reads_nesting_off_the_indentation():
 def _semester_sheets(monkeypatch, sheets: dict, failing: str = "") -> list:
     """`semester_sheet_faults` over `sheets`, with one of them refusing to be read."""
     monkeypatch.setattr(
-        grades, "sheet_specs", lambda course, sched: dict.fromkeys(sheets, individual())
+        grading_spec,
+        "sheet_specs",
+        lambda course, sched: dict.fromkeys(sheets, individual()),
     )
 
     def _read(org, repo, path):
@@ -813,9 +819,9 @@ def _semester_sheets(monkeypatch, sheets: dict, failing: str = "") -> list:
             raise RuntimeError("rate-limited")
         return sheets[name]
 
-    monkeypatch.setattr(grades, "get_file_content", _read)
+    monkeypatch.setattr(grading_spec, "get_file_content", _read)
     found: list = []
-    grades.semester_sheet_faults("Course", "Semester", None, found)
+    grading_spec.semester_sheet_faults("Course", "Semester", None, found)
     return found
 
 
@@ -835,25 +841,25 @@ def test_a_sheet_that_could_not_be_read_reports_none_of_them(monkeypatch):
     # tick never reached as repaired.
     found: list = []
     monkeypatch.setattr(
-        grades, "sheet_specs", lambda course, sched: {"a1": individual()}
+        grading_spec, "sheet_specs", lambda course, sched: {"a1": individual()}
     )
     monkeypatch.setattr(
-        grades,
+        grading_spec,
         "get_file_content",
         lambda *a: (_ for _ in ()).throw(RuntimeError("rate-limited")),
     )
     with pytest.raises(RuntimeError):
-        grades.semester_sheet_faults("Course", "Semester", None, found)
+        grading_spec.semester_sheet_faults("Course", "Semester", None, found)
     assert found == []
 
 
 def test_an_assignment_with_no_sheet_yet_is_not_a_fault(monkeypatch):
     monkeypatch.setattr(
-        grades, "sheet_specs", lambda course, sched: {"a1": individual()}
+        grading_spec, "sheet_specs", lambda course, sched: {"a1": individual()}
     )
-    monkeypatch.setattr(grades, "get_file_content", lambda *a: None)
+    monkeypatch.setattr(grading_spec, "get_file_content", lambda *a: None)
     found: list = []
-    grades.semester_sheet_faults("Course", "Semester", None, found)
+    grading_spec.semester_sheet_faults("Course", "Semester", None, found)
     assert found == []
 
 
@@ -868,16 +874,16 @@ def test_declared_questions_get_a_feedback_cell_each_after_the_members():
         "feedback_group",
         "members",
         "score_group",
-        grades.QUESTION_FEEDBACK_KEY,
+        grading_sheet.QUESTION_FEEDBACK_KEY,
     ]
-    assert block[grades.QUESTION_FEEDBACK_KEY] == {"Q1": None, "Q2": None}
+    assert block[grading_sheet.QUESTION_FEEDBACK_KEY] == {"Q1": None, "Q2": None}
     solo = new_sheet(individual(questions=QUESTIONS), SOLO)["submissions"]["ada-l"]
-    assert list(solo)[-2:] == ["score_individual", grades.QUESTION_FEEDBACK_KEY]
+    assert list(solo)[-2:] == ["score_individual", grading_sheet.QUESTION_FEEDBACK_KEY]
 
 
 def test_no_questions_means_no_per_question_feedback():
     assert (
-        grades.QUESTION_FEEDBACK_KEY
+        grading_sheet.QUESTION_FEEDBACK_KEY
         not in new_sheet(individual(), SOLO)["submissions"]["ada-l"]
     )
 
@@ -917,7 +923,7 @@ def test_a_question_marked_from_another_file_names_it_beside_its_maximum():
 def test_effective_penalty_reads_apply_waive_or_the_whole_penalty(
     late_penalty, expected
 ):
-    penalty = grades.effective_penalty(penalty_rate("10%"), 2, late_penalty)
+    penalty = grading_sheet.effective_penalty(penalty_rate("10%"), 2, late_penalty)
     assert penalty.fraction == expected
 
 
@@ -937,13 +943,16 @@ def test_effective_penalty_reads_apply_waive_or_the_whole_penalty(
     ],
 )
 def test_late_choice_reads_the_graders_say_once(late_penalty, mode):
-    assert grades.late_choice(late_penalty).mode == mode
-    assert grades.effective_penalty(penalty_rate("10%"), 2, late_penalty).mode == mode
+    assert grading_sheet.late_choice(late_penalty).mode == mode
+    assert (
+        grading_sheet.effective_penalty(penalty_rate("10%"), 2, late_penalty).mode
+        == mode
+    )
 
 
 def test_a_unit_that_is_not_late_loses_nothing_whatever_is_written():
     for late_penalty in (None, "apply", "waive", "15%", "half"):
-        penalty = grades.effective_penalty(penalty_rate("10%"), 0, late_penalty)
+        penalty = grading_sheet.effective_penalty(penalty_rate("10%"), 0, late_penalty)
         assert penalty.fraction == 0
 
 
@@ -1020,6 +1029,6 @@ def test_an_unreadable_late_penalty_holds_no_unit_that_is_on_time():
 
 def test_a_set_penalty_of_nothing_reads_as_waived():
     rate = penalty_rate("10%")
-    assert grades._penalty_display(rate, 2, "0%") == "waived"
-    assert grades._penalty_display(rate, 2, "waive") == "waived"
+    assert gradebook._penalty_display(rate, 2, "0%") == "waived"
+    assert gradebook._penalty_display(rate, 2, "waive") == "waived"
     assert final_grade(20, rate, 2, None, "0%") == Decimal(20)

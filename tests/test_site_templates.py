@@ -1094,7 +1094,7 @@ def test_the_deadline_is_bold_under_the_release_date_and_printed_once():
 
 def test_what_the_assignment_is_worth_sits_under_the_deadline(generated):
     # One fact, one place: the total is the sum of the `questions:` maxima in the
-    # assignment's own grading_config.yml (`grades.total_points`, the same total the
+    # assignment's own grading_config.yml (`grading_spec.total_points`, the same total the
     # gradebook prints beside a score), so nobody types it into the brief. It reads under
     # the deadline, which is where the other two meta lines are.
     layout = _strip_comments(_liquid_templates()["_layouts/assignment.html"])
@@ -1877,7 +1877,7 @@ def test_an_assignment_waiting_on_its_teams_invites_one_instead(generated):
         "https://github.com/hertie-dsl-fixture-f2026/join/issues/new/choose"
     )
     assert page["team_join_cap"] == "4"
-    # Already spoken (`grades.spoken_day`), so it is printed as it stands - the same
+    # Already spoken (`gradebook.spoken_day`), so it is printed as it stands - the same
     # spelling the mail and the Join-team form's refusal use for the same day.
     assert page["team_join_closes"] == "4th Dec"
     # The layout renders the whole block off the key's presence - no second flag, and

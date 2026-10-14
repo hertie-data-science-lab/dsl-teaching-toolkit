@@ -7,7 +7,13 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 
-from dsl_course import gh_contents, grades, roster, schedule, scheduler
+from dsl_course import (
+    gh_contents,
+    grading_spec,
+    roster,
+    schedule,
+    scheduler,
+)
 from dsl_course.faults import ConfigFault, FaultKind
 from dsl_course.schedule import Deploy, Release
 
@@ -111,7 +117,7 @@ def _handout(monkeypatch, *, group: bool, teams_csv: dict, listing: dict | None)
             }
         }
     )
-    spec = grades.GradingSpec(type="group" if group else "individual")
+    spec = grading_spec.GradingSpec(type="group" if group else "individual")
     monkeypatch.setattr(scheduler, "load_grading_spec", lambda org, template, **_: spec)
     monkeypatch.setattr(scheduler.teams, "load", lambda org: teams_csv)
     monkeypatch.setattr(

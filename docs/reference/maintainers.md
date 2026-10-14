@@ -84,9 +84,9 @@ Things whose *literal spelling* is depended on from outside Python:
 - **`roster.FIELDS` / `roster.normalise_role` / `teams.FIELDS`** are re-implemented in the
   shipped JavaScript (`templates/join/onboard.yml`, `team-formation.yml`), which cites them by
   name. Change a column and change both sides.
-- **`grades.team_lock_text`'s LAYOUT.** `semester-config/.system/assignments.lock.yml` is parsed by
+- **`team_formation.team_lock_text`'s LAYOUT.** `semester-config/.system/assignments.lock.yml` is parsed by
   line scanners - one in `templates/join/team-formation.yml` (github-script has no YAML
-  library), one in `grades.parse_team_lock` - which match a two-space assignment key
+  library), one in `team_formation.parse_team_lock` - which match a two-space assignment key
   and four-space `team_formation:` / `max_team_size:` / `team_formation_window:` /
   `team_formation_closes:` / `team_formation_page:` under it. Re-indenting the writer, or
   nesting the entries any deeper, makes every Join-team request in every semester read as
@@ -149,7 +149,7 @@ Things whose *literal spelling* is depended on from outside Python:
 - **An ARCHIVED `semester-config`** is a semester's "finished" marker. `archive` (`teardown`) archives it
   last, after everything else it archives; `discovery.semester_is_live` is what every
   course-side sweep that WRITES asks (the scheduler, the faculty and membership syncs, the
-  enrolment codes, the site build), and `seed.refresh` and `grades.sync_team_lock` read the
+  enrolment codes, the site build), and `seed.refresh` and `team_formation.sync_team_lock` read the
   same flag for themselves off listings they already hold. So archiving one closes a semester whether the person doing it meant
   that or not, and anything that archives a semester must do it in that order - the archived
   repo is read-only, and a marker set early strands whatever had not happened yet.
@@ -400,8 +400,8 @@ DERIVED - rendered per semester from that semester's `schedule.yml` and each nam
 `grading_config.yml` - so it cannot join `welcome.CONFIG_SYSTEM_FILES`, which maps a
 repo path to a file under `templates/`. Adding a file like this is four places:
 
-1. the renderer and the writer, beside what owns the subject (`grades.team_lock_text` /
-   `grades.sync_team_lock`), with the SYSTEM-OWNED stamp emitted by the writer itself;
+1. the renderer and the writer, beside what owns the subject (`team_formation.team_lock_text` /
+   `team_formation.sync_team_lock`), with the SYSTEM-OWNED stamp emitted by the writer itself;
 2. `seed.refresh`'s per-semester loop - which is BOTH how it is seeded (a Bootstrap semester
    run ends in `seed refresh`) and how it converges nightly. An archived semester is skipped
    there, which is what keeps a finished semester frozen;
@@ -522,6 +522,7 @@ layers above its own:
 | 3 | `gh_contents` (file reads and writes, seeded stubs), `workflows_render` |
 | 4 | `discovery`, `roster`/`teams`/`schedule`, `workflows_place` |
 | 5 and up | `access` (team permissions and the faculty floor), `materials` (the `materials.yml` escape hatch and the kind aliases), `opencourse` (the public website's `opencourse.yml`), `schedule_plan` (the rows a plan declares, one per release entry), `cadence` (the scheduler's driver-health and late-delivery alarms, read off its own run history), `join`, `profile_readme`, `scaffold`, `site_repo` (the Jekyll site repo both websites publish into), `site`, then the CLIs |
+| grading, each above the one before | `grading_sheet` (the sheet file: shape, load and dump, merge, mark arithmetic, what holds a mark), `grading_spec` (`grading_config.yml`, its faults, the `SheetSpec` it gives), `gradebook` (the `grades-<handle>` repos, what a student is shown, the registrar export, `distributed.csv`), `receipts` (the Submission receipts issue), `distribute` (sending marks); `team_formation` (and its lock file) sits above `grading_spec` and `gradebook`, and `grades` is only the CLI over `distribute` |
 
 Two placements are not where they read: `access` sits above `discovery`, because the
 faculty floor is computed from what discovery finds, and `site_repo` above `scaffold` and
@@ -633,7 +634,7 @@ A run setting (`settings.RUN_KEYS`: `team_formation`, `max_team_size`, `late_win
 The late pair is one rule: a layer stating either half answers both, the other half none.
 An absent `assignments.yml` leaves its two layers empty. A template's `grading_config.yml`
 states no run setting: one written there refuses the whole file as `NOT_MIGRATED`
-(`grades.TEMPLATE_KEYS` is what it reads). `settings.parse_instance` is the one parser of
+(`grading_spec.TEMPLATE_KEYS` is what it reads). `settings.parse_instance` is the one parser of
 `assignments.yml`; `schedule.load` hands it to `schedule.parse`, which takes each entry's
 `semester_dest_repo` from it and carries its faults (and one per block for a key the plan
 does not name) beside the plan's, so they ride the `schedule.yml` digest and file in
@@ -645,7 +646,7 @@ states nothing, and the next layer answers.
 An `assignments.yml` that is not YAML is the exception to the ride: the scheduler files it
 on the `assignments.yml` digest and holds the `schedule.yml` digest as it stands for that
 tick, since its window, number and marks faults need the settings to be worked out.
-`grades.load_grading_spec(course, template, semester_org=, slug=)`
+`grading_spec.load_grading_spec(course, template, semester_org=, slug=)`
 hands every reader the effective values, with `GradingSpec.sources`; `status.json` carries
 them per assignment (`settings`). `settings` is the only module that reads
 `assignment_defaults` (`tests/test_settings.py`).
@@ -946,7 +947,7 @@ also collect, and the DUE date and the CUTOFF drive different passes (refresh, t
 freeze). Each schedule edit the run makes drives a tick of its own as well (the semester's
 `dispatch-scheduled-release.yml` fires on the push), which the harness waits out before
 dispatching. One-off setup:
-`python3 -c "from dsl_course import grades; grades.ensure_gradebooks('<demo semester>')"`
+`python3 -c "from dsl_course import gradebook; gradebook.ensure_gradebooks('<demo semester>')"`
 once, so every student in the demo semester already has their `grades-<handle>` repo - a repo
 the run created in a student's namespace is drift the teardown cannot take back, and the
 handout provisions them now (gradebooks exist from onboarding, so the brief can point at

@@ -67,11 +67,11 @@ from .faults import NOT_MIGRATED, not_migrated_text
 from .gh_contents import get_file_content, put_file, put_files
 from .gh_teams import converge_org_settings, create_role_teams
 from .ghcli import bot_token, gh
-from .grades import sync_team_lock
 from .log import CLIParser, log, log_err, log_ok, log_step
 from .profile_readme import update_profile_readme
 from .repos import converge_descriptions, org_exists
 from .status import refresh as refresh_status
+from .team_formation import sync_team_lock
 from .welcome import (
     refresh_config_system_files,
     refresh_join_workflows,

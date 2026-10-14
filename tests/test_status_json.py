@@ -17,8 +17,10 @@ import pytest
 
 from dsl_course import (
     discovery,
+    distribute,
     gh_commits,
-    grades,
+    grading_sheet,
+    grading_spec,
     policy,
     releaseignore,
     roster,
@@ -300,7 +302,7 @@ def _semester(**over) -> status_json.SemesterFacts:
         },
         sched=_sched(),
         # The assignment's name is its template's `title:` (decision 0009).
-        specs={"assignment-2": grades.GradingSpec(title="Regression")},
+        specs={"assignment-2": grading_spec.GradingSpec(title="Regression")},
         people=_people(),
         students=[_student("ada"), _student("")],
         dest_paths={"materials": {"lectures", "lectures/03_trees"}},
@@ -330,14 +332,14 @@ def _missing_s5() -> ConfigFault:
 
 
 def _autograde_sometimes() -> ConfigFault:
-    """What `grades.grading_spec_faults` files for an unreadable value."""
+    """What `grading_spec.grading_spec_faults` files for an unreadable value."""
     return ConfigFault(
         "assignments.assignment-3",
         "`autograde: sometimes` is not yes or no",
         datetime(2026, 11, 1, 23, 59, tzinfo=BERLIN),
         field="autograde",
         lineno=7,
-        file=grades.GRADING_FILE,
+        file=grading_spec.GRADING_FILE,
         in_repo="assignment-3-f2026",
         in_org=COURSE,
         ref="solution",
@@ -786,11 +788,11 @@ def test_an_assignment_moves_through_due_and_the_late_cutoff(now, units, expecte
 
 
 def test_a_group_assignment_with_no_copies_after_hand_out_is_forming_teams():
-    group = grades.GradingSpec(type="group", team_formation="self_select")
+    group = grading_spec.GradingSpec(type="group", team_formation="self_select")
     doc = _render(semester=_semester(specs={"assignment-2": group}))
     row = next(a for a in doc["assignments"] if a["slug"] == "assignment-2")
     assert (row["state"], row["teams"]) == ("teams_forming", 0)
-    assigned = grades.GradingSpec(type="group", team_formation="assigned")
+    assigned = grading_spec.GradingSpec(type="group", team_formation="assigned")
     doc = _render(semester=_semester(specs={"assignment-2": assigned}))
     row = next(a for a in doc["assignments"] if a["slug"] == "assignment-2")
     assert row["state"] == "blocked"
@@ -801,7 +803,9 @@ def test_a_group_assignment_with_no_copies_after_hand_out_is_forming_teams():
 def test_a_shape_with_no_repo_per_unit_is_open_once_handed_out(via, kind):
     # Handed out 15 Sep, due 27 Sep: no unit has a repo of its own, so the hand-out
     # itself is what opens it, as the student file's `handed_out` says.
-    spec = grades.GradingSpec(type=kind, submit_via=via, team_formation="assigned")
+    spec = grading_spec.GradingSpec(
+        type=kind, submit_via=via, team_formation="assigned"
+    )
     semester = _semester(specs={"assignment-2": spec})
     row = next(
         a
@@ -827,8 +831,8 @@ def test_a_group_assignment_nobody_declared_a_formation_for_is_forming_teams(
     # `self_select` answers, so the state is teams_forming, never blocked.
     monkeypatch.setattr(settings, "_assignments_text", lambda org: None)
     monkeypatch.setattr(settings, "org_meta", lambda org: {})
-    group = grades.with_run_settings(
-        grades.GradingSpec(type="group"), "COURSE", SEMESTER, "assignment-2"
+    group = grading_spec.with_run_settings(
+        grading_spec.GradingSpec(type="group"), "COURSE", SEMESTER, "assignment-2"
     )
     doc = _render(semester=_semester(specs={"assignment-2": group}))
     row = next(a for a in doc["assignments"] if a["slug"] == "assignment-2")
@@ -898,7 +902,7 @@ def test_the_returned_record_keeps_an_assignment_returned_after_a_sheet_commit()
         return row["returned"], row["state"]
 
     assert state({}) == (False, "marking")
-    record = grades.marks_return_record("assignment-2")
+    record = distribute.marks_return_record("assignment-2")
     assert state({record: "f00d"}) == (True, "returned")
 
 
@@ -1003,9 +1007,9 @@ def test_a_problem_is_dated_by_the_moment_it_bites_and_a_roster_one_is_not(
         "assignment-3-f2026": "a: [\n",
         "assignment-2-f2026": "title: Regression\n",
     }
-    monkeypatch.setattr(grades, "_grading_text", lambda org, repo: texts[repo])
+    monkeypatch.setattr(grading_spec, "_grading_text", lambda org, repo: texts[repo])
     template: list[ConfigFault] = []
-    grades.grading_config_faults(COURSE, SEMESTER, _sched(), template, None)
+    grading_spec.grading_config_faults(COURSE, SEMESTER, _sched(), template, None)
     roster_fault = header_fault("students.csv", ["github_handle"])
     doc = _render(
         semester=_semester(
@@ -1221,7 +1225,7 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
             )
         ],
     }
-    for module in (status_json, schedule, grades):
+    for module in (status_json, schedule, grading_spec, distribute):
         monkeypatch.setattr(module, "get_file_content", content)
     monkeypatch.setattr(status_json, "read_materials", lambda org, repo: Declared())
     monkeypatch.setattr(status_json, "load_opencourse", lambda org: None)
@@ -1275,7 +1279,7 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
     monkeypatch.setattr(status_json, "file_exists", lambda org, repo, path: False)
     monkeypatch.setattr(gh_commits, "gh", lambda *a: (0, "2026-09-22T06:02:00Z"))
     monkeypatch.setattr(status_json, "get_team_members", lambda org, team: {"prof"})
-    monkeypatch.setattr(grades, "_org_settings_faults", lambda org: [])
+    monkeypatch.setattr(grading_spec, "_org_settings_faults", lambda org: [])
 
     doc = status_json.collect_semester(COURSE, SEMESTER, NOW)
     assert doc["semester"]["org"] == SEMESTER
@@ -1342,9 +1346,9 @@ def _problems(faults: list[ConfigFault]) -> list[dict]:
 def _many_faults() -> list[ConfigFault]:
     """A fault from every hand-edited file, through the parsers that file them."""
     faults: list[ConfigFault] = [_missing_s5(), _autograde_sometimes()]
-    faults += grades.sheet_faults("assignment-3-project", DUPLICATE_SHEET)
-    faults += grades.sheet_faults("assignment-4", "teams: [\n")
-    spec_faults, _ = grades.grading_spec_faults(
+    faults += grading_sheet.sheet_faults("assignment-3-project", DUPLICATE_SHEET)
+    faults += grading_sheet.sheet_faults("assignment-4", "teams: [\n")
+    spec_faults, _ = grading_spec.grading_spec_faults(
         "assignment-3", "assignment-3-f2026", COURSE, "a: [\n", None
     )
     faults += spec_faults
@@ -1364,7 +1368,9 @@ def _many_faults() -> list[ConfigFault]:
 
 
 def test_a_held_mark_is_one_plain_sentence_with_its_fault_code_in_the_id():
-    (problem,) = _problems(grades.sheet_faults("assignment-3-project", DUPLICATE_SHEET))
+    (problem,) = _problems(
+        grading_sheet.sheet_faults("assignment-3-project", DUPLICATE_SHEET)
+    )
     assert problem["id"] == "sheet:assignment-3-project:GRADING_SHEETS"
     assert problem["stage"] == "marking"
     assert problem["text"] == (
@@ -1419,13 +1425,13 @@ def test_the_vocabulary_pass_keeps_the_file_names_a_fix_edits():
 
 
 def _visibility_mismatch() -> ConfigFault:
-    """What `grades.grading_spec_faults` files for a private assignment whose repos
+    """What `grading_spec.grading_spec_faults` files for a private assignment whose repos
     this semester handed out public."""
     rows = [
         repo_row("assignment-1-ada", visibility="public"),
         repo_row("assignment-1-bob", visibility="private"),
     ]
-    faults, _ = grades.grading_spec_faults(
+    faults, _ = grading_spec.grading_spec_faults(
         "assignment-1",
         "assignment-1-f2026",
         COURSE,
@@ -1465,7 +1471,7 @@ def test_a_visibility_mismatch_is_the_semesters_problem_not_the_courses():
 def test_the_course_file_never_lists_a_semester_only_problem():
     # The course's own gather reads each template with nothing handed out to compare
     # it against, so the fault does not arise there at all.
-    faults, _ = grades.grading_spec_faults(
+    faults, _ = grading_spec.grading_spec_faults(
         "assignment-1", "assignment-1-f2026", COURSE, "", None
     )
     assert faults == []
@@ -1475,11 +1481,11 @@ def test_the_course_file_never_lists_a_semester_only_problem():
 
 def test_the_org_settings_problem_is_the_semesters_setup(monkeypatch):
     monkeypatch.setattr(
-        grades.gh_teams,
+        grading_spec.gh_teams,
         "org_settings",
-        lambda org: {grades.gh_teams.MEMBERS_CAN_DELETE: True},
+        lambda org: {grading_spec.gh_teams.MEMBERS_CAN_DELETE: True},
     )
-    (fault,) = grades._org_settings_faults(SEMESTER)
+    (fault,) = grading_spec._org_settings_faults(SEMESTER)
     doc = _render(semester=_semester(template_faults=[fault]))
     (problem,) = doc["problems"]
     assert (problem["scope"], problem["stage"]) == ("semester", "K2")
@@ -1495,7 +1501,7 @@ def test_the_org_settings_problem_is_the_semesters_setup(monkeypatch):
 
 
 def test_a_template_that_does_not_parse_stays_the_courses():
-    faults, _ = grades.grading_spec_faults(
+    faults, _ = grading_spec.grading_spec_faults(
         "assignment-3", "assignment-3-f2026", COURSE, "a: [\n", None
     )
     course = _course()
@@ -3372,7 +3378,7 @@ def test_an_assignment_carries_the_site_s_submit_shape():
         ("shared_dropbox_repo", "shared-dropbox-repo"),
         ("external", "external"),
     ):
-        spec = grades.GradingSpec(submit_via=via)
+        spec = grading_spec.GradingSpec(submit_via=via)
         doc = _render(semester=_semester(specs={"assignment-2": spec}))
         row = next(a for a in doc["assignments"] if a["slug"] == "assignment-2")
         assert row["submit_shape"] == shape

@@ -32,7 +32,7 @@ from dsl_course import (
     discovery,
     gh_contents,
     ghcli,
-    grades,
+    grading_sheet,
     repos,
     schedule,
     seed,
@@ -54,7 +54,7 @@ _DRIFT = re.compile(rf"^assignment-{ASSIGNMENT_NUMBER}-|e2e[0-9a-z]{{6}}")
 
 # The engine's own names, every one of them, so a rename there cannot leave artefacts
 # uncollected here.
-ARTEFACT_DIRS = (collect.SNAPSHOT_DIR, collect.AUTOGRADE_DIR, grades.SHEETS_DIR)
+ARTEFACT_DIRS = (collect.SNAPSHOT_DIR, collect.AUTOGRADE_DIR, grading_sheet.SHEETS_DIR)
 
 
 def new_run_id() -> str:
