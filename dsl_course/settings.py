@@ -14,7 +14,7 @@ repo visibility, the external submit link) resolves nearest-first through four l
 and `effective` says which layer answered. The late pair is ONE rule: whichever layer
 states either half states both, the other half absent meaning none (`_late_pair`).
 `assignments.yml` is optional: absent, both of its layers are empty. A template's
-`grading_config.yml` states no run setting (a run key there is NOT_MIGRATED). This is the
+`grading_config.yml` states no run setting (a run key there is RUN_SETTING_IN_TEMPLATE). This is the
 ONE module that reads `assignment_defaults`, and the one parser of `assignments.yml`
 (`parse_instance`): its `semester_dest_repo` per assignment is read here too, for
 `schedule.load`.

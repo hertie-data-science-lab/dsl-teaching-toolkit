@@ -198,7 +198,7 @@ _READINGS_STUB = (
 # INSTRUCTOR-OWNED from the moment it lands: nothing ever rewrites it, and every setting in
 # it is meant to be edited here afterwards. What the assignment IS, and nothing about how
 # one semester runs it: the run settings (`settings.RUN_KEYS`) live in each semester's
-# `assignments.yml`, and one written here is NOT_MIGRATED.
+# `assignments.yml`, and one written here is RUN_SETTING_IN_TEMPLATE.
 _GRADING_STAMP = (
     "# INSTRUCTOR-OWNED - defines the assignment. "
     "Dates live in the semester's schedule.yml."

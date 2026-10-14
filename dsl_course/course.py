@@ -700,8 +700,8 @@ def people_by_role(meta: object, *, semester: bool = False) -> dict | None:
     """A people block as `{role key: [entries]}`: a semester's `instructors:` list grouped
     by each entry's `role:` (an entry without a valid one is left out - `sync_faculty`
     reports it), or a COURSE file's `people:` mapping as it stands. None when `meta`
-    carries neither. A semester's file is read for its list alone: the old `people:`
-    shape there is NOT_MIGRATED, and renders no cards."""
+    carries neither. A semester's file is read for its list alone: a `people:` mapping
+    there renders no cards."""
     if not isinstance(meta, dict):
         return None
     listed = meta.get("instructors")

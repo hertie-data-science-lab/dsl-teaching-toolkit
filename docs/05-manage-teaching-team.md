@@ -50,9 +50,6 @@ Never edit the GitHub teams directly; the file is the auditable record.
    `role:` ignores case. An entry with no valid `role:` or `github_handle:` is reported on the
    `instructors.yml` issue, and nobody is removed from the teaching teams until it is fixed.
 
-   A semester that still has the old `people.yml` is refused as `NOT_MIGRATED` until the
-   migration moves it to `instructors.yml`.
-
    `email` is required and private: it is where this semester's notifications go (a schedule fault, a source that has not been staged), and nothing publishes it. Add `show_email: true` to an entry to show that address on the semester site's instructor card. A `course_admins` entry's `email` is optional, and public, since `dsl-course.yml` is. Leave every entry without one and the semester's notifications go to the course admins instead, and to the toolkit maintainer if the course names none.
 
    Or **course org** → `.github` → `dsl-course.yml` (course-wide admin):
