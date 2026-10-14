@@ -200,3 +200,21 @@ def test_a_placeholder_title_gives_way_to_the_readme_heading(
     )
     assert got == want
     assert gradebook._readme_label("assignment-1", got) == label
+
+
+def test_a_schedule_entry_overrides_the_template_s_shape(monkeypatch):
+    # Decision 0038 amendment 2: the entry's `type` / `submit_via` win over the
+    # template's, and say so in `sources`; the shape rules follow the effective word.
+    from dsl_course import schedule
+
+    monkeypatch.setattr(
+        schedule,
+        "shape_of",
+        lambda org, slug: {"type": "group", "submit_via": "external"},
+    )
+    spec = grading_spec.with_run_settings(
+        grading_spec.parse_grading_spec("type: individual\n"), "C", "SEM", "a1"
+    )
+    assert (spec.type, spec.submit_via) == ("group", "external")
+    assert spec.is_group and spec.visibility == "private"
+    assert dict(spec.sources)["type"] == "assignment"

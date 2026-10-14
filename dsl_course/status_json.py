@@ -1086,8 +1086,8 @@ def empty_week_problems(
 
     The id names the Monday of the week's first day. Each problem carries its card word
     (`label`) and `aside: true` - a gap is what the course can set aside. A week already
-    begun is not raised, nor a gap the course has set aside (decision 0032: a reading week
-    or an exam week is dismissed that way)."""
+    begun is not raised, nor a week a break touches (decision 0038 amendment 2), nor a gap
+    the course has set aside (decision 0032)."""
     sched = facts.sched
     start, end = sched.semester_start, sched.semester_end
     if start is None or end is None or end < start:
@@ -1139,6 +1139,8 @@ def empty_week_problems(
     for n in range(week + 1, weeks + 1):
         first = start + timedelta(weeks=n - 1)
         span = {first + timedelta(days=i) for i in range(7)}
+        if any(b.covers(day) for b in sched.breaks for day in span):
+            continue  # a break (`semester:` entry of `type: break`) is meant to be empty
         pid = f"empty_week:{(first - timedelta(days=first.weekday())).isoformat()}"
         if not span & days:
             nothing = "Nothing seems to have been scheduled for this week."

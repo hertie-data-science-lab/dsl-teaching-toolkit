@@ -38,11 +38,10 @@ NOW = datetime(2026, 9, 23, 9, 0, tzinfo=UTC)
 
 SCHEDULE = """\
 timezone: Europe/Berlin
-semester_start: 2026-09-07
-semester_end: 2026-12-18
-archive:
-  event_datetime: 2027-01-31
-  show_on_site: false
+semester:
+  start: {type: start, event_datetime: 2026-09-07}
+  end: {type: end, event_datetime: 2026-12-18}
+  archive: {type: archive, event_datetime: 2027-01-31, show_on_site: false}
 lectures:
   lecture_01:
     session: 1

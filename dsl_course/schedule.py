@@ -87,11 +87,13 @@ import yaml
 
 from . import legacy, policy, run, settings
 from .course import (
+    ASSIGNMENT_TYPES,
     ASSIGNMENTS_FILE,
     CONFIG_REPO,
     SCHEDULE_FILE,
     SOLUTION_BEFORE_CUTOFF,
     SOLUTION_WARNING,
+    SUBMIT_VIA,
     coerce_date,
     is_repo_root,
     pages_repo,
@@ -462,6 +464,10 @@ class AssignmentEntry:
     # Its run settings as the entry writes them (`settings.inline_settings`, decision
     # 0038 rule 9): the nearest layer of the cascade.
     settings: dict = field(default_factory=dict)
+    # This semester's override of the template's `type` / `submit_via` (decision 0038
+    # amendment 2); None = the template's (`grading_spec.with_run_settings`).
+    type: str | None = None
+    submit_via: str | None = None
 
 
 @dataclass
@@ -527,19 +533,41 @@ class ArchiveRow:
 
 
 @dataclass
+class Break:
+    """A `semester:` entry of `type: break` (decision 0038 amendment 2): a stretch of the
+    term with no teaching - a reading week. A grey band on the site's schedule, and its
+    weeks are never an empty-week problem. `start`/`end` are its `from`/`to`, both days
+    included."""
+
+    key: str
+    start: date
+    end: date
+    title: str = ""
+    details: str = ""
+    show_on_site: bool = True
+
+    def covers(self, day: date) -> bool:
+        return self.start <= day <= self.end
+
+
+@dataclass
 class Schedule:
     timezone: str = DEFAULT_TZ
     # The semester org it was loaded from ("" for a plan parsed from text): what an
     # assignment's run settings resolve against (`settings`, `grading_spec.load_grading_spec`).
     org: str = field(default="", compare=False)
     releases: list[Release] = field(default_factory=list)
+    # The `semester:` block's `type: start` and `type: end` entries.
     semester_start: date | None = None
     semester_end: date | None = None
     assignments: dict[str, AssignmentEntry] = field(default_factory=dict)
+    # The `semester:` block's `type: break` entries, in date order.
+    breaks: list[Break] = field(default_factory=list)
     # The display rows: each `exams:` and `events:` entry written with no `files:` (one
     # per slot), in date order.
     events: list[Event] = field(default_factory=list)
-    # The `archive:` block, or None where the semester wrote none - see `ArchiveRow`, which
+    # The `semester:` block's `type: archive` entry, or None where the semester wrote none
+    # - see `ArchiveRow`, which
     # holds every key of it. None IS "nobody asked for archiving", which is a different
     # answer from an ArchiveRow whose `when` could not be derived. Resolved by `parse` and
     # never re-derived downstream: `archive.event_datetime` where the block names one,
@@ -699,19 +727,14 @@ def _require_mapping(
 # by the parser and so means something other than what faculty wrote; `_flag_unknown_keys`
 # surfaces it so `--validate` catches it.
 #
+# The term's own dates, one block of the institution's `semester` kind (decision 0038
+# amendment 2): each entry names its `type`.
+SEMESTER_BLOCK = "semester"
+SEMESTER_TYPES = ("start", "end", "break", "archive")
 # One block per content kind, named by the kind's policy plural (decision 0038 rule 1):
 # `lectures:`, `labs:`, `readings:`, `exams:`, `events:`, `assets:` at Hertie.
 BLOCKS = {policy.plural_of(kind): kind for kind in policy.content_kinds()}
-KNOWN_TOP_LEVEL = frozenset(
-    {
-        "timezone",
-        "semester_start",
-        "semester_end",
-        "assignments",
-        "archive",
-        *BLOCKS,
-    }
-)
+KNOWN_TOP_LEVEL = frozenset({"timezone", SEMESTER_BLOCK, "assignments", *BLOCKS})
 # The kinds whose entries make a teaching unit: `session` is required on them (decision
 # 0038 amendment, rule 2); optional on readings (absent: a standalone row).
 SESSION_KINDS = ("lecture", "lab")
@@ -732,7 +755,7 @@ KNOWN_ENTRY = frozenset(
         "files",
     }
 )
-KNOWN_READINGS = KNOWN_ENTRY | {"reading_list"}
+KNOWN_READINGS = KNOWN_ENTRY | {"reading_guide"}
 KNOWN_SLOT = frozenset({"at", "location", "details"})
 KNOWN_FILE = frozenset(
     {"from_course_repo", "from_path", "to_semester_repo", "to_path", "release_datetime"}
@@ -749,6 +772,8 @@ KNOWN_ASSIGNMENT = frozenset(
         "details",
         "tbc",
         "show_on_site",
+        "type",
+        "submit_via",
         *settings.INLINE_KEYS,
     }
 )
@@ -1163,13 +1188,18 @@ def _parse_block(
         title = str(entry.get("title") or "")
         details = _flagged_details(entry, drops, where, lines) or ""
         location = str(entry.get("location") or "").strip()
+        # A kind that is never a row (supporting files) defaults off the site (decision
+        # 0038 amendment 2).
+        shown_default = kind in policy.shown_kinds()
         shown = _flagged_flag(
             entry,
             "show_on_site",
-            True,
+            shown_default,
             drops,
             where,
-            "this entry's row is shown on the site anyway",
+            "this entry's row is shown on the site anyway"
+            if shown_default
+            else "this entry stays off the site",
             lines,
         )
         if display:
@@ -1192,17 +1222,17 @@ def _parse_block(
         first = min(dated, key=lambda p: p[0].when) if dated else None
         deploys = _parse_files(entry.get("files"), tz, drops, where)
         _default_ship_times(deploys, first[1] if first else None)
-        reading_list = entry.get("reading_list")
-        if reading_list is not None and not isinstance(reading_list, str):
+        guide = entry.get("reading_guide")
+        if guide is not None and not isinstance(guide, str):
             _flag_bad_value(
                 drops,
                 where,
-                "reading_list",
-                reading_list,
-                "the row shows no reading list",
+                "reading_guide",
+                guide,
+                "the row shows no reading guide",
                 lines,
             )
-            reading_list = ""
+            guide = ""
         releases.append(
             Release(
                 label=key,
@@ -1218,7 +1248,7 @@ def _parse_block(
                 session=str(session) if session else "",
                 location=location,
                 slots=[slot for slot, _written in slots],
-                reading_list=(reading_list or "").strip(),
+                reading_list=(guide or "").strip(),
                 files_written="files" in entry,
                 block=block,
             )
@@ -1456,7 +1486,7 @@ def _parse_assignments(
             lines,
             end_of_day=True,
         )
-        if marks is not None and marks <= due:
+        if marks is not None and due is not None and marks <= due:
             _flag_bad_value(
                 drops,
                 where,
@@ -1492,12 +1522,44 @@ def _parse_assignments(
             number=number,
             lines=lines,
             settings=run_settings,
+            type=_flagged_word(
+                entry, "type", ASSIGNMENT_TYPES, drops, where, SHAPE_COST, lines
+            ),
+            submit_via=_flagged_word(
+                entry, "submit_via", SUBMIT_VIA, drops, where, SHAPE_COST, lines
+            ),
         )
     return out
 
 
+# What an unusable `type:` / `submit_via:` override costs: the template's word stands.
+SHAPE_COST = "the template's grading_config.yml decides it instead"
+
+
+def _flagged_word(
+    entry: dict,
+    key: str,
+    words: tuple[str, ...],
+    drops: Drops,
+    where: str,
+    cost: str,
+    lines: dict[str, int] | None = None,
+) -> str | None:
+    """`entry[key]` when it is one of `words`, else None - flagging a value that is
+    there but is not one."""
+    raw = entry.get(key)
+    if raw is None or raw == "":
+        return None
+    word = str(raw).strip().lower()
+    if word in words:
+        return word
+    _flag_bad_value(drops, where, key, raw, cost, lines)
+    return None
+
+
 KNOWN_ARCHIVE = frozenset(
     {
+        "type",
         "event_datetime",
         "grace_days",
         "title",
@@ -1519,7 +1581,7 @@ def _whole_days(value: object) -> int | None:
     return days if days >= 0 else None
 
 
-def _grace(raw: object, drops: Drops) -> timedelta:
+def _grace(raw: object, drops: Drops, where: str) -> timedelta:
     """`archive.grace_days` as the time after `semester_end` the default date falls,
     else `ARCHIVE_GRACE`. An unusable value is flagged and the sixty days stand."""
     if not isinstance(raw, dict) or raw.get("grace_days") is None:
@@ -1528,7 +1590,7 @@ def _grace(raw: object, drops: Drops) -> timedelta:
     if days is None:
         _flag_bad_value(
             drops,
-            "archive",
+            where,
             "grace_days",
             raw["grace_days"],
             f"the default date counts {ARCHIVE_GRACE.days} days from semester_end instead",
@@ -1538,9 +1600,10 @@ def _grace(raw: object, drops: Drops) -> timedelta:
 
 
 def _parse_archive(
-    meta: dict, semester_end: date | None, drops: Drops
-) -> ArchiveRow | None:
-    """The optional `archive:` block as an `ArchiveRow`, or None where none was written.
+    raw: object, semester_end: date | None, drops: Drops, where: str
+) -> ArchiveRow:
+    """The `semester:` block's `type: archive` entry (`raw`, at `where`) as an
+    `ArchiveRow`; the caller passes None for a semester that wrote none.
 
     The block IS the switch. A semester that writes none is never frozen automatically:
     every repository in an org going read-only is far too large a thing to happen off a
@@ -1562,10 +1625,7 @@ def _parse_archive(
     `title:` and `tbc:` are display only and never reach the freeze: the row may be called
     anything and may say the day is still moving, and the day the scheduler acts on is the
     one this returns either way."""
-    if "archive" not in meta:
-        return None
-    raw = meta["archive"]
-    grace = _grace(raw, drops)
+    grace = _grace(raw, drops, where)
     default = semester_end + grace if semester_end else None
     cost = (
         f"this semester freezes at its default date instead ({default})"
@@ -1580,33 +1640,140 @@ def _parse_archive(
         if raw is not None:
             _drop(
                 drops,
-                "archive",
-                "not a mapping (it must be `event_datetime:`, `title:`, `details:` "
-                "and/or `show_on_site:` under it)",
+                where,
+                "not a mapping (it must be `type: archive` with `event_datetime:`, "
+                "`title:`, `details:` and/or `show_on_site:` beside it)",
                 cost,
-                field_name="archive",
             )
         return ArchiveRow(when=default)
     lines = take_lines(raw)
     _flag_unknown_keys(
-        drops, raw, KNOWN_ARCHIVE, "archive", "that setting is ignored", lines
+        drops, raw, KNOWN_ARCHIVE, where, "that setting is ignored", lines
     )
     return ArchiveRow(
-        when=_flagged_date(raw, "event_datetime", drops, "archive", cost, lines)
-        or default,
+        when=_flagged_date(raw, "event_datetime", drops, where, cost, lines) or default,
         show_on_site=_flagged_flag(
             raw,
             "show_on_site",
             True,
             drops,
-            "archive",
+            where,
             "the site's archive row is shown anyway",
             lines,
         ),
         title=str(raw.get("title") or "").strip() or ARCHIVE_TITLE,
-        details=_flagged_details(raw, drops, "archive", lines),
-        tbc=_flagged_flag(raw, "tbc", False, drops, "archive", TBC_COST, lines),
+        details=_flagged_details(raw, drops, where, lines),
+        tbc=_flagged_flag(raw, "tbc", False, drops, where, TBC_COST, lines),
     )
+
+
+KNOWN_SEMESTER_DATE = frozenset({"type", "event_datetime"})
+KNOWN_BREAK = frozenset({"type", "title", "details", "from", "to", "show_on_site"})
+
+
+def _parse_semester(
+    raw: object, drops: Drops
+) -> tuple[date | None, date | None, list[Break], ArchiveRow | None]:
+    """The `semester:` block (decision 0038 amendment 2): `(start, end, breaks,
+    archive)`. Each entry names its `type`: one `start`, one `end` (the week numbering),
+    any number of `break`s (`from`/`to`), and at most one `archive` - the switch, as its
+    own block was (`_parse_archive`). An entry with no usable type is dropped; a second
+    start, end or archive too."""
+    if raw is None:
+        return None, None, [], None
+    raw = _require_mapping(
+        raw, drops, SEMESTER_BLOCK, "key", "the semester has no dates of its own"
+    )
+    if raw is None:
+        return None, None, [], None
+    seen: dict[str, str] = {}
+    start = end = None
+    breaks: list[Break] = []
+    archive_raw: tuple[str, object] | None = None
+    term_cost = "the site synthesises semester dates, shifting every session row"
+    for key, entry in raw.items():
+        key = str(key)
+        where = f"{SEMESTER_BLOCK}.{key}"
+        lines = take_lines(entry) if isinstance(entry, dict) else None
+        kind = (
+            str(entry.get("type") or "").strip().lower()
+            if isinstance(entry, dict)
+            else ""
+        )
+        if kind not in SEMESTER_TYPES:
+            _drop(
+                drops,
+                where,
+                "no `type:` (start, end, break or archive)",
+                "nothing about the semester's dates is read from it",
+                lines,
+                "type",
+            )
+            continue
+        if kind != "break" and kind in seen:
+            _drop(
+                drops,
+                where,
+                f"a second `type: {kind}` (semester.{seen[kind]} is the first)",
+                "only the first counts",
+                lines,
+                "type",
+            )
+            continue
+        seen[kind] = key
+        if kind == "archive":
+            archive_raw = (where, entry)
+            continue
+        if kind in ("start", "end"):
+            _flag_unknown_keys(
+                drops,
+                entry,
+                KNOWN_SEMESTER_DATE,
+                where,
+                "that setting is ignored",
+                lines,
+            )
+            when = _flagged_date(
+                entry, "event_datetime", drops, where, term_cost, lines
+            )
+            if kind == "start":
+                start = when
+            else:
+                end = when
+            continue
+        _flag_unknown_keys(
+            drops, entry, KNOWN_BREAK, where, "that setting is ignored", lines
+        )
+        cost = "the break is not on the site, and its weeks count as teaching weeks"
+        first = _flagged_date(entry, "from", drops, where, cost, lines)
+        last = _flagged_date(entry, "to", drops, where, cost, lines) or first
+        if first is None or last < first:
+            _drop(drops, where, "no usable `from:`/`to:`", cost, lines, "from")
+            continue
+        breaks.append(
+            Break(
+                key=key,
+                start=first,
+                end=last,
+                title=str(entry.get("title") or "").strip(),
+                details=_flagged_details(entry, drops, where, lines) or "",
+                show_on_site=_flagged_flag(
+                    entry,
+                    "show_on_site",
+                    True,
+                    drops,
+                    where,
+                    "the break is shown on the site anyway",
+                    lines,
+                ),
+            )
+        )
+    archive = (
+        _parse_archive(archive_raw[1], end, drops, archive_raw[0])
+        if archive_raw
+        else None
+    )
+    return start, end, sorted(breaks, key=lambda b: b.start), archive
 
 
 def parse(meta: dict, instance: settings.Instance | None = None) -> Schedule:
@@ -1642,9 +1809,9 @@ def parse(meta: dict, instance: settings.Instance | None = None) -> Schedule:
             f"`{tz_name}` is not a known zone - falling back to {DEFAULT_TZ}, so every "
             f"naive time below is read in {DEFAULT_TZ}",
         )
-    term_cost = "the site synthesises semester dates, shifting every session row"
-    semester_start = _flagged_date(meta, "semester_start", drops, "", term_cost)
-    semester_end = _flagged_date(meta, "semester_end", drops, "", term_cost)
+    semester_start, semester_end, breaks, archive = _parse_semester(
+        meta.get(SEMESTER_BLOCK), drops
+    )
     releases: list[Release] = []
     events: list[Event] = []
     taken: dict[str, str] = {}
@@ -1667,14 +1834,12 @@ def parse(meta: dict, instance: settings.Instance | None = None) -> Schedule:
         # (and the console an Intl zone) from this, so a fallen-back name must not leak.
         timezone=str(tz),
         releases=releases,
-        # `01/09/2026` coerces to None exactly like an absent key, and the site then
-        # SYNTHESISES term dates from what it does know - so a bad separator quietly
-        # shifts every weekly session row. Flag it.
         semester_start=semester_start,
         semester_end=semester_end,
+        breaks=breaks,
         assignments=_parse_assignments(meta.get("assignments"), tz, drops),
         events=events,
-        archive=_parse_archive(meta, semester_end, drops),
+        archive=archive,
         dropped=drops.report
         + [f"{ASSIGNMENTS_FILE} {f.label}: {f.what}" for f in instance.faults],
         faults=drops.faults,
@@ -2039,6 +2204,22 @@ def run_settings_of(semester_org: str, slug: str) -> dict:
         return {}
     entry = load(semester_org).assignments.get(slug)
     return dict(entry.settings) if entry else {}
+
+
+def shape_of(semester_org: str, slug: str) -> dict:
+    """This semester's override of the template's `type` / `submit_via` for assignment
+    `slug` (decision 0038 amendment 2): only the words the entry writes, off the plan
+    `load` parses once per run; `{}` with no semester, no entry or no override."""
+    if not semester_org or not slug:
+        return {}
+    entry = load(semester_org).assignments.get(slug)
+    if entry is None:
+        return {}
+    return {
+        k: v
+        for k, v in (("type", entry.type), ("submit_via", entry.submit_via))
+        if v is not None
+    }
 
 
 def load(semester_org: str) -> Schedule:
