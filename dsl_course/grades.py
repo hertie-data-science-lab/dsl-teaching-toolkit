@@ -49,6 +49,13 @@ def main() -> int:
         help="Put the markers' feedback text into each student's email.",
     )
     p.add_argument(
+        "--no-per-question",
+        action="store_true",
+        help="Withhold the marks and feedback per question of the assignment returned "
+        "(every assignment, without --assignment): the score, late penalty, adjustment "
+        "and final grade still go.",
+    )
+    p.add_argument(
         "--assignment",
         default="",
         help="Return this assignment only (its semester-side name), beside the ones "
@@ -86,6 +93,7 @@ def main() -> int:
             dry_run=args.preview,
             receipt_note=args.receipt_note,
             include_feedback=args.include_feedback,
+            per_question=not args.no_per_question,
             assignment=args.assignment or None,
             sched=sched,
         )

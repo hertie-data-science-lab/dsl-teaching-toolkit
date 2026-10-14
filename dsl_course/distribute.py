@@ -395,13 +395,29 @@ def _canonical(value: object) -> object:
     return value
 
 
-def _marks_digest(book: dict[str, dict]) -> str:
+def _marks_digest(
+    book: dict[str, dict], specs: dict[str, SheetSpec] | None = None
+) -> str:
     """What the EMAIL keys on: what a grader wrote, per assignment, and nothing else. A
     refreshed `submitted`, a new `max_points` or a respelt date moves grades.yml without
-    there being anything new for a student to read; a late penalty that moves a mark
-    moves `final_grade`, so it is still in here."""
+    there being anything new for a student to read; a late penalty or an adjustment that
+    moves a mark moves `final_grade`, so it is still in here.
+
+    The team's score on a group assignment with a repo per team is left out (`specs`
+    names those): a member's page has shown it only since 0.11.0, and keying the email on
+    it would have mailed every such student once to say nothing new. Its total moves the
+    final grade, which is in here."""
+    team_repo = {
+        slug
+        for slug, spec in (specs or {}).items()
+        if spec.is_group and spec.creates_unit_repos
+    }
     projection = {
-        slug: {key: view[key] for key in _GRADER_KEYS if key in view}
+        slug: {
+            key: view[key]
+            for key in _GRADER_KEYS
+            if key in view and not (key == "score" and slug in team_repo)
+        }
         for slug, view in book.items()
     }
     text = json.dumps(
@@ -677,6 +693,7 @@ def distribute(
     *,
     receipt_note: bool = False,
     include_feedback: bool = False,
+    per_question: bool = True,
     assignment: str | None = None,
     sched: schedule.Schedule | None = None,
 ) -> int:
@@ -709,7 +726,8 @@ def distribute(
 
     `receipt_note` also posts `MARKS_RETURNED_NOTE` once per assignment on each returned
     unit's Submission receipts issue; `include_feedback` puts the feedback text into the email. Both
-    off by default."""
+    off by default. `per_question` off withholds the marks and feedback per question of the
+    assignment this run returns (every assignment, unscoped) - `student_view`."""
     # ONE listing of the semester for the whole run: it answers "does this student already
     # have a gradebook?". A dry run writes nothing and needs none.
     listed = None if dry_run else listing_by_name(semester_org)
@@ -787,7 +805,10 @@ def distribute(
             )
             return 1
         titles = {slug: specs[slug].title for slug in sources}
-        books, unknown = _on_the_roster(build_gradebooks(sources), students)
+        withheld = (
+            set() if per_question else ({assignment} if assignment else set(sources))
+        )
+        books, unknown = _on_the_roster(build_gradebooks(sources, withheld), students)
         distributed, migrating = _read_distributed(wd)
         retired = _retired_gradebook_files(wd)
         old_grades = records.RETIRED_SEMESTER_GRADES
@@ -869,7 +890,7 @@ def distribute(
     for handle in sorted(books):
         files = _gradebook_files(handle, books[handle], titles)
         digest = content_hash("".join(f.decode() for f in files.values()))
-        marks = _marks_digest(books[handle])
+        marks = _marks_digest(books[handle], specs)
         entry = record.get((handle, "", CHANNEL_GRADEBOOK))
         if entry and entry[0] == digest:
             live[handle] = marks

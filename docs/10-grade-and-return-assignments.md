@@ -48,11 +48,11 @@ teams:
 | Field | Owner | Student sees |
 | --- | --- | --- |
 | `info.submitted`, `info.days_late`, `info.contributions`, `info.autograde`, `info.completion`, `info.submitted_note` | toolkit, refreshed until frozen | `submitted`, `days_late` |
-| `score_individual` (per question, or one value) | you | the total, and the breakdown behind it |
+| `score_individual` (per question, or one value) | you | the score, and its marks per question |
 | `feedback_group`, `feedback_individual` | you | yes (own + team) |
-| `feedback_per_question` (where questions are declared; the team's on a group sheet) | you, optional | yes: a list after the overall feedback, inside the team's quote on a group sheet; a blank cell is not sent |
-| `score_group` | you | never shown as-is; each member's gradebook shows only the final grade it derives - the score itself too, but only for a team with no repo of its own (`shared_dropbox_repo`, `external`) |
-| `adjustment_individual` | you - the ONLY override of the mark, in both shapes | **no** - only the final grade it produced |
+| `feedback_per_question` (where questions are declared; the team's on a group sheet) | you, optional | yes (unless marks per question are withheld): a list after the overall feedback, inside the team's quote on a group sheet; a blank cell is not sent |
+| `score_group` | you | yes: every member's gradebook shows the team's score and its marks per question, beside their own final grade |
+| `adjustment_individual` | you - one person's change to their final grade, in both shapes (the late penalty has its own override, `late_penalty`) | yes, their own only, as its own line (`adjustment +4`); never a team-mate's |
 | `late_penalty` (per student or team, beside `info:`; optional) | you: `apply` (the default), `waive`, or the whole penalty as `15%` / `0.15` | with their marks (Distribute grades), the penalty that applied: `-20%`, `waived` or `-15% (set by hand)`; a submission receipt quotes the late rule's own figure only |
 | `notes_not_shared_with_students` | you | **never** |
 | final grade | derived on output, never stored | yes |
@@ -183,8 +183,11 @@ posted into a repo: a student has one address for a mark, and a repo whose `visi
 could change is not it.
 
 - **The private gradebook** `grades-<handle>`: `grades.yml` and a rendered `README.md`, in
-  one commit. The student sees their final grade, never the sum behind it. Each member of
-  a team reads the team's shared feedback here, in their own repo, beside their own grade.
+  one commit. The student sees the whole breakdown, so the numbers add up: the marks per
+  question, the score (the team's, on a group assignment), how late it was and the penalty
+  (whenever the submission was timed), their own adjustment where there is one, and the
+  final grade. Each member of a team reads the team's shared feedback here, in their own
+  repo, beside their own grade.
 - **`.system/semester-grades.csv`** in `semester-config` - the semester grades file, one row per
   enrolled student including the ungraded. Private, never logged.
 - **An email** with a link and no marks in it.
@@ -196,6 +199,10 @@ only when you press Return marks again; if every one fails, `marks_return_dateti
 again on its own. It also keeps trying while any mark is held, and sends only what has not
 gone out. A `grading_config.yml` refused as `NOT_MIGRATED` stops its sheet refresh and
 Return marks until the migration runs. Untick `notify` to skip the email.
+
+The marks per question and the feedback per question go to the page unless the run
+withholds them (`--no-per-question` on `python3 -m dsl_course.grades distribute`, for the
+assignment it returns); the score, late penalty, adjustment and final grade go either way.
 
 Two options, both off by default. `include_feedback` puts the markers' feedback text into
 the email: the overall feedback, then each question's. `receipt_note` posts one line,

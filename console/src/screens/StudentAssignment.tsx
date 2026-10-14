@@ -254,7 +254,7 @@ function questionsOf(e: MarkEntry): string[] {
 /** A returned mark as a figure: "18 / 20". */
 export const MarkFigure = ({ e }: { e: MarkEntry }) => <span class="mark-big">{e.finalGrade}{e.maxPoints ? <span> / {e.maxPoints}</span> : null}</span>;
 
-/** One returned mark: submitted, days late, penalty, team, feedback, by question, team feedback. */
+/** One returned mark: submitted, days late, penalty, adjustment, team, feedback, by question, team feedback. */
 export function MarkBody({ e }: { e: MarkEntry }) {
   const qs = questionsOf(e);
   return (
@@ -264,6 +264,7 @@ export function MarkBody({ e }: { e: MarkEntry }) {
         {e.daysLate && e.daysLate !== '0' ? <><dt>Days late</dt><dd>{e.daysLate}</dd></> : null}
         {e.penalty ? <><dt>Late penalty</dt><dd>{e.penalty}</dd></> : null}
         {typeof e.score === 'string' && e.score !== e.finalGrade ? <><dt>Marks</dt><dd>{e.score}</dd></> : null}
+        {e.adjustment ? <><dt>Adjustment</dt><dd>{e.adjustment}</dd></> : null}
         {e.team ? <><dt>Team</dt><dd>{e.team}</dd></> : null}
       </dl>
       {e.feedback ? <div class="fb"><h4>Feedback</h4><Md src={e.feedback} /></div> : null}
