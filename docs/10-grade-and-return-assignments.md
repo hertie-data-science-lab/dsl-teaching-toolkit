@@ -77,10 +77,12 @@ by hand.
 
 ### The console's Marks tab
 
-The sheet as a grid, one row per student or team. On a team assignment a team's ▸ (or **Open
-all teams**) shows its members, each with their own Adjustment, feedback and private notes; a
+**Return marks** sits above the grid, with **Student view** under it; the grid itself is for
+marking and saving, and its corner icon opens it full screen (Escape closes). The sheet is one row
+per student or team. On a team assignment a team's ▸ shows its members, each with their own Adjustment, feedback and private notes; a
 team with any of those set opens by itself. On an individual one the Adjustment column sits
-behind the **Adjustments** chip. Every column header has a `?`. The filters (All, Unmarked, Late,
+behind the **Adjustments** chip. Every column header has a `?`; the **From the submission** heading
+folds its columns into one. The filters (All, Unmarked, Late,
 Held) count from the sheet as typed, and a held row says why, by the same rules as Return marks.
 Enter moves down a column of numbers; in a text box Ctrl+Enter (⌘+Enter) does. **Student view**
 shows what one student's marks page will hold. Unsaved marks stay in this browser until saved, and
