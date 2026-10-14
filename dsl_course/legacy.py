@@ -47,6 +47,7 @@ SEMESTER_ORG = "semester org"
 SEMESTER_TOPICS = "semester .github topics"
 COURSE_REPOS = "course org repos"
 MEMBERSHIP_DISPATCH = "sync-membership dispatch payload"
+STATUS_TODO_CHECK = "status.json to-do check"
 
 _GRADING_CONFIG_HOME = (
     "in the assignment's own grading_config.yml, on the course template's "
@@ -187,6 +188,15 @@ ROWS: tuple[Old, ...] = (
     Old("semester_defaults", "", COURSE_CONFIG, "0.10.0"),
     # An assignment template told by its name before the `dsl-assignment` topic (0014).
     Old("assignment-", "dsl-assignment", COURSE_REPOS, "0.10.0"),
+    # A status.json an engine before 0.11.0 wrote still carries it until the semester's next
+    # status refresh rewrites the file; the final sweep drops the row once every live org
+    # has migrated and refreshed (decision 0038 retired the check).
+    Old(
+        "kind_folder",
+        "none: folders carry no kind (the schedule block decides it)",
+        STATUS_TODO_CHECK,
+        "0.11.0",
+    ),
 )
 
 

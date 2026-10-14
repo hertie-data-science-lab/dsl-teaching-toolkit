@@ -248,7 +248,7 @@ TODO_KINDS = ("course", "materials", "template", "site", "schedule", "instructor
 # semester's own.
 TODO_CHECKS = (
     # Read in a status an engine before 0.11.0 wrote (decision 0038 retired the check).
-    "kind_folder",
+    *(row.old for row in legacy.rows(legacy.STATUS_TODO_CHECK)),
     "syllabus",
     "withheld",
     "brief",

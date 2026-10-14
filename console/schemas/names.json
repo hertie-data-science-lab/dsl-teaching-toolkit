@@ -215,6 +215,14 @@
       "old": "assignment-",
       "since": "0.10.0",
       "where": "course org repos"
+    },
+    {
+      "cost": "",
+      "fault_code": null,
+      "new": "none: folders carry no kind (the schedule block decides it)",
+      "old": "kind_folder",
+      "since": "0.11.0",
+      "where": "status.json to-do check"
     }
   ],
   "opencourse_file": "opencourse.yml",
