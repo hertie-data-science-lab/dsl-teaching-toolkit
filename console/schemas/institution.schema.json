@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "defaults": {
+      "additionalProperties": false,
+      "properties": {
+        "archive_grace_days": {
+          "type": "integer"
+        },
+        "assignment_repo_visibility": {
+          "enum": [
+            "private",
+            "public",
+            "student_choice"
+          ],
+          "type": "string"
+        },
+        "late_penalty_per_day": {
+          "pattern": "^(?:(?:100|[0-9]{1,2})(?:\\.[0-9]+)?%|0?\\.[0-9]+|0)$",
+          "type": "string"
+        },
+        "late_window_days": {
+          "type": "integer"
+        },
+        "marks_per_question": {
+          "type": "boolean"
+        },
+        "materials_repo": {
+          "pattern": "^[\\w.-]+$",
+          "type": "string"
+        },
+        "max_team_size": {
+          "type": "integer"
+        },
+        "timezone": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "timezone",
+        "late_window_days",
+        "late_penalty_per_day",
+        "max_team_size",
+        "assignment_repo_visibility",
+        "archive_grace_days",
+        "materials_repo",
+        "marks_per_question"
+      ],
+      "type": "object"
+    },
+    "institution": {
+      "additionalProperties": false,
+      "properties": {
+        "address": {
+          "type": "string"
+        },
+        "console_url": {
+          "type": "string"
+        },
+        "contacts": {
+          "items": {
+            "pattern": "^[^@\\s]+@[^@\\s]+$",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "dsl_org_url": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "url",
+        "address",
+        "dsl_org_url",
+        "contacts"
+      ],
+      "type": "object"
+    },
+    "kinds": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "background": {
+            "pattern": "^#[0-9a-fA-F]{6}$",
+            "type": "string"
+          },
+          "colour": {
+            "pattern": "^#[0-9a-fA-F]{6}$",
+            "type": "string"
+          },
+          "key": {
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "numbered": {
+            "type": "boolean"
+          },
+          "plural": {
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "type": "string"
+          },
+          "shown": {
+            "type": "boolean"
+          },
+          "system": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "key",
+          "plural",
+          "numbered",
+          "label",
+          "colour",
+          "background",
+          "system"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "licences": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "url"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "selection_floor": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "institution",
+    "defaults",
+    "kinds",
+    "selection_floor",
+    "licences"
+  ],
+  "title": "institution.yml",
+  "type": "object"
+}

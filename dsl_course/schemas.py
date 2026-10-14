@@ -796,6 +796,10 @@ def names_json() -> dict:
         "system_dir": records.SYSTEM_DIR,
         "course_file": COURSE_CONFIG,
         "semester_file": SEMESTER_FILE,
+        # WP-C removes: the console's settings screens still edit the 0.10 files.
+        "instructors_file": legacy.OLD_INSTRUCTORS_FILE,
+        "opencourse_file": legacy.OLD_OPENCOURSE_FILE,
+        "assignments_file": legacy.OLD_ASSIGNMENTS_FILE,
         "registry_file": SEMESTERS_PATH,
         "records": {kind: records.path(kind) for kind in records.RECORDS},
         # The hidden first line that routes a Join issue opened through the API.
