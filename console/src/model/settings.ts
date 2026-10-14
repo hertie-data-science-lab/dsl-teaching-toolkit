@@ -7,14 +7,11 @@
 
 import { YamlText, deepEqual, isObj, obj, type Path } from '../edit/yamlText';
 import type { FileState, Files } from './files';
-import { ASSIGNMENTS_FILE, CONFIG_REPO } from './names';
-import assignmentsSchema from '../../schemas/assignments.schema.json';
-import courseSchema from '../../schemas/dsl_course.schema.json';
+import { CONFIG_REPO, COURSE_FILE, COURSE_REPO, SEMESTER_FILE } from './names';
 import courseFileSchema from '../../schemas/course.schema.json';
 import gradingSchema from '../../schemas/grading_config.schema.json';
-// WP-C removes: the 0.10 assignments.yml / dsl-course.yml schemas the settings screens
-// still validate against, frozen.
 import scheduleSchema from '../../schemas/schedule.schema.json';
+import semesterFileSchema from '../../schemas/semester.schema.json';
 import { labelMap, labelOf } from './labels';
 import { DEFAULTS, penaltyRate } from './policy';
 import type { Status } from './types';
@@ -41,10 +38,10 @@ export type Effectives = Partial<Record<string, Effective>>;
 export const fileKey = (key: string): string => (key === 'visibility' ? 'assignment_repo_visibility' : key);
 
 
-const ENUMS = (assignmentsSchema.properties.defaults.properties as unknown as Record<string, { enum?: string[] }>);
+const ENUMS = (courseFileSchema.properties.defaults.properties as unknown as Record<string, { enum?: string[] }>);
 /** The closed vocabularies, as the exported schema lists them (`setting_readers._one_of`). */
 export const TEAM_FORMATIONS: string[] = ENUMS.team_formation.enum ?? [];
-export const VISIBILITIES: string[] = ENUMS.visibility.enum ?? [];
+export const VISIBILITIES: string[] = ENUMS.assignment_repo_visibility.enum ?? [];
 /** Their words, from the engine's labels export. */
 export const TEAM_FORMATION = labelMap('team_formation', TEAM_FORMATIONS);
 export const VISIBILITY = labelMap('visibility', VISIBILITIES);
@@ -123,9 +120,9 @@ export function usableBlock(raw: unknown, keys: readonly string[] = RUN_KEYS): B
 }
 
 /** The name the semester's artefacts use for an assignment (`schedule.semester_name`): its
- *  `semester_dest_repo` in assignments.yml when that is a repo name, else its schedule key. */
-export function semesterName(assignmentsDoc: Block, key: string): string {
-  const dest = String(obj(obj(assignmentsDoc.assignments)[key]).semester_dest_repo ?? '').trim();
+ *  schedule entry's `repo_name` when that is a repo name, else its key. */
+export function semesterName(scheduleDoc: Block, key: string): string {
+  const dest = String(obj(obj(scheduleDoc.assignments)[key]).repo_name ?? '').trim();
   return dest && REPO_NAME_RE.test(dest) ? dest : key;
 }
 
@@ -200,8 +197,8 @@ export function lateWord(days: unknown, penalty: unknown): string {
 
 // ------------------------------------------------------------------ files
 
-export const ASSIGNMENTS_STUB =
-  '# INSTRUCTOR-OWNED - yours to edit freely; edits here are not overwritten.\n#\n# How THIS semester runs each assignment. The dates live in schedule.yml.\n';
+/** What a new `semester.yml` starts as, when the semester has none yet. */
+export const SEMESTER_STUB = '# INSTRUCTOR-OWNED - yours to edit freely; edits here are not overwritten.\n';
 
 export interface YamlFile {
   text: string;
@@ -219,8 +216,14 @@ export function yamlFile(f: FileState, stub: string | null): YamlFile | 'loading
   return { text, sha: f.kind === 'ready' ? f.sha : null, doc: y.errors.length ? {} : obj(y.toJS()), error: y.errors[0] ?? null };
 }
 
-export function assignmentsFile(files: Files, semesterOrg: string): YamlFile | 'loading' | null {
-  return yamlFile(files.file(semesterOrg, CONFIG_REPO, ASSIGNMENTS_FILE), ASSIGNMENTS_STUB);
+/** The course's `.github/course.yml`: there is no course without one, so a missing file is unreadable. */
+export function courseFile(files: Files, courseOrg: string): YamlFile | 'loading' | null {
+  return yamlFile(files.file(courseOrg, COURSE_REPO, COURSE_FILE), null);
+}
+
+/** The semester's `semester.yml`; a missing one reads as the stub, so the first save creates it. */
+export function semesterFile(files: Files, semesterOrg: string): YamlFile | 'loading' | null {
+  return yamlFile(files.file(semesterOrg, CONFIG_REPO, SEMESTER_FILE), SEMESTER_STUB);
 }
 
 export function scheduleFile(files: Files, semesterOrg: string): YamlFile | 'loading' | null {
@@ -228,11 +231,10 @@ export function scheduleFile(files: Files, semesterOrg: string): YamlFile | 'loa
 }
 
 /** Each instructor file checked against its exported schema, before anything is written. */
-export const validAssignments = validator(assignmentsSchema);
 export const validSchedule = validator(scheduleSchema);
-export const validCourse = validator(courseSchema);
-/** `.github/course.yml` (decision 0039). */
+/** `.github/course.yml` and `semester-config/semester.yml` (decision 0039). */
 export const validCourseFile = validator(courseFileSchema);
+export const validSemesterFile = validator(semesterFileSchema);
 export const validGrading = validator(gradingSchema);
 
 /**
@@ -255,20 +257,6 @@ export function writeBlock(y: YamlText, path: Path, before: Block, after: Block,
       y.delete(path.slice(0, i));
     }
   return changed;
-}
-
-/**
- * assignments.yml's text with one run setting of assignment `key` set to `value`, or null when
- * its block already says so. Throws when the file cannot be written as it stands.
- */
-export function withRunSetting(f: YamlFile, key: string, setting: string, value: unknown): string | null {
-  if (f.error) throw new Error(`${ASSIGNMENTS_FILE} does not parse (${f.error}); nothing was saved`);
-  const path: Path = ['assignments', key];
-  const before = rawBlock(f.doc, path);
-  const y = new YamlText(f.text);
-  if (!writeBlock(y, path, before, { ...before, [setting]: value }, [setting])) return null;
-  if (!validAssignments(y.toJS() ?? {})) throw new Error(`${ASSIGNMENTS_FILE} would not be valid; nothing was saved`);
-  return y.text;
 }
 
 /** What a run-settings form edits at one layer: the block's own keys, as written. */

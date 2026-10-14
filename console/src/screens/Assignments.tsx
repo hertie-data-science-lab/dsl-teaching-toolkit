@@ -1,8 +1,7 @@
 // S16 Assignments index and S10 Assignment detail: the hub, with tabs Overview | Teams |
 // Marks (decisions 0008, 0037). Teams shows only when the template says teams.
 
-import { readTable } from '../edit/csv';
-import { parseRoster } from '../model/people';
+import { parseRoster, teamColumn } from '../model/people';
 import { ASSIGNMENT_WORD, assignmentIdent, assignmentTitle, fmtDay, fmtTime, fmtWhen } from '../model/format';
 import type { Assignment, Status } from '../model/types';
 import { pastDue, phaseOf, submissionsOf, type Phase } from '../model/assignment';
@@ -20,7 +19,7 @@ import { MarksTab, TeamsTab, requestReturnMarks } from './Marking';
 import { AssignmentRun, SemesterDefaults, sheetName } from './RunSettings';
 import { WithStatus, cohortName, cohortScope, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
-import { CONFIG_REPO } from '../model/names';
+import { CONFIG_REPO, ROSTER_PATH, STUDENTS_FILE } from '../model/names';
 
 function nextDate(a: Assignment, tz: string, year: number): string {
   switch (a.state) {
@@ -38,18 +37,13 @@ function nextDate(a: Assignment, tz: string, year: number): string {
   }
 }
 
-/** Joined students in no team of `slug` (teams.csv keys on its semester-side name), as the Teams tab counts them; null until both files are read. */
-function teamless(p: ReadyProps, slug: string): number | null {
-  const roster = p.files.file(p.cohort.org, CONFIG_REPO, 'students.csv');
-  const teams = p.files.file(p.cohort.org, CONFIG_REPO, 'teams.csv');
-  if (roster.kind === 'loading' || teams.kind === 'loading') return null;
-  const joined = roster.kind === 'ready' ? parseRoster(roster.text).rows.filter((s) => s.handle) : [];
-  const placed = new Set(
-    (teams.kind === 'ready' ? readTable(teams.text).rows : [])
-      .filter((r) => (r.assignment ?? '').trim() === sheetName(p, slug) && (r.github_handle ?? '').trim())
-      .map((r) => r.github_handle.trim().toLowerCase()),
-  );
-  return joined.filter((s) => !placed.has(s.handle.toLowerCase())).length;
+/** Joined students in no team of `a` (a blank cell in its `team:<n>` column of students.csv), as the Teams tab counts them; null until both roster files are read. */
+function teamless(p: ReadyProps, a: Assignment): number | null {
+  const roster = p.files.file(p.cohort.org, CONFIG_REPO, STUDENTS_FILE);
+  const sys = p.files.file(p.cohort.org, CONFIG_REPO, ROSTER_PATH);
+  if (roster.kind === 'loading' || sys.kind === 'loading') return null;
+  const rows = roster.kind === 'ready' ? parseRoster(roster.text, sys.kind === 'ready' ? sys.text : null).rows : [];
+  return rows.filter((s) => s.handle && !(s.teams[teamColumn(a)] ?? '').trim()).length;
 }
 
 function Index(p: ReadyProps) {
@@ -74,7 +68,7 @@ function Index(p: ReadyProps) {
           <thead><tr><th>Assignment</th><th>State</th><th>Next date</th><th>Progress</th><th>Teams</th><th>Marked</th><th>Returned</th><th>Problem</th></tr></thead>
           <tbody>
             {list.map((a) => {
-              const free = isGroup(a) ? teamless(p, a.slug) : null;
+              const free = isGroup(a) ? teamless(p, a) : null;
               return (
               <tr>
                 <td>

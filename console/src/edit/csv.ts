@@ -1,7 +1,7 @@
-// students.csv and teams.csv as tables the console edits and writes back. The header's
-// column order is kept, columns the console does not show (the enrol code) ride along
-// untouched, and the engine's `require_csv_header` + `strip_bom` reading rules hold: a
-// leading BOM is dropped and the named columns must be present.
+// students.csv (and `.system/roster.csv`) as tables the console edits and writes back. The
+// header's column order is kept, columns the console does not show ride along untouched, and
+// the engine's `require_csv_header` + `strip_bom` reading rules hold: a leading BOM is dropped
+// and the named columns must be present.
 
 /** One CSV record and the file line it ends on (header = 1), as Python's `csv` reader's `line_num` counts. */
 export interface CsvRecord {
@@ -81,10 +81,10 @@ const YOURS = ['name', 'role'];
 
 /**
  * What replacing the roster with `upload` would do, matched by email (case-insensitive).
- * A matched row keeps its system columns; only name and role come from the upload.
+ * A matched row keeps its other columns (its team cells); only name and role come from the upload.
  */
 export function diffRoster(current: Record<string, string>[], upload: Record<string, string>[]): { diff: RosterDiff; rows: Record<string, string>[] } {
-  const key = (r: Record<string, string>) => (r.hertie_email ?? '').trim().toLowerCase();
+  const key = (r: Record<string, string>) => (r.email ?? '').trim().toLowerCase();
   const byEmail = new Map(current.map((r) => [key(r), r]));
   const seen = new Set<string>();
   const diff: RosterDiff = { added: [], changed: [], removed: [], unchanged: 0 };
@@ -95,7 +95,7 @@ export function diffRoster(current: Record<string, string>[], upload: Record<str
     seen.add(k);
     const before = byEmail.get(k);
     if (!before) {
-      const row = { hertie_email: u.hertie_email.trim(), name: (u.name ?? '').trim(), role: (u.role ?? '').trim() };
+      const row = { email: u.email.trim(), name: (u.name ?? '').trim(), role: (u.role ?? '').trim() };
       diff.added.push(row);
       rows.push(row);
       continue;

@@ -191,7 +191,7 @@ export interface Assignment {
   settings?: Effectives;
   /** Where the work is handed in, in the site's one word (`course.submit_shape`). Absent in an older status. */
   submit_shape?: string;
-  /** The semester-side name (`semester_dest_repo`, else the slug): the per-unit repos' stem. Absent in an older status. */
+  /** The semester-side name (the entry's `repo_name`, else the slug): the per-unit repos' stem. Absent in an older status. */
   semester_name?: string;
 }
 

@@ -1,5 +1,5 @@
 // The run settings as form fields, at one layer of the cascade (the engine resolves it; status.json carries each answer, model/settings.ts): the
-// course's `assignment_defaults`, a semester's `defaults:`, or one assignment's block. Each
+// course's or a semester's `defaults:`, or one assignment's schedule entry. Each
 // field shows, in grey, what applies when it is left empty: the value the next layer down
 // gives and where that comes from.
 

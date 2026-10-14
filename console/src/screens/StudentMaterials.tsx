@@ -13,7 +13,7 @@ import { useEnv } from '../env';
 import type { TreeEntry } from '../github/client';
 import { buildTree, type TreeNode } from '../edit/badges';
 import { fmtDay } from '../model/format';
-import { ASSETS_KIND, aliasKind } from '../model/materialsRules';
+import { KINDS } from '../model/policy';
 import { sortedRows, type SemesterFacts } from '../model/student';
 import { CheckLine, Loading, Md, ghUrl } from '../ui/bits';
 import { FileHead, FolderHead } from '../ui/FileTree';
@@ -57,12 +57,11 @@ export function FileBeside({ org, repos, entry, label, children }: { org: string
 }
 
 /**
- * A top-level tree node is supporting files (decision 0026): a folder the engine's built-in
- * names make so (data/, img/, ...). Only those: a folder no name covers is supporting files
- * by default (decision 0031), but the status file carries no repo's own kinds, so one the
- * instructor set to a lecture or lab would be folded away by mistake.
+ * A top-level tree node is supporting files (decision 0026): a folder named for a kind of the
+ * institution's that is released but never a row (`assets/`). Folder names imply no other kind
+ * (decision 0038: a kind comes from the schedule), so no other folder is folded away.
  */
-export const isSupport = (n: TreeNode) => !!n.children && aliasKind(n.name) === ASSETS_KIND;
+export const isSupport = (n: TreeNode) => !!n.children && KINDS.some((k) => !k.shown && !k.system && [k.key, k.plural].includes(n.name.toLowerCase()));
 
 /** Every repo's tree; `current`, the file open beside it, is marked and its folders open. */
 export function MaterialsTree({ org, trees, current }: { org: string; trees: (readonly [string, TreeEntry[] | null])[]; current?: { repo: string; path: string } | null }) {

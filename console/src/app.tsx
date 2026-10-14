@@ -277,7 +277,7 @@ export function App({ state: s }: { state: AppState }) {
   } else {
     const cp: CohortProps = {
       course: ctx.course, cohort: ctx.cohort, loaded: cohortLoaded ?? { kind: 'loading' }, files: s.files, now: s.now.value, entry: route.entry, tab: route.tab,
-      heartbeat: s.heartbeat(ctx.course.org), prefill: sel.template,
+      heartbeat: s.heartbeat(ctx.course.org), prefill: sel.template, courseLoaded: s.statuses.course(ctx.course.org).value,
     };
     const screens: Record<string, () => preact.JSX.Element> = {
       dashboard: () => <CohortScreen {...cp} />,

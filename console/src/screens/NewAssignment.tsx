@@ -19,7 +19,7 @@ import { OpButtons } from '../ops/Panel';
 import { FormatPicker } from '../forms/FormatPicker';
 import { labelOf } from '../model/labels';
 import { DEFAULT_FORMATS, SUBMIT_VIA_DEFAULT } from '../model/policy';
-import { STARTERS, STARTER_COPY, formatWord, formatsList, questionFileError, questionsValue, toConfig, type QuestionRow } from '../tiers/grading';
+import { STARTERS, STARTER_COPY, formatWord, questionFileError, questionsValue, toConfig, type QuestionRow } from '../tiers/grading';
 import type { Tiers, Values } from '../tiers/types';
 import { assignmentMarking, assignmentName, assignmentStart, assignmentWork } from '../tiers/wizard';
 import { CheckLine, Loading, uploadUrl } from '../ui/bits';
@@ -74,14 +74,11 @@ export interface NaDraft {
   imported?: { repo: string; branches: string[] };
 }
 
-/** Fresh answers: the course's defaults where it has them, else the institution's. */
-export function initialValues(meta: Record<string, unknown> | null): Values {
-  const ad = ((meta?.assignment_defaults ?? {}) as Record<string, unknown>);
-  const s = (k: string, d: string) => (typeof ad[k] === 'string' && ad[k] ? String(ad[k]) : d);
-  const course = formatsList(ad.formats);
+/** Fresh answers: the toolkit's defaults (decision 0039 rule 2: formats and the submit route are no course default; the wizard asks). */
+export function initialValues(): Values {
   return {
-    start: 'fresh', type: 'individual', submit_via: s('submit_via', SUBMIT_VIA_DEFAULT),
-    formats: course.length ? course : [...DEFAULT_FORMATS], autograde: 'false', completion_check: 'auto', grader_pdf: false,
+    start: 'fresh', type: 'individual', submit_via: SUBMIT_VIA_DEFAULT,
+    formats: [...DEFAULT_FORMATS], autograde: 'false', completion_check: 'auto', grader_pdf: false,
   };
 }
 
@@ -211,11 +208,10 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
   const env = useEnv();
   const status = courseOf(p);
   const templates = (status?.templates ?? []).map((t) => t.repo);
-  const [d, set, clear] = useDraft<NaDraft>(`new-assignment:${course.org}`, () => ({ v: initialValues(course.meta), verified: {} }));
+  const [d, set, clear] = useDraft<NaDraft>(`new-assignment:${course.org}`, () => ({ v: initialValues(), verified: {} }));
   const v = d.v;
   const repo = templateRepo(v.name);
   const name = String(v.name ?? '').trim();
-  const courseFormats = formatsList(((course.meta?.assignment_defaults ?? {}) as Record<string, unknown>).formats);
   const runs = env?.ops.runs.value.length ?? 0;
   const tpl = useLive(env && repo ? async () => ({ repo, r: await checkTemplate(env.client, course.org, repo) }) : null, [repo, runs, asked]);
   const tplNow = tpl.value?.repo === repo ? tpl.value.r : null;
@@ -308,7 +304,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
             <label class="check"><input type="checkbox" id="na-keep-number" checked={v.keep_number === true} onChange={(e) => setV({ ...v, keep_number: (e.target as HTMLInputElement).checked })} /> Keep the number</label>
           </div>
         ) : null}
-        <SchemaForm id="na1s" schema={null} tiers={tiersStart} values={v} onChange={(nv) => setV(withStart(v, nv, initialValues(course.meta)))} />
+        <SchemaForm id="na1s" schema={null} tiers={tiersStart} values={v} onChange={(nv) => setV(withStart(v, nv, initialValues()))} />
         {src ? <ImportPicker src={src} read={read} busy={source.busy} lines={lines} set={(l) => set({ lines: l })} /> : null}
         {s1.list || s1.busy ? <Checks list={s1.list} busy={s1.busy} pending={[`${repo} is free in the course`]} /> : null}
       </>
@@ -332,7 +328,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
     body = (
       <>
         {createdNote}
-        {step === 3 ? <FormatPicker v={v} set={setV} fallback={courseFormats.length ? { formats: courseFormats, source: 'course' } : undefined} /> : null}
+        {step === 3 ? <FormatPicker v={v} set={setV} /> : null}
         {step === 3 && imports(v) ? <p class="why">The imported files are the starter, so No starter file starts ticked.</p> : null}
         <SchemaForm id={`na${step}`} schema={null} tiers={tiers} values={v} onChange={(nv) => setV(withAutograde(v, nv))} />
       </>

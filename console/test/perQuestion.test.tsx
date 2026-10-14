@@ -3,9 +3,11 @@
 // the assignment's run setting BEFORE the run is dispatched, so automatic returns follow it.
 
 import { render } from 'preact-render-to-string';
+import { parse } from 'yaml';
 import { describe, expect, it } from 'vitest';
 import { SchemaForm, fieldErrors } from '../src/forms/Form';
-import { RUN_KEYS, fileValue, readSetting, valueWord, withRunSetting, writeBlock } from '../src/model/settings';
+import { RUN_KEYS, fileValue, readSetting, valueWord, writeBlock } from '../src/model/settings';
+import { withRunSetting } from '../src/screens/RunSettings';
 import { YamlText } from '../src/edit/yamlText';
 import { RUN_LABEL, runTier } from '../src/tiers/runSettings';
 import type { Adapter, Handle, Progress, Result } from '../src/ops/adapter';
@@ -91,22 +93,20 @@ describe('Include marks per question', () => {
 });
 
 describe('the run setting it saves', () => {
-  const file = (text: string) => ({ text, sha: 'abc', doc: {}, error: null });
+  const file = (text: string) => ({ text, sha: 'abc', doc: parse(text) as Record<string, unknown>, error: null });
 
-  it('writes the assignment’s own block, keeping everything else', () => {
-    const text = '# mine\ndefaults:\n  late_window_days: 5\nassignments:\n  assignment-1:\n    late_penalty_per_day: 5%\n    late_window_days: 2\n';
-    const doc = { defaults: { late_window_days: 5 }, assignments: { 'assignment-1': { late_penalty_per_day: '5%', late_window_days: 2 } } };
-    const out = withRunSetting({ ...file(text), doc }, 'assignment-1', 'marks_per_question', false)!;
+  it('writes it inline on the assignment’s schedule entry, keeping everything else (decision 0038 rule 9)', () => {
+    const text = '# mine\nassignments:\n  assignment-1:\n    number: 1\n    template: assignment-linear-regression\n    due_datetime: 2026-10-13\n    late_penalty_per_day: 5%\n    late_window_days: 2\n';
+    const out = withRunSetting(file(text), 'assignment-1', 'marks_per_question', false)!;
     expect(out).toContain('# mine');
     expect(out).toContain('late_penalty_per_day: 5%');
     expect(out).toMatch(/assignment-1:\n(?:.*\n)*\s+marks_per_question: false/);
     // Already so: nothing to write.
-    const already = { 'assignment-1': { marks_per_question: false } };
-    expect(withRunSetting({ ...file('assignments:\n  assignment-1:\n    marks_per_question: false\n'), doc: { assignments: already } }, 'assignment-1', 'marks_per_question', false)).toBeNull();
+    expect(withRunSetting(file(`${text}    marks_per_question: false\n`), 'assignment-1', 'marks_per_question', false)).toBeNull();
   });
 
-  it('starts the block in a file that has none', () => {
-    expect(withRunSetting(file(''), 'assignment-2', 'marks_per_question', true)).toMatch(/assignments:\n\s+assignment-2:\n\s+marks_per_question: true/);
+  it('refuses an assignment the schedule does not name', () => {
+    expect(() => withRunSetting(file('assignments: {}\n'), 'assignment-2', 'marks_per_question', true)).toThrow(/not in the schedule/);
   });
 
   it('refuses a file that does not parse', () => {

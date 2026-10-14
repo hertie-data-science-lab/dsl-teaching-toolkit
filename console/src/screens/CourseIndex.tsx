@@ -7,7 +7,7 @@ import type { GhRepo } from '../github/client';
 import { TEMPLATE_TOPIC, termOf } from '../model/discovery';
 import type { Files } from '../model/files';
 import { ago, fmtDay, templateName } from '../model/format';
-import { MATERIALS_TOPIC } from '../model/materialsRules';
+import { MATERIALS_TOPIC } from '../model/materialsRepo';
 import { formatWord, formatsList } from '../tiers/grading';
 import { CheckLine, Loading } from '../ui/bits';
 import { Hint } from '../ui/Hint';

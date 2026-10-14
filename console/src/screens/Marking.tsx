@@ -1,5 +1,5 @@
-// The assignment hub's Marks tab (S12, the grading sheet as a grid) and Teams tab (S9,
-// teams.csv for a team assignment).
+// The assignment hub's Marks tab (S12, the grading sheet as a grid) and Teams tab (S9, the
+// assignment's `team:<n>` column of students.csv for a team assignment, decision 0039 rule 4).
 
 import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
@@ -13,13 +13,13 @@ import {
   HOLD_WORDS, NOTES_KEY, SNIPPETS_KEY, cellValue, effectivePenalty, finalGrade, holdReasons, lateRule, markerLines, num, overrideText, overrideValue, penaltyFigure, questionFile,
   questionPoints, readSheet, readSnippets, round, rowsChanged, scoreTotal, spread, studentMarks, type HoldReason, type HoldUnit, type Penalty, type Person, type Unit,
 } from '../model/marks';
-import { SOURCE_WORD, assignmentsFile, valueWord, withRunSetting } from '../model/settings';
+import { SOURCE_WORD, scheduleFile, valueWord } from '../model/settings';
 import type { Env } from '../env';
 import type { ReadyProps } from './types';
-import { sheetName } from './RunSettings';
+import { sheetName, withRunSetting } from './RunSettings';
 import { penaltyRate } from '../model/policy';
 import { marksDraft, marksWidths, saveMarksDraft, saveMarksWidths, type MarksDraft } from '../model/prefs';
-import { parseRoster, sameHandle } from '../model/people';
+import { parseRoster, sameHandle, teamColumn, type RosterRow } from '../model/people';
 import type { Assignment } from '../model/types';
 import { returnMarks, teamsWindow, type AsgRef, type LateReturn, type PerQuestion } from '../ops/defs';
 import { OpButtons, OpOpen, VerbHint } from '../ops/Panel';
@@ -31,7 +31,7 @@ import { SaveBar } from '../ui/edit';
 import { Check } from '../ui/icons';
 import type { TabProps } from './Assignments';
 import { cohortScope, todayOf, tzOf, useGradingConfig, yearOf } from './common';
-import { ASSIGNMENTS_FILE, CONFIG_REPO, NAMES } from '../model/names';
+import { CONFIG_REPO, NAMES, ROSTER_PATH, STUDENTS_FILE } from '../model/names';
 import { MarksDrawer, type DrawerBox, type DrawerLink } from './MarksDrawer';
 import { formatsList } from '../tiers/grading';
 
@@ -58,7 +58,7 @@ export function lateReturn(a: Assignment, now: number, tz: string, year: number)
 /**
  * "Include marks per question" for Return marks: the assignment's effective `marks_per_question`
  * as status.json states it (on, from the institution, in a status written before the setting), and
- * how a change is saved: into the assignment's block in assignments.yml, before the run goes.
+ * how a change is saved: inline on the assignment's schedule entry, before the run goes.
  */
 export function perQuestionOf(p: Pick<ReadyProps, 'files' | 'cohort'>, a: Assignment, env: Env | null): PerQuestion {
   const s = a.settings?.marks_per_question;
@@ -67,13 +67,13 @@ export function perQuestionOf(p: Pick<ReadyProps, 'files' | 'cohort'>, a: Assign
     source: s?.source ?? 'institution',
     save: async (on) => {
       if (!env) throw new Error('Sign in to save.');
-      const f = assignmentsFile(p.files, p.cohort.org);
-      if (f === 'loading' || f === null) throw new Error(`${ASSIGNMENTS_FILE} could not be read, so the setting was not saved and nothing was returned`);
+      const f = scheduleFile(p.files, p.cohort.org);
+      if (f === 'loading' || f === null) throw new Error('schedule.yml could not be read, so the setting was not saved and nothing was returned');
       const text = withRunSetting(f, a.slug, 'marks_per_question', on);
       if (text === null) return;
       let said = '';
-      const ok = await saveText(env, { owner: p.cohort.org, repo: CONFIG_REPO, path: ASSIGNMENTS_FILE }, text, f.sha,
-        { message: `assignments: ${a.slug} marks_per_question ${on}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] },
+      const ok = await saveText(env, { owner: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }, text, f.sha,
+        { message: `schedule: ${a.slug} marks_per_question ${on}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] },
         (st) => { if (st.kind === 'bad') said = st.text; });
       if (!ok) throw new Error(`Include marks per question was not saved, so nothing was returned: ${said.replace(/^Not saved: /, '')}`);
     },
@@ -301,10 +301,12 @@ export function MarksTab(p: TabProps) {
     const doc = y.toJS();
     return { sheet: readSheet(text, doc), snippets: readSnippets(doc) };
   }, [text]);
-  const roster = p.files.file(org, CONFIG_REPO, 'students.csv');
+  const roster = p.files.file(org, CONFIG_REPO, STUDENTS_FILE);
+  const sysRoster = p.files.file(org, CONFIG_REPO, ROSTER_PATH);
   const rosterText = roster.kind === 'ready' ? roster.text : null;
-  const students = useMemo(() => (rosterText === null ? [] : parseRoster(rosterText).rows), [rosterText]);
-  /** A person's real name from students.csv, or '' when it has none. */
+  const sysText = sysRoster.kind === 'ready' ? sysRoster.text : null;
+  const students = useMemo(() => (rosterText === null ? [] : parseRoster(rosterText, sysText).rows), [rosterText, sysText]);
+  /** A person's real name from students.csv (by their handle in the engine's roster), or '' when it has none. */
   const realName = (h: string) => students.find((s) => sameHandle(s.handle, h))?.name ?? '';
   const cfg = useGradingConfig(p, a.template);
   const questions = cfg.questions && typeof cfg.questions === 'object' ? (cfg.questions as Record<string, unknown>) : null;
@@ -917,10 +919,32 @@ function StudentView({ handle, title, m, submitted }: { handle: string; title: s
 // --------------------------------------------------------------------------- teams
 
 const TEAM_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const TEAMS_HEADER = ['assignment', 'team', 'github_handle'];
 
+/** A team and its members, each by email (casefolded): students.csv's key, joined or not. */
 interface TeamsState {
   teams: { name: string; members: string[] }[];
+}
+
+/** The teams one `team:<n>` column of students.csv holds: the rows sharing a cell value, in file order. */
+export function teamsIn(rows: RosterRow[], column: string): TeamsState {
+  const out: TeamsState = { teams: [] };
+  for (const r of rows) {
+    const name = (r.teams[column] ?? '').trim();
+    if (!name || !r.email) continue;
+    let t = out.teams.find((x) => x.name === name);
+    if (!t) out.teams.push((t = { name, members: [] }));
+    t.members.push(r.email.toLowerCase());
+  }
+  return out;
+}
+
+/** students.csv with `column` holding each row's team from `state` (blank for none), the column added when the file has none; every other cell kept. */
+export function withTeams(text: string, column: string, state: TeamsState): string {
+  const t = readTable(text);
+  const teamOf = new Map(state.teams.flatMap((x) => x.members.map((m) => [m, x.name] as const)));
+  const header = t.header.includes(column) ? t.header : [...t.header, column];
+  const rows = t.rows.map((r) => ({ ...r, [column]: teamOf.get((r.email ?? '').trim().toLowerCase()) ?? '' }));
+  return writeTable({ header, rows });
 }
 
 export function TeamsTab(p: TabProps) {
@@ -931,37 +955,30 @@ export function TeamsTab(p: TabProps) {
   const [newTeam, setNewTeam] = useState('');
   const [teamError, setTeamError] = useState('');
   const [save, runSave, setSave] = useSave(env);
-  const file = p.files.file(p.cohort.org, CONFIG_REPO, 'teams.csv');
-  const roster = p.files.file(p.cohort.org, CONFIG_REPO, 'students.csv');
-  // teams.csv keys on the semester-side name, as the mark sheet does (`schedule.semester_name`).
-  const teamsKey = sheetName(p, a.slug);
+  const roster = p.files.file(p.cohort.org, CONFIG_REPO, STUDENTS_FILE);
+  const sysRoster = p.files.file(p.cohort.org, CONFIG_REPO, ROSTER_PATH);
+  // The assignment's column: `team:<its number>`, else its key (`teams.columns`).
+  const column = teamColumn(a);
   // The engine's answers (status.json); absent on an older status, and then no cap is applied.
   const size = a.settings?.max_team_size ?? null;
   const formation = a.settings?.team_formation ?? null;
   // While the settings are read, no cap is applied.
   const maxSize = typeof size?.value === 'number' ? size.value : Infinity;
-  const table = file.kind === 'ready' ? readTable(file.text) : { header: TEAMS_HEADER, rows: [] };
-  const base: TeamsState = { teams: [] };
-  for (const r of table.rows) {
-    if ((r.assignment ?? '').trim() !== teamsKey) continue;
-    const name = (r.team ?? '').trim();
-    let t = base.teams.find((x) => x.name === name);
-    if (!t) base.teams.push((t = { name, members: [] }));
-    if (r.github_handle?.trim()) t.members.push(r.github_handle.trim());
-  }
+  const students = roster.kind === 'ready' ? parseRoster(roster.text, sysRoster.kind === 'ready' ? sysRoster.text : null).rows : [];
+  const base = teamsIn(students, column);
   const cur = draft ?? base;
-  const students = roster.kind === 'ready' ? parseRoster(roster.text).rows : [];
   const joined = students.filter((s) => s.handle);
-  const nameOf = (h: string) => students.find((s) => sameHandle(s.handle, h))?.name || h;
-  const inTeam = new Set(cur.teams.flatMap((t) => t.members.map((m) => m.toLowerCase())));
-  const free = joined.filter((s) => !inTeam.has(s.handle.toLowerCase()));
+  const byEmail = (m: string) => students.find((s) => s.email.toLowerCase() === m);
+  const nameOf = (m: string) => { const s = byEmail(m); return s?.name || s?.handle || m; };
+  const inTeam = new Set(cur.teams.flatMap((t) => t.members));
+  const free = joined.filter((s) => !inTeam.has(s.email.toLowerCase()));
   const notJoined = students.filter((s) => !s.handle).length;
   const change = (next: TeamsState) => {
     setDraft(next);
     if (save.kind !== 'busy') setSave({ kind: 'idle' });
   };
-  const move = (h: string, to: string | null) =>
-    change({ teams: cur.teams.map((t) => ({ ...t, members: t.name === to ? [...t.members.filter((m) => m !== h), h] : t.members.filter((m) => m !== h) })) });
+  const move = (m: string, to: string | null) =>
+    change({ teams: cur.teams.map((t) => ({ ...t, members: t.name === to ? [...t.members.filter((x) => x !== m), m] : t.members.filter((x) => x !== m) })) });
   const create = () => {
     const nm = newTeam.trim();
     if (!TEAM_RE.test(nm)) return setTeamError('Use lowercase letters, numbers and dashes, like team-alpha.');
@@ -973,12 +990,10 @@ export function TeamsTab(p: TabProps) {
   const dirty = draft !== null && JSON.stringify(draft) !== JSON.stringify(base);
   const over = cur.teams.filter((t) => t.members.length > maxSize);
   const doSave = async () => {
+    if (roster.kind !== 'ready') return;
     if (over.length) return setSave({ kind: 'bad', text: `${over.map((t) => t.name).join(', ')} ${over.length > 1 ? 'have' : 'has'} more than ${maxSize} members.` });
-    const others = table.rows.filter((r) => (r.assignment ?? '').trim() !== teamsKey);
-    const mine = cur.teams.flatMap((t) => (t.members.length ? t.members : ['']).map((h) => ({ assignment: teamsKey, team: t.name, github_handle: h })));
-    const header = table.header.length ? table.header : TEAMS_HEADER;
-    const text = writeTable({ header, rows: [...others, ...mine.filter((r) => r.github_handle)] });
-    const ok = await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path: 'teams.csv' }, text, file.kind === 'ready' ? file.sha : null, { message: `teams: ${teamsKey}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] });
+    const text = withTeams(roster.text, column, cur);
+    const ok = await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path: STUDENTS_FILE }, text, roster.sha, { message: `teams: ${a.slug}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] });
     if (ok) setDraft(null);
   };
   // As the engine's formation window: hand out to the late cutoff (due + the late window).
@@ -990,13 +1005,13 @@ export function TeamsTab(p: TabProps) {
   const window = assigned ? 'assigned' : !opens ? 'never' : today < opens ? 'pending' : closes && today > closes ? 'closed' : 'open';
   const empty = cur.teams.filter((t) => !t.members.length);
   // A failed read is no empty table: nothing to place, and nothing to save over.
-  const failed = file.kind === 'error' ? file : roster.kind === 'error' ? roster : null;
+  const failed = roster.kind === 'error' ? roster : sysRoster.kind === 'error' ? sysRoster : null;
   if (failed)
     return (
       <>
         <div class="page-head"><div><h2 class="h1">{assignmentTitle(a)}</h2></div></div>
         {p.tabs}
-        <CheckLine cls="bad">Could not read {failed === file ? 'teams.csv' : 'students.csv'}: {failed.message}. It is tried again shortly.</CheckLine>
+        <CheckLine cls="bad">Could not read {failed === roster ? STUDENTS_FILE : ROSTER_PATH}: {failed.message}. It is tried again shortly.</CheckLine>
       </>
     );
   return (
@@ -1006,7 +1021,7 @@ export function TeamsTab(p: TabProps) {
           <h2 class="h1">{assignmentTitle(a)} <Hint doc="09-release-assignment-to-cohort.md">Students form their own teams on the assignment’s page until the window closes; you can assign the rest here. Students without a team get no repo at hand out.</Hint></h2>
           <p class="lede">{joined.length - free.length} of {joined.length} joined students in {cur.teams.length} teams; {free.length} without a team.{notJoined ? ` ${notJoined} students have not joined yet and cannot be placed.` : ''}</p>
         </div>
-        <div class="actions"><a class="btn outline" href={assignmentHref(p.cohort.org, teamsKey)}>Assignment page, as students see it</a></div>
+        <div class="actions"><a class="btn outline" href={assignmentHref(p.cohort.org, sheetName(p, a.slug))}>Assignment page, as students see it</a></div>
       </div>
       {p.tabs}
       <div class="stack">
@@ -1040,7 +1055,7 @@ export function TeamsTab(p: TabProps) {
             {roster.kind === 'loading' ? <Loading what="Reading the roster" /> : free.length ? free.map((s) => (
               <div class="free-row">
                 <span class="member free">{s.name || s.handle}</span>
-                <select aria-label={`Team for ${s.name || s.handle}`} onChange={(e) => { const v = (e.target as HTMLSelectElement).value; if (v) move(s.handle, v); }}>
+                <select aria-label={`Team for ${s.name || s.handle}`} onChange={(e) => { const v = (e.target as HTMLSelectElement).value; if (v) move(s.email.toLowerCase(), v); }}>
                   <option value="" selected>Add to a team…</option>
                   {cur.teams.filter((t) => t.members.length < maxSize).map((t) => <option value={t.name}>{t.name} ({t.members.length}{Number.isFinite(maxSize) ? `/${maxSize}` : ''})</option>)}
                 </select>
@@ -1076,7 +1091,7 @@ export function TeamsTab(p: TabProps) {
           {empty.length && dirty ? <p class="footnote">{empty.length} empty team{empty.length > 1 ? 's are' : ' is'} kept only until you leave this page.</p> : null}
         </section>
         <div class="panel" style="display:grid;gap:10px">
-          <SaveBar state={save} onSave={() => void doSave()} disabled={!dirty} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: 'teams.csv', exists: file.kind !== 'absent' }} note={dirty ? 'Unsaved changes' : undefined} />
+          <SaveBar state={save} onSave={() => void doSave()} disabled={!dirty || roster.kind !== 'ready'} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: STUDENTS_FILE, exists: roster.kind !== 'absent' }} note={dirty ? 'Unsaved changes' : undefined} />
         </div>
       </div>
     </>

@@ -12,7 +12,7 @@ import { COURSE_FACTS } from '../src/tiers/course';
 import { GitHubClient } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
 import { StaticFiles } from './staticFiles';
-import { CONTACT, POLICY, penaltyRate } from '../src/model/policy';
+import { CONTACTS, POLICY, penaltyRate } from '../src/model/policy';
 import { effectivePenalty, finalGrade, lateChoice, overrideText, overrideValue, penaltyText, questionFile, questionPoints, questionsFromRows, readSheet, scoreTotal } from '../src/model/marks';
 import { StatusStore, type Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
@@ -337,7 +337,7 @@ describe('editing screens', () => {
   });
   it('course details asks for the contact and licence, with the institution’s in grey', () => {
     const out = html(<DetailsScreen {...cp} />);
-    expect(out).toContain(`placeholder="${CONTACT}"`);
+    expect(out).toContain(`placeholder="${CONTACTS[0]}"`);
     expect(out).toContain(`institution default: ${POLICY.licences[0].name}`);
     expect(out).toContain(`<option value="${POLICY.licences[1].name}"`);
     // The website's on/off is a switch here, beside the link to its own tab.

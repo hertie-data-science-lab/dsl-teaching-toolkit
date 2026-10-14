@@ -38,8 +38,8 @@ export interface Policy {
 }
 
 export const POLICY: Policy = policy as unknown as Policy;
-/** The institution's first contact: the open site's contact when a course names none (`policy.contact`). */
-export const CONTACT: string = POLICY.institution.contacts[0];
+/** The institution's contacts in escalation order (`institution.contacts`); the first is the open site's contact when a course names none (`policy.contact`). */
+export const CONTACTS: string[] = POLICY.institution.contacts;
 export const DEFAULTS = POLICY.defaults;
 
 /** The row kinds, in display order: the console's only kind vocabulary. */

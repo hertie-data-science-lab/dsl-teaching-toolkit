@@ -1,7 +1,7 @@
 // A template's `grading_config.yml` (on its `solution` branch) as the Settings form reads
 // and writes it: design/inputs.md "Assignment Settings", revision brief v3 section 3. The
 // template holds what the task IS (decision 0009 rule 2): how each semester runs it (teams,
-// visibility, the late rule, the submit link) is that semester's assignments.yml. The form
+// visibility, the late rule, the submit link) is that semester's schedule entry. The form
 // works on a flat model; `toConfig` turns it back into the file's shape.
 
 import { h } from 'preact';

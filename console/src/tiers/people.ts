@@ -1,4 +1,4 @@
-// Instructors (`instructors.yml` in the semester's config repo): design/inputs.md "Teaching team".
+// Instructors (`semester.yml` `people:` in the semester's config repo): design/inputs.md "Teaching team".
 
 import { EMAIL_RE } from '../edit/csv';
 import { blank } from '../edit/yamlText';
@@ -9,7 +9,8 @@ import type { Tiers } from './types';
 /**
  * A person with a name and no handle is display only: the engine gives them a card on the
  * student site and nothing else (`sync_faculty`), so the handle and email are not needed.
- * The console's instructors.schema.json still requires both; the engine reads the file.
+ * The exported semester.schema.json still requires both, so the console does not hold a
+ * `people:` write to it; the engine reads the file.
  */
 export function displayOnly(v: Record<string, unknown>): boolean {
   return blank(v.github_handle) && !blank(v.name);
@@ -31,7 +32,7 @@ export const PERSON: Tiers = {
   show_email: { tier: 'advanced', label: 'Show email on the student site', widget: 'checkbox', default: false },
 };
 
-/** Where uploaded instructor photos go in the semester's site repo (`templates/semester-config/instructors.yml`). */
+/** Where uploaded instructor photos go in the semester's site repo (`templates/semester-config/semester.yml`). */
 export const PHOTO_DIR = '_images/pp';
 
 const PHOTO_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
