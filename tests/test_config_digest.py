@@ -410,7 +410,7 @@ def test_the_course_digest_survives_the_very_file_it_reports_on(gh, monkeypatch)
 def test_an_issue_open_under_an_older_title_is_kept_and_closed_as_this_one(gh):
     # The course issue said "cohort registry" until the rename: that open issue is still
     # the course's, updated in place and closed once fixed - never left beside a new one.
-    (old,) = COURSE.older_titles
+    old = COURSE.older_titles[-1]
     body = cd.render_body(COURSE, [_course_fault()], NOW, COURSE_CTX)
     fake = gh([issue_row(7, old, body)])
     assert cd.sync(COURSE, "Course", "Course", [_course_fault()], NOW).errors == 0
@@ -418,21 +418,27 @@ def test_an_issue_open_under_an_older_title_is_kept_and_closed_as_this_one(gh):
     assert fake.did("issue", "edit", "7")
     assert cd.sync(COURSE, "Course", "Course", [], NOW).errors == 0
     assert fake.did("issue", "close", "7")
-    assert COURSE.titles == (COURSE.title, old) and "semester registry" in COURSE.title
+    assert COURSE.titles[-1] == old and "semester registry" in COURSE.title
+    # Decision 0039: the file is course.yml now; both older titles are still this issue.
+    assert COURSE.title.startswith("course.yml") and COURSE.titles[1].startswith(
+        "dsl-course.yml"
+    )
 
 
 def test_the_instructors_digest_keeps_the_issue_it_opened_as_people_yml(gh):
-    # The file became semester.yml and its issue title followed it; an issue still
-    # open under the people.yml title is that semester's, found and closed as this one.
+    # The file became instructors.yml, then semester.yml, and its issue title followed
+    # it; an issue still open under an older title is that semester's, found and closed
+    # as this one.
     people = cd.PEOPLE
     fault = ConfigFault(
-        "instructors[0]",
+        "people[0]",
         "no github_handle - grants nobody access",
         file=people.file,
         field="github_handle",
     )
     assert people.titles == (
-        "semester.yml has entries the sync cannot use",
+        "semester.yml people has entries the sync cannot use",
+        "instructors.yml has entries the sync cannot use",
         "people.yml has entries the sync cannot use",
     )
     body = cd.render_body(people, [fault], NOW, SEMESTER)
@@ -444,9 +450,9 @@ def test_the_instructors_digest_keeps_the_issue_it_opened_as_people_yml(gh):
     assert fake.did("issue", "close", "7")
 
 
-def test_assignments_yml_faults_have_their_own_issue():
+def test_semester_defaults_faults_have_their_own_issue():
     template = ConfigFault("assignments.a1", "bad", file="grading_config.yml")
-    run = ConfigFault("assignments.a1", "drift", file="assignments.yml")
+    run = ConfigFault("assignments.a1", "drift", file="semester.yml")
     assert cd.split_assignments([template, run]) == ([template], [run])
     assert cd.ASSIGNMENTS in cd.SEMESTER_DIGESTS
     assert cd.ASSIGNMENTS.title != cd.GRADING_CONFIG.title

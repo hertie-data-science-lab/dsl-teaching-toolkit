@@ -138,7 +138,7 @@ class Digest:
 PEOPLE = Digest(
     title="semester.yml people has entries the sync cannot use",
     older_titles=(
-        "semester.yml has entries the sync cannot use",
+        "instructors.yml has entries the sync cannot use",
         "people.yml has entries the sync cannot use",
     ),
     file=SEMESTER_PEOPLE_PATH,
@@ -188,8 +188,8 @@ ASSIGNMENTS = Digest(
 COURSE = Digest(
     title="course.yml / semester registry has entries the sync cannot use",
     older_titles=(
-        "course.yml / semester registry has entries the sync cannot use",
-        "course.yml / cohort registry has entries the sync cannot use",
+        "dsl-course.yml / semester registry has entries the sync cannot use",
+        "dsl-course.yml / cohort registry has entries the sync cannot use",
     ),
     file=COURSE_CONFIG,
     doc="docs/01-new-course-org.md",

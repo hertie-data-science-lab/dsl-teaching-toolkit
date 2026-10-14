@@ -166,13 +166,13 @@ SEEDED = {
     "semester-config/schedule.yml (seeded)": lambda: welcome.template(
         "semester-config/schedule.yml"
     ).format(tag="f2026", year=2026, timezone="Europe/Berlin", grace_days=60),
-    "semester-config/semester.yml (seeded)": lambda: welcome.template(
-        "semester-config/semester.yml"
-    ).format(year=2026, year_next=2027),
-    "course/course.yml (seeded, commented)": lambda: bootstrap_course._course_metadata(
+    "semester-config/semester.yml (seeded)": lambda: bootstrap_course.semester_scaffold(
+        "x-f2026", "semester.yml", "release"
+    ),
+    "course/course.yml (seeded, commented)": lambda: bootstrap_course.course_seed(
         "Course", "CODE"
     ),
-    "course/course.yml (seeded, --admins)": lambda: bootstrap_course._course_metadata(
+    "course/course.yml (seeded, --admins)": lambda: bootstrap_course.course_seed(
         "Course", "CODE", admins=["adminhandle"]
     ),
     "semester/course.yml (seeded)": lambda: bootstrap_course._semester_metadata(

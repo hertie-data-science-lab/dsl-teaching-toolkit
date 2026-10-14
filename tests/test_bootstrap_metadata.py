@@ -20,18 +20,17 @@ from tests.conftest import parse_roster
 
 
 def test_course_metadata_carries_faculty_block():
-    md = bc._course_metadata("Deep Learning", "E1")
-    for key in ("org", "org_name", "semester_defaults"):
+    md = bc.course_seed("Deep Learning", "E1")
+    for key in ("org", "org_name", "semester_defaults", "course_name"):
         assert f"\n{key}:" not in md
-    assert "course_name: Deep Learning" in md
-    assert "course_code: E1" in md
+    assert "  name: Deep Learning" in md
+    assert "  code: E1" in md
     # the (commented) faculty block faculty fill in - schedule stays semester-side
     assert "# people:" in md
     assert "github_handle" in md
     assert "schedule:" not in md
-    # instructors get an OPTIONAL open-courseware card scaffold; TAs never do - they
-    # change every semester, so they're declared per semester, not course-level.
-    assert "# instructors:" in md
+    # Decision 0039 rule 3: no course-level instructors or TAs - only the admins.
+    assert "instructors:" not in md
     assert "teaching_assistants" not in md
 
 
@@ -39,7 +38,7 @@ def test_course_metadata_seeds_admins_live_when_given():
     # --admins at bootstrap must land in the SSOT itself (uncommented), not just get a
     # one-time direct team invite (add_course_admins) - otherwise the next sync_faculty
     # run sees them as undeclared and prunes them right back out.
-    md = bc._course_metadata("Deep Learning", "E1", admins=["alice", "bob"])
+    md = bc.course_seed("Deep Learning", "E1", admins=["alice", "bob"])
     assert "# people:" not in md  # live, not commented out
     assert "people:" in md
     assert '- github_handle: "alice"' in md
