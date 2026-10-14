@@ -30,6 +30,7 @@ import { Check } from '../ui/icons';
 import type { TabProps } from './Assignments';
 import { cohortScope, todayOf, tzOf, useGradingConfig, yearOf } from './common';
 import { CONFIG_REPO } from '../model/names';
+import { formatsList } from '../tiers/grading';
 
 /** The late cutoff as the Return marks dialog names it, while it has not passed; null after it. */
 export function lateUntil(a: Assignment, now: number, tz: string, year: number): string | null {
@@ -87,6 +88,21 @@ function grow(el: HTMLTextAreaElement): void {
   if (sizesItself()) return;
   el.style.height = 'auto';
   el.style.height = `${el.scrollHeight + 2}px`;
+}
+
+const on = (v: unknown) => v === true || v === 'true';
+const off = (v: unknown) => v === false || v === 'false';
+
+/**
+ * What a template's `grading_config.yml` runs at the late cutoff (grades.GradingSpec): its tests
+ * when `autograde:` is on, and the completion check when `completion_check:` says so, else
+ * when its runnable format (the first of `formats:`) is a notebook. A shared drop box runs
+ * neither (grades._cross_check).
+ */
+export function templateChecks(cfg: Record<string, unknown>): { tests: boolean; completion: boolean } {
+  if (cfg.submit_via === 'shared_dropbox_repo') return { tests: false, completion: false };
+  const completion = on(cfg.completion_check) ? true : off(cfg.completion_check) ? false : formatsList(cfg.formats)[0] === 'ipynb';
+  return { tests: on(cfg.autograde), completion };
 }
 
 /** A column header's `?`: small, so the header row does not grow. */
@@ -308,7 +324,10 @@ export function MarksTab(p: TabProps) {
     ) : (
       <input class={cls} type="text" inputMode={typed ? 'decimal' : undefined} value={str(v(pth, orig))} aria-label={label} data-col={col} onInput={(e) => set(pth, (e.target as HTMLInputElement).value, typed)} />
     );
-  const fact = (u: Unit, k: string) => (u.info !== null && !(k in u.info) ? '—' : str(u.info?.[k]));
+  // "—" where the template does not run the check, whatever the sheet carries (a key can outlive the
+  // setting that wrote it), and where this unit's sheet has no such fact; blank until the cutoff fills it.
+  const runs = templateChecks(cfg);
+  const fact = (u: Unit, k: 'autograde' | 'completion') => (!(k === 'autograde' ? runs.tests : runs.completion) || (u.info !== null && !(k in u.info)) ? '—' : str(u.info?.[k]));
   const info = (u: Unit) => {
     if (external) return [];
     if (subFolded) {
@@ -317,15 +336,15 @@ export function MarksTab(p: TabProps) {
         const days = num(u.info.days_late);
         if (!u.info.submitted) parts.push('Nothing');
         else if (days !== null) parts.push(days > 0 ? `${plural(days, 'day')} late` : 'on time');
-        if (!blank(u.info.autograde)) parts.push(`${str(u.info.autograde)} tests`);
-        if (!blank(u.info.completion)) parts.push(`completion ${str(u.info.completion)}`);
+        if (runs.tests && !blank(u.info.autograde)) parts.push(`${str(u.info.autograde)} tests`);
+        if (runs.completion && !blank(u.info.completion)) parts.push(`completion ${str(u.info.completion)}`);
       }
       return [<td class="sys">{parts.length ? <span class="chip">{parts.join(' · ')}</span> : null}</td>];
     }
     return [
       <td class="sys">{str(u.info?.submitted).replace('T', ' ') || (u.info ? 'Nothing' : '—')}</td>,
       <td class="sys num">{str(u.info?.days_late)}</td>,
-      ...(showTests ? [<td class={`sys${blank(u.info?.autograde) ? '' : ' auto'}`}>{fact(u, 'autograde')}</td>] : []),
+      ...(showTests ? [<td class={`sys${runs.tests && !blank(u.info?.autograde) ? ' auto' : ''}`}>{fact(u, 'autograde')}</td>] : []),
       ...(showCompletion ? [<td class="sys">{fact(u, 'completion')}</td>] : []),
     ];
   };
@@ -523,10 +542,10 @@ export function MarksTab(p: TabProps) {
         {qs.length
           ? <th rowSpan={2} class="num">Score{max ? ` / ${max}` : ''} <ColHint col="Score">The questions added up, before any late penalty.</ColHint></th>
           : <th rowSpan={2}>Score{max ? ` / ${max}` : ''} <ColHint col="Score">Your mark for the whole assignment: a number, or a word such as pass that students get as written.</ColHint></th>}
-        <th rowSpan={2} class="sys">Penalty <ColHint col="Penalty">{rule ? `${rule.charAt(0).toUpperCase()}${rule.slice(1)}. Switch it off to waive it, or type the whole penalty as a percentage to override it.` : 'No late penalty applies to this assignment.'}</ColHint></th>
-        {adjOpen ? <th rowSpan={2} class="adjcol">Adjustment <ColHint col="Adjustment">Added to this person’s final grade (plus or minus points). Students see it as its own line on their marks page.</ColHint></th> : null}
+        <th rowSpan={2} class="sys">Penalty <ColHint col="Penalty">{rule ? `${rule.charAt(0).toUpperCase()}${rule.slice(1)}. Switch it off to waive it, or type your preferred penalty as a percentage to override it.` : 'No late penalty applies to this assignment.'}</ColHint></th>
+        {adjOpen ? <th rowSpan={2} class="adjcol">Adjustment <ColHint col="Adjustment">Added to this person’s final grade (plus or minus points).</ColHint></th> : null}
         <th rowSpan={2} class="sys">Final{max ? ` / ${max}` : ''} <ColHint col="Final">What the student gets: the score less any late penalty, plus their adjustment, never below 0.</ColHint></th>
-        <th rowSpan={2}>Feedback <ColHint col="Feedback">Students see this with their marks.{sheet.group ? ' On a team row it reaches every member; on a member’s row, only that member.' : ''} Enter starts a new line; Ctrl+Enter (⌘+Enter on a Mac) moves to the row below.</ColHint></th>
+        <th rowSpan={2}>Feedback <ColHint col="Feedback">Students see this with their marks.{sheet.group ? ' On a team row it reaches every member; on a member’s row, only that member.' : ''}</ColHint></th>
         <th rowSpan={2}>Private notes <ColHint col="Private notes">For the teaching team only: never sent to students.</ColHint></th>
       </tr>
       <tr>
@@ -535,7 +554,7 @@ export function MarksTab(p: TabProps) {
             <th class="sys">Submitted <ColHint col="Submitted">When the work was handed in, as the latest collection found it. Nothing: no submission yet.</ColHint></th>
             <th class="sys">Days late <ColHint col="Days late">Days started after the deadline, counted by the toolkit. 0 is on time.</ColHint></th>
             {showTests ? <th class="sys">Tests <ColHint col="Tests">The template’s automatic tests passed, filled in at the late cutoff. Information for you, never a mark. — where the template has no tests.</ColHint></th> : null}
-            {showCompletion ? <th class="sys">Completion <ColHint col="Completion">Whether the submission runs to the end, from the completion check at the late cutoff. Information for you, never a mark. — where the template has no check.</ColHint></th> : null}
+            {showCompletion ? <th class="sys">Completion <ColHint col="Completion">At the late cutoff the toolkit runs the submitted notebook top to bottom in a clean sandbox and records whether it reached the end. “Completed” means every cell ran without an error; otherwise the first error is named. Information for you, never a mark: a notebook can run through and still be wrong, or stop on a missing package and still be right. “—” where the template has no check.</ColHint></th> : null}
           </>
         )}
         {qs.map(([q, m]) => (
