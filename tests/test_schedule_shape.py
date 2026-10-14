@@ -164,9 +164,9 @@ def test_the_migration_writes_session_number_only_where_it_differs_and_keeps_key
         "from_path": "dldemo/uncertainty.py",
         "to_path": "code/dldemo/uncertainty.py",
     }
-    # Assignments keep their keys; a key that is not `assignment-<n>` keeps its repos.
+    # Assignments keep their keys, and the key still names their repos: no `repo_name`.
     project = data["assignments"]["assignment-3-project"]
-    assert (project["number"], project["repo_name"]) == (8, "assignment-3-project")
+    assert project["number"] == 8 and "repo_name" not in project
     assert "repo_name" not in data["assignments"]["assignment-1"]
     assert data["assignments"]["assignment-1"]["template"] == "assignment-1-f2026"
 

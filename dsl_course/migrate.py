@@ -1449,7 +1449,7 @@ def schedule_shape(
         if entry.get("course_source_repo") is not None:
             new["template"] = entry["course_source_repo"]
         name = instance.dests.get(key) or key
-        if name != (f"assignment-{n}" if n else key):
+        if name != key:
             new["repo_name"] = name
         new |= plain(
             {

@@ -1102,10 +1102,10 @@ def test_the_repos_are_repo_name_else_assignment_and_the_number():
             }
         },
     )
-    # unset (and blank) -> `assignment-<number>`; set -> it wins; no number -> the key
-    assert semester_name("hw", sched.assignments["hw"]) == "assignment-1"
+    # unset (and blank) -> the key (decision 0038 amendment rule 1); set -> it wins
+    assert semester_name("hw", sched.assignments["hw"]) == "hw"
     assert semester_name("named", sched.assignments["named"]) == "homework-1"
-    assert semester_name("blank", sched.assignments["blank"]) == "assignment-3"
+    assert semester_name("blank", sched.assignments["blank"]) == "blank"
     assert semester_name("unnumbered", sched.assignments["unnumbered"]) == "unnumbered"
 
 

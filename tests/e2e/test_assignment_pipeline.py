@@ -357,7 +357,7 @@ def _schedule_block(
     slug: str, handout: datetime, due: datetime, shape: shapes.Shape, number: int
 ) -> str:
     """One assignment, as `assignments:` wants it (decision 0038): the template repo in the
-    course org, its number, its repos named by the key (`repo_name`), so every repo it
+    course org, its number (its repos are named by the key), so every repo it
     makes falls inside the run's namespace, its dates, and its run settings - the run's
     late rule, then the shape's own. The late cutoff is not written: it is the due date
     plus `late_window_days`."""
@@ -371,7 +371,6 @@ def _schedule_block(
             f"  {slug}:",
             f"    number: {number}",
             f"    template: {slug}",
-            f"    repo_name: {slug}",
             f"    handout_datetime: {handout:%Y-%m-%dT%H:%M}",
             f"    due_datetime: {due:%Y-%m-%dT%H:%M}",
             *(f"    {k}: {v}" for k, v in run.items()),

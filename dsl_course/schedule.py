@@ -413,8 +413,8 @@ class AssignmentEntry:
     course_source_repo: str
     # What the SEMESTER-side artefacts are called - the frozen semester template repo, the
     # `<name>-<handle>` student repos, the teams.csv key, the snapshot and grades files:
-    # the entry's `repo_name`, else `assignment-<number>`. None = the entry's key (an
-    # entry with no number yet).
+    # the entry's `repo_name`, else (None) the entry's key (decision 0038 amendment rule 1:
+    # the key names the student repos).
     semester_dest_repo: str | None = None
     # When to provision one repo per student (or per team - see `type`) from the
     # `<slug>-<tag>` template. The scheduler synthesises a release from this, so it fires
@@ -1250,8 +1250,8 @@ def _parse_assignments(
     """`assignments:` (decision 0038 amendment): `key -> entry`. The KEY names what the
     toolkit makes (the mark sheet, the `team:<key>` column, the problem ids) and is never
     read for a number; `number` is REQUIRED (its absence is a problem, `schedule_plan.
-    unnumbered`, and the hand-out waits); the student repos are `repo_name`, else
-    `assignment-<number>`. Each entry carries its run settings inline
+    unnumbered`, and the hand-out waits); the student repos are `repo_name`, else the
+    key. Each entry carries its run settings inline
     (`settings.inline_settings`).
 
     Only the nested {due_datetime, ...} form is accepted. A malformed
@@ -1324,8 +1324,8 @@ def _parse_assignments(
                 "template",
             )
             continue
-        dest = written or (f"assignment-{number}" if number else "")
-        # `semester_name` - `repo_name`, else `assignment-<number>` - is what EVERY semester-side
+        dest = written
+        # `semester_name` - `repo_name`, else the key - is what EVERY semester-side
         # artefact keys on: the generated repos, the teams.csv rows, the snapshot, the
         # autograde marker, the grading sheet. Two entries resolving to one name share all
         # of them silently: the second handout finds the first's repos and "skips" them,
@@ -1743,7 +1743,7 @@ def refuse_early_solutions(sched: Schedule, instance: settings.Instance) -> None
 
 
 def semester_name(slug: str, entry: AssignmentEntry) -> str:
-    """The ONE semester-side name for an assignment: `semester_dest_repo`, else its slug.
+    """The ONE semester-side name for an assignment: its `repo_name`, else its key.
     Every semester-side artefact keys on it - generated repos, teams.csv, snapshots,
     autograde markers, grades - and the scheduler's fire-once check must agree with what
     collect writes, so both resolve it here rather than each deriving its own."""

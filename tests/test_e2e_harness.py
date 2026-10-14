@@ -804,7 +804,7 @@ def test_the_block_the_harness_really_inserts_is_valid_yaml(monkeypatch):
     doc = yaml.safe_load(text)
     assert set(doc) == {"timezone", "assignments", "events"}
     entry = doc["assignments"]["assignment-90-e2eab12cd"]
-    assert entry["template"] == entry["repo_name"] == "assignment-90-e2eab12cd"
+    assert entry["template"] == "assignment-90-e2eab12cd" and "repo_name" not in entry
     assert set(entry) <= schedule.KNOWN_ASSIGNMENT
     # The due date and the cutoff are separate instants: collapsing them would skip the
     # refresh pass entirely, which is most of what the live run is there to exercise. And
@@ -1375,7 +1375,7 @@ def test_the_run_puts_one_schedule_entry_per_shape_in_one_fence(monkeypatch):
     assert mine == {shapes.slug("e2eab12cd", s) for s in shapes.SHAPES}
     for slug in mine:
         entry = doc["assignments"][slug]
-        assert entry["template"] == entry["repo_name"] == slug
+        assert entry["template"] == slug and "repo_name" not in entry
         assert set(entry) <= schedule.KNOWN_ASSIGNMENT
     # Each with its own number and a late window, so the due date and the cutoff stay
     # separate instants.

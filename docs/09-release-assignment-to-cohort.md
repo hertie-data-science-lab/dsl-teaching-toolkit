@@ -25,7 +25,7 @@ Hand an assignment out now (op `assignment.handout_now`):
 Pick the `course_source_repo` - the same field a scheduled handout names in `schedule.yml`.
 The template must be in the semester's schedule; one that is not is refused: add it to the
 schedule first.
-- It freezes a semester-level copy `<name>` of the chosen template (the schedule entry's `repo_name`, else `assignment-<number>`)
+- It freezes a semester-level copy `<name>` of the chosen template (the schedule entry's `repo_name`, else its key)
 - then it creates one **private** `<name>-<handle>` repo per onboarded student/group, with that student as
 collaborator.
 

@@ -136,7 +136,7 @@ Each assignment's dates and run settings.
 |---|---|---|---|
 | `number` | **yes** | - | "Assignment 1" on the site |
 | `template` | **yes** | - | the course-org template each student's (or team's) repo is generated from |
-| `repo_name` | no | `assignment-<number>` | what this semester's repos are called (`<repo_name>-<handle>`) |
+| `repo_name` | no | the key | what this semester's repos are called (`<repo_name>-<handle>`) |
 | `handout_datetime` | no | - | when repos are provisioned. Omit it to hand out by hand |
 | `due_datetime` | **yes** | - | the deadline students see; a bare date closes at **23:59:59** |
 | `solution_datetime` | no | - | when the template's `solution/` is pushed into every repo. **No default**; must be after `handout_datetime` (and needs it) and no earlier than the late cutoff. It cannot be undone |
