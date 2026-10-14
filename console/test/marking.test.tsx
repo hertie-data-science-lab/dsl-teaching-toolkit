@@ -386,6 +386,7 @@ describe('the marking screen', () => {
     expect(view.textContent).toContain('ada-l · Assignment 2: Regression');
     expect([...view.querySelectorAll('th')].map((t) => t.textContent)).toEqual(['Q1', 'Q2', 'Score', 'Submitted', 'Late', 'Final grade']);
     expect(view.textContent).toContain('17 / 20');
+    expect([...view.querySelectorAll('td')].map((t) => t.textContent)).toContain('27 Sep 20:00'); // as the grid's Submitted
     expect(view.textContent).toContain('Good.');
     expect(view.textContent).not.toContain('Check the plot.');
     await act(() => void document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
@@ -436,6 +437,17 @@ describe('Return marks from the marking screen', () => {
   it('names who a preview would email, from the private preview issue', () => {
     const def = returnMarks({ courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' }, { slug: 'a', title: 'A', template: 't', units: 1, group: false, when: 'Marking' }, 1, 'a', null, [], 'extra');
     expect(def.dryExtra).toBe('extra');
+  });
+});
+
+describe('the Submitted column', () => {
+  const submitted = () => [...root!.querySelectorAll('tr.unit-row')].map((r) => r.querySelector('td.sys')!.textContent);
+  it('shows a recorded time short and as written (no timezone shift), a date alone as a day, and anything else as written', async () => {
+    await marks(files(SHEET.replace('submitted: 2026-09-27T20:00', "submitted: '2026-10-13 22:41:05+02:00'").replace('submitted: 2026-09-29T20:00', "submitted: '2026-10-03'")));
+    expect(submitted()).toEqual(['13 Oct 22:41', '3 Oct', 'Nothing']);
+    root!.remove();
+    await marks(files(SHEET.replace('submitted: 2026-09-27T20:00', 'submitted: by email')));
+    expect(submitted()).toEqual(['by email', '29 Sep 20:00', 'Nothing']);
   });
 });
 

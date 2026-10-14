@@ -8,7 +8,7 @@ import { readTable, writeTable } from '../edit/csv';
 import { CONFLICT, saveText, useSave, type SaveState } from '../edit/save';
 import { YamlText, blank, isObj, type Path } from '../edit/yamlText';
 import { Invalid } from '../forms/Form';
-import { assignmentTitle, fmtDay, fmtWhen, plural, str } from '../model/format';
+import { assignmentTitle, fmtDay, fmtShort, fmtTime, fmtWhen, plural, str } from '../model/format';
 import {
   HOLD_WORDS, NOTES_KEY, cellValue, effectivePenalty, finalGrade, holdReasons, lateRule, num, overrideText, overrideValue, percentOff, questionFile,
   questionPoints, readSheet, round, rowsChanged, scoreTotal, spread, studentMarks, type HoldReason, type HoldUnit, type Penalty, type Person, type Unit,
@@ -32,24 +32,18 @@ import { cohortScope, todayOf, tzOf, useGradingConfig, yearOf } from './common';
 import { CONFIG_REPO } from '../model/names';
 import { formatsList } from '../tiers/grading';
 
-/** The late cutoff as the Return marks dialog names it, while it has not passed; null after it. */
-export function lateUntil(a: Assignment, now: number, tz: string, year: number): string | null {
-  const at = a.grading_cutoff_datetime;
-  return at && Date.parse(at) > now ? fmtWhen(at, tz, year) : null;
-}
-
 /** The late penalty the marks grid applies: the assignment's effective `late_penalty_per_day` as status states it (`status_json.run_settings`). */
 function penaltyOf(a: Assignment): number | null {
   return penaltyRate(a.settings?.late_penalty_per_day?.value);
 }
 
 /** The assignment's late rule in the one wording the lede, the Penalty `?` and Return marks share. */
-export const lateRuleOf = (a: Assignment) => lateRule(penaltyOf(a), a.settings?.late_window_days?.value);
+const lateRuleOf = (a: Assignment) => lateRule(penaltyOf(a), a.settings?.late_window_days?.value);
 
 /** What Return marks says while late work can still arrive: the deadline, the late cutoff and the late rule; null once the cutoff has passed. */
 export function lateReturn(a: Assignment, now: number, tz: string, year: number): LateReturn | null {
-  const until = lateUntil(a, now, tz, year);
-  return until ? { due: fmtWhen(a.due, tz, year), until, rule: lateRuleOf(a) } : null;
+  const at = a.grading_cutoff_datetime;
+  return at && Date.parse(at) > now ? { due: fmtWhen(a.due, tz, year), until: fmtWhen(at, tz, year), rule: lateRuleOf(a) } : null;
 }
 
 function asgRef(a: Assignment, group: boolean): AsgRef {
@@ -72,7 +66,7 @@ type Filter = 'all' | 'unmarked' | 'late' | 'held';
 const FILTER_WORD: Record<Filter, string> = { all: 'All', unmarked: 'Unmarked', late: 'Late', held: 'Held' };
 
 /** The issue a Return marks preview writes in semester-config (grades.PREVIEW_TITLE). */
-export const PREVIEW_TITLE = 'Distribute grades preview';
+const PREVIEW_TITLE = 'Distribute grades preview';
 
 /**
  * Return marks asked for from another tab (the Overview): the Marks tab opens the panel once its
@@ -108,27 +102,28 @@ export function templateChecks(cfg: Record<string, unknown>): { tests: boolean; 
 }
 
 /** A grid column: its key, its default width (null: Feedback and Private notes share what is left), and its name. */
-export interface MarksCol {
+interface MarksCol {
   key: string;
   def: number | null;
   label: string;
 }
 /** Below this window width the submission columns start folded. */
-export const WIDE = 1400;
+const WIDE = 1400;
 /** Where the instructor's fold choice is kept, beside the column widths. */
 const FOLD_KEY = '__subFolded';
 /** No column is dragged narrower than this. */
-export const MIN_COL = 48;
+const MIN_COL = 48;
 /** Feedback and Private notes never get less than this each (the console beside its side nav at 1280px). */
-export const MIN_TEXT_COL = 170;
+const MIN_TEXT_COL = 170;
 
-/** "13 Oct 22:41" for a recorded `submitted` (`2026-10-13T22:41`, as the sheet holds it); anything else as written. */
-export function submittedShort(v: unknown): string {
+/** "13 Oct 22:41" for a recorded `submitted` (`2026-10-13T22:41`, as the sheet holds it, read as written); anything else as written. */
+function submittedShort(v: unknown): string {
   const t = str(v).trim();
-  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/.exec(t);
+  const m = /^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}:\d{2}))?/.exec(t);
   if (!m) return t;
-  const mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][Number(m[2]) - 1];
-  return `${Number(m[3])} ${mon}${m[4] ? ` ${m[4]}:${m[5]}` : ''}`;
+  const at = m[2] ? `${m[1]}T${m[2]}` : m[1];
+  const time = fmtTime(at);
+  return `${fmtShort(at)}${time ? ` ${time}` : ''}`;
 }
 
 /** A column header's `?`: small, so the header row does not grow. */
@@ -737,7 +732,7 @@ function StudentView({ handle, title, m, submitted }: { handle: string; title: s
       <div class="table-wrap">
         <table class="grid">
           <thead><tr>{qs.map(([q]) => <th>{q}</th>)}<th>Score</th><th>Submitted</th><th>Late</th>{m.adjustment ? <th>Adjustment</th> : null}<th>Final grade</th>{m.team ? <th>Team</th> : null}</tr></thead>
-          <tbody><tr>{qs.map(([, x]) => <td>{str(x)}</td>)}<td>{over(m.total || (m.score[''] !== undefined ? str(m.score['']) : '')) || '—'}</td><td>{str(submitted).replace('T', ' ') || 'not submitted'}</td><td>{late}{m.penalty ? ` · penalty ${m.penalty}` : ''}</td>{m.adjustment ? <td>{m.adjustment}</td> : null}<td><b>{over(m.final) || '—'}</b></td>{m.team ? <td>{m.team}</td> : null}</tr></tbody>
+          <tbody><tr>{qs.map(([, x]) => <td>{str(x)}</td>)}<td>{over(m.total || (m.score[''] !== undefined ? str(m.score['']) : '')) || '—'}</td><td>{submittedShort(submitted) || 'not submitted'}</td><td>{late}{m.penalty ? ` · penalty ${m.penalty}` : ''}</td>{m.adjustment ? <td>{m.adjustment}</td> : null}<td><b>{over(m.final) || '—'}</b></td>{m.team ? <td>{m.team}</td> : null}</tr></tbody>
         </table>
       </div>
       {m.feedback ? <p class="pre">{m.feedback}</p> : null}
