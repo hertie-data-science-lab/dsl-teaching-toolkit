@@ -240,7 +240,7 @@ def open_windows(
         # A semester with no students.csv already carries that fault on its own digest.
         if students is None:
             return None
-        per_assignment = teams.load(semester_org)
+        per_assignment = teams.parse(students, teams.columns(sched))
     except Exception as exc:
         log_err(
             f"could not work out who is still without a team in {semester_org} "

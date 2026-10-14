@@ -116,25 +116,28 @@ def parse(
 
 
 def load(
-    semester_org: str, faults: list[ConfigFault] | None = None
+    semester_org: str,
+    faults: list[ConfigFault] | None = None,
+    sched: schedule.Schedule | None = None,
 ) -> dict[str, dict[str, list[str]]]:
-    """Every assignment's teams, from the semester's roster and schedule. `{}` when the
-    roster is absent - whether that is benign or an error is the caller's call.
-
-    `faults` is `parse`'s, for the caller that is checking the file rather than reading
-    it."""
-    return load_or_none(semester_org, faults) or {}
+    """Every assignment's teams, from the semester's roster and schedule (`sched`, when
+    the caller holds it). `{}` when the roster is absent - whether that is benign or an
+    error is the caller's call. `faults` is `parse`'s."""
+    return load_or_none(semester_org, faults, sched) or {}
 
 
 def load_or_none(
-    semester_org: str, faults: list[ConfigFault] | None = None
+    semester_org: str,
+    faults: list[ConfigFault] | None = None,
+    sched: schedule.Schedule | None = None,
 ) -> dict[str, dict[str, list[str]]] | None:
     """`load`, but None when students.csv is ABSENT (a 404) - for the caller that would
     take access away on the strength of an empty answer (the pruning team sync)."""
     students = roster.load(semester_org)
     if students is None:
         return None
-    return parse(students, columns(schedule.load(semester_org)), faults)
+    sched = sched if sched is not None else schedule.load(semester_org)
+    return parse(students, columns(sched), faults)
 
 
 def teams_for(
