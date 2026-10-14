@@ -59,7 +59,7 @@ and no marks. A **Join team** issue from an auditor is refused and labelled `nee
 
 - There are 2 methods to form groups:
    1. Students open a **Join team** issue in `join`, 
-   2. instructors type team names into the assignment's `team:<number>` column of `semester-config/students.csv` (a team = the rows sharing a value; blank = no team)
+   2. instructors type team names into the assignment's `team:<number>` column of `semester-config/students.csv` (a team = the rows sharing a value; blank = no team) - in the console, the column on the **Students** tab or the assignment's **Teams** tab
 - The issue flow only accepts an assignment **declared under `assignments:` in
   `semester-config/schedule.yml`**, **whose `team_formation` is `self_select`** (its `schedule.yml` entry, else `semester.yml` or `course.yml` `defaults:`; set nowhere = no teams form),
   and **whose team-formation window is open**. It enforces that assignment's

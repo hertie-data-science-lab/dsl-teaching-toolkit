@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
-// Course details (WP-S6): the public website switch writes course.yml at once, each
-// select lists its inherited value once as "X (default)", and "Edit the file directly".
+// Course details (WP-S6, decision 0039): the public website switch writes course.yml's
+// `open_course_site.enabled` at once, each select lists its inherited value once as
+// "X (default)", and "Edit the file directly".
 
 import { render } from 'preact';
 import { render as html } from 'preact-render-to-string';
@@ -19,7 +20,8 @@ import type { Status } from '../src/model/types';
 import { DispatchAdapter } from '../src/ops/adapter';
 import { OpsSession } from '../src/ops/session';
 import { DetailsScreen } from '../src/screens/CourseEdit';
-import { courseDefaultTiers, COURSE_FACTS } from '../src/tiers/course';
+import { defaultsTiers, COURSE_FACTS } from '../src/tiers/course';
+import { institutionDefaults } from '../src/model/settings';
 import { runTier } from '../src/tiers/runSettings';
 import { EditFile } from '../src/ui/bits';
 import { Field } from '../src/forms/Form';
@@ -30,7 +32,8 @@ const ORG = 'hertie-dsl-demo-course-e1234';
 const USER = { login: 'a-example', id: 1, name: 'A. Example', email: null, avatar_url: '' };
 const course: Course = { org: ORG, name: 'Machine Learning', code: 'E1234', description: '', write: true, admins: [], cohorts: [], meta: {} };
 const loaded: Loaded = { kind: 'ready', status: example as unknown as Status, sha: 's', stale: [] };
-const META = 'course_name: Machine Learning\ncourse_code: E1234\n';
+const META = 'course:\n  name: Machine Learning\n  code: E1234\n';
+const FILE = `${ORG}/.github/course.yml`;
 
 function envOf(gh: FakeGitHub, f: StaticFiles): Env {
   const client = new GitHubClient({ token: () => 't', fetch: gh.fetch });
@@ -55,8 +58,6 @@ async function settle(until: () => boolean) {
   for (let i = 0; i < 200 && !until(); i++) await act(() => new Promise((r) => setTimeout(r, 0)));
 }
 const puts = (gh: FakeGitHub) => gh.seen.filter((s) => s.method === 'PUT' && s.url.endsWith('/contents/course.yml'));
-/** A course.yml whose public website is off (as seeded). */
-const COURSE_YML = '# INSTRUCTOR-OWNED\ncourse:\n  name: Machine Learning\nopen_course_site:\n  enabled: false\n  source_repo:\n';
 const body = (s: Seen) => decodeBase64((s.body as { content: string }).content);
 const word = () => root!.querySelector('.web-switch .footnote')!.textContent;
 
@@ -74,20 +75,20 @@ class Unreadable extends StaticFiles {
 describe('the public website switch in Course details', () => {
   it('writes enabled at once, keeping the rest of the file', async () => {
     const gh = github();
-    const f = new StaticFiles({ [`${ORG}/.github/dsl-course.yml`]: META, [`${ORG}/.github/course.yml`]: '# mine\nopen_course_site:\n  enabled: true\n  source_repo: course-materials-f2026\n' });
+    const f = new StaticFiles({ [FILE]: `${META}# mine\nopen_course_site:\n  enabled: true\n  source_repo: course-materials-f2026\n` });
     await mount(envOf(gh, f), f);
     expect(word()).toBe('On: updates daily');
     expect(input().getAttribute('aria-describedby')).toBe('cd-web-state');
     await flip();
     await settle(() => puts(gh).length > 0 && idle());
-    expect(body(puts(gh)[0])).toBe('# mine\nopen_course_site:\n  enabled: false\n  source_repo: course-materials-f2026\n');
+    expect(body(puts(gh)[0])).toBe(`${META}# mine\nopen_course_site:\n  enabled: false\n  source_repo: course-materials-f2026\n`);
     expect(word()).toBe('Off');
     expect(input().checked).toBe(false);
   });
 
-  it('turns the website on with the newest materials repo, holding the new position while it saves', async () => {
+  it('writes the open_course_site block when course.yml has none, holding the new position while it saves', async () => {
     const gh = github();
-    const f = new StaticFiles({ [`${ORG}/.github/dsl-course.yml`]: META, [`${ORG}/.github/course.yml`]: COURSE_YML });
+    const f = new StaticFiles({ [FILE]: META });
     await mount(envOf(gh, f), f);
     expect(word()).toBe('Off');
     await flip();
@@ -98,14 +99,15 @@ describe('the public website switch in Course details', () => {
     expect(input().checked).toBe(true);
     await settle(() => puts(gh).length > 0 && idle());
     const text = body(puts(gh)[0]);
-    expect(text.startsWith('# INSTRUCTOR-OWNED')).toBe(true);
+    expect(text.startsWith(META)).toBe(true);
     expect(parse(text).open_course_site).toMatchObject({ enabled: true, source_repo: 'course-materials-f2026' });
+    expect((puts(gh)[0].body as { sha?: string }).sha).toBe('static');
     expect(word()).toBe('On: updates daily');
   });
 
   it('is not part of the form’s Save', async () => {
     const gh = github();
-    const f = new StaticFiles({ [`${ORG}/.github/dsl-course.yml`]: META, [`${ORG}/.github/course.yml`]: COURSE_YML });
+    const f = new StaticFiles({ [FILE]: META });
     await mount(envOf(gh, f), f);
     await flip();
     await settle(() => puts(gh).length > 0 && idle());
@@ -115,7 +117,7 @@ describe('the public website switch in Course details', () => {
 
   it('goes back and says why when the save fails', async () => {
     const gh = new FakeGitHub().on('PUT', /\/contents\//, () => json({ message: 'Server error' }, 500));
-    const f = new StaticFiles({ [`${ORG}/.github/dsl-course.yml`]: META, [`${ORG}/.github/course.yml`]: COURSE_YML });
+    const f = new StaticFiles({ [FILE]: META });
     await mount(envOf(gh, f), f);
     await flip();
     await settle(() => idle());
@@ -126,7 +128,7 @@ describe('the public website switch in Course details', () => {
 
   it('refuses to turn on without a materials repo, and writes nothing', async () => {
     const gh = github();
-    const f = new StaticFiles({ [`${ORG}/.github/dsl-course.yml`]: META, [`${ORG}/.github/course.yml`]: COURSE_YML });
+    const f = new StaticFiles({ [FILE]: META });
     await mount(envOf(gh, f), f, noMaterials);
     await flip();
     expect(input().checked).toBe(false);
@@ -134,13 +136,11 @@ describe('the public website switch in Course details', () => {
     expect(gh.seen.filter((s) => s.method === 'PUT')).toEqual([]);
   });
 
-  it('is disabled, never seeding, when the file could not be read or the names are not confirmed', async () => {
+  it('is not offered, and nothing is written, when course.yml could not be read', async () => {
     const gh = github();
-    const f = new Unreadable({ [`${ORG}/.github/dsl-course.yml`]: META });
+    const f = new Unreadable({ [FILE]: META });
     await mount(envOf(gh, f), f);
-    expect(input().disabled).toBe(true);
-    expect(word()).toBe('Could not read the website settings.');
-    await flip();
+    expect(root!.querySelector('#cd-web')).toBeNull();
     expect(gh.seen.filter((s) => s.method === 'PUT')).toEqual([]);
   });
 });
@@ -149,21 +149,22 @@ describe('selects list the inherited value once', () => {
   const labels = (options: { label: string }[] | undefined) => (options ?? []).map((o) => o.label);
   const LIC = POLICY.licences[0].name;
   it('as "X (default)" first, with value "", and not again', () => {
-    const t = courseDefaultTiers();
-    expect(labels(t.formats.options)).toEqual(['Jupyter notebook (default)', 'Python files', 'R Markdown', 'Quarto', 'LaTeX', 'No starter file']);
-    expect(labels(t.submit_via.options)).toEqual(['Their own repo (default)', 'A shared drop box', 'Elsewhere']);
+    const t = defaultsTiers(institutionDefaults());
+    // Decision 0039 rule 2: formats and the submit route are no course default.
+    expect(t.formats).toBeUndefined();
+    expect(t.submit_via).toBeUndefined();
     expect(labels(t.visibility.options)).toEqual(['Private (default)', 'Public', 'Student\'s choice']);
+    expect(labels(t.timezone.options)[0]).toBe(`${POLICY.defaults.timezone} (default)`);
     const semester = runTier('team_formation', { value: 'assigned', source: 'course' });
     expect(labels(semester.options)).toEqual(['You assign them (default)', 'Students form their own']);
     expect(semester.options![0].value).toBe('');
-    for (const tier of [COURSE_FACTS.licence, t.formats, t.submit_via, t.visibility, t.team_formation])
+    for (const tier of [COURSE_FACTS.licence, t.visibility, t.team_formation, t.timezone])
       expect(labels(tier.options).some((l) => l.startsWith('Default ('))).toBe(false);
   });
   it('keeps a pin equal to the default as "X (set here)", selected', () => {
-    const t = courseDefaultTiers({ visibility: 'private', formats: 'ipynb' });
+    const t = defaultsTiers(institutionDefaults(), { visibility: 'private' });
     expect(labels(t.visibility.options)).toEqual(['Private (default)', 'Private (set here)', 'Public', 'Student\'s choice']);
     expect(t.visibility.options![1].value).toBe('private');
-    expect(labels(t.formats.options).slice(0, 2)).toEqual(['Jupyter notebook (default)', 'Jupyter notebook (set here)']);
     const out = html(<Field id="v" k="visibility" t={t.visibility} value="private" values={{ visibility: 'private' }} set={() => {}} />);
     expect(out).toContain('<option value="private" selected>Private (set here)</option>');
   });
@@ -184,22 +185,10 @@ describe('copy', () => {
     expect(html(<EditFile org="o" repo="r" path="p" />)).toContain('Edit the file directly');
     expect(CONFLICT).toContain('or use Edit the file directly.');
   });
-  it('explains the linked file types with a ?', () => {
-    const f = new StaticFiles({ [`${ORG}/.github/dsl-course.yml`]: META, [`${ORG}/.github/course.yml`]: COURSE_YML });
-    const host = document.body.appendChild(document.createElement('div'));
-    render(<DetailsScreen course={course} loaded={loaded} cohortStates={{}} files={f} now={0} />, host);
-    const q = host.querySelector('button[aria-label="About linked file types"]');
-    expect(q?.textContent).toBe('?');
-    expect(q?.closest('label')?.getAttribute('for')).toBe('cdk');
-    render(null, host);
-    host.remove();
-  });
-  it('says what the linked file types do, and that the public website is not affected', () => {
-    const f = new StaticFiles({ [`${ORG}/.github/dsl-course.yml`]: META, [`${ORG}/.github/course.yml`]: COURSE_YML });
+  it('has no linked file types field: site_link_extensions is dropped (decision 0039 rule 3)', () => {
+    const f = new StaticFiles({ [FILE]: META });
     const out = html(<DetailsScreen course={course} loaded={loaded} cohortStates={{}} files={f} now={0} />);
-    expect(out).toContain('File types linked on each semester’s student site');
-    expect(out).toContain('Other files are still released: students reach them through the repo.');
-    expect(out).toContain('The public website is not affected.');
-    expect(out).toContain('Released files of these types get a direct link on every semester’s student site.');
+    expect(out).not.toContain('File types linked');
+    expect(out).not.toContain('id="cdk"');
   });
 });

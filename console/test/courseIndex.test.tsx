@@ -13,10 +13,10 @@ import type { Status } from '../src/model/types';
 import { CourseScreen, MaterialsChecklist } from '../src/screens/Course';
 import { materialsReadiness } from '../src/model/readiness';
 import { HomeScreen } from '../src/screens/Home';
-import { MaterialsScreen, WebsiteScreen, writeSyllabus } from '../src/screens/CourseEdit';
+import { MaterialsScreen, WebsiteScreen, withSyllabus } from '../src/screens/CourseEdit';
 import { MaterialsIndexScreen, TemplatesIndexScreen, otherRepos } from '../src/screens/CourseIndex';
 import type { CourseProps } from '../src/screens/types';
-import { REVIEWED_MARK, withMark } from '../src/model/materialsRules';
+import { REVIEWED_MARK, withMark } from '../src/model/materialsRepo';
 import { EditFile, newFileUrl } from '../src/ui/bits';
 import { Sidenav } from '../src/ui/shell';
 import example from './fixtures/status.example.json';
@@ -196,6 +196,14 @@ describe('materials settings file tree', () => {
     // The fixture's list has patterns and is unchanged: nothing to save.
     expect(saveOf(files)).toContain('disabled');
   });
+  it('has Syllabus and Withheld only: no Folder kinds, no kind pickers (decision 0038)', () => {
+    const out = render(<MaterialsScreen {...cp({ entry: MAT })} />);
+    expect(out).not.toContain('Folder kinds');
+    expect(out).not.toContain('aria-label="Kind of');
+    expect(out).not.toContain('Kinds found');
+    expect(out.match(/<ul class="file-tree">/g)?.length).toBe(1);
+    expect([...out.matchAll(/<h2>([^<]+)/g)].map((m) => m[1].trim())).toEqual(['Syllabus', 'Withheld from students']);
+  });
   it('badges every file and flags the rule that matches nothing, with no edit link per row', () => {
     const out = render(<MaterialsScreen {...cp({ entry: MAT })} />);
     const t = text(<MaterialsScreen {...cp({ entry: MAT })} />);
@@ -265,22 +273,24 @@ describe('course nav and overview', () => {
   });
 });
 
-describe('materials settings: syllabus file and withheld files', () => {
-  const tree = ['E1282.pdf', 'lectures/01/a.pdf', 'Tutorials/01/b.ipynb', 'quiz/q1.md', 'datasets/x.csv'];
-  const withYml = new StaticFiles({ [`${COURSE_ORG}/${MAT}/materials.yml`]: 'syllabus: E1282.pdf\nkinds:\n  quiz: exam\n' }, {}, { [`${COURSE_ORG}/${MAT}`]: tree });
+describe('materials settings: the syllabus file is the newest semester’s semester.yml (decision 0039)', () => {
+  const tree = ['E1282.pdf', 'Syllabus.md', 'lectures/01/a.pdf'];
+  const SEM = `${COHORT_ORG}/semester-config/semester.yml`;
+  const withSem = new StaticFiles({ [SEM]: '# INSTRUCTOR-OWNED\nstudent_site:\n  syllabus: Syllabus.md\n' }, {}, { [`${COURSE_ORG}/${MAT}`]: tree });
 
-  it('shows the declared syllabus and one tree, the withheld one, with no folder kinds', () => {
-    const out = render(<MaterialsScreen {...cp({ entry: MAT, files: withYml })} />);
-    const t = text(<MaterialsScreen {...cp({ entry: MAT, files: withYml })} />);
-    expect(out.match(/<ul class="file-tree">/g)?.length).toBe(1);
-    expect(t).not.toContain('Folder kinds');
-    expect(out).not.toContain('aria-label="Kind of');
-    expect(out).toContain('value="E1282.pdf"');
-    expect(out).toContain(`/edit/main/E1282.pdf`);
+  it('shows the semester’s syllabus selected, the repo’s top-level Markdown files as the choices, and the file it is saved in', () => {
+    const out = render(<MaterialsScreen {...cp({ entry: MAT, files: withSem })} />);
+    expect(out).toContain('<option value="Syllabus.md" selected>Syllabus.md</option>');
+    expect(out).toContain('<option value="SYLLABUS.md">SYLLABUS.md</option>');
+    expect(out).not.toContain('value="E1282.pdf"');
+    expect(text(<MaterialsScreen {...cp({ entry: MAT, files: withSem })} />)).toContain('saved for Fall 2026');
+    expect(out).toContain(`/edit/main/semester.yml`);
+    expect(out).not.toContain('materials.yml');
   });
-  it('writes the syllabus into materials.yml and nothing else', () => {
-    expect(writeSyllabus(null, 'E1282.pdf')).toBe('# INSTRUCTOR-OWNED - yours. What the folder names cannot say: the syllabus file.\nsyllabus: E1282.pdf\n');
-    expect(writeSyllabus('syllabus: a.pdf\nkinds:\n  quiz: exam\n', '')).toBe('kinds:\n  quiz: exam\n');
+  it('writes student_site.syllabus, and the default as no key', () => {
+    expect(withSyllabus('# c\n', 'Syllabus.md')).toEqual({ text: '# c\nstudent_site:\n  syllabus: Syllabus.md\n' });
+    expect(withSyllabus('# c\nstudent_site:\n  syllabus: Syllabus.md\n', 'SYLLABUS.md')).toEqual({ text: '# c\n' });
+    expect(withSyllabus('people: [\n', 'x.md')).toEqual({ error: 'semester.yml does not parse; fix it with Edit the file directly.' });
   });
   it('offers Confirm on the withheld patterns while they are not reviewed (decision 0040 rule 7)', () => {
     const materials = STATUS.course!.materials.map((m) => ({ ...m, checks: m.checks?.map((c) => (c.id === 'withheld' ? { ...c, done: false } : c)) }));
@@ -290,13 +300,13 @@ describe('materials settings: syllabus file and withheld files', () => {
     expect(withheld).toContain('Withheld patterns reviewed');
     expect(withheld).toContain('Confirm');
   });
-  it('the public website shows its settings from course.yml, off when there is none', () => {
-    const t = text(<WebsiteScreen {...cp()} />);
+  it('the public website shows its settings from course.yml’s open_course_site, off when there is none', () => {
+    const meta = new StaticFiles({ [`${COURSE_ORG}/.github/course.yml`]: 'course:\n  name: ML\n  description: About ML.\n' });
+    const t = text(<WebsiteScreen {...cp({ files: meta })} />);
     expect(t).not.toContain('publish.yml');
+    expect(t).not.toContain('opencourse.yml');
     expect(t).toContain('The website is off: Publish refuses until it is on and saved.');
-    // The site repo is there from an earlier publish: off leaves it up, frozen.
-    expect(t).toContain('Off Off: the site stays as last published and no longer updates.');
-    expect(t).toContain('Description');
+    expect(t).toContain('Description About ML.');
     expect(t).toContain('Not set');
   });
 });
@@ -304,26 +314,20 @@ describe('materials settings: syllabus file and withheld files', () => {
 describe('materials checklist and edit links (decision 0024 rules 8 and 9)', () => {
   const checks = STATUS.course!.materials[0].checks!;
 
-  it('gives every line a ?, and folds the kinds found under the content-kind line', () => {
-    const out = render(<MaterialsChecklist checks={checks} />);
+  it('gives the syllabus and the withheld patterns a ?, with no Kinds found fold', () => {
+    const current = checks.filter((c) => c.id !== 'kind_folder');
+    const out = render(<MaterialsChecklist checks={current} />);
     // The syllabus (one check with its weekly plan) has its own ?.
-    expect(out.match(/aria-label="About this check"/g)).toHaveLength(checks.length - 1);
+    expect(out.match(/aria-label="About this check"/g)).toHaveLength(1);
     expect(out.match(/aria-label="About the syllabus"/g)).toHaveLength(1);
-    expect(out).toContain('A repo with nothing of a content kind has nothing to release.');
     expect(out).toContain('Saving the list once, even empty, marks it reviewed.');
-    // Collapsed: no `open`. Every content kind but supporting files: a tick and its folders when present, nothing when not.
-    expect(out).toContain('<details class="fold s-kinds"><summary>Kinds found</summary>');
-    const kinds = out.split('<summary>Kinds found</summary>')[1].split('</details>')[0];
-    expect(kinds.match(/<li/g)).toHaveLength(6);
-    expect(kinds).toMatch(/<li class="found"><span class="k-mark" aria-hidden="true"><svg[^]*?<\/svg><\/span><b>Lecture<\/b>: lectures\/<\/li>/);
-    expect(kinds).toContain('<li><span class="k-mark" aria-hidden="true"></span><b>Readings</b><span class="sr">: none</span></li>');
-    expect(kinds).not.toContain('Supporting');
-    // Needed first (the kinds), then the suggested: the syllabus row (its open part, the plan, is a suggestion), the withheld patterns.
-    const t = text(<MaterialsChecklist checks={checks} />);
-    expect(t).not.toContain('Every top folder has a kind');
-    expect(t.indexOf('At least one folder of a content kind')).toBeLessThan(t.indexOf('Syllabus'));
+    expect(out).not.toContain('Kinds found');
+    // The suggested: the syllabus row (its open part, the plan, is a suggestion), the withheld patterns.
+    const t = text(<MaterialsChecklist checks={current} />);
     expect(t.indexOf('Syllabus')).toBeLessThan(t.indexOf('Withheld patterns reviewed'));
     expect(t).not.toContain('Weekly plan in the syllabus');
+    // An older status's folder check carries its kinds: no fold for them any more.
+    expect(render(<MaterialsChecklist checks={checks} />)).not.toContain('Kinds found');
   });
 
   it('points an edit link at GitHub’s new-file page while the file does not exist', () => {
@@ -345,10 +349,10 @@ describe('materials checklist and edit links (decision 0024 rules 8 and 9)', () 
     expect(present).not.toContain('Lives in');
   });
 
-  it('on the settings screen: new-file links for an absent materials.yml, the editor for a present .releaseignore', () => {
+  it('on the settings screen: new-file links for an absent semester.yml, the editor for a present .releaseignore', () => {
     const out = render(<MaterialsScreen {...cp({ entry: MAT })} />);
-    expect(out).toContain(`href="https://github.com/${COURSE_ORG}/${MAT}/new/main?filename=materials.yml"`);
-    expect(out).not.toContain(`/edit/main/materials.yml`);
+    expect(out).toContain(`href="https://github.com/${COHORT_ORG}/semester-config/new/main?filename=semester.yml"`);
+    expect(out).not.toContain('materials.yml');
     expect(out).toContain(`href="https://github.com/${COURSE_ORG}/${MAT}/edit/main/.releaseignore"`);
     // SYLLABUS.md is in the tree, though its text is not loaded: it exists.
     expect(out).toContain(`/edit/main/SYLLABUS.md`);

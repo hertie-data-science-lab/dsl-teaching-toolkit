@@ -3,8 +3,7 @@ kinds (the console's exported aliases and migrate's 0.10 reading kept)."""
 
 from __future__ import annotations
 
-from dsl_course import materials, schemas
-from dsl_course.schema_check import validate
+from dsl_course import materials
 
 
 def test_the_semester_names_its_syllabus_and_absent_is_none():
@@ -23,12 +22,6 @@ def test_a_folders_kind_is_the_institutions_and_nothing_else():
     assert materials.folder_kind("lecture") == "lecture"
     assert materials.folder_kind("tutorials") == materials.ASSETS_KIND
     assert materials.folder_kind("data") == materials.ASSETS_KIND
-
-
-def test_the_exported_schema_takes_what_the_parser_takes():
-    schema = schemas.materials_schema()
-    assert validate({"syllabus": "s.pdf", "kinds": {"quiz": "drop-in"}}, schema) == []
-    assert validate({"kinds": {"quiz": "quizzes"}}, schema) != []
 
 
 def test_the_topic_makes_a_materials_repo_not_the_name():

@@ -6,6 +6,7 @@ import type { GitHubClient } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
 import { LiveFiles, RETRY_MS, type Files } from '../src/model/files';
 import { StaticFiles } from './staticFiles';
+import { rosterFiles } from './roster';
 import type { Loaded } from '../src/model/status';
 import type { Assignment, AssignmentState, Status } from '../src/model/types';
 import { hashOf, movedHash, parseHash, replaceHash } from '../src/router';
@@ -23,10 +24,10 @@ const cohort = { org: COHORT_ORG, term: 'f2026', termLabel: 'Fall 2026' };
 const course: Course = { org: COURSE_ORG, name: 'Machine Learning', code: 'E1234', description: '', write: true, admins: [], cohorts: [cohort], meta: {} };
 
 const solo = STATUS.assignments![0];
-const team: Assignment = { ...solo, slug: 'assignment-3', title: 'Group project', template: 'assignment-3-f2026', state: 'teams_forming', units: 0, submissions: 0, teams: 1 };
+const team: Assignment = { ...solo, slug: 'assignment-3', number: 3, title: 'Group project', template: 'assignment-3-f2026', state: 'teams_forming', units: 0, submissions: 0, teams: 1 };
 const status: Status = { ...STATUS, assignments: [solo, team] };
 const ready: Loaded = { kind: 'ready', status, sha: 's', stale: [] };
-const files = new StaticFiles({ [`${COHORT_ORG}/semester-config/teams.csv`]: 'assignment,team,github_handle\nassignment-3,team-alpha,anna-a\n' });
+const files = new StaticFiles(rosterFiles(COHORT_ORG, 'email,name,role,team:3,github_handle\na@x.org,A,enrolled,team-alpha,anna-a\n'));
 const props = (over: Partial<CohortProps> = {}): CohortProps => ({ course, cohort, loaded: ready, files, now: NOW, ...over });
 const current = (out: string) => /<a href="[^"]*" aria-current="page">([^<]+)<\/a>/.exec(out)?.[1];
 
@@ -77,12 +78,16 @@ describe('the assignment hub', () => {
     expect(s).toContain('href="#assignment-assignment-2/marks"');
   });
 
-  it('a teams.csv it could not read is an error, never an empty team list to save over', () => {
-    const failing: Files = Object.assign(Object.create(files), {
-      file: (o: string, r: string, path: string) => (path === 'teams.csv' ? { kind: 'error', message: 'HTTP 502' } : files.file(o, r, path)),
-    });
-    const out = render(<AssignmentScreen {...props({ entry: 'assignment-3', tab: 'teams', files: failing })} />);
-    expect(out).toContain('Could not read teams.csv: HTTP 502. It is tried again shortly.');
+  it('a roster it could not read is an error, never an empty team list to save over', () => {
+    for (const bad of ['students.csv', '.system/roster.csv']) {
+      const failing: Files = Object.assign(Object.create(files), {
+        file: (o: string, r: string, path: string) => (path === bad ? { kind: 'error', message: 'HTTP 502' } : files.file(o, r, path)),
+      });
+      const out = render(<AssignmentScreen {...props({ entry: 'assignment-3', tab: 'teams', files: failing })} />);
+      expect(out).toContain(`Could not read ${bad}: HTTP 502. It is tried again shortly.`);
+      expect(out).not.toContain('Without a team');
+    }
+    const out = render(<AssignmentScreen {...props({ entry: 'assignment-3', tab: 'teams', files: Object.assign(Object.create(files), { file: (o: string, r: string, path: string) => (path === 'students.csv' ? { kind: 'error', message: 'HTTP 502' } : files.file(o, r, path)) }) })} />);
     expect(out).not.toContain('Without a team');
     expect(out).not.toContain('Create team');
   });
@@ -111,10 +116,7 @@ describe('the assignment hub', () => {
   });
 
   it('an assigned-teams assignment has no window on its Teams tab', () => {
-    const assigned = new StaticFiles({
-      [`${COHORT_ORG}/semester-config/teams.csv`]: 'assignment,team,github_handle\n',
-      [`${COHORT_ORG}/semester-config/assignments.yml`]: 'assignments:\n  assignment-3:\n    team_formation: assigned\n',
-    });
+    const assigned = new StaticFiles(rosterFiles(COHORT_ORG, 'email,name,role,team:3\n'));
     const assignedTeam: Assignment = { ...team, settings: { team_formation: { value: 'assigned', source: 'entry' } } };
     const loaded: Loaded = { ...ready, status: { ...status, assignments: [solo, assignedTeam] } };
     const out = render(<AssignmentScreen {...props({ entry: 'assignment-3', tab: 'teams', files: assigned, loaded })} />);
@@ -173,11 +175,8 @@ describe('the cohort nav', () => {
 
 describe('the Assignments index', () => {
   it('shows teams formed and students without a team, marked of total and returned', () => {
-    const roster = 'hertie_email,name,role,github_handle\na@x.org,A,enrolled,anna-a\nb@x.org,B,enrolled,ben-b\nc@x.org,C,enrolled,\n';
-    const f = new StaticFiles({
-      [`${COHORT_ORG}/semester-config/students.csv`]: roster,
-      [`${COHORT_ORG}/semester-config/teams.csv`]: 'assignment,team,github_handle\nassignment-3,team-alpha,Anna-A\nassignment-2,x,ben-b\n',
-    });
+    // Joined: A (team-alpha in assignment 3's column) and B (a team for assignment 2 only); C has not joined.
+    const f = new StaticFiles(rosterFiles(COHORT_ORG, 'email,name,role,team:2,team:3,github_handle\na@x.org,A,enrolled,,team-alpha,anna-a\nb@x.org,B,enrolled,x,,ben-b\nc@x.org,C,enrolled,,,\n'));
     const back = { ...solo, marks: { filled: 40, total: 48 }, returned: true };
     const out = render(<AssignmentsScreen {...props({ files: f, loaded: { kind: 'ready', status: { ...status, assignments: [back, team] }, sha: 's', stale: [] } })} />);
     expect(out).toContain('<th>Teams</th><th>Marked</th><th>Returned</th>');

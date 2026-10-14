@@ -20,7 +20,8 @@ import { SaveBar, SaveLine } from '../ui/edit';
 import { Ext } from '../ui/icons';
 import { WithStatus, cohortScope, todayOf, tzOf, useOperations, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
-import { COURSE_REPO, CONFIG_REPO, INSTRUCTORS_FILE, SEMESTER_FILE, SITE_CONFIG } from '../model/names';
+import { COURSE_FILE, COURSE_REPO, CONFIG_REPO, DEFAULT_SYLLABUS, SEMESTER_FILE, SITE_CONFIG } from '../model/names';
+import { semesterFile } from '../model/settings';
 import semesterSchema from '../../schemas/semester.schema.json';
 import { DEFAULT_DEST_REPO } from '../model/policy';
 import { FLOORS, HOST_DEFAULT, kindOfLanded, landings, readSel, withPublic, type Sel } from '../model/selection';
@@ -29,7 +30,7 @@ import { SelectionEditor } from '../ui/SelectionEditor';
 import { draftErrors, readDraft, type SemesterDraft } from '../model/scheduleEdit';
 import { ABOUT } from '../tiers/course';
 import type { FieldTier, Tiers, Values } from '../tiers/types';
-import { detailsOf, saveCourseFile } from './CourseEdit';
+import { detailsOf, saveCourseFile, withSyllabus } from './CourseEdit';
 import { SemesterForm, scheduleAfter, useSchedFile } from './Schedule';
 
 /** A hand-written announcement's title, date and text, from its front matter (or its body). */
@@ -106,7 +107,7 @@ function Site(p: ReadyProps) {
   const url = status.site?.url ?? `https://${repo}`;
   const home = p.files.file(p.cohort.org, repo, 'index.md');
   const ann = p.files.dir(p.cohort.org, repo, '_announcements');
-  const peopleFile = p.files.file(p.cohort.org, CONFIG_REPO, INSTRUCTORS_FILE);
+  const peopleFile = p.files.file(p.cohort.org, CONFIG_REPO, SEMESTER_FILE);
   const people = peopleFile.kind === 'ready' ? parseInstructors(peopleFile.text) : [];
   const site = status.site;
   const [body, setBody] = useState<string | null>(null);
@@ -264,14 +265,13 @@ const INSTITUTION_FIELDS: Record<string, FieldTier> = {
 };
 const INSTITUTION: Tiers = Object.fromEntries(SITE_CONFIG.institution.map((k) => [k, INSTITUTION_FIELDS[k] ?? { tier: 'ask', label: k }]));
 const COURSE_KEYS = ['course_name', 'course_code', 'course_description'];
-const COURSE_FILE = 'dsl-course.yml';
 
 /** Where a derived group is saved, and that the site follows at the next sync. */
 function SavedTo({ href, screen }: { href: string; screen: string }) {
   return <p class="footnote">Saved to <a class="textlink" href={href}>{screen}</a>; the site updates at the next sync.</p>;
 }
 
-/** Course name, code and description: the sync copies them from dsl-course.yml, so they are saved there. */
+/** Course name, code and description: the sync copies them from course.yml, so they are saved there. */
 function CourseGroup({ p }: { p: ReadyProps }) {
   const { course } = p;
   const file = p.files.file(course.org, COURSE_REPO, COURSE_FILE);
@@ -321,6 +321,33 @@ function SemesterGroup({ p }: { p: ReadyProps }) {
   );
 }
 
+const SYLLABUS: Tiers = {
+  syllabus: { tier: 'default', label: 'Syllabus file', placeholder: DEFAULT_SYLLABUS, defaultLabel: `default: ${DEFAULT_SYLLABUS}`, reason: 'The released file the home page pins as the syllabus, as a path in the materials repo.' },
+};
+
+/** The semester's own student site settings (`semester.yml student_site:`, decision 0039): the syllabus it pins. */
+function StudentSiteGroup({ p }: { p: ReadyProps }) {
+  const f = semesterFile(p.files, p.cohort.org);
+  const ready = f && f !== 'loading' && !f.error ? f : null;
+  const saved = String(obj(ready?.doc.student_site).syllabus ?? '').trim();
+  const base: Values = useMemo(() => ({ syllabus: saved || undefined }), [saved]);
+  const { cur, set, save, setSave, run, unchanged } = useDraftSave(base);
+  const doSave = async () => {
+    if (!ready) return;
+    const out = withSyllabus(ready.text, String(cur.syllabus ?? '').trim() || DEFAULT_SYLLABUS);
+    if ('error' in out) return setSave({ kind: 'bad', text: out.error });
+    await run({ owner: p.cohort.org, repo: CONFIG_REPO, path: SEMESTER_FILE }, out.text, ready.sha, { message: 'semester: choose the syllabus file, from the DSL Teaching Console', statusRepo: [p.cohort.org, CONFIG_REPO] });
+  };
+  return (
+    <div class="form-section">
+      <h3>Student site</h3>
+      {f === 'loading' ? <Loading what={`Reading ${SEMESTER_FILE}`} /> : f === null ? <CheckLine cls="bad">Could not read {SEMESTER_FILE}.</CheckLine> : f.error ? <CheckLine cls="bad">{SEMESTER_FILE} does not parse ({f.error}); fix it with Edit the file directly.</CheckLine> : null}
+      {ready ? <SchemaForm id="ss-site" schema={null} tiers={SYLLABUS} values={cur} onChange={set} /> : null}
+      <SaveBar state={save} onSave={() => void doSave()} small disabled={!ready || unchanged} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: SEMESTER_FILE, exists: p.files.file(p.cohort.org, CONFIG_REPO, SEMESTER_FILE).kind !== 'absent' }} />
+    </div>
+  );
+}
+
 /** The institution keys of the site's `_config.yml`, folded under Advanced: the sync never rewrites them, so they are saved in the site repo. */
 function InstitutionGroup({ p, repo, file, cfg }: { p: ReadyProps; repo: string; file: FileState; cfg: ReturnType<typeof useYaml> }) {
   const y = cfg?.y, doc = cfg?.doc ?? null;
@@ -357,6 +384,7 @@ function SiteSettings({ p, repo, cfgFile, cfg }: { p: ReadyProps; repo: string; 
       <div class="form">
         <CourseGroup p={p} />
         <SemesterGroup p={p} />
+        <StudentSiteGroup p={p} />
         <div class="form-section">
           <h3>Semester and org</h3>
           <dl class="kv">

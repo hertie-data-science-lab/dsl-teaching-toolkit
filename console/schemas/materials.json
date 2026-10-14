@@ -1,24 +1,4 @@
 {
-  "alias_depth": 2,
-  "aliases": {
-    "assets": "assets",
-    "data": "assets",
-    "fig": "assets",
-    "figures": "assets",
-    "images": "assets",
-    "img": "assets",
-    "lab": "lab",
-    "labs": "lab",
-    "lecture": "lecture",
-    "lectures": "lecture",
-    "literature": "readings",
-    "reading": "readings",
-    "readings": "readings",
-    "src": "assets",
-    "static": "assets",
-    "tutorials": "lab"
-  },
-  "assets_kind": "assets",
   "cases": [
     {
       "name": "nothing declared",
@@ -445,17 +425,6 @@
         "a[b]/notes.pdf"
       ]
     }
-  ],
-  "default_kind": "assets",
-  "default_syllabus": "SYLLABUS.md",
-  "empty_entry_kind": "lecture",
-  "fallback_kind": "other",
-  "file": "materials.yml",
-  "folder_kinds": [
-    "lecture",
-    "lab",
-    "readings",
-    "assets"
   ],
   "reviewed_mark": "# Reviewed: nothing withheld.",
   "topic": "dsl-materials"

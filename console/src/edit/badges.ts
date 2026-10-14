@@ -1,5 +1,5 @@
 // What a withhold list does to each file of a repo, and how a click on the tree edits it.
-// One widget serves `.releaseignore` (withheld from students), `opencourse.yml`'s `withhold`
+// One widget serves `.releaseignore` (withheld from students), course.yml's `open_course_site.withhold`
 // (kept off the public website) and the import picker (decision 0016).
 //
 // The rule is the engine's (`releaseignore`): gitignore syntax, the last matching line wins,

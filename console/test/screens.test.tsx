@@ -8,6 +8,7 @@ import { ConsoleAuth } from '../src/auth/console';
 import { PatAuth } from '../src/auth/pat';
 import type { Course } from '../src/model/discovery';
 import { StaticFiles } from './staticFiles';
+import { rosterFiles } from './roster';
 import type { Files, TreeState } from '../src/model/files';
 import { signal } from '@preact/signals';
 import { EnvCtx, type Env } from '../src/env';
@@ -75,8 +76,8 @@ events:
     title: Reading week
     event_datetime: 2026-10-26
 `;
-const STUDENTS = '﻿hertie_email,name,role,github_handle,github_id,enrol_code,code_sent_at\nanna@students.example.org,Anna Adams,enrolled,anna-a,101,SECRETCODE1,2026-09-02T09:30:00Z\nben@example,Ben Baker,enrolled,,,,\ncarla@students.example.org,Carla Cohen,auditor,,,SECRETCODE3,2026-09-02T09:30:00Z\n';
-const PEOPLE = 'instructors:\n  - github_handle: a-example\n    role: instructor\n    email: a@staff.example.org\n    name: Dr A. Example\n    photo: images/a.jpg\n  - github_handle: b-sample\n    role: teaching_assistant\n    email: b@staff.example.org\n    name: B. Sample\n    start: "2026-09-01"\n    end: "2026-12-31"\n';
+const STUDENTS = '﻿email,name,role,github_handle,github_id,enrol_code,code_sent_at\nanna@students.example.org,Anna Adams,enrolled,anna-a,101,SECRETCODE1,2026-09-02T09:30:00Z\nben@example,Ben Baker,enrolled,,,,\ncarla@students.example.org,Carla Cohen,auditor,,,SECRETCODE3,2026-09-02T09:30:00Z\n';
+const PEOPLE = 'people:\n  - github_handle: a-example\n    role: instructor\n    email: a@staff.example.org\n    name: Dr A. Example\n    photo: images/a.jpg\n  - github_handle: b-sample\n    role: teaching_assistant\n    email: b@staff.example.org\n    name: B. Sample\n    start: "2026-09-01"\n    end: "2026-12-31"\n';
 const GRADING = 'title: Group project\ntype: group\nteam_formation: self_select\nmax_team_size: 4\nsubmit_via: assignment_repo\nvisibility: private\nformats: [ipynb]\nautograde: sometimes\ncompletion_check: true\ngrader_pdf: false\nquestions:\n  proposal: 20\n  analysis: 30\n';
 const OUTCOME = JSON.stringify({ schema: 'dsl.outcome/1', op: 'release.entry', run_id: 4821, actor: 'a', preview: false, conclusion: 'done', summary: 'x', counts: { files: 7 }, reasons: [{ code: 'RELEASED', text: 'lectures/03 copied' }] });
 
@@ -85,8 +86,8 @@ const TREE = { [`${COURSE_ORG}/course-materials-f2026`]: ['SYLLABUS.md', 'lectur
 const files = new StaticFiles(
   {
     [`${COHORT_ORG}/semester-config/schedule.yml`]: SCHEDULE,
-    [`${COHORT_ORG}/semester-config/students.csv`]: STUDENTS,
-    [`${COHORT_ORG}/semester-config/instructors.yml`]: PEOPLE,
+    ...rosterFiles(COHORT_ORG, STUDENTS),
+    [`${COHORT_ORG}/semester-config/semester.yml`]: PEOPLE,
     [`${COHORT_ORG}/semester-config/.system/outcomes/release.entry.json`]: OUTCOME,
     [`${COHORT_ORG}/${COHORT_ORG}.github.io/index.md`]: '---\nlayout: home\n---\nWelcome to **Machine Learning**.\n',
     [`${COURSE_ORG}/assignment-3-f2026/grading_config.yml`]: GRADING,
@@ -430,7 +431,7 @@ describe('S8 students', () => {
 
 describe('S8 students, a fault on a row after a blank line', () => {
   it('marks the row the engine names, by its line in the file', () => {
-    const csv = 'hertie_email,name,role\nanna@x.org,Anna Adams,enrolled\n\nben@x.org,Ben Baker,enroled\n';
+    const csv = 'email,name,role\nanna@x.org,Anna Adams,enrolled\n\nben@x.org,Ben Baker,enroled\n';
     const fault = { id: 'role', scope: 'semester' as const, stage: 'K5', text: 'Row 4 has a role nobody can act on.', stops: '', fix: { repo: `${COHORT_ORG}/semester-config`, path: 'students.csv', screen: 'students', line: 4 } };
     const out = html(<StudentsScreen {...props({ files: new StaticFiles({ [`${COHORT_ORG}/semester-config/students.csv`]: csv }), loaded: { ...ready, status: { ...STATUS, problems: [fault] } } as Loaded })} />);
     const row = (line: number) => out.match(new RegExp(`<tr class(?:="([^"]*)")? id="line-${line}">`))?.[1] ?? '';
@@ -579,18 +580,19 @@ describe('S2 course and S17 template', () => {
   });
   it('shows every course fact in Course details, the institution’s in grey', () => {
     const t = text(<CourseScreen {...cp} />);
-    expect(t).toContain('Description ? One paragraph about the course, shown on the public website. In dsl-course.yml. Not set');
-    expect(t).toMatch(/Contact \? Who students and the lab write to about the course\. In dsl-course\.yml; the institution’s contact when unset\. \S+@\S+, from the institution/);
+    expect(t).toContain('Description ? One paragraph about the course, shown on the public website. In course.yml. Not set');
+    // The institution's contacts, in escalation order (decision 0039).
+    expect(t).toMatch(/Contact \? Who students and the lab write to about the course\. In course\.yml; the institution’s contacts when unset\. \S+@\S+, from the institution/);
     expect(t).toContain(', from the institution');
-    expect(t).toContain('In dsl-course.yml. a-example');
+    expect(t).toContain('In course.yml. a-example');
     // Every fact carries the small ?.
     expect((html(<CourseScreen {...cp} />).match(/<dt>[^<]*<span class="hint-wrap small">/g) ?? []).length).toBe(8);
     expect(t).toContain('The course’s code in the catalogue, as students know it.');
     expect(t).toContain('A semester’s instructors and TAs are set on that semester’s Instructors page.');
     expect(t).toContain('This course’s default. Each assignment can set its own.');
-    const own = { ...course, meta: { ...course.meta, course_description: 'Learning from data.', contact: 'ml@example.org', licence: 'CC BY 4.0' } };
+    const own = { ...course, meta: { ...course.meta, course: { description: 'Learning from data.', licence: 'CC BY 4.0' }, open_course_site: { contact: 'ml@example.org' } } };
     const mine = text(<CourseScreen {...cp} course={own} />);
-    expect(mine).toContain('In dsl-course.yml. Learning from data.');
+    expect(mine).toContain('In course.yml. Learning from data.');
     expect(mine).toContain('when unset. ml@example.org');
     expect(mine).toContain('when unset. CC BY 4.0');
     expect(mine).not.toContain(', from the institution');

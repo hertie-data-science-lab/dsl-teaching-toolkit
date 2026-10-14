@@ -1,26 +1,24 @@
-// Course-side editors: S3 Course details (dsl-course.yml), S20 Public OpenCourse website
-// (course.yml `open_course_site:`), S19 Course materials repo settings (materials.yml,
-// .releaseignore).
+// Course-side editors: S3 Course details and S20 Public OpenCourse website (both
+// `.github/course.yml`, decision 0039), S19 Course materials repo settings (the syllabus, in the
+// newest semester's `semester.yml`, and `.releaseignore`).
 
 import { useRef, useState } from 'preact/hooks';
-import materialsSchema from '../../schemas/materials.schema.json';
-import courseSchema from '../../schemas/course.schema.json';
 import { useEnv, type Env } from '../env';
 import { badgeFiles } from '../edit/badges';
 import { invalidText, useSave, type SaveState } from '../edit/save';
-import { YamlText, compact, deepEqual, obj } from '../edit/yamlText';
+import { YamlText, blank, compact, deepEqual, isObj, obj, render, type Path } from '../edit/yamlText';
 import { SchemaForm, fieldErrors } from '../forms/Form';
 import { termRank } from '../model/catalogue';
+import { defaultsOf, placeBlock, statedDefaults, uncommentIn, withDefaults } from '../model/config';
+import { courseBlock } from '../model/discovery';
+import { withMark } from '../model/materialsRepo';
 import { sameHandle } from '../model/people';
-import { DEFAULT_SYLLABUS, MATERIALS_FILE, NOTHING_DECLARED, readDeclared, withMark } from '../model/materialsRules';
 import { KINDS } from '../model/policy';
 import { FLOORS, PUBLISH_DEFAULT, readSel, type Sel } from '../model/selection';
-import { fileValue, validCourse } from '../model/settings';
-import { validator } from '../model/validate';
+import { institutionDefaults, rawBlock, semesterFile, validCourseFile, validSemesterBlocks, validSemesterFile, writeBlock } from '../model/settings';
 import { confirmWithheld, generateSyllabus, publishWebsite, type Scope } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
-import { ABOUT, COURSE_FACTS, courseDefaultTiers } from '../tiers/course';
-import { formatsList } from '../tiers/grading';
+import { ABOUT, COURSE_FACTS, defaultsTiers } from '../tiers/course';
 import { WEBSITE_OFF_LIVE, publishWebsite as publishTiers } from '../tiers/ops';
 import type { Values } from '../tiers/types';
 import { CheckLine, EditFile, Loading } from '../ui/bits';
@@ -34,7 +32,7 @@ import { ItemRow, RepoChip, RepoWhy } from '../ui/SetupPanel';
 import { materialsReadiness } from '../model/readiness';
 import { courseScope } from './common';
 import type { CourseProps } from './types';
-import { COURSE_FILE, COURSE_REPO } from '../model/names';
+import { CONFIG_REPO, COURSE_FILE, COURSE_REPO, DEFAULT_SYLLABUS, SEMESTER_FILE } from '../model/names';
 
 /** `course.yml`'s public-website block. */
 const OPEN_SITE = 'open_course_site';
@@ -56,37 +54,42 @@ export interface Admin {
   end: string;
 }
 
+/** Where each Course details field lives in course.yml (decision 0039): the open site's contact in its block. */
+export const ABOUT_PATHS: Record<string, Path> = {
+  course_name: ['course', 'name'], course_code: ['course', 'code'], course_description: ['course', 'description'], licence: ['course', 'licence'],
+  contact: ['open_course_site', 'contact'],
+};
+
 export function detailsOf(meta: Record<string, unknown>) {
-  const ad = obj(meta.assignment_defaults);
   const people = obj(meta.people);
   const admins = (Array.isArray(people.course_admins) ? people.course_admins : []).map((a) => {
     const x = obj(a);
     return { github_handle: String(x.github_handle ?? ''), email: String(x.email ?? ''), start: String(x.start ?? ''), end: String(x.end ?? '') };
   });
-  const links = Array.isArray(meta.site_link_extensions) ? meta.site_link_extensions.map(String).join(', ') : typeof meta.site_link_extensions === 'string' ? meta.site_link_extensions : '';
   return {
-    about: compact({ course_name: meta.course_name, course_code: meta.course_code, course_description: meta.course_description, contact: meta.contact, licence: meta.licence }),
-    defaults: compact({ ...ad, formats: formatsList(ad.formats)[0] }),
+    about: compact(Object.fromEntries(Object.entries(ABOUT_PATHS).map(([k, path]) => [k, rawBlock(meta, path.slice(0, -1))[String(path[path.length - 1])]]))),
+    defaults: compact(defaultsOf(meta)),
     admins,
-    links,
   };
 }
 
 export type Details = ReturnType<typeof detailsOf>;
 
-/** The course's `formats` list with its first (runnable) entry replaced: the others stay. Cleared means the toolkit's default, so no list. */
-export function formatsAfter(meta: Record<string, unknown>, first: unknown): string[] | undefined {
-  if (!first) return undefined;
-  const rest = formatsList(obj(meta.assignment_defaults).formats).slice(1);
-  return [String(first), ...rest.filter((f) => f !== first)];
-}
-
-/** Write only what changed, key by key, into dsl-course.yml. */
-export function writeDetails(y: YamlText, before: Details, after: Details, meta: Record<string, unknown>): void {
-  for (const k of Object.keys({ ...before.about, ...after.about })) if (!deepEqual(before.about[k], after.about[k])) y.assign([k], after.about[k]);
-  for (const k of Object.keys({ ...before.defaults, ...after.defaults })) {
-    const v = fileValue(k, after.defaults[k]);
-    if (!deepEqual(before.defaults[k], v)) y.assign(['assignment_defaults', k], k === 'formats' ? formatsAfter(meta, v) : v);
+/** course.yml's text with `after` written over `before`, only what changed: the fields at their paths, the admins, then the `defaults:` skeleton. */
+export function writeDetails(text: string, before: Details, after: Details, meta: Record<string, unknown>): string {
+  let y = new YamlText(text);
+  for (const k of Object.keys({ ...before.about, ...after.about })) {
+    if (deepEqual(before.about[k], after.about[k])) continue;
+    const path = ABOUT_PATHS[k], value = blank(after.about[k]) ? undefined : after.about[k];
+    // A key the seed shows commented takes its comment's place.
+    const placed = value !== undefined && y.get(path) === undefined && path.length === 2 ? uncommentIn(y.text, String(path[0]), String(path[1]), value) : null;
+    if (placed !== null) {
+      y = new YamlText(placed);
+      continue;
+    }
+    y.assign(path, value);
+    const block = ABOUT_PATHS[k].slice(0, -1), left = y.get(block);
+    if (left === null || (isObj(left) && !Object.keys(left).length)) y.delete(block);
   }
   if (!deepEqual(before.admins, after.admins)) {
     const raws = (Array.isArray(obj(meta.people).course_admins) ? (obj(meta.people).course_admins as unknown[]) : []).map(obj);
@@ -95,26 +98,17 @@ export function writeDetails(y: YamlText, before: Details, after: Details, meta:
       ...rawBy(a.github_handle), github_handle: a.github_handle.trim(), email: a.email.trim() || undefined, start: a.start || undefined, end: a.end || undefined,
     })));
   }
-  if (before.links !== after.links) {
-    const list = after.links.split(/[,\s]+/).map((s) => s.trim().replace(/^\./, '')).filter(Boolean);
-    y.assign(['site_link_extensions'], list.length ? list : undefined);
-  }
-  const emptyMap = (k: string) => {
-    const v = y.get([k]);
-    if (v && typeof v === 'object' && !Object.keys(v as object).length) y.delete([k]);
-  };
-  emptyMap('assignment_defaults');
+  return deepEqual(before.defaults, after.defaults) ? y.text : withDefaults(y.text, statedDefaults(after.defaults), institutionDefaults());
 }
 
-/** dsl-course.yml after `after`, or why it would not be valid against the exported schema. */
+/** course.yml after `after`, or why it would not be valid against the exported schema. */
 export function courseFileAfter(text: string, before: Details, after: Details, meta: Record<string, unknown>): { text: string } | { error: string } {
-  const out = new YamlText(text);
-  writeDetails(out, before, after, meta);
-  return validCourse(out.toJS()) ? { text: out.text } : { error: invalidText('dsl-course.yml', validCourse) };
+  const out = writeDetails(text, before, after, meta);
+  return validCourseFile(new YamlText(out).toJS() ?? {}) ? { text: out } : { error: invalidText(COURSE_FILE, validCourseFile) };
 }
 
 /**
- * Save dsl-course.yml with `after` written over `before`: refused on the save line, before any
+ * Save course.yml with `after` written over `before`: refused on the save line, before any
  * write, while `errs` marks a field, when the file
  * would not be valid, or when a new admin has no GitHub account. True once written.
  */
@@ -129,7 +123,7 @@ export async function saveCourseFile(
   if ('error' in out) return refuse(out.error);
   const missing = await missingAdmin(env, o.before.admins, o.after.admins);
   if (missing) return refuse(`There is no GitHub account called ${missing}.`);
-  return run({ owner: o.org, repo: COURSE_REPO, path: 'dsl-course.yml' }, out.text, o.file.sha, { message: 'course: edit the course details, from the DSL Teaching Console', statusRepo: [o.org, COURSE_REPO] });
+  return run({ owner: o.org, repo: COURSE_REPO, path: COURSE_FILE }, out.text, o.file.sha, { message: 'course: edit the course details, from the DSL Teaching Console', statusRepo: [o.org, COURSE_REPO] });
 }
 
 /** The first new admin handle with no GitHub account, or null (a failed lookup counts as there). */
@@ -220,19 +214,6 @@ export function WebsiteSwitch(p: CourseProps) {
   );
 }
 
-/** The one dsl-course.yml key the semester sites read for which files a row links (`site._link_extensions`). */
-function LinkKindsField({ id, value, onInput }: { id: string; value: string; onInput: (v: string) => void }) {
-  return (
-    <div class="field">
-      <label for={id}>File types linked on each semester’s student site <Hint label="About linked file types">
-        Each semester has its own student site, with a row for every session. A release copies files from your materials into the semester, and the row links them. Left empty, a row links the files at the top of each released folder, and one link for each subfolder. With types listed, a row links only files of those types, such as notebooks, PDFs and slides, at any depth, plus one link to browse the folder. Other files are still released: students reach them through the repo. For example: ipynb, pdf, html. The public website is not affected.
-      </Hint></label>
-      <input type="text" id={id} value={value} placeholder="pdf, html" onInput={(e) => onInput((e.target as HTMLInputElement).value)} />
-      <p class="why">Released files of these types get a direct link on every semester’s student site. Separate them with commas.</p>
-    </div>
-  );
-}
-
 /** The course's `.github` default branch, for its file links (main until the repo list is read). */
 function courseBranch(files: CourseProps['files'], org: string): string {
   const gh = files.repos(org);
@@ -242,7 +223,7 @@ function courseBranch(files: CourseProps['files'], org: string): string {
 export function DetailsScreen(p: CourseProps) {
   const { course } = p;
   const env = useEnv();
-  const file = p.files.file(course.org, COURSE_REPO, 'dsl-course.yml');
+  const file = p.files.file(course.org, COURSE_REPO, COURSE_FILE);
   const [draft, setDraft] = useState<Details | null>(null);
   const [save, runSave, setSave] = useSave(env);
   const y = file.kind === 'ready' ? new YamlText(file.text) : null;
@@ -253,7 +234,8 @@ export function DetailsScreen(p: CourseProps) {
     setDraft({ ...d, ...patch });
     if (save.kind !== 'busy') setSave({ kind: 'idle' });
   };
-  const defaultErrs = fieldErrors(null, courseDefaultTiers(before.defaults), d.defaults);
+  const tiers = defaultsTiers(institutionDefaults(), before.defaults);
+  const defaultErrs = fieldErrors(null, tiers, d.defaults);
   const errs = { ...fieldErrors(null, ABOUT, d.about), ...fieldErrors(null, COURSE_FACTS, d.about), ...defaultErrs };
   const doSave = async () => {
     if (!y || file.kind !== 'ready') return;
@@ -263,11 +245,11 @@ export function DetailsScreen(p: CourseProps) {
     <>
       <div class="page-head">
         <div><h2 class="h1">Course details <Hint doc="01-new-course-org.md">Every semester of the course starts from these settings. Each semester and each assignment can set its own defaults.</Hint></h2><p class="lede">What every semester’s student site shows about the course, and the course’s defaults.</p></div>
-        <div class="actions"><EditFile cls="btn quiet" org={course.org} repo={COURSE_REPO} path="dsl-course.yml" branch={courseBranch(p.files, course.org)} exists={file.kind !== 'absent'} /></div>
+        <div class="actions"><EditFile cls="btn quiet" org={course.org} repo={COURSE_REPO} path={COURSE_FILE} branch={courseBranch(p.files, course.org)} exists={file.kind !== 'absent'} /></div>
       </div>
-      {file.kind === 'loading' ? <Loading what="Reading dsl-course.yml" /> : null}
-      {file.kind === 'absent' ? <CheckLine cls="bad">There is no dsl-course.yml in {course.org}/.github.</CheckLine> : null}
-      {y?.errors.length ? <CheckLine cls="bad">dsl-course.yml does not parse ({y.errors[0]}); fix it with Edit the file directly.</CheckLine> : null}
+      {file.kind === 'loading' ? <Loading what={`Reading ${COURSE_FILE}`} /> : null}
+      {file.kind === 'absent' ? <CheckLine cls="bad">There is no {COURSE_FILE} in {course.org}/.github.</CheckLine> : null}
+      {y?.errors.length ? <CheckLine cls="bad">{COURSE_FILE} does not parse ({y.errors[0]}); fix it with Edit the file directly.</CheckLine> : null}
       {y && !y.errors.length ? (
         <div class="panel">
           <div class="form" style="max-width:720px">
@@ -277,7 +259,7 @@ export function DetailsScreen(p: CourseProps) {
               <SchemaForm id="cdf" schema={null} tiers={COURSE_FACTS} values={d.about} onChange={(v) => set({ about: v })} />
               <dl class="kv">
                 <dt>Org</dt><dd>{course.org} <span class="footnote">cannot be renamed here</span></dd>
-                <dt>Engine version</dt><dd>{String(meta.central_ref ?? 'release')} <span class="footnote">set by the lab</span></dd>
+                <dt>Engine version</dt><dd>{String(courseBlock(meta).toolkit_version_ref ?? 'release')} <span class="footnote">set by the lab</span></dd>
               </dl>
               <WebsiteSwitch {...p} />
             </div>
@@ -290,17 +272,13 @@ export function DetailsScreen(p: CourseProps) {
               <summary>Advanced</summary>
               <div class="fold-body">
                 <div class="form-section">
-                  <h3>Defaults for this course’s assignments <Hint label="About the defaults">Sets the course’s default; each assignment can override. Left empty, the institution’s value in grey applies.</Hint></h3>
-                  <SchemaForm id="cdx" schema={null} tiers={courseDefaultTiers(before.defaults)} values={d.defaults} onChange={(v) => set({ defaults: v })} />
-                </div>
-                <div class="form-section">
-                  <h3>Student site links</h3>
-                  <LinkKindsField id="cdk" value={d.links} onInput={(links) => set({ links })} />
+                  <h3>Defaults for this course’s semesters <Hint label="About the defaults">Sets the course’s default; each semester and each assignment can override. Left empty, the institution’s value in grey applies.</Hint></h3>
+                  <SchemaForm id="cdx" schema={null} tiers={tiers} values={d.defaults} onChange={(v) => set({ defaults: v })} />
                 </div>
               </div>
             </details>
             <div class="form-section">
-              <SaveBar state={save} onSave={() => void doSave()} disabled={!draft || deepEqual(draft, before)} file={{ org: course.org, repo: COURSE_REPO, path: 'dsl-course.yml', exists: file.kind !== 'absent' }} />
+              <SaveBar state={save} onSave={() => void doSave()} disabled={!draft || deepEqual(draft, before)} file={{ org: course.org, repo: COURSE_REPO, path: COURSE_FILE, exists: file.kind !== 'absent' }} />
             </div>
           </div>
         </div>
@@ -401,8 +379,6 @@ export function websiteOf(site: Record<string, unknown>): Website {
   const pub = obj(site.publish);
   return { enabled: site.enabled === true, source_repo: String(site.source_repo ?? ''), publish: readSel(pub), reading_lists: pub.reading_lists !== false };
 }
-
-const validCourseFile = validator(courseSchema);
 
 /** `course.yml` after `after`, key by key under `open_course_site:`, or why it would not be valid. */
 export function websiteFileAfter(text: string, before: Website, after: Website): { text: string } | { error: string } {
@@ -518,18 +494,18 @@ export function WebsiteScreen(p: CourseProps) {
 
 // --------------------------------------------------------------------------- materials repo settings
 
-const MATERIALS_STUB = '# INSTRUCTOR-OWNED - yours. What the folder names cannot say: the syllabus file.\n';
-const validMaterials = validator(materialsSchema);
-
 /** A syllabus the weekly plan can be written into. */
 const isMarkdown = (path: string) => /\.(md|markdown)$/i.test(path);
 
-/** `materials.yml` with the syllabus written: a blank syllabus removes the key. */
-export function writeSyllabus(text: string | null, syllabus: string): string | null {
-  const y = new YamlText(text ?? MATERIALS_STUB);
-  if (y.errors.length) return null;
-  y.assign(['syllabus'], syllabus.trim() || undefined);
-  return y.text;
+/** `semester.yml` with `student_site.syllabus` set: the default writes no key, and an emptied block goes. */
+export function withSyllabus(text: string, syllabus: string): { text: string } | { error: string } {
+  let y = new YamlText(text);
+  if (y.errors.length) return { error: `${SEMESTER_FILE} does not parse; fix it with Edit the file directly.` };
+  const want = syllabus === DEFAULT_SYLLABUS ? undefined : syllabus;
+  // A semester.yml with no block gets it where the seed shows it commented.
+  if (want !== undefined && y.get(['student_site']) === undefined) y = new YamlText(placeBlock(y.text, 'student_site', render({ student_site: { syllabus: want } })));
+  else writeBlock(y, ['student_site'], obj(y.get(['student_site'])), { syllabus: want }, ['syllabus']);
+  return validSemesterBlocks(y.toJS(), ['student_site']) ? { text: y.text } : { error: invalidText(SEMESTER_FILE, validSemesterFile) };
 }
 
 /** The syllabus select's choices: the default, the repo's top-level Markdown files, and the current value if it is neither. */
@@ -547,15 +523,16 @@ export function MaterialsScreen(p: CourseProps) {
   const tree = p.files.tree(course.org, repo);
   const files = tree.kind === 'ready' ? tree.paths.filter((x) => !x.dir).map((x) => x.path) : [];
   const ignFile = p.files.file(course.org, repo, '.releaseignore');
-  const matFile = p.files.file(course.org, repo, MATERIALS_FILE);
-  const declared = matFile.kind === 'loading' ? NOTHING_DECLARED : readDeclared(matFile.kind === 'ready' ? matFile.text : null);
-  const baseSyl = declared?.declared ? declared.syllabus : '';
   const ignText = ignFile.kind === 'ready' ? ignFile.text : '';
   const [ign, setIgn] = useState<string | null>(null);
   const [syl, setSyl] = useState<string | null>(null);
   const [sylSave, runSyl, setSylSave] = useSave(env);
-  // The chosen file: the draft, else the declared one, else the default. Choosing the default writes no key.
-  const savedSyl = baseSyl.trim() || DEFAULT_SYLLABUS;
+  const scope = newestScope(p);
+  // The syllabus is the newest semester's (`semester.yml student_site.syllabus`, decision 0039): its weekly plan is written here too.
+  const semOrg = scope?.cohortOrg;
+  const semFile = semOrg ? semesterFile(p.files, semOrg) : null;
+  const semReady = semFile && semFile !== 'loading' && !semFile.error ? semFile : null;
+  const savedSyl = String(obj(semReady?.doc.student_site).syllabus ?? '').trim() || DEFAULT_SYLLABUS;
   const syllabus = syl ?? savedSyl;
   const sylFile = p.files.file(course.org, repo, syllabus);
   // Why Write is not offered (Copy still is): a file the plan cannot go into.
@@ -565,20 +542,19 @@ export function MaterialsScreen(p: CourseProps) {
       ? `There is no ${syllabus} yet: write the syllabus first, or copy the plan.`
       : null;
   const [ignSave, runIgn] = useSave(env);
-  const scope = newestScope(p);
   // The syllabus line of the checklist; a status without one reads it off `ready`.
   const sylDone = m ? (m.checks?.find((c) => c.id === 'syllabus')?.done ?? m.state === 'ready') : false;
   const repos = p.files.repos(course.org);
   const branch = (repos.kind === 'ready' ? repos.repos.find((r) => r.name === repo)?.default_branch : undefined);
   // Each file's link: the editor while it exists, GitHub's new-file page while it does not (0024 rule 9).
-  const matRef = { org: course.org, repo, path: MATERIALS_FILE, branch, exists: matFile.kind !== 'absent' };
+  const semRef = semOrg ? { org: semOrg, repo: CONFIG_REPO, path: SEMESTER_FILE, exists: p.files.file(semOrg, CONFIG_REPO, SEMESTER_FILE).kind !== 'absent' } : undefined;
   const ignRef = { org: course.org, repo, path: '.releaseignore', branch, exists: ignFile.kind !== 'absent' };
   const partial = tree.kind === 'ready' && tree.truncated;
-  const saveSyl = async (value: string) => {
-    const text = writeSyllabus(matFile.kind === 'ready' ? matFile.text : null, value);
-    if (text === null) return;
-    if (!validMaterials(new YamlText(text).toJS() ?? {})) return setSylSave({ kind: 'bad', text: invalidText(MATERIALS_FILE, validMaterials) });
-    if (await runSyl({ owner: course.org, repo, path: MATERIALS_FILE }, text, matFile.kind === 'ready' ? matFile.sha : null, { message: 'materials: edit the syllabus file, from the DSL Teaching Console', statusRepo: [course.org, COURSE_REPO] })) setSyl(null);
+  const saveSyl = async () => {
+    if (!semOrg || !semReady) return;
+    const out = withSyllabus(semReady.text, syllabus);
+    if ('error' in out) return setSylSave({ kind: 'bad', text: out.error });
+    if (await runSyl({ owner: semOrg, repo: CONFIG_REPO, path: SEMESTER_FILE }, out.text, semReady.sha, { message: 'semester: choose the syllabus file, from the DSL Teaching Console', statusRepo: [semOrg, CONFIG_REPO] })) setSyl(null);
   };
   // "Withheld patterns reviewed" (decision 0040 rule 7): a suggestion, Confirm marks it without an edit.
   const reviewCheck = m?.checks?.find((c) => c.id === 'withheld');
@@ -601,21 +577,22 @@ export function MaterialsScreen(p: CourseProps) {
           </section>
         ) : r ? <RepoWhy r={r} /> : null}
         <section class="panel section">
-          <h2>Syllabus <Hint label="About the syllabus">The syllabus is one file at the repo’s top level that the student site pins. Pick which file it is here; the default is SYLLABUS.md. The list shows this repo’s top-level Markdown files; pick the one that is your syllabus.</Hint></h2>
+          <h2>Syllabus <Hint label="About the syllabus">The syllabus is one file at the repo’s top level that the student site pins. Pick which file it is here; the default is {DEFAULT_SYLLABUS}. The list shows this repo’s top-level Markdown files; pick the one that is your syllabus. It is saved in the newest semester’s {SEMESTER_FILE}.</Hint></h2>
           <div class="field">
             <label for="m-syl">Syllabus file <span class="default">default: {DEFAULT_SYLLABUS}</span></label>
-            <select id="m-syl" onChange={(e) => setSyl((e.target as HTMLSelectElement).value)}>
+            <select id="m-syl" disabled={!semReady} onChange={(e) => setSyl((e.target as HTMLSelectElement).value)}>
               {syllabusChoices(files, savedSyl).map((f) => <option value={f} selected={f === syllabus}>{f}</option>)}
             </select>
-            <p class="hint">The Markdown file at the repo’s top level that the student site pins as the syllabus.</p>
+            <p class="hint">The Markdown file at the repo’s top level that the student site pins as the syllabus{scope ? `, saved for ${scope.where}` : ''}.</p>
           </div>
           {/* A suggestion (decision 0034): never red. Done, or the dotted optional row with what is missing. */}
           {m ? (sylDone ? <div class="check-line ok"><Check /><span>Written.</span></div> : (
             <ul class="setup"><ItemRow it={{ id: 'syllabus', label: 'Syllabus written', kind: 'step', need: 'suggested', state: 'open', why: sylFile.kind === 'absent' ? `There is no ${syllabus} yet.` : 'Still the template text. Students would see the placeholder at the first release.' }} /></ul>
           )) : <p class="footnote">Not checked yet.</p>}
           <div class="actions"><EditFile org={course.org} repo={repo} path={syllabus} branch={branch} exists={sylFile.kind !== 'absent' || files.includes(syllabus)} /></div>
-          {declared === null ? <CheckLine cls="bad">{MATERIALS_FILE} does not parse; fix it with Edit the file directly.</CheckLine> : null}
-          <SaveBar state={sylSave} onSave={() => void saveSyl(syllabus === DEFAULT_SYLLABUS ? '' : syllabus)} small disabled={syl === null || syl === savedSyl || declared === null} file={matRef} />
+          {semFile && semFile !== 'loading' && semFile.error ? <CheckLine cls="bad">{SEMESTER_FILE} does not parse; fix it with Edit the file directly.</CheckLine> : null}
+          {semFile === null && scope ? <CheckLine cls="bad">Could not read {SEMESTER_FILE}.</CheckLine> : null}
+          {semRef ? <SaveBar state={sylSave} onSave={() => void saveSyl()} small disabled={syl === null || syl === savedSyl || !semReady} file={semRef} /> : null}
           <h3>Weekly plan for the syllabus <Hint label="About the weekly plan">Built from the semester schedule: every session with its date and readings. Copy shows it to paste anywhere; Write puts it into your syllabus file.</Hint></h3>
           {scope ? (
             <div class="actions">

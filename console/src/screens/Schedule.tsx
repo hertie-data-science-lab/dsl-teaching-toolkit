@@ -9,7 +9,7 @@ import { Invalid } from '../forms/Form';
 import { RELEASE_WORD, TYPE_CLASS, siteRowWord, fmtDay, fmtTime, fmtWhen, heldSentence, markWord, releaseIdent, repoWords, sortKey } from '../model/format';
 import { needsANumber, parseSchedule, scheduleRows, type Block, type Row } from '../model/schedule';
 import {
-  ASSIGNMENTS_BLOCK, READINGS_KIND, SESSION_KINDS, applyChanges, blockOf, changesOf, defaultReleaseAt, draftErrors, emptyTwin, hiddenKind, newDraft, nextNumber, nextSession, numberedField, readDraft, releaseAt, writeDraft,
+  READINGS_KIND, SESSION_KINDS, applyChanges, blockOf, changesOf, defaultReleaseAt, draftErrors, emptyTwin, hiddenKind, newDraft, nextNumber, nextSession, numberedField, readDraft, releaseAt, writeDraft,
   type AssignmentDraft, type Draft, type EntryDraft, type FileDraft, type SemesterDraft, type SemesterEntryDraft, type SemesterType, type Slot,
 } from '../model/scheduleEdit';
 import type { Assignment, Release } from '../model/types';
@@ -26,9 +26,9 @@ import { NOTHING_TO_RELEASE, markClass, releaseRef, rowMark } from './Cohort';
 import { NotFound } from './Assignments';
 import { CheckNow, WithStatus, cohortScope, gradingConfig, todayOf, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
-import { ASSIGNMENTS_FILE, CONFIG_REPO } from '../model/names';
-import { RUN_KEYS, TEAM_FORMATION, TEAM_FORMATIONS, VISIBILITIES, VISIBILITY, assignmentsFile, effectiveOf, validAssignments, validSchedule } from '../model/settings';
-import { SolutionNote, assignmentsAfterSchedule, cutoffOf, entryBelow, forcedVisibility } from './RunSettings';
+import { CONFIG_REPO } from '../model/names';
+import { RUN_KEYS, TEAM_FORMATION, TEAM_FORMATIONS, VISIBILITIES, VISIBILITY, effectiveOf, validSchedule } from '../model/settings';
+import { SolutionNote, cutoffOf, entryBelow, forcedVisibility } from './RunSettings';
 import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO, DEFAULT_TIMEZONE, KINDS, SUBMIT_VIA_DEFAULT, penaltyError, pluralOf } from '../model/policy';
 import { otherRepos } from './CourseIndex';
 
@@ -717,22 +717,9 @@ function View(p: ReadyProps) {
     const out = applyChanges(y.text, (y.toJS() ?? {}) as Record<string, unknown>, changesOf(entryKeys.map((k) => drafts[k]), entryKeys.map((k) => baseOf(k))), removed, { handedOut });
     if (!validSchedule(parse(out.text) ?? {})) return setSave({ kind: 'bad', text: invalidText('the schedule', validSchedule) });
     const newId = entryKeys.includes('new') ? out.keys[changesOf(entryKeys.slice(0, entryKeys.indexOf('new')).map((k) => drafts[k]), entryKeys.slice(0, entryKeys.indexOf('new')).map((k) => baseOf(k))).length] : null;
-    // A removed assignment leaves no block in assignments.yml, which the engine would fault.
-    const gone = removed.filter((k) => blockOf(doc, k) === ASSIGNMENTS_BLOCK);
-    let second: Step | null = null;
-    if (gone.length) {
-      const af = assignmentsFile(p.files, p.cohort.org);
-      if (af && af !== 'loading' && !af.error) {
-        const text = assignmentsAfterSchedule(af, null, gone);
-        if (text !== null) {
-          if (!validAssignments(parse(text) ?? {})) return setSave({ kind: 'bad', text: invalidText(ASSIGNMENTS_FILE, validAssignments) });
-          second = { target: { owner: p.cohort.org, repo: CONFIG_REPO, path: ASSIGNMENTS_FILE }, text, sha: af.sha, opts: { message: `assignments: remove ${gone.join(', ')}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] } };
-        }
-      }
-    }
     const what = dirty === 1 && dirtyKeys.length === 1 ? (dirtyKeys[0] === 'new' ? `add ${newId}` : `edit ${dirtyKeys[0]}`) : dirtyKeys.length === 0 ? `remove ${removed.join(', ')}` : `${dirty} changes`;
     const first: Step = { target: { owner: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }, text: out.text, sha: sf.sha, opts: { message: `schedule: ${what}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] } };
-    await saveSteps(env, setSave, first, second, 'Entry removed, but its block is still in assignments.yml', () => {
+    await saveSteps(env, setSave, first, null, '', () => {
       setDrafts({});
       setRemoved([]);
       if (newId && typeof location !== 'undefined') location.hash = `#schedule-${newId}`;

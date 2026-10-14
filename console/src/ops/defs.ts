@@ -118,7 +118,7 @@ export interface AsgRef {
   units: number;
   group: boolean;
   when: string; // for the eyebrow
-  /** The semester-side name its repos are called after (`semester_dest_repo`, else the key: cascade `semesterName`). */
+  /** The semester-side name its repos are called after (the entry's `repo_name`, else the key: `semesterName`). */
   name?: string;
 }
 
@@ -168,7 +168,7 @@ export interface PerQuestion {
 }
 
 /**
- * `name`: the assignment's semester-side name (`semester_dest_repo`, else its key), what the engine returns by.
+ * `name`: the assignment's semester-side name (the entry's `repo_name`, else its key), what the engine returns by.
  * `late`: while the late cutoff has not passed, the dialog says late work can still change marks (decision 0037).
  * `facts`: the Marks tab's lines from the mark sheet: who gets marks, who is skipped or held, and the final grades (`marks.spread`).
  * `dryExtra`: shown under a preview, who would be emailed (the Marks tab reads the preview issue).

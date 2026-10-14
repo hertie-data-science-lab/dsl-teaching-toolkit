@@ -2,7 +2,7 @@
 
 Three wire shapes (`dsl.request/1`, `dsl.outcome/1`, `dsl.status/1`), the operations
 registry (`ops.json`), the engine's names (`names.json`), the words for its values
-(`labels.json`), the materials-repo rules (`materials.json`) and the institution file
+(`labels.json`), the materials-repo withhold rules (`materials.json`) and the institution file
 (`policy.json`), and one schema per instructor-owned file the console edits. Every
 enum and every key set is READ off the constant the engine itself parses with, so a value
 added to the engine reaches the console's forms with no second edit; the committed copies
@@ -97,9 +97,6 @@ from .settings import (
 )
 
 DRAFT = "https://json-schema.org/draft/2020-12/schema"
-# WP-C removes: the console's settings screens still write the 0.10 files and validate
-# against those files' schemas, frozen, until they write `course.yml` / `semester.yml`.
-FROZEN = Path(__file__).with_name("frozen")
 DEFAULT_OUT = Path("console/schemas")
 
 # The schema-level types of the keys whose parser accepts more than a string. Anything not
@@ -789,26 +786,12 @@ def institution_schema() -> dict:
     return _doc("institution.yml", dict(policy.SCHEMA))
 
 
-def materials_schema() -> dict:
-    """A materials repo's optional `materials.yml`: the syllabus file and folder -> kind
-    aliases (`materials.parse`)."""
-    body = dict(materials.SCHEMA)
-    body["properties"] = {
-        "syllabus": _str(),
-        "kinds": {
-            "type": "object",
-            "additionalProperties": _enum(policy.content_kinds()),
-        },
-    }
-    return _doc(materials.MATERIALS_FILE, body)
-
-
 def names_json() -> dict:
     """The repo names and paths the console must spell exactly as the engine does, so it
     holds no literal of its own: the config and join repos, the `.system/` folder and every
-    record in it (`records.path`), the instructor files, the semester topic, and a
-    semester site's `_config.yml` keys; and the old names the engine still recognises
-    (`legacy.ROWS`)."""
+    record in it (`records.path`), the instructor files and their `defaults:` keys, the
+    semester topic, and a semester site's `_config.yml` keys; and the old names the
+    engine still recognises (`legacy.ROWS`)."""
     return {
         "config_repo": CONFIG_REPO,
         "join_repo": JOIN_REPO,
@@ -818,10 +801,10 @@ def names_json() -> dict:
         # The starters New assignment offers when nobody chose (`course.DEFAULT_FORMATS`).
         "default_formats": list(DEFAULT_FORMATS),
         "semester_file": SEMESTER_FILE,
-        # WP-C removes: the console's settings screens still edit the 0.10 files.
-        "instructors_file": legacy.OLD_INSTRUCTORS_FILE,
-        "opencourse_file": legacy.OLD_OPENCOURSE_FILE,
-        "assignments_file": legacy.OLD_ASSIGNMENTS_FILE,
+        # The `defaults:` keys in the order the seeded skeleton writes them (decision 0039).
+        "default_keys": list(DEFAULT_FILE_KEYS),
+        # The syllabus `semester.yml student_site.syllabus` names when it names none.
+        "default_syllabus": materials.DEFAULT_SYLLABUS,
         "registry_file": SEMESTERS_PATH,
         "records": {kind: records.path(kind) for kind in records.RECORDS},
         # The hidden first line that routes a Join issue opened through the API.
@@ -897,19 +880,10 @@ def withheld_paths(paths: tuple[str, ...], lines: tuple[str, ...]) -> list[str]:
 
 
 def materials_json() -> dict:
-    """The materials-repo rules the console applies itself: the topic, the file, the
-    folder -> kind aliases, and the withhold rule as cases answered by the engine."""
+    """The materials-repo rules the console applies itself: the topic that marks one, the
+    line a reviewed list carries, and the withhold rule as cases answered by the engine."""
     return {
         "topic": materials.MATERIALS_TOPIC,
-        "file": materials.MATERIALS_FILE,
-        "default_syllabus": materials.DEFAULT_SYLLABUS,
-        "default_kind": materials.DEFAULT_KIND,
-        "assets_kind": materials.ASSETS_KIND,
-        "fallback_kind": policy.FALLBACK_KIND,
-        "empty_entry_kind": materials.EMPTY_ENTRY_KIND,
-        "folder_kinds": list(materials.FOLDER_KINDS),
-        "alias_depth": materials.ALIAS_DEPTH,
-        "aliases": materials.BUILTIN_ALIASES,
         "reviewed_mark": releaseignore.REVIEWED_MARK,
         "cases": [
             {
@@ -1069,13 +1043,6 @@ def all_schemas() -> dict[str, dict]:
         "students.schema.json": students_schema(),
         "roster.schema.json": roster_schema(),
         "grading_config.schema.json": grading_config_schema(),
-        "materials.schema.json": materials_schema(),
-        **{
-            f"{name}.schema.json": json.loads(
-                (FROZEN / f"{name}-0.10.schema.json").read_text()
-            )
-            for name in ("dsl_course", "assignments", "instructors", "opencourse")
-        },
         # The semester's PUBLIC student file, closed at every level (its allow-list).
         "student-status.schema.json": _doc(
             "student-status.json", student_status.json_schema()

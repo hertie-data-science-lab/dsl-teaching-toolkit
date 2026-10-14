@@ -6,7 +6,7 @@ import { useEnv } from '../env';
 import { invalidText, useSave } from '../edit/save';
 import { YamlText, deepEqual } from '../edit/yamlText';
 import { Invalid, SchemaForm, effective, fieldErrors } from '../forms/Form';
-import { KIND_LABEL, ago, fmtDay, fmtShort, opLabel, templateName } from '../model/format';
+import { ago, fmtDay, fmtShort, opLabel, templateName } from '../model/format';
 import {
   SYLLABUS_HINT, SYLLABUS_LABEL, dayAt, materialsReadiness, problemCount, problemFromDay, standing, stepItems, suggestionsCount, templateReadinessIn, tier, todoAside, verdictOf, verdictTab,
   type Tiered, type Verdict as VerdictT,
@@ -15,7 +15,7 @@ import { checkNow, derive, publishWebsite } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
 import { FormatPicker } from '../forms/FormatPicker';
 import { effectiveOf, lateWord, validGrading, valueWord } from '../model/settings';
-import { CONTACT, POLICY } from '../model/policy';
+import { CONTACTS, POLICY } from '../model/policy';
 import { fromConfig, handsOutStarter, questionFileError, questionRows, questionsValue, settingsTiers, toConfig, type QuestionRow } from '../tiers/grading';
 import { pick, type Values } from '../tiers/types';
 import { SaveBar } from '../ui/edit';
@@ -32,7 +32,7 @@ import { OpenButton } from '../ui/OpenButton';
 import { formatError } from '../wizards/model';
 import { detailsOf, newestScope, websiteUrl } from './CourseEdit';
 import type { CourseProps } from './types';
-import { CONFIG_REPO, COURSE_REPO, STATUS_PATH } from '../model/names';
+import { CONFIG_REPO, COURSE_FILE, COURSE_REPO, STATUS_PATH } from '../model/names';
 import { useSetAside } from './SetAside';
 import { REFRESH_HINT, courseScope, tzOf, yearOf } from './common';
 import { weekWords } from '../model/week';
@@ -172,7 +172,6 @@ export function courseItems(c: CourseStatus, tiered: Tiered[], list: string[] | 
 
 /** What each materials check is, for its `?`, in the checklist's order. */
 const CHECK_HINT: Record<string, string> = {
-  kind_folder: 'A repo with nothing of a content kind has nothing to release.',
   syllabus: 'The file the student site pins as the syllabus. Still the template text until you write it.',
   withheld: 'The whole repo is released as it stands unless a line here withholds it. Saving the list once, even empty, marks it reviewed.',
 };
@@ -194,26 +193,7 @@ export function MaterialsChecklist({ checks }: { checks: MaterialsCheck[] }) {
     id: c.id, label: c.label, kind: 'step', need: c.need ?? 'needed', state: c.done ? 'done' : 'open', why: c.done ? undefined : c.why ?? undefined, hint: c.id === 'syllabus' ? SYLLABUS_HINT : CHECK_HINT[c.id],
     hintLabel: c.id === 'syllabus' ? 'About the syllabus' : 'About this check',
   }));
-  const kinds = checks.find((c) => c.detail)?.detail;
-  return (
-    <>
-      <RepoChecklist items={items} />
-      {kinds ? (
-        <details class="fold s-kinds">
-          <summary>Kinds found</summary>
-          <ul class="fold-body">
-            {/* Every content kind: a tick and its folders when present, nothing when not. */}
-            {kinds.map((d) => (
-              <li class={d.folders.length ? 'found' : undefined}>
-                <span class="k-mark" aria-hidden="true">{d.folders.length ? <Check /> : null}</span>
-                <b>{KIND_LABEL[d.kind] ?? d.kind}</b>{d.folders.length ? `: ${d.folders.map((f) => `${f}/`).join(', ')}` : <span class="sr">: none</span>}
-              </li>
-            ))}
-          </ul>
-        </details>
-      ) : null}
-    </>
-  );
+  return <RepoChecklist items={items} />;
 }
 
 /** A template's needed checklist (the brief, the student version where a starter is handed out), from the course's open to-dos. */
@@ -430,7 +410,7 @@ export function courseReadiness(c: CourseStatus, tiered: Tiered[], list: string[
 /**
  * The course Dashboard's tabbed panel (decisions 0032 and 0034): Problems (course-scope only),
  * Suggestions, Set aside and Setup. The circle before a suggestion asks whether to set it aside;
- * the answer is saved into dsl-course.yml through the same save path as Course details, and
+ * the answer is saved into course.yml through the same save path as Course details, and
  * Bring back removes the id at once. A read-only viewer gets neither.
  */
 export function CourseTabs({ items, problems: list, aside, tab, onTab }: { items: SetupItem[] | null; problems: Problem[]; aside: ReturnType<typeof useSetAside>; tab?: string; onTab?: (key: string) => void }) {
@@ -507,16 +487,16 @@ export function CourseScreen(p: CourseProps) {
       <section class="panel section">
         <div class="section-head"><h2>Course details</h2><a class="btn small quiet" href="#details">Edit course details</a></div>
         <dl class="kv">
-          <dt>Name <Hint small label="About the name">The course’s name, as the console and the student site show it. In dsl-course.yml.</Hint></dt><dd>{course.name}</dd>
-          <dt>Code <Hint small label="About the code">The course’s code in the catalogue, as students know it. In dsl-course.yml.</Hint></dt><dd>{course.code || 'not set'}</dd>
-          <dt>Description <Hint small label="About the description">One paragraph about the course, shown on the public website. In dsl-course.yml.</Hint></dt><dd>{description || <span class="footnote">Not set</span>}</dd>
-          <dt>Contact <Hint small label="About the contact">Who students and the lab write to about the course. In dsl-course.yml; the institution’s contact when unset.</Hint></dt><dd>{fallback(about.contact, CONTACT)}</dd>
-          <dt>Licence <Hint small label="About the licence">The licence the public website shows for your materials. In dsl-course.yml; the institution’s default when unset.</Hint></dt><dd>{fallback(about.licence, POLICY.licences[0].name)}</dd>
-          <dt>Admins <Hint small label="Course admins, instructors and teaching assistants">Course admins can change everything in the course, every semester. A semester’s instructors and TAs are set on that semester’s Instructors page. In dsl-course.yml.</Hint></dt><dd>{course.admins.join(', ') || 'none'}</dd>
+          <dt>Name <Hint small label="About the name">The course’s name, as the console and the student site show it. In course.yml.</Hint></dt><dd>{course.name}</dd>
+          <dt>Code <Hint small label="About the code">The course’s code in the catalogue, as students know it. In course.yml.</Hint></dt><dd>{course.code || 'not set'}</dd>
+          <dt>Description <Hint small label="About the description">One paragraph about the course, shown on the public website. In course.yml.</Hint></dt><dd>{description || <span class="footnote">Not set</span>}</dd>
+          <dt>Contact <Hint small label="About the contact">Who students and the lab write to about the course. In course.yml; the institution’s contacts when unset.</Hint></dt><dd>{fallback(about.contact, CONTACTS.join(', '))}</dd>
+          <dt>Licence <Hint small label="About the licence">The licence the public website shows for your materials. In course.yml; the institution’s default when unset.</Hint></dt><dd>{fallback(about.licence, POLICY.licences[0].name)}</dd>
+          <dt>Admins <Hint small label="Course admins, instructors and teaching assistants">Course admins can change everything in the course, every semester. A semester’s instructors and TAs are set on that semester’s Instructors page. In course.yml.</Hint></dt><dd>{course.admins.join(', ') || 'none'}</dd>
           <dt>Late work <Hint small label="About these defaults">Late work and max team size apply to every assignment unless its semester or the assignment sets its own. Each comes from this course, or from the institution when the course sets none.</Hint></dt><dd>{lateWord(lateDays.value, latePen.value)}, {whose(lateDays.source)}</dd>
           <dt>Max team size <Hint small label="About max team size">This course’s default. Each assignment can set its own.</Hint></dt><dd>{valueWord('max_team_size', team.value)}, {whose(team.source)}</dd>
         </dl>
-        <EditFile org={course.org} repo={COURSE_REPO} path="dsl-course.yml" exists={p.files.file(course.org, COURSE_REPO, 'dsl-course.yml').kind !== 'absent'} />
+        <EditFile org={course.org} repo={COURSE_REPO} path={COURSE_FILE} exists={p.files.file(course.org, COURSE_REPO, COURSE_FILE).kind !== 'absent'} />
         <div class="website-block">
           <h3>Public OpenCourse website <span class="chip">Beta</span> <Hint label="About the public website">Optional: an open version of this course and its materials, available to anyone on the internet. Beta: leave this off for now - work in progress.</Hint></h3>
           <SiteLive org={course.org} published={pub} last={lastPublish} running={publishing} now={p.now} />

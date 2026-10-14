@@ -286,7 +286,7 @@ export const SEMESTER_STEPS: { id: string; name: string }[] = [
 const K_HINT: Record<string, string> = {
   K1: 'The console and automation can read the semester’s GitHub org.',
   K2: 'The semester’s repos exist (semester-config, join and the student site) and the course lists the semester.',
-  K3: 'At least one instructor in instructors.yml, on the Instructors page.',
+  K3: 'At least one instructor in semester.yml, on the Instructors page.',
   K4: 'schedule.yml with the semester’s start and end and at least one release or assignment.',
   K5: 'At least one student on the roster (students.csv).',
   K6: 'The student site’s repo exists.',

@@ -6,7 +6,6 @@ import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { NAMES } from '../src/model/names';
 import { buildRequest } from '../src/ops/adapter';
-import { formatsAfter } from '../src/screens/CourseEdit';
 import { syncedValues } from '../src/screens/Site';
 
 const SRC = new URL('../src/', import.meta.url).pathname;
@@ -45,11 +44,20 @@ const RETIRED: [string, RegExp][] = [
   ['term_tag', /\bterm_tag\b/],
   ['format as a key', /\bformat\s*:|['"]format['"]|\.format\b(?!\()/],
   ['silent', /\bsilent\b/],
+  // Decision 0039: the 0.10 config files the console no longer reads or writes.
+  ['the old course file', /dsl-course\.yml/],
+  ['the old website file', /opencourse\.yml/],
+  ['the old instructors file', /instructors\.yml/],
+  ['the old run settings file', /assignments\.yml/],
+  ['the old materials file', /(?<!_data\/)materials\.yml/],
+  ['the old teams file', /teams\.csv/],
+  ['the old roster email column', /hertie_email/],
+  ['the old course defaults block', /assignment_defaults/],
 ];
 
 describe('names', () => {
   it('has exactly the keys the engine exports', () => {
-    expect(Object.keys(NAMES).sort()).toEqual(['assignments_file', 'config_repo', 'course_file', 'default_formats', 'instructors_file', 'join_markers', 'join_repo', 'legacy', 'opencourse_file', 'records', 'registry_file', 'semester_file', 'semester_topic', 'site_config', 'system_dir']);
+    expect(Object.keys(NAMES).sort()).toEqual(['config_repo', 'course_file', 'default_formats', 'default_keys', 'default_syllabus', 'join_markers', 'join_repo', 'legacy', 'records', 'registry_file', 'semester_file', 'semester_topic', 'site_config', 'system_dir']);
     expect(NAMES.config_repo).toBe('semester-config');
     expect(NAMES.records.status.startsWith(`${NAMES.system_dir}/`)).toBe(true);
   });
@@ -64,7 +72,7 @@ describe('names', () => {
   it('agrees with schemas/names.json, which the engine exports, and holds every record the console reads', () => {
     const file = JSON.parse(readFileSync(new URL('../schemas/names.json', import.meta.url), 'utf8'));
     expect(NAMES).toEqual(file);
-    const decided = { config_repo: 'semester-config', join_repo: 'join', system_dir: '.system', instructors_file: 'instructors.yml', assignments_file: 'assignments.yml', registry_file: 'semesters.yml' };
+    const decided = { config_repo: 'semester-config', join_repo: 'join', system_dir: '.system', course_file: 'course.yml', semester_file: 'semester.yml', registry_file: 'semesters.yml' };
     for (const [k, v] of Object.entries(decided)) expect(file[k], k).toBe(v);
     for (const k of ['status', 'outcomes', 'distributed', 'pointer']) expect(file.records[k], `records.${k}`).toMatch(/^\.system\//);
   });
@@ -78,18 +86,9 @@ describe('names', () => {
   it('spells repo names only in model/names.ts', () => {
     const hits = ours()
       .filter((f) => f.rel !== 'model/names.ts')
-      .filter((f) => /['"](semester-config|\.github|\.system(\/[^'"]*)?|instructors\.yml|semesters\.yml)['"]/.test(f.text))
+      .filter((f) => /['"](semester-config|\.github|\.system(\/[^'"]*)?|course\.yml|semester\.yml|semesters\.yml)['"]/.test(f.text))
       .map((f) => f.rel);
     expect(hits).toEqual([]);
-  });
-});
-
-describe('the course default format', () => {
-  it('replaces only the first entry and keeps the others', () => {
-    expect(formatsAfter({ assignment_defaults: { formats: ['ipynb', 'py'] } }, 'rmd')).toEqual(['rmd', 'py']);
-    expect(formatsAfter({ assignment_defaults: { formats: 'ipynb,py' } }, 'py')).toEqual(['py']);
-    expect(formatsAfter({}, 'qmd')).toEqual(['qmd']);
-    expect(formatsAfter({ assignment_defaults: { formats: ['ipynb', 'py'] } }, '')).toBeUndefined();
   });
 });
 

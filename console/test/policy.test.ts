@@ -9,7 +9,6 @@ import { YamlText } from '../src/edit/yamlText';
 import { effectiveOf, effectiveWord, institutionDefaults, lateWord, over, readSetting, semesterName, usableBlock, writeBlock, type Effectives } from '../src/model/settings';
 import { questionFileError, questionsValue } from '../src/tiers/grading';
 import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO, DEFAULT_TIMEZONE, HANDLE_RE, ORG_NAME_RE, penaltyRate } from '../src/model/policy';
-import { assignmentsAfterSchedule } from '../src/screens/RunSettings';
 
 const SOURCES = import.meta.glob('../src/**/*.{ts,tsx}', { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
 
@@ -135,9 +134,9 @@ describe('the readers, as setting_readers reads each value', () => {
     expect(usableBlock({ max_team_size: '4', visibility: 'Private' })).toEqual({ max_team_size: 4, visibility: 'private' });
   });
 
-  it('names an assignment’s semester-side artefacts by its semester_dest_repo, else its key', () => {
-    expect(semesterName({ assignments: { 'assignment-1': { semester_dest_repo: 'assignment-1-resit' } } }, 'assignment-1')).toBe('assignment-1-resit');
-    expect(semesterName({ assignments: { 'assignment-1': { semester_dest_repo: 'not a repo' } } }, 'assignment-1')).toBe('assignment-1');
+  it('names an assignment’s semester-side artefacts by its schedule entry’s repo_name, else its key', () => {
+    expect(semesterName({ assignments: { 'assignment-1': { repo_name: 'assignment-1-resit' } } }, 'assignment-1')).toBe('assignment-1-resit');
+    expect(semesterName({ assignments: { 'assignment-1': { repo_name: 'not a repo' } } }, 'assignment-1')).toBe('assignment-1');
     expect(semesterName({}, 'assignment-2')).toBe('assignment-2');
   });
 });
@@ -156,7 +155,7 @@ describe('questions', () => {
   });
 });
 
-// The 0.10 assignments.yml skeleton the run-settings forms still write into until WP-C.
+// A file of comments only: a block is started at its end.
 const SKELETON = '# INSTRUCTOR-OWNED - yours to edit freely.\n#\n# How THIS semester runs each assignment.\n\n# defaults:\n#   late_window_days: 10\n';
 
 describe('writing a layer', () => {
@@ -171,13 +170,5 @@ describe('writing a layer', () => {
     const y = new YamlText('# mine\ndefaults:\n  max_team_size: 4\nassignments:\n  a2:\n    visibility: public\n');
     writeBlock(y, ['assignments', 'a2'], { visibility: 'public' }, {}, ['visibility']);
     expect(y.text).toBe('# mine\ndefaults:\n  max_team_size: 4\n');
-  });
-
-  it('after a schedule save: the new entry’s block only when a setting was set, and no block for a removed entry', () => {
-    const text = 'defaults:\n  max_team_size: 4\nassignments:\n  a1:\n    visibility: public\n';
-    const af = { text, sha: 's', doc: parse(text), error: null };
-    expect(assignmentsAfterSchedule(af, { key: 'a3', run: {} }, [])).toBeNull();
-    expect(parse(assignmentsAfterSchedule(af, { key: 'a3', run: { team_formation: 'assigned' } }, [])!).assignments).toEqual({ a1: { visibility: 'public' }, a3: { team_formation: 'assigned' } });
-    expect(parse(assignmentsAfterSchedule(af, null, ['a1', 'a9'])!)).toEqual({ defaults: { max_team_size: 4 } });
   });
 });

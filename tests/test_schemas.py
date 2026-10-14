@@ -13,6 +13,7 @@ from dsl_course import (
     course,
     gradebook,
     grading_spec,
+    materials,
     policy,
     roster,
     schedule,
@@ -357,10 +358,11 @@ def test_names_json_is_the_engines_own_names():
     names = schemas.names_json()
     assert set(names) == {
         "config_repo", "join_repo", "system_dir", "course_file", "semester_file",
-        "default_formats", "instructors_file", "assignments_file", "registry_file",
-        "records", "join_markers", "opencourse_file", "site_config", "semester_topic",
-        "legacy",
+        "default_formats", "default_keys", "default_syllabus", "registry_file",
+        "records", "join_markers", "site_config", "semester_topic", "legacy",
     }  # fmt: skip
+    assert names["default_keys"] == list(settings.DEFAULT_FILE_KEYS)
+    assert names["default_syllabus"] == materials.DEFAULT_SYLLABUS
     assert (names["course_file"], names["semester_file"]) == (
         course.COURSE_CONFIG,
         course.SEMESTER_FILE,

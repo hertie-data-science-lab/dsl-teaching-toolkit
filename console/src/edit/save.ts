@@ -135,7 +135,7 @@ export interface Step {
 }
 
 /**
- * Commit one file, then a second that depends on it (the schedule, then assignments.yml).
+ * Commit one file, then a second that depends on it (students.csv, then the engine's roster).
  * `afterFirst` runs as soon as the first commit lands, whatever happens next, so a retry
  * never writes it twice. A second commit that fails is reported as `partial: <why>`: the
  * first file is saved and the message says so.

@@ -12,7 +12,8 @@ import { COURSE_FACTS } from '../src/tiers/course';
 import { GitHubClient } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
 import { StaticFiles } from './staticFiles';
-import { CONTACT, POLICY, penaltyRate } from '../src/model/policy';
+import { rosterFiles } from './roster';
+import { CONTACTS, POLICY, penaltyRate } from '../src/model/policy';
 import { effectivePenalty, finalGrade, lateChoice, overrideText, overrideValue, penaltyText, questionFile, questionPoints, questionsFromRows, readSheet, scoreTotal } from '../src/model/marks';
 import { StatusStore, type Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
@@ -230,23 +231,22 @@ const NOW = Date.parse('2026-09-23T10:00:00+02:00');
 const cohort = { org: COHORT_ORG, term: 'f2026', termLabel: 'Fall 2026' };
 const course: Course = {
   org: COURSE_ORG, name: 'Machine Learning', code: 'E1234', description: 'A course.', write: true, admins: ['a-example'], cohorts: [cohort],
-  meta: { assignment_defaults: { late_window_days: 10, late_penalty_per_day: '10%', max_team_size: 5 } },
+  meta: { defaults: { late_window_days: 10, late_penalty_per_day: '10%', max_team_size: 5 } },
 };
 const groupStatus: Status = {
   ...STATUS,
   assignments: [...(STATUS.assignments ?? []), { slug: 'assignment-3', number: 3, title: 'Group project', template: 'assignment-3-f2026', state: 'teams_forming', handout: '2026-09-20T10:00:00+02:00', due: '2026-10-20T23:59:00+02:00', grading_cutoff_datetime: '2026-10-30T23:59:00+02:00', solution_shown: null, units: 12, submissions: 0, teams: 1, marks: { filled: 0, total: 12 }, returned: false, problem: true, settings: { max_team_size: { value: 3, source: 'entry' }, team_formation: { value: 'self_select', source: 'institution' } } }],
 };
 const ready: Loaded = { kind: 'ready', status: groupStatus, sha: 's', stale: [] };
+const SITE = 'open_course_site:\n  enabled: true   # false: nothing is published\n  source_repo: course-materials-f2026\n  publish:\n    kinds: [lectures, labs]\n    exclude: ["labs/"]\n';
+const COURSE_YML = `# INSTRUCTOR-OWNED\ncourse:\n  name: Machine Learning\n  code: E1234\npeople:\n  course_admins:\n    - github_handle: a-example\n      email: a@staff.example.org\ndefaults:\n  late_window_days: 10\n  late_penalty_per_day: 10%\n${SITE}`;
 const FILES: Record<string, string> = {
-    [`${COHORT_ORG}/semester-config/students.csv`]: 'hertie_email,name,role,github_handle,github_id,enrol_code,code_sent_at\nanna@x.org,Anna Adams,enrolled,anna-a,101,SECRET1,2026-09-02T09:30:00Z\nben@x.org,Ben Baker,enrolled,ben-b,102,SECRET2,2026-09-02T09:30:00Z\ncarla@x.org,Carla Cohen,,carla-c,103,SECRET3,2026-09-02T09:30:00Z\n',
-    [`${COHORT_ORG}/semester-config/instructors.yml`]: 'instructors:\n  - github_handle: a-example\n    role: instructor\n    email: a@staff.example.org\n    name: Dr A. Example\n',
-    [`${COHORT_ORG}/semester-config/teams.csv`]: 'assignment,team,github_handle\nassignment-3,team-alpha,anna-a\nassignment-3,team-alpha,ben-b\n',
+    ...rosterFiles(COHORT_ORG, 'email,name,role,team:3,github_handle,github_id,enrol_code,code_sent_at\nanna@x.org,Anna Adams,enrolled,team-alpha,anna-a,101,SECRET1,2026-09-02T09:30:00Z\nben@x.org,Ben Baker,enrolled,team-alpha,ben-b,102,SECRET2,2026-09-02T09:30:00Z\ncarla@x.org,Carla Cohen,,,carla-c,103,SECRET3,2026-09-02T09:30:00Z\n'),
+    [`${COHORT_ORG}/semester-config/semester.yml`]: 'people:\n  - github_handle: a-example\n    role: instructor\n    email: a@staff.example.org\n    name: Dr A. Example\n',
     [`${COHORT_ORG}/semester-config/grading_sheets/assignment-2.yml`]: '# GRADING SHEET\n# Status: OPEN\nsubmissions:\n  anna-a:\n    info:\n      submitted: 2026-09-27T20:00\n      days_late: 2\n    score_individual:\n      Q1: 14\n      Q2: 20\n    adjustment_individual: 1\n    feedback_individual: |\n      Good.\n    notes_not_shared_with_students:\n',
     [`${COURSE_ORG}/assignment-2-f2026/grading_config.yml`]: 'questions:\n  Q1: 15\n  Q2: 25\n',
     [`${COURSE_ORG}/assignment-3-f2026/grading_config.yml`]: 'type: group\n',
-    [`${COHORT_ORG}/semester-config/assignments.yml`]: 'assignments:\n  assignment-3:\n    max_team_size: 3\n',
-    [`${COURSE_ORG}/.github/dsl-course.yml`]: '# INSTRUCTOR-OWNED\norg: hertie-dsl-demo-course-e1234\ncourse_name: Machine Learning\ncourse_code: E1234\npeople:\n  course_admins:\n    - github_handle: a-example\n      email: a@staff.example.org\nassignment_defaults:\n  late_window_days: 10\n  late_penalty_per_day: 10%\n',
-    [`${COURSE_ORG}/.github/course.yml`]: '# INSTRUCTOR-OWNED\ncourse:\n  name: Machine Learning\nopen_course_site:\n  enabled: true   # false: nothing is published\n  source_repo: course-materials-f2026\n  publish:\n    kinds: [lectures, labs]\n    exclude: ["labs/"]\n',
+    [`${COURSE_ORG}/.github/course.yml`]: COURSE_YML,
     [`${COURSE_ORG}/course-materials-f2026/.releaseignore`]: 'solutions/\n',
 };
 const TREES = { [`${COURSE_ORG}/course-materials-f2026`]: ['SYLLABUS.md', 'lectures/01/slides.html', 'labs/01/solutions/a.py'] };
@@ -274,7 +274,7 @@ describe('editing screens', () => {
   });
   it('points every link to a file that does not exist yet at GitHub’s new-file page, never a 404', () => {
     const none = new StaticFiles();
-    for (const [screen, path] of [[<StudentsScreen {...props({ files: none })} />, 'students.csv'], [<InstructorsScreen {...props({ files: none })} />, 'instructors.yml']] as const) {
+    for (const [screen, path] of [[<StudentsScreen {...props({ files: none })} />, 'students.csv'], [<InstructorsScreen {...props({ files: none })} />, 'semester.yml']] as const) {
       const out = html(screen);
       expect(out).toContain(`/new/main?filename=${path}`);
       expect(out).not.toContain(`/edit/main/${path}`);
@@ -325,32 +325,31 @@ describe('editing screens', () => {
   const cp = { course, loaded: { kind: 'absent' } as Loaded, cohortStates: { [COHORT_ORG]: ready }, files, now: NOW };
   it('course details edits admins with emails and the defaults', () => {
     const out = html(<DetailsScreen {...cp} />);
-    expect(out).toContain(`<div class="actions"><a class="btn quiet" href="https://github.com/${COURSE_ORG}/.github/edit/main/dsl-course.yml" target="_blank" rel="noopener" title="${COURSE_ORG}/.github/dsl-course.yml">Edit the file directly`);
+    expect(out).toContain(`<div class="actions"><a class="btn quiet" href="https://github.com/${COURSE_ORG}/.github/edit/main/course.yml" target="_blank" rel="noopener" title="${COURSE_ORG}/.github/course.yml">Edit the file directly`);
     expect(out).not.toContain('New semester');
-    // On .github's own default branch; GitHub's new-file page while dsl-course.yml does not exist.
+    // On .github's own default branch; GitHub's new-file page while course.yml does not exist.
     const trunk = new StaticFiles({}, {}, {}, { [COURSE_ORG]: [{ name: '.github', default_branch: 'trunk' }] });
-    expect(html(<DetailsScreen {...cp} files={trunk} />)).toContain(`href="https://github.com/${COURSE_ORG}/.github/new/trunk?filename=dsl-course.yml"`);
+    expect(html(<DetailsScreen {...cp} files={trunk} />)).toContain(`href="https://github.com/${COURSE_ORG}/.github/new/trunk?filename=course.yml"`);
     expect(out).toContain('value="Machine Learning"');
     expect(out).toContain('value="a@staff.example.org"');
-    expect(out).toMatch(/<details class="fold"><summary>Advanced<\/summary>[^]*Defaults for this course’s assignments[^]*Student site links[^]*<\/details>/);
-    expect(out).not.toContain('Semester defaults'); // the engine reads none from dsl-course.yml
+    expect(out).toMatch(/<details class="fold"><summary>Advanced<\/summary>[^]*Defaults for this course’s semesters[^]*<\/details>/);
+    expect(out).not.toContain('Student site links');
+    expect(out).toContain('id="cdx-late_window_days" value="10"');
   });
   it('course details asks for the contact and licence, with the institution’s in grey', () => {
     const out = html(<DetailsScreen {...cp} />);
-    expect(out).toContain(`placeholder="${CONTACT}"`);
+    expect(out).toContain(`placeholder="${CONTACTS[0]}"`);
     expect(out).toContain(`institution default: ${POLICY.licences[0].name}`);
     expect(out).toContain(`<option value="${POLICY.licences[1].name}"`);
     // The website's on/off is a switch here, beside the link to its own tab.
     expect(out).toMatch(/<input type="checkbox" role="switch" id="cd-web" aria-describedby="cd-web-state" checked\/><span>Public OpenCourse website <span class="chip">Beta<\/span><\/span><\/label><span class="footnote" id="cd-web-state" aria-live="polite">On: updates daily<\/span> <a class="textlink" href="#website">Manage<\/a>/);
-    const off = new StaticFiles({ ...FILES, [`${COURSE_ORG}/.github/course.yml`]: 'open_course_site:\n  enabled: false\n' }, {}, TREES);
+    const off = new StaticFiles({ ...FILES, [`${COURSE_ORG}/.github/course.yml`]: COURSE_YML.replace(SITE, 'open_course_site:\n  enabled: false\n') }, {}, TREES);
     expect(html(<DetailsScreen {...cp} files={off} />)).toContain('aria-describedby="cd-web-state"/><span>Public OpenCourse website <span class="chip">Beta</span></span></label><span class="footnote" id="cd-web-state" aria-live="polite">Off</span>');
-    const none = Object.fromEntries(Object.entries(FILES).filter(([k]) => !k.endsWith('/course.yml')));
-    expect(html(<DetailsScreen {...cp} files={new StaticFiles(none, {}, TREES)} />)).toContain('aria-live="polite">Off</span>');
-    const broken = new StaticFiles({ ...FILES, [`${COURSE_ORG}/.github/course.yml`]: 'open_course_site: [\n' }, {}, TREES);
-    expect(html(<DetailsScreen {...cp} files={broken} />)).toMatch(/id="cd-web" aria-describedby="cd-web-state" disabled\/>.*course.yml does not parse; fix it in Manage\./);
+    const none = new StaticFiles({ ...FILES, [`${COURSE_ORG}/.github/course.yml`]: COURSE_YML.replace(SITE, '') }, {}, TREES);
+    expect(html(<DetailsScreen {...cp} files={none} />)).toContain('aria-live="polite">Off</span>');
   });
   it('skips the account check when only a course admin handle’s case changes', async () => {
-    const src = 'course_name: ML\npeople:\n  course_admins:\n    - github_handle: octo\n      email: o@x.edu\n';
+    const src = 'course:\n  name: ML\npeople:\n  course_admins:\n    - github_handle: octo\n      email: o@x.edu\n';
     const meta = obj(new YamlText(src).toJS());
     const before = detailsOf(meta);
     const after = { ...before, admins: [{ ...before.admins[0], github_handle: 'Octo' }] };
@@ -361,14 +360,20 @@ describe('editing screens', () => {
     expect(await missingAdmin(env, before.admins, after.admins)).toBeNull();
     expect(looked).toEqual([]);
   });
-  it('writes a contact and a licence into dsl-course.yml and a file without them still saves', () => {
-    const src = 'course_name: ML\ncourse_code: E1\n';
+  it('writes a contact into open_course_site and a licence into course: in course.yml, and a file without them still saves', () => {
+    const src = 'course:\n  name: ML\n  code: E1\n';
     const meta = obj(new YamlText(src).toJS());
     const before = detailsOf(meta);
     const out = courseFileAfter(src, before, { ...before, about: { ...before.about, contact: 'ml@x.edu', licence: 'CC BY 4.0' } }, meta);
-    expect('text' in out && out.text).toContain('contact: ml@x.edu\nlicence: CC BY 4.0');
+    expect('text' in out && parse(out.text)).toEqual({ course: { name: 'ML', code: 'E1', licence: 'CC BY 4.0' }, open_course_site: { contact: 'ml@x.edu' } });
     const same = courseFileAfter(src, before, { ...before, about: { ...before.about, course_code: 'E2' } }, meta);
-    expect('text' in same && same.text).toBe('course_name: ML\ncourse_code: E2\n');
+    expect('text' in same && same.text).toBe('course:\n  name: ML\n  code: E2\n');
+    // Clearing the contact drops the block it emptied, which the schema would refuse as null.
+    const withContact = 'course:\n  name: ML\nopen_course_site:\n  contact: ml@x.edu\n';
+    const m2 = obj(new YamlText(withContact).toJS());
+    const b2 = detailsOf(m2);
+    const cleared = courseFileAfter(withContact, b2, { ...b2, about: { ...b2.about, contact: undefined } }, m2);
+    expect('text' in cleared && cleared.text).toBe('course:\n  name: ML\n');
     expect(fieldErrors(null, COURSE_FACTS, { contact: 'not-an-email' }).contact).toBe('Write an email address.');
   });
   it('materials settings previews what is withheld, and nothing about the public website', () => {
@@ -383,19 +388,19 @@ describe('editing screens', () => {
     expect(out).not.toContain('>Preview</button>');
     expect(out).toContain('aria-label="About Write"');
     // A syllabus that is not Markdown cannot be written into: Copy alone, and why.
-    const pdf = new StaticFiles({ ...FILES, [`${COURSE_ORG}/course-materials-f2026/materials.yml`]: 'syllabus: E1282.pdf\n' }, {}, TREES);
+    const pdf = new StaticFiles({ ...FILES, [`${COHORT_ORG}/semester-config/semester.yml`]: 'student_site:\n  syllabus: E1282.pdf\n' }, {}, TREES);
     const onlyCopy = html(<MaterialsScreen {...cp} files={pdf} entry="course-materials-f2026" />);
     expect(onlyCopy).toContain('>Copy</button>');
     expect(onlyCopy).not.toContain('>Write</button>');
     expect(onlyCopy).toContain('E1282.pdf is not Markdown, so the plan cannot be written into it: copy it and paste it in.');
     // A Markdown syllabus that is not there yet: nothing to write into either.
-    const absent = new StaticFiles({ ...FILES, [`${COURSE_ORG}/course-materials-f2026/materials.yml`]: 'syllabus: E1282.md\n' }, {}, TREES);
+    const absent = new StaticFiles({ ...FILES, [`${COHORT_ORG}/semester-config/semester.yml`]: 'student_site:\n  syllabus: E1282.md\n' }, {}, TREES);
     const noFile = html(<MaterialsScreen {...cp} files={absent} entry="course-materials-f2026" />);
     expect(noFile).not.toContain('>Write</button>');
     expect(noFile).toContain('There is no E1282.md yet: write the syllabus first, or copy the plan.');
     // No public-website setting here: that list is the Public website tab's.
     expect(out).not.toContain('kept off');
-    expect(out).not.toContain('opencourse.yml');
+    expect(out).not.toContain('open_course_site');
   });
   it('materials settings releases every file when nothing is withheld', () => {
     const none = new StaticFiles({}, {}, { [`${COURSE_ORG}/course-materials-f2026`]: ['SYLLABUS.md', 'lectures/01/slides.html'] });

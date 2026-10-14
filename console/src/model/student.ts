@@ -163,7 +163,7 @@ export interface SemesterFacts {
    * plus the undated and off-schedule ones the schedule leaves out. Absent: `rows`.
    */
   tabRows?: ScheduleRow[];
-  /** The course's one-line blurb (`course_description` in dsl-course.yml); absent or '' when unset. */
+  /** The course's one-line blurb (`course.description` in course.yml); absent or '' when unset. */
   courseDescription?: string;
   /** Earlier runs of the course, as the site's landing page lists them; absent when the source does not say. */
   previousOfferings?: PreviousOffering[];
@@ -173,7 +173,7 @@ export interface SemesterFacts {
   /** When the engine last found the facts changed (an ISO instant); absent when the source does not say. */
   generatedAt?: string;
   /**
-   * The course's opt-in (`student_console: true` in dsl-course.yml, `course.advertises_console`):
+   * The course's opt-in (`course.student_console: true` in course.yml, `course.advertises_console`):
    * only true opens these screens. Absent (the site fallback, a status file written before the
    * engine carried it) counts as off, as the engine reads an unset key.
    */

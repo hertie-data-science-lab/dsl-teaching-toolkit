@@ -1,11 +1,21 @@
 {
-  "assignments_file": "assignments.yml",
   "config_repo": "semester-config",
   "course_file": "course.yml",
   "default_formats": [
     "ipynb"
   ],
-  "instructors_file": "instructors.yml",
+  "default_keys": [
+    "timezone",
+    "late_window_days",
+    "late_penalty_per_day",
+    "max_team_size",
+    "assignment_repo_visibility",
+    "archive_grace_days",
+    "materials_repo",
+    "marks_per_question",
+    "team_formation"
+  ],
+  "default_syllabus": "SYLLABUS.md",
   "join_markers": {
     "join_course": "<!-- dsl:join-course -->",
     "join_team": "<!-- dsl:join-team -->"
@@ -485,7 +495,6 @@
       "where": "status.json to-do check"
     }
   ],
-  "opencourse_file": "opencourse.yml",
   "records": {
     "archive": ".system/archive.md",
     "autograde": ".system/autograde",

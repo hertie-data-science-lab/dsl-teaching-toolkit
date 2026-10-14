@@ -359,7 +359,7 @@ export function HomeScreen({ courses, semesters = [], invited = [], kind, cohort
       </>
     );
   }
-  // Each course's newest running semester, whose instructors.yml tells the person's role.
+  // Each course's newest running semester, whose semester.yml tells the person's role.
   const files = env?.files;
   const subs = new Map(courses.map((course) => {
     const live = course.cohorts.filter((c) => !isPast(c, cohortStates[c.org], now)).sort((a, b) => termRank(b.org) - termRank(a.org))[0];

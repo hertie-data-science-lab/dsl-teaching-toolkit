@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
-// The save paths clicked through against a fake GitHub: the Overview form (schedule.yml, then
-// assignments.yml), the schedule's new assignment entry (and its retry after a failed second
-// commit), and the marks grid.
+// The save paths clicked through against a fake GitHub: the Overview form (its schedule entry,
+// dates and inline run settings in one commit), the schedule's new assignment entry, the marks
+// grid, and the Students grid (students.csv, and a relink in the engine's roster).
 
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
@@ -21,6 +21,7 @@ import { ScheduleScreen } from '../src/screens/Schedule';
 import type { CohortProps } from '../src/screens/types';
 import example from './fixtures/status.example.json';
 import { FakeGitHub, json, type Seen } from './fake';
+import { rosterFiles } from './roster';
 
 const COURSE_ORG = 'hertie-dsl-demo-course-e1234';
 const COHORT_ORG = 'hertie-dsl-demo-f2026';
@@ -34,13 +35,11 @@ const team: Assignment = { ...solo, slug: 'assignment-3', title: 'Group project'
 const ready: Loaded = { kind: 'ready', status: { ...STATUS, assignments: [solo, team] }, sha: 's', stale: [] };
 
 const SCHEDULE = 'timezone: Europe/Berlin\nassignments:\n  assignment-2:\n    number: 2\n    template: assignment-2-f2026\n    handout_datetime: 2026-09-15T10:00\n    due_datetime: 2026-09-27T23:59\n';
-const ASSIGNMENTS = '# INSTRUCTOR-OWNED\ndefaults:\n  late_window_days: 5\n  late_penalty_per_day: 5%\n';
 const TEAM_SHEET = 'teams:\n  team-alpha:\n    info:\n      submitted: 2026-09-20T20:00\n      days_late: 0\n    feedback_group:\n    members:\n      anna-a:\n        adjustment_individual:\n        feedback_individual:\n        notes_not_shared_with_students:\n    score_group:\n      Q1:\n    feedback_per_question:\n      Q1:\n';
 
 function files(over: Record<string, string> = {}) {
   return new StaticFiles({
     [`${COHORT_ORG}/semester-config/schedule.yml`]: SCHEDULE,
-    [`${COHORT_ORG}/semester-config/assignments.yml`]: ASSIGNMENTS,
     [`${COURSE_ORG}/assignment-2-f2026/grading_config.yml`]: 'type: individual\n',
     [`${COURSE_ORG}/assignment-3-f2026/grading_config.yml`]: 'type: group\nquestions:\n  Q1: 5\n',
     [`${COURSE_ORG}/assignment-4-f2026/grading_config.yml`]: 'type: individual\n',
@@ -102,7 +101,7 @@ const body = (s: Seen) => decodeBase64((s.body as { content: string }).content);
 const props = (f: StaticFiles, over: Partial<CohortProps> = {}): CohortProps => ({ course, cohort, loaded: ready, files: f, now: NOW, ...over });
 
 describe('Save on the Overview form', () => {
-  it('writes the schedule, then only the run settings set, into assignments.yml', async () => {
+  it('writes the dates and only the run settings set, inline on the schedule entry, as one commit (decision 0038 rule 9)', async () => {
     const gh = github(), f = files();
     await mount(envOf(gh, f), <AssignmentScreen {...props(f, { entry: 'assignment-2', tab: 'overview' })} />);
     await type('#ov-dueDate', '2026-09-29');
@@ -110,11 +109,11 @@ describe('Save on the Overview form', () => {
     await type('#ov-late_window_days', '3');
     await type('#ov-late_penalty_per_day', '2%');
     await click(button('Save'));
-    await settle(() => puts(gh, 'assignments.yml').length > 0 && !root!.textContent!.includes('Checking'));
-    const order = gh.seen.filter((s) => s.method === 'PUT').map((s) => s.url.split('/contents/')[1]);
-    expect(order).toEqual(['schedule.yml', 'assignments.yml']);
-    expect(parse(body(puts(gh, 'schedule.yml')[0])).assignments['assignment-2'].due_datetime).toBe('2026-09-29T23:59');
-    expect(parse(body(puts(gh, 'assignments.yml')[0])).assignments).toEqual({ 'assignment-2': { late_window_days: 3, late_penalty_per_day: '2%' } });
+    await settle(() => puts(gh, 'schedule.yml').length > 0 && !root!.textContent!.includes('Checking'));
+    expect(gh.seen.filter((s) => s.method === 'PUT').map((s) => s.url.split('/contents/')[1])).toEqual(['schedule.yml']);
+    const entry = parse(body(puts(gh, 'schedule.yml')[0])).assignments['assignment-2'];
+    expect(entry).toMatchObject({ due_datetime: '2026-09-29T23:59', late_window_days: 3, late_penalty_per_day: '2%' });
+    expect(entry.assignment_repo_visibility).toBeUndefined();
   });
 
   it('warns that a late rule changed after the due date moves the cutoff and penalties, and still writes only the pair', async () => {
@@ -127,9 +126,19 @@ describe('Save on the Overview form', () => {
     await type('#ov-late_penalty_per_day', '2%');
     expect(root!.textContent).toContain('The due date has passed: this moves the late cutoff and the late penalties of this assignment');
     await click(button('Save'));
-    await settle(() => puts(gh, 'assignments.yml').length > 0 && !root!.textContent!.includes('Checking'));
-    expect(gh.seen.filter((x) => x.method === 'PUT').map((x) => x.url.split('/contents/')[1])).toEqual(['assignments.yml']);
-    expect(body(puts(gh, 'assignments.yml')[0])).toBe(`${ASSIGNMENTS}assignments:\n  assignment-2:\n    late_window_days: 3\n    late_penalty_per_day: 2%\n`);
+    await settle(() => puts(gh, 'schedule.yml').length > 0 && !root!.textContent!.includes('Checking'));
+    expect(body(puts(gh, 'schedule.yml')[0])).toBe(`${SCHEDULE}    late_window_days: 3\n    late_penalty_per_day: 2%\n`);
+  });
+
+  it('writes the visibility as the file spells it, and the repo name as repo_name', async () => {
+    const gh = github(), f = files();
+    await mount(envOf(gh, f), <AssignmentScreen {...props(f, { entry: 'assignment-2', tab: 'overview' })} />);
+    await click(buttons('Change for this assignment')[1]);
+    await type('#ov-visibility', 'public', 'change');
+    await type('#ov-repo', 'assignment-2-resit');
+    await click(button('Save'));
+    await settle(() => puts(gh, 'schedule.yml').length > 0 && !root!.textContent!.includes('Checking'));
+    expect(parse(body(puts(gh, 'schedule.yml')[0])).assignments['assignment-2']).toMatchObject({ assignment_repo_visibility: 'public', repo_name: 'assignment-2-resit' });
   });
 
   it('says nothing about moved penalties before the due date', async () => {
@@ -152,27 +161,13 @@ describe('Save on the Overview form', () => {
     expect(parse(body(puts(gh, 'schedule.yml')[0])).assignments['assignment-2'].due_datetime).toBe('2026-09-29T23:59');
   });
 
-  it('says the dates were saved when the run settings commit fails', async () => {
-    const gh = github(['assignments.yml']), f = files();
+  it('writes nothing when the schedule would not be valid', async () => {
+    const gh = github(), f = files({ [`${COHORT_ORG}/semester-config/schedule.yml`]: `${SCHEDULE}colour: red\n` });
     await mount(envOf(gh, f), <AssignmentScreen {...props(f, { entry: 'assignment-2', tab: 'overview' })} />);
     await type('#ov-dueDate', '2026-09-29');
-    await click(buttons('Change for this assignment')[1]);
-    await type('#ov-visibility', 'public', 'change');
-    await click(button('Save'));
-    await settle(() => root!.textContent!.includes('Dates saved'));
-    expect(root!.textContent).toContain('Dates saved; run settings not saved:');
-    expect(puts(gh, 'schedule.yml')).toHaveLength(1);
-  });
-
-  it('writes nothing when assignments.yml would not be valid', async () => {
-    const gh = github(), f = files({ [`${COHORT_ORG}/semester-config/assignments.yml`]: 'defaults:\n  colour: red\n' });
-    await mount(envOf(gh, f), <AssignmentScreen {...props(f, { entry: 'assignment-2', tab: 'overview' })} />);
-    await type('#ov-dueDate', '2026-09-29');
-    await click(buttons('Change for this assignment')[1]);
-    await type('#ov-visibility', 'public', 'change');
     await click(button('Save'));
     await settle(() => root!.textContent!.includes('Not saved'));
-    expect(root!.textContent).toContain('Not saved: assignments.yml would not be valid');
+    expect(root!.textContent).toContain('Not saved: the schedule would not be valid');
     expect(gh.seen.filter((s) => s.method === 'PUT')).toEqual([]);
   });
 });
@@ -372,11 +367,11 @@ describe('the late penalty on the marks grid', () => {
 });
 
 describe('Save on the Students grid', () => {
-  const ROSTER = 'hertie_email,name,role,github_handle,github_id,enrol_code,code_sent_at\nanna@x.org,Anna Adams,enrolled,anna-a,101,SECRET1,2026-09-02T09:30:00Z\nben@x.org,Ben Baker,enrolled,,,SECRET2,2026-09-02T09:30:00Z\n';
-  const roster = () => files({ [`${COHORT_ORG}/semester-config/students.csv`]: ROSTER });
+  const ROSTER = 'email,name,role,team:4,github_handle,github_id,enrol_code,code_sent_at\nanna@x.org,Anna Adams,enrolled,geneva,anna-a,101,SECRET1,2026-09-02T09:30:00Z\nben@x.org,Ben Baker,enrolled,,,,SECRET2,2026-09-02T09:30:00Z\n';
+  const roster = () => files(rosterFiles(COHORT_ORG, ROSTER));
   const HANDLE = 'input[aria-label="GitHub handle, line 2"]';
 
-  it('re-points a joined student at their new account, checked on GitHub first', async () => {
+  it('re-points a joined student at their new account in the engine’s roster, checked on GitHub first, students.csv untouched', async () => {
     const gh = github().on('GET', '/users/anna-new', { login: 'anna-new' }), f = roster();
     await mount(envOf(gh, f), <StudentsScreen {...props(f)} />);
     await click(q('button[aria-label="Edit roster"]'));
@@ -384,8 +379,9 @@ describe('Save on the Students grid', () => {
     expect(root!.querySelector('input[aria-label="GitHub handle, line 3"]')).toBeNull();
     await type(HANDLE, 'anna-new');
     await click(button('Save 1 change'));
-    await settle(() => puts(gh, 'students.csv').length > 0);
-    expect(body(puts(gh, 'students.csv')[0])).toContain('anna@x.org,Anna Adams,enrolled,anna-new,101,');
+    await settle(() => puts(gh, '.system/roster.csv').length > 0);
+    expect(puts(gh, 'students.csv')).toEqual([]);
+    expect(body(puts(gh, '.system/roster.csv')[0])).toBe('email,github_handle,github_id,enrol_code,code_sent_at\nanna@x.org,anna-new,101,SECRET1,2026-09-02T09:30:00Z\nben@x.org,,,SECRET2,2026-09-02T09:30:00Z\n');
   });
 
   it('shows inputs only after Edit roster, and keeps unsaved edits through Done editing', async () => {
@@ -401,7 +397,19 @@ describe('Save on the Students grid', () => {
     expect(root!.textContent).toContain('Ben B. Baker');
     await click(button('Save 1 change'));
     await settle(() => puts(gh, 'students.csv').length > 0);
-    expect(body(puts(gh, 'students.csv')[0])).toContain('ben@x.org,Ben B. Baker,enrolled,');
+    expect(body(puts(gh, 'students.csv')[0])).toBe('email,name,role,team:4\nanna@x.org,Anna Adams,enrolled,geneva\nben@x.org,Ben B. Baker,enrolled,\n');
+  });
+
+  it('edits a team column like the instructor’s other cells (decision 0039 rule 4)', async () => {
+    const gh = github(), f = roster();
+    await mount(envOf(gh, f), <StudentsScreen {...props(f)} />);
+    expect(root!.textContent).toContain('yours: team:4');
+    await click(q('button[aria-label="Edit roster"]'));
+    const cell = [...root!.querySelectorAll<HTMLInputElement>('.roster-table input')].find((i) => i.getAttribute('aria-label')?.startsWith('Team') && i.getAttribute('aria-label')?.endsWith('line 3'))!;
+    await act(() => { cell.value = 'geneva'; cell.dispatchEvent(new Event('input', { bubbles: true })); });
+    await click(button('Save 1 change'));
+    await settle(() => puts(gh, 'students.csv').length > 0);
+    expect(body(puts(gh, 'students.csv')[0])).toBe('email,name,role,team:4\nanna@x.org,Anna Adams,enrolled,geneva\nben@x.org,Ben Baker,enrolled,geneva\n');
   });
 
   it('opens the grid for editing when a student is added', async () => {
@@ -420,6 +428,6 @@ describe('Save on the Students grid', () => {
     await click(button('Save 1 change'));
     await settle(() => root!.textContent!.includes('There is no GitHub account'));
     expect(root!.textContent).toContain('There is no GitHub account called nobody-here.');
-    expect(puts(gh, 'students.csv')).toEqual([]);
+    expect(gh.seen.filter((s) => s.method === 'PUT')).toEqual([]);
   });
 });
