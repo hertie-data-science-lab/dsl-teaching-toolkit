@@ -930,8 +930,9 @@ a.st-chip:hover { text-decoration: underline; }
 .q-list .q-score { margin-left: 10px; font-variant-numeric: tabular-nums; color: var(--ink-2); }
 .people-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
 .person { display: flex; gap: 12px; align-items: center; background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 14px 16px; }
-.p-avatar { flex: none; width: 52px; height: 52px; border-radius: 50%; background: var(--sunk); color: var(--ink-2); display: grid; place-items: center; font-family: var(--font-display); font-weight: 700; overflow: hidden; }
-.p-avatar img { width: 52px; height: 52px; display: block; }
+/* A person's picture (ui/Avatar): an instructor card's, or `.small` the Instructors tab's Photo column, its initials muted. */
+.p-avatar { flex: none; width: 52px; height: 52px; border-radius: 50%; object-fit: cover; background: var(--sunk); color: var(--ink-2); display: grid; place-items: center; font-family: var(--font-display); font-weight: 700; overflow: hidden; }
+.p-avatar.small { width: 28px; height: 28px; display: inline-grid; vertical-align: middle; color: var(--muted); font-size: 11px; }
 /* The Students page: Send codes on its own row, the rest under it; Edit roster over the table's corner. */
 .students-actions { display: grid; gap: 8px; justify-items: end; }
 .students-actions .main-action { display: inline-flex; align-items: center; gap: 4px; }
@@ -939,8 +940,6 @@ a.st-chip:hover { text-decoration: underline; }
 .roster-box .roster-edit { position: absolute; top: 8px; right: 8px; z-index: 3; }
 .roster-box .roster-edit[aria-pressed="true"] { background: var(--ink); color: var(--surface); border-color: var(--ink); }
 .roster-box .roster-edit:disabled { opacity: 0.45; cursor: default; }
-/* The Instructors tab's photo: a small round thumbnail, or the initials muted. */
-.thumb { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; display: inline-grid; place-items: center; vertical-align: middle; background: var(--sunk); color: var(--muted); font-family: var(--font-display); font-weight: 700; font-size: 11px; overflow: hidden; }
 .file-tree a.ft-name { color: var(--link); }
 .md-body { font-size: 15px; line-height: 1.55; overflow-wrap: anywhere; }
 .md-body img, .file-img, .nb-img { max-width: 100%; height: auto; }

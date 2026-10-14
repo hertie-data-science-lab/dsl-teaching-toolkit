@@ -20,10 +20,7 @@ import { StudentCounts } from './Cohort';
 import { WithStatus, cohortScope } from './common';
 import type { CohortProps, ReadyProps } from './types';
 import { CONFIG_REPO, INSTRUCTORS_FILE } from '../model/names';
-import { pictureOf } from '../model/student';
-import { useLoad } from '../ui/load';
-import { studentData } from './Student';
-import { initials } from './StudentInstructors';
+import { Avatar } from '../ui/Avatar';
 
 type Row = Record<string, string>;
 const YOURS = ['hertie_email', 'name', 'role'] as const;
@@ -368,7 +365,7 @@ function Instructors(p: ReadyProps) {
                       <td class="mono" style="font-size:13px">{x.email}</td>
                       <td><Access v={x.handle ? p.files.member(p.cohort.org, x.handle) : null} /></td>
                       <td class="num">{dates(x)}</td>
-                      <td><PhotoThumb photo={x.photo} name={x.name || x.handle} org={p.cohort.org} /></td>
+                      <td><Avatar small picture={x.photo} name={x.name || x.handle} org={p.cohort.org} /></td>
                       <td>
                         <button class="btn small quiet" type="button" onClick={() => { setEditing({ idx: i, values: formOf(x, rawOf(i)) }); setSave({ kind: 'idle' }); }}>Edit</button>
                         <button class="btn small quiet" type="button" onClick={() => setRemoved([...removed, i])}>Remove</button>
@@ -448,27 +445,10 @@ function PhotoField({ p, values, set }: { p: ReadyProps; values: Record<string, 
   );
 }
 
-/**
- * A person's photo as a small round thumbnail: an absolute URL as is; a path in the site repo
- * (`/_images/pp/x.jpg`, or a bare name in the photo folder) read through the API as the site would
- * show it; the initials, muted, when there is none or it does not load.
- */
 const SEND_CODES_HINT =
   'Every student on the roster gets a private enrolment code by email the moment their row is saved; they paste it on the semester’s join form to get their repos. This button sends a NEW code to everyone who has not joined yet (their old code stops working) and emails it again. Preview first to see how many that is.';
 const REPLACE_CSV_HINT =
   'Upload a CSV from the registrar to replace the roster in one go: you see a diff of added, removed and changed rows before anything is saved. Columns the toolkit fills (GitHub handle, code, when it was sent) are kept for rows that stay.';
-
-export function PhotoThumb({ photo, name, org }: { photo: string; name: string; org: string }) {
-  const env = useEnv();
-  const [failed, setFailed] = useState(false);
-  const raw = photo.trim();
-  const absolute = /^https?:\/\//.test(raw);
-  const path = !raw || absolute ? '' : raw.startsWith('/') ? raw : `/${PHOTO_DIR}/${raw}`;
-  const load = useLoad(env && path ? () => studentData(env.client).picture(org, pictureOf(path, org)) : null, [path, org]);
-  const src = absolute ? raw : load.kind === 'ready' ? load.value : '';
-  if (!src || failed) return <span class={`thumb${raw ? '' : ' none'}`} role="img" aria-label={raw ? name : `${name}: no photo`}>{initials(name)}</span>;
-  return <img class="thumb" src={src} alt={name} onError={() => setFailed(true)} />;
-}
 
 export function InstructorsScreen(p: CohortProps) {
   return <WithStatus props={p} title="Instructors">{(r) => <Instructors {...r} />}</WithStatus>;
