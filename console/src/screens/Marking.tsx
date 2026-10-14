@@ -110,6 +110,18 @@ function sweep(table: HTMLElement, layout: string): void {
   sweptLayout.set(table, layout);
   grow([...table.querySelectorAll('textarea')], all);
 }
+/**
+ * Sweeps the grid's boxes when what they show may have moved without typing: the columns
+ * (`layout`), the rows shown, the sheet read again, a draft restored or the large editor closed
+ * (`also`). Never per keystroke: typing grows its own box. A component, so the grid's early
+ * returns come before its hook.
+ */
+function GrowSweep({ table, layout, rows, also }: { table: { current: HTMLElement | null }; layout: string; rows: string; also: unknown[] }) {
+  useEffect(() => {
+    if (table.current) sweep(table.current, layout);
+  }, [layout, rows, ...also]);
+  return null;
+}
 
 /** Who a unit's held chip names: the first of its people the hold rules hold, and why. */
 const heldIn = (held: Record<string, HoldReason>) => (u: Unit): HoldReason | null => u.people.map((pr) => held[pr.handle]).find(Boolean) ?? null;
@@ -254,11 +266,6 @@ export function MarksTab(p: TabProps) {
   useEffect(() => saveMarksSubFolded(org, path, foldChoice), [foldChoice, org, path]);
   const subFolded = foldChoice ?? (!full && narrow);
   const fullBtn = useRef<HTMLButtonElement>(null);
-  // Textareas grow with their text where the browser cannot do it in CSS: typing grows its own box,
-  // and this sweep catches the rest (rows shown, a text set by the large editor, columns moved).
-  useEffect(() => {
-    if (table.current) sweep(table.current, JSON.stringify([widths, subFolded, adjChoice, folds, full]));
-  });
   const [save, , setSave] = useSave(env);
   const file = p.files.file(org, CONFIG_REPO, path);
   const sha = file.kind === 'ready' ? file.sha : null;
@@ -774,6 +781,8 @@ export function MarksTab(p: TabProps) {
           </table>
         </div>
       </div>
+      {/* Textareas grow with their text where the browser cannot do it in CSS: typing grows its own box, and this sweep catches the rest. */}
+      <GrowSweep table={table} layout={JSON.stringify([widths, subFolded, adjChoice, folds, full])} rows={shown.map((u) => `${u.key}:${qOpen(u)}:${sheet.group && membersOpen(u)}`).join('|')} also={[editor === null, pending === null, text]} />
       {editor ? (
         <Modal title={editor.title} onClose={() => setEditor(null)}>
           <textarea class="big-editor" aria-label={editor.title} value={editor.text} onInput={(e) => setEditor({ ...editor, text: (e.target as HTMLTextAreaElement).value })} />

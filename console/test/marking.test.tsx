@@ -530,6 +530,19 @@ describe('growing text boxes', () => {
   });
 });
 
+describe('the text box sweep', () => {
+  it('does not go over every box on a keystroke, and does when the rows shown change', async () => {
+    await marks();
+    const swept = vi.spyOn(q<HTMLTableElement>('table.marks'), 'querySelectorAll');
+    const sweeps = () => swept.mock.calls.filter(([sel]) => sel === 'textarea').length;
+    await type('input[aria-label="Q1 (out of 10) for cy-d"]', '6');
+    await type('textarea[aria-label="Feedback for ada-l"]', 'Good. More');
+    expect(sweeps()).toBe(0);
+    await click(filter('Late'));
+    expect(sweeps()).toBe(1);
+  });
+});
+
 describe('unsaved marks', () => {
   it('offers a kept draft instead of replaying it, and Restore puts it over the sheet', async () => {
     localStorage.setItem(`dsl-console-marks-draft:${COHORT_ORG}:grading_sheets/assignment-2.yml`, JSON.stringify({ sha: 'older', at: Date.parse('2026-10-08T09:00:00Z'), edits: { '["submissions","cy-d","score_individual","Q1"]': 6 } }));
