@@ -23,7 +23,7 @@ i.e. what these files were used to create
 ```
 example-course/
   course-org/
-    dsl-course.yml                  # course identity + course_admins + display-only cards
+    course.yml                      # course identity, course_admins, defaults, open course site
     course-materials-f2026/
       lectures/01_week-1../05_week-5/  # 5 sessions (slides.md + a code demo each)
       readings/01_week-1../05_week-5/  # 5 sessions of placeholder readings
@@ -34,10 +34,9 @@ example-course/
     assignment-gradient-descent/    # individual (notebook) main/ + solution/
     assignment-group-project/       # GROUP project         main/ + solution/
   semester-org/
-    students.csv                    # 10 students + 1 auditor (handles blank until they onboard)
-    teams.csv                       # 3 project teams of 3-4 (auditors are refused from teams)
+    students.csv                    # 10 students + 1 auditor; a `team:` column holds the project teams
     schedule.yml                    # the full semester: a block per kind + assignments
-    instructors.yml                      # this semester's own instructors/TAs (real push access)
+    semester.yml                    # this semester's people, defaults and student site
     grading_sheets/*.yml            # one marking sheet per assignment (individual + group)
 ```
 

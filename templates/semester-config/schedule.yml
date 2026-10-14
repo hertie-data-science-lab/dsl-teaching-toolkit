@@ -96,7 +96,7 @@
 #     details:                      # OPTIONAL - on both its schedule rows
 #     type:                         # OPTIONAL - individual | group; absent = the template's
 #     submit_via:                   # OPTIONAL - assignment_repo | shared_dropbox_repo | external; absent = the template's
-#     # run settings, each OPTIONAL, each overriding assignments.yml `defaults:`, the course and the institution:
+#     # run settings, each OPTIONAL, each overriding semester.yml `defaults:`, the course and the institution:
 #     # late_window_days, late_penalty_per_day, max_team_size, team_formation,
 #     # assignment_repo_visibility, marks_per_question, submit_url, repo_name, show_on_site, tbc
 
