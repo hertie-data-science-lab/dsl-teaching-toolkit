@@ -389,6 +389,9 @@
           "released": {
             "type": "boolean"
           },
+          "repeat": {
+            "type": "boolean"
+          },
           "sort_at": {
             "type": [
               "string",
@@ -436,7 +439,8 @@
           "reading_list",
           "readings_pending",
           "tabs",
-          "no_materials"
+          "no_materials",
+          "repeat"
         ],
         "type": "object"
       },

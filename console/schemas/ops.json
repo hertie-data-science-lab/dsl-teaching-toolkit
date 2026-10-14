@@ -47,7 +47,7 @@
             "type": "string"
           },
           "entry": {
-            "description": "The schedule.yml releases key",
+            "description": "The schedule.yml entry key",
             "pattern": "^(?!-)[A-Za-z0-9_.-]{1,100}$",
             "type": "string"
           },

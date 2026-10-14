@@ -390,7 +390,7 @@ def _open_window(request: Request) -> list[str]:
 # ------------------------------------------------------------------ the registry
 
 _RELEASE_ENTRY_ARGS = _args(
-    {"entry": _string(KEY_PATTERN, "The schedule.yml releases key"), **_DEPLOY_FIELDS},
+    {"entry": _string(KEY_PATTERN, "The schedule.yml entry key"), **_DEPLOY_FIELDS},
     required=("entry",),
 )
 _RELEASE_COUNTS = "Copied paths per destination, as deploy reports them."

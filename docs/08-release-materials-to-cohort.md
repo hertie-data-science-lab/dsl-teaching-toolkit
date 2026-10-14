@@ -19,13 +19,13 @@ A `files:` item of a `schedule.yml` entry releases exactly what the ops below do
 Two ops, in the console or on the CLI:
 
 - **`release.entry`** (`python -m dsl_course release.entry`) - ships one schedule entry's files now, ahead of their time.
-- **`release.adhoc`** (`python -m dsl_course release.adhoc`) - copies a path no entry names. It takes the fields of a `files:` item: `from_course_repo`, `from_path`, `to_semester_repo` (created if missing, private, `students` + `auditors` read) and `to_path` (default: `from_path`).
+- **`release.adhoc`** (`python -m dsl_course release.adhoc`) - copies a path no entry names. Its arguments are a `files:` item's under their op names: `course_source_repo` (`from_course_repo`), `course_source_path` (`from_path`, comma-separated for several), `semester_dest_repo` (`to_semester_repo`; created if missing, private, `students` + `auditors` read) and `semester_dest_path` (`to_path`, default: the source path).
 
 ### How to specify release paths
 
-- **One folder or file**: `from_path` = `lectures/02_intro` → lands at `materials/lectures/02_intro`.
-- Root files are just paths too: `from_path` = `SYLLABUS.md`.
-- **The whole repo**: `from_path` = `/` (or `.`), minus `.git`, `.github` and `.system/` (your operating notes `MAINTAINING.md` and the syllabus example - never released).
+- **One folder or file**: `lectures/02_intro` → lands at `materials/lectures/02_intro`.
+- Root files are just paths too: `SYLLABUS.md`.
+- **The whole repo**: `/` (or `.`), minus `.git`, `.github` and `.system/` (your operating notes `MAINTAINING.md` and the syllabus example - never released).
 
 Re-releasing is safe - copies are additive and idempotent.
 
