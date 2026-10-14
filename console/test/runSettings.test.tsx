@@ -234,28 +234,33 @@ describe('the marks grid: teams > students > questions', () => {
     const out = html(<AssignmentScreen {...props({ entry: 'assignment-3', tab: 'marks' })} />);
     expect(out).toContain('aria-label="Q2 (out of 5) for team-alpha"');
     expect(out).toContain('/ 5 · <code>report.tex</code>');
-    expect(out).toContain('aria-label="Team feedback for team-alpha">Solid work.</textarea>');
-    expect(out).toContain('Team feedback per question');
-    expect(out).toContain('aria-label="Feedback on Q1 for team-alpha">Nice proof.</textarea>');
-    expect(out).toContain('aria-label="Feedback on Q2 for team-alpha"></textarea>');
+    expect(out).toContain('aria-label="Team feedback for team-alpha" data-col="fb">Solid work.</textarea>');
+    // Feedback per question folds until opened; its chip counts the questions with text.
+    expect(out).toContain('aria-expanded="false" aria-label="Show feedback per question for team-alpha">✎ Feedback per question (1)</button>');
+    expect(out).not.toContain('Feedback on Q1 for team-alpha');
     for (const h of ['anna-a', 'ben-b']) {
       expect(out).toContain(`aria-label="Feedback for ${h}"`);
       expect(out).toContain(`aria-label="Adjustment for ${h}"`);
       expect(out).toContain(`aria-label="Private notes for ${h}"`);
     }
     expect(out).toContain('aria-label="Hide the members of team-alpha"');
-    expect(out).toContain('individual adjustment relative to team (optional)');
+    // A member carries an adjustment, so the team opens on load, with the amber Adjustment column.
+    expect(out).toContain('<th rowspan="2" class="adjcol">Adjustment');
+    expect(out).toContain('Students see it as its own line on their marks page.');
+    expect(out).not.toContain('class="grp">students see');
   });
 
   it('renders every input even when the sheet is blank, and folds feedback per question until there is some', () => {
     const out = html(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'marks' })} />);
     expect(out).toContain('aria-label="Q1 (out of 10) for carla-c"');
-    expect(out).toContain('aria-label="Adjustment for carla-c"');
+    // No adjustment saved: the Adjustment column waits behind its chip.
+    expect(out).not.toContain('aria-label="Adjustment for carla-c"');
+    expect(out).toContain('aria-expanded="false">Adjustments ▸</button>');
     expect(out).toContain('aria-label="Private notes for carla-c"');
     expect(out).toContain('aria-expanded="false" aria-label="Show feedback per question for carla-c"');
     expect(out).not.toContain('Feedback on Q1 for carla-c');
     // The penalty is the one status states (the semester's), not a literal.
-    expect(out).toContain('late penalties (5% of the total per late day)');
+    expect(out).toContain('late penalties (5% of the total per day started)');
   });
 
   it('reads a renamed entry’s mark sheet by its semester-side name', () => {

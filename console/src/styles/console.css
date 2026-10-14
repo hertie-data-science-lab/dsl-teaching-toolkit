@@ -110,8 +110,8 @@ main { min-width: 0; }
 .hint-pop.flip-x { right: auto; left: 0; }
 .hint-pop.flip-y { top: auto; bottom: calc(100% + 8px); }
 .hint-pop.flip-y::before { top: auto; bottom: -9px; }
-/* In a dialog the popover is fixed to the viewport (Hint.tsx), so the scrolling body cannot clip it; above the modal scrim and the panel. */
-.hint-pop.fixed { z-index: 60; }
+/* An open popover is fixed to the viewport at the end of the page (Hint.tsx): nothing clips or covers it, so it carries its own type. */
+.hint-pop.fixed { z-index: 1000; font-family: var(--font-body); font-weight: 400; font-size: 14px; line-height: 1.45; white-space: normal; text-wrap: wrap; }
 .lbl-row { display: flex; align-items: center; gap: 0; flex-wrap: wrap; }
 .fold > summary::before, .a-card > summary.a-sum::before { content: ""; width: 7px; height: 7px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform 0.15s; margin-right: 2px; flex: none; }
 .fold[open] > summary::before, .a-card[open] > summary.a-sum::before { transform: rotate(45deg); }
@@ -769,18 +769,68 @@ table.marks input { min-height: 30px; padding: 3px 6px; }
 table.marks td input { border-color: var(--rule-strong); background: var(--surface); }
 table.marks input.q { width: 56px; }
 table.marks input.adj { width: 60px; }
-table.marks input.fb { min-width: 180px; }
-table.marks input.pn { min-width: 150px; }
 table.marks td.calc { font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
 table.marks td.pen { color: var(--amber-ink); font-variant-numeric: tabular-nums; text-align: right; }
 table.marks td.pen .late-apply { display: flex; gap: 6px; justify-content: flex-end; color: var(--ink-2); font-size: 12.5px; white-space: nowrap; }
-table.marks input.ovr { width: 92px; }
+table.marks td.pen .pen-a { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+table.marks td.pen .val { min-width: 42px; text-align: right; font-weight: 600; }
+table.marks td.pen .val.off { text-decoration: line-through; color: var(--muted); font-weight: 400; }
+table.marks input.late-switch { appearance: none; -webkit-appearance: none; margin: 0; width: 28px; height: 16px; min-height: 0; padding: 0; border: 0; border-radius: 999px; background: var(--rule-strong); position: relative; cursor: pointer; flex: none; }
+table.marks input.late-switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--surface); transition: transform 0.12s; }
+table.marks input.late-switch:checked { background: var(--amber-ink); }
+table.marks input.late-switch:checked::after { transform: translateX(12px); }
+table.marks input.late-switch:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { table.marks input.late-switch::after { transition: none; } }
+table.marks input.ovr { width: 54px; min-height: 26px; text-align: right; }
+table.marks input.ovr.set { border-color: var(--amber-ink); background: var(--amber-soft); }
+table.marks input.ovr.bad { border-color: var(--bad); }
+table.marks input.ovr:disabled { opacity: 0.5; }
+table.marks td.pen .invalid-msg { display: flex; justify-content: flex-end; margin-top: 2px; }
+table.marks td.sys.auto { background: var(--ok-soft); }
+table.marks .held-chip { margin-top: 4px; }
+table.marks .held-why { font-size: 12px; font-weight: 400; color: var(--bad-ink); }
+table.marks .qfb-chip { margin-top: 4px; border: 0; cursor: pointer; }
+table.marks th.adjcol, table.marks td.adjcol { background: var(--amber-soft); }
+table.marks input.adj { border-color: var(--amber-ink); }
+table.marks .team-names { font-weight: 400; }
+.marks-filters .adj-chip { border: 0; cursor: pointer; }
+table.marks th .hint-wrap.small { line-height: 1; }
+/* The first column stays put while the grid scrolls sideways; the header stays while it scrolls down. */
+table.marks tbody td:first-child { position: sticky; left: 0; z-index: 1; background: var(--surface); }
+table.marks thead tr:first-child th:first-child { position: sticky; left: 0; z-index: 3; }
+.marks-wrap { max-height: 620px; overflow: auto; }
+.marks-bar { display: grid; gap: 8px; margin-bottom: 10px; }
+.marks-filters, .marks-tools { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+.marks-filters .chip.filter { border: 0; cursor: pointer; }
+.marks-filters .chip.filter.on { background: var(--ink); color: var(--surface); }
+.marks-tools .savebar { margin: 0; }
+.marks-tools .student-pick { width: auto; min-height: 30px; padding: 3px 8px; font-size: 13.5px; }
+/* Return marks: its own block above the marking panel, right-aligned, with Student view under it. */
+.return-block { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; margin-bottom: 12px; }
+.return-block .return-main { display: inline-flex; align-items: center; gap: 4px; }
+.btn.big { font-size: 15.5px; padding: 8px 20px; min-height: 42px; }
+.marks-filters .full-toggle { margin-left: auto; }
+.icon-btn { display: inline-grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 1px solid var(--rule-strong); border-radius: 6px; background: var(--surface); color: var(--ink-2); font-size: 17px; line-height: 1; cursor: pointer; }
+.icon-btn:hover, .icon-btn:focus-visible { color: var(--ink); border-color: var(--ink-2); }
+table.marks th .th-fold { border: 0; background: none; padding: 0; min-height: 0; font: inherit; color: inherit; cursor: pointer; }
+table.marks th .th-fold:hover { text-decoration: underline; }
+.marking.full { position: fixed; inset: 0; z-index: 40; background: var(--ground, var(--surface)); padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; }
+.marking.full .marks-wrap { flex: 1 1 auto; min-height: 0; max-height: none; }
+.student-view { display: grid; gap: 8px; margin-top: 12px; }
+.student-view h3 { margin: 0; }
+.student-view .sv-team { margin: 8px 0 0; padding: 4px 12px; border-left: 3px solid var(--rule-strong); color: var(--ink-2); }
+.draft-offer { margin-bottom: 12px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.op-facts { display: grid; gap: 2px; font-size: 13.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.op-facts p { margin: 0; }
+.hint-pop .para { display: block; }
+.hint-pop .para + .para { margin-top: 6px; }
 table.marks tr.nosub td { color: var(--muted); }
 table.marks tr.team-row td { background: var(--sunk); font-weight: 600; border-top: 1px solid var(--rule-strong); }
 table.marks tr.member-row td { font-weight: 400; }
 table.marks .fold-toggle { border: 0; background: none; padding: 0 6px 0 0; min-height: 0; cursor: pointer; color: var(--ink-2); font: inherit; }
-table.marks td textarea { border-color: var(--rule-strong); background: var(--surface); min-height: 30px; padding: 3px 6px; }
+table.marks td textarea { border-color: var(--rule-strong); background: var(--surface); min-height: 30px; padding: 3px 6px; resize: vertical; field-sizing: content; max-height: 14em; }
 table.marks textarea.fb { min-width: 180px; }
+table.marks textarea.pn { min-width: 150px; }
 table.marks textarea.qfb { width: 100%; min-width: 120px; font-size: 13px; }
 table.marks tr.qfb-row td { border-top: 0; font-weight: 400; }
 
@@ -868,6 +918,15 @@ a.st-chip:hover { text-decoration: underline; }
 .person { display: flex; gap: 12px; align-items: center; background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 14px 16px; }
 .p-avatar { flex: none; width: 52px; height: 52px; border-radius: 50%; background: var(--sunk); color: var(--ink-2); display: grid; place-items: center; font-family: var(--font-display); font-weight: 700; overflow: hidden; }
 .p-avatar img { width: 52px; height: 52px; display: block; }
+/* The Students page: Send codes on its own row, the rest under it; Edit roster over the table's corner. */
+.students-actions { display: grid; gap: 8px; justify-items: end; }
+.students-actions .main-action { display: inline-flex; align-items: center; gap: 4px; }
+.roster-box { position: relative; }
+.roster-box .roster-edit { position: absolute; top: 8px; right: 8px; z-index: 3; }
+.roster-box .roster-edit[aria-pressed="true"] { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+.roster-box .roster-edit:disabled { opacity: 0.45; cursor: default; }
+/* The Instructors tab's photo: a small round thumbnail, or the initials muted. */
+.thumb { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; display: inline-grid; place-items: center; vertical-align: middle; background: var(--sunk); color: var(--muted); font-family: var(--font-display); font-weight: 700; font-size: 11px; overflow: hidden; }
 .file-tree a.ft-name { color: var(--link); }
 .md-body { font-size: 15px; line-height: 1.55; overflow-wrap: anywhere; }
 .md-body img, .file-img, .nb-img { max-width: 100%; height: auto; }

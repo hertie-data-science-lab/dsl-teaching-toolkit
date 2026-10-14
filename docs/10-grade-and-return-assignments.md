@@ -60,7 +60,7 @@ teams:
 The final mark is `total × (1 − rate × days_late) + adjustment`, floored at 0. A late
 unit's `late_penalty` changes the middle term: `waive` (or `0%`) takes nothing off, and `15%` takes
 off 15% in place of `rate × days_late`; a unit that is not late loses nothing whatever it
-says. The console's Marks tab writes it for you: untick **Apply late penalty**, or type an
+says. The console's Marks tab writes it for you: switch the penalty off, or type an
 override. An assignment with no late penalty (`late_penalty_per_day` unset) has nothing to waive or
 override: the Marks tab offers neither, any `late_penalty` written is ignored, and the Distribute
 preview says so. A penalty changed after marks were returned goes out again as a changed mark. A
@@ -75,6 +75,22 @@ comments you add do not survive a rewrite when one happens. A sheet written befo
 `feedback_per_question` existed never gains it: add `feedback_per_question:` under a unit
 by hand.
 
+### The console's Marks tab
+
+**Return marks** sits above the grid, with **Student view** under it; the grid itself is for
+marking and saving, and its corner icon opens it full screen (Escape closes). The sheet is one row
+per student or team. On a team assignment a team's ▸ shows its members, each with their own Adjustment, feedback and private notes; a
+team with any of those set opens by itself. On an individual one the Adjustment column sits
+behind the **Adjustments** chip. Every column header has a `?`; the **From the submission** heading
+folds its columns into one. The filters (All, Unmarked, Late,
+Held) count from the sheet as typed, and a held row says why, by the same rules as Return marks.
+Enter moves down a column of numbers; in a text box Ctrl+Enter (⌘+Enter) does. **Student view**
+shows what one student's marks page will hold. Unsaved marks stay in this browser until saved, and
+are offered back (Restore or Discard) on the next visit; a save that meets someone else's keeps
+both and says how many rows they changed. Return marks counts who gets marks, who is skipped and
+who is held (and how many unsaved rows it leaves out), gives the final grades in one line, and after a
+preview names who would be emailed. The Overview's Return marks opens this same panel on the Marks tab.
+
 ### When a sheet has something nobody can act on
 
 The quarter-hourly tick reads every sheet. Anything it cannot use - a save that does not
@@ -87,7 +103,7 @@ and line, and emails whoever committed that line. Nothing is refreshed or sent f
 until it is settled; a sheet that does not parse, or whose `members:` cannot be read, stops
 Return marks altogether. A held mark the student was already sent is never taken back: that
 student's gradebook, email and export row stay as last sent until it is settled. With the
-registrar export missing or unreadable, which marks were sent cannot be told, so a held mark
+semester grades file missing or unreadable, which marks were sent cannot be told, so a held mark
 stops Return marks until it is settled. The issue
 rewrites itself on every tick and closes when the last one goes.
 
@@ -156,7 +172,7 @@ repo's, so it would accuse the entire semester of one student's late push), and
    pin and the sheet. Its header then reads `FROZEN`.
    A late rule changed after the due date (the console's Overview says so before you save)
    moves the cutoff and recomputes every late penalty; return the changed marks again.
-6. **Distribute grades** (button), `preview` first. Leave `assignment` empty to return every sheet, or name one to return only its marks; each gradebook still shows everything already returned, rendered from those sheets as they stand now, so a mark changed on an already-returned assignment goes out with it. A scoped run refuses when it cannot tell what was returned (the registrar export missing or unreadable); an unscoped run rewrites it. The preview writes no grades and sends
+6. **Distribute grades** (button), `preview` first. Leave `assignment` empty to return every sheet, or name one to return only its marks; each gradebook still shows everything already returned, rendered from those sheets as they stand now, so a mark changed on an already-returned assignment goes out with it. A scoped run refuses when it cannot tell what was returned (the semester grades file missing or unreadable); an unscoped run rewrites it. The preview writes no grades and sends
    no mail. It prints the counts, and posts who gets what - each changed grade, who is
    emailed, marks **held** for a hand decision, unmarked questions - as a *Distribute
    grades preview* issue in `semester-config`. Each preview rewrites that issue; the real
@@ -171,7 +187,7 @@ could change is not it.
 - **The private gradebook** `grades-<handle>`: `grades.yml` and a rendered `README.md`, in
   one commit. The student sees their final grade, never the sum behind it. Each member of
   a team reads the team's shared feedback here, in their own repo, beside their own grade.
-- **`.system/semester-gradebook.csv`** in `semester-config` - the registrar export, one row per
+- **`.system/semester-gradebook.csv`** in `semester-config` - the semester grades file, one row per
   enrolled student including the ungraded. Private, never logged.
 - **An email** with a link and no marks in it.
 
