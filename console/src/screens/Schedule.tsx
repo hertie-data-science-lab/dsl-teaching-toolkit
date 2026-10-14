@@ -9,7 +9,7 @@ import { Invalid } from '../forms/Form';
 import { RELEASE_WORD, TYPE_CLASS, siteRowWord, fmtDay, fmtTime, fmtWhen, heldSentence, markWord, releaseIdent, repoWords, sortKey } from '../model/format';
 import { needsANumber, parseSchedule, scheduleRows, type Block, type Row } from '../model/schedule';
 import {
-  ASSIGNMENTS_BLOCK, READINGS_KIND, SESSION_KINDS, applyChanges, archiveFallbackWords, blockOf, changesOf, defaultReleaseAt, draftErrors, emptyTwin, hiddenKind, newDraft, nextNumber, nextSession, numberedField, readDraft, releaseAt, writeDraft,
+  ASSIGNMENTS_BLOCK, READINGS_KIND, SESSION_KINDS, applyChanges, blockOf, changesOf, defaultReleaseAt, draftErrors, emptyTwin, hiddenKind, newDraft, nextNumber, nextSession, numberedField, readDraft, releaseAt, writeDraft,
   type AssignmentDraft, type Draft, type EntryDraft, type FileDraft, type SemesterDraft, type SemesterEntryDraft, type SemesterType, type Slot,
 } from '../model/scheduleEdit';
 import type { Assignment, Release } from '../model/types';
@@ -29,7 +29,7 @@ import type { CohortProps, ReadyProps } from './types';
 import { ASSIGNMENTS_FILE, CONFIG_REPO } from '../model/names';
 import { RUN_KEYS, TEAM_FORMATION, TEAM_FORMATIONS, VISIBILITIES, VISIBILITY, assignmentsFile, resolve, validAssignments, validSchedule } from '../model/cascade';
 import { SolutionNote, assignmentsAfterSchedule, cutoffOf, forcedVisibility, semesterLayers } from './RunSettings';
-import { DEFAULT_DEST_REPO, DEFAULT_TIMEZONE, KINDS, SUBMIT_VIA_DEFAULT, penaltyError, pluralOf } from '../model/policy';
+import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO, DEFAULT_TIMEZONE, KINDS, SUBMIT_VIA_DEFAULT, penaltyError, pluralOf } from '../model/policy';
 import { otherRepos } from './CourseIndex';
 
 const LABELS: Record<Block, string> = { releases: 'Releases', assignments: 'Assignments', events: 'Events' };
@@ -444,11 +444,14 @@ function SemesterEntryForm({ d, set, errors, consoleOn }: FormProps<SemesterEntr
         <div class="field"><Lbl for="e-title" strong>Title</Lbl><input id="e-title" type="text" placeholder={d.type === 'archive' ? 'Semester archived' : ''} value={d.title} onInput={(e) => set({ title: val(e) })} /></div>
       </div>
       <div class="row-3">
-        <div class="field"><Lbl for="e-from" strong>From</Lbl><input id="e-from" type="date" value={d.from} onInput={(e) => set({ from: val(e) })} /><Err e={errors.from} />{d.type === 'archive' && !d.from ? <span class="hint">Empty: {archiveFallbackWords}.</span> : null}</div>
+        <div class="field"><Lbl for="e-from" strong>From</Lbl><input id="e-from" type="date" value={d.from} onInput={(e) => set({ from: val(e) })} /><Err e={errors.from} />{d.type === 'archive' && !d.from ? <span class="hint">Empty: {d.graceDays === '' ? ARCHIVE_GRACE_DAYS : d.graceDays} days after the semester ends.</span> : null}</div>
         <div class="field"><Lbl for="e-to" strong>To</Lbl><span class="hint">{FORM_TEXT.breaksOnly}</span><input id="e-to" type="date" value={isBreak ? d.to : ''} disabled={!isBreak} onInput={(e) => set({ to: val(e) })} /><Err e={errors.to} /></div>
-        <div class="field"><Lbl for="e-det">Details</Lbl><input id="e-det" type="text" value={d.details} onInput={(e) => set({ details: val(e) })} /></div>
+        <div class="field"><Lbl for="e-det" hint={d.type === 'archive' ? '{date} is filled in with the archive date.' : undefined}>Details</Lbl><input id="e-det" type="text" value={d.details} onInput={(e) => set({ details: val(e) })} /></div>
       </div>
-      <Fold summary="Advanced">
+      <Fold summary="Advanced" open={d.type === 'archive' && !d.from && d.graceDays !== ARCHIVE_GRACE_DAYS}>
+        {d.type === 'archive' ? (
+          <div class="row-adv"><div class="field"><Lbl for="e-grace">Days after the semester ends <span class="default">default: {ARCHIVE_GRACE_DAYS}</span></Lbl><input id="e-grace" type="number" min="0" disabled={!!d.from} value={d.from ? '' : d.graceDays} onInput={(e) => set({ graceDays: intOf(val(e)) })} /><Err e={errors.graceDays} /></div></div>
+        ) : null}
         <Toggles id="e" d={d} set={(x) => set(x)} consoleOn={consoleOn} noTbc />
       </Fold>
     </>
@@ -481,7 +484,8 @@ function AssignmentForm({ p, d, set, errors, consoleOn, templates, tiered, hande
   const pct = String(runShown(d, inherited, 'late_penalty_per_day') ?? '').replace(/%$/, '');
   const n = d.number || 'N';
   const solutionOff = vis !== 'private' ? 'Not available: student repos are not private, so the solution cannot be pushed automatically.' : d.manual ? 'Needs a hand-out time; the solution must follow it.' : null;
-  const opt = (value: string, label: string, from: boolean) => <option value={from ? '' : value} selected={from ? !(value === d.group || value === d.submitVia) && (value === tplGroup || value === tplRoute) : value === d.group || value === d.submitVia}>{label}{from ? ' (from template)' : ''}</option>;
+  // The template's own value is the option written as no override (''); any other is the override.
+  const opt = (value: string, label: string, tpl: string, override: string) => <option value={value === tpl ? '' : value} selected={value === (override || tpl)}>{label}{value === tpl ? ' (from template)' : ''}</option>;
   return (
     <>
       <div class="row-tpl">
@@ -503,12 +507,12 @@ function AssignmentForm({ p, d, set, errors, consoleOn, templates, tiered, hande
       <div class="row-2">
         <div class="field"><Lbl for="e-group" strong hint={FORM_TEXT.template}>Group or solo</Lbl>
           <select id="e-group" onChange={(e) => set({ group: (val(e) as AssignmentDraft['group']) })}>
-            {['group', 'individual'].map((g) => opt(g, GROUP_LABEL[g], g === tplGroup))}
+            {['group', 'individual'].map((g) => opt(g, GROUP_LABEL[g], tplGroup, d.group ?? ''))}
           </select>
         </div>
         <div class="field"><Lbl for="e-route" strong>Submission route</Lbl>
           <select id="e-route" onChange={(e) => set({ submitVia: val(e) })}>
-            {Object.keys(ROUTE_LABEL).map((r) => opt(r, ROUTE_LABEL[r], r === tplRoute))}
+            {Object.keys(ROUTE_LABEL).map((r) => opt(r, ROUTE_LABEL[r], tplRoute, d.submitVia ?? ''))}
           </select>
         </div>
       </div>
@@ -579,7 +583,7 @@ function ArchiveHelp({ org }: { org: string }) {
   return (
     <Hint small label="About archiving" doc="10-grade-and-return-assignments.md">
       Archiving makes every repo in {org} read-only: student repos, marks repos, the student site, the join form, the settings repo. Students and instructors keep read access; nothing is deleted and the student site stays online.
-      It happens on the archive entry’s date, or {archiveFallbackWords} when the entry names none; students get an Updates notice two weeks before. Without an archive entry it never happens by itself.
+      It happens on the date chosen here, or {ARCHIVE_GRACE_DAYS} days (or the number set here) after the semester ends; students get an Updates notice two weeks before. Without an archive entry it never happens by itself.
     </Hint>
   );
 }

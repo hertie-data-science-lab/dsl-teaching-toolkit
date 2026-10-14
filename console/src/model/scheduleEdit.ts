@@ -155,6 +155,8 @@ export interface SemesterEntryDraft {
   details: string;
   show: boolean;
   provisional: boolean;
+  /** An archive with no date: the days after the semester ends it falls (`grace_days`); '' while the box is empty. */
+  graceDays: number | '';
 }
 
 export type Draft = EntryDraft | AssignmentDraft | SemesterDraft | SemesterEntryDraft;
@@ -275,6 +277,7 @@ function readSemesterEntry(id: string, raw: unknown): SemesterEntryDraft {
   return {
     kind: 'semesterEntry', id, type, title: s(e.title), from: splitWhen(type === 'break' ? e.from : e.event_datetime)[0], to: splitWhen(e.to)[0],
     details: s(e.details), show: e.show_on_site !== false, provisional: e.tbc === true,
+    graceDays: typeof e.grace_days === 'number' ? e.grace_days : ARCHIVE_GRACE_DAYS,
   };
 }
 
@@ -327,7 +330,7 @@ export function newDraft(kind: string, doc: Raw): EntryDraft | AssignmentDraft |
       solutionOn: false, solutionDate: '', solutionTime: '', details: '', show: true, tbc: false, datesTbc: false, marksOn: false, marksDate: '', marksTime: '', group: '', submitVia: '', run: {}, repoName: '',
     };
   }
-  if (kind === 'semester') return { kind: 'semesterEntry', id: '', type: 'break', title: '', from: '', to: '', details: '', show: true, provisional: false };
+  if (kind === 'semester') return { kind: 'semesterEntry', id: '', type: 'break', title: '', from: '', to: '', details: '', show: true, provisional: false, graceDays: ARCHIVE_GRACE_DAYS };
   const session = SESSION_KINDS.includes(kind) ? nextSession(doc, kind) : '';
   const d: EntryDraft = {
     kind: 'entry', type: kind, id: '', session, number: '', title: '', details: '', slots: [blankSlot()], files: [], guide: '',
@@ -522,6 +525,8 @@ export function semesterEntryValue(d: SemesterEntryDraft, rawEntry: unknown): Ra
     event_datetime: isBreak ? undefined : d.from ? whenOf(raw.event_datetime, d.from, splitWhen(raw.event_datetime)[1]) : undefined,
     from: isBreak ? whenOf(raw.from, d.from, '') : undefined,
     to: isBreak ? whenOf(raw.to, d.to, '') : undefined,
+    // Only the archive alternative chosen is written: a date, or the days after the semester ends (written once it differs from the default).
+    grace_days: d.type === 'archive' && !d.from ? keep(raw.grace_days, d.graceDays === '' ? ARCHIVE_GRACE_DAYS : d.graceDays, ARCHIVE_GRACE_DAYS) : undefined,
     details: text(d.details),
     show_on_site: keep(raw.show_on_site, d.show, true),
     tbc: keep(raw.tbc, d.provisional, false),
@@ -756,12 +761,10 @@ export function draftErrors(d: Draft, ctx: ErrorContext = {}, cutoff?: string | 
     if (!d.to) e.to = 'Give the last day of the break.';
     else if (d.from && d.to < d.from) e.to = 'The break must end on or after its first day.';
   } else if (d.type !== 'archive' && !d.from) e.from = 'Give the date.';
+  if (d.type === 'archive' && !d.from && d.graceDays !== '' && !(Number.isInteger(d.graceDays) && d.graceDays >= 0)) e.graceDays = 'A whole number of days, 0 or more.';
   if (d.type !== 'break' && ctx.doc) {
     const hit = semesterEntryOf(ctx.doc, d.type);
     if (hit && hit[0] !== d.id && !(ctx.removed ?? []).includes(hit[0])) e.type = `The semester already has a${d.type === 'archive' ? 'n' : ''} ${d.type} entry (${hit[0]}).`;
   }
   return e;
 }
-
-/** The archive date the engine falls back on when the archive entry names none. */
-export const archiveFallbackWords = `${ARCHIVE_GRACE_DAYS} days after the semester ends`;

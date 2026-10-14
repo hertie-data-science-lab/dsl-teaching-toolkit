@@ -98,7 +98,7 @@ function Node({ n, depth, c }: { n: TreeNode; depth: number; c: Ctx }) {
       <li class={`ft-file${fixed || out ? ' ft-out' : ''}`}>
         {c.mode === 'select' ? control : null}
         <FileHead name={n.name} />
-        <span class={`chip ${fixed || out ? 'amber' : ''}`}>{word}</span>
+        {word ? <span class={`chip ${fixed || out ? 'amber' : ''}`}>{word}</span> : null}
         <Why s={s} word={c.withheldWord} />
         {c.mode === 'exclude' ? control : null}
         {note}

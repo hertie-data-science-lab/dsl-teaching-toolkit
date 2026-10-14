@@ -329,6 +329,10 @@ describe('S6 schedule and S11 release', () => {
     const out = html(<FilePicker files={listed} org={COURSE_ORG} repos={['course-materials-f2026']} others={['lecture-code-f2026']} onPick={() => {}} onClose={() => {}} />);
     expect(out).toMatch(/<optgroup label="Course materials repos"><option value="course-materials-f2026" selected>/);
     expect(out).toContain('<optgroup label="Other repos"><option value="lecture-code-f2026">lecture-code-f2026</option></optgroup>');
+    // The shared file tree, a tick per file and folder, the withheld file marked.
+    expect(out).toContain('aria-label="Pick lectures/"');
+    expect(out).toMatch(/notes\.pdf.*?<span class="chip amber">withheld<\/span>/s);
+    expect(out).not.toContain('released to students');
     expect(out).toContain('Or type a path');
     expect(out).toContain('it need not exist yet');
   });

@@ -1,0 +1,8 @@
+timezone: Europe/Berlin
+assets:
+  assets-datasets:
+    title: Datasets
+    event_datetime: 2026-09-01T08:00
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: data

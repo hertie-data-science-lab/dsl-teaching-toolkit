@@ -325,9 +325,15 @@ describe('kept from the 0.10 editor (baby rule)', () => {
     expect(parse(y.text).assignments.a2).toMatchObject({ title: 'Regression', grading_datetime: '2026-10-07', details: 'Fit it.' });
   });
 
-  it('keeps an archive entry’s grace days the form does not show', () => {
+  it('edits the archive’s days after the semester ends, writing them only once they differ from the default, and only without a date', () => {
     const t = 'semester:\n  archive:\n    type: archive\n    grace_days: 30\n';
     const base = readDraft(doc(t), 'archive') as SemesterEntryDraft;
+    expect(base.graceDays).toBe(30);
     expect(parse(save(t, { ...base, title: 'Frozen' }, base).text).semester.archive).toEqual({ type: 'archive', grace_days: 30, title: 'Frozen' });
+    expect(parse(save(t, { ...base, from: '2027-02-16' }, base).text).semester.archive).toEqual({ type: 'archive', event_datetime: '2027-02-16' });
+    const fresh = { ...(newDraft('semester', {}) as SemesterEntryDraft), type: 'archive' as const };
+    expect(parse(save('', fresh).text).semester).toEqual({ archive: { type: 'archive' } });
+    expect(parse(save('', { ...fresh, graceDays: 90 }).text).semester).toEqual({ archive: { type: 'archive', grace_days: 90 } });
+    expect(draftErrors({ ...fresh, graceDays: -1 }).graceDays).toBe('A whole number of days, 0 or more.');
   });
 });
