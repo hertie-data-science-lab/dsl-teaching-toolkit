@@ -138,7 +138,7 @@ Each assignment's dates and run settings.
 | `template` | **yes** | - | the course-org template each student's (or team's) repo is generated from |
 | `repo_name` | no | the key | what this semester's repos are called (`<repo_name>-<handle>`) |
 | `handout_datetime` | no | - | when repos are provisioned. Omit it to hand out by hand |
-| `due_datetime` | no | - | the deadline students see; a bare date closes at **23:59:59**. Absent: dates to be confirmed - nothing fires and the assignment is not on the site until it has one (a to-do: *Give assignment-2 a due date*) |
+| `due_datetime` | no | - | the deadline students see; a bare date closes at **23:59:59**. Absent: dates to be confirmed - its hand-out and due rows show **TBC** at the end of term, with no links, and nothing fires until it has one (a to-do: *Give assignment-2 a due date*) |
 | `solution_datetime` | no | - | when the template's `solution/` is pushed into every repo. **No default**; must be after `handout_datetime` (and needs it) and no earlier than the late cutoff. It cannot be undone |
 | `marks_return_datetime` | no | - | when marks go back automatically, once every unit is marked. `{event_datetime: ..., show_on_site: true}` also shows a "Marks expected" row |
 | `details`, `show_on_site`, `tbc` | no | - | as for any entry; on both its rows (out and due) |

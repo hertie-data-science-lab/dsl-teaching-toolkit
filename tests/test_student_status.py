@@ -696,6 +696,20 @@ def test_an_undated_event_is_a_dateless_row_with_no_when():
     assert row["sort_at"].startswith(facts.sched.semester_end.isoformat())
 
 
+def test_an_assignment_with_no_due_date_is_two_dateless_rows():
+    import dataclasses
+
+    facts = _facts()
+    key = next(iter(facts.sched.assignments))
+    entry = facts.sched.assignments[key]
+    facts.sched.assignments[key] = dataclasses.replace(entry, due_datetime=None)
+    name = schedule.semester_name(key, entry)
+    rows = {r["id"]: r for r in student_status.event_rows(facts)}
+    for row in (rows[f"{name}:handout"], rows[f"{name}:due"]):
+        assert row["when"] is None and row["dateless"] is True and row["tbc"] is True
+        assert row["sort_at"].startswith(facts.sched.semester_end.isoformat())
+
+
 def test_a_second_slot_is_a_row_of_its_entry():
     # Decision 0038 rule 3: lecture 1 given twice is two rows, "Lecture 1" with the
     # entry's title and files; the second's id is `<key>-2`, as the site names its file.

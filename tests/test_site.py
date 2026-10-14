@@ -308,6 +308,31 @@ def test_assignment_entry_falls_back_to_the_due_date_without_a_handout(monkeypat
     assert out.count("date: 2026-11-10T23:59:00") == 2  # both rows on the due date
 
 
+def test_an_assignment_with_no_due_date_is_two_tbc_rows_and_nothing_else(monkeypatch):
+    # Like an undated session: no `date:` on either row, sorted at the end of term, the
+    # not-yet-released sentence and no repo, link or team invitation to act on.
+    def _no_reads(*a, **k):
+        raise AssertionError("nothing is out, so the README must not be read")
+
+    monkeypatch.setattr(site, "get_file_content", _no_reads)
+    out = site._assignment_entry(
+        "Course",
+        "Semester-f2026",
+        "assignment-2",
+        None,
+        datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
+        undated_at=date(2026, 12, 18),
+        now=datetime(2026, 10, 1, tzinfo=BERLIN),
+    )
+    head, due = out.split("due_event:")
+    assert "date:" not in head.replace("sort_at:", "") and "    date:" not in due
+    assert out.count("dateless: true") == 2 and out.count("tbc: true") == 2
+    assert out.count("sort_at: 2026-12-18") == 2
+    assert "handout_pending: true" in head
+    assert "repo_name" not in out and "repo_url" not in out and "team_join" not in out
+    assert "its dates are still to be confirmed" in out
+
+
 def test_an_unhanded_out_assignment_is_a_placeholder(monkeypatch):
     # The template repo exists from the day faculty write the assignment; publishing its
     # README on sight put the whole brief on the PUBLIC semester site weeks before hand-out,

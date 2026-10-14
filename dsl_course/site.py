@@ -1038,13 +1038,14 @@ def _assignment_entry(
     course_org: str,
     semester_org: str,
     repo: str,
-    when: date | datetime,
+    when: date | datetime | None,
     handout: datetime | None = None,
     found: tuple[str, schedule.AssignmentEntry] | None = None,
     handed_out: frozenset[str] = frozenset(),
     now: datetime | None = None,
     sched: schedule.Schedule | None = None,
     formed_teams: FormedTeams | None = None,
+    undated_at: date | None = None,
 ) -> str:
     """An assignment's page (`_layouts/assignment.html`), plus the two schedule rows it
     drives: the entry's own `date:` is the hand-out ("Assignment out") row and its
@@ -1053,6 +1054,10 @@ def _assignment_entry(
     The page's rule sentences are the same helpers the student console's assignment
     reads (`student_status.render_assignments`): `course.late_rule`, `CUTOFF_SENTENCE`,
     `course.shape_note`, `grades.total_points`, `grades.team_cap`, `teams.teams_for`.
+
+    `when` None: no due date yet (TBC). Nothing fires for it, so both rows are `dateless`
+    TBC rows sorted at `undated_at` (end of term), as an undated session is: no `date:`,
+    no repo, no links, no team invitation - the not-yet-released sentence only.
 
     `when` is the due date (a real one from schedule.yml, or a synthesised fallback);
     `handout` the scheduled provisioning moment when there is one. A handout dates the
@@ -1079,13 +1084,18 @@ def _assignment_entry(
     (`member_digest`, never a handle) and its repo's URL. `formed_teams` is the sync's one
     reader of teams.csv (`_formed_teams`), shared by every page."""
     slug = schedule.semester_name(*found) if found else repo
-    # An unscheduled assignment's synthesised fallback date is due end-of-day.
-    due = iso_when(when, "23:59:00")
-    released = iso_when(handout) if handout is not None else due
-    pinned_out = handout is not None and handout <= (
-        now or datetime.now(handout.tzinfo)
-    )
-    out = slug in handed_out or pinned_out
+    undated = when is None
+    if undated:
+        due = released = iso_when(undated_at or date.today())
+        out = False
+    else:
+        # An unscheduled assignment's synthesised fallback date is due end-of-day.
+        due = iso_when(when, "23:59:00")
+        released = iso_when(handout) if handout is not None else due
+        pinned_out = handout is not None and handout <= (
+            now or datetime.now(handout.tzinfo)
+        )
+        out = slug in handed_out or pinned_out
     spec = load_grading_spec(
         course_org,
         repo,
@@ -1100,7 +1110,9 @@ def _assignment_entry(
     subtitle = row_name(spec.title, title)
     details = found[1].details if found else ""
     # Display-only: a deadline that says "(TBC)" still closes when it says.
-    tbc_fm = "tbc: true\n" if found and found[1].tbc else ""
+    tbc_fm = "tbc: true\n" if (found and found[1].tbc) or undated else ""
+    if undated:
+        tbc_fm += "dateless: true\n"
     tbc_due = indent(tbc_fm, "    ")
     external = spec.submit_external
     window, shuts = (
@@ -1109,7 +1121,7 @@ def _assignment_entry(
         else ("closed", None)
     )
     self_select = found is not None and spec.team_formation_resolved == SELF_SELECT
-    forming = window == "open" and self_select and shuts is not None
+    forming = window == "open" and self_select and shuts is not None and not undated
     # Where the work goes, on the due row: the SHAPE in one word, and the address once
     # there is something at the other end of it.
     repo_lines = [f'submit_shape: "{spec.submit_shape}"']
@@ -1190,6 +1202,8 @@ def _assignment_entry(
             )
     # Written at BOTH levels: the due row is a sub-hash the theme reaches through
     # `map: "due_event"`, so it cannot see its parent's fields.
+    # No due date yet: no repo, so nothing to submit to (no actions on a TBC row).
+    repo_lines = [] if undated else repo_lines
     repo_fm = "".join(f"{ln}\n" for ln in repo_lines)
     repo_due = "".join(f"    {ln}\n" for ln in repo_lines)
     if out:
@@ -1205,7 +1219,9 @@ def _assignment_entry(
         flags = "handout_pending: true\n"
         # Word for word the shape of an unreleased session's line (`_row_entry`).
         born = "private" if spec.visibility_is_students else spec.visibility
-        if external:
+        if undated:
+            coming = "its dates are still to be confirmed"
+        elif external:
             coming = "the brief appears here when it is"
         elif spec.submit_shared:
             coming = f"the `{repo_name}` drop box appears when it is"
@@ -1218,10 +1234,11 @@ def _assignment_entry(
     # through `map: "due_event"`, so it cannot see its parent's.
     details_fm = _details(details)
     details_due = indent(details_fm, "    ")
+    nl = "\n"
     return (
         f"---\n"
         f"kind: assignment\n"
-        f"date: {released}\n"
+        f"{'' if undated else 'date: ' + released + nl}"
         f"sort_at: {released}\n"
         f'title: "{q(title)}"\n'
         f"{sub_fm}"
@@ -1236,7 +1253,7 @@ def _assignment_entry(
         f"{team_fm}"
         f"due_event:\n"
         f"    kind: due\n"
-        f"    date: {due}\n"
+        f"{'' if undated else '    date: ' + due + nl}"
         f"    sort_at: {due}\n"
         f'    title: "{q(title)}"\n'
         f"{sub_due}"
@@ -1250,7 +1267,7 @@ def _assignment_entry(
 
 def _assignment_dates(
     found: tuple[str, schedule.AssignmentEntry],
-) -> tuple[date | datetime, datetime | None]:
+) -> tuple[date | datetime | None, datetime | None]:
     """(due, handout) for an assignment, off the plan entry the caller resolved: a
     handout only when the plan pins (or the manual release workflow recorded) one. Every
     page is a plan entry (`schedule.assignment_pages`): no date is ever made up."""
@@ -1630,14 +1647,13 @@ def sync_site(course_org: str, semester_org: str) -> int:
                         page.repo,
                         *_assignment_dates(page.hit),
                         found=page.hit,
+                        undated_at=end,
                         handed_out=handed_out,
                         sched=sched,
                         formed_teams=formed_teams,
                     )
                     for page in pages
-                    # No due date yet (TBC): no page until it has one - nothing about
-                    # it is out, and the status carries the to-do.
-                    if shown(page.hit) and page.hit[1].due_datetime is not None
+                    if shown(page.hit)
                 },
                 "_events": event_entries,
             },

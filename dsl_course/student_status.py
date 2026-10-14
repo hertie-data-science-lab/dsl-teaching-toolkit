@@ -454,12 +454,7 @@ def _public_assignments(
 ) -> list[tuple[str, schedule.AssignmentEntry]]:
     """The plan's assignments the site may show: `show_on_site: false` keeps one out of
     every public surface."""
-    # An assignment with no due date yet (TBC) shows nowhere until it has one, as on the site.
-    return [
-        (k, e)
-        for k, e in sched.assignments.items()
-        if e.show_on_site and e.due_datetime is not None
-    ]
+    return [(k, e) for k, e in sched.assignments.items() if e.show_on_site]
 
 
 def event_rows(facts: SemesterFacts) -> list[dict]:
@@ -470,16 +465,22 @@ def event_rows(facts: SemesterFacts) -> list[dict]:
     for key, entry in _public_assignments(sched):
         name = schedule.semester_name(key, entry)
         title = identifier(name)
-        if entry.handout_datetime is not None:
+        # No due date yet: both rows TBC at the end of term, as an undated session is (the
+        # site's `_assignment_entry`); nothing fires for it, so its hand-out is TBC too.
+        undated = entry.due_datetime is None
+        end = term_end(sched, []) if undated else None
+        if entry.handout_datetime is not None or undated:
             out.append(
                 _row(
                     f"{name}:handout",
                     "assignment",
-                    entry.handout_datetime,
+                    None if undated else entry.handout_datetime,
                     title,
+                    sort_at=end,
                     details=entry.details,
                     assignment=name,
-                    tbc=entry.tbc,
+                    tbc=entry.tbc or undated,
+                    dateless=undated,
                 )
             )
         out.append(
@@ -488,9 +489,11 @@ def event_rows(facts: SemesterFacts) -> list[dict]:
                 "due",
                 entry.due_datetime,
                 title,
+                sort_at=end,
                 details=entry.details,
                 assignment=name,
-                tbc=entry.tbc,
+                tbc=entry.tbc or undated,
+                dateless=undated,
             )
         )
         if entry.marks_return_datetime is not None and entry.marks_return_on_site:
