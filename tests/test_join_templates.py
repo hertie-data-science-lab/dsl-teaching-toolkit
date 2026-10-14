@@ -5,7 +5,7 @@ YAML literal-block strings, so safe_load parses the workflow without running any
 The JS itself can't be executed here (no node in CI, and github-script has no npm
 deps), so what's asserted instead is the Python <-> JS contract: the embedded scripts
 parse the CSVs with real quote-aware helpers rather than line.split(','), and every
-column they address by name really exists in roster.FIELDS / teams.FIELDS.
+column they address by name really exists in roster.FIELDS / roster.SYSTEM_FIELDS.
 """
 
 from __future__ import annotations
@@ -28,6 +28,8 @@ from dsl_course import (
     teams,
     welcome,
 )
+from dsl_course import roster as roster_mod
+from tests.conftest import ROSTER_HEADER, roster_files
 
 WELCOME = Path(__file__).resolve().parents[1] / "templates" / "join"
 TEMPLATES = [
@@ -168,8 +170,10 @@ def test_an_unspliced_workflow_is_still_valid_yaml(rel, job):
 def test_onboard_addresses_roster_columns_declared_in_python():
     script = script_of("onboard.yml", "onboard")
     named = set(re.findall(r"indexOf\('([a-z_]+)'\)", script))
-    assert named == {"github_handle", "github_id", "enrol_code", "role"}
-    assert named <= set(roster.FIELDS)  # the contract with dsl_course.roster
+    assert named == {"email", "github_handle", "github_id", "enrol_code", "role"}
+    # the contract with dsl_course.roster: both files' columns
+    assert named <= set(roster.FIELDS) | set(roster.SYSTEM_FIELDS)
+    assert f"'{roster.SYSTEM_PATH}'" in script and f"'{roster.STUDENTS_PATH}'" in script
 
 
 def test_onboard_routes_auditors_to_the_auditors_team():
@@ -231,8 +235,8 @@ def test_team_formation_refuses_auditors_without_publishing_their_role():
     )
     assert "enrolment" not in refusal
     # ... and it is the same constant the not-on-the-roster path uses.
-    assert len(re.findall(r"fail\(\s*NOT_A_PARTICIPANT", code)) == 2
-    # refused before anything is written back to teams.csv
+    assert len(re.findall(r"fail\(\s*NOT_A_PARTICIPANT", code)) == 4
+    # refused before anything is written back to students.csv
     assert code.index("iRole >= 0") < code.index("createOrUpdateFileContents")
 
 
@@ -262,11 +266,13 @@ def test_team_formation_treats_a_missing_role_column_as_enrolled():
 def test_team_formation_addresses_columns_declared_in_python():
     script = script_of("team-formation.yml", "form-team")
     named = set(re.findall(r"indexOf\('([a-z_]+)'\)", script))
-    assert named == set(teams.FIELDS) | {"github_handle", "role"}
-    assert named <= set(teams.FIELDS) | set(roster.FIELDS)
-    # The header it writes on first use must match teams.FIELDS exactly, in order.
-    literal = re.search(r"const FIELDS = \[(.*?)\];", script).group(1)
-    assert tuple(re.findall(r"'([a-z_]+)'", literal)) == teams.FIELDS
+    assert named == {"email", "github_handle", "role"}
+    assert named <= set(roster.FIELDS) | set(roster.SYSTEM_FIELDS)
+    # The team cell's column: the lock's `team_column`, the key under the prefix else.
+    assert (
+        "lock.column ||" in script
+        and f"`{roster.TEAM_PREFIX}${{assignment}}`" in script
+    )
 
 
 def test_forms_have_no_confirmation_checkbox_and_fixed_titles():
@@ -339,7 +345,7 @@ def test_onboard_retries_the_roster_write_on_a_conflict():
         "matched[iHandle] = handle"
     )
     # ...and the role read further down addresses the fresh row, not the first snapshot's.
-    assert "(matched[iRole] || '')" in code
+    assert "studentRow(matched[iEmail])" in code
     assert "(row[iRole] || '')" not in code
 
 
@@ -364,10 +370,12 @@ def test_team_formation_retakes_the_cap_decision_on_every_attempt():
     loop = retry_loop(code)
     # The read, the duplicate-membership check and the size cap all live INSIDE the retry
     # loop: two students committing at the same moment must not both slip past a full team.
-    for fragment in ("await readTeams()", "size >= cap", "createOrUpdateFileContents"):
+    for fragment in (
+        "await readStudents()",
+        "size >= cap",
+        "createOrUpdateFileContents",
+    ):
         assert fragment in loop, fragment
-    # 422 is the create-on-first-use race: our request carried no sha because the file did
-    # not exist when we read it, but it does now.
     assert "e.status === 422" in code
 
 
@@ -445,15 +453,30 @@ def test_the_scanner_reads_every_scalar_for_every_shape():
     # older toolkit looks like: the two window scalars come back unset, and the workflow
     # reads that as open rather than shut (see the behavioural test further down).
     assert _lock_answers(_LOCK_FILE, ["solo", "project", "allocated", "invented"]) == [
-        {"formation": "none", "cap": 5, "window": None, "closes": "", "page": ""},
+        {
+            "formation": "none",
+            "cap": 5,
+            "window": None,
+            "closes": "",
+            "page": "",
+            "column": "",
+        },
         {
             "formation": "self_select",
             "cap": 3,
             "window": None,
             "closes": "",
             "page": "",
+            "column": "",
         },
-        {"formation": "assigned", "cap": 4, "window": None, "closes": "", "page": ""},
+        {
+            "formation": "assigned",
+            "cap": 4,
+            "window": None,
+            "closes": "",
+            "page": "",
+            "column": "",
+        },
         None,  # a slug the lock file does not carry
     ]
 
@@ -488,6 +511,7 @@ def test_the_scanner_is_not_confused_by_the_files_own_header():
             "window": "open",
             "closes": "2026-10-04",
             "page": "https://semester.github.io/assignments/02-assignment-2.html",
+            "column": "team:project",
         }
     ]
 
@@ -511,6 +535,7 @@ def test_an_empty_close_date_is_still_a_line_the_scanner_reads():
             "window": "closed",
             "closes": "",
             "page": "",
+            "column": "team:early",
         },
         {
             "formation": "self_select",
@@ -518,6 +543,7 @@ def test_an_empty_close_date_is_still_a_line_the_scanner_reads():
             "window": "open",
             "closes": "2026-11-30",
             "page": "",
+            "column": "team:later",
         },
     ]
 
@@ -672,17 +698,30 @@ def test_the_form_refuses_exactly_the_slugs_the_reconcile_reserves():
 # `team_lock_text` output and real CSVs, against stubs for the four API calls it makes.
 # The create/join rules are the reason: each of them is a sentence about what the file
 # says, what the form said and what gets written - which reading a regex cannot settle.
-_ROSTER = ",".join(roster.FIELDS) + "\n"
-_TEAMS_HEADER = ",".join(teams.FIELDS) + "\n"
+# The tests below speak the old teams.csv shape (`assignment,team,github_handle`) for
+# brevity; `_files_of` turns it into the two roster files the workflow reads, and
+# `_as_teams` turns each students.csv it writes back into that shape.
+_TEAMS_HEADER = "assignment,team,github_handle\n"
+_NUMBERS = {"assignment-2": 2}
 
 
-def _roster_of(*handles: str) -> str:
-    """students.csv carrying nothing but the handles, addressed by column name."""
+def _files_of(teams_csv: str, handles: tuple[str, ...]) -> dict[str, str]:
+    """students.csv (team cells from `teams_csv`) + .system/roster.csv, one onboarded
+    student per handle, `<handle>@x.org`."""
+    combined = (
+        ROSTER_HEADER + "\n" + "".join(f"{h}@x.org,{h},,{h},1,,\n" for h in handles)
+    )
+    return roster_files(combined, teams_csv or None, _NUMBERS)
+
+
+def _as_teams(students_csv: str, system_csv: str) -> str:
+    """A students.csv the workflow wrote, as teams.csv rows in file order."""
     rows = [
-        ",".join(h if f == "github_handle" else "" for f in roster.FIELDS)
-        for h in handles
+        f"assignment-2,{team},{s.github_handle}\n"
+        for s in roster.parse(students_csv, system_csv)
+        if (team := s.teams.get("2"))
     ]
-    return _ROSTER + "".join(f"{row}\n" for row in rows)
+    return _TEAMS_HEADER + "".join(rows)
 
 
 def _form_body(assignment: str, action: str | None, team: str) -> str:
@@ -701,8 +740,8 @@ def _run_form(
     roster: tuple[str, ...] | None = None,
 ) -> dict:
     """Run the SHIPPED team-formation script over these files and this issue, and return
-    what it did: `comments`, `labels`, `writes` (each teams.csv it committed) and
-    `states`.
+    what it did: `comments`, `labels`, `writes` (each students.csv it committed, read back
+    as teams.csv rows) and `states`.
 
     `await`/`async` are taken out so the stubs can answer synchronously - the same trick
     `_lock_answers` plays on one helper, over the whole script. Nothing else is rewritten,
@@ -714,8 +753,7 @@ def _run_form(
     )
     files = {
         ".system/assignments.lock.yml": lock,
-        "teams.csv": teams_csv,
-        "students.csv": _roster_of(*(roster or ("ann", "bob", handle))),
+        **_files_of(teams_csv, roster or ("ann", "bob", handle)),
     }
     issue = {"number": 7, "user": {"login": handle}, "body": body}
     harness = (
@@ -755,7 +793,9 @@ def _run_form(
         check=False,
     )
     assert run.returncode == 0, run.stderr
-    return json.loads(run.stdout)
+    out = json.loads(run.stdout)
+    out["writes"] = [_as_teams(w, files[roster_mod.SYSTEM_PATH]) for w in out["writes"]]
+    return out
 
 
 # The assignment's page on the semester site, as the lock carries it for the refusals.
@@ -767,7 +807,8 @@ def _lock_for(
 ) -> str:
 
     return team_formation.team_lock_text(
-        {"assignment-2": ("self_select", cap, window, closes, page)}
+        {"assignment-2": ("self_select", cap, window, closes, page)},
+        {"assignment-2": "2"},
     )
 
 
@@ -871,7 +912,8 @@ def test_a_lock_written_before_the_window_existed_still_forms_teams():
     # formation away from every such semester at once, silently, until someone noticed.
     out = _run_form(
         "assignments:\n  assignment-2:\n"
-        "    team_formation: self_select\n    max_team_size: 4\n",
+        "    team_formation: self_select\n    max_team_size: 4\n"
+        "    team_column: team:2\n",
         _TEAMS_CSV,
         _form_body("assignment-2", "Join or switch to an existing team", "team-alpha"),
     )
@@ -1465,15 +1507,26 @@ _CODE = "dsl-abc234"
 
 
 def _bound_roster(handle: str, user_id: str) -> str:
-    """students.csv whose one row carries `_CODE`, bound to `handle` / `user_id`."""
-    cells = {"github_handle": handle, "github_id": user_id, "enrol_code": _CODE}
-    return _ROSTER + ",".join(cells.get(f, "") for f in roster.FIELDS) + "\n"
+    """.system/roster.csv whose one row carries `_CODE`, bound to `handle` / `user_id`."""
+    cells = {
+        "email": "a@x.org",
+        "github_handle": handle,
+        "github_id": user_id,
+        "enrol_code": _CODE,
+    }
+    header = ",".join(roster.SYSTEM_FIELDS)
+    return (
+        header + "\n" + ",".join(cells.get(f, "") for f in roster.SYSTEM_FIELDS) + "\n"
+    )
+
+
+_STUDENTS = "email,name,role\na@x.org,Ada,\n"
 
 
 def _run_onboard(rosters: list[str], record_fails: bool = False) -> dict:
     """Run the SHIPPED onboard script for a Join from `newacct` (id 202). `rosters` is
-    what successive reads of students.csv return; a write of it is refused with a 409, so a
-    second entry is what the retry re-reads. Returns `comments`, `records` (path -> the
+    what successive reads of .system/roster.csv return; a write of it is refused with a
+    409, so a second entry is what the retry re-reads. students.csv is `_STUDENTS`. Returns `comments`, `records` (path -> the
     parsed record) and `warnings`."""
     code = re.sub(
         r"\basync\s+",
@@ -1487,6 +1540,7 @@ def _run_onboard(rosters: list[str], record_fails: bool = False) -> dict:
     }
     harness = (
         f"const ROSTERS = {json.dumps(rosters)};\n"
+        f"const STUDENTS_CSV = {json.dumps(_STUDENTS)};\n"
         f"const ISSUE = {json.dumps(issue)};\n"
         f"const RECORD_FAILS = {json.dumps(record_fails)};\n"
         "const OUT = { comments: [], records: {}, warnings: [] };\n"
@@ -1501,10 +1555,12 @@ def _run_onboard(rosters: list[str], record_fails: bool = False) -> dict:
         "  paginate: (fn, args) => [],\n"
         "  rest: {\n"
         "  repos: {\n"
-        "    getContent: (a) => ({ data: { content:"
+        "    getContent: (a) => a.path === 'students.csv'"
+        " ? { data: { content: STUDENTS_CSV, sha: 'st' } }"
+        " : ({ data: { content:"
         " ROSTERS[Math.min(reads++, ROSTERS.length - 1)], sha: 's' + reads } }),\n"
         "    createOrUpdateFileContents: (a) => {\n"
-        "      if (a.path === 'students.csv') {"
+        "      if (a.path === '.system/roster.csv') {"
         " const e = new Error('stale'); e.status = 409; throw e; }\n"
         "      if (RECORD_FAILS) { const e = new Error('no'); e.status = 403; throw e; }\n"
         "      OUT.records[a.path] = JSON.parse(a.content); return {}; },\n"
