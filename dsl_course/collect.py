@@ -115,7 +115,17 @@ from operator import itemgetter
 from pathlib import Path, PurePosixPath
 from typing import NamedTuple
 
-from . import course, grades, records, roster, schedule, sync_teams, teams
+from . import (
+    course,
+    grading_sheet,
+    grading_spec,
+    receipts,
+    records,
+    roster,
+    schedule,
+    sync_teams,
+    teams,
+)
 from .course import (
     CONFIG_REPO,
     SANDBOX_USER,
@@ -139,10 +149,10 @@ from .gh_contents import (
 )
 from .ghcli import BOT_EMAIL, GIT_ENV, bot_login, clone, gh, git, is_missing_resource
 
-# The assignment's definition and the sheet's spec live in `grades` (see the section
-# there): `grades` may not import `collect`, and the sheet is its type. Re-exported
-# under their old names so every caller and workflow keeps spelling them here.
-from .grades import (
+# The assignment's definition and the sheet's spec live in `grading_spec`: it may not
+# import `collect`, and the sheet is its type. Re-exported under their old names so every
+# caller and workflow keeps spelling them here.
+from .grading_spec import (
     GRADING_FILE,
     load_grading_spec,
     parse_grading_spec,  # noqa: F401 - re-exported; `collect` no longer parses it itself
@@ -526,7 +536,7 @@ def one_per_unit(targets: list[Target]) -> list[Target]:
     happens - two roster rows sharing a `github_handle` (the same person entered twice, or
     a handle pasted into the wrong row), a team listed twice in teams.csv.
 
-    Unfiltered, the duplicate is not merely wasted work. `grades.merge_sheet` walks the
+    Unfiltered, the duplicate is not merely wasted work. `grading_sheet.merge_sheet` walks the
     units in order, popping each one out of the sheet it read: the first pass merges the
     block, the second finds the key already popped and builds a BRAND NEW one - so a tick
     that derived nothing for that unit (a repo quiet since the last look, which is the
@@ -1370,7 +1380,7 @@ def snapshot_assignment(
 
 # The sheet is created at handout, filled at the due date, refreshed through the late
 # window and frozen at the cutoff. Only the toolkit's own `info:` moves; see
-# `grades.merge_sheet` for what that guarantees the grader.
+# `grading_sheet.merge_sheet` for what that guarantees the grader.
 CONTRIBUTIONS_FILE = "CONTRIBUTIONS.md"
 
 
@@ -1392,7 +1402,7 @@ def submitted_display(submitted_at: str, tz: str | None) -> str:
 
     To the MINUTE: seconds add nothing a grader reads a submission time for, and this is
     also the form the mock-up shows. It used to be load-bearing as well - with seconds the
-    value matches YAML 1.1's timestamp pattern - but `grades._SheetLoader` now keeps every
+    value matches YAML 1.1's timestamp pattern - but `grading_sheet._SheetLoader` now keeps every
     plain scalar in the sheet a string, so the type can no longer move under it."""
     at = _parse_iso(submitted_at)
     if at is None:
@@ -1470,7 +1480,7 @@ def _sheet_info(
     merge keeps the fact the sheet already holds for it.
 
     The block's shape - which keys exist at all for this assignment - is
-    `grades._fresh_info`'s to declare, and the merge unions the two; stating it here as
+    `grading_sheet._fresh_info`'s to declare, and the merge unions the two; stating it here as
     well is how a key added in one place goes missing in the other."""
     out: dict[str, dict] = {}
     looked_at = datetime.now(schedule._tz(tz)).isoformat(timespec="minutes")
@@ -1551,7 +1561,7 @@ def _provisional_pins(
     Only the repos that can have MOVED are read. The semester listing handed in carries
     `pushed_at` for every repo, and one quiet since the commit the sheet already records
     cannot have gained a later one - so it is not asked, and the fact on the sheet stands (a unit
-    absent from these pins is one `grades._merged_block` leaves alone). The refresh runs
+    absent from these pins is one `grading_sheet._merged_block` leaves alone). The refresh runs
     four times an hour for the length of the late window, where it used to cost one commits
     call per submission repo on every one of those ticks.
 
@@ -1570,7 +1580,7 @@ def _provisional_pins(
     pins: dict[str, tuple[str, str]] = {}
     notes: dict[str, str] = {}
     for target in targets:
-        was = (previous.get(target.unit) or {}).get(grades.INFO_KEY) or {}
+        was = (previous.get(target.unit) or {}).get(grading_sheet.INFO_KEY) or {}
         pushed_at = _pushed_at(listing, target.repo)
         if _quiet_since(pushed_at, was.get("submitted"), was.get("checked")):
             continue
@@ -1620,7 +1630,7 @@ def _receipt_event(
 
 def _post_receipts(
     semester_org: str,
-    spec: grades.SheetSpec,
+    spec: grading_sheet.SheetSpec,
     listing: dict[str, dict] | None,
     targets: list[Target],
     pins: dict[str, tuple[str, str]],
@@ -1640,10 +1650,10 @@ def _post_receipts(
     it. No mark is lost either way - marks go to the gradebook and never to a repo.
 
     That gate is the FILE's answer, and the loop below asks the LIVE one -
-    `grades.receipts_thread`. The two can disagree: `visibility:` edited back to `private`
+    `receipts.receipts_thread`. The two can disagree: `visibility:` edited back to `private`
     after hand-out leaves the file saying there is a private thread here and the semester's
     repos world-readable, and this would open one in each of them and post a student's
-    submission times where the internet can read them. The repo wins. (The digest reports the disagreement itself - `grades._visibility_faults`; this
+    submission times where the internet can read them. The repo wins. (The digest reports the disagreement itself - `grading_spec._visibility_faults`; this
     is what keeps it from costing anything meanwhile.)"""
     if not spec.has_receipts_issue:
         return
@@ -1657,22 +1667,22 @@ def _post_receipts(
             # answers UTC, and "pushed 20:14" for a 22:14 push reads as a bug.
             when = when.astimezone(schedule._tz(tz))
         shown = submitted_display(submitted_at, tz) if when is not None else ""
-        before = (previous.get(unit) or {}).get(grades.INFO_KEY) or {}
+        before = (previous.get(unit) or {}).get(grading_sheet.INFO_KEY) or {}
         was = before.get("submitted")
         event = _receipt_event(phase, sha, was, shown, before.get("checked"))
         if event is None or (not changed and event == course.RECEIPT_UPDATED):
             continue
-        body = grades.receipt(
+        body = receipts.receipt(
             spec,
             event,
             sha=sha,
-            pushed_display=grades._display_long(when),
+            pushed_display=grading_spec._display_long(when),
             days=days_late(when, due, tz) if (when is not None and due) else 0,
         )
         # Nothing weaker than "this repo is in the listing and the listing says it is
         # private" may be posted into. Off the rows this pass already holds, so the guard
         # costs no call.
-        issue = grades.receipts_thread(
+        issue = receipts.receipts_thread(
             spec, semester_org, repo, unit, target.members, listing, dry_run=dry_run
         )
         if issue is None:
@@ -1685,7 +1695,7 @@ def _post_receipts(
             # A lookup that could not be read. A receipt is a courtesy and the sheet is
             # the record, so this unit waits for the next tick.
             continue
-        if grades.post_receipt(
+        if receipts.post_receipt(
             semester_org,
             repo,
             issue,
@@ -1701,7 +1711,11 @@ def _post_receipts(
 
 
 def _status_line(
-    spec: grades.SheetSpec, phase: SheetPhase, total: int, submitted: int, derived: bool
+    spec: grading_sheet.SheetSpec,
+    phase: SheetPhase,
+    total: int,
+    submitted: int,
+    derived: bool,
 ) -> str:
     """The one line of the header that changes hour to hour. It says what a grader wants
     to know before opening the file: is it worth marking yet, and can it still move?"""
@@ -1740,7 +1754,7 @@ def _sheet_phase(
     could not be read. Otherwise the CUTOFF decides, off the schedule and the template -
     no extra call. Only when the schedule cannot say (an assignment collected by hand,
     with no dated entry) is the snapshot file asked."""
-    if grades.sheet_is_frozen(old_text):
+    if grading_sheet.sheet_is_frozen(old_text):
         return SheetPhase.FROZEN
     sealed = (
         now >= cutoff
@@ -1798,7 +1812,7 @@ def sync_sheet(
     button press, an autograde run - or the tick's own could not be read, and this takes
     its own, and only if it is going to derive anything at all."""
     gspec = load_grading_spec(course_org, template, semester_org=semester_org, slug=key)
-    path = grades.sheet_path(slug)
+    path = grading_sheet.sheet_path(slug)
     if gspec.not_migrated:
         # A refused definition is a default shape and late rule nobody wrote: refreshing
         # off it rewrites a group sheet in the individual shape. Not a failed write - the
@@ -1846,8 +1860,8 @@ def sync_sheet(
         cutoff,
     )
     try:
-        on_disk = grades.parse_sheet(old_text) if old_text else {}
-    except grades.SheetUnreadable as exc:
+        on_disk = grading_sheet.parse_sheet(old_text) if old_text else {}
+    except grading_sheet.SheetUnreadable as exc:
         # A grader mid-edit. The file is theirs and it is the record, so the tick reports
         # and stops; the next one picks it up the moment the YAML parses again.
         log_err(f"  ! {path} cannot be read ({exc}) - leaving it exactly as it is")
@@ -1936,7 +1950,7 @@ def sync_sheet(
     for unit, state in (completion or {}).items():
         info_updates.setdefault(unit, {})["completion"] = state
 
-    sheet = grades.merge_sheet(
+    sheet = grading_sheet.merge_sheet(
         on_disk or None,
         spec,
         units,
@@ -1950,19 +1964,19 @@ def sync_sheet(
         1
         for block in (sheet.get(spec.container_key) or {}).values()
         if isinstance(block, dict)
-        and (block.get(grades.INFO_KEY) or {}).get("submitted")
+        and (block.get(grading_sheet.INFO_KEY) or {}).get("submitted")
     )
     status = _status_line(spec, phase, len(units), submitted, derive)
-    content = grades.dump_sheet(sheet, spec, status).encode()
+    content = grading_sheet.dump_sheet(sheet, spec, status).encode()
     # NOT a byte compare. The file is the grader's: their quoting, their indentation, the
     # blank lines they leave and the comments they add ("extension granted by email") are
     # all things a re-dump rewrites, and this runs four times an hour - so a sheet was
     # canonicalised within fifteen minutes of every save, and a grader editing it locally
     # got a non-fast-forward on every push. What the toolkit owns is the DATA and the
     # header; a write happens when one of those two really moved, and not otherwise.
-    changed = sheet != on_disk or grades.sheet_header(old_text) != grades.sheet_header(
-        content.decode()
-    )
+    changed = sheet != on_disk or grading_sheet.sheet_header(
+        old_text
+    ) != grading_sheet.sheet_header(content.decode())
     written = True
     if not changed:
         log_skip(f"{path} (unchanged)")
@@ -3796,7 +3810,7 @@ def collect(
             )
             return 1
     log_ok(
-        f"examined {len(examined)} target(s) into {grades.sheet_path(slug)}: "
+        f"examined {len(examined)} target(s) into {grading_sheet.sheet_path(slug)}: "
         f"{len(scores)} scored, {len(completions)} completion-checked; "
         f"{len(failed_to_run)} failed to run, {len(unreachable)} unreachable "
         f"(per-target detail in {autograde_path(slug)}/) - faculty mark in the sheet"

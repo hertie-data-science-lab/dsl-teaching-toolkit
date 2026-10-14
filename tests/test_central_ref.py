@@ -20,7 +20,7 @@ from dsl_course import (
     workflows_place,
 )
 from dsl_course.central import CENTRAL, CENTRAL_REF, CENTRAL_REF_PLACEHOLDER
-from dsl_course.grades import LockWrite
+from dsl_course.team_formation import LockWrite
 
 SHA = "0" * 40
 

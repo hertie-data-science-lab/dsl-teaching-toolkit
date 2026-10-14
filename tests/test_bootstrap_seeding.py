@@ -38,7 +38,9 @@ from dsl_course import (
     course,
     gh_contents,
     gh_teams,
-    grades,
+    gradebook,
+    grading_sheet,
+    grading_spec,
     opencourse,
     readings,
     roster,
@@ -56,8 +58,8 @@ from dsl_course import bootstrap_course as bc
 from dsl_course.central import CENTRAL
 from dsl_course.course import OLD_SEMESTER_TOPIC
 from dsl_course.faults import NOT_MIGRATED
-from dsl_course.grades import LockWrite
 from dsl_course.repos import Converged
+from dsl_course.team_formation import LockWrite
 from tests.conftest import repo_row, stub_bootstrap
 
 EXAMPLE_SEMESTER = (
@@ -416,10 +418,10 @@ def test_every_shipped_sample_parses_with_the_real_parser():
 
     # both grading sheets: the individual case, and the group one (which nests `members:`
     # inside each team). Parsed by the very function the toolkit reads a live sheet with.
-    individual = grades.parse_sheet(
+    individual = grading_sheet.parse_sheet(
         example_semester_file("grading_sheets/assignment-1.yml")
     )
-    project = grades.parse_sheet(
+    project = grading_sheet.parse_sheet(
         example_semester_file("grading_sheets/assignment-4-project.yml")
     )
     assert set(individual) == {"submissions"}
@@ -433,7 +435,7 @@ def test_every_shipped_sample_parses_with_the_real_parser():
     )
     # A sample is what a grader copies from, so it must not teach them to type a note that
     # reaches a student: the private keys are present and the allowlist has never seen them.
-    assert grades.NOTES_KEY not in grades.STUDENT_VIEW_KEYS
+    assert grading_sheet.NOTES_KEY not in gradebook.STUDENT_VIEW_KEYS
 
 
 # `(slug, schedule key, is_group, phase, submitted, total, derived)` - the moment each
@@ -468,15 +470,17 @@ def test_every_sample_sheet_is_what_the_toolkit_would_write(
     sched, error = schedule.load_file(str(EXAMPLE_SEMESTER / "schedule.yml"))
     assert error is None, error
     entry = sched.assignments[key]
-    gspec = grades.parse_grading_spec(
+    gspec = grading_spec.parse_grading_spec(
         welcome.example_course_file(
-            f"{entry.course_source_repo}/solution/{grades.GRADING_FILE}"
+            f"{entry.course_source_repo}/solution/{grading_spec.GRADING_FILE}"
         )
     )
-    spec = grades.sheet_spec(sched, key, slug, gspec, is_group)
-    text = example_semester_file(f"{grades.SHEETS_DIR}/{slug}.yml")
+    spec = grading_spec.sheet_spec(sched, key, slug, gspec, is_group)
+    text = example_semester_file(f"{grading_sheet.SHEETS_DIR}/{slug}.yml")
     status = collect._status_line(spec, phase, total, submitted, derived)
-    assert grades.dump_sheet(grades.parse_sheet(text), spec, status) == text
+    assert (
+        grading_sheet.dump_sheet(grading_sheet.parse_sheet(text), spec, status) == text
+    )
 
 
 def test_scaffold_and_sample_carry_the_engines_current_column_sets():
@@ -600,16 +604,16 @@ def test_the_worked_examples_assignments_parse_with_the_real_reader(capsys):
     configs = sorted((WT_EXAMPLES).glob("assignment-*/solution/grading_config.yml"))
     assert configs, "the worked example has lost its assignments"
     for path in configs:
-        spec = grades.parse_grading_spec(path.read_text())
+        spec = grading_spec.parse_grading_spec(path.read_text())
         assert spec.dropped == (), f"{path.name}: {spec.dropped}"
         assert spec.title
     assert capsys.readouterr().err == ""
     # And the showcase is opinionated: the notebook assignment declares the completion
     # check rather than leaving a reader to infer it from `format:`.
     notebooks = [
-        grades.parse_grading_spec(p.read_text())
+        grading_spec.parse_grading_spec(p.read_text())
         for p in configs
-        if grades.parse_grading_spec(p.read_text()).format == "ipynb"
+        if grading_spec.parse_grading_spec(p.read_text()).format == "ipynb"
     ]
     assert notebooks and all(s.completion_check is True for s in notebooks)
 

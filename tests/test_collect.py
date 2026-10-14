@@ -26,7 +26,16 @@ import pytest
 import yaml
 from conftest import repo_row
 
-from dsl_course import collect, course, gh_contents, ghcli, grades, settings
+from dsl_course import (
+    collect,
+    course,
+    gh_contents,
+    ghcli,
+    gradebook,
+    grading_sheet,
+    grading_spec,
+    settings,
+)
 from dsl_course.collect import Target
 from dsl_course.faults import NotMigrated, Severity
 from dsl_course.roster import Student
@@ -78,10 +87,10 @@ def _clear_dep_caches() -> None:
     collect._grader_dep_missing.cache_clear()
 
 
-DEFAULT_SPEC = grades.GradingSpec()
+DEFAULT_SPEC = grading_spec.GradingSpec()
 # What a reader is handed for a template that declares nothing: the defaults, with the
 # run settings resolved (here to the institution's, the conftest's course declaring none).
-LOADED_DEFAULT_SPEC = grades.GradingSpec(max_team_size=5)
+LOADED_DEFAULT_SPEC = grading_spec.GradingSpec(max_team_size=5)
 
 
 def test_parse_grading_spec_defaults_and_overrides():
@@ -91,7 +100,7 @@ def test_parse_grading_spec_defaults_and_overrides():
     spec = collect.parse_grading_spec(
         "type: group\nformats: [ipynb]\nautograde: false\nmax_auto: 20\ntests: solution/tests\n"
     )
-    assert spec == grades.GradingSpec(
+    assert spec == grading_spec.GradingSpec(
         type="group",
         formats=("ipynb",),
         autograde=False,
@@ -108,13 +117,13 @@ def _instance_faults(block: str) -> list[str]:
     ]
 
 
-def _resolved(monkeypatch, spec_text: str, block: str) -> grades.GradingSpec:
+def _resolved(monkeypatch, spec_text: str, block: str) -> grading_spec.GradingSpec:
     """The template `spec_text` with the run settings `block` gives assignment `a` in the
     semester's assignments.yml - what every reader is handed."""
     monkeypatch.setattr(
         settings, "_assignments_text", lambda org: f"assignments:\n  a:\n{block}"
     )
-    return grades.with_run_settings(
+    return grading_spec.with_run_settings(
         collect.parse_grading_spec(spec_text), "C", "Sem", "a"
     )
 
@@ -1605,7 +1614,9 @@ def _stub_solution_clone(monkeypatch, grading: str = "autograde: true\nmax_auto:
     clone), so both transports answer with the template's grading_config.yml."""
     monkeypatch.setattr(collect, "clone", _clone_writing(grading))
     monkeypatch.setattr(collect, "gh", lambda *a, **k: (0, ""))
-    monkeypatch.setattr(collect.grades, "_grading_text", lambda org, template: grading)
+    monkeypatch.setattr(
+        collect.grading_spec, "_grading_text", lambda org, template: grading
+    )
     # The grading sheet has its own tests below; here it is a no-op, so an autograding
     # test does not have to stand up a roster, a snapshot and a semester-config read.
     monkeypatch.setattr(collect, "sync_sheet", lambda *a, **k: collect.SheetWrite(True))
@@ -1623,7 +1634,7 @@ def _recorded_sheet_writes(
     def fake_sync(course_org, semester_org, sched, key, slug, template, **kw):
         calls.append({"slug": slug, **kw})
         if order is not None:
-            order.append(collect.grades.sheet_path(slug))
+            order.append(collect.grading_sheet.sheet_path(slug))
         return collect.SheetWrite(ok)
 
     monkeypatch.setattr(collect, "sync_sheet", fake_sync)
@@ -1928,7 +1939,7 @@ def test_collect_records_a_skip_when_the_template_has_no_solution_branch(monkeyp
     # same skip on every hourly tick, for ever. Hand-marked assignments are common.
     monkeypatch.setattr(collect, "clone", lambda *a, **k: False)
     monkeypatch.setattr(collect, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
-    monkeypatch.setattr(collect.grades, "_grading_text", lambda org, template: "")
+    monkeypatch.setattr(collect.grading_spec, "_grading_text", lambda org, template: "")
     monkeypatch.setattr(collect.schedule, "load", lambda org: citing(*TEMPLATES))
     sheets = _recorded_sheet_writes(monkeypatch)
     written = _captured_writes(monkeypatch)
@@ -1947,7 +1958,7 @@ def test_a_solution_clone_that_failed_records_no_skip(monkeypatch, capsys):
     # branch", one bad tick after the cutoff retired the hidden tests for good.
     monkeypatch.setattr(collect, "clone", lambda *a, **k: False)
     monkeypatch.setattr(collect, "gh", lambda *a, **k: (0, '{"name": "solution"}'))
-    monkeypatch.setattr(collect.grades, "_grading_text", lambda org, template: "")
+    monkeypatch.setattr(collect.grading_spec, "_grading_text", lambda org, template: "")
     monkeypatch.setattr(collect.schedule, "load", lambda org: citing(*TEMPLATES))
     _recorded_sheet_writes(monkeypatch)
     written = _captured_writes(monkeypatch)
@@ -1963,7 +1974,7 @@ def test_a_freeze_that_fails_records_no_skip_and_goes_red(monkeypatch, capsys):
     # re-derives. So the marker waits, and the next tick seals and then records.
     monkeypatch.setattr(collect, "clone", lambda *a, **k: False)
     monkeypatch.setattr(collect, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
-    monkeypatch.setattr(collect.grades, "_grading_text", lambda org, template: "")
+    monkeypatch.setattr(collect.grading_spec, "_grading_text", lambda org, template: "")
     monkeypatch.setattr(collect.schedule, "load", lambda org: citing(*TEMPLATES))
     _recorded_sheet_writes(monkeypatch, ok=False)
     written = _captured_writes(monkeypatch)
@@ -1977,7 +1988,7 @@ def test_the_next_run_after_a_failed_freeze_seals_and_then_records(monkeypatch):
     # tick that follows does both halves.
     monkeypatch.setattr(collect, "clone", lambda *a, **k: False)
     monkeypatch.setattr(collect, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
-    monkeypatch.setattr(collect.grades, "_grading_text", lambda org, template: "")
+    monkeypatch.setattr(collect.grading_spec, "_grading_text", lambda org, template: "")
     monkeypatch.setattr(collect.schedule, "load", lambda org: citing(*TEMPLATES))
     sheets = _recorded_sheet_writes(monkeypatch, ok=True)
     written = _captured_writes(monkeypatch)
@@ -2016,7 +2027,7 @@ def test_no_unit_of_a_shared_drop_box_is_ever_machine_marked(monkeypatch):
     monkeypatch.setattr(
         collect,
         "load_grading_spec",
-        lambda *a, **k: collect.grades.GradingSpec(
+        lambda *a, **k: collect.grading_spec.GradingSpec(
             submit_via="shared_dropbox_repo", autograde=True, completion_check=True
         ),
     )
@@ -2044,7 +2055,7 @@ def test_collect_records_a_skip_when_the_solution_branch_has_no_tests(monkeypatc
     monkeypatch.setattr(collect, "clone", clone_without_tests)
     monkeypatch.setattr(collect, "gh", lambda *a, **k: (0, ""))
     monkeypatch.setattr(
-        collect.grades, "_grading_text", lambda org, template: "autograde: true\n"
+        collect.grading_spec, "_grading_text", lambda org, template: "autograde: true\n"
     )
     monkeypatch.setattr(collect.schedule, "load", lambda org: citing(*TEMPLATES))
     sheets = _recorded_sheet_writes(monkeypatch)
@@ -2151,7 +2162,7 @@ def test_the_shape_is_read_off_the_solution_branch_grading_config(monkeypatch):
         seen.update(org=org, repo=repo, path=path, ref=ref)
         return "type: group\nformats: [py]\n"
 
-    monkeypatch.setattr(collect.grades, "get_file_content", fake_get)
+    monkeypatch.setattr(collect.grading_spec, "get_file_content", fake_get)
     assert collect.load_grading_spec(
         "Course-Org", "assignment-4-project-f2026"
     ).is_group
@@ -2165,7 +2176,7 @@ def test_the_shape_is_read_off_the_solution_branch_grading_config(monkeypatch):
 
 def test_the_shape_defaults_to_individual_without_grading_config(monkeypatch):
     # No solution branch / no grading_config.yml -> the contents fetch misses -> individual.
-    monkeypatch.setattr(collect.grades, "get_file_content", lambda *a, **k: None)
+    monkeypatch.setattr(collect.grading_spec, "get_file_content", lambda *a, **k: None)
     assert not collect.load_grading_spec("Course-Org", "assignment-1-f2026").is_group
 
 
@@ -3848,7 +3859,7 @@ def test_an_unwritten_no_solution_branch_marker_goes_red(monkeypatch, capsys):
     # same clone attempt, and the same decision, every hour.
     monkeypatch.setattr(collect, "clone", lambda *a, **k: False)
     monkeypatch.setattr(collect, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
-    monkeypatch.setattr(collect.grades, "_grading_text", lambda org, template: "")
+    monkeypatch.setattr(collect.grading_spec, "_grading_text", lambda org, template: "")
     monkeypatch.setattr(collect, "sync_sheet", lambda *a, **k: collect.SheetWrite(True))
     monkeypatch.setattr(collect.schedule, "load", lambda org: citing(*TEMPLATES))
     _failing_put_file(monkeypatch)
@@ -3927,7 +3938,9 @@ def _sheet_env(
             for repo in {target.repo for target in targets}
         },
     )
-    monkeypatch.setattr(collect.grades, "_grading_text", lambda org, template: grading)
+    monkeypatch.setattr(
+        collect.grading_spec, "_grading_text", lambda org, template: grading
+    )
     monkeypatch.setattr(
         collect,
         "submission_targets",
@@ -3952,8 +3965,8 @@ def _sheet_env(
     )
     # Receipts have their own tests below; here they are a no-op, so a sheet test does not
     # also have to stand up an issue per submission repo.
-    monkeypatch.setattr(collect.grades, "ensure_receipts_issue", lambda *a, **k: 1)
-    monkeypatch.setattr(collect.grades, "post_receipt", lambda *a, **k: True)
+    monkeypatch.setattr(collect.receipts, "ensure_receipts_issue", lambda *a, **k: 1)
+    monkeypatch.setattr(collect.receipts, "post_receipt", lambda *a, **k: True)
     return written
 
 
@@ -4057,7 +4070,7 @@ def test_the_sheet_carries_the_note_for_a_contradicted_submission(monkeypatch):
         now=datetime(2026, 10, 6, tzinfo=BERLIN),
     ).written
     ((_path, text),) = written
-    info = grades.parse_sheet(text)["submissions"]["ada-l"]["info"]
+    info = grading_sheet.parse_sheet(text)["submissions"]["ada-l"]["info"]
     assert info["submitted_note"] == collect.SUSPECT_NOTE
     assert info["days_late"] == "0"  # the arithmetic still says what it says
 
@@ -4086,7 +4099,7 @@ def test_the_solution_push_never_makes_an_on_time_submission_suspect(monkeypatch
         now=datetime(2026, 10, 6, tzinfo=BERLIN),
     ).written
     ((_path, text),) = written
-    info = grades.parse_sheet(text)["submissions"]["ada-l"]["info"]
+    info = grading_sheet.parse_sheet(text)["submissions"]["ada-l"]["info"]
     assert info.get("submitted_note") != collect.SUSPECT_NOTE
 
 
@@ -4116,7 +4129,7 @@ def test_the_freeze_reads_the_note_back_off_the_snapshot(monkeypatch):
         now=datetime(2026, 10, 12, tzinfo=BERLIN),
     ).written
     ((_path, text),) = written
-    info = grades.parse_sheet(text)["submissions"]["ada-l"]["info"]
+    info = grading_sheet.parse_sheet(text)["submissions"]["ada-l"]["info"]
     assert info["submitted_note"] == collect.SUSPECT_NOTE
 
 
@@ -4146,7 +4159,7 @@ def test_a_commit_dated_row_says_so_in_the_sheet_at_the_freeze(monkeypatch):
         now=datetime(2026, 10, 12, tzinfo=BERLIN),
     ).written
     ((_path, text),) = written
-    info = grades.parse_sheet(text)["submissions"]["ada-l"]["info"]
+    info = grading_sheet.parse_sheet(text)["submissions"]["ada-l"]["info"]
     assert info["submitted_note"] == collect.COMMIT_ONLY_NOTE
 
 
@@ -4176,7 +4189,7 @@ def test_a_server_timed_row_carries_no_note_at_all(monkeypatch):
         now=datetime(2026, 10, 12, tzinfo=BERLIN),
     ).written
     ((_path, text),) = written
-    info = grades.parse_sheet(text)["submissions"]["ada-l"]["info"]
+    info = grading_sheet.parse_sheet(text)["submissions"]["ada-l"]["info"]
     assert "submitted_note" not in info
 
 
@@ -4203,7 +4216,7 @@ def test_the_sheet_created_at_handout_has_every_row_and_derives_nothing(monkeypa
     assert path == "grading_sheets/assignment-1.yml"
     assert "# Status: OPEN - 0 of 2 students have submitted" in text
     assert "; late pushes still update" not in text  # nothing can be late yet
-    sheet = grades.parse_sheet(text)
+    sheet = grading_sheet.parse_sheet(text)
     assert list(sheet["submissions"]) == ["ada-l", "ben-k"]
     assert sheet["submissions"]["ada-l"]["info"] == {
         "submitted": None,
@@ -4248,7 +4261,7 @@ def test_the_refresh_fills_info_and_leaves_the_graders_text_byte_identical(monke
         now=datetime(2026, 10, 6, 12, 0, tzinfo=BERLIN),
     ).written
     ((_path, text),) = written
-    sheet = grades.parse_sheet(text)
+    sheet = grading_sheet.parse_sheet(text)
     ada = sheet["submissions"]["ada-l"]
     assert ada["info"]["submitted"] == "2026-10-06T09:30+02:00"
     assert ada["info"]["days_late"] == "2"
@@ -4398,12 +4411,14 @@ def _canonical(status: str, units: list[str]) -> str:
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(settings, "_assignments_text", lambda org: LATE_YML)
         settings.semester_blocks.cache_clear()
-        spec = grades.sheet_spec(_sched(), "assignment-1", "assignment-1", gspec, False)
+        spec = grading_spec.sheet_spec(
+            _sched(), "assignment-1", "assignment-1", gspec, False
+        )
     settings.semester_blocks.cache_clear()
-    sheet = grades.merge_sheet(
+    sheet = grading_sheet.merge_sheet(
         None, spec, [(u, [u]) for u in units], {u: {"days_late": "0"} for u in units}
     )
-    return grades.dump_sheet(sheet, spec, status)
+    return grading_sheet.dump_sheet(sheet, spec, status)
 
 
 FROZEN_STATUS = "FROZEN Sun 11 Oct 2026 23:59"
@@ -4687,7 +4702,7 @@ def test_an_externally_submitted_assignment_gets_no_info_and_a_status_that_says_
         "# Status: submitted outside GitHub - nothing to collect; run Distribute grades any time\n"
         in text
     )
-    assert "info" not in grades.parse_sheet(text)["submissions"]["ada-l"]
+    assert "info" not in grading_sheet.parse_sheet(text)["submissions"]["ada-l"]
 
 
 def test_an_external_sheet_past_its_cutoff_keeps_the_external_wording(monkeypatch):
@@ -4711,7 +4726,7 @@ def test_an_external_sheet_past_its_cutoff_keeps_the_external_wording(monkeypatc
         "# Status: submitted outside GitHub - nothing to collect; run Distribute grades any time\n"
         in text
     )
-    assert "FROZEN" not in grades.sheet_header(text)
+    assert "FROZEN" not in grading_sheet.sheet_header(text)
 
 
 def test_a_quiz_marked_after_the_fact_is_sent_from_a_sheet_that_is_not_frozen(
@@ -4719,7 +4734,7 @@ def test_a_quiz_marked_after_the_fact_is_sent_from_a_sheet_that_is_not_frozen(
 ):
     # An in-class paper quiz: handed out after its due date, marks typed in later. Nothing
     # is collected, so nothing waits on the freeze - Distribute sends from an open sheet.
-    from tests.test_grades import ROSTER_ADA, _distribute
+    from tests.test_distribute import ROSTER_ADA, _distribute
 
     _EXTERNAL_GRADING = "title: Neural networks\nsubmit_via: external\n"
 
@@ -4736,10 +4751,10 @@ def test_a_quiz_marked_after_the_fact_is_sent_from_a_sheet_that_is_not_frozen(
         units=[("ada-l", ["ada-l"]), ("ben-k", ["ben-k"])],  # off the roster
     ).created
     ((_path, text),) = written
-    rows = grades.parse_sheet(text)["submissions"]
+    rows = grading_sheet.parse_sheet(text)["submissions"]
     assert set(rows) == {"ada-l", "ben-k"}
     assert not any("info" in row for row in rows.values())
-    assert not grades.sheet_is_frozen(text)
+    assert not grading_sheet.sheet_is_frozen(text)
 
     blank = "    notes_not_shared_with_students:\n    score_individual:\n  ben-k:"
     assert text.count(blank) == 1
@@ -4792,7 +4807,7 @@ def test_the_freeze_reads_the_written_snapshot_and_seals_the_sheet(monkeypatch):
     ).written
     ((_path, text),) = written
     assert "# Status: FROZEN Sun 11 Oct 2026 23:59" in text
-    ada = grades.parse_sheet(text)["submissions"]["ada-l"]
+    ada = grading_sheet.parse_sheet(text)["submissions"]["ada-l"]
     assert ada["info"]["submitted"] == "2026-10-03T22:14+02:00"
     assert ada["info"]["days_late"] == "0"
     assert ada["info"]["autograde"] == "7/9"
@@ -4830,7 +4845,7 @@ def test_a_frozen_sheet_is_never_re_derived(monkeypatch):
         now=datetime(2026, 10, 20, tzinfo=BERLIN),
     ).written
     ((_path, text),) = written
-    sheet = grades.parse_sheet(text)
+    sheet = grading_sheet.parse_sheet(text)
     assert sheet["submissions"]["ada-l"]["info"] == {
         "submitted": "2026-10-03T22:14+02:00",
         "days_late": "0",
@@ -4865,7 +4880,7 @@ def test_a_teams_contributions_are_read_at_the_pin_and_a_stub_reads_blank(monkey
     ).written
     assert seen == [SHA]
     ((_path, text),) = written
-    team = grades.parse_sheet(text)["teams"]["alpha"]
+    team = grading_sheet.parse_sheet(text)["teams"]["alpha"]
     assert team["info"]["contributions"] == "Ada: Q1. Ben: Q2.\n"
     assert list(team["members"]) == ["ada-l", "ben-k"]
 
@@ -4928,7 +4943,7 @@ def test_the_freeze_reads_contributions_at_the_frozen_sha(monkeypatch):
     assert seen == [frozen]
     ((_path, text),) = written
     assert (
-        grades.parse_sheet(text)["teams"]["alpha"]["info"]["contributions"]
+        grading_sheet.parse_sheet(text)["teams"]["alpha"]["info"]["contributions"]
         == "Ada: Q1. Ben: Q2.\n"
     )
     assert "# Status: FROZEN" in text
@@ -4956,7 +4971,7 @@ def test_an_unwritten_contributions_stub_says_so_rather_than_reading_blank(monke
     )
     ((_path, text),) = written
     assert (
-        grades.parse_sheet(text)["teams"]["alpha"]["info"]["contributions"]
+        grading_sheet.parse_sheet(text)["teams"]["alpha"]["info"]["contributions"]
         == collect.CONTRIBUTIONS_UNFILLED
     )
 
@@ -4978,7 +4993,10 @@ def test_a_team_with_nothing_pinned_has_a_blank_contributions_cell(monkeypatch):
         now=datetime(2026, 10, 6, tzinfo=BERLIN),
     )
     ((_path, text),) = written
-    assert grades.parse_sheet(text)["teams"]["alpha"]["info"]["contributions"] is None
+    assert (
+        grading_sheet.parse_sheet(text)["teams"]["alpha"]["info"]["contributions"]
+        is None
+    )
 
 
 def test_the_sheet_is_not_created_before_there_is_anyone_to_grade(monkeypatch):
@@ -5111,13 +5129,13 @@ def test_load_grading_spec_never_raises_and_falls_back_to_the_defaults(monkeypat
     def unreadable(*a, **k):
         raise RuntimeError("500")
 
-    monkeypatch.setattr(collect.grades, "get_file_content", unreadable)
+    monkeypatch.setattr(collect.grading_spec, "get_file_content", unreadable)
     assert (
         collect.load_grading_spec("Course", "assignment-1-f2026") == LOADED_DEFAULT_SPEC
     )
-    collect.grades._grading_text.cache_clear()
+    collect.grading_spec._grading_text.cache_clear()
     monkeypatch.setattr(
-        collect.grades, "get_file_content", lambda *a, **k: "questions: ["
+        collect.grading_spec, "get_file_content", lambda *a, **k: "questions: ["
     )
     assert (
         collect.load_grading_spec("Course", "assignment-1-f2026") == LOADED_DEFAULT_SPEC
@@ -5127,7 +5145,7 @@ def test_load_grading_spec_never_raises_and_falls_back_to_the_defaults(monkeypat
 def test_the_grading_config_is_read_once_per_template_per_process(monkeypatch):
     reads: list[str] = []
     monkeypatch.setattr(
-        collect.grades,
+        collect.grading_spec,
         "get_file_content",
         lambda org, repo, path, ref="": (reads.append(repo), "type: group")[1],
     )
@@ -5145,7 +5163,7 @@ def test_the_definition_is_read_from_grading_config_yml(monkeypatch):
         paths.append(path)
         return "type: group"
 
-    monkeypatch.setattr(collect.grades, "get_file_content", fake_get)
+    monkeypatch.setattr(collect.grading_spec, "get_file_content", fake_get)
     assert collect.load_grading_spec("Course", "assignment-4-f2026").type == "group"
     assert paths == ["grading_config.yml"]
 
@@ -5153,7 +5171,7 @@ def test_the_definition_is_read_from_grading_config_yml(monkeypatch):
 def test_a_template_without_the_file_says_nothing(monkeypatch, capsys):
     # Plenty of assignments have no definition file at all; the defaults cover them, and a
     # complaint about a file nobody wrote would be noise on every tick.
-    monkeypatch.setattr(collect.grades, "get_file_content", lambda *a, **k: None)
+    monkeypatch.setattr(collect.grading_spec, "get_file_content", lambda *a, **k: None)
     assert (
         collect.load_grading_spec("Course", "assignment-9-f2026") == LOADED_DEFAULT_SPEC
     )
@@ -5216,7 +5234,7 @@ def test_a_re_fired_handout_after_the_cutoff_cannot_un_freeze_the_sheet(monkeypa
     ((_path, text),) = written
     assert "# Status: FROZEN" in text
     assert "OPEN" not in text
-    ada = grades.parse_sheet(text)["submissions"]["ada-l"]
+    ada = grading_sheet.parse_sheet(text)["submissions"]["ada-l"]
     assert ada["info"] == {"submitted": "2026-10-03T22:14+02:00", "days_late": "0"}
 
 
@@ -5261,12 +5279,12 @@ def _receipt_env(monkeypatch) -> list[tuple[str, str, bool]]:
     """Record `(repo, receipt body, dry_run)` instead of touching an issue."""
     posted: list[tuple[str, str, bool]] = []
     monkeypatch.setattr(
-        collect.grades,
+        collect.receipts,
         "ensure_receipts_issue",
         lambda org, repo, body, dry_run=False: 7,
     )
     monkeypatch.setattr(
-        collect.grades,
+        collect.receipts,
         "post_receipt",
         lambda org, repo, issue, body, marker, dry_run=False: (
             posted.append((repo, body, dry_run)) or True
@@ -5345,7 +5363,7 @@ def test_a_team_issue_the_refresh_has_to_open_still_names_the_team(monkeypatch):
     _receipt_env(monkeypatch)
     opened: list[str] = []
     monkeypatch.setattr(
-        collect.grades,
+        collect.receipts,
         "ensure_receipts_issue",
         lambda org, repo, body, dry_run=False: opened.append(body) or 7,
     )
@@ -5451,8 +5469,8 @@ def test_nothing_is_posted_for_work_handed_in_off_github(monkeypatch):
         raise AssertionError("there is no push to acknowledge")
 
     _sheet_env(monkeypatch, targets=SOLO_TARGETS, grading="submit_via: external\n")
-    monkeypatch.setattr(collect.grades, "post_receipt", boom)
-    monkeypatch.setattr(collect.grades, "ensure_receipts_issue", boom)
+    monkeypatch.setattr(collect.receipts, "post_receipt", boom)
+    monkeypatch.setattr(collect.receipts, "ensure_receipts_issue", boom)
     _refresh(monkeypatch, now=datetime(2026, 10, 5, tzinfo=BERLIN))
 
 
@@ -5560,7 +5578,9 @@ def test_a_handout_over_a_duplicated_unit_does_not_blank_what_was_derived(monkey
         units=[("ada-l", ["ada-l"]), ("ada-l", ["ada-l"])],
     ).written
     text = written[-1][1] if written else DUPLICATED_SHEET
-    info = grades.parse_sheet(text)["submissions"]["ada-l"][grades.INFO_KEY]
+    info = grading_sheet.parse_sheet(text)["submissions"]["ada-l"][
+        grading_sheet.INFO_KEY
+    ]
     assert info["submitted"] == "2026-10-03T20:14+02:00"
     assert info["checked"] == "2026-10-05T00:10+02:00"
     # One row, so one student to count - the duplicate used to inflate the denominator.
@@ -5595,7 +5615,9 @@ def test_a_refresh_that_derives_nothing_leaves_a_duplicated_unit_alone(monkeypat
     )
     assert _refresh(monkeypatch, now=datetime(2026, 10, 5, 0, 15, tzinfo=BERLIN))
     text = written[-1][1] if written else DUPLICATED_SHEET
-    info = grades.parse_sheet(text)["submissions"]["ada-l"][grades.INFO_KEY]
+    info = grading_sheet.parse_sheet(text)["submissions"]["ada-l"][
+        grading_sheet.INFO_KEY
+    ]
     assert info["submitted"] == "2026-10-03T20:14+02:00"
     assert info["checked"] == "2026-10-05T00:10+02:00"
 
@@ -5708,7 +5730,7 @@ def test_a_late_push_the_server_timed_reaches_the_final_grade(monkeypatch):
         now=datetime(2026, 10, 11, 23, 59, tzinfo=BERLIN),
     ).written
     ((_path, text),) = written
-    sheet = grades.parse_sheet(text)
+    sheet = grading_sheet.parse_sheet(text)
     info = sheet["submissions"]["ada-l"]["info"]
     assert info["submitted"] == "2026-10-06T09:30+02:00"  # the semester's own clock
     assert info["days_late"] == "2"
@@ -5716,15 +5738,15 @@ def test_a_late_push_the_server_timed_reaches_the_final_grade(monkeypatch):
 
     # And the arithmetic the student is sent, off that same block: 10% per day started,
     # of the earned grade, floored at 0 and applied before the one human override.
-    spec = grades.sheet_spec(
+    spec = grading_spec.sheet_spec(
         _sched(),
         "assignment-1",
         "assignment-1",
-        grades.parse_grading_spec(GRADING_YML),
+        grading_spec.parse_grading_spec(GRADING_YML),
         False,
     )
     sheet["submissions"]["ada-l"]["score_individual"] = {"Q1": "15", "Q2": "10"}
-    view = grades.student_view(spec, "ada-l", sheet["submissions"]["ada-l"], "ada-l")
+    view = gradebook.student_view(spec, "ada-l", sheet["submissions"]["ada-l"], "ada-l")
     assert view["days_late"] == "2"
     assert view["penalty"] == "-20%"
     assert view["final_grade"] == "20"  # 25 x (1 - 0.10 x 2)
@@ -5756,17 +5778,17 @@ def test_a_submission_on_the_deadline_is_not_late_and_loses_nothing(monkeypatch)
         now=datetime(2026, 10, 11, 23, 59, tzinfo=BERLIN),
     ).written
     ((_path, text),) = written
-    sheet = grades.parse_sheet(text)
+    sheet = grading_sheet.parse_sheet(text)
     assert sheet["submissions"]["ada-l"]["info"]["days_late"] == "0"
-    spec = grades.sheet_spec(
+    spec = grading_spec.sheet_spec(
         _sched(),
         "assignment-1",
         "assignment-1",
-        grades.parse_grading_spec(GRADING_YML),
+        grading_spec.parse_grading_spec(GRADING_YML),
         False,
     )
     sheet["submissions"]["ada-l"]["score_individual"] = {"Q1": "15", "Q2": "10"}
-    view = grades.student_view(spec, "ada-l", sheet["submissions"]["ada-l"], "ada-l")
+    view = gradebook.student_view(spec, "ada-l", sheet["submissions"]["ada-l"], "ada-l")
     assert view["final_grade"] == "25" and "penalty" not in view
 
 
@@ -6170,7 +6192,7 @@ BROKEN_CONFIG = "title: Bayes\ntype: group\nsubmit_via: emial\nmystery: 4\n"
 
 def _spec_faults(text=BROKEN_CONFIG, fires=GRADES_AT):
     """Just the faults: the spec beside them is what saves the caller a second parse."""
-    faults, _spec = grades.grading_spec_faults(
+    faults, _spec = grading_spec.grading_spec_faults(
         "a3", "assignment-3-f2026", "Course-Org", text, fires
     )
     return faults
@@ -6229,10 +6251,10 @@ def _sched_one_assignment():
 
 
 def _collect_configs(monkeypatch, text=BROKEN_CONFIG, legacy=None):
-    monkeypatch.setattr(grades, "_grading_text", lambda course, template: text)
-    monkeypatch.setattr(grades, "get_file_content", lambda *a, **k: legacy)
+    monkeypatch.setattr(grading_spec, "_grading_text", lambda course, template: text)
+    monkeypatch.setattr(grading_spec, "get_file_content", lambda *a, **k: legacy)
     found: list = []
-    grades.grading_config_faults(
+    grading_spec.grading_config_faults(
         "Course-Org", "Semester-Org", _sched_one_assignment(), found, {}
     )
     return found
@@ -6266,10 +6288,10 @@ def test_a_template_that_could_not_be_read_reports_none_of_them(monkeypatch):
     def _boom(course, template):
         raise RuntimeError("rate-limited")
 
-    monkeypatch.setattr(grades, "_grading_text", _boom)
+    monkeypatch.setattr(grading_spec, "_grading_text", _boom)
     found: list = []
     with pytest.raises(RuntimeError):
-        grades.grading_config_faults(
+        grading_spec.grading_config_faults(
             "Course-Org", "Semester-Org", _sched_one_assignment(), found, {}
         )
     assert found == []
@@ -6289,8 +6311,8 @@ def _split_run_keys(monkeypatch, config: str) -> None:
     `a3`), the rest as the template's grading_config.yml."""
     run = [ln for ln in config.splitlines() if ln.split(":")[0] in settings.RUN_KEYS]
     rest = "".join(f"{ln}\n" for ln in config.splitlines() if ln not in run)
-    monkeypatch.setattr(grades, "_grading_text", lambda course, template: rest)
-    monkeypatch.setattr(grades, "get_file_content", lambda *a, **k: None)
+    monkeypatch.setattr(grading_spec, "_grading_text", lambda course, template: rest)
+    monkeypatch.setattr(grading_spec, "get_file_content", lambda *a, **k: None)
     block = "".join(f"    {ln}\n" for ln in run)
     monkeypatch.setattr(
         settings,
@@ -6321,7 +6343,9 @@ def _visibility_run(monkeypatch, config, rows, *, handed_out=HANDED_OUT, dest=No
     )
     found: list = []
     listing = None if rows is None else {r["name"]: r for r in rows}
-    grades.grading_config_faults("Course-Org", "Semester-Org", sched, found, listing)
+    grading_spec.grading_config_faults(
+        "Course-Org", "Semester-Org", sched, found, listing
+    )
     return found
 
 
@@ -6419,7 +6443,7 @@ def test_a_scheduled_solution_for_repos_that_are_not_private_is_a_fault(monkeypa
         org="Semester-Org",
     )
     found: list = []
-    grades.grading_config_faults("Course-Org", "Semester-Org", sched, found, None)
+    grading_spec.grading_config_faults("Course-Org", "Semester-Org", sched, found, None)
     (fault,) = found
     assert fault.field == "visibility"
     assert "solution_datetime" in fault.what and "public" in fault.what
@@ -6433,11 +6457,11 @@ def test_a_scheduled_solution_for_a_shared_drop_box_is_a_fault(monkeypatch):
     from dsl_course.schedule import AssignmentEntry
 
     monkeypatch.setattr(
-        grades,
+        grading_spec,
         "_grading_text",
         lambda course, template: "submit_via: shared_dropbox_repo\n",
     )
-    monkeypatch.setattr(grades, "get_file_content", lambda *a, **k: None)
+    monkeypatch.setattr(grading_spec, "get_file_content", lambda *a, **k: None)
     sched = Schedule(
         assignments={
             "a3": AssignmentEntry(
@@ -6448,15 +6472,15 @@ def test_a_scheduled_solution_for_a_shared_drop_box_is_a_fault(monkeypatch):
         }
     )
     found: list = []
-    grades.grading_config_faults("Course-Org", "Semester-Org", sched, found, None)
+    grading_spec.grading_config_faults("Course-Org", "Semester-Org", sched, found, None)
     (fault,) = found
     assert fault.field == "visibility"
     assert "solution_datetime" in fault.what and "shared" in fault.what
 
 
 def test_a_private_assignment_may_schedule_its_solution(monkeypatch):
-    monkeypatch.setattr(grades, "_grading_text", lambda course, template: "")
-    monkeypatch.setattr(grades, "get_file_content", lambda *a, **k: None)
+    monkeypatch.setattr(grading_spec, "_grading_text", lambda course, template: "")
+    monkeypatch.setattr(grading_spec, "get_file_content", lambda *a, **k: None)
     from dsl_course.schedule import AssignmentEntry
 
     sched = Schedule(
@@ -6469,7 +6493,7 @@ def test_a_private_assignment_may_schedule_its_solution(monkeypatch):
         }
     )
     found: list = []
-    grades.grading_config_faults("Course-Org", "Semester-Org", sched, found, None)
+    grading_spec.grading_config_faults("Course-Org", "Semester-Org", sched, found, None)
     assert found == []
 
 
@@ -6477,8 +6501,10 @@ def test_the_listings_own_word_is_what_is_compared(monkeypatch):
     # Both sides are one of `VISIBILITIES` and are compared as written, so a value the
     # listing reports that the file cannot hold is a disagreement like any other rather
     # than something this has to have an opinion about.
-    spec = dataclasses.replace(grades.parse_grading_spec(""), visibility="private")
-    (fault,) = grades._visibility_faults(
+    spec = dataclasses.replace(
+        grading_spec.parse_grading_spec(""), visibility="private"
+    )
+    (fault,) = grading_spec._visibility_faults(
         spec, "a3", "Semester-Org", DUE_AT, [repo_row("a3-ada", visibility="internal")]
     )
     assert "1 of 1 are not private" in fault.what
@@ -6528,7 +6554,7 @@ def test_a_student_choice_assignment_is_exempt_from_the_consistency_check(monkey
     # The STUDENT owns the flag on this shape, so twenty private repos and four public
     # ones is the assignment working as written. Exempted by the vocabulary's own
     # predicate (`course.visibility_is_students`), never by a name spelt in the check.
-    monkeypatch.setattr(grades.gh_teams, "org_settings", lambda org: {})
+    monkeypatch.setattr(grading_spec.gh_teams, "org_settings", lambda org: {})
     assert (
         _visibility_run(
             monkeypatch,
@@ -6564,7 +6590,7 @@ def _org_run(
         reads.append(org)
         return settings
 
-    monkeypatch.setattr(grades.gh_teams, "org_settings", _settings)
+    monkeypatch.setattr(grading_spec.gh_teams, "org_settings", _settings)
     found = _visibility_run(
         monkeypatch,
         config,
@@ -6578,7 +6604,7 @@ def test_a_semester_whose_members_may_delete_their_repos_is_a_fault(monkeypatch)
         monkeypatch, {**_GOOD_ORG, "members_can_delete_repositories": True}
     )
     (fault,) = found
-    assert fault.where == grades.ORG_SETTINGS
+    assert fault.where == grading_spec.ORG_SETTINGS
     assert "delete or transfer repositories** is ON" in fault.what
     assert "change repository visibilities" not in fault.what
     assert "settings/member_privileges" in fault.fix()
@@ -7027,7 +7053,7 @@ def _shared_sheet(monkeypatch, *, targets, rows):
         now=datetime(2026, 10, 12, tzinfo=BERLIN),
     ).written
     ((_path, text),) = written
-    return grades.parse_sheet(text)
+    return grading_sheet.parse_sheet(text)
 
 
 def test_a_shared_sheet_keys_its_rows_on_the_folder_not_the_repo(monkeypatch):
@@ -7114,14 +7140,14 @@ def test_a_shared_assignment_posts_no_receipts(monkeypatch):
     )
     # AFTER `_sheet_env`, whose own no-op receipt stubs this must win over.
     monkeypatch.setattr(
-        collect.grades,
+        collect.receipts,
         "ensure_receipts_issue",
         lambda *a, **k: pytest.fail(
             "a shared drop box has no Submission receipts issue"
         ),
     )
     monkeypatch.setattr(
-        collect.grades,
+        collect.receipts,
         "post_receipt",
         lambda *a, **k: pytest.fail("a shared drop box has nowhere to post a receipt"),
     )

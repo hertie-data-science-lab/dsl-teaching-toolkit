@@ -24,7 +24,8 @@ from dsl_course import (
     gh_contents,
     gh_teams,
     ghcli,
-    grades,
+    grading_sheet,
+    grading_spec,
     issues,
     log,
     pulls,
@@ -42,6 +43,34 @@ from dsl_course import (
 # same columns out by hand), and five test files each carried their own copy of it - so a
 # column added to FIELDS left five fixtures describing a roster that no longer exists.
 ROSTER_HEADER = ",".join(roster.FIELDS)
+
+
+def new_sheet(
+    spec: grading_sheet.SheetSpec, units: list[tuple[str, list[str]]]
+) -> dict:
+    """A brand-new sheet: every unit present from the moment of handout, every human field
+    blank. A sheet that arrives complete is one a grader can start typing into as soon as
+    anything is in, and one whose missing row is visibly missing.
+
+    `units` is `[(unit key, member handles)]`: for an individual assignment the key IS the
+    handle and the list holds only it; for a group one the key is the team name."""
+    return {
+        spec.container_key: {
+            unit: grading_sheet._fresh_block(spec, members) for unit, members in units
+        }
+    }
+
+
+def split_grading(text: str | None) -> tuple[str | None, str | None]:
+    """A test's old-style grading config split where the keys live now: the template's
+    `grading_config.yml`, and the run settings as the semester's `assignments.yml`
+    `defaults:` (decision 0009)."""
+    if text is None:
+        return None, None
+    data = yaml.safe_load(text) or {}
+    run = {k: data.pop(k) for k in settings.RUN_KEYS if k in data}
+    template = yaml.safe_dump(data) if data else ""
+    return template, (yaml.safe_dump({"defaults": run}) if run else None)
 
 
 def repo_row(name: str, **extra) -> dict:
@@ -194,8 +223,8 @@ def clear_process_memos() -> None:
     teams._teams_text.cache_clear()
     schedule._schedule_text.cache_clear()
     schedule._repo_paths.cache_clear()
-    grades._grading_text.cache_clear()
-    grades.readme_heading.cache_clear()
+    grading_spec._grading_text.cache_clear()
+    grading_spec.readme_heading.cache_clear()
     settings.course_defaults.cache_clear()
     settings._assignments_text.cache_clear()
     settings.semester_blocks.cache_clear()

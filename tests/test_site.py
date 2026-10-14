@@ -19,7 +19,7 @@ from dsl_course import (
     course,
     discovery,
     ghcli,
-    grades,
+    grading_spec,
     materials,
     schedule_plan,
     settings,
@@ -44,7 +44,7 @@ from tests.conftest import BareOrigins
 UTC = ZoneInfo("UTC")
 
 
-def _spec(config: str) -> grades.GradingSpec:
+def _spec(config: str) -> grading_spec.GradingSpec:
     """`config` as the site is handed it: the template's keys parsed from the template, and
     any run setting in it read as the semester's assignments.yml gives it (decision 0009)."""
     data = yaml.safe_load(config) or {}
@@ -52,7 +52,7 @@ def _spec(config: str) -> grades.GradingSpec:
     values = read_settings(run, settings.RUN_KEYS, "assignments.yml", [])
     if any(k in values for k in settings.LATE_PAIR):
         values = {k: values.get(k) for k in settings.LATE_PAIR} | values
-    spec = grades.parse_grading_spec(yaml.safe_dump(data) if data else "")
+    spec = grading_spec.parse_grading_spec(yaml.safe_dump(data) if data else "")
     return dataclasses.replace(spec, **values)
 
 
@@ -637,7 +637,7 @@ def test_an_assignment_waiting_on_its_teams_asks_for_one_instead(monkeypatch):
         in out
     )
     # The day it stops accepting - the same date the lock file gives that form's refusal to
-    # name, SPOKEN as the mail and the refusal speak it (`grades.spoken_day`).
+    # name, SPOKEN as the mail and the refusal speak it (`gradebook.spoken_day`).
     assert 'team_join_closes: "20th Oct"' in out
     # The cap the form enforces, and the salt the page's script hashes a handle with.
     assert 'team_join_cap: "4"' in out
@@ -1049,7 +1049,7 @@ def test_the_cutoff_sentence_is_the_pages_alone_and_never_the_external_ones(
 
 def test_the_page_carries_the_total_the_questions_add_up_to(monkeypatch):
     # Summed by the one helper the gradebook and the student console sum it with
-    # (`grades.total_points`), so no two surfaces print two different totals.
+    # (`grading_spec.total_points`), so no two surfaces print two different totals.
     out = _entry_for(
         monkeypatch,
         "questions:\n  Q1: 15\n  Q2: 10\n",
@@ -1146,9 +1146,11 @@ def test_a_definition_that_cannot_be_read_leaves_the_github_wording(monkeypatch)
     # a cron, so a template with no `solution` branch must leave the page exactly as it
     # was rather than flip it to "handed in outside GitHub".
     monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "# A1\nThe brief.")
-    monkeypatch.setattr(site, "load_grading_spec", grades.load_grading_spec)
+    monkeypatch.setattr(site, "load_grading_spec", grading_spec.load_grading_spec)
     monkeypatch.setattr(
-        grades, "_grading_text", lambda *a: (_ for _ in ()).throw(RuntimeError("404"))
+        grading_spec,
+        "_grading_text",
+        lambda *a: (_ for _ in ()).throw(RuntimeError("404")),
     )
     out = site._assignment_entry(
         "Course",

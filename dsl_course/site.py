@@ -73,7 +73,8 @@ from .discovery import (
 from .faults import Unusable
 from .gh_contents import get_file_content, repo_tree
 from .ghcli import clone
-from .grades import load_grading_spec, spoken_day, team_cap, total_points
+from .gradebook import spoken_day
+from .grading_spec import load_grading_spec, total_points
 from .log import CLIParser, log, log_err, log_step, log_withheld
 from .materials import ASSETS_KIND, Declared, publishable
 from .materials import read as read_materials
@@ -127,6 +128,7 @@ from .site_repo import (
     yaml_file,
 )
 from .student_status import _brief as read_brief
+from .team_formation import team_cap
 
 
 def _semester_start(semester_org: str) -> date:

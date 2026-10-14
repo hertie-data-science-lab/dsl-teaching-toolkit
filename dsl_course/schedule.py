@@ -516,7 +516,7 @@ class ArchiveRow:
 class Schedule:
     timezone: str = DEFAULT_TZ
     # The semester org it was loaded from ("" for a plan parsed from text): what an
-    # assignment's run settings resolve against (`settings`, `grades.load_grading_spec`).
+    # assignment's run settings resolve against (`settings`, `grading_spec.load_grading_spec`).
     org: str = field(default="", compare=False)
     releases: list[Release] = field(default_factory=list)
     semester_start: date | None = None
@@ -2096,7 +2096,7 @@ def formation_state(
 
     Whether the assignment HAS a window is the caller's question, not this one's: it hangs
     on `team_formation`, a run setting resolved into the assignment's spec
-    (`grades.load_grading_spec`), which this module deliberately cannot read. Both callers
+    (`grading_spec.load_grading_spec`), which this module deliberately cannot read. Both callers
     already hold the spec.
 
     One place, because two things now answer off it minutes apart - the lock file the

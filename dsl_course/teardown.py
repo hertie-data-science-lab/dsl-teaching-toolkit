@@ -65,8 +65,9 @@ from .discovery import (
     is_student_repo,
     list_org_repos,
 )
+from .distribute import PREVIEW_TITLE
 from .gh_contents import get_file_content, put_file, read_csv
-from .grades import PREVIEW_TITLE, SEMESTER_CSV_NAME
+from .gradebook import SEMESTER_CSV_NAME
 from .issues import close_issues_titled, open_titles
 from .log import (
     CLIParser,

@@ -102,7 +102,7 @@ def test_the_late_rule_reads_as_one_sentence_for_every_way_it_can_be_declared():
     assert course.late_rule(None, "10%") == "not accepted after the deadline"
     assert course.late_rule(0, None) == "not accepted after the deadline"
     # The sentence a semester reads when nobody has declared anything: the toolkit's own
-    # default is the Hertie syllabus rule, not silence (`grades.parse_grading_spec`).
+    # default is the Hertie syllabus rule, not silence (`grading_spec.parse_grading_spec`).
     assert (
         course.late_rule(
             policy.defaults()["late_window_days"],

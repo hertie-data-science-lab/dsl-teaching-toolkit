@@ -8,11 +8,19 @@ import re
 
 from conftest import workflow_inputs, workflow_jobs
 
-from dsl_course import course, grades, roster, workflows_render
+from dsl_course import (
+    course,
+    distribute,
+    gradebook,
+    grading_sheet,
+    receipts,
+    roster,
+    workflows_render,
+)
 
 SEMESTER = "Semester-f2026"
-SPEC = grades.SheetSpec(slug="assignment-1", title="Regression", is_group=False)
-EXTERNAL = grades.SheetSpec(
+SPEC = grading_sheet.SheetSpec(slug="assignment-1", title="Regression", is_group=False)
+EXTERNAL = grading_sheet.SheetSpec(
     slug="assignment-2", title="Kaggle", is_group=False, submit_via="external"
 )
 
@@ -30,7 +38,7 @@ def _sheet(*handles: str, marked: bool = True) -> dict:
 
 
 def _books(specs, sheets):
-    return grades.build_gradebooks({s: (specs[s], sheets[s]) for s in sheets})
+    return gradebook.build_gradebooks({s: (specs[s], sheets[s]) for s in sheets})
 
 
 # ------------------------------------------------------------- which units get the note
@@ -40,7 +48,7 @@ def test_the_note_goes_to_every_unit_whose_marks_went_out():
     specs = {"assignment-1": SPEC}
     sheets = {"assignment-1": _sheet("ada", "bo")}
     books = _books(specs, sheets)
-    units = grades._returned_units(specs, sheets, books, {"ada": "x"})
+    units = distribute._returned_units(specs, sheets, books, {"ada": "x"})
     # Only `ada`'s gradebook was written this run, so only her repo is told.
     assert [repo for _spec, repo in units] == ["assignment-1-ada"]
 
@@ -52,7 +60,7 @@ def test_an_unmarked_unit_or_an_off_github_shape_gets_no_note():
         "assignment-2": _sheet("ada"),
     }
     books = _books(specs, sheets)
-    assert grades._returned_units(specs, sheets, books, {"ada": "x"}) == []
+    assert distribute._returned_units(specs, sheets, books, {"ada": "x"}) == []
 
 
 # ------------------------------------------------------------- posting it once
@@ -76,12 +84,14 @@ class _Thread:
 
 def test_a_rerun_posts_the_note_once(monkeypatch):
     thread = _Thread([])
-    monkeypatch.setattr(grades, "gh", thread)
-    monkeypatch.setattr(grades, "find_receipts_issue", lambda org, repo: (7, "open"))
+    monkeypatch.setattr(receipts, "gh", thread)
+    monkeypatch.setattr(
+        distribute, "find_receipts_issue", lambda org, repo: (7, "open")
+    )
     units = [(SPEC, "assignment-1-ada")]
     listed = {"assignment-1-ada": {"visibility": "private", "private": True}}
-    assert grades._post_returned_notes(SEMESTER, units, listed) == 1
-    assert grades._post_returned_notes(SEMESTER, units, listed) == 1
+    assert distribute._post_returned_notes(SEMESTER, units, listed) == 1
+    assert distribute._post_returned_notes(SEMESTER, units, listed) == 1
     (posted,) = thread.posted
     assert course.MARKS_RETURNED_NOTE in posted
     assert course.marks_returned_marker("assignment-1") in posted
@@ -89,10 +99,11 @@ def test_a_rerun_posts_the_note_once(monkeypatch):
 
 def test_no_note_where_the_repo_has_no_receipts_issue(monkeypatch):
     thread = _Thread([])
-    monkeypatch.setattr(grades, "gh", thread)
-    monkeypatch.setattr(grades, "find_receipts_issue", lambda org, repo: None)
+    monkeypatch.setattr(receipts, "gh", thread)
+    monkeypatch.setattr(distribute, "find_receipts_issue", lambda org, repo: None)
     assert (
-        grades._post_returned_notes(SEMESTER, [(SPEC, "assignment-1-ada")], None) == 0
+        distribute._post_returned_notes(SEMESTER, [(SPEC, "assignment-1-ada")], None)
+        == 0
     )
     assert thread.posted == []
 
@@ -126,7 +137,7 @@ def _students():
 
 def _sent(monkeypatch) -> list:
     sent: list = []
-    monkeypatch.setattr(grades.roster, "load", lambda org: _students())
+    monkeypatch.setattr(distribute.roster, "load", lambda org: _students())
     monkeypatch.setattr(
         "dsl_course.discovery.course_name_for_semester", lambda org: "ML"
     )
@@ -135,14 +146,14 @@ def _sent(monkeypatch) -> list:
         sent.extend(messages)
         return [m[0] for m in messages]
 
-    monkeypatch.setattr(grades.mailer, "send_bulk", send)
+    monkeypatch.setattr(distribute.mailer, "send_bulk", send)
     return sent
 
 
 def test_feedback_goes_into_the_email_only_when_asked(monkeypatch):
     sent = _sent(monkeypatch)
-    grades._email_updates(SEMESTER, ["ada"], feedback={"ada": "Regression:\nGood."})
-    grades._email_updates(SEMESTER, ["ada"])
+    distribute._email_updates(SEMESTER, ["ada"], feedback={"ada": "Regression:\nGood."})
+    distribute._email_updates(SEMESTER, ["ada"])
     with_feedback, without = (m[2] for m in sent)
     assert "Regression:\nGood." in with_feedback
     assert "Good." not in without
@@ -154,13 +165,13 @@ def test_feedback_text_is_one_paragraph_per_assignment():
         "assignment-2": {"final_grade": 7},
         "assignment-3": {"feedback": "Fine.", "team_feedback": "Team did well."},
     }
-    text = grades.feedback_text(book, {"assignment-1": "Regression"})
+    text = distribute.feedback_text(book, {"assignment-1": "Regression"})
     assert text == "Regression:\nGood.\n\nassignment-3:\nFine.\n\nTeam did well."
 
 
 def test_the_preview_sample_carries_a_placeholder_not_feedback():
-    assert "<feedback>" in grades.sample_body(SEMESTER, "ML", feedback=True)
-    assert "<feedback>" not in grades.sample_body(SEMESTER, "ML")
+    assert "<feedback>" in distribute.sample_body(SEMESTER, "ML", feedback=True)
+    assert "<feedback>" not in distribute.sample_body(SEMESTER, "ML")
 
 
 # ------------------------------------------------------------- the button

@@ -41,7 +41,14 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 sys.path.insert(0, str(ROOT))
 
-from dsl_course import grades, materials, schedule, schedule_plan, site, site_repo
+from dsl_course import (
+    grading_spec,
+    materials,
+    schedule,
+    schedule_plan,
+    site,
+    site_repo,
+)
 
 BERLIN = ZoneInfo("Europe/Berlin")
 COURSE_ORG = "hertie-dsl-fixture-course"
@@ -207,7 +214,7 @@ def _grading_spec(_org: str, repo: str, **_):
         return _spec("submit_via: shared_dropbox_repo\n")
     if repo == GROUP_FORMING:
         # The cap is the semester's (assignments.yml), so the page prints it without the
-        # course-org read `grades.team_cap` falls back to.
+        # course-org read `team_formation.team_cap` falls back to.
         return _spec("type: group\n", team_formation="self_select", max_team_size=4)
     return _spec(
         "questions:\n  Q1: 15\n  Q2: 10\n",
@@ -216,10 +223,10 @@ def _grading_spec(_org: str, repo: str, **_):
     )
 
 
-def _spec(text: str, **run) -> grades.GradingSpec:
+def _spec(text: str, **run) -> grading_spec.GradingSpec:
     """The template's definition with the run settings its semester's assignments.yml
     gives it - what `load_grading_spec` hands the site."""
-    return dataclasses.replace(grades.parse_grading_spec(text), **run)
+    return dataclasses.replace(grading_spec.parse_grading_spec(text), **run)
 
 
 def _get_file_content(_org: str, _repo: str, path: str) -> str | None:

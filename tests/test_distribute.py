@@ -1,4 +1,4 @@
-"""grades pure core -- the CSV -> per-student gradebook pivot is the bit that must be
+"""Distributing marks -- the sheet -> per-student gradebook pivot is the bit that must be
 right (a wrong row silently emails a student someone else's mark). The gh/git fan-out is
 deliberately not mocked, per the testing strategy. No network here.
 """
@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -18,369 +19,20 @@ import yaml
 from dsl_course import (
     course,
     discovery,
-    gh_contents,
+    distribute,
     ghcli,
+    gradebook,
     grades,
+    grading_sheet,
+    grading_spec,
     issues,
-    policy,
-    repos,
+    receipts,
     roster,
     settings,
     status_json,
 )
 from dsl_course.schedule import AssignmentEntry, Schedule
-from tests.conftest import ROSTER_HEADER, repo_row
-
-# ------------------------------------------------------ provisioning the gradebooks
-
-
-def test_ensure_gradebooks_skips_auditors(monkeypatch, capsys):
-    # Auditors are never assessed, so they get no private gradebook repo. Dry-run keeps
-    # this pure - the roster is the only input, and nothing is provisioned.
-    monkeypatch.setenv("DSL_VERBOSE", "1")  # per-student lines are verbose-only
-    students = roster.parse(
-        ROSTER_HEADER + "\n"
-        "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n"
-        "eve@uni.edu,Eve,auditor,eve-e,43,dsl-xyz\n"
-        "bob@uni.edu,Bob,,bob-b,44,dsl-def\n"  # blank role -> enrolled
-    )
-    monkeypatch.setattr(grades.roster, "load", lambda org: students)
-    assert grades.ensure_gradebooks("SEMESTER", dry_run=True) == 0
-    out = capsys.readouterr().out
-    assert "grades-ada-l" in out and "grades-bob-b" in out
-    assert "eve-e" not in out
-    assert "Syncing 2 gradebook repo(s)" in out
-    assert "1 auditor row(s) skipped" in out
-
-
-def test_a_semester_with_no_roster_rows_yet_is_a_skip_not_a_failure(
-    monkeypatch, capsys
-):
-    # This runs on every nightly Sync membership. An empty roster is a freshly bootstrapped
-    # semester and a missing one is a content fault the roster's own digest already reports,
-    # so neither may redden a run in an org the maintainer cannot fix it in.
-    monkeypatch.setattr(grades.roster, "load", lambda org: [])
-    assert grades.ensure_gradebooks("SEMESTER") == 0
-    monkeypatch.setattr(grades.roster, "load", lambda org: None)
-    assert grades.ensure_gradebooks("SEMESTER") == 0
-    assert capsys.readouterr().err == ""
-
-
-def test_one_run_stops_at_its_deadline_and_says_how_many_are_left(monkeypatch, capsys):
-    # Four API calls per new gradebook, on a nightly job with a 30-minute bound: a large
-    # semester's FIRST night would spend all of it here, and a job that times out has
-    # recorded nothing about where it got to. What has to be bounded is the WALL CLOCK, so
-    # the budget is a deadline rather than a guess at how many creations fit in one.
-    # Nothing is lost - the next run starts from the rest - so it stays green and counts.
-    monkeypatch.delenv("DSL_VERBOSE", raising=False)
-    rows = "".join(f"\ns{n}@uni.edu,S{n},enrolled,s{n},{n},dsl-{n}" for n in range(5))
-    monkeypatch.setattr(
-        grades.roster, "load", lambda org: roster.parse(ROSTER_HEADER + rows + "\n")
-    )
-    made: list[str] = []
-    monkeypatch.setattr(grades, "listing_by_name", lambda org: {})
-    # A clock that jumps a minute per gradebook, so the third student is already past a
-    # 2-minute budget. `time.monotonic` is read once before the loop and once per student.
-    ticks = iter(range(0, 6000, 60))
-    monkeypatch.setattr(grades.time, "monotonic", lambda: next(ticks))
-    monkeypatch.setattr(
-        grades,
-        "provision_one",
-        lambda org, handle, existing=None, collaborators=None: (
-            made.append(handle) or "ok"
-        ),
-    )
-    assert grades.ensure_gradebooks("SEMESTER", budget_minutes=2) == 0
-    assert made == ["s0", "s1"]
-    out = capsys.readouterr().out
-    assert "3 more gradebook(s) on the next run" in out
-    assert "2 created here" in out  # `ok` is provision_one's word for a creation
-    assert "s2" not in out  # a count, never a handle
-
-
-def test_the_deadline_does_not_stop_a_run_that_is_keeping_up(monkeypatch, capsys):
-    # A semester whose gradebooks all exist costs almost nothing per student, so the budget
-    # must never be what decides that some of them wait for tomorrow.
-    monkeypatch.delenv("DSL_VERBOSE", raising=False)
-    rows = "".join(f"\ns{n}@uni.edu,S{n},enrolled,s{n},{n},dsl-{n}" for n in range(200))
-    monkeypatch.setattr(
-        grades.roster, "load", lambda org: roster.parse(ROSTER_HEADER + rows + "\n")
-    )
-    made: list[str] = []
-    monkeypatch.setattr(grades, "listing_by_name", lambda org: {})
-    monkeypatch.setattr(
-        grades,
-        "provision_one",
-        lambda org, handle, existing=None, collaborators=None: (
-            made.append(handle) or "skipped"
-        ),
-    )
-    assert grades.ensure_gradebooks("SEMESTER") == 0
-    assert len(made) == 200
-    assert "on the next run" not in capsys.readouterr().out
-
-
-def test_ensure_gradebooks_names_no_student_in_a_public_log(monkeypatch, capsys):
-    monkeypatch.delenv("DSL_VERBOSE", raising=False)
-    students = roster.parse(
-        ROSTER_HEADER + "\nada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n"
-    )
-    monkeypatch.setattr(grades.roster, "load", lambda org: students)
-    assert grades.ensure_gradebooks("SEMESTER", dry_run=True) == 0
-    out = capsys.readouterr().out
-    assert "ada-l" not in out
-    assert "Syncing 1 gradebook repo(s)" in out  # the aggregate still reports
-
-
-def test_gradebook_provisioning_names_nobody_on_the_happy_path(monkeypatch, capsys):
-    # The sibling test above covers `sync --dry-run`, which never creates anything. This is
-    # the CREATE branch, where `repo created: SEMESTER/grades-ada-l` used to reach the public
-    # log. `repos.gh` is stubbed - the process boundary - so the real create_repo runs.
-    monkeypatch.delenv("DSL_VERBOSE", raising=False)
-    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, repo: False)
-    monkeypatch.setattr(repos, "gh", lambda *a, **k: (0, ""))
-    monkeypatch.setattr(grades, "put_file", lambda *a, **k: True)
-    monkeypatch.setattr(grades, "set_repo_topics", lambda *a, **k: True)
-    monkeypatch.setattr(grades, "grant_faculty", lambda *a, **k: None)
-    monkeypatch.setattr(grades, "add_collaborator", lambda *a, **k: True)
-    assert grades.provision_one("SEMESTER", "ada-l") == "ok"
-    captured = capsys.readouterr()
-    assert "ada-l" not in captured.out + captured.err
-
-
-@pytest.mark.parametrize(
-    "break_it",
-    [
-        "branch-404",  # the gradebook repo is not there at all
-        "tree",  # the repo could not be read before writing
-        "build",  # POST /git/trees
-        "commit",  # POST /git/commits
-        "ref",  # PATCH the branch
-    ],
-)
-def test_no_failure_branch_of_a_gradebook_write_names_the_student(
-    break_it, monkeypatch, capsys
-):
-    # The green path was covered; the failure branches were not, and they are where the
-    # repo name lives: `could not commit to SEMESTER/grades-ada-l` on a bad day publishes the
-    # roster one student at a time, from a run in a PUBLIC .github repo.
-    monkeypatch.delenv("DSL_VERBOSE", raising=False)
-    if break_it == "branch-404":
-        # The one that happened: `grades-<handle>` was never provisioned, GET /repos 404s,
-        # and `default_branch` raises NAMING the repo. Stubbed at the process boundary so
-        # the real repos.default_branch runs and writes its own message.
-        monkeypatch.setattr(
-            repos, "gh", lambda *a, **k: (1, '{"message":"Not Found"} (HTTP 404)')
-        )
-    elif break_it == "tree":
-        monkeypatch.setattr(
-            gh_contents,
-            "default_branch",
-            lambda org, repo, **k: (_ for _ in ()).throw(
-                RuntimeError(f"could not read {org}/{repo}'s default branch: 500")
-            ),
-        )
-    else:
-        monkeypatch.setattr(
-            gh_contents, "default_branch", lambda org, repo, **k: "main"
-        )
-        monkeypatch.setattr(gh_contents, "repo_blob_shas", lambda o, r, b: {})
-        monkeypatch.setattr(gh_contents, "_head", lambda o, r, b: ("parent", "tree"))
-        answers = {"trees": break_it != "build", "commits": break_it != "commit"}
-        monkeypatch.setattr(
-            gh_contents,
-            "gh",
-            lambda *a, **k: (
-                (0, "sha") if answers.get(_endpoint(a), False) else (1, "boom")
-            ),
-        )
-    assert not gh_contents.put_files(
-        "SEMESTER",
-        "grades-ada-l",
-        {"grades.yml": b"x\n"},
-        "grades: update",
-        person=True,
-    )
-    captured = capsys.readouterr()
-    assert "ada-l" not in captured.out + captured.err
-    assert captured.err.strip(), "the fault itself still has to be reported"
-
-
-def _endpoint(args) -> str:
-    """Which git-data call a stubbed `gh` was asked for."""
-    joined = " ".join(str(a) for a in args)
-    for name in ("trees", "commits", "refs"):
-        if f"/git/{name}" in joined:
-            return name
-    return ""
-
-
-def test_a_failed_label_or_collaborator_grant_names_nobody_publicly(
-    monkeypatch, capsys
-):
-    # Both are called once per SUBMISSION repo now (the Submission receipts issue's label, and the
-    # student's own grant), so both name a `<slug>-<handle>` repo on failure.
-    monkeypatch.delenv("DSL_VERBOSE", raising=False)
-    monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "boom"))
-    assert not repos.ensure_label(
-        "SEMESTER",
-        "assignment-1-ada-l",
-        "dsl-feedback",
-        color="ededed",
-        description="d",
-        person=True,
-    )
-    assert not repos.add_collaborator(
-        "SEMESTER", "assignment-1-ada-l", "ada-l", person=True
-    )
-    captured = capsys.readouterr()
-    assert "ada-l" not in captured.out + captured.err
-    assert captured.err.count("SEMESTER") == 2  # the fault, and where to look
-
-
-def test_no_topic_stamp_or_offboarding_failure_names_a_student_repo(
-    monkeypatch, capsys
-):
-    # The other five repos.py failure lines that carry `{org}/{repo}` on a path a student
-    # repo reaches: the topic stamp both sweeps make, and the four calls that take a
-    # vanished handle's access away.
-    monkeypatch.delenv("DSL_VERBOSE", raising=False)
-    monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "boom"))
-    assert not repos.set_repo_topics(
-        "SEMESTER", "grades-ada-l", ["gradebook"], person=True
-    )
-    assert (
-        repos.is_collaborator("SEMESTER", "assignment-1-ada-l", "ada-l", person=True)
-        is None
-    )
-    assert not repos.remove_collaborator(
-        "SEMESTER", "assignment-1-ada-l", "ada-l", person=True
-    )
-    assert (
-        repos.pending_invitations(
-            "SEMESTER", "assignment-1-ada-l", "ada-l", person=True
-        )
-        is None
-    )
-    assert not repos.cancel_invitation(
-        "SEMESTER", "assignment-1-ada-l", "777", person=True
-    )
-    captured = capsys.readouterr()
-    assert "ada-l" not in captured.out + captured.err
-    assert captured.err.count("SEMESTER") == 5  # each fault, and where to look
-
-
-def test_the_verbose_log_still_says_which_repo_it_was(monkeypatch, capsys):
-    # The name is not thrown away, it is moved: a maintainer running the CLI locally with
-    # DSL_VERBOSE=1 still gets the repo, and so does the private semester-config archive.
-    monkeypatch.setenv("DSL_VERBOSE", "1")
-    monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "boom"))
-    assert not repos.add_collaborator(
-        "SEMESTER", "assignment-1-ada-l", "ada-l", person=True
-    )
-    assert "assignment-1-ada-l" in capsys.readouterr().out
-
-
-def test_a_gradebook_the_student_cannot_open_is_a_failure(monkeypatch):
-    # The old "created-no-collaborator" status doesn't start with "failed", so sync's exit
-    # predicate ignored it: a student with no read on their own gradebook, reported green.
-    monkeypatch.setattr("dsl_course.discovery.repo_exists", lambda org, repo: True)
-    monkeypatch.setattr(grades, "grant_faculty", lambda *a, **k: None)
-    monkeypatch.setattr(grades, "add_collaborator", lambda *a, **k: False)
-    assert grades.provision_one("SEMESTER", "ada-l").startswith("failed")
-
-
-def test_a_new_gradebook_grants_faculty_read_and_an_existing_one_is_left_alone(
-    monkeypatch,
-):
-    # Read, not write: `distribute` rewrites grades.yml from the grading sheet, so a mark
-    # corrected in the gradebook itself would be overwritten on the next run.
-    #
-    # At CREATION only. A team grant does not decay and the nightly sweep
-    # (access.converge_faculty_access) owns the floor, so re-granting on every Sync
-    # membership cost two PUTs per student a night for nothing.
-    faculty = []
-    exists = {"grades-ada-l"}
-    monkeypatch.setattr(
-        "dsl_course.discovery.repo_exists", lambda org, repo: repo in exists
-    )
-    monkeypatch.setattr(grades, "grant_faculty", lambda *a, **k: faculty.append(a))
-    monkeypatch.setattr(grades, "add_collaborator", lambda *a, **k: True)
-    monkeypatch.setattr(grades, "create_repo", lambda *a, **k: True)
-    monkeypatch.setattr(grades, "put_file", lambda *a, **k: True)
-    monkeypatch.setattr(grades, "set_repo_topics", lambda *a, **k: True)
-    grades.provision_one("SEMESTER", "ada-l")
-    assert faculty == [], "the existing gradebook was re-granted"
-    grades.provision_one("SEMESTER", "bob-b")
-    assert faculty == [("SEMESTER", "grades-bob-b", grades.FACULTY_READ_ACCESS)]
-
-
-def test_an_existing_gradebook_missing_its_topic_is_retagged(monkeypatch):
-    # The stamp is a separate PUT after the create, so a gradebook whose PUT failed - or
-    # that predates the topic - stayed untagged until the nightly sweep. Untagged means
-    # discovery reads `grades-<handle>` as a semester repo, handle and all.
-    tagged = []
-    monkeypatch.setattr(grades, "add_collaborator", lambda *a, **k: True)
-    monkeypatch.setattr(
-        grades, "set_repo_topics", lambda o, r, t, **k: tagged.append((r, t)) or True
-    )
-    grades.provision_one(
-        "SEMESTER",
-        "ada-l",
-        existing={"grades-ada-l": {"name": "grades-ada-l", "topics": ["keep-me"]}},
-    )
-    # additive: the PUT replaces the whole list, so what it already carried comes back
-    assert tagged == [("grades-ada-l", ["gradebook", "keep-me"])]
-
-
-def test_an_already_tagged_gradebook_costs_no_call(monkeypatch):
-    # The listing carries `topics`, so the common case - every gradebook tagged - is free.
-    tagged = []
-    monkeypatch.setattr(grades, "add_collaborator", lambda *a, **k: True)
-    monkeypatch.setattr(
-        grades, "set_repo_topics", lambda o, r, t, **k: tagged.append(r) or True
-    )
-    grades.provision_one(
-        "SEMESTER",
-        "ada-l",
-        existing={"grades-ada-l": {"name": "grades-ada-l", "topics": ["gradebook"]}},
-    )
-    assert tagged == []
-
-
-def test_an_archived_gradebook_is_left_frozen(monkeypatch):
-    # An archived repo is read-only, so the PUT 403s, and a finished semester is meant to
-    # stay frozen. `access.converge_topics` passes over archived repos for the same reason.
-    tagged = []
-    monkeypatch.setattr(grades, "add_collaborator", lambda *a, **k: True)
-    monkeypatch.setattr(
-        grades, "set_repo_topics", lambda o, r, t, **k: tagged.append(r) or True
-    )
-    grades.provision_one(
-        "SEMESTER",
-        "ada-l",
-        existing={
-            "grades-ada-l": {"name": "grades-ada-l", "topics": [], "archived": True}
-        },
-    )
-    assert tagged == []
-
-
-def test_a_failed_gradebook_tag_is_reported_with_its_consequence(monkeypatch, capsys):
-    # The return used to be discarded. The consequence - `grades-<handle>` is a candidate
-    # for the public landing page - is what a reader needs, and the line names nobody.
-    monkeypatch.delenv("DSL_VERBOSE", raising=False)
-    monkeypatch.setattr(grades, "add_collaborator", lambda *a, **k: True)
-    monkeypatch.setattr(grades, "set_repo_topics", lambda *a, **k: False)
-    grades.provision_one(
-        "SEMESTER",
-        "ada-l",
-        existing={"grades-ada-l": {"name": "grades-ada-l", "topics": []}},
-    )
-    captured = capsys.readouterr()
-    assert "carries no `gradebook` topic" in captured.err
-    assert "landing page" in captured.err
-    assert "ada-l" not in captured.out + captured.err
+from tests.conftest import ROSTER_HEADER, repo_row, split_grading
 
 
 def test_unsent_grade_notifications_are_reported(monkeypatch, capsys):
@@ -391,14 +43,14 @@ def test_unsent_grade_notifications_are_reported(monkeypatch, capsys):
         "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n"
         "bob@uni.edu,Bob,enrolled,bob-b,43,dsl-def\n"
     )
-    monkeypatch.setattr(grades.roster, "load", lambda org: students)
+    monkeypatch.setattr(distribute.roster, "load", lambda org: students)
     monkeypatch.setattr(discovery, "course_name_for_semester", lambda org: "")
     monkeypatch.setattr(
-        grades.mailer,
+        distribute.mailer,
         "send_bulk",
         lambda msgs, dry_run=False, sample=None: [m[0] for m in msgs[:1]],
     )
-    grades._email_updates("SEMESTER", ["ada-l", "bob-b"])
+    distribute._email_updates("SEMESTER", ["ada-l", "bob-b"])
     assert "1 of 2 grade notification(s) not sent" in capsys.readouterr().err
 
 
@@ -409,10 +61,10 @@ def test_grade_notification_names_the_course_and_falls_back_when_unnamed(monkeyp
     students = roster.parse(
         ROSTER_HEADER + "\nada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n"
     )
-    monkeypatch.setattr(grades.roster, "load", lambda org: students)
+    monkeypatch.setattr(distribute.roster, "load", lambda org: students)
     sent: list[list] = []
     monkeypatch.setattr(
-        grades.mailer,
+        distribute.mailer,
         "send_bulk",
         lambda msgs, dry_run=False, sample=None: (
             sent.append(msgs) or [m[0] for m in msgs]
@@ -422,14 +74,14 @@ def test_grade_notification_names_the_course_and_falls_back_when_unnamed(monkeyp
     monkeypatch.setattr(
         discovery, "course_name_for_semester", lambda org: "Deep Learning"
     )
-    grades._email_updates("SEMESTER", ["ada-l"])
+    distribute._email_updates("SEMESTER", ["ada-l"])
     _to, subject, body = sent[-1][0]
     assert "Your grades for the Deep Learning course have been updated." in body
     # and in the SUBJECT - the inbox list is where a student tells two courses apart
     assert subject == "Your grades for Deep Learning have been updated"
 
     monkeypatch.setattr(discovery, "course_name_for_semester", lambda org: "")
-    grades._email_updates("SEMESTER", ["ada-l"])
+    distribute._email_updates("SEMESTER", ["ada-l"])
     _to, subject, body = sent[-1][0]
     assert "Your grades for the course have been updated." in body
     assert subject == "Your grades have been updated"
@@ -439,19 +91,19 @@ def test_grade_notification_dry_run_carries_a_placeholder_sample(monkeypatch):
     students = roster.parse(
         ROSTER_HEADER + "\nada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n"
     )
-    monkeypatch.setattr(grades.roster, "load", lambda org: students)
+    monkeypatch.setattr(distribute.roster, "load", lambda org: students)
     monkeypatch.setattr(
         discovery, "course_name_for_semester", lambda org: "Deep Learning"
     )
     seen: dict = {}
     monkeypatch.setattr(
-        grades.mailer,
+        distribute.mailer,
         "send_bulk",
         lambda msgs, dry_run=False, sample=None: (
             seen.update(sample=sample) or [m[0] for m in msgs]
         ),
     )
-    grades._email_updates("SEMESTER", ["ada-l"], dry_run=True)
+    distribute._email_updates("SEMESTER", ["ada-l"], dry_run=True)
     # The reviewer sees the wording; no real student's name or handle is in it.
     assert "<name>" in seen["sample"] and "<handle>" in seen["sample"]
     assert "Ada" not in seen["sample"] and "ada-l" not in seen["sample"]
@@ -468,95 +120,18 @@ def test_email_updates_matches_the_roster_case_insensitively(monkeypatch):
     students = roster.parse(
         ROSTER_HEADER + "\nada@uni.edu,Ada,enrolled,Ada-L,42,dsl-abc\n"
     )
-    monkeypatch.setattr(grades.roster, "load", lambda org: students)
+    monkeypatch.setattr(distribute.roster, "load", lambda org: students)
     monkeypatch.setattr(discovery, "course_name_for_semester", lambda org: "")
     sent: list[list] = []
     monkeypatch.setattr(
-        grades.mailer,
+        distribute.mailer,
         "send_bulk",
         lambda msgs, dry_run=False, sample=None: (
             sent.append(msgs) or [m[0] for m in msgs]
         ),
     )
-    grades._email_updates("SEMESTER", ["ada-l"])  # the gradebook file's spelling
+    distribute._email_updates("SEMESTER", ["ada-l"])  # the gradebook file's spelling
     assert sent and sent[-1][0][0] == "ada@uni.edu"
-
-
-# ---------------- "nothing new to render" must mean nothing new, not a failed commit
-
-
-# ------------------------------------------- ONE listing instead of a probe per gradebook
-
-
-def _ensure_run(monkeypatch, listing, handles=("ada-l", "bob-b")):
-    """`ensure_gradebooks` over `handles`, with `listing` (or None for one that could not
-    be read) standing in for the org listing. Returns (the orgs listed, the gradebooks
-    created)."""
-    students = roster.parse(
-        ROSTER_HEADER
-        + "\n"
-        + "".join(
-            f"{h}@uni.edu,{h},enrolled,{h},4{i},dsl-{h}\n"
-            for i, h in enumerate(handles)
-        )
-    )
-    listed: list[str] = []
-
-    def fake_listing(org):
-        listed.append(org)
-        # None is `discovery.listing_by_name`'s answer when the listing could not be read.
-        return None if listing is None else {r["name"]: r for r in listing}
-
-    created: list[str] = []
-    monkeypatch.setattr(grades.roster, "load", lambda org: students)
-    monkeypatch.setattr(grades, "listing_by_name", fake_listing)
-    monkeypatch.setattr(
-        grades, "create_repo", lambda org, repo, **k: created.append(repo) or True
-    )
-    monkeypatch.setattr(grades, "put_file", lambda *a, **k: True)
-    monkeypatch.setattr(grades, "set_repo_topics", lambda *a, **k: True)
-    monkeypatch.setattr(grades, "grant_faculty", lambda *a, **k: None)
-    monkeypatch.setattr(grades, "add_collaborator", lambda *a, **k: True)
-    assert grades.ensure_gradebooks("SEMESTER") == 0
-    return listed, created
-
-
-def test_ensure_gradebooks_lists_the_org_once_and_probes_no_gradebook(monkeypatch):
-    # A repo_exists per student cost a GET per student on every nightly sync, to ask what
-    # one paginated listing already answers for the whole semester.
-    monkeypatch.setattr(
-        "dsl_course.discovery.repo_exists",
-        lambda *a, **k: pytest.fail("a per-repo probe is back in the hot path"),
-    )
-    listed, created = _ensure_run(monkeypatch, [{"name": "grades-ada-l", "topics": []}])
-    assert listed == ["SEMESTER"], "one listing per run, not one per student"
-    assert created == ["grades-bob-b"], "a listed gradebook was recreated"
-
-
-def test_a_failed_listing_falls_back_to_probing_each_gradebook(monkeypatch):
-    # The listing is an optimisation. A rate limit on it must not leave a student who
-    # onboarded today without a gradebook.
-    probed: list[str] = []
-    monkeypatch.setattr(
-        "dsl_course.discovery.repo_exists",
-        lambda org, repo: probed.append(repo) or False,
-    )
-    listed, created = _ensure_run(monkeypatch, None)
-    assert listed == ["SEMESTER"]
-    assert probed == ["grades-ada-l", "grades-bob-b"]
-    assert created == ["grades-ada-l", "grades-bob-b"]
-
-
-def test_a_dry_run_lists_nothing(monkeypatch):
-    # Nothing is created, so nothing needs to know what exists.
-    students = roster.parse(
-        ROSTER_HEADER + "\nada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n"
-    )
-    monkeypatch.setattr(grades.roster, "load", lambda org: students)
-    monkeypatch.setattr(
-        grades, "listing_by_name", lambda org: pytest.fail("a dry run listed the org")
-    )
-    assert grades.ensure_gradebooks("SEMESTER", dry_run=True) == 0
 
 
 # ------------------------------------------------------------------ distribute, end to end
@@ -589,18 +164,6 @@ teams:
           Your section repeats the Q4 error.
         notes_not_shared_with_students: privately noted
 """
-
-
-def _split_grading(text: str | None) -> tuple[str | None, str | None]:
-    """A test's old-style grading config split where the keys live now: the template's
-    `grading_config.yml`, and the run settings as the semester's `assignments.yml`
-    `defaults:` (decision 0009)."""
-    if text is None:
-        return None, None
-    data = yaml.safe_load(text) or {}
-    run = {k: data.pop(k) for k in settings.RUN_KEYS if k in data}
-    template = yaml.safe_dump(data) if data else ""
-    return template, (yaml.safe_dump({"defaults": run}) if run else None)
 
 
 _GRADING_YML = (
@@ -732,22 +295,22 @@ def _distribute(
     `preview_issues` to start from one, or to share it between two runs. `exported` is the
     registrar export the last real run left behind."""
     cfg = tmp_path / "cfg"
-    (cfg / grades.SHEETS_DIR).mkdir(parents=True)
+    (cfg / grading_sheet.SHEETS_DIR).mkdir(parents=True)
     sheets = {"assignment-1": _SHEET} if sheets is None else sheets
     for slug, text in sheets.items():
-        (cfg / grades.SHEETS_DIR / f"{slug}.yml").write_text(text)
+        (cfg / grading_sheet.SHEETS_DIR / f"{slug}.yml").write_text(text)
     if distributed is not None:
-        (cfg / grades.GRADEBOOK_DIR).mkdir(parents=True, exist_ok=True)
-        (cfg / grades.DISTRIBUTED_PATH).write_text(distributed)
+        (cfg / gradebook.GRADEBOOK_DIR).mkdir(parents=True, exist_ok=True)
+        (cfg / gradebook.DISTRIBUTED_PATH).write_text(distributed)
     if notified is not None:
-        (cfg / grades.GRADEBOOK_DIR).mkdir(parents=True, exist_ok=True)
-        (cfg / grades.NOTIFIED_PATH).write_text(notified)
+        (cfg / gradebook.GRADEBOOK_DIR).mkdir(parents=True, exist_ok=True)
+        (cfg / gradebook.NOTIFIED_PATH).write_text(notified)
     for name in stale_gradebooks:
-        (cfg / grades.GRADEBOOK_DIR).mkdir(parents=True, exist_ok=True)
-        (cfg / grades.GRADEBOOK_DIR / name).write_text("student: someone\n")
+        (cfg / gradebook.GRADEBOOK_DIR).mkdir(parents=True, exist_ok=True)
+        (cfg / gradebook.GRADEBOOK_DIR / name).write_text("student: someone\n")
     if exported is not None:
-        (cfg / grades.SEMESTER_CSV_NAME).parent.mkdir(parents=True, exist_ok=True)
-        (cfg / grades.SEMESTER_CSV_NAME).write_text(exported)
+        (cfg / gradebook.SEMESTER_CSV_NAME).parent.mkdir(parents=True, exist_ok=True)
+        (cfg / gradebook.SEMESTER_CSV_NAME).write_text(exported)
     store = [] if preview_issues is None else preview_issues
     _fake_issues(monkeypatch, store)
 
@@ -767,10 +330,10 @@ def _distribute(
         "gradebook_calls": [],
         "preview": store,
     }
-    monkeypatch.setattr(grades, "gh", fake_gh)
+    monkeypatch.setattr(receipts, "gh", fake_gh)
     monkeypatch.setattr(ghcli, "gh", fake_gh)
     monkeypatch.setattr(
-        grades,
+        distribute,
         "ensure_gradebooks",
         lambda org, dry_run=False, existing=None, **kw: (
             effects["gradebook_calls"].append(kw) or 0
@@ -778,26 +341,26 @@ def _distribute(
     )
     # The semester listing distribute takes to check what each repo is: there, and private.
     # None is "could not be read", which is a listing nothing may be CREATED on the
-    # strength of (`grades.receipts_thread_policy`).
-    monkeypatch.setattr(grades, "listing_by_name", lambda org: listed)
-    monkeypatch.setattr(grades, "course_org_for_semester", lambda org: "COURSE")
-    template_text, semester_text = _split_grading(grading)
-    monkeypatch.setattr(grades, "_grading_text", lambda org, tpl: template_text)
+    # strength of (`receipts.receipts_thread_policy`).
+    monkeypatch.setattr(distribute, "listing_by_name", lambda org: listed)
+    monkeypatch.setattr(distribute, "course_org_for_semester", lambda org: "COURSE")
+    template_text, semester_text = split_grading(grading)
+    monkeypatch.setattr(grading_spec, "_grading_text", lambda org, tpl: template_text)
     monkeypatch.setattr(settings, "_assignments_text", lambda org: semester_text)
     monkeypatch.setattr(
-        grades.schedule,
+        distribute.schedule,
         "load",
         lambda org: _schedule_with(*(sheets or {"assignment-1": ""}), due=due),
     )
     monkeypatch.setattr(
-        grades,
+        receipts,
         "ensure_receipts_issue",
         lambda org, repo, body, dry_run=False: (
             effects["issues"].append((repo, body)) or issue
         ),
     )
     monkeypatch.setattr(
-        grades,
+        distribute,
         "post_marked_comment",
         lambda org, repo, no, body, marker, dry_run=False: (
             effects["comments"].append((repo, body, marker)) or True
@@ -807,8 +370,8 @@ def _distribute(
     def fake_put_files(
         org, repo, files, message, *, delete=(), create_only=False, person=False
     ):
-        target = "config" if repo == grades.CONFIG_REPO else "gradebooks"
-        if target == "config" and message.startswith(grades.INTENT_MESSAGE):
+        target = "config" if repo == course.CONFIG_REPO else "gradebooks"
+        if target == "config" and message.startswith(distribute.INTENT_MESSAGE):
             # The record of the emails about to go, committed before they are sent.
             effects["intent"].append({k: v.decode() for k, v in files.items()})
             return intent_ok
@@ -822,11 +385,11 @@ def _distribute(
         # A callable lets a test answer per write - which is what a lost ref race is.
         return put_files_ok(files) if callable(put_files_ok) else put_files_ok
 
-    monkeypatch.setattr(grades, "put_files", fake_put_files)
+    monkeypatch.setattr(distribute, "put_files", fake_put_files)
     students = (
         None if roster_rows is None else roster.parse(ROSTER_HEADER + roster_rows)
     )
-    monkeypatch.setattr(grades.roster, "load", lambda org: students)
+    monkeypatch.setattr(distribute.roster, "load", lambda org: students)
     monkeypatch.setattr(discovery, "course_name_for_semester", course_name)
 
     def fake_send_bulk(msgs, dry_run=False, sample=None):
@@ -835,9 +398,9 @@ def _distribute(
         effects["outbox"].append(msgs)
         return [m[0] for m in msgs[:sent]]
 
-    monkeypatch.setattr(grades.mailer, "send_bulk", fake_send_bulk)
+    monkeypatch.setattr(distribute.mailer, "send_bulk", fake_send_bulk)
     try:
-        effects["rc"] = grades.distribute(
+        effects["rc"] = distribute.distribute(
             "SEMESTER",
             notify=notify,
             dry_run=dry_run,
@@ -867,8 +430,8 @@ def test_a_real_run_reaches_every_channel_and_posts_no_comment(tmp_path, monkeyp
     assert "| Assignment 1 · Neural networks | 43 |" in files["README.md"]
     # the registrar export and the record, in one semester-config commit
     ((_cfg, cfg_files, _d),) = out["config"]
-    assert set(cfg_files) == {grades.SEMESTER_CSV_NAME, grades.DISTRIBUTED_PATH}
-    assert "ada@uni.edu,Ada,ada-l,43" in cfg_files[grades.SEMESTER_CSV_NAME]
+    assert set(cfg_files) == {gradebook.SEMESTER_CSV_NAME, gradebook.DISTRIBUTED_PATH}
+    assert "ada@uni.edu,Ada,ada-l,43" in cfg_files[gradebook.SEMESTER_CSV_NAME]
     # and the email
     assert [m[0] for batch in out["outbox"] for m in batch] == ["ada@uni.edu"]
 
@@ -896,10 +459,10 @@ def test_a_scoped_return_sends_that_assignment_beside_those_already_returned(
     )
     assert "assignment-2" not in files["grades.yml"]
     ((_cfg, cfg_files, _d2),) = out["config"]
-    header = cfg_files[grades.SEMESTER_CSV_NAME].splitlines()[0]
+    header = cfg_files[gradebook.SEMESTER_CSV_NAME].splitlines()[0]
     assert header.endswith("assignment-0,assignment-1")
     # distribute never writes a sheet, scoped or not.
-    assert not [p for p in cfg_files if p.startswith(grades.SHEETS_DIR)]
+    assert not [p for p in cfg_files if p.startswith(grading_sheet.SHEETS_DIR)]
 
 
 _UNMARKED = _SHEET.replace("score_individual: 43", "score_individual:").replace(
@@ -918,8 +481,8 @@ _UNMARKED = _SHEET.replace("score_individual: 43", "score_individual:").replace(
         # gone while gradebooks were already written
         (
             None,
-            grades.dump_distributed(
-                {("ada-l", "", grades.CHANNEL_GRADEBOOK): ("x", "2026-10-01", "")}
+            gradebook.dump_distributed(
+                {("ada-l", "", gradebook.CHANNEL_GRADEBOOK): ("x", "2026-10-01", "")}
             ),
         ),
     ],
@@ -1054,7 +617,7 @@ def test_a_question_the_assignment_does_not_declare_is_held_and_never_summed(
         monkeypatch, tmp_path, sheets={"assignment-1": sheet}, grading=grading
     )
     assert (out["comments"], out["gradebooks"]) == ([], [])
-    assert grades.score_total(
+    assert grading_sheet.score_total(
         {"Q1": "15", "Q2": "10", "Q5": "10"}, {"Q1": "15", "Q2": "10"}
     ) == Decimal(25)
 
@@ -1097,7 +660,7 @@ def test_a_run_writes_every_sheet_the_semester_has_into_every_gradebook(
     assert "assignment-2:" in book["grades.yml"]
     ((_cfg_repo, cfg, _e),) = out["config"]
     assert (
-        cfg[grades.SEMESTER_CSV_NAME]
+        cfg[gradebook.SEMESTER_CSV_NAME]
         .splitlines()[0]
         .endswith("assignment-1,assignment-2")
     )
@@ -1111,7 +674,7 @@ def test_a_semester_with_no_sheet_yet_distributes_nothing(
     out = _distribute(monkeypatch, tmp_path, sheets={})
     assert out["rc"] == 1
     assert (out["comments"], out["gradebooks"], out["config"]) == ([], [], [])
-    assert f"no {grades.SHEETS_DIR}/ in SEMESTER" in capsys.readouterr().err
+    assert f"no {grading_sheet.SHEETS_DIR}/ in SEMESTER" in capsys.readouterr().err
 
 
 def test_the_dry_run_counts_units_with_questions_still_unmarked(
@@ -1201,15 +764,17 @@ def test_a_hold_on_a_mark_already_returned_takes_nothing_away(tmp_path, monkeypa
         monkeypatch,
         tmp_path / "again",
         sheets=sheets,
-        distributed=before[grades.DISTRIBUTED_PATH],
-        exported=before[grades.SEMESTER_CSV_NAME],
+        distributed=before[gradebook.DISTRIBUTED_PATH],
+        exported=before[gradebook.SEMESTER_CSV_NAME],
         assignment="assignment-2",
     )
     assert out["rc"] == 0
     assert (out["gradebooks"], out["outbox"]) == ([], [])
     ((_cfg, after, _d),) = out["config"]
-    assert after[grades.SEMESTER_CSV_NAME].splitlines()[1] == "ada@uni.edu,Ada,ada-l,43"
-    assert grades.marks_return_record("assignment-2") not in after
+    assert (
+        after[gradebook.SEMESTER_CSV_NAME].splitlines()[1] == "ada@uni.edu,Ada,ada-l,43"
+    )
+    assert distribute.marks_return_record("assignment-2") not in after
 
 
 def test_a_hold_with_no_export_to_check_it_against_sends_nothing(tmp_path, monkeypatch):
@@ -1222,7 +787,7 @@ def test_a_hold_with_no_export_to_check_it_against_sends_nothing(tmp_path, monke
         monkeypatch,
         tmp_path / "again",
         sheets={"assignment-1": _TYPO_SHEET, "assignment-2": _SHEET},
-        distributed=before[grades.DISTRIBUTED_PATH],
+        distributed=before[gradebook.DISTRIBUTED_PATH],
     )
     assert out["rc"] == 1
     assert (out["gradebooks"], out["outbox"], out["config"]) == ([], [], [])
@@ -1348,7 +913,7 @@ def test_the_dry_run_says_who_gets_what_in_a_private_issue_and_logs_none_of_it(
     assert out["rc"] == 0
     assert (out["gradebooks"], out["config"], out["outbox"]) == ([], [], [])
     ((issue),) = out["preview"]
-    assert issue["title"] == grades.PREVIEW_TITLE and issue["state"] == "OPEN"
+    assert issue["title"] == distribute.PREVIEW_TITLE and issue["state"] == "OPEN"
     body = issue["body"]
     # ada's grade changed; bob's did not (he has never been told it, so he is still
     # emailed), and his other mark is held
@@ -1463,7 +1028,7 @@ def test_a_preview_too_long_for_one_issue_says_how_many_it_left_out(
     tmp_path, monkeypatch
 ):
     # GitHub refuses a body over its cap, and a refused body is no preview at all.
-    monkeypatch.setattr(grades, "_ISSUE_BODY_CAP", 2_000)
+    monkeypatch.setattr(distribute, "_ISSUE_BODY_CAP", 2_000)
     handles = [f"s{n:03d}" for n in range(60)]
     rows = (
         "".join(
@@ -1502,8 +1067,8 @@ def _after_one_real_run(monkeypatch, tmp_path, sheet: str, **kwargs) -> dict:
         monkeypatch,
         tmp_path / "dry",
         sheets={"assignment-1": sheet},
-        distributed=cfg_files[grades.DISTRIBUTED_PATH],
-        exported=cfg_files[grades.SEMESTER_CSV_NAME],
+        distributed=cfg_files[gradebook.DISTRIBUTED_PATH],
+        exported=cfg_files[gradebook.SEMESTER_CSV_NAME],
         dry_run=True,
         **kwargs,
     )
@@ -1636,7 +1201,7 @@ def test_a_real_run_closes_the_preview_with_a_line_saying_so(tmp_path, monkeypat
     assert out["rc"] == 0
     ((issue),) = store
     assert issue["state"] == "CLOSED"
-    assert issue["comments"] == [grades.PREVIEW_SENT]
+    assert issue["comments"] == [distribute.PREVIEW_SENT]
 
 
 def test_a_real_run_with_no_preview_open_is_fine(tmp_path, monkeypatch):
@@ -1670,7 +1235,7 @@ def test_a_dry_run_writes_nothing_posts_nothing_and_sends_nothing(
     printed = capsys.readouterr().out
     assert "assignment-1: 1 student(s) · 1 final grade(s) derived" in printed
     assert "0 held for a hand decision" in printed
-    assert f"{grades.SEMESTER_CSV_NAME}: would gain column assignment-1" in printed
+    assert f"{gradebook.SEMESTER_CSV_NAME}: would gain column assignment-1" in printed
     assert "would update 1 gradebook(s) and email 1 student(s)" in printed
 
 
@@ -1695,7 +1260,7 @@ def test_the_record_survives_one_lost_race_with_the_cron(tmp_path, monkeypatch, 
     tries = {"n": 0}
 
     def refuse_the_first_record(files):
-        if grades.DISTRIBUTED_PATH not in files:
+        if gradebook.DISTRIBUTED_PATH not in files:
             return True  # the gradebook writes are not in the race
         tries["n"] += 1
         return tries["n"] > 1
@@ -1720,7 +1285,7 @@ def test_a_re_run_says_nothing_twice(tmp_path, monkeypatch):
     again = _distribute(
         monkeypatch,
         tmp_path / "again",
-        distributed=cfg_files[grades.DISTRIBUTED_PATH],
+        distributed=cfg_files[gradebook.DISTRIBUTED_PATH],
     )
     assert again["comments"] == []
     assert again["gradebooks"] == []
@@ -1736,7 +1301,7 @@ def test_a_corrected_grade_reaches_that_student_and_only_them(tmp_path, monkeypa
         monkeypatch,
         tmp_path / "again",
         sheets={"assignment-1": corrected},
-        distributed=cfg_files[grades.DISTRIBUTED_PATH],
+        distributed=cfg_files[gradebook.DISTRIBUTED_PATH],
     )
     ((_repo, files, _delete),) = again["gradebooks"]  # exactly one gradebook
     assert "45" in files["README.md"]
@@ -1764,15 +1329,15 @@ def test_a_student_is_emailed_on_the_run_that_brings_their_first_mark(
     assert [repo for repo, _files, _d in first["gradebooks"]] == ["grades-ada-l"]
     assert first["outbox"] == []
     ((_cfg, cfg_files, _d),) = first["config"]
-    record = grades.parse_distributed(cfg_files[grades.DISTRIBUTED_PATH])
-    assert ("ada-l", "", grades.CHANNEL_EMAIL) not in record
+    record = gradebook.parse_distributed(cfg_files[gradebook.DISTRIBUTED_PATH])
+    assert ("ada-l", "", gradebook.CHANNEL_EMAIL) not in record
 
     again = _distribute(
         monkeypatch,
         tmp_path / "again",
         sheets={"assignment-1": _SHEET},
         grading=grading,
-        distributed=cfg_files[grades.DISTRIBUTED_PATH],
+        distributed=cfg_files[gradebook.DISTRIBUTED_PATH],
     )
     assert [m[0] for batch in again["outbox"] for m in batch] == ["ada@uni.edu"]
 
@@ -1787,9 +1352,9 @@ def test_a_reworded_gradebook_page_is_committed_and_nobody_is_emailed(
     # every student in every live semester to tell them nothing.
     first = _distribute(monkeypatch, tmp_path)
     ((_cfg, cfg_files, _d),) = first["config"]
-    page = grades.render_readme
+    page = gradebook.render_readme
     monkeypatch.setattr(
-        grades,
+        distribute,
         "render_readme",
         lambda *a, **k: (
             page(*a, **k) + "\n## Keeping your work\nA new standing section.\n"
@@ -1798,14 +1363,14 @@ def test_a_reworded_gradebook_page_is_committed_and_nobody_is_emailed(
     again = _distribute(
         monkeypatch,
         tmp_path / "again",
-        distributed=cfg_files[grades.DISTRIBUTED_PATH],
+        distributed=cfg_files[gradebook.DISTRIBUTED_PATH],
     )
     ((_repo, files, _delete),) = again["gradebooks"]
     assert "A new standing section." in files["README.md"]
     assert again["outbox"] == []
 
 
-_EMAIL = ("ada-l", "", grades.CHANNEL_EMAIL)
+_EMAIL = ("ada-l", "", gradebook.CHANNEL_EMAIL)
 
 
 def _first_run(monkeypatch, tmp_path, **kwargs) -> tuple[str, str, str]:
@@ -1814,16 +1379,16 @@ def _first_run(monkeypatch, tmp_path, **kwargs) -> tuple[str, str, str]:
     first = _distribute(monkeypatch, tmp_path, **kwargs)
     ((_repo, book, _d),) = first["gradebooks"]
     ((_cfg, cfg_files, _e),) = first["config"]
-    record = cfg_files[grades.DISTRIBUTED_PATH]
-    told = grades.parse_distributed(record)[_EMAIL][0]
-    return record, told, grades.content_hash(book["grades.yml"])
+    record = cfg_files[gradebook.DISTRIBUTED_PATH]
+    told = gradebook.parse_distributed(record)[_EMAIL][0]
+    return record, told, gradebook.content_hash(book["grades.yml"])
 
 
 def _told_as(record: str, digest: str) -> str:
     """`record` with Ada's email row holding `digest` - the row an older run wrote."""
-    rows = grades.parse_distributed(record)
+    rows = gradebook.parse_distributed(record)
     rows[_EMAIL] = (digest, "2026-09-01T00:00:00", "")
-    return grades.dump_distributed(rows)
+    return gradebook.dump_distributed(rows)
 
 
 def test_a_legacy_email_row_under_a_changed_mark_mails_once(tmp_path, monkeypatch):
@@ -1841,22 +1406,22 @@ def test_a_legacy_email_row_under_a_changed_mark_mails_once(tmp_path, monkeypatc
     )
     assert [m[0] for batch in again["outbox"] for m in batch] == ["ada@uni.edu"]
     ((_cfg, files, _d),) = again["config"]
-    now = grades.parse_distributed(files[grades.DISTRIBUTED_PATH])[_EMAIL][0]
-    assert now.startswith(grades.MARKS_DIGEST_PREFIX)
+    now = gradebook.parse_distributed(files[gradebook.DISTRIBUTED_PATH])[_EMAIL][0]
+    assert now.startswith(distribute.MARKS_DIGEST_PREFIX)
     third = _distribute(
         monkeypatch,
         tmp_path / "third",
         sheets=corrected,
-        distributed=files[grades.DISTRIBUTED_PATH],
+        distributed=files[gradebook.DISTRIBUTED_PATH],
     )
     assert third["outbox"] == []
 
 
 def _respelt(monkeypatch) -> None:
     # What PR #289 did to the Submitted column: the same moment, spelt `3rd Oct`.
-    shown = grades._submitted_display
+    shown = gradebook._submitted_display
     monkeypatch.setattr(
-        grades,
+        gradebook,
         "_submitted_display",
         lambda *a, **k: shown(*a, **k).replace("3 Oct", "3rd Oct"),
     )
@@ -1925,7 +1490,7 @@ def test_the_dry_run_says_what_the_real_run_would_send(tmp_path, monkeypatch, ca
 def test_the_registrar_export_is_written_only_on_a_real_run(tmp_path, monkeypatch):
     assert _distribute(monkeypatch, tmp_path, dry_run=True)["config"] == []
     ((_cfg, files, _d),) = _distribute(monkeypatch, tmp_path / "real")["config"]
-    csv_text = files[grades.SEMESTER_CSV_NAME]
+    csv_text = files[gradebook.SEMESTER_CSV_NAME]
     assert csv_text.splitlines()[0] == "hertie_email,name,github_handle,assignment-1"
 
 
@@ -1943,14 +1508,14 @@ def test_the_migration_off_notified_csv_happens_in_one_commit(tmp_path, monkeypa
         notify=False,  # so the carried-over row is visible, not overwritten
     )
     ((_cfg, files, delete),) = out["config"]
-    assert grades.DISTRIBUTED_PATH in files
+    assert gradebook.DISTRIBUTED_PATH in files
     assert set(delete) == {
-        grades.NOTIFIED_PATH,
-        f"{grades.GRADEBOOK_DIR}/ada-l.yml",
+        gradebook.NOTIFIED_PATH,
+        f"{gradebook.GRADEBOOK_DIR}/ada-l.yml",
     }
     # The email rows carried over, so nobody is re-told about a book they already know
     # about beyond the one re-hash this migration costs.
-    assert "ada-l,,email,anoldsha," in files[grades.DISTRIBUTED_PATH]
+    assert "ada-l,,email,anoldsha," in files[gradebook.DISTRIBUTED_PATH]
 
 
 def test_the_dead_per_student_yaml_goes_whether_or_not_this_is_the_migration(
@@ -1966,11 +1531,11 @@ def test_the_dead_per_student_yaml_goes_whether_or_not_this_is_the_migration(
     )
     ((_cfg, files, delete),) = out["config"]
     assert set(delete) == {
-        f"{grades.GRADEBOOK_DIR}/ada-l.yml",
-        f"{grades.GRADEBOOK_DIR}/bo-b.yml",
+        f"{gradebook.GRADEBOOK_DIR}/ada-l.yml",
+        f"{gradebook.GRADEBOOK_DIR}/bo-b.yml",
     }
     # `distributed.csv` lives in the same folder and is the one file still read there.
-    assert grades.DISTRIBUTED_PATH in files
+    assert gradebook.DISTRIBUTED_PATH in files
 
 
 _EXTERNAL_GRADING = _GRADING_YML + "submit_via: external\n"
@@ -2044,14 +1609,14 @@ def test_a_record_written_while_marks_were_commented_still_reads(tmp_path, monke
     assert out["rc"] == 0
     assert out["comments"] == [] and out["issues"] == []
     ((_cfg, files, _d),) = out["config"]
-    written = grades.parse_distributed(files[grades.DISTRIBUTED_PATH])
+    written = gradebook.parse_distributed(files[gradebook.DISTRIBUTED_PATH])
     # The old row is still there, unchanged, and the gradebook row is new beside it.
-    assert written[("ada-l", "assignment-1", grades.CHANNEL_ISSUE)] == (
+    assert written[("ada-l", "assignment-1", gradebook.CHANNEL_ISSUE)] == (
         "anoldhash",
         "2026-10-05T00:00:00",
         "7",
     )
-    assert ("ada-l", "", grades.CHANNEL_GRADEBOOK) in written
+    assert ("ada-l", "", gradebook.CHANNEL_GRADEBOOK) in written
 
 
 # -------------------------------------------- marks sent before the due date has passed
@@ -2120,63 +1685,6 @@ def test_an_assignment_that_collects_nothing_is_never_warned_about(
     assert "before the due date" not in capsys.readouterr().out
 
 
-@pytest.mark.parametrize(
-    "shape, listed, want",
-    [
-        # We could not look at all: find the thread the student was told to read, open
-        # nothing on an org nobody could list.
-        ({}, None, grades.THREAD_FIND),
-        # There, and private: the one case a Submission receipts issue may be OPENED in.
-        ({}, {"assignment-1-ada": "private"}, grades.THREAD_CREATE),
-        # There, and not private. Nothing about a student's marking goes where the world
-        # can read it - not even into a thread we used while it was still private.
-        ({}, {"assignment-1-ada": "public"}, grades.THREAD_NONE),
-        ({"visibility": "public"}, {"assignment-1-ada": "public"}, grades.THREAD_NONE),
-        # There and private, but a shape with no Submission receipts issue of its own: the thread a
-        # semester handed out before these shapes existed still gets its comment.
-        ({"visibility": "public"}, {"assignment-1-ada": "private"}, grades.THREAD_FIND),
-        (
-            {"visibility": "student_choice"},
-            {"assignment-1-ada": "private"},
-            grades.THREAD_FIND,
-        ),
-        (
-            {"submit_via": "external"},
-            {"assignment-1-ada": "private"},
-            grades.THREAD_FIND,
-        ),
-        # Not in the listing. A `github` repo may have been created since it was taken,
-        # where a shape that creates no repos has none to find, and probing each would be
-        # an issues call per student for an answer already known.
-        ({}, {"grades-ada": "private"}, grades.THREAD_FIND),
-        ({"submit_via": "external"}, {"grades-ada": "private"}, grades.THREAD_NONE),
-    ],
-)
-def test_the_feedback_thread_policy_answers_every_shape(shape, listed, want):
-    # ONE question - may this run touch the issue here, and may it open one? - answered in
-    # one place, for the submission receipts, which are the whole of what is posted into
-    # a submission repo.
-    spec = grades.SheetSpec(slug="assignment-1", title="A1", is_group=False, **shape)
-    rows = (
-        None
-        if listed is None
-        else {name: repo_row(name, visibility=v) for name, v in listed.items()}
-    )
-    assert grades.receipts_thread_policy(spec, rows, "assignment-1-ada") == want
-
-
-def test_a_spec_read_off_the_sheet_alone_never_opens_an_issue():
-    # No schedule entry, so no definition: `submit_via` and `visibility` are this spec's
-    # defaults rather than anybody's decision, and the one thing a guess may not do is
-    # open an issue in a student's repo. Its marks reach the gradebook either way.
-    spec = grades._spec_from_sheet("assignment-1", {"submissions": {}})
-    rows = {"assignment-1-ada": repo_row("assignment-1-ada")}
-    assert (
-        grades.receipts_thread_policy(spec, rows, "assignment-1-ada")
-        is grades.THREAD_FIND
-    )
-
-
 def test_distribute_provisions_the_gradebooks_with_no_time_budget(
     tmp_path, monkeypatch
 ):
@@ -2184,28 +1692,6 @@ def test_distribute_provisions_the_gradebooks_with_no_time_budget(
     # about to write a mark into every one of these repos, so one it stopped short of
     # would be a 404 per student in a public log, not a batch for tomorrow.
     assert _distribute(monkeypatch, tmp_path)["gradebook_calls"] == [{}]
-
-
-def test_a_gradebook_this_run_creates_goes_into_the_listing_it_was_handed(monkeypatch):
-    # The handout provisions the gradebooks off the tick's rows, so a gradebook made here
-    # has to be in them: the next release of the same tick reads those rows, and would
-    # otherwise create it again and count GitHub's refusal as a failure.
-    monkeypatch.setattr(grades, "create_repo", lambda *a, **k: True)
-    monkeypatch.setattr(grades, "put_file", lambda *a, **k: True)
-    monkeypatch.setattr(grades, "set_repo_topics", lambda *a, **k: True)
-    monkeypatch.setattr(grades, "grant_faculty", lambda *a, **k: None)
-    monkeypatch.setattr(grades, "add_collaborator", lambda *a, **k: True)
-    existing: dict[str, dict] = {}
-    assert grades.provision_one("SEMESTER", "ada-l", existing) == "ok"
-    row = existing["grades-ada-l"]
-    assert (row["name"], row["visibility"]) == ("grades-ada-l", "private")
-    assert (row["isTemplate"], row["archived"], row["topics"]) == (False, False, [])
-    assert row["pushed_at"]
-    # And the second pass over those rows makes nothing.
-    monkeypatch.setattr(
-        grades, "create_repo", lambda *a, **k: pytest.fail("made twice")
-    )
-    assert grades.provision_one("SEMESTER", "ada-l", existing) == "skipped"
 
 
 # A handle no roster row claims. A sheet is hand-typed, and the demo org carried six of
@@ -2314,11 +1800,11 @@ def test_an_unsent_notification_reddens_the_run_and_is_retried(tmp_path, monkeyp
     first = _distribute(monkeypatch, tmp_path, sent=0)
     assert first["rc"] == 1
     ((_cfg, files, _d),) = first["config"]
-    assert ",email," not in files[grades.DISTRIBUTED_PATH]
+    assert ",email," not in files[gradebook.DISTRIBUTED_PATH]
     again = _distribute(
         monkeypatch,
         tmp_path / "again",
-        distributed=files[grades.DISTRIBUTED_PATH],
+        distributed=files[gradebook.DISTRIBUTED_PATH],
         sent=1,
     )
     assert [m[0] for batch in again["outbox"] for m in batch] == ["ada@uni.edu"]
@@ -2386,8 +1872,8 @@ def test_distribute_reds_when_the_roster_cannot_be_read(tmp_path, monkeypatch, c
     # regenerating it from a roster nobody could read would commit a header line over the
     # file a registrar transcribes grades from.
     ((_repo, files, _delete),) = out["config"]
-    assert grades.SEMESTER_CSV_NAME not in files
-    assert grades.DISTRIBUTED_PATH in files
+    assert gradebook.SEMESTER_CSV_NAME not in files
+    assert gradebook.DISTRIBUTED_PATH in files
 
 
 def test_distribute_reds_on_a_header_only_roster_and_leaves_the_export(
@@ -2401,497 +1887,12 @@ def test_distribute_reds_on_a_header_only_roster_and_leaves_the_export(
     out = _distribute(monkeypatch, tmp_path, roster_rows="")
     assert out["rc"] == 1
     ((_repo, files, _delete),) = out["config"]
-    assert grades.SEMESTER_CSV_NAME not in files
-    assert grades.DISTRIBUTED_PATH in files
+    assert gradebook.SEMESTER_CSV_NAME not in files
+    assert gradebook.DISTRIBUTED_PATH in files
 
 
 def test_a_dry_run_reds_on_a_header_only_roster_too(tmp_path, monkeypatch):
     assert _distribute(monkeypatch, tmp_path, roster_rows="", dry_run=True)["rc"] == 1
-
-
-# ------------------------------------------------- the team-formation lock file
-
-
-_DUE = datetime(2026, 10, 4, 23, 59, tzinfo=timezone.utc)
-# The late cutoff the window closes at: the due date plus the institution's 10 days.
-_CUTOFF = _DUE + timedelta(days=10)
-_HANDOUT = datetime(2026, 9, 20, 9, 0, tzinfo=timezone.utc)
-
-
-def _sched(*, handout: datetime | None = None, **assignments) -> Schedule:
-    """A schedule of assignments whose only interesting fields are which template they
-    hand out from and, for the formation window, when. `handout=None` is the manual
-    hand-out every test that is not about the window wants."""
-    return Schedule(
-        assignments={
-            key: AssignmentEntry(
-                due_datetime=_DUE,
-                course_source_repo=template,
-                handout_datetime=handout,
-            )
-            for key, template in assignments.items()
-        }
-    )
-
-
-def _lock(
-    monkeypatch,
-    sched,
-    configs: dict[str, str | None],
-    defaults: str = "",
-    now: datetime | None = None,
-) -> str:
-    """Render the lock file for `sched`, with each template's `grading_config.yml` given
-    as text (None = the template has none) and the course's own defaults block as YAML."""
-    # Each template's run settings are its schedule key's block in the semester's
-    # assignments.yml now (decision 0009); the rest stays the template's.
-    split = {t: _split_grading(text) for t, text in configs.items()}
-    blocks = {
-        key: yaml.safe_load(split[e.course_source_repo][1])["defaults"]
-        for key, e in sched.assignments.items()
-        if (split.get(e.course_source_repo) or (None, None))[1]
-    }
-    sched.org = sched.org or "SEMESTER"
-    monkeypatch.setattr(
-        grades,
-        "_grading_text",
-        lambda org, template: (split.get(template) or (None,))[0],
-    )
-    monkeypatch.setattr(
-        settings,
-        "_assignments_text",
-        lambda org: yaml.safe_dump({"assignments": blocks}) if blocks else None,
-    )
-    monkeypatch.setattr(
-        settings, "org_meta", lambda org: yaml.safe_load(defaults or "{}") or {}
-    )
-    return grades.team_lock_text(grades.team_lock_entries("COURSE", sched, now))
-
-
-def test_the_lock_file_carries_a_scalar_block_per_schedule_assignment(monkeypatch):
-    # The Join-team form runs in a PUBLIC repo under a token deliberately scoped away from
-    # the course org's templates, so it cannot read grading_config.yml. This file is the
-    # mirror it reads instead, and it must answer for every assignment in the schedule.
-    text = _lock(
-        monkeypatch,
-        _sched(a1="assignment-1-f2026", project="assignment-4-project-f2026"),
-        {
-            "assignment-1-f2026": "type: individual\n",
-            "assignment-4-project-f2026": (
-                "type: group\nteam_formation: self_select\nmax_team_size: 3\n"
-            ),
-        },
-    )
-    assert yaml.safe_load(text) == {
-        "assignments": {
-            "a1": {
-                "team_formation": "none",
-                "max_team_size": 5,
-                "team_formation_window": "none",
-                # No window, so no day for a refusal about one to name.
-                "team_formation_closes": None,
-                "team_formation_page": None,
-            },
-            "project": {
-                "team_formation": "self_select",
-                "max_team_size": 3,
-                # No handout_datetime on `_sched`, so the window never opens.
-                "team_formation_window": "closed",
-                "team_formation_closes": _CUTOFF.date(),
-                # No `pages` handed in, so none to link - the key is still written.
-                "team_formation_page": None,
-            },
-        }
-    }
-    # SYSTEM-OWNED, stamped at the write site - it is rewritten on every sync.
-    assert text.startswith("# SYSTEM-OWNED")
-
-
-def test_an_assigned_group_assignment_is_locked_as_assigned(monkeypatch):
-    text = _lock(
-        monkeypatch,
-        _sched(project="assignment-4-project-f2026"),
-        {"assignment-4-project-f2026": "type: group\nteam_formation: assigned\n"},
-    )
-    assert (
-        yaml.safe_load(text)["assignments"]["project"]["team_formation"] == "assigned"
-    )
-
-
-def test_a_template_that_does_not_exist_yet_is_locked_to_none(monkeypatch, capsys):
-    # Maths a2-a4 today: the schedule names a template nobody has created. Guessing
-    # `group` would let any student mint a real GitHub team, granted `maintain` on the
-    # repo, under a name of their choosing - so the lock refuses and says what that costs.
-    text = _lock(
-        monkeypatch, _sched(a2="assignment-2-f2026"), {"assignment-2-f2026": None}
-    )
-    assert yaml.safe_load(text)["assignments"]["a2"]["team_formation"] == "none"
-    err = capsys.readouterr().err
-    assert "no grading_config.yml yet" in err and "no team can be formed" in err
-
-
-def test_the_course_default_cap_fills_in_for_an_assignment_that_names_none(monkeypatch):
-    text = _lock(
-        monkeypatch,
-        _sched(project="assignment-4-project-f2026"),
-        {"assignment-4-project-f2026": "type: group\n"},
-        defaults="assignment_defaults:\n  max_team_size: 4\n",
-    )
-    assert yaml.safe_load(text)["assignments"]["project"]["max_team_size"] == 4
-
-
-def test_a_semester_with_no_assignments_still_gets_a_readable_lock_file(monkeypatch):
-    # The form refuses every slug rather than 404ing on the read and reporting a fault.
-    text = _lock(monkeypatch, _sched(), {})
-    assert yaml.safe_load(text) == {"assignments": {}}
-
-
-def test_a_self_select_window_is_pending_then_open_then_closed(
-    monkeypatch,
-):
-    # The three answers off one schedule, so the boundaries are read from the same dates a
-    # semester really carries: handout 20 Sep, due 4 Oct, late cutoff 14 Oct.
-    def window(now: datetime) -> str:
-        text = _lock(
-            monkeypatch,
-            _sched(project="assignment-4-project-f2026", handout=_HANDOUT),
-            {"assignment-4-project-f2026": "type: group\n"},
-            now=now,
-        )
-        return yaml.safe_load(text)["assignments"]["project"]["team_formation_window"]
-
-    # `pending` and `closed` are kept apart because the form says different things about
-    # them: before the handout the close date is still in the FUTURE, so the shut wording
-    # would tell a September student the door closed in October.
-    assert window(_HANDOUT - timedelta(seconds=1)) == "pending"
-    assert window(_HANDOUT) == "open"  # the handout instant itself is inside
-    assert window(_CUTOFF - timedelta(seconds=1)) == "open"
-    assert window(_CUTOFF) == "closed"  # the cutoff is not: the snapshot has frozen
-
-
-def test_a_group_assignment_nobody_declared_a_formation_for_self_selects(monkeypatch):
-    # Every student must be in a team, and forming them is the students' job: with no
-    # `team_formation` at any layer the institution's `self_select` answers, so the lock
-    # opens the window and the site's list asks for it. `assigned` only when declared.
-    sched = _sched(p="group-f2026", q="assigned-f2026", handout=_HANDOUT)
-    text = _lock(
-        monkeypatch,
-        sched,
-        {
-            "group-f2026": "type: group\n",
-            "assigned-f2026": "type: group\nteam_formation: assigned\n",
-        },
-        now=_HANDOUT,
-    )
-    lock = yaml.safe_load(text)["assignments"]
-    assert (lock["p"]["team_formation"], lock["p"]["team_formation_window"]) == (
-        "self_select",
-        "open",
-    )
-    assert (lock["q"]["team_formation"], lock["q"]["team_formation_window"]) == (
-        "assigned",
-        "none",
-    )
-    assert grades.self_select_keys("COURSE", sched) == ["p"]
-    spec = grades.load_grading_spec(
-        "COURSE", "group-f2026", semester_org=sched.org, slug="p"
-    )
-    assert dict(spec.sources)["team_formation"] == "institution"
-
-
-def test_a_self_select_assignment_nobody_has_dated_never_opens(monkeypatch):
-    # `handout_datetime` unset = handed out by hand at a moment nobody wrote down, so
-    # there is no hour from which "form your team now" would be true.
-    text = _lock(
-        monkeypatch,
-        _sched(project="assignment-4-project-f2026"),
-        {"assignment-4-project-f2026": "type: group\n"},
-        now=_HANDOUT,
-    )
-    assert (
-        yaml.safe_load(text)["assignments"]["project"]["team_formation_window"]
-        == "closed"
-    )
-
-
-def test_an_assignment_the_form_refuses_anyway_has_no_window(monkeypatch):
-    # `assigned` and `individual` are refused on the team_formation scalar alone, so the
-    # window says nothing - whatever the dates would make of it.
-    text = _lock(
-        monkeypatch,
-        _sched(
-            a1="assignment-1-f2026",
-            project="assignment-4-project-f2026",
-            handout=_HANDOUT,
-        ),
-        {
-            "assignment-1-f2026": "type: individual\n",
-            "assignment-4-project-f2026": "type: group\nteam_formation: assigned\n",
-        },
-        now=_HANDOUT,
-    )
-    windows = yaml.safe_load(text)["assignments"]
-    assert windows["a1"]["team_formation_window"] == "none"
-    assert windows["project"]["team_formation_window"] == "none"
-
-
-def test_the_close_date_is_the_pins_day_and_the_line_is_there_even_when_it_is_empty(
-    monkeypatch,
-):
-    # The only reader is a refusal a student reads ("closed on 14 Oct"), so the scalar is
-    # the cutoff's DAY, not its moment. The line is written whatever the value: the form and
-    # `welcome.open_formation_slugs` both line-scan this file, and a key that appears only
-    # sometimes is a second shape for them to get right.
-    text = _lock(
-        monkeypatch,
-        _sched(
-            a1="assignment-1-f2026",
-            project="assignment-4-project-f2026",
-            handout=_HANDOUT,
-        ),
-        {
-            "assignment-1-f2026": "type: individual\n",
-            "assignment-4-project-f2026": "type: group\n",
-        },
-        now=_HANDOUT,
-    )
-    assert "    team_formation_closes: 2026-10-14\n" in text
-    assert "    team_formation_closes:\n" in text  # the individual one, empty
-    entries = yaml.safe_load(text)["assignments"]
-    assert entries["project"]["team_formation_closes"] == _CUTOFF.date()
-    assert entries["a1"]["team_formation_closes"] is None
-
-
-def test_a_template_with_no_spec_has_no_window_either(monkeypatch):
-    text = _lock(
-        monkeypatch,
-        _sched(a2="assignment-2-f2026", handout=_HANDOUT),
-        {"assignment-2-f2026": None},
-        now=_HANDOUT,
-    )
-    assert yaml.safe_load(text)["assignments"]["a2"]["team_formation_window"] == "none"
-
-
-def _writes(
-    monkeypatch, existing, ok: bool = True, console: bool = False
-) -> list[dict]:
-    """Stub everything the lock write touches and collect what it puts. `existing` is what
-    `get_file_with_sha` answers: `(text, sha)`, None for a 404, or an exception to raise.
-    `console` is the course's `student_console:`."""
-    monkeypatch.setattr(grades, "_grading_text", lambda org, t, **_: "type: group\n")
-    monkeypatch.setattr(settings, "org_meta", lambda org: {})
-    monkeypatch.setattr(discovery, "org_meta", lambda org: {"student_console": console})
-    monkeypatch.setattr(grades, "repo_is_archived", lambda org, repo, **_: False)
-
-    def read(org, repo, path):
-        if isinstance(existing, Exception):
-            raise existing
-        return existing
-
-    monkeypatch.setattr(grades, "get_file_with_sha", read)
-    puts: list[dict] = []
-
-    def put(org, repo, path, content, msg, expected_sha=None):
-        puts.append({"org": org, "path": path, "content": content, "sha": expected_sha})
-        return ok
-
-    monkeypatch.setattr(grades, "put_file", put)
-    return puts
-
-
-def test_the_lock_file_is_written_once_and_is_free_when_nothing_changed(monkeypatch):
-    # put_file blob-compares, so writing it from the membership sync, the handout and the
-    # nightly refresh costs a read apiece and no commit at all on an unchanged semester.
-    puts = _writes(monkeypatch, None)
-    assert grades.sync_team_lock(
-        "COURSE", "SEMESTER", _sched(project="assignment-4-project-f2026")
-    ).ok
-    (put,) = puts
-    assert (put["org"], put["path"]) == ("SEMESTER", ".system/assignments.lock.yml")
-    assert yaml.safe_load(put["content"])["assignments"]["project"] == {
-        "team_formation": "self_select",
-        "max_team_size": 5,
-        "team_formation_window": "closed",
-        "team_formation_closes": _CUTOFF.date(),
-        # Where the teams are listed: the assignment's page on the semester site.
-        "team_formation_page": "https://semester.github.io/assignments/project.html",
-    }
-
-
-def test_a_course_that_opts_in_locks_the_page_in_the_student_console(monkeypatch):
-    puts = _writes(monkeypatch, None, console=True)
-    grades.sync_team_lock(
-        "COURSE", "SEMESTER", _sched(project="assignment-4-project-f2026")
-    )
-    entry = yaml.safe_load(puts[0]["content"])["assignments"]["project"]
-    assert entry["team_formation_page"] == (
-        "https://hertie-data-science-lab.github.io/"
-        "dsl-teaching-toolkit/?semester=SEMESTER#assignment-project"
-    )
-
-
-def test_the_lock_links_no_page_for_an_individual_assignment_and_lists_nothing(
-    monkeypatch,
-):
-    # The page is for the refusal of a Join, which only a self-select assignment gets.
-    puts = _writes(monkeypatch, None)
-    monkeypatch.setattr(grades, "_grading_text", lambda org, t: "type: individual\n")
-    assert grades.sync_team_lock("COURSE", "SEMESTER", _sched(a1="assignment-1")).ok
-    assert "    team_formation_page:\n" in puts[0]["content"].decode()
-
-
-def test_the_lock_write_says_whether_the_file_actually_moved(monkeypatch):
-    # `changed` is the blob compare handed back, so a caller that renders off this file
-    # knows when to re-render without paying a second read to find out.
-    puts = _writes(monkeypatch, None)
-    sched = _sched(project="assignment-4-project-f2026")
-    assert grades.sync_team_lock("COURSE", "SEMESTER", sched) == (True, True)
-    live = puts[0]["content"]
-
-    puts = _writes(monkeypatch, ("text does not matter", gh_contents.blob_sha(live)))
-    assert grades.sync_team_lock("COURSE", "SEMESTER", sched) == (True, False)
-    # The sha the content was read at goes to put_file - both the safe read-modify-write
-    # and, when it already matches, the no-op short circuit.
-    assert puts[0]["sha"] == gh_contents.blob_sha(live)
-
-    puts = _writes(monkeypatch, ("something else", "0" * 40))
-    assert grades.sync_team_lock("COURSE", "SEMESTER", sched) == (True, True)
-
-
-def test_a_read_that_failed_still_writes_and_reports_a_change(monkeypatch):
-    # Not a 404 - the file may well be there and unreadable. `changed` is a render HINT,
-    # so one spurious re-render beats a missed one, and the write goes ahead with no sha.
-    puts = _writes(monkeypatch, RuntimeError("could not read"))
-    assert grades.sync_team_lock(
-        "COURSE", "SEMESTER", _sched(project="assignment-4-project-f2026")
-    ) == (True, True)
-    assert puts[0]["sha"] is None
-
-
-def test_a_failed_write_is_never_reported_as_a_change(monkeypatch):
-    puts = _writes(monkeypatch, None, ok=False)
-    assert grades.sync_team_lock("COURSE", "SEMESTER", _sched(p="t")) == (False, False)
-    assert len(puts) == 1
-
-
-def test_a_lock_file_that_could_not_be_written_says_what_that_costs(
-    monkeypatch, capsys
-):
-    _writes(monkeypatch, None, ok=False)
-    assert not grades.sync_team_lock("COURSE", "SEMESTER", _sched(p="t")).ok
-    assert "the Join-team form reads it" in capsys.readouterr().err
-
-
-def test_a_closed_out_semester_is_left_alone(monkeypatch, capsys):
-    # `teardown` archives semester-config last, and an archived repo is read-only. The
-    # membership sync fans out over the semester REGISTRY, which teardown does not touch, so
-    # without this every finished semester would 403 the daily sync red for good.
-    def boom(*args, **kwargs):
-        raise AssertionError("a sealed semester-config takes no write")
-
-    monkeypatch.setattr(grades, "repo_is_archived", lambda org, repo: True)
-    monkeypatch.setattr(grades, "put_file", boom)
-    monkeypatch.setattr(grades, "_grading_text", boom)
-    assert grades.sync_team_lock("COURSE", "SEMESTER", _sched(p="t")).ok
-    assert "semester archived" in capsys.readouterr().out
-
-
-def test_no_log_line_from_the_lock_file_names_a_person(monkeypatch, capsys):
-    # It runs in the course org's PUBLIC .github. Only slugs and template names may appear.
-    monkeypatch.setattr(grades, "put_file", lambda *a, **k: True)
-    _lock(monkeypatch, _sched(a2="assignment-2-f2026"), {"assignment-2-f2026": None})
-    printed = capsys.readouterr()
-    assert "@" not in printed.out + printed.err
-
-
-# ------------------------------------------- the late-work rule a silent file is graded by
-
-
-def test_a_file_that_says_nothing_about_late_work_gets_the_hertie_rule():
-    # The default an assignment is graded by when neither it nor its course states one.
-    # It was "nothing after the deadline", which no syllabus says: the school's own
-    # sentence is 10% a day, and ten days is where that has taken the whole grade.
-    spec = grades.parse_grading_spec("title: Neural networks\n")
-    assert (spec.late_window_days, spec.late_penalty_per_day) == (
-        policy.defaults()["late_window_days"],
-        policy.defaults()["late_penalty_per_day"],
-    )
-    assert (
-        course.late_rule(spec.late_window_days, spec.late_penalty_per_day)
-        == "10% per day, up to 10 days"
-    )
-
-
-def _semester_spec(monkeypatch, block: str) -> grades.GradingSpec:
-    """An assignment whose semester's assignments.yml gives it `block` (YAML lines)."""
-    text = "assignments:\n  a1:\n" + "".join(f"    {ln}\n" for ln in block.splitlines())
-    monkeypatch.setattr(settings, "_assignments_text", lambda org: text)
-    return grades.with_run_settings(grades.parse_grading_spec(""), "C", "SEM", "a1")
-
-
-def test_an_explicit_zero_window_still_means_nothing_after_the_deadline(monkeypatch):
-    # The one way to say it, and it must survive a default that now fills the silence.
-    spec = _semester_spec(monkeypatch, "late_window_days: 0\nlate_penalty_per_day: 10%")
-    assert spec.late_window_days == 0
-    assert (
-        course.late_rule(spec.late_window_days, spec.late_penalty_per_day)
-        == "not accepted after the deadline"
-    )
-
-
-def test_an_explicit_late_rule_wins(monkeypatch):
-    spec = _semester_spec(monkeypatch, "late_window_days: 3\nlate_penalty_per_day: 25%")
-    assert (spec.late_window_days, spec.late_penalty_per_day) == (3, "25%")
-
-
-@pytest.mark.parametrize(
-    ("config", "window", "penalty"),
-    [
-        ("late_window_days: 3", 3, None),
-        ("late_penalty_per_day: 25%", None, "25%"),
-        ("late_window_days: 0", 0, None),
-    ],
-    ids=["window-alone", "penalty-alone", "zero-alone"],
-)
-def test_half_a_late_rule_is_never_completed_from_the_default(
-    monkeypatch, config, window, penalty
-):
-    # A semester that names one of the two has stated its own rule - three days late
-    # accepted free, or a rate with nothing collected to spend it on - and finishing the
-    # sentence out of the syllabus would grade a semester by words nobody wrote.
-    spec = _semester_spec(monkeypatch, config)
-    assert (spec.late_window_days, spec.late_penalty_per_day) == (window, penalty)
-
-
-@pytest.mark.parametrize("key", ["late_window_days", "visibility", "max_team_size"])
-def test_a_run_setting_in_the_template_is_not_migrated(key):
-    # Refused WHOLE: read without it, the assignment would run on the semester's defaults
-    # instead of the rule the file wrote, and say nothing (decision 0009).
-    with pytest.raises(grades.NotMigrated) as raised:
-        grades.parse_grading_spec(f"title: A1\n{key}: 3\n")
-    assert raised.value.old == key and "assignments.yml" in str(raised.value)
-
-
-@pytest.mark.parametrize(
-    ("day", "spoken"),
-    [
-        (1, "1st"),
-        (2, "2nd"),
-        (3, "3rd"),
-        (4, "4th"),
-        (11, "11th"),
-        (12, "12th"),
-        (13, "13th"),
-        (21, "21st"),
-        (22, "22nd"),
-        (23, "23rd"),
-        (31, "31st"),
-    ],
-)
-def test_a_day_is_spoken_with_its_ordinal(day, spoken):
-    # ONE spelling for the mail, the site and the form's JavaScript copy -
-    # and 11th-13th are the three a `day % 10` rule alone gets wrong.
-    assert grades.spoken_day(datetime(2026, 10, day)) == f"{spoken} Oct"
 
 
 def test_a_scoped_real_return_records_that_assignment_as_returned(
@@ -2899,17 +1900,41 @@ def test_a_scoped_real_return_records_that_assignment_as_returned(
 ):
     out = _distribute(monkeypatch, tmp_path, assignment="assignment-1")
     ((_cfg, cfg_files, _d),) = out["config"]
-    assert grades.marks_return_record("assignment-1") in cfg_files
+    assert distribute.marks_return_record("assignment-1") in cfg_files
 
 
 def test_a_return_marks_dispatch_sends_only_what_is_due_and_marked(monkeypatch):
     # The payload is written by whoever holds a bot token: nothing in it is trusted.
-    monkeypatch.setattr(grades, "discover_semesters", lambda org: ["Sem"])
-    monkeypatch.setattr(grades.schedule, "load", lambda org: _schedule_with("a1", "a2"))
-    monkeypatch.setattr(grades, "marks_due", lambda c, s, sched, now: ([], ["a1"]))
-    assert grades.dispatch_refusal("C", "sem", "a1") == ""
-    assert "not due" in grades.dispatch_refusal("C", "Sem", "a2")
-    assert "not a semester" in grades.dispatch_refusal("C", "Other", "a1")
+    monkeypatch.setattr(distribute, "discover_semesters", lambda org: ["Sem"])
+    monkeypatch.setattr(
+        distribute.schedule, "load", lambda org: _schedule_with("a1", "a2")
+    )
+    monkeypatch.setattr(distribute, "marks_due", lambda c, s, sched, now: ([], ["a1"]))
+    assert distribute.dispatch_refusal("C", "sem", "a1")[0] == ""
+    assert "not due" in distribute.dispatch_refusal("C", "Sem", "a2")[0]
+    assert "not a semester" in distribute.dispatch_refusal("C", "Other", "a1")[0]
+
+
+def test_a_dispatched_return_reads_the_schedule_once(monkeypatch):
+    # The dispatch check and the return both need the plan: the check hands on what it
+    # read, so one run reads schedule.yml once.
+    loads: list[str] = []
+    sched = _schedule_with("a1")
+    monkeypatch.setattr(distribute, "discover_semesters", lambda org: ["Sem"])
+    monkeypatch.setattr(
+        distribute.schedule, "load", lambda org: loads.append(org) or sched
+    )
+    monkeypatch.setattr(distribute, "marks_due", lambda c, s, sched, now: ([], ["a1"]))
+    given: dict = {}
+    monkeypatch.setattr(grades, "distribute", lambda org, **kw: given.update(kw) or 0)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["grades", "distribute", "--semester-org", "Sem", "--assignment", "a1"]
+        + ["--dispatched-by", "C"],
+    )
+    assert grades.main() == 0
+    assert loads == ["Sem"] and given["sched"] is sched
 
 
 # ------------------------------------------------ the record written before the emails
@@ -2918,7 +1943,7 @@ def test_a_return_marks_dispatch_sends_only_what_is_due_and_marked(monkeypatch):
 def test_the_emails_are_recorded_before_they_are_sent(tmp_path, monkeypatch):
     out = _distribute(monkeypatch, tmp_path)
     ((intent),) = out["intent"]
-    assert ",email," in intent[grades.DISTRIBUTED_PATH]
+    assert ",email," in intent[gradebook.DISTRIBUTED_PATH]
     assert [m[0] for batch in out["outbox"] for m in batch] == ["ada@uni.edu"]
 
 
@@ -2928,14 +1953,14 @@ def test_a_lost_final_record_re_mails_nobody(tmp_path, monkeypatch):
     first = _distribute(
         monkeypatch,
         tmp_path,
-        put_files_ok=lambda files: grades.DISTRIBUTED_PATH not in files,
+        put_files_ok=lambda files: gradebook.DISTRIBUTED_PATH not in files,
     )
     assert first["rc"] == 1 and first["outbox"]
     ((intent),) = first["intent"]
     again = _distribute(
         monkeypatch,
         tmp_path / "again",
-        distributed=intent[grades.DISTRIBUTED_PATH],
+        distributed=intent[gradebook.DISTRIBUTED_PATH],
     )
     assert again["outbox"] == []
 
@@ -2977,8 +2002,8 @@ def test_one_refused_address_does_not_hold_back_the_returned_record(
     )
     assert out["rc"] == 1
     ((_cfg, cfg_files, _d),) = out["config"]
-    assert grades.marks_return_record("assignment-1") in cfg_files
-    record = cfg_files[grades.DISTRIBUTED_PATH]
+    assert distribute.marks_return_record("assignment-1") in cfg_files
+    record = cfg_files[gradebook.DISTRIBUTED_PATH]
     assert "ada-l,,email," in record and "ben-k,,email," not in record
 
 
@@ -2990,8 +2015,8 @@ def test_no_email_sent_at_all_leaves_the_assignment_to_be_returned_again(
     out = _distribute(monkeypatch, tmp_path, assignment="assignment-1", sent=0)
     assert out["rc"] == 1
     ((_cfg, cfg_files, _d),) = out["config"]
-    assert grades.marks_return_record("assignment-1") not in cfg_files
-    assert ",email," not in cfg_files[grades.DISTRIBUTED_PATH]
+    assert distribute.marks_return_record("assignment-1") not in cfg_files
+    assert ",email," not in cfg_files[gradebook.DISTRIBUTED_PATH]
 
 
 def test_a_send_that_raises_resets_the_recorded_rows(tmp_path, monkeypatch):
@@ -3006,15 +2031,15 @@ def test_a_send_that_raises_resets_the_recorded_rows(tmp_path, monkeypatch):
     )
     assert "raised" in first
     ((intent),) = first["intent"]
-    assert ",email," in intent[grades.DISTRIBUTED_PATH]
+    assert ",email," in intent[gradebook.DISTRIBUTED_PATH]
     ((_cfg, cfg_files, _d),) = first["config"]
-    assert ",email," not in cfg_files[grades.DISTRIBUTED_PATH]
-    assert grades.marks_return_record("assignment-1") not in cfg_files
+    assert ",email," not in cfg_files[gradebook.DISTRIBUTED_PATH]
+    assert distribute.marks_return_record("assignment-1") not in cfg_files
     again = _distribute(
         monkeypatch,
         tmp_path / "again",
-        distributed=cfg_files[grades.DISTRIBUTED_PATH],
-        exported=cfg_files[grades.SEMESTER_CSV_NAME],
+        distributed=cfg_files[gradebook.DISTRIBUTED_PATH],
+        exported=cfg_files[gradebook.SEMESTER_CSV_NAME],
         assignment="assignment-1",
     )
     assert [m[0] for batch in again["outbox"] for m in batch] == ["ada@uni.edu"]
@@ -3029,20 +2054,20 @@ def test_a_scoped_return_that_died_after_the_first_record_is_not_wedged(
         monkeypatch,
         tmp_path,
         assignment="assignment-1",
-        put_files_ok=lambda files: grades.DISTRIBUTED_PATH not in files,
+        put_files_ok=lambda files: gradebook.DISTRIBUTED_PATH not in files,
     )
     ((intent),) = first["intent"]
-    assert grades.SEMESTER_CSV_NAME in intent
+    assert gradebook.SEMESTER_CSV_NAME in intent
     again = _distribute(
         monkeypatch,
         tmp_path / "again",
-        distributed=intent[grades.DISTRIBUTED_PATH],
-        exported=intent[grades.SEMESTER_CSV_NAME],
+        distributed=intent[gradebook.DISTRIBUTED_PATH],
+        exported=intent[gradebook.SEMESTER_CSV_NAME],
         assignment="assignment-1",
     )
     assert again["rc"] == 0
     ((_cfg, cfg_files, _d),) = again["config"]
-    assert grades.marks_return_record("assignment-1") in cfg_files
+    assert distribute.marks_return_record("assignment-1") in cfg_files
 
 
 def test_a_student_with_no_roster_email_is_not_recorded_before_the_mail(
@@ -3093,7 +2118,7 @@ def test_per_question_feedback_reaches_the_gradebook_under_each_question(
     ((_repo, files, _d),) = out["gradebooks"]
     book = yaml.safe_load(files["grades.yml"])["assignments"]["assignment-1"]
     # a blank cell is not sent
-    assert book[grades.QUESTION_FEEDBACK_KEY] == {
+    assert book[grading_sheet.QUESTION_FEEDBACK_KEY] == {
         "Q2": "The bound is loose.\nTighten it with the second lemma."
     }
     readme = files["README.md"]
@@ -3119,72 +2144,6 @@ def test_the_marks_email_lists_overall_then_per_question_feedback(
     assert body.index("Clean derivation.") < body.index("Q2: The bound is loose.")
 
 
-def test_a_teams_per_question_feedback_reaches_every_member():
-    spec = grades.SheetSpec(
-        slug="a1", title="A1", is_group=True, questions={"Q1": "5", "Q2": "5"}
-    )
-    block = {
-        "feedback_group": "Good.",
-        "members": {"ada-l": {}, "ben-k": {}},
-        "score_group": {"Q1": "4", "Q2": "5"},
-        grades.QUESTION_FEEDBACK_KEY: {"Q2": "Neat proof.", "Q1": None},
-    }
-    for handle in ("ada-l", "ben-k"):
-        view = grades.student_view(spec, "alpha", block, handle)
-        assert view[grades.QUESTION_FEEDBACK_KEY] == {"Q2": "Neat proof."}
-
-
-def test_per_question_feedback_keeps_the_declared_order_and_a_mistyped_name():
-    spec = grades.SheetSpec(
-        slug="a1", title="A1", is_group=False, questions={"Q1": "5", "Q2": "5"}
-    )
-    said = grades.question_feedback(spec, {"Q3": "typo", "Q2": "b", "Q1": "a"})
-    assert list(said) == ["Q1", "Q2", "Q3"]
-
-
-def test_a_question_may_name_the_file_it_is_marked_from():
-    spec = grades.parse_grading_spec(
-        "formats: [ipynb, latex]\n"
-        "questions:\n"
-        "  Q1: 10\n"
-        "  Q2: {points: 5, file: starter.tex}\n"
-    )
-    assert spec.format == "ipynb"  # the runnable one
-    assert spec.questions == {"Q1": "10", "Q2": "5"}
-    assert spec.question_files == {"Q2": "starter.tex"}
-    assert spec.dropped == ()
-
-
-@pytest.mark.parametrize(
-    "entry", ["{points: 5, file: ../secret.tex}", "{points: 5, file: /etc/x}"]
-)
-def test_a_question_file_outside_the_submission_is_refused(entry):
-    spec = grades.parse_grading_spec(f"questions:\n  Q1: 10\n  Q2: {entry}\n")
-    assert spec.question_files is None
-    assert spec.questions == {"Q1": "10", "Q2": "5"}  # still marked, from the runnable
-    assert any("not a file inside the submission" in line for line in spec.dropped)
-
-
-def test_an_unknown_key_on_a_question_is_named_and_ignored():
-    spec = grades.parse_grading_spec("questions:\n  Q1: {points: 5, weight: 2}\n")
-    assert spec.questions == {"Q1": "5"}
-    assert any("`weight:`" in line for line in spec.dropped)
-
-
-def test_a_teams_per_question_feedback_sits_in_the_shared_quote():
-    view = {
-        "final_grade": "9",
-        "team": "alpha",
-        "team_feedback": "Good.",
-        grades.QUESTION_FEEDBACK_KEY: {"Q2": "Neat proof."},
-    }
-    section = grades._readme_section("A1", view)
-    assert (
-        "> **Team feedback (shared with alpha):** Good.\n>\n> - **Q2:** Neat proof."
-        in section
-    )
-
-
 def test_the_preview_counts_feedback_on_an_undeclared_question(
     tmp_path, monkeypatch, capsys
 ):
@@ -3197,40 +2156,6 @@ def test_the_preview_counts_feedback_on_an_undeclared_question(
         dry_run=True,
     )
     assert "WARNING: 1 unit(s) give feedback on a question" in capsys.readouterr().out
-
-
-def test_the_lock_keeps_the_fragment_of_the_assignment_page_url():
-    # The page is the assignment's page in the console (`...?semester=x#assignment-a`): a
-    # `#` inside a value is not a comment, as in YAML, so the fragment survives the parse.
-    page = "https://console.example/?semester=x#assignment-a"
-    text = grades.team_lock_text({"a": ("self_select", 4, "open", "2026-10-04", page)})
-    assert (
-        grades.parse_team_lock(text + "# a comment\n")["a"]["team_formation_page"]
-        == page
-    )
-
-
-def test_a_gradebook_whose_student_already_reads_it_is_not_granted_again(monkeypatch):
-    # The nightly sync visits every gradebook; the GraphQL listing says who is already a
-    # read collaborator, so the PUT is made only for the rest: a pending invite (not
-    # listed) and a student who holds MORE than read, which the PUT puts back.
-    added = []
-    monkeypatch.setattr(
-        grades,
-        "add_collaborator",
-        lambda org, repo, handle, **k: added.append(handle) or True,
-    )
-    monkeypatch.setattr(grades, "_tag_gradebook", lambda *a, **k: None)
-    handles = ("ada", "bo", "cy")
-    existing = {f"grades-{h}": {"name": f"grades-{h}"} for h in handles}
-    held = {
-        "grades-ada": {"ada": "READ"},
-        "grades-bo": {},
-        "grades-cy": {"cy": "WRITE"},
-    }
-    for handle in handles:
-        assert grades.provision_one("S", handle, existing, held) == "skipped"
-    assert added == ["bo", "cy"]
 
 
 def test_a_held_mark_keeps_the_assignment_to_be_returned_again(tmp_path, monkeypatch):
@@ -3250,27 +2175,29 @@ def test_a_held_mark_keeps_the_assignment_to_be_returned_again(tmp_path, monkeyp
         assignment="assignment-1",
     )
     ((_cfg, cfg_files, _d),) = first["config"]
-    assert grades.marks_return_record("assignment-1") not in cfg_files
+    assert distribute.marks_return_record("assignment-1") not in cfg_files
     assert [m[0] for batch in first["outbox"] for m in batch] == ["ada@uni.edu"]
     again = _distribute(
         monkeypatch,
         tmp_path / "again",
         sheets={"assignment-1": _TWO_SHEET},
         roster_rows=_TWO_ROSTER,
-        distributed=cfg_files[grades.DISTRIBUTED_PATH],
-        exported=cfg_files[grades.SEMESTER_CSV_NAME],
+        distributed=cfg_files[gradebook.DISTRIBUTED_PATH],
+        exported=cfg_files[gradebook.SEMESTER_CSV_NAME],
         assignment="assignment-1",
     )
     assert [repo for repo, _f, _d in again["gradebooks"]] == ["grades-ben-k"]
     assert [m[0] for batch in again["outbox"] for m in batch] == ["ben@uni.edu"]
     ((_cfg, cfg_files, _d),) = again["config"]
-    assert grades.marks_return_record("assignment-1") in cfg_files
+    assert distribute.marks_return_record("assignment-1") in cfg_files
 
 
 def test_a_refused_definition_returns_no_marks(tmp_path, monkeypatch):
     # A NOT_MIGRATED grading_config.yml reads as a default spec: individual, and the
     # institution's late rule. Nothing goes out off it, and nothing is recorded returned.
-    monkeypatch.setattr(grades, "assignment_title", lambda org, repo, spec, name: name)
+    monkeypatch.setattr(
+        grading_spec, "assignment_title", lambda org, repo, spec, name: name
+    )
     out = _distribute(
         monkeypatch, tmp_path, grading="format: notebook\n", assignment="assignment-1"
     )
@@ -3289,40 +2216,26 @@ def test_a_refused_definition_is_not_due_for_return(monkeypatch):
         },
         org="SEMESTER",
     )
-    monkeypatch.setattr(grades, "_grading_text", lambda org, tpl: "format: notebook\n")
     monkeypatch.setattr(
-        grades,
-        "get_file_content",
-        lambda org, repo, path, **k: None if "marks" in path else _SHEET,
+        grading_spec, "_grading_text", lambda org, tpl: "format: notebook\n"
     )
-    faults, ready = grades.marks_due(
+
+    def read(org, repo, path, **k):
+        return None if "marks" in path else _SHEET
+
+    # The sheet and its marker (`marks_due`), and the template's README (the title).
+    monkeypatch.setattr(distribute, "get_file_content", read)
+    monkeypatch.setattr(grading_spec, "get_file_content", read)
+    faults, ready = distribute.marks_due(
         "COURSE", "SEMESTER", sched, datetime(2026, 10, 5, tzinfo=timezone.utc)
     )
     assert ready == [] and faults == []
 
 
-@pytest.mark.parametrize(
-    ("config", "window", "penalty"),
-    [
-        ("late_penalty_per_day: 0", None, "0"),
-        ("late_window_days: 3\nlate_penalty_per_day: 0", 3, "0"),
-        ("late_window_days: 0\nlate_penalty_per_day: 0", 0, "0"),
-    ],
-    ids=["zero-penalty-alone", "zero-penalty-with-window", "both-zero"],
-)
-def test_an_explicit_zero_penalty_is_never_the_institution_default(
-    monkeypatch, config, window, penalty
-):
-    # A bare `0` was read as blank, so the layer dropped out and the institution's
-    # 10% a day for 10 days was deducted from every late mark and emailed.
-    spec = _semester_spec(monkeypatch, config)
-    assert (spec.late_window_days, spec.late_penalty_per_day) == (window, penalty)
-    assert dict(spec.sources)["late_penalty_per_day"] == "assignment"
-    assert grades.penalty_rate(spec.late_penalty_per_day) == 0
-
-
 def _book_row(record: str, handle: str) -> tuple[str, str, str]:
-    return grades.parse_distributed(record)[(handle, "", grades.CHANNEL_GRADEBOOK)]
+    return gradebook.parse_distributed(record)[
+        (handle, "", gradebook.CHANNEL_GRADEBOOK)
+    ]
 
 
 def test_a_sheet_edit_that_moves_no_mark_keeps_the_marks_returned(
@@ -3334,7 +2247,7 @@ def test_a_sheet_edit_that_moves_no_mark_keeps_the_marks_returned(
     record, _told, _legacy = _first_run(monkeypatch, tmp_path)
     old = _book_row(record, "ada-l")
     edited = datetime.now(timezone.utc) + timedelta(seconds=-1)
-    monkeypatch.setattr(grades, "git", lambda *a, cwd=None: (0, edited.isoformat()))
+    monkeypatch.setattr(distribute, "git", lambda *a, cwd=None: (0, edited.isoformat()))
     again = _distribute(
         monkeypatch,
         tmp_path / "again",
@@ -3343,13 +2256,13 @@ def test_a_sheet_edit_that_moves_no_mark_keeps_the_marks_returned(
     )
     assert again["gradebooks"] == [] and again["outbox"] == []
     ((_cfg, cfg_files, _d),) = again["config"]
-    digest, at, _issue = _book_row(cfg_files[grades.DISTRIBUTED_PATH], "ada-l")
+    digest, at, _issue = _book_row(cfg_files[gradebook.DISTRIBUTED_PATH], "ada-l")
     assert digest == old[0] and datetime.fromisoformat(at) >= edited.replace(
         microsecond=0
     )
     assert status_json.marks_returned(
-        grades.parse_sheet(_SHEET),
-        grades.SheetSpec(slug="assignment-1", title="", is_group=False),
+        grading_sheet.parse_sheet(_SHEET),
+        grading_sheet.SheetSpec(slug="assignment-1", title="", is_group=False),
         {"ada-l": datetime.fromisoformat(at)},
         edited.replace(microsecond=0),
     )
@@ -3366,77 +2279,23 @@ def test_a_held_mark_is_never_re_stamped_as_returned(tmp_path, monkeypatch):
     )
     ((_cfg, cfg_files, _d),) = first["config"]
     stale = "2026-10-04T00:00:00+00:00"
-    rows = grades.parse_distributed(cfg_files[grades.DISTRIBUTED_PATH])
+    rows = gradebook.parse_distributed(cfg_files[gradebook.DISTRIBUTED_PATH])
     rows = {k: (v[0], stale, v[2]) for k, v in rows.items()}
     held = _TWO_SHEET.replace(
         "score_individual: 40\n    adjustment_individual:\n",
         "score_individual: 40\n    adjustment_individual: \u22123\n",
     )
     monkeypatch.setattr(
-        grades, "git", lambda *a, cwd=None: (0, "2026-10-05T00:00:00+00:00")
+        distribute, "git", lambda *a, cwd=None: (0, "2026-10-05T00:00:00+00:00")
     )
     again = _distribute(
         monkeypatch,
         tmp_path / "again",
         sheets={"assignment-1": _TWO_SHEET, "assignment-2": held},
         roster_rows=_TWO_ROSTER,
-        distributed=grades.dump_distributed(rows),
-        exported=cfg_files[grades.SEMESTER_CSV_NAME],
+        distributed=gradebook.dump_distributed(rows),
+        exported=cfg_files[gradebook.SEMESTER_CSV_NAME],
     )
     assert [repo for repo, _f, _d in again["gradebooks"]] == ["grades-ada-l"]
     ((_cfg, cfg_files, _d),) = again["config"]
-    assert _book_row(cfg_files[grades.DISTRIBUTED_PATH], "ben-k")[1] == stale
-
-
-def test_one_penalty_reader_gives_the_rate_and_the_fault_together():
-    # The setting's parse, the grade arithmetic and the fault text read the key through
-    # one function, so `0` and `10%` mean the same thing to all three.
-    from decimal import Decimal
-
-    from dsl_course.setting_readers import read_penalty
-
-    assert read_penalty("10%") == (Decimal("0.1"), "")
-    assert read_penalty("0.1") == (Decimal("0.1"), "")
-    assert read_penalty(0) == (Decimal(0), "")
-    assert read_penalty(None) == read_penalty("  ") == (None, "")
-    for raw, fault in (("10", "bare"), ("-5%", "negative"), ("x", "unwritten")):
-        assert read_penalty(raw) == (None, fault)
-    assert read_penalty("150%") == (None, "over")
-
-
-def test_a_whole_number_of_days_is_read_by_one_rule():
-    # `late_window_days` and the schedule's day counts share the parse: a negative or a
-    # YAML `true` is not a number of days, and the late window warns rather than
-    # silently reading it as 0.
-    from dsl_course.setting_readers import _whole_days, whole_days
-
-    assert [whole_days(v) for v in (3, "7", 0)] == [3, 7, 0]
-    assert [whole_days(v) for v in (-1, True, "x", None)] == [None] * 4
-    dropped: list[str] = []
-    assert _whole_days(-1, "where", dropped) is None and len(dropped) == 1
-
-
-@pytest.mark.parametrize(
-    ("declared", "readme", "want", "label"),
-    [
-        # The seeded placeholder names nothing: the brief's heading does.
-        (
-            "Assignment 1",
-            "# Assignment 1 - Fraud\nBody",
-            "Assignment 1 - Fraud",
-            "Assignment 1 · Fraud",
-        ),
-        # A real title beats the heading.
-        ("Churn model", "# Fraud\nBody", "Churn model", "Assignment 1 · Churn model"),
-        # No heading: the placeholder stands, and the label is the identifier alone.
-        ("Assignment 1", "Body only", "Assignment 1", "Assignment 1"),
-    ],
-)
-def test_a_placeholder_title_gives_way_to_the_readme_heading(
-    monkeypatch, declared, readme, want, label
-):
-    monkeypatch.setattr(grades, "get_file_content", lambda *a, **k: readme)
-    spec = grades.parse_grading_spec(f"title: {declared}\n")
-    got = grades.assignment_title("COURSE", "assignment-1-f2026", spec, "assignment-1")
-    assert got == want
-    assert grades._readme_label("assignment-1", got) == label
+    assert _book_row(cfg_files[gradebook.DISTRIBUTED_PATH], "ben-k")[1] == stale

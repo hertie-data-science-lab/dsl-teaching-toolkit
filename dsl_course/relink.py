@@ -63,20 +63,22 @@ from .gh_teams import (
     remove_org_membership,
 )
 from .ghcli import BOT_EMAIL, bot_login, gh
-from .grades import (
+from .gradebook import (
     CHANNEL_EMAIL,
     DISTRIBUTED_PATH,
     GRADEBOOK_PERMISSION,
+    dump_distributed,
+    parse_distributed,
+)
+from .grading_sheet import (
     INFO_KEY,
     SHEETS_DIR,
     SheetUnreadable,
-    dump_distributed,
     is_blank,
     key_lines,
-    parse_distributed,
     parse_sheet,
-    sheet_specs,
 )
+from .grading_spec import sheet_specs
 from .issues import close_by_creator
 from .log import log, log_err, log_err_person, log_ok, log_person, log_step
 from .repos import (

@@ -13,19 +13,27 @@ from pathlib import Path
 
 import pytest
 
-from dsl_course import enrol_codes, gh_contents, grades, relink, roster, teams
+from dsl_course import (
+    enrol_codes,
+    gh_contents,
+    gradebook,
+    grading_sheet,
+    relink,
+    roster,
+    teams,
+)
 from dsl_course.gh_contents import blob_sha, read_csv
-from tests.conftest import ROSTER_HEADER, repo_row
+from tests.conftest import ROSTER_HEADER, new_sheet, repo_row
 
 ORG = "Semester"
 OLD, NEW = "oldacct", "newacct"
 OLD_ID, NEW_ID = "101", "202"
 SHEET = "grading_sheets/assignment-1.yml"
 GROUP_SHEET = "grading_sheets/assignment-2.yml"
-SPEC = grades.SheetSpec(
+SPEC = grading_sheet.SheetSpec(
     slug="assignment-1", title="A1", is_group=False, questions={"q1": "5"}
 )
-GROUP = grades.SheetSpec(slug="assignment-2", title="A2", is_group=True)
+GROUP = grading_sheet.SheetSpec(slug="assignment-2", title="A2", is_group=True)
 
 
 def roster_text(handle=NEW, stored=OLD_ID, extra=()) -> str:
@@ -37,22 +45,22 @@ def sheet_text(new_entry: str | None = None, status: str = "FROZEN at the cutoff
     units = [(OLD, [OLD]), ("bob", ["bob"])]
     if new_entry is not None:
         units.append((NEW, [NEW]))
-    sheet = grades.new_sheet(SPEC, units)
+    sheet = new_sheet(SPEC, units)
     sheet["submissions"][OLD]["score_individual"]["q1"] = "4"
     sheet["submissions"][OLD]["feedback_individual"] = "Good work.\nKeep going."
     if new_entry:
         sheet["submissions"][NEW]["feedback_individual"] = new_entry
-    return grades.dump_sheet(sheet, SPEC, status)
+    return grading_sheet.dump_sheet(sheet, SPEC, status)
 
 
 def group_sheet_text() -> str:
-    sheet = grades.new_sheet(GROUP, [("team-x", [OLD, "bob"])])
+    sheet = new_sheet(GROUP, [("team-x", [OLD, "bob"])])
     sheet["teams"]["team-x"]["members"][OLD]["feedback_individual"] = "led the analysis"
-    return grades.dump_sheet(sheet, GROUP, "open")
+    return grading_sheet.dump_sheet(sheet, GROUP, "open")
 
 
 def distributed_text() -> str:
-    return grades.dump_distributed(
+    return gradebook.dump_distributed(
         {
             (OLD, "", "email"): ("abc", "2026-09-01", ""),
             (OLD, "assignment-1", "gradebook"): ("def", "2026-09-01", ""),
@@ -73,7 +81,7 @@ class World:
             ).encode(),
             SHEET: sheet_text().encode(),
             GROUP_SHEET: group_sheet_text().encode(),
-            grades.DISTRIBUTED_PATH: distributed_text().encode(),
+            gradebook.DISTRIBUTED_PATH: distributed_text().encode(),
             f".system/autograde/assignment-1/{OLD}.json": b'{"score": 4}\n',
             ".system/autograde/assignment-1/bob.json": b'{"score": 5}\n',
         }
@@ -291,7 +299,7 @@ def run(w: World, dry_run: bool = False) -> tuple[int, dict]:
 
 
 def sheet_of(w: World, path: str = SHEET) -> dict:
-    return grades.parse_sheet(w.config[path].decode())
+    return grading_sheet.parse_sheet(w.config[path].decode())
 
 
 # ----------------------------------------------------------------- the whole move
@@ -318,8 +326,8 @@ def test_a_switched_account_is_moved_completely(world):
         NEW,
         "bob",
     ]
-    distributed = grades.parse_distributed(
-        world.config[grades.DISTRIBUTED_PATH].decode()
+    distributed = gradebook.parse_distributed(
+        world.config[gradebook.DISTRIBUTED_PATH].decode()
     )
     assert (NEW, "", "email") in distributed and (OLD, "", "email") not in distributed
     assert (OLD, "assignment-1", "gradebook") in distributed  # redistributed later
@@ -343,8 +351,8 @@ def test_the_sheet_edit_keeps_the_header_and_the_graders_text(world):
     before = world.config[SHEET].decode()
     run(world)
     after = world.config[SHEET].decode()
-    assert grades.sheet_is_frozen(after)
-    assert grades.sheet_header(after) == grades.sheet_header(before)
+    assert grading_sheet.sheet_is_frozen(after)
+    assert grading_sheet.sheet_header(after) == grading_sheet.sheet_header(before)
     assert after == before.replace(f"  {OLD}:\n", f"  {NEW}:\n")
 
 
@@ -658,7 +666,7 @@ def test_a_mistyped_handle_is_named_for_faculty_not_counted_as_unanswered(
 
 def test_a_student_choice_repo_is_granted_admin_as_provisioning_does(world):
     world.specs = {
-        "assignment-1": grades.SheetSpec(
+        "assignment-1": grading_sheet.SheetSpec(
             slug="assignment-1", title="A1", is_group=False, visibility="student_choice"
         )
     }

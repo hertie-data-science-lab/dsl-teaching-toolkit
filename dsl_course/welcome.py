@@ -21,10 +21,10 @@ from . import policy, records
 from .central import CENTRAL, pin_central_ref
 from .course import JOIN_REPO
 from .gh_contents import get_file_content, put_file, put_files
-from .grades import TEAM_LOCK_PATH, parse_team_lock
 from .log import log_err, log_ok
 from .repos import ensure_label
 from .roster import CONFIG_REPO
+from .team_formation import TEAM_LOCK_PATH, parse_team_lock
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATES = ROOT / "templates"
@@ -139,7 +139,7 @@ def open_formations(lock_text: str) -> dict[str, str]:
     OPEN, sorted, each with its page (`team_formation_page`, "" where
     the lock carries none).
 
-    A filter over `grades.parse_team_lock`, which lives beside the writer of that file: the
+    A filter over `team_formation.parse_team_lock`, which lives beside the writer of that file: the
     format is hand-rolled for a line scanner, and a second scanner here would be a second
     opinion about a shape one module decides.
 

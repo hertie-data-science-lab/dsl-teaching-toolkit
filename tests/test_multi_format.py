@@ -8,9 +8,16 @@ from types import SimpleNamespace
 
 import yaml
 
-from dsl_course import collect, derive, grades, scaffold
+from dsl_course import (
+    collect,
+    derive,
+    grading_sheet,
+    grading_spec,
+    scaffold,
+)
+from tests.conftest import new_sheet
 from tests.test_collect import _QUESTION_NB, _capture_archive, _checkout
-from tests.test_grades import ROSTER_ADA, _distribute, _schedule_with
+from tests.test_distribute import ROSTER_ADA, _distribute, _schedule_with
 from tests.test_scaffold import _solution_files, fake  # noqa: F401 - the fixture
 
 QUESTIONS = "questions:\n  Q1: 10\n  Q2: {points: 5, file: starter.tex}\n"
@@ -32,14 +39,14 @@ def test_a_two_format_template_is_scaffolded_derived_collected_and_returned(
         assert stripped.replaced == 1 and "42" not in stripped.text
 
     # the first format is the runnable one; Q2 is marked from the write-up
-    gspec = grades.parse_grading_spec(written["grading_config.yml"] + QUESTIONS)
+    gspec = grading_spec.parse_grading_spec(written["grading_config.yml"] + QUESTIONS)
     assert gspec.formats == ("ipynb", "latex") and gspec.format == "ipynb"
     assert gspec.runs_completion_check
     assert gspec.question_files == {"Q2": "starter.tex"}
 
     # collect: at the cutoff the grader copies carry the notebook's questions and the
     # write-up. Hand-marked here, so no hidden tests and no completion check run.
-    gspec = grades.parse_grading_spec(
+    gspec = grading_spec.parse_grading_spec(
         written["grading_config.yml"]
         .replace("grader_pdf: false", "grader_pdf: true")
         .replace("completion_check: true", "completion_check: false")
@@ -63,18 +70,18 @@ def test_a_two_format_template_is_scaffolded_derived_collected_and_returned(
     } <= set(archived)
 
     # the sheet: one total, a feedback cell per question, the file named beside Q2
-    spec = grades.sheet_spec(sched, "assignment-1", "assignment-1", gspec, False)
+    spec = grading_spec.sheet_spec(sched, "assignment-1", "assignment-1", gspec, False)
     assert spec.question_files == {"Q2": "starter.tex"}
-    sheet = grades.new_sheet(spec, [("ada-l", ["ada-l"])])
+    sheet = new_sheet(spec, [("ada-l", ["ada-l"])])
     block = sheet["submissions"]["ada-l"]
-    assert block[grades.QUESTION_FEEDBACK_KEY] == {"Q1": None, "Q2": None}
-    assert "# /5 · starter.tex" in grades.dump_sheet(sheet, spec, "OPEN")
+    assert block[grading_sheet.QUESTION_FEEDBACK_KEY] == {"Q1": None, "Q2": None}
+    assert "# /5 · starter.tex" in grading_sheet.dump_sheet(sheet, spec, "OPEN")
 
     # distribute: overall then per-question feedback, in the gradebook and the email
     block.update(
         score_individual={"Q1": "9", "Q2": "4"},
         feedback_individual="Well done.",
-        **{grades.QUESTION_FEEDBACK_KEY: {"Q1": None, "Q2": "Cite the lemma."}},
+        **{grading_sheet.QUESTION_FEEDBACK_KEY: {"Q1": None, "Q2": "Cite the lemma."}},
     )
     out = _distribute(
         monkeypatch,
@@ -88,7 +95,7 @@ def test_a_two_format_template_is_scaffolded_derived_collected_and_returned(
     ((_repo, files, _d),) = out["gradebooks"]
     book = yaml.safe_load(files["grades.yml"])["assignments"]["assignment-1"]
     assert book["final_grade"] == "13"  # one total over both formats
-    assert book[grades.QUESTION_FEEDBACK_KEY] == {"Q2": "Cite the lemma."}
+    assert book[grading_sheet.QUESTION_FEEDBACK_KEY] == {"Q2": "Cite the lemma."}
     assert "- **Q2:** Cite the lemma." in files["README.md"]
     ((message,),) = out["outbox"]
     assert message[2].index("Well done.") < message[2].index("Q2: Cite the lemma.")

@@ -56,7 +56,7 @@ INFRA_REPOS = {JOIN_REPO, CONFIG_REPO, ".github"}
 ASSIGNMENT_TEMPLATE_TOPIC = "assignment-template"
 # Topics marking a repo as machinery rather than faculty-authored content: per-student
 # submission repos and the frozen semester-side assignment templates (assign.py), and the
-# private per-student gradebooks (grades.py).
+# private per-student gradebooks (gradebook.py).
 INFRA_TOPICS = {"submission", ASSIGNMENT_TEMPLATE_TOPIC, "gradebook"}
 # The topic that makes a COURSE-org repo an assignment template (decision 0014), as
 # `dsl-materials` makes a materials repo. The `assignment-` name is only the scaffold's
@@ -327,7 +327,7 @@ def listing_row(org: str, name: str, visibility: str = "private") -> dict:
     `visibility` is GITHUB's word for the repo as it stands NOW - `private` unless this
     run has already flipped it and been told the flip landed. Never the config's
     `visibility:`: that file says what was ASKED for, this row says what is there, and a
-    reader that compares the two (`grades._visibility_faults`) can only notice a
+    reader that compares the two (`grading_spec._visibility_faults`) can only notice a
     difference if the row was not written from the same wish.
 
     A listing is taken once and handed to every pass of a tick, so the pass that CREATES

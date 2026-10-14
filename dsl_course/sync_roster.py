@@ -4,7 +4,7 @@ The enrolment "access" half: a single idempotent reconcile that ensures every on
 row in the semester's students.csv is (a) a member of the semester org and (b) in the role
 team its `role` column names - `students` for enrolled rows, `auditors` for auditors.
 Both teams carry semester-private read on released materials; only `students` rows get
-assignment repos and gradebooks (see dsl_course.assign / dsl_course.grades).
+assignment repos and gradebooks (see dsl_course.assign / dsl_course.gradebook).
 
 Students normally grant themselves on Join (templates/join/onboard.yml); this is the
 faculty & instructors true-up - edit students.csv, then re-run to reconcile the whole team to the roster.

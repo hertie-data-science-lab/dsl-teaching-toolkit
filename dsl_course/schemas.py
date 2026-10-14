@@ -51,7 +51,7 @@ from .course import (
     submit_shape,
 )
 from .discovery import SEMESTERS_PATH
-from .grades import TEMPLATE_KEYS
+from .grading_spec import TEMPLATE_KEYS
 from .log import CLIParser, log_ok
 from .ops.outcome import CONCLUSIONS
 from .ops.registry import (

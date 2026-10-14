@@ -34,7 +34,7 @@ import yaml
 
 from . import (
     config_digest,
-    grades,
+    grading_sheet,
     mailer,
     roster,
     schedule,
@@ -337,13 +337,13 @@ def collect(course_org: str, semester_org: str) -> dict[str, dict]:
         f"{len(students)} student(s), {onboarded} onboarded" if students else "",
     )
 
-    sheets = grades.sheet_slugs(semester_org)
+    sheets = grading_sheet.sheet_slugs(semester_org)
     data["C3"] = _row(
         "C3",
-        f"Grading sheets ({grades.SHEETS_DIR}/)",
+        f"Grading sheets ({grading_sheet.SHEETS_DIR}/)",
         semester_org,
-        grades.CONFIG_REPO,
-        f"{grades.SHEETS_DIR}/",
+        grading_sheet.CONFIG_REPO,
+        f"{grading_sheet.SHEETS_DIR}/",
         semester_branch,
         bool(sheets),
         f"{len(sheets)} assignment(s)" if sheets else "",

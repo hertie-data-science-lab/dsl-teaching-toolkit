@@ -22,7 +22,9 @@ from dsl_course import (
     course,
     deploy,
     discovery,
-    grades,
+    distribute,
+    grading_sheet,
+    grading_spec,
     list_orgs,
     schedule,
     schemas,
@@ -398,7 +400,9 @@ def test_the_one_cutoff_resolver_adds_the_late_window_to_the_due_date():
 
 def test_the_old_resolvers_are_gone():
     assert not hasattr(schedule, "grading_datetime_at")
-    assert not hasattr(grades, "cutoff_at")
+    assert not any(
+        hasattr(m, "cutoff_at") for m in (grading_sheet, grading_spec, distribute)
+    )
 
 
 def test_status_json_names_the_cutoff_grading_cutoff_datetime():
@@ -536,7 +540,7 @@ def test_the_hand_out_op_passes_solution_datetime_now():
 
 
 def test_formats_is_a_list_and_its_first_entry_is_the_runnable_one():
-    spec = grades.parse_grading_spec("formats: [py, ipynb]\n")
+    spec = grading_spec.parse_grading_spec("formats: [py, ipynb]\n")
     assert (spec.formats, spec.format, spec.dropped) == (("py", "ipynb"), "py", ())
 
 
@@ -544,21 +548,23 @@ def test_a_template_naming_only_format_is_refused_whole(monkeypatch, capsys):
     from datetime import UTC, datetime
 
     with pytest.raises(NotMigrated):
-        grades.parse_grading_spec("type: group\nformat: ipynb\n")
+        grading_spec.parse_grading_spec("type: group\nformat: ipynb\n")
     # Beside `formats:` the old key is only a dropped line; the file is still read.
-    spec = grades.parse_grading_spec("formats: [py]\nformat: ipynb\n")
+    spec = grading_spec.parse_grading_spec("formats: [py]\nformat: ipynb\n")
     assert spec.formats == ("py",)
     assert [(d.field, d.code) for d in spec.dropped] == [("format", NOT_MIGRATED)]
     # Loaded, it is flagged rather than read as the defaults, and the handout refuses it.
-    monkeypatch.setattr(grades, "_grading_text", lambda org, t, **_: "format: ipynb\n")
-    assert grades.load_grading_spec("C", "a1").not_migrated
-    assert grades.declared_grading_spec("C", "a1").not_migrated
+    monkeypatch.setattr(
+        grading_spec, "_grading_text", lambda org, t, **_: "format: ipynb\n"
+    )
+    assert grading_spec.load_grading_spec("C", "a1").not_migrated
+    assert grading_spec.declared_grading_spec("C", "a1").not_migrated
     student = assign.roster.Student("a@x", "A", "ada", "", "", "student")
     monkeypatch.setattr(assign.roster, "load", lambda org: [student])
     monkeypatch.setattr(assign.schedule, "load", lambda org: citing("a1"))
     assert assign.provision_all("C", "a1", "S") == (1, False)
     assert NOT_MIGRATED in capsys.readouterr().err
-    faults, parsed = grades.grading_spec_faults(
+    faults, parsed = grading_spec.grading_spec_faults(
         "a1", "a1", "C", "format: ipynb\n", datetime.now(UTC)
     )
     assert parsed is None and [f.code for f in faults] == [NOT_MIGRATED]

@@ -11,7 +11,7 @@ import pytest
 import yaml
 
 from dsl_course import faults, roster, sync_membership
-from dsl_course.grades import LockWrite
+from dsl_course.team_formation import LockWrite
 
 
 def _stub_course_admins(monkeypatch, rv: int = 0):

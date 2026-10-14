@@ -25,7 +25,12 @@ import base64
 import re
 from dataclasses import dataclass
 
-from dsl_course import course, gh_contents, ghcli, grades
+from dsl_course import (
+    course,
+    gh_contents,
+    ghcli,
+    grading_spec,
+)
 
 from . import cleanup
 
@@ -189,14 +194,14 @@ def read_config(course_org: str, slug: str) -> tuple[str, str]:
     """`(text, blob sha)` of one template's `grading_config.yml`, off the SOLUTION branch.
 
     That branch and no other: the solution branch is where the definition lives
-    (`grades.load_grading_spec`), and a config read from `main` would be a file the engine
+    (`grading_spec.load_grading_spec`), and a config read from `main` would be a file the engine
     never looks at."""
     read = gh_contents.get_file_with_sha(
-        course_org, slug, grades.GRADING_FILE, course.SOLUTION_BRANCH
+        course_org, slug, grading_spec.GRADING_FILE, course.SOLUTION_BRANCH
     )
     if read is None:
         raise RuntimeError(
-            f"{course_org}/{slug} has no {grades.GRADING_FILE} on its "
+            f"{course_org}/{slug} has no {grading_spec.GRADING_FILE} on its "
             f"{course.SOLUTION_BRANCH} branch - did New assignment finish?"
         )
     return read
@@ -217,7 +222,7 @@ def write_config(course_org: str, slug: str, text: str, sha: str) -> None:
         "api",
         "--method",
         "PUT",
-        f"repos/{course_org}/{slug}/contents/{grades.GRADING_FILE}",
+        f"repos/{course_org}/{slug}/contents/{grading_spec.GRADING_FILE}",
         "--field",
         "message=e2e: declare this assignment's shape",
         "--field",
@@ -230,6 +235,6 @@ def write_config(course_org: str, slug: str, text: str, sha: str) -> None:
     )
     if code != 0:
         raise RuntimeError(
-            f"could not write {slug}/{grades.GRADING_FILE} on "
+            f"could not write {slug}/{grading_spec.GRADING_FILE} on "
             f"{course.SOLUTION_BRANCH}: {out[:200]}"
         )

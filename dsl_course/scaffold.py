@@ -276,7 +276,7 @@ def _grading_config(
     """`grading_config.yml` as New assignment writes it. An empty `starter` takes decision
     0028 rule 1's default, derived when tests are on."""
     # A drop box is hand-marked, and the parse says so: all three per-unit stages are
-    # refused for `submit_via: shared_dropbox_repo` (`grades._cross_check`), because each
+    # refused for `submit_via: shared_dropbox_repo` (`grading_spec._cross_check`), because each
     # of fifty students would have the whole semester's work cloned, run and archived under
     # their own key. Seeded true, the file the button had just written reported a
     # `Dropped` line on every quarter-hourly tick and stood as an advisory in the semester's

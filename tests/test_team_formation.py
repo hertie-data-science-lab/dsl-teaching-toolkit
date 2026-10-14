@@ -19,7 +19,7 @@ from conftest import ROSTER_HEADER
 
 from dsl_course import discovery, gh_contents, settings, team_formation
 from dsl_course.faults import Severity
-from dsl_course.grades import GradingSpec
+from dsl_course.grading_spec import GradingSpec
 from dsl_course.mailer import send_bulk as _SEND_BULK
 from dsl_course.schedule import AssignmentEntry, Schedule
 
@@ -85,11 +85,11 @@ def semester(monkeypatch):
             lambda org: teams_csv or None,
         )
         monkeypatch.setattr(
-            team_formation.grades,
+            team_formation,
             "declared_grading_spec",
             lambda org, template, **_: spec,
         )
-        # The cap the window carries and the mail prints: `grades.team_cap` falls back to
+        # The cap the window carries and the mail prints: `team_formation.team_cap` falls back to
         # the COURSE org's assignment_defaults when the template names no size, and that
         # is a live read of its dsl-course.yml.
         monkeypatch.setattr(
@@ -957,7 +957,7 @@ def test_the_first_claim_of_a_term_does_not_overwrite_a_racing_writer(semester, 
     # An absent file read as "no sha" must be sent to GitHub as NO SHA - which it refuses if
     # the file has appeared since - and never as "fetch the sha yourself and overwrite",
     # which is what `put_file` does with None and which would discard the other writer's
-    # rows and mail every unteamed student twice. `grades.sync_team_lock` passes "" for the
+    # rows and mail every unteamed student twice. `team_formation.sync_team_lock` passes "" for the
     # same absence and for the same reason.
     semester()
     mine = "2026-09-25T07:00"
