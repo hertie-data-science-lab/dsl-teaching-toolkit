@@ -34,6 +34,7 @@ from .central import CENTRAL
 from .course import (
     ASSIGNMENT_TYPES,
     COURSE_DEFAULT_CHOICE,
+    DEFAULT_FORMATS,
     FACULTY_ONLY_HEADING,
     FORMATS,
     MAINTAINING_FILE,
@@ -1114,20 +1115,17 @@ def _collision(named: list[str], autograde: bool) -> str:
     return ""
 
 
-# `submit_via` is the template's shape, not a policy default: the box left at
-# `COURSE_DEFAULT_CHOICE` with no course answer gets the ordinary repo per unit.
-_SHAPE_ANSWERS = {"submit_via": "assignment_repo"}
+# What a box left at `COURSE_DEFAULT_CHOICE` gets when the course does not answer it:
+# `submit_via` is the template's shape (the ordinary repo per unit), `formats` the
+# wizard's own default - neither is an institution default (decision 0039 rule 2).
+_SHAPE_ANSWERS = {"submit_via": "assignment_repo", "formats": DEFAULT_FORMATS}
 
 
 def resolve_answers(answers: dict[str, str], defaults: dict) -> dict[str, str]:
     """The New assignment answers with every box left at `COURSE_DEFAULT_CHOICE` replaced
-    through the cascade's course and institution layers (`settings.resolve`): the course's
-    `assignment_defaults:` value when it declares one, else the policy's. An answer
-    somebody chose is kept as given."""
-    stack = [
-        ("course", defaults),
-        ("institution", {**_SHAPE_ANSWERS, **settings.institution_defaults()}),
-    ]
+    through the course's `defaults:` (`submit_via` only, pending the maintainer's ruling)
+    else `_SHAPE_ANSWERS`. An answer somebody chose is kept as given."""
+    stack = [("course", defaults), ("institution", _SHAPE_ANSWERS)]
     out = {}
     for key, value in answers.items():
         if value == COURSE_DEFAULT_CHOICE:
@@ -1564,8 +1562,8 @@ def main() -> int:
         help="The assignment's name, e.g. 'Neural networks from scratch': the repo is "
         "assignment-<name>, and the name is its `title:` in grading_config.yml.",
     )
-    # Two boxes default to COURSE_DEFAULT_CHOICE: the course's `assignment_defaults:`
-    # answers them, else the toolkit does (`resolve_answers`).
+    # Two boxes default to COURSE_DEFAULT_CHOICE: the course's `defaults:` answers
+    # `submit_via`, else the toolkit does (`resolve_answers`).
     pa.add_argument(
         "--formats",
         dest="formats",
@@ -1573,8 +1571,7 @@ def main() -> int:
         help="Which starter stubs to seed on main, and nothing else: a comma-separated "
         f"list of {', '.join(FORMATS)}, with `none` on its own for no starter at all; "
         "the first is the runnable one (the completion check and the autograder run "
-        "it). Default: the course's `assignment_defaults: formats`, else the "
-        "institution's (policy.yml)",
+        "it). Default: ipynb",
     )
     pa.add_argument(
         "--type",

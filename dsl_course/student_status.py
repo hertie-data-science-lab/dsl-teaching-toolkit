@@ -47,6 +47,7 @@ from .course import (
     CUTOFF_SENTENCE,
     SELF_SELECT,
     advertises_console,
+    course_block,
     identifier,
     is_repo_root,
     late_rule,
@@ -710,11 +711,11 @@ def home_markdown(text: str, config: dict[str, str]) -> str:
 
 def site_config(course: CourseFacts, org: str) -> dict[str, str]:
     """The `site.*` keys a home page may name, as the site sync writes them."""
-    meta = course.meta or {}
+    identity = course_block(course.meta or {})
     config = {
-        k: str(meta[k])
-        for k in ("course_name", "course_code", "course_description")
-        if meta.get(k)
+        f"course_{k}": str(identity[k])
+        for k in ("name", "code", "description")
+        if identity.get(k)
     }
     if semester_label(semester_of(org)):
         config["course_semester"] = semester_label(semester_of(org))
@@ -734,8 +735,8 @@ def render(
     return {
         "schema": SCHEMA,
         "semester": facts.org,
-        "course_name": str((course.meta or {}).get("course_name") or ""),
-        "course_description": str((course.meta or {}).get("course_description") or ""),
+        "course_name": str(course_block(course.meta).get("name") or ""),
+        "course_description": str(course_block(course.meta).get("description") or ""),
         # The course's opt-in: false, and the console shows a student the site instead.
         "student_console": advertises_console(course.meta or {}),
         # schedule.yml's dates, so the console counts "Week N of M" as the instructor's does.
@@ -862,7 +863,7 @@ def gather(course: CourseFacts, facts: SemesterFacts, now: datetime) -> StudentF
         )
     except Unusable:
         extra.syllabus = None  # the site sync names the bad materials.yml
-    extra.cards = people_cards(read_semester(org).instructors.meta(), semester=True)
+    extra.cards = people_cards(read_semester(org).semester.meta(), semester=True)
     site = pages_repo(org)
     if site in facts.listing:
         extra.home = facts.site_home or ""

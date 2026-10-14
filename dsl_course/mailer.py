@@ -146,7 +146,7 @@ def maintainer_address() -> str:
 
     `DSL_MAINTAINER_EMAIL` when the org has it, else `GRAPH_SENDER` - the shared mailbox
     the toolkit already sends AS is a mailbox the maintainer can read, which beats a fault
-    nobody hears about - else the institution's `contact` (policy.yml), so a fault always
+    nobody hears about - else the institution's first `contacts` address (institution.yml), so a fault always
     has somewhere to go.
 
     Never logged: every faculty workflow runs in a PUBLIC repo. Log the NAME, or
@@ -155,7 +155,7 @@ def maintainer_address() -> str:
         value = (os.environ.get(name) or "").strip()
         if value:
             return value
-    return policy.load()["contact"]
+    return policy.contact()
 
 
 def course_admin_addresses(declared: Iterable[str] = ()) -> tuple[str, ...]:

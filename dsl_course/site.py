@@ -44,9 +44,10 @@ from . import policy, run, schedule, status, teams
 from .config import read_semester
 from .course import (
     CUTOFF_SENTENCE,
-    INSTRUCTORS_FILE,
     SELF_SELECT,
+    SEMESTER_FILE,
     advertises_console,
+    course_block,
     identifier,
     late_rule,
     pages_repo,
@@ -136,9 +137,9 @@ def _semester_start(semester_org: str) -> date:
 
 
 def _instructors_meta(semester_org: str) -> tuple[dict, str]:
-    """A semester's `instructors.yml` and its path. The old `people.yml` is never read
-    (decision 0012): a semester that has not migrated gets the instructors-team cards."""
-    return read_semester(semester_org).instructors.meta(), INSTRUCTORS_FILE
+    """A semester's `semester.yml` (its `people:` are the cards) and its path. A semester
+    that has not migrated gets the instructors-team cards."""
+    return read_semester(semester_org).semester.meta(), SEMESTER_FILE
 
 
 def _semester_label(semester_org: str) -> str:
@@ -1543,17 +1544,18 @@ def sync_site(course_org: str, semester_org: str) -> int:
         )
 
         config = {}
-        if meta.get("course_name"):
-            config["course_name"] = str(meta["course_name"])
+        identity = course_block(meta)
+        if identity.get("name"):
+            config["course_name"] = str(identity["name"])
         if _semester_label(semester_org):
             config["course_semester"] = _semester_label(semester_org)
-        if meta.get("course_code"):
-            config["course_code"] = str(meta["course_code"])
-        # The site's blurb. Declared once in the course org's dsl-course.yml and pushed to
+        if identity.get("code"):
+            config["course_code"] = str(identity["code"])
+        # The site's blurb. Declared once in the course org's course.yml and pushed to
         # every semester site; left as the site repo has it when the course doesn't declare
         # one. Written as a single line whatever the source shape (see q).
-        if meta.get("course_description"):
-            config["course_description"] = str(meta["course_description"])
+        if identity.get("description"):
+            config["course_description"] = str(identity["description"])
         # The footer's GitHub link (the site's only click-back). This is the SEMESTER site,
         # so it links the semester org - where this year's materials and the students' own
         # repos live - never the course org (faculty-side) or the template's default.

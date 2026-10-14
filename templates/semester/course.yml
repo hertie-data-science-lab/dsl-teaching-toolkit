@@ -2,6 +2,6 @@
 #
 # This semester org points back to its persistent course org. Read by this repo's
 # dispatchers to find where to fire Sync membership, Sync site, Scheduled release and
-# Send codes. Identity lives in the course org's .github/dsl-course.yml, the schedule
+# Send codes. Identity lives in the course org's .github/course.yml, the schedule
 # in this repo's schedule.yml.
 course: {course}

@@ -24,17 +24,19 @@ import argparse
 import os
 import sys
 
-from . import mailer, policy, records, scaffold, seed, site, sync_faculty
+from . import mailer, policy, records, scaffold, seed, settings, site, sync_faculty
 from .access import COURSE_TEAM_ACCESS, SEMESTER_WRITE_REPOS, grant_team_repo_access
 from .central import pin_central_ref, resolve_central_ref
 from .course import (
     CONFIG_REPO,
     COURSE_ADMIN_TEAM,
+    COURSE_CONFIG,
     COURSE_HUB_TOPIC,
     FACULTY_TEAMS,
     JOIN_REPO,
     SEMESTER_TEAMS,
     SEMESTER_TOPIC,
+    TOOLKIT_REF_KEY,
     semester_of,
 )
 from .discovery import (
@@ -46,7 +48,6 @@ from .gh_contents import put_file, put_files, seed_if_absent
 from .gh_teams import converge_org_settings, create_role_teams
 from .ghcli import bot_token, gh
 from .log import CLIParser, log, log_err, log_ok, log_step
-from .opencourse import OPENCOURSE_FILE
 from .opencourse import seed_text as opencourse_seed
 from .profile_readme import update_profile_readme
 from .repos import create_repo, repo_is_private, repo_missing, set_repo_topics
@@ -291,7 +292,7 @@ def add_course_admins(org: str, handles: str) -> int:
     team - never added on the Teams page, which the next sync reverts.
 
     This is a direct, immediate team invite ONLY - it does not persist anywhere. On the
-    course org, `_course_metadata` also seeds these same handles into
+    course org, `course_seed` also seeds these same handles into
     `dsl-course.yml`'s `people.course_admins` (the SSOT `sync_faculty` reconciles
     against), so the next sync doesn't undo this invite by pruning them right back out
     for not being declared. On a semester org there's no SSOT to write to (course_admins
@@ -328,69 +329,65 @@ def add_course_admins(org: str, handles: str) -> int:
 # either for open-ended, or set both to bound access to one window (auto-rotates, no manual
 # removal needed).
 #
-# TAs are never declared here (they change every semester); instructors appear here only as
-# OPTIONAL open-courseware display cards (templates/course/people-cards.yml - the schema
-# site_repo.people_cards reads for the course-site headshots). A semester's real teaching team
-# - GitHub access AND semester-site cards - is declared per semester in that semester's own
-# semester-config/instructors.yml (seeded alongside schedule.yml at Bootstrap semester).
-#
-# The preamble (people-header.yml) and card scaffold (people-cards.yml) are shared by both
-# variants below - fully-commented default and --admins-seeded - so the two can't drift.
+# Instructors and TAs are never declared here: a semester's teaching team - GitHub access
+# AND semester-site cards - is declared per semester in that semester's own
+# semester-config/semester.yml (decision 0039 rule 3).
 def _course_admins_block(admins: list[str] | None) -> str:
-    """The `people.course_admins` block for a freshly-seeded dsl-course.yml. With no
-    admins given, ships fully commented out (today's default, uncomment-what-you-want
-    UX). Given admins (from bootstrap's --admins), seeds them LIVE (uncommented) - so
-    they're declared in the SSOT from day one, not just given a one-time direct team
-    invite (add_course_admins) that the next sync would otherwise revert for not
-    being declared here."""
+    """The `people.course_admins` block for a freshly-seeded course.yml. With no admins
+    given, ships fully commented out (uncomment-what-you-want). Given admins (from
+    bootstrap's --admins), seeds them LIVE - so they're declared in the SSOT from day one,
+    not just given a one-time direct team invite (add_course_admins) that the next sync
+    would otherwise revert for not being declared here."""
     header = template("course/people-header.yml")
-    cards = template("course/people-cards.yml")
     if not admins:
-        return f"{header}\n{template('course/people-commented.yml')}\n{cards}"
+        return f"{header}{template('course/people-commented.yml')}"
     entries = "\n".join(
         f'    - github_handle: "{a}"    # grants the `course-admin` team'
         for a in admins
     )
-    return f"{header}people:\n  course_admins:\n{entries}\n\n{cards}"
+    return f"{header}people:\n  course_admins:\n{entries}\n"
 
 
-def _course_metadata(
+def course_seed(
     course_name: str,
     course_code: str,
     admins: list[str] | None = None,
     central_ref: str | None = None,
 ) -> str:
-    """dsl-course.yml for the persistent COURSE org: identity + course_admins (the
-    single source of truth for course-wide admin access, mirrored into every semester
-    org's own course-admin team by sync_faculty). Instructors/TAs and the schedule
-    both stay per-semester instead (they change year to year and, for instructors/TAs,
-    usually the people too).
+    """course.yml for the persistent COURSE org (decision 0039): identity, course_admins
+    (the single source of truth for course-wide admin access, mirrored into every
+    semester org's own course-admin team by sync_faculty), the full `defaults:` skeleton
+    with the institution's values as comments, and the open course site, off.
 
     `central_ref` writes the deployment tier this course runs (--central-ref) as a live
-    key. Omitted, the file declares nothing and the course runs `central.CENTRAL_REF` -
-    which is what every real course should do; the demo course is the one that is meant to
-    sit on `main`. It is appended rather than templated in beside `course_code` because
-    the template is itself parsed as YAML by the shipped-workflow sweep, so it cannot carry
-    a placeholder on a line of its own."""
-    identity = template("course/dsl-course.yml").format(
+    `toolkit_version_ref`. Omitted, the file declares nothing and the course runs
+    `central.CENTRAL_REF` - which is what every real course should do; the demo course is
+    the one that is meant to sit on `main`."""
+    identity = template("course/course.yml").format(
         course_name=course_name,
         course_code=course_code or "",
     )
-    tier = (
-        f"# Set by `--central-ref` at bootstrap - see the commented note above.\n"
-        f"central_ref: {central_ref}\n\n"
-        if central_ref
-        else ""
+    if central_ref:
+        lines = identity.splitlines(keepends=True)
+        at = next(i for i, line in enumerate(lines) if "toolkit_version_ref" in line)
+        lines[at] = (
+            f"  {TOOLKIT_REF_KEY}: {central_ref}   # set by `--central-ref` at bootstrap\n"
+        )
+        identity = "".join(lines)
+    defaults = settings.defaults_skeleton(
+        [("institution", settings.institution_defaults())]
     )
-    return identity + tier + _course_admins_block(admins)
+    return "\n".join(
+        (identity, _course_admins_block(admins), defaults, opencourse_seed())
+    )
 
 
 def _semester_metadata(course: str) -> str:
-    """dsl-course.yml for a SEMESTER org's .github repo: a pointer back to its persistent
-    course org. This is the single source the semester's semester-config dispatchers
-    (dispatch.yml) read to find where to fire Sync membership /
-    Sync site - so without it those auto-triggers can't resolve the course org."""
-    return template("semester/dsl-course.yml").format(course=course)
+    """The SEMESTER org's pointer back to its persistent course org,
+    `semester-config/.system/course.yml`. The single source the semester's semester-config
+    dispatchers (dispatch.yml) read to find where to fire Sync membership / Sync site - so
+    without it those auto-triggers can't resolve the course org."""
+    return template("semester/course.yml").format(course=course)
 
 
 def create_profile_repo(
@@ -441,27 +438,18 @@ def create_profile_repo(
         # USER-owned: seeded once, never rewritten by a later repair run.
         # (The org-overview profile/README.md is generated at the end of bootstrap,
         # once all repos exist, by profile_readme.update_profile_readme - see main.)
-        metadata = _course_metadata(course_name, course_code, admins, central_ref)
+        # The open course site inside it is seeded off, so nothing is public until
+        # someone turns it on.
+        metadata = course_seed(course_name, course_code, admins, central_ref)
         if not seed_if_absent(
             org,
             ".github",
-            "dsl-course.yml",
+            COURSE_CONFIG,
             metadata.encode(),
-            "init: course metadata for DSL discovery tooling",
+            "init: course.yml (identity, admins, defaults, open course site)",
         ):
             failures += 1
-            log_err(f"could not seed {org}/.github/dsl-course.yml (the faculty SSOT)")
-        # The public website's settings, INSTRUCTOR-OWNED like dsl-course.yml: seeded
-        # off, so nothing is public until someone turns it on.
-        if not seed_if_absent(
-            org,
-            ".github",
-            OPENCOURSE_FILE,
-            opencourse_seed().encode(),
-            "init: public website settings (off)",
-        ):
-            failures += 1
-            log_err(f"could not seed {org}/.github/{OPENCOURSE_FILE}")
+            log_err(f"could not seed {org}/.github/{COURSE_CONFIG} (the faculty SSOT)")
 
     if not set_repo_topics(org, ".github", _profile_topics(is_semester, course_code)):
         failures += 1
@@ -490,35 +478,37 @@ def _scaffold_text(
     central_ref: str,
     tag: str,
     year: int,
+    course_org: str = "",
 ) -> bytes:
     """One semester-config scaffold, rendered for this semester. Pinned first, formatted
     second: the scaffolds link the runbooks, and an org must be sent to the docs for the
-    engine it actually runs. The skeleton names the institution's defaults (policy.yml)
-    for the settings it leaves commented out."""
+    engine it actually runs. `semester.yml`'s `defaults:` skeleton names, for every key,
+    the value it inherits from the course (`course_org`) or the institution and which."""
     ours = policy.defaults()
+    inherited = settings.layers(course_org)[2:]
     text = pin_central_ref(template(rel), central_ref).format(
         tag=tag,
         year=year,
         year_next=year + 1,
         timezone=ours["timezone"],
-        grace_days=ours["archive"]["grace_days"],
-        late_window_days=ours["late_window_days"],
-        late_penalty_per_day=ours["late_penalty_per_day"],
-        max_team_size=ours["max_team_size"],
-        team_formation=ours["team_formation"],
-        visibility=ours["visibility"],
+        grace_days=ours["archive_grace_days"],
+        defaults=settings.defaults_skeleton(inherited),
     )
     return text.encode()
 
 
-def semester_scaffold(org: str, path: str, central_ref: str) -> str:
+def semester_scaffold(
+    org: str, path: str, central_ref: str, course_org: str = ""
+) -> str:
     """One semester-config scaffold exactly as Bootstrap semester seeds it for `org` (the
     migration replaces an untouched old skeleton with the current one)."""
     tag, year = _tag_and_year(org)
-    return _scaffold_text(path, CONFIG_SCAFFOLDS[path], central_ref, tag, year).decode()
+    return _scaffold_text(
+        path, CONFIG_SCAFFOLDS[path], central_ref, tag, year, course_org
+    ).decode()
 
 
-def setup_semester_extras(org: str, central_ref: str) -> int:
+def setup_semester_extras(org: str, central_ref: str, course_org: str = "") -> int:
     """Semester-only: seed the student-facing repos.
 
     Layered on top of the common bootstrap when --semester is passed (the safe-by-default
@@ -618,7 +608,7 @@ def setup_semester_extras(org: str, central_ref: str) -> int:
             org,
             CONFIG_REPO,
             {
-                path: _scaffold_text(path, rel, central_ref, tag, year)
+                path: _scaffold_text(path, rel, central_ref, tag, year, course_org)
                 for path, rel in CONFIG_SCAFFOLDS.items()
             },
             "init: semester-config scaffolds (roster, teams, schedule, people)",
@@ -871,7 +861,9 @@ def _run(args: argparse.Namespace) -> int:
     workflow_failures = 0
     if args.semester:
         # Semester: student-facing join + roster + tightened perms.
-        workflow_failures = setup_semester_extras(args.org, central_ref)
+        workflow_failures = setup_semester_extras(
+            args.org, central_ref, args.course or ""
+        )
         if args.course:
             # Pointer back to the course org, in this semester's semester-config/.system/ -
             # the semester-config dispatchers read its `course:` line to know where to

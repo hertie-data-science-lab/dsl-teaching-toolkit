@@ -221,7 +221,7 @@ def _deploy(request: Request) -> list[str]:
         "--course-source-path",
         _a(request, "course_source_path"),
         "--semester-dest-repo",
-        _a(request, "semester_dest_repo", policy.defaults()["semester_dest_repo"]),
+        _a(request, "semester_dest_repo", policy.defaults()["materials_repo"]),
         "--semester-dest-path",
         _a(request, "semester_dest_path", ""),
     ]

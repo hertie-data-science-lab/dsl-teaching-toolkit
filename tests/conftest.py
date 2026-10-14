@@ -168,13 +168,13 @@ def _no_semester_is_closed_out(monkeypatch):
 @pytest.fixture(autouse=True)
 def _no_course_or_semester_defaults(monkeypatch):
     """Answer the cascade's live reads (`settings`) with "nothing declared" by default:
-    the course's `dsl-course.yml`, the semester's `assignments.yml`, the run settings
+    the course's `course.yml`, the semester's `semester.yml`, the run settings
     the settings written on a schedule.yml entry (`schedule.run_settings_of`, which reads
     the parsed plan) and the semester's pointer to its course. Every spec read and every late cutoff resolves through them,
-    and the institution's policy is the uninteresting answer for every test but the ones
+    and the institution's defaults are the uninteresting answer for every test but the ones
     about a layer, which set their own after this fixture and win."""
     monkeypatch.setattr(settings, "org_meta", lambda org: {})
-    monkeypatch.setattr(settings, "_assignments_text", lambda org: None)
+    monkeypatch.setattr(settings, "_semester_text", lambda org: None)
     monkeypatch.setattr(schedule, "run_settings_of", lambda org, slug: {})
     monkeypatch.setattr(settings, "course_org_for_semester", lambda org: "")
 
@@ -540,11 +540,11 @@ def entry_links(rendered: str) -> list[tuple[str, str]]:
 
 def run_settings(monkeypatch, read) -> None:
     """Stub a semester's run settings from `read(org)`, the text of an `assignments.yml`
-    as it was written before decision 0038: its `defaults:` stay in `assignments.yml`,
+    as it was written before decisions 0038/0039: its `defaults:` become `semester.yml`'s,
     and each `assignments.<key>` block becomes the settings written on that key's
-    schedule.yml entry (`settings.inline_settings`; `visibility` spelt
-    `assignment_repo_visibility` there). Text that is not YAML is the `assignments.yml`
-    as it stands."""
+    schedule.yml entry (`settings.inline_settings`). `visibility` is spelt
+    `assignment_repo_visibility` in both. Text that is not YAML is `semester.yml` as it
+    stands."""
 
     def split(org):
         text = read(org)
@@ -555,6 +555,10 @@ def run_settings(monkeypatch, read) -> None:
         if not isinstance(data, dict):
             return text, None
         blocks = data.pop("assignments", None)
+        if isinstance(data.get("defaults"), dict):
+            data["defaults"] = {
+                settings.INLINE_NAMES.get(k, k): v for k, v in data["defaults"].items()
+            }
         defaults = yaml.safe_dump(data, sort_keys=False) if data else None
         if not isinstance(blocks, dict):
             return defaults, None
@@ -569,6 +573,6 @@ def run_settings(monkeypatch, read) -> None:
         blocks = (yaml.safe_load(text) or {}).get("assignments") if text else None
         return settings.inline_blocks(blocks).get(slug, {})
 
-    monkeypatch.setattr(settings, "_assignments_text", lambda org: split(org)[0])
+    monkeypatch.setattr(settings, "_semester_text", lambda org: split(org)[0])
     # The entry's own settings, as the parsed plan carries them (`AssignmentEntry.settings`).
     monkeypatch.setattr(schedule, "run_settings_of", inline)

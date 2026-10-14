@@ -874,7 +874,7 @@ def render_sync_membership() -> str:
     (teams.csv) additionally reconcile for whichever semester is in scope. Fully
     automatic, including removals (no --prune flag - config is the live truth):
 
-    - push to this file's own dsl-course.yml -> course_admins only (no single semester
+    - push to this file's own course.yml -> course_admins only (no single semester
       implied - but still applied to every semester's own course-admin team)
     - repository_dispatch (from a semester's semester-config dispatcher on push to its
       students.csv/teams.csv/instructors.yml) -> course_admins + that one semester's
@@ -915,7 +915,7 @@ on:
   push:
     branches: [main]
     paths:
-      - dsl-course.yml
+      - course.yml
       # The registry is the other half of the course's own config, and its digest issue is
       # the same one - so an edit to either is checked and mailed within the minute rather
       # than waiting for the scheduler's next tick.
@@ -1266,7 +1266,7 @@ on:
 # it, from this step (see dsl_course.notify) - so the release pass carries the transport
 # alongside the token. Without it the digest issue's @mention is the only channel, which
 # reaches whoever happens to read GitHub notifications that week. This pass also pre-flights
-# the COURSE org's own dsl-course.yml and semester registry, whose mail goes to the course
+# the COURSE org's own course.yml and semester registry, whose mail goes to the course
 # admins' `email:` there instead.
 {_MAIL_ENV}
         run: |
@@ -1447,7 +1447,7 @@ def render_sync_site() -> str:
     schedule.yml dates + assignment catalog). Auto-resyncs on any change the site sources
     from - not just on release:
 
-    - push to this .github repo's dsl-course.yml -> re-sync EVERY semester (the course name /
+    - push to this .github repo's course.yml -> re-sync EVERY semester (the course name /
       instructor cards feed every semester site).
     - repository_dispatch `sync-site` (fired by the semester's semester-config dispatcher on
       push to schedule.yml/instructors.yml) -> re-sync that one semester (or all, if the payload
@@ -1477,7 +1477,7 @@ on:
   push:
     branches: [main]
     paths:
-      - dsl-course.yml
+      - course.yml
   repository_dispatch:
     types: [sync-site]
   schedule:
@@ -1500,7 +1500,7 @@ on:
 
 def render_publish_site() -> str:
     """Build/refresh the PUBLIC course site <course-org>.github.io (open courseware), as
-    the course's `.github/opencourse.yml` declares it.
+    the course's `.github/course.yml` `open_course_site:` declares it.
 
     No inputs: the file says what to publish, so a manual run and the daily cron do the
     same thing. The manual run refuses a course whose file is absent or off; the cron is
@@ -1509,8 +1509,8 @@ def render_publish_site() -> str:
     return f"""name: Publish course website
 
 # Build/refresh the PUBLIC course site <course-org>.github.io (open courseware) from
-# opencourse.yml in this repo: which materials repo, readings mode, lecture files and
-# what to withhold. Edit that file (or the console's Public website tab), then run this;
+# course.yml `open_course_site:` in this repo: which materials repo, readings mode, lecture files and
+# what to withhold. Edit that block (or the console's Public website tab), then run this;
 # the daily cron re-publishes from it, and does nothing while it says enabled: false.
 
 on:
@@ -1530,7 +1530,7 @@ on:
           python3 -m dsl_course.site public-sync --course-org "$COURSE_ORG"
 {_CRON_CLOSE}
   resync:
-    # The daily catch-up: the same publish, quiet when opencourse.yml is absent or off.
+    # The daily catch-up: the same publish, quiet when open_course_site is absent or off.
     # Cron has no actor, so this path skips the check-team gate (as Sync site does).
     if: github.event_name == 'schedule'
 {_ungated_preamble()}      - name: Re-sync course website

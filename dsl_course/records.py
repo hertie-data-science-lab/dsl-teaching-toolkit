@@ -23,7 +23,7 @@ RECORDS = {
     "student_status": "student-status.json",
     "outcomes": "outcomes",
     # semester-config: the pointer to the course org, and the semester's records
-    "pointer": "dsl-course.yml",
+    "pointer": "course.yml",
     "lock": "assignments.lock.yml",
     "snapshots": "snapshots",
     "autograde": "autograde",

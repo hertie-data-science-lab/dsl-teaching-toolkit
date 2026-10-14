@@ -29,7 +29,9 @@ from .course import (
     GRADEBOOK_PREFIX,
     JOIN_REPO,
     SEMESTER_TOPIC,
+    TOOLKIT_REF_KEY,
     advertises_console,
+    course_block,
 )
 from .faults import ConfigFault, Unusable
 from .gh_contents import get_file_content, put_file
@@ -486,8 +488,7 @@ def course_name_of(course_org: str) -> str:
     course org needs no guard of its own."""
     if not course_org:
         return ""
-    meta = org_meta(course_org)
-    return str(meta.get("course_name") or "")
+    return str(course_block(org_meta(course_org)).get("name") or "")
 
 
 def student_console_for(course_org: str) -> bool:
@@ -519,7 +520,7 @@ def central_ref_for(org: str) -> str:
     if course:
         org, meta = course, org_meta(course)
     return resolve_central_ref(
-        meta.get("central_ref"), source=f"{org}/.github/{COURSE_CONFIG}"
+        course_block(meta).get(TOOLKIT_REF_KEY), source=f"{org}/.github/{COURSE_CONFIG}"
     )
 
 

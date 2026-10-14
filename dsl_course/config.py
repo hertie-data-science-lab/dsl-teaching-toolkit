@@ -1,9 +1,10 @@
 """One reader per config file.
 
-`read_course(org)` is the course org's `.github/dsl-course.yml`; `read_semester(org)` the
-semester's hand-edited files in `semester-config` (its course pointer, `instructors.yml`,
-`assignments.yml`). Every module that reads one of them comes through here, so absent,
-empty and malformed mean the same thing everywhere:
+One hand-edited file per level (decision 0039): `read_course(org)` is the course org's
+`.github/course.yml`; `read_semester(org)` the semester's files in `semester-config` (its
+course pointer `.system/course.yml` and `semester.yml`); the institution's is
+`policy.load()`. Every module that reads one of them comes through here, so absent, empty
+and malformed mean the same thing everywhere:
 
 - ABSENT (a 404): `text` is None, `state` is `absent`, `mapping()` is None.
 - present: `mapping()` is the parsed mapping (`{}` for an empty file), its keys' lines
@@ -27,7 +28,7 @@ from pathlib import Path
 import yaml
 
 from . import gh_contents, records
-from .course import ASSIGNMENTS_FILE, CONFIG_REPO, COURSE_CONFIG, INSTRUCTORS_FILE
+from .course import CONFIG_REPO, COURSE_CONFIG, SEMESTER_FILE
 from .faults import Unusable
 
 ABSENT = "absent"
@@ -99,7 +100,7 @@ def read_local(root: Path, path: str) -> ConfigFile:
 
 
 def read_course(org: str) -> ConfigFile:
-    """The course org's identity file, `.github/dsl-course.yml`."""
+    """The course org's one hand-edited file, `.github/course.yml`."""
     return read(org, ".github", COURSE_CONFIG)
 
 
@@ -114,16 +115,13 @@ class SemesterConfig:
 
     @property
     def pointer(self) -> ConfigFile:
-        """The semester's pointer to its course org (`.system/dsl-course.yml`)."""
+        """The semester's pointer to its course org (`.system/course.yml`)."""
         return self.file(records.path("pointer"))
 
     @property
-    def instructors(self) -> ConfigFile:
-        return self.file(INSTRUCTORS_FILE)
-
-    @property
-    def assignments(self) -> ConfigFile:
-        return self.file(ASSIGNMENTS_FILE)
+    def semester(self) -> ConfigFile:
+        """`semester.yml`: `people:`, `defaults:`, `student_site:`."""
+        return self.file(SEMESTER_FILE)
 
 
 def read_semester(org: str) -> SemesterConfig:

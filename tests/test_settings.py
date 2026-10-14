@@ -24,7 +24,7 @@ RUN_SETTINGS_OF = schedule.run_settings_of
 
 PACKAGE = Path(settings.__file__).parent
 # The real read, before conftest's autouse fixture answers it with "no file".
-_READ_ASSIGNMENTS = settings._assignments_text
+_READ_SEMESTER = settings._semester_text
 
 ASSIGNMENTS_YML = """\
 defaults:
@@ -133,7 +133,7 @@ def test_no_assignments_yml_means_both_of_its_layers_are_empty(course):
 
 
 def test_a_semester_read_that_fails_raises_and_is_not_cached(monkeypatch):
-    run_settings(monkeypatch, _READ_ASSIGNMENTS)
+    run_settings(monkeypatch, _READ_SEMESTER)
     answers = [RuntimeError("could not read Sem/semester-config/assignments.yml: 403")]
 
     def read(org, repo, path, ref=""):
@@ -151,7 +151,7 @@ def test_a_semester_read_that_fails_raises_and_is_not_cached(monkeypatch):
 
 
 def test_an_absent_assignments_yml_is_the_empty_layer(monkeypatch):
-    run_settings(monkeypatch, _READ_ASSIGNMENTS)
+    run_settings(monkeypatch, _READ_SEMESTER)
     monkeypatch.setattr(gh_contents, "get_file_content", lambda *a, **k: None)
     assert settings.semester_defaults("Sem") == {}
 
@@ -346,7 +346,7 @@ def test_an_entry_setting_typo_leaves_the_semester_default_to_answer(
 ):
     good = "public" if key == "visibility" else "assigned"
     monkeypatch.setattr(
-        settings, "_assignments_text", lambda org: f"defaults:\n  {key}: {good}\n"
+        settings, "_semester_text", lambda org: f"defaults:\n  {key}: {good}\n"
     )
     entry = (
         f"assignments:\n  a1:\n    template: t\n    number: 1\n"

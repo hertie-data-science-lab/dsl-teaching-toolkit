@@ -29,7 +29,7 @@ from collections.abc import Callable
 
 from . import policy
 from .central import CENTRAL
-from .course import CONFIG_REPO, COURSE_CONFIG, JOIN_REPO
+from .course import CONFIG_REPO, COURSE_CONFIG, JOIN_REPO, course_block
 from .discovery import (
     being_set_up,
     course_name_for_semester,
@@ -511,7 +511,7 @@ def profile_files(
         # students' landing page "hertie-dsl-demo-f2026". Follow the pointer to the course
         # org that does hold the name; the slug stays as the last resort.
         course_name = (
-            cfg.get("course_name")
+            course_block(cfg).get("name")
             or (course_name_for_semester(org) if not cfg else "")
             or org
         )

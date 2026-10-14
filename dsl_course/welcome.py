@@ -38,8 +38,7 @@ CONFIG_SCAFFOLDS = {
     "students.csv": "semester-config/students.csv",
     "teams.csv": "semester-config/teams.csv",
     "schedule.yml": "semester-config/schedule.yml",
-    "instructors.yml": "semester-config/instructors.yml",
-    "assignments.yml": "semester-config/assignments.yml",
+    "semester.yml": "semester-config/semester.yml",
 }
 
 
@@ -50,7 +49,7 @@ def template(rel: str) -> str:
     Everything under templates/ is content pushed into a course/semester repo, kept in real
     files rather than Python literals so faculty & instructors can read (and PR) the thing
     they'll actually receive. Most are seeded verbatim; the few that carry `{placeholders}`
-    are rendered with str.format (see bootstrap_course._course_metadata)."""
+    are rendered with str.format (see bootstrap_course.course_seed)."""
     return (TEMPLATES / rel).read_text(encoding="utf-8")
 
 
@@ -439,7 +438,7 @@ def config_system_files(central_ref: str) -> dict[str, bytes]:
 
 
 def refresh_semester_pointer(org: str, course_org: str) -> int:
-    """Re-push a semester's `semester-config/.system/dsl-course.yml` - the pointer its
+    """Re-push a semester's `semester-config/.system/course.yml` - the pointer its
     dispatchers read to find which course org to fire Sync membership / Sync site at.
 
     SYSTEM-owned, but it used to be written ONLY by Bootstrap semester's own wiring, so it
@@ -454,7 +453,7 @@ def refresh_semester_pointer(org: str, course_org: str) -> int:
         org,
         CONFIG_REPO,
         {
-            records.path("pointer"): template("semester/dsl-course.yml")
+            records.path("pointer"): template("semester/course.yml")
             .format(course=course_org)
             .encode()
         },

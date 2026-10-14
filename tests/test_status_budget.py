@@ -26,7 +26,7 @@ from dsl_course import discovery, gh_contents, ghcli, materials, settings, statu
 _REAL = {
     (settings, "org_meta"): discovery.org_meta,
     (settings, "course_org_for_semester"): discovery.course_org_for_semester,
-    (settings, "_assignments_text"): settings._assignments_text,
+    (settings, "_semester_text"): settings._semester_text,
     (discovery, "repo_is_archived"): discovery.repo_is_archived,
     (discovery, "repo_missing"): discovery.repo_missing,
 }

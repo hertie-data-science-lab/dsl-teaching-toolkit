@@ -15,19 +15,34 @@ from pathlib import Path
 
 from . import records
 
-# The per-org identity/config file, at the root of every org's `.github` repo: a course
-# org's declares its name and its faculty SSOT, a semester org's is a pointer back to it.
-COURSE_CONFIG = "dsl-course.yml"
+# The course org's one hand-edited file, at the root of its `.github` repo (decision 0039):
+# `course:` (identity, `toolkit_version_ref`, licence), `people:` (course_admins),
+# `defaults:` and `open_course_site:`.
+COURSE_CONFIG = "course.yml"
+# Its blocks.
+COURSE_BLOCK = "course"
+PEOPLE_BLOCK = "people"
+DEFAULTS_BLOCK = "defaults"
+OPEN_SITE_BLOCK = "open_course_site"
+# The key that pins an org to one ref of the toolkit (`course.toolkit_version_ref`).
+TOOLKIT_REF_KEY = "toolkit_version_ref"
+
+
+def course_block(meta: object) -> dict:
+    """`course.yml`'s `course:` block (name, code, description, toolkit_version_ref,
+    licence), or `{}` when the file or the block is absent or not a mapping."""
+    block = meta.get(COURSE_BLOCK) if isinstance(meta, dict) else None
+    return block if isinstance(block, dict) else {}
 
 
 def advertises_console(meta: dict) -> bool:
-    """Whether a course's `dsl-course.yml` sends its students to the student console
-    (`student_console: true`). Off by default: an unset course keeps its semester sites
-    exactly as they were - no banner, team links to the site's own assignment pages, and
-    no student-facing sentence naming the console - and the console, reading it off
-    `student-status.json`, shows a signed-in student the site's link instead of its
-    student screens."""
-    return meta.get("student_console") is True
+    """Whether a course's `course.yml` sends its students to the student console
+    (`course.student_console: true`, undocumented: the parked console). Off by default: an
+    unset course keeps its semester sites exactly as they were - no banner, team links to
+    the site's own assignment pages, and no student-facing sentence naming the console -
+    and the console, reading it off `student-status.json`, shows a signed-in student the
+    site's link instead of its student screens."""
+    return course_block(meta).get("student_console") is True
 
 
 # The private per-semester config repo: roster, teams, schedule, grades, autograde records.
@@ -164,6 +179,9 @@ NO_STARTER = "none"
 # commented example turning into a live one otherwise costs a semester.
 SETTING_PLACEHOLDER = "CHANGE-ME"
 FORMATS = ("ipynb", "py", "rmd", "qmd", "latex", NO_STARTER)
+# The starters New assignment seeds when nobody chose (decision 0039 rule 2: `formats` is
+# asked by the wizard, never cascaded).
+DEFAULT_FORMATS = ("ipynb",)
 # The answer New assignment's formats and submit_via boxes
 # arrive with when nobody touches them: "use the course's `assignment_defaults:`, else the
 # toolkit's own". Here because two layers spell it: the rendered form offers it and the
@@ -676,13 +694,11 @@ def coerce_date(value: object) -> date | None:
     return None
 
 
-# A semester's instructors file (decision 0012): ONE `instructors:` list, each entry with
-# a required `role:`.
-INSTRUCTORS_FILE = "instructors.yml"
-# The semester layer of the assignment settings (decision 0010: a `defaults:` block and an
-# `assignments:` map of per-slug deviations), at the root of semester-config beside the
-# schedule. Named now so the console has no literal; the engine reads it from B2.
-ASSIGNMENTS_FILE = "assignments.yml"
+# A semester org's one hand-edited settings file, at the root of semester-config beside
+# the schedule (decision 0039): `people:` (ONE list, each entry with a required `role:`),
+# `defaults:` (the semester layer of the cascade) and `student_site:`.
+SEMESTER_FILE = "semester.yml"
+STUDENT_SITE_BLOCK = "student_site"
 # The semester's plan, beside it in `semester-config` (`schedule`).
 SCHEDULE_FILE = "schedule.yml"
 # `role:` value -> the role key every consumer groups by (the old file's own keys).
@@ -693,31 +709,31 @@ INSTRUCTOR_ROLES = {
 
 
 def instructor_role(value: object) -> str | None:
-    """The role key an `instructors.yml` entry's `role:` names, read the way the roster's
-    role is (case and surrounding space ignored), or None when it names no role."""
+    """The role key a `semester.yml` `people:` entry's `role:` names, read the way the
+    roster's role is (case and surrounding space ignored), or None when it names no role."""
     return INSTRUCTOR_ROLES.get(str(value or "").strip().lower())
 
 
-def people_by_role(meta: object, *, semester: bool = False) -> dict | None:
-    """A people block as `{role key: [entries]}`: a semester's `instructors:` list grouped
-    by each entry's `role:` (an entry without a valid one is left out - `sync_faculty`
-    reports it), or a COURSE file's `people:` mapping as it stands. None when `meta`
-    carries neither. A semester's file is read for its list alone: a `people:` mapping
-    there renders no cards."""
-    if not isinstance(meta, dict):
+def people_by_role(meta: object) -> dict | None:
+    """A semester's `people:` list as `{role key: [entries]}`, grouped by each entry's
+    `role:` (an entry without a valid one is left out - `sync_faculty` reports it). None
+    when `meta` carries no such list."""
+    listed = meta.get(PEOPLE_BLOCK) if isinstance(meta, dict) else None
+    if not isinstance(listed, list):
         return None
-    listed = meta.get("instructors")
-    if isinstance(listed, list):
-        grouped: dict[str, list] = {key: [] for key in INSTRUCTOR_ROLES.values()}
-        for entry in listed:
-            role = instructor_role(entry.get("role") if isinstance(entry, dict) else "")
-            if role:
-                grouped[role].append(entry)
-        return grouped
-    if semester:
-        return None
-    people = meta.get("people")
-    return people if isinstance(people, dict) else None
+    grouped: dict[str, list] = {key: [] for key in INSTRUCTOR_ROLES.values()}
+    for entry in listed:
+        role = instructor_role(entry.get("role") if isinstance(entry, dict) else "")
+        if role:
+            grouped[role].append(entry)
+    return grouped
+
+
+def course_admins(meta: object) -> list:
+    """`course.yml`'s `people.course_admins` list as written, or `[]`."""
+    people = meta.get(PEOPLE_BLOCK) if isinstance(meta, dict) else None
+    admins = people.get("course_admins") if isinstance(people, dict) else None
+    return admins if isinstance(admins, list) else []
 
 
 def active_today(start: str | date | None, end: str | date | None, today: str) -> bool:

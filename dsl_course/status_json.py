@@ -62,19 +62,21 @@ from . import (
     teams,
 )
 from .course import (
-    ASSIGNMENTS_FILE,
     COURSE_ADMIN_TEAM,
     COURSE_CONFIG,
+    DEFAULTS_BLOCK,
     INSTRUCTORS_TEAM,
     JOIN_REPO,
     NO_STARTER,
     SELF_SELECT,
+    SEMESTER_FILE,
     SOLUTION_BRANCH,
     SOLUTION_DIR,
     STARTER_DERIVED,
     STARTER_HANDWRITTEN,
     STARTER_NONE,
     active_today,
+    course_block,
     is_repo_root,
     pages_repo,
     semester_label,
@@ -384,10 +386,6 @@ _FILES = {
     schedule.SCHEDULE_PATH: _Where(
         "schedule", "semester", "K4", "schedule", "SCHEDULE"
     ),
-    # How the semester runs each assignment: the schedule's partner, and the same stage.
-    ASSIGNMENTS_FILE: _Where(
-        "assignments", "semester", "K4", "assignment", "ASSIGNMENTS"
-    ),
     sync_faculty.SEMESTER_PEOPLE_PATH: _Where(
         "people", "semester", "K3", "instructors", "PEOPLE"
     ),
@@ -411,8 +409,12 @@ HANDED_OUT = "open"
 _SEMESTER_TEMPLATE = _Where(
     "template", "semester", HANDED_OUT, "template", "GRADING_CONFIG"
 )
+# How the semester runs each assignment (`semester.yml` `defaults:`): the schedule's
+# partner, and the same stage. Its file is the people's too: `_where_filed` tells them by
+# the block the fault is in.
+_DEFAULTS = _Where("assignments", "semester", "K4", "assignment", "ASSIGNMENTS")
 # A run setting that no longer describes what was handed out (visibility drift): the
-# phase after hand out, fixed in assignments.yml.
+# phase after hand out.
 _HANDED_OUT_SETTING = _Where(
     "assignments", "semester", HANDED_OUT, "assignment", "ASSIGNMENTS"
 )
@@ -451,7 +453,8 @@ _ROLES = {
     "teaching_assistants": "Teaching assistant",
     "course_admins": "Course admin",
 }
-_PERSON = re.compile(r"^people\.(\w+)\[(\d+)\]$")
+# `people.course_admins[0]` in course.yml, `people[0]` in semester.yml.
+_PERSON = re.compile(r"^people(?:\.(\w+))?\[(\d+)\]$")
 _ROW = re.compile(r"^row (\d+)$")
 
 
@@ -491,8 +494,8 @@ def _subject(fault: ConfigFault, filed: _Where, entry: str) -> str:
     """What a derived sentence is about, named the way the console names it."""
     person = _PERSON.match(fault.where)
     if person:
-        role = _ROLES.get(person[1], "Entry")
-        where = "course details" if filed.kind == "course" else "instructors.yml"
+        role = _ROLES.get(person[1] or "", "Person")
+        where = "course details" if filed.kind == "course" else SEMESTER_FILE
         return f"{role} {int(person[2]) + 1} in {where}"
     row = _ROW.match(fault.where)
     if row and filed.kind in ("roster", "teams"):
@@ -505,7 +508,7 @@ def _subject(fault: ConfigFault, filed: _Where, entry: str) -> str:
     if filed.kind == "template":
         return f"The {entry} template's settings"
     return {
-        "people": "instructors.yml",
+        "people": SEMESTER_FILE,
         "roster": "The roster",
         "teams": "The teams file",
         "course": "Course details",
@@ -528,8 +531,10 @@ def _where_filed(fault: ConfigFault) -> _Where:
         return _ORG
     if fault.field == "marks_return_datetime" and fault.file == schedule.SCHEDULE_PATH:
         return _MARKS_DUE
-    if fault.per_semester and fault.file == ASSIGNMENTS_FILE:
+    if fault.per_semester and fault.file == SEMESTER_FILE:
         return _HANDED_OUT_SETTING
+    if fault.file == SEMESTER_FILE and fault.where.startswith(DEFAULTS_BLOCK):
+        return _DEFAULTS
     if fault.per_semester and fault.file == grading_spec.GRADING_FILE:
         return _SEMESTER_TEMPLATE
     if fault.file.startswith(f"{grading_sheet.SHEETS_DIR}/"):
@@ -1369,13 +1374,13 @@ def course_admin_count(meta: dict) -> int:
     )
 
 
-# `dsl-course.yml`'s list of optional setup steps and to-dos the course has set aside
+# `course.yml`'s list of optional setup steps and to-dos the course has set aside
 # (decision 0032).
 SET_ASIDE_KEY = "set_aside"
 
 
 def set_aside_ids(meta: dict) -> frozenset[str]:
-    """The ids `dsl-course.yml` sets aside: its `set_aside:` list, the strings in it. Any
+    """The ids `course.yml` sets aside: its `set_aside:` list, the strings in it. Any
     other shape, or an absent key, sets nothing aside; an unknown id is never a fault, it
     simply matches nothing (decision 0032 rule 2)."""
     raw = meta.get(SET_ASIDE_KEY)
@@ -1484,14 +1489,15 @@ def render_course(
     judged = course_verdict(stages, why, todos, standing, set_aside)
     block = {
         "org": facts.org,
-        "name": str(meta.get("course_name") or ""),
-        "code": str(meta.get("course_code") or ""),
+        "name": str(course_block(meta).get("name") or ""),
+        "code": str(course_block(meta).get("code") or ""),
         "stages": stages,
         "stage_why": why,
         "stage_need": dict(COURSE_STAGE_NEED),
         # Decision 0032: which stages (suggested ones only) are set aside.
         "stage_set_aside": set_aside,
         "verdict": judged,
+        "defaults": effective_defaults(facts.org),
         "materials": [
             {
                 "repo": m.repo,
@@ -1541,7 +1547,7 @@ def course_todo(
     `checks`: each materials repo's `materials_checks`. A template's to-do is undated: a
     dated hand-out citing it makes it a problem as well (`template_todo_problems`)."""
     out = []
-    if not facts.meta.get("course_description") and facts.meta:
+    if not course_block(facts.meta).get("description") and facts.meta:
         out.append(
             _todo(
                 SUGGESTED,
@@ -1619,7 +1625,7 @@ def course_checks(
         out["C2"] = f"The course's .github has no {COURSE_CONFIG} yet."
     elif not any(p.startswith(".github/workflows/") for p in paths):
         out["C2"] = "The course's .github has no workflows yet."
-    if not all(meta.get(k) for k in ("course_name", "course_code")):
+    if not all(course_block(meta).get(k) for k in ("name", "code")):
         out["C3"] = "Course details have no course name or code yet."
     elif course_admin_count(meta) == 0:
         out["C3"] = "No course admin is declared in course details yet."
@@ -1796,13 +1802,36 @@ def _problem_entries(problems: list[dict]) -> set[str]:
 
 
 def run_settings(spec: grading_spec.GradingSpec) -> dict[str, dict]:
-    """Each run setting's effective value and the layer it came from (`settings`), so the
-    console shows "5 days, this course's default" without a cascade of its own."""
+    """Each run setting's effective value and the layer it came from (`settings`), keyed
+    as the files spell them, so the console shows "5 days, this course's default" without
+    a cascade of its own."""
     sources = dict(spec.sources)
     return {
-        key: {"value": getattr(spec, key), "source": sources.get(key, "institution")}
+        settings.FILE_NAMES.get(key, key): {
+            "value": getattr(spec, key),
+            "source": sources.get(key, "institution"),
+        }
         for key in settings.RUN_KEYS
     }
+
+
+def effective_defaults(
+    course_org: str, semester_org: str = "", zone: str | None = None
+) -> dict[str, dict]:
+    """Every `defaults:` key's effective value and its source (`settings.effective_defaults`)
+    at the semester level, or the course level with no semester: what each settings input
+    shows as its placeholder (decision 0039 rule 2). `zone` is the zone the semester's
+    schedule is read in: one other than the cascade's is its schedule.yml's own
+    `timezone:`, the semester's word written where the dates are. `{}` when a layer
+    cannot be read: its own fault says so."""
+    try:
+        out = settings.effective_defaults(course_org, semester_org)
+    except (Unusable, yaml.YAMLError) as exc:
+        log_err(f"  ! the effective defaults could not be worked out: {exc}")
+        return {}
+    if zone and zone != out["timezone"]["value"]:
+        out["timezone"] = {"value": zone, "source": "semester"}
+    return out
 
 
 def render_assignments(
@@ -2224,8 +2253,7 @@ def semester_inputs(facts: SemesterFacts, course: CourseFacts) -> dict[str, str 
     paths = facts.config_paths
     return {
         schedule.SCHEDULE_PATH: paths.get(schedule.SCHEDULE_PATH),
-        ASSIGNMENTS_FILE: paths.get(ASSIGNMENTS_FILE),
-        sync_faculty.SEMESTER_PEOPLE_PATH: paths.get(sync_faculty.SEMESTER_PEOPLE_PATH),
+        SEMESTER_FILE: paths.get(SEMESTER_FILE),
         roster.ROSTER_PATH: paths.get(roster.ROSTER_PATH),
         teams.TEAMS_PATH: paths.get(teams.TEAMS_PATH),
         grading_sheet.SHEETS_DIR: paths.get(grading_sheet.SHEETS_DIR),
@@ -2357,6 +2385,7 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
             "verdict": semester_verdict(stages, why, todo, problems),
             "todo": todo,
             "archive_date": _iso(sched.archive.when if sched.archive else None),
+            "defaults": effective_defaults(course.org, facts.org, sched.timezone),
             # Decision 0034: each cited template's first hand-out still to come here,
             # which the course tick reads to date its template problems (`gather_moments`).
             "template_moments": {repo: _iso(m.when) for repo, m in moments.items()},

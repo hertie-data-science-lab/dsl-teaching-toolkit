@@ -25,6 +25,8 @@ import yaml
 from . import policy
 from .config import read_local
 from .course import (
+    OPEN_SITE_BLOCK,
+    course_block,
     discover_local_sessions,
     discover_sections,
     find_session_dir,
@@ -77,12 +79,19 @@ READINGS_SECTION = "readings"
 def course_facts(meta: dict) -> str:
     """`_data/course.yml`: the contact and the licence the home page shows (decision 0019).
 
-    The course's own `contact` / `licence` from dsl-course.yml, else the institution's
-    `policy.contact` and first licence. A licence `policy.licences` names carries its URL;
-    one it does not (or `All rights reserved`, which has none) is shown as plain text."""
+    The course's own `open_course_site.contact` / `course.licence` from course.yml, else
+    the institution's first contact and first licence. A licence the institution names
+    carries its URL; one it does not (or `All rights reserved`, which has none) is shown
+    as plain text."""
     pol = policy.load()
-    contact = str(meta.get("contact") or "").strip() or pol["contact"]
-    name = str(meta.get("licence") or "").strip() or pol["licences"][0]["name"]
+    site = (
+        meta.get(OPEN_SITE_BLOCK) if isinstance(meta.get(OPEN_SITE_BLOCK), dict) else {}
+    )
+    contact = str(site.get("contact") or "").strip() or policy.contact()
+    name = (
+        str(course_block(meta).get("licence") or "").strip()
+        or pol["licences"][0]["name"]
+    )
     url = next((lc["url"] for lc in pol["licences"] if lc["name"] == name), "")
     facts = {"contact": contact, "licence": {"name": name, "url": url}}
     return yaml.safe_dump(facts, sort_keys=False, allow_unicode=True)
@@ -368,13 +377,14 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
                     )
 
         config = {}
-        if meta.get("course_name"):
-            config["course_name"] = str(meta["course_name"])
-        if meta.get("course_code"):
-            config["course_code"] = str(meta["course_code"])
+        identity = course_block(meta)
+        if identity.get("name"):
+            config["course_name"] = str(identity["name"])
+        if identity.get("code"):
+            config["course_code"] = str(identity["code"])
         # Always written, blank included: the seed's placeholder paragraph must never
         # reach the open web (the home page drops the section when it is blank).
-        config["course_description"] = str(meta.get("course_description") or "").strip()
+        config["course_description"] = str(identity.get("description") or "").strip()
         config["course_semester"] = "Open Courseware"  # neutral: the site is multi-year
         # The public open-courseware site belongs to the COURSE org (multi-year), so its
         # footer links there - unlike a semester site, which links its semester org.

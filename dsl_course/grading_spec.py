@@ -16,12 +16,12 @@ from urllib.parse import urlsplit
 
 import yaml
 
-from . import gh_teams, policy, run, schedule, settings
+from . import gh_teams, run, schedule, settings
 from .course import (
-    ASSIGNMENTS_FILE,
     CONFIG_REPO,
     NO_STARTER,
     NO_TEAMS,
+    SEMESTER_FILE,
     SOLUTION_BRANCH,
     creates_unit_repos,
     identifier,
@@ -65,7 +65,7 @@ GRADING_FILE = "grading_config.yml"  # on the template's solution branch
 
 
 # The institution's defaults, read once: the run settings of a spec nobody has resolved yet.
-_INSTITUTION = policy.defaults()
+_INSTITUTION = settings.institution_defaults()
 
 
 @dataclass(frozen=True)
@@ -484,8 +484,8 @@ def grading_spec_faults(
                 f"{CONFIG_REPO}/schedule.yml - the model answer stays on this "
                 "template's `solution` branch, which is where the instructors read "
                 "it - or give this assignment a private repo per unit "
-                f"(`submit_via: assignment_repo` here, `visibility: private` in "
-                f"{CONFIG_REPO}/{ASSIGNMENTS_FILE})",
+                f"(`submit_via: assignment_repo` here, `assignment_repo_visibility: "
+                f"private` on its entry in {CONFIG_REPO}/schedule.yml)",
                 plain=f"{slug} has a solution shown date in this semester's schedule, "
                 f"but its settings give it no private repo to put the solution in.",
                 consequence="the solution shown date passes and no solution is "
@@ -612,15 +612,16 @@ def _visibility_faults(
             f"assignments.{slug}",
             # A COUNT and never a name: a submission repo is `<slug>-<handle>`, and this
             # sentence is repeated into a public run log, a digest issue and an email.
-            f"`visibility: {spec.visibility}` does not describe the repos this assignment "
+            f"`assignment_repo_visibility: {spec.visibility}` does not describe the repos this assignment "
             f"handed out - {len(wrong)} of {len(rows)} are not {spec.visibility}. The "
             f"value is read when each repo is CREATED, so editing it afterwards moves "
             f"nothing on its own",
             fires=fires,
-            field="visibility",
-            file=ASSIGNMENTS_FILE,
+            field="assignment_repo_visibility",
+            file=SEMESTER_FILE,
             in_org=semester_org,
-            fix_text=f"set this assignment's `visibility:` in {ASSIGNMENTS_FILE} back to "
+            fix_text=f"set this assignment's `assignment_repo_visibility:` (on its "
+            f"schedule.yml entry, else in {SEMESTER_FILE} `defaults:`) back to "
             f"what those repos are, or make each of them {spec.visibility} by hand from "
             f"its GitHub Settings - the toolkit never re-opens a repo it has already "
             f"created",

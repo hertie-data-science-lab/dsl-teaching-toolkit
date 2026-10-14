@@ -5031,7 +5031,7 @@ def test_an_assignments_yml_that_is_not_yaml_holds_the_tick_green(monkeypatch):
     # Every run setting is unknown: nothing acts, the tick stays green, and the fault goes
     # out on the schedule.yml digest.
     monkeypatch.setattr(
-        scheduler.schedule.settings, "_assignments_text", lambda org: "a: [\n"
+        scheduler.schedule.settings, "_semester_text", lambda org: "a: [\n"
     )
     monkeypatch.setattr(
         scheduler.schedule,

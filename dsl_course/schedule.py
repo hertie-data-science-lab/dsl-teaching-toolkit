@@ -87,9 +87,9 @@ import yaml
 
 from . import legacy, policy, run, settings
 from .course import (
-    ASSIGNMENTS_FILE,
     CONFIG_REPO,
     SCHEDULE_FILE,
+    SEMESTER_FILE,
     SOLUTION_BEFORE_CUTOFF,
     SOLUTION_WARNING,
     coerce_date,
@@ -130,7 +130,8 @@ SCHEDULE_PATH = SCHEDULE_FILE
 # one that freezes late. A semester that wants another date says so in
 # `archive.event_datetime`, and
 # only a semester that writes the block at all is ever archived off this (`_parse_archive`).
-ARCHIVE_GRACE = timedelta(days=policy.defaults()["archive"]["grace_days"])  # policy.yml
+# The institution's; a course or a semester sets its own (`settings.SEMESTER_KEYS`).
+ARCHIVE_GRACE = timedelta(days=policy.defaults()["archive_grace_days"])
 
 # How long before that date a semester is TOLD. Two weeks is long enough to move the date,
 # to finish a late piece of marking or to pull a copy of anything somebody wants to keep,
@@ -153,9 +154,10 @@ ARCHIVE_TITLE = "Semester archived"
 SourceFault = ConfigFault
 
 # The zone a schedule.yml that names none is read in, and where a release lands when its
-# deploy entry names no semester repo: both the institution's (policy.yml).
+# copy names no semester repo: the institution's (institution.yml); a course or a semester
+# sets its own (`settings.Instance`).
 DEFAULT_TZ = policy.defaults()["timezone"]
-DEFAULT_DEST_REPO = policy.defaults()["semester_dest_repo"]
+DEFAULT_DEST_REPO = policy.defaults()["materials_repo"]
 
 # What a release SYNTHESISED from `assignments.<slug>.handout_datetime` is labelled:
 # `<slug>-handout`. There is no such entry in any file - `scheduler._handout_releases`
@@ -939,7 +941,9 @@ def _flagged_details(
     return None
 
 
-def _parse_files(raw: object, tz: ZoneInfo, drops: Drops, where: str) -> list[Deploy]:
+def _parse_files(
+    raw: object, tz: ZoneInfo, drops: Drops, where: str, dest: str = DEFAULT_DEST_REPO
+) -> list[Deploy]:
     """Parse an entry's `files:` - a list (or a single mapping) of copies from a course
     repo into a semester repo (decision 0038 amendment, rule 5). A copy missing
     `from_course_repo`/`from_path` is skipped (nothing to copy). A malformed
@@ -978,7 +982,7 @@ def _parse_files(raw: object, tz: ZoneInfo, drops: Drops, where: str) -> list[De
             Deploy(
                 course_source_repo=str(src_repo),
                 course_source_path=str(src_path),
-                semester_dest_repo=str(d.get("to_semester_repo") or DEFAULT_DEST_REPO),
+                semester_dest_repo=str(d.get("to_semester_repo") or dest),
                 semester_dest_path=str(dest_path) if dest_path else None,
                 deploy_datetime=_flagged_datetime(
                     d,
@@ -1082,6 +1086,7 @@ def _parse_block(
     tz: ZoneInfo,
     drops: Drops,
     taken: dict[str, str],
+    dest: str = DEFAULT_DEST_REPO,
 ) -> tuple[list[Release], list[Event]]:
     """One kind's block (decision 0038): `key -> entry`, the kind the block's. The KEY
     names what the toolkit makes for the entry (its row file, its problem ids) and is
@@ -1190,7 +1195,7 @@ def _parse_block(
             continue
         dated = [(slot, written) for slot, written in slots if slot.when is not None]
         first = min(dated, key=lambda p: p[0].when) if dated else None
-        deploys = _parse_files(entry.get("files"), tz, drops, where)
+        deploys = _parse_files(entry.get("files"), tz, drops, where, dest)
         _default_ship_times(deploys, first[1] if first else None)
         reading_list = entry.get("reading_list")
         if reading_list is not None and not isinstance(reading_list, str):
@@ -1519,11 +1524,12 @@ def _whole_days(value: object) -> int | None:
     return days if days >= 0 else None
 
 
-def _grace(raw: object, drops: Drops) -> timedelta:
+def _grace(raw: object, drops: Drops, default: timedelta = ARCHIVE_GRACE) -> timedelta:
     """`archive.grace_days` as the time after `semester_end` the default date falls,
-    else `ARCHIVE_GRACE`. An unusable value is flagged and the sixty days stand."""
+    else `default` (the cascade's `archive_grace_days`). An unusable value is flagged and
+    the default stands."""
     if not isinstance(raw, dict) or raw.get("grace_days") is None:
-        return ARCHIVE_GRACE
+        return default
     days = _whole_days(raw["grace_days"])
     if days is None:
         _flag_bad_value(
@@ -1531,14 +1537,17 @@ def _grace(raw: object, drops: Drops) -> timedelta:
             "archive",
             "grace_days",
             raw["grace_days"],
-            f"the default date counts {ARCHIVE_GRACE.days} days from semester_end instead",
+            f"the default date counts {default.days} days from semester_end instead",
         )
-        return ARCHIVE_GRACE
+        return default
     return timedelta(days=days)
 
 
 def _parse_archive(
-    meta: dict, semester_end: date | None, drops: Drops
+    meta: dict,
+    semester_end: date | None,
+    drops: Drops,
+    grace_days: timedelta = ARCHIVE_GRACE,
 ) -> ArchiveRow | None:
     """The optional `archive:` block as an `ArchiveRow`, or None where none was written.
 
@@ -1565,7 +1574,7 @@ def _parse_archive(
     if "archive" not in meta:
         return None
     raw = meta["archive"]
-    grace = _grace(raw, drops)
+    grace = _grace(raw, drops, grace_days)
     default = semester_end + grace if semester_end else None
     cost = (
         f"this semester freezes at its default date instead ({default})"
@@ -1617,8 +1626,9 @@ def parse(meta: dict, instance: settings.Instance | None = None) -> Schedule:
 
     One block per content kind (`BLOCKS`, decision 0038) and `assignments:`; a 0.10
     `releases:` block is NOT_MIGRATED (`legacy`). `instance` is the semester's
-    `assignments.yml`, read (`settings.Instance`): its own faults are carried here beside
-    the plan's. None = no file."""
+    `semester.yml` defaults, read (`settings.Instance`): its own faults are carried here
+    beside the plan's, and its semester-wide values (zone, archive grace, default repo)
+    are what the plan is read with. None = no file."""
     meta = meta if isinstance(meta, dict) else {}
     instance = instance or settings.Instance()
     drops = Drops(top=take_lines(meta))
@@ -1633,7 +1643,7 @@ def parse(meta: dict, instance: settings.Instance | None = None) -> Schedule:
         "",
         "nothing it contains is scheduled or shown",
     )
-    tz_name = meta.get("timezone")
+    tz_name = meta.get("timezone") or instance.timezone
     tz = _tz(tz_name)
     if tz_name and str(tz_name).strip() != str(tz):
         drops.note(
@@ -1649,7 +1659,9 @@ def parse(meta: dict, instance: settings.Instance | None = None) -> Schedule:
     events: list[Event] = []
     taken: dict[str, str] = {}
     for block in BLOCKS:
-        got = _parse_block(block, meta.get(block), tz, drops, taken)
+        got = _parse_block(
+            block, meta.get(block), tz, drops, taken, instance.materials_repo
+        )
         releases += got[0]
         events += got[1]
     # Undated (TBC) entries sort to the end, in the plan as on the site.
@@ -1674,9 +1686,11 @@ def parse(meta: dict, instance: settings.Instance | None = None) -> Schedule:
         semester_end=semester_end,
         assignments=_parse_assignments(meta.get("assignments"), tz, drops),
         events=events,
-        archive=_parse_archive(meta, semester_end, drops),
+        archive=_parse_archive(
+            meta, semester_end, drops, timedelta(days=instance.archive_grace_days)
+        ),
         dropped=drops.report
-        + [f"{ASSIGNMENTS_FILE} {f.label}: {f.what}" for f in instance.faults],
+        + [f"{SEMESTER_FILE} {f.label}: {f.what}" for f in instance.faults],
         faults=drops.faults,
     )
 
@@ -2156,7 +2170,7 @@ def load_file(path: str) -> tuple[Schedule | None, str | None]:
         return None, f"{path} is not valid YAML:\n{exc}"
     if not isinstance(meta, dict):
         return None, f"{path} is valid YAML but not a mapping - it needs top-level keys"
-    beside = p.with_name(ASSIGNMENTS_FILE)
+    beside = p.with_name(SEMESTER_FILE)
     instance = settings.parse_instance(beside.read_text() if beside.is_file() else None)
     sched = parse(meta, instance)
     refuse_early_solutions(sched, instance)

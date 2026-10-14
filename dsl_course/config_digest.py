@@ -58,7 +58,7 @@ from datetime import datetime, timedelta
 from typing import NamedTuple
 
 from .central import CENTRAL, CENTRAL_REF
-from .course import ASSIGNMENTS_FILE, COURSE_ADMIN_TEAM, COURSE_CONFIG
+from .course import COURSE_ADMIN_TEAM, COURSE_CONFIG, SEMESTER_FILE
 from .discovery import central_ref_for
 from .faults import (
     NOTIFY_FROM,
@@ -137,8 +137,11 @@ class Digest:
 # in one file would only earn its own issue if it kept different time, as schedule.yml's
 # two do.
 PEOPLE = Digest(
-    title="instructors.yml has entries the sync cannot use",
-    older_titles=("people.yml has entries the sync cannot use",),
+    title="semester.yml people has entries the sync cannot use",
+    older_titles=(
+        "instructors.yml has entries the sync cannot use",
+        "people.yml has entries the sync cannot use",
+    ),
     file=SEMESTER_PEOPLE_PATH,
     doc="docs/05-manage-teaching-team.md",
 )
@@ -170,24 +173,30 @@ GRADING_CONFIG = Digest(
     doc="docs/03-add-assignment-to-course.md",
     cite=f"<assignment template>/{GRADING_FILE}",
 )
-# The semester's own run settings for its assignments. Its faults come from the same pass
-# as GRADING_CONFIG's (the resolved spec is what they are checked against), and are the
-# ones whose `file` is this one (`split_assignments`).
+# The semester's own run settings for its assignments (`semester.yml` `defaults:`, and a
+# setting that no longer describes what was handed out). Its faults come from the same
+# pass as GRADING_CONFIG's (the resolved spec is what they are checked against), and are
+# the ones whose `file` is this one (`split_assignments`): `people:` faults never reach
+# that pass, so one file is two digests without ambiguity.
 ASSIGNMENTS = Digest(
-    title="assignments.yml has values that will not run as written",
-    file=ASSIGNMENTS_FILE,
+    title="semester.yml defaults have values that will not run as written",
+    older_titles=("assignments.yml has values that will not run as written",),
+    file=SEMESTER_FILE,
     doc="docs/09-release-assignment-to-cohort.md",
 )
 # The one digest that is not a semester's. It lives in the COURSE org's own public
 # `.github`, beside the two files it is about, and it is the exception to "one issue per
-# FILE": `dsl-course.yml` and the semester registry are one issue because they are one
+# FILE": `course.yml` and the semester registry are one issue because they are one
 # failure - either of them unreadable and the sync walks past the whole course, admins
 # and semesters alike, so the consequence sentence and the audience are identical. `file`
-# names dsl-course.yml because that is what the subject line has to say; each fault still
+# names course.yml because that is what the subject line has to say; each fault still
 # cites the file it is actually in.
 COURSE = Digest(
-    title="dsl-course.yml / semester registry has entries the sync cannot use",
-    older_titles=("dsl-course.yml / cohort registry has entries the sync cannot use",),
+    title="course.yml / semester registry has entries the sync cannot use",
+    older_titles=(
+        "dsl-course.yml / semester registry has entries the sync cannot use",
+        "dsl-course.yml / cohort registry has entries the sync cannot use",
+    ),
     file=COURSE_CONFIG,
     doc="docs/01-new-course-org.md",
     repo=".github",
@@ -211,7 +220,7 @@ SEMESTER_DIGESTS: tuple[Digest, ...] = (
 
 def split_assignments(faults: list) -> tuple[list, list]:
     """`(GRADING_CONFIG's faults, ASSIGNMENTS')` out of one assignment-definition pass."""
-    ours = [f for f in faults if f.file == ASSIGNMENTS_FILE]
+    ours = [f for f in faults if f.file == SEMESTER_FILE]
     return [f for f in faults if f not in ours], ours
 
 

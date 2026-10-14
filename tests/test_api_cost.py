@@ -471,7 +471,7 @@ _REAL = [
     (discovery, "repo_is_archived", discovery.repo_is_archived),
     (discovery, "repo_missing", discovery.repo_missing),
     (settings, "org_meta", settings.org_meta),
-    (settings, "_assignments_text", settings._assignments_text),
+    (settings, "_semester_text", settings._semester_text),
     (settings, "course_org_for_semester", settings.course_org_for_semester),
 ]
 

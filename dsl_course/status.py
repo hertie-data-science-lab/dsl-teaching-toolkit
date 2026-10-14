@@ -45,6 +45,7 @@ from . import (
     teams,
 )
 from .central import CENTRAL_REF, MissingCentralRef, resolve_central_ref
+from .course import COURSE_CONFIG, TOOLKIT_REF_KEY, course_block
 from .discovery import org_meta
 from .faults import Unusable
 from .gh_contents import get_file_content, put_file
@@ -239,13 +240,13 @@ def collect(course_org: str, semester_org: str) -> dict[str, dict]:
 
     data: dict[str, dict] = {}
 
-    course_name = course_meta.get("course_name") or ""
+    course_name = course_block(course_meta).get("name") or ""
     data["B1"] = _row(
         "B1",
         "Course identity",
         course_org,
         ".github",
-        "dsl-course.yml",
+        COURSE_CONFIG,
         course_branch,
         bool(course_name),
         course_name,
@@ -269,12 +270,12 @@ def collect(course_org: str, semester_org: str) -> dict[str, dict]:
         "Course admins",
         course_org,
         ".github",
-        "dsl-course.yml",
+        COURSE_CONFIG,
         course_branch,
         # Needed: at least one active course admin, not merely the block.
         has_people_block and n_admins > 0,
         # No people: block does NOT "fall back to GitHub teams" - sync_faculty reconciles
-        # course-admin with prune=True whenever dsl-course.yml is present, so an absent
+        # course-admin with prune=True whenever course.yml is present, so an absent
         # block reconciles the team to empty.
         f"{n_admins} active"
         if has_people_block
@@ -285,10 +286,10 @@ def collect(course_org: str, semester_org: str) -> dict[str, dict]:
     # inherited here, so it belongs in the B (course-org) block even though the checklist
     # is per-semester - and an org whose tier is the default should read as such rather than
     # as an unset input someone forgot.
-    declared = course_meta.get("central_ref")
+    declared = course_block(course_meta).get(TOOLKIT_REF_KEY)
     try:
         ref = resolve_central_ref(
-            declared, source=f"{course_org}/.github/dsl-course.yml"
+            declared, source=f"{course_org}/.github/{COURSE_CONFIG}"
         )
         tier_ok = declared is not None
         tier = ref if declared is not None else f"{CENTRAL_REF} (default)"
@@ -302,7 +303,7 @@ def collect(course_org: str, semester_org: str) -> dict[str, dict]:
         "Toolkit tier",
         course_org,
         ".github",
-        "dsl-course.yml",
+        COURSE_CONFIG,
         course_branch,
         tier_ok,
         tier,

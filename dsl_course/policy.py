@@ -1,14 +1,16 @@
-"""The institution policy: every default the toolkit applies when nobody said otherwise.
+"""The institution: every default the toolkit applies when nobody said otherwise.
 
-`policy.default.yml` beside this module is what the toolkit ships (Hertie's values); an
-optional `policy.yml` at the root of the toolkit checkout overrides it. The engine runs from
-a checkout of the org's `central_ref`, so the policy an org gets is the one at that ref.
+`institution.default.yml` beside this module is what the toolkit ships (Hertie's values);
+an optional `institution.yml` at the root of the toolkit checkout overrides it. The engine
+runs from a checkout of the org's `toolkit_version_ref`, so the institution file an org
+gets is the one at that ref. (The module keeps its name: CLI module names are frozen.)
 
-`defaults` is the institution layer of the run-settings cascade (`settings`); `kinds` are the
-schedule row kinds; `institution` is the site block; `contact` is where a course fault goes
-when no course admin declares an address; `licences` are the open site's choices, default
-first. A policy that does not validate RAISES: it is maintainer-owned, and an engine running
-on a guess about its own defaults would be worse than one that stops.
+`defaults` is the institution layer of the defaults cascade (`settings`); `kinds` are the
+schedule row kinds; `institution` is the site block, its `contacts` the escalation list
+(the first is where a fault goes when nobody nearer has an address); `selection_floor`
+the hard hosting limits; `licences` the open site's choices, default first. A file that
+does not validate RAISES: it is maintainer-owned, and an engine running on a guess about
+its own defaults would be worse than one that stops.
 """
 
 from __future__ import annotations
@@ -19,12 +21,12 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
-from .course import FORMATS, TEAM_FORMATIONS, VISIBILITIES
+from .course import VISIBILITIES
 from .schema_check import validate
 from .setting_readers import READERS
 
-DEFAULT_PATH = Path(__file__).with_name("policy.default.yml")
-OVERRIDE_PATH = Path(__file__).resolve().parents[1] / "policy.yml"
+DEFAULT_PATH = Path(__file__).with_name("institution.default.yml")
+OVERRIDE_PATH = Path(__file__).resolve().parents[1] / "institution.yml"
 
 # The kinds the engine creates rows for itself, and the one an unknown kind lands on: an
 # override may relabel or recolour them, never drop them.
@@ -32,18 +34,28 @@ SYSTEM_KINDS = ("assignment", "semester", "archive")
 FALLBACK_KIND = "other"
 # The blocks an override merges key by key; every other block it names replaces ours whole.
 MERGED = ("defaults", "institution")
-# The defaults a course or a semester can also write: each is read by the same reader as
-# those layers (`setting_readers`), and must come back unchanged - a default no course
-# could write (`max_team_size: -3`, `late_penalty_per_day: 100.9%`) is refused.
-READ_DEFAULTS = (
+# The `defaults:` keys every level writes (decision 0039 rule 2), in file order.
+DEFAULT_KEYS = (
+    "timezone",
     "late_window_days",
     "late_penalty_per_day",
     "max_team_size",
-    "visibility",
-    "team_formation",
-    "formats",
+    "assignment_repo_visibility",
+    "archive_grace_days",
+    "materials_repo",
     "marks_per_question",
 )
+# The defaults a course or a semester can also write, with the reader that reads them
+# there: each must come back unchanged - a default no course could write
+# (`max_team_size: -3`, `late_penalty_per_day: 100.9%`) is refused.
+READ_DEFAULTS = {
+    "late_window_days": "late_window_days",
+    "late_penalty_per_day": "late_penalty_per_day",
+    "max_team_size": "max_team_size",
+    "assignment_repo_visibility": "visibility",
+    "archive_grace_days": "late_window_days",
+    "marks_per_question": "marks_per_question",
+}
 
 _HEX = "^#[0-9a-fA-F]{6}$"
 _KEY = r"^[a-z][a-z0-9_-]*$"
@@ -57,36 +69,19 @@ SCHEMA = {
         "defaults": {
             "type": "object",
             "properties": {
+                "timezone": {"type": "string"},
                 "late_window_days": _WHOLE,
                 "late_penalty_per_day": {"type": "string", "pattern": _PENALTY},
                 "max_team_size": _WHOLE,
-                "visibility": {"type": "string", "enum": list(VISIBILITIES)},
-                "team_formation": {"type": "string", "enum": list(TEAM_FORMATIONS)},
+                "assignment_repo_visibility": {
+                    "type": "string",
+                    "enum": list(VISIBILITIES),
+                },
+                "archive_grace_days": _WHOLE,
+                "materials_repo": {"type": "string", "pattern": r"^[\w.-]+$"},
                 "marks_per_question": {"type": "boolean"},
-                "formats": {
-                    "type": "array",
-                    "items": {"type": "string", "enum": list(FORMATS)},
-                },
-                "timezone": {"type": "string"},
-                "archive": {
-                    "type": "object",
-                    "properties": {"grace_days": _WHOLE},
-                    "required": ["grace_days"],
-                    "additionalProperties": False,
-                },
-                "semester_dest_repo": {"type": "string", "pattern": r"^[\w.-]+$"},
             },
-            "required": [
-                "late_window_days",
-                "late_penalty_per_day",
-                "max_team_size",
-                "visibility",
-                "team_formation",
-                "formats",
-                "timezone",
-                "archive",
-                "semester_dest_repo",
-            ],
+            "required": list(DEFAULT_KEYS),
             "additionalProperties": False,
         },
         "kinds": {
@@ -123,11 +118,16 @@ SCHEMA = {
                 "address": {"type": "string"},
                 "dsl_org_url": {"type": "string"},
                 "console_url": {"type": "string"},
+                "contacts": {
+                    "type": "array",
+                    "items": {"type": "string", "pattern": r"^[^@\s]+@[^@\s]+$"},
+                },
             },
-            "required": ["name", "url", "address", "dsl_org_url"],
+            "required": ["name", "url", "address", "dsl_org_url", "contacts"],
             "additionalProperties": False,
         },
-        "contact": {"type": "string", "pattern": r"^[^@\s]+@[^@\s]+$"},
+        # Its shape is the hosting selection's (decision 0040); none at Hertie.
+        "selection_floor": {"type": "object"},
         "licences": {
             "type": "array",
             "items": {
@@ -138,13 +138,13 @@ SCHEMA = {
             },
         },
     },
-    "required": ["defaults", "kinds", "institution", "contact", "licences"],
+    "required": ["institution", "defaults", "kinds", "selection_floor", "licences"],
     "additionalProperties": False,
 }
 
 
 class PolicyError(ValueError):
-    """The policy file(s) do not describe a policy the engine can run on."""
+    """The institution file(s) do not describe an institution the engine can run on."""
 
 
 def _parse(path: Path) -> dict:
@@ -158,16 +158,11 @@ def _parse(path: Path) -> dict:
 
 
 def merge(base: dict, override: dict) -> dict:
-    """`override` over `base`: the `MERGED` blocks key by key (the `archive` block inside
-    `defaults` too), every other block whole."""
+    """`override` over `base`: the `MERGED` blocks key by key, every other block whole."""
     out = dict(base)
     for key, value in override.items():
         if key in MERGED and isinstance(value, dict) and isinstance(out.get(key), dict):
-            merged = {**out[key], **value}
-            inner = out[key].get("archive")
-            if isinstance(inner, dict) and isinstance(value.get("archive"), dict):
-                merged["archive"] = {**inner, **value["archive"]}
-            out[key] = merged
+            out[key] = {**out[key], **value}
         else:
             out[key] = value
     return out
@@ -177,48 +172,45 @@ def _problems(policy: dict) -> list[str]:
     """What the JSON Schema subset cannot say: each default as its layer's reader reads
     it, unique kinds, the system kinds present, a non-empty licence list, a zone the tz
     database knows."""
-    out = validate(policy, SCHEMA, "policy")
+    out = validate(policy, SCHEMA, "institution")
     if out:
         return out
     ours = policy["defaults"]
-    days = READERS["late_window_days"]
-    read = [(key, READERS[key], ours[key]) for key in READ_DEFAULTS]
-    read.append(("archive.grace_days", days, ours["archive"]["grace_days"]))
-    for key, reader, value in read:
+    for key, reader in READ_DEFAULTS.items():
         refused: list[str] = []
-        want = tuple(value) if isinstance(value, list) else value
-        if reader(value, "policy", refused) != want or refused:
-            out.append(f"policy.defaults.{key}: `{value}` is not a usable value")
+        value = ours[key]
+        if READERS[reader](value, "institution", refused) != value or refused:
+            out.append(f"institution.defaults.{key}: `{value}` is not a usable value")
     keys = [kind["key"] for kind in policy["kinds"]]
     if len(keys) != len(set(keys)):
-        out.append("policy.kinds: each key may appear once")
+        out.append("institution.kinds: each key may appear once")
     plurals = [kind["plural"] for kind in policy["kinds"]]
     if len(plurals) != len(set(plurals)):
-        out.append("policy.kinds: each plural may appear once")
+        out.append("institution.kinds: each plural may appear once")
     for key in (*SYSTEM_KINDS, FALLBACK_KIND):
         if key not in keys:
             out.append(
-                f"policy.kinds: `{key}` is required (the engine creates its rows)"
+                f"institution.kinds: `{key}` is required (the engine creates its rows)"
             )
     for kind in policy["kinds"]:
         if kind["system"] != (kind["key"] in SYSTEM_KINDS):
             out.append(
-                f"policy.kinds.{kind['key']}: `system` is fixed by the engine - "
+                f"institution.kinds.{kind['key']}: `system` is fixed by the engine - "
                 f"true for {', '.join(SYSTEM_KINDS)} only"
             )
     if not policy["licences"]:
-        out.append("policy.licences: at least one (the first is the default)")
-    if not ours["formats"]:
-        out.append("policy.defaults.formats: at least one starter format")
+        out.append("institution.licences: at least one (the first is the default)")
+    if not policy["institution"]["contacts"]:
+        out.append("institution.institution.contacts: at least one address")
     try:
         ZoneInfo(policy["defaults"]["timezone"])
     except (ZoneInfoNotFoundError, ValueError):
-        out.append("policy.defaults.timezone: not a zone the tz database knows")
+        out.append("institution.defaults.timezone: not a zone the tz database knows")
     return out
 
 
 def read(default: Path = DEFAULT_PATH, override: Path | None = OVERRIDE_PATH) -> dict:
-    """The policy: `default`, with `override` merged over it when that file exists.
+    """The institution file: `default`, with `override` merged over it when that file exists.
     Raises `PolicyError` naming every problem."""
     policy = _parse(default)
     if override is not None and override.is_file():
@@ -233,13 +225,19 @@ def read(default: Path = DEFAULT_PATH, override: Path | None = OVERRIDE_PATH) ->
 
 @cache
 def load() -> dict:
-    """The policy this checkout runs on, read once per process."""
+    """The institution file this checkout runs on, read once per process."""
     return read()
 
 
 def defaults() -> dict:
     """The institution's defaults block."""
     return load()["defaults"]
+
+
+def contact() -> str:
+    """The first of the institution's `contacts`: where a fault goes when nobody nearer
+    has an address, and the open site's contact when a course names none."""
+    return load()["institution"]["contacts"][0]
 
 
 def kinds() -> list[dict]:

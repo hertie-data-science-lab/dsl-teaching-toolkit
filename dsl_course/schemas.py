@@ -2,7 +2,7 @@
 
 Three wire shapes (`dsl.request/1`, `dsl.outcome/1`, `dsl.status/1`), the operations
 registry (`ops.json`), the engine's names (`names.json`), the words for its values
-(`labels.json`), the materials-repo rules (`materials.json`) and institution policy
+(`labels.json`), the materials-repo rules (`materials.json`) and the institution file
 (`policy.json`), and one schema per instructor-owned file the console edits. Every
 enum and every key set is READ off the constant the engine itself parses with, so a value
 added to the engine reaches the console's forms with no second edit; the committed copies
@@ -33,22 +33,28 @@ from . import (
 from .central import TIERS
 from .course import (
     ASSIGNMENT_TYPES,
-    ASSIGNMENTS_FILE,
     CONFIG_REPO,
+    COURSE_BLOCK,
+    COURSE_CONFIG,
+    DEFAULTS_BLOCK,
     FORMATS,
     INSTRUCTOR_ROLES,
-    INSTRUCTORS_FILE,
     JOIN_COURSE_MARKER,
     JOIN_REPO,
     JOIN_TEAM_MARKER,
     LABELS,
+    OPEN_SITE_BLOCK,
+    PEOPLE_BLOCK,
+    SEMESTER_FILE,
     SEMESTER_TOPIC,
     SOLUTION_BEFORE_CUTOFF,
     SOLUTION_WARNING,
     STARTER_MODES,
     STARTER_STATES,
+    STUDENT_SITE_BLOCK,
     SUBMIT_VIA,
     TEAM_FORMATIONS,
+    TOOLKIT_REF_KEY,
     VISIBILITIES,
     submit_shape,
 )
@@ -79,24 +85,25 @@ from .schedule import (
     READINGS_KIND,
 )
 from .settings import (
-    ASSIGNMENT_DEFAULTS_KEY,
-    ASSIGNMENTS_BLOCKS,
-    ASSIGNMENTS_DEFAULTS,
-    COURSE_DEFAULT_KEYS,
+    COURSE_ASKED_KEYS,
+    DEFAULT_FILE_KEYS,
     INLINE_NAMES,
-    INSTANCE_KEYS,
     RUN_KEYS,
     SOURCES,
 )
 from .teams import FIELDS as TEAMS_FIELDS
 
 DRAFT = "https://json-schema.org/draft/2020-12/schema"
+# WP-C removes: the console's settings screens still write the 0.10 files and validate
+# against those files' schemas, frozen, until they write `course.yml` / `semester.yml`.
+FROZEN = Path(__file__).with_name("frozen")
 DEFAULT_OUT = Path("console/schemas")
 
 # The schema-level types of the keys whose parser accepts more than a string. Anything not
 # named here is a string: the parsers read dates, paths and titles as text.
 _FLAGS = {"tbc", "show_on_site"}
-# instructors.yml entry keys (sync_faculty and the site read them by name; no constant holds them).
+# semester.yml `people:` entry keys (sync_faculty and the site read them by name; no
+# constant holds them).
 PEOPLE_ENTRY_KEYS = (
     "github_handle",
     "role",
@@ -110,27 +117,27 @@ PEOPLE_ENTRY_KEYS = (
     "show_email",
 )
 PEOPLE_REQUIRED = ("github_handle", "role", "email")
-COURSE_ADMIN_KEYS = ("github_handle", "email", "start", "end")
-# Course cards, instructors and TAs alike: what `site_repo.people_cards` reads, the
-# optional start/end bounding when a card shows.
-COURSE_CARD_KEYS = ("github_handle", "name", "title", "photo", "url", "start", "end")
-# dsl-course.yml keys beyond `people` and `assignment_defaults`.
-COURSE_TOP_KEYS = (
-    "course_name",
-    "course_code",
-    "central_ref",
-    "course_description",
-    "site_link_extensions",
-    # Course facts the public website shows (decision 0019). Optional: a course without
-    # them falls back to the institution's `policy.contact` and first licence.
-    "contact",
+# A course admin: access, fault mail, and a card as a course lead on the open site.
+COURSE_ADMIN_KEYS = (
+    "github_handle",
+    "name",
+    "email",
+    "title",
+    "photo",
+    "url",
+    "start",
+    "end",
+)
+# `course.yml`'s `course:` block. `student_console` sends this course's students to the
+# student console (`course.advertises_console`): kept, undocumented (the parked console).
+COURSE_KEYS = (
+    "name",
+    "code",
+    "description",
+    TOOLKIT_REF_KEY,
     "licence",
-    # Send this course's students to the student console (`course.advertises_console`).
     "student_console",
 )
-# The assignment_defaults keys New assignment reads as the course's defaults for the
-# questions it asks (contracts section 6); optional, beside COURSE_DEFAULT_KEYS.
-ASKED_DEFAULT_KEYS = ("formats", "submit_via", "team_formation", "visibility")
 
 
 def _obj(
@@ -370,11 +377,21 @@ def status_schema(*, closed: bool = True) -> dict:
         },
         ("id", "kind", "repo", "text", "need"),
     )
+    # Every `defaults:` key's effective value and the layer that gave it (`settings`).
+    effective = obj(
+        {
+            "value": {"type": ["string", "integer", "boolean", "null"]},
+            "source": _enum(SOURCES),
+        },
+        ("value", "source"),
+    )
+    defaults = obj({key: effective for key in DEFAULT_FILE_KEYS})
     course = obj(
         {
             "org": _str(),
             "name": _str(),
             "code": _str(),
+            "defaults": defaults,
             "stages": stages,
             "stage_why": stage_why,
             "stage_need": stage_need,
@@ -409,6 +426,7 @@ def status_schema(*, closed: bool = True) -> dict:
             # Suggested to-dos: the site's home page, the archive date, emails.
             "todo": {"type": "array", "items": todo},
             "archive_date": nullable,
+            "defaults": defaults,
             # Each cited template's first hand-out still to come (ISO, null: undated).
             "template_moments": {"type": "object", "additionalProperties": nullable},
         },
@@ -495,18 +513,7 @@ def status_schema(*, closed: bool = True) -> dict:
             "submit_shape": _enum(SUBMIT_SHAPES),
             # Each run setting's effective value and the layer that gave it (`settings`).
             "settings": obj(
-                {
-                    key: obj(
-                        {
-                            "value": {
-                                "type": ["string", "integer", "boolean", "null"],
-                            },
-                            "source": _enum(SOURCES),
-                        },
-                        ("value", "source"),
-                    )
-                    for key in RUN_KEYS
-                }
+                {INLINE_NAMES.get(key, key): effective for key in RUN_KEYS}
             ),
         },
         # The four moments are always present (null when unset), so the console can move
@@ -628,8 +635,8 @@ def schedule_schema() -> dict:
     return _doc(f"{CONFIG_REPO}/schedule.yml", _obj(top))
 
 
-def instructors_schema() -> dict:
-    entry = _obj(
+def _person() -> dict:
+    return _obj(
         _keys(
             PEOPLE_ENTRY_KEYS,
             {
@@ -638,10 +645,6 @@ def instructors_schema() -> dict:
             },
         ),
         PEOPLE_REQUIRED,
-    )
-    return _doc(
-        f"{CONFIG_REPO}/{INSTRUCTORS_FILE}",
-        _obj({"instructors": {"type": "array", "items": entry}}),
     )
 
 
@@ -710,56 +713,60 @@ def grading_config_schema() -> dict:
     return _doc("grading_config.yml", _obj(_keys(TEMPLATE_KEYS, _SPEC_TYPES)))
 
 
-def assignments_schema() -> dict:
-    """`semester-config/assignments.yml`: this semester's `defaults:` and one block per
-    schedule key (`settings.parse_instance`)."""
-    defaults = _obj(_keys(RUN_KEYS, _SPEC_TYPES))
-    block = _obj(_keys(INSTANCE_KEYS, _SPEC_TYPES))
-    return _doc(
-        f"{CONFIG_REPO}/{ASSIGNMENTS_FILE}",
-        _obj(
-            {
-                ASSIGNMENTS_DEFAULTS: defaults,
-                ASSIGNMENTS_BLOCKS: {"type": "object", "additionalProperties": block},
-            }
-        ),
-    )
+def _defaults(keys) -> dict:
+    """A `defaults:` block (decision 0039 rule 2). The seeded block holds only comments, so
+    YAML reads it as null (`settings` reads {})."""
+    types = {
+        **_SPEC_TYPES,
+        "assignment_repo_visibility": _enum(VISIBILITIES),
+        "timezone": _str(),
+        "archive_grace_days": {"type": "integer"},
+        "materials_repo": {"type": "string", "pattern": r"^[\w.-]+$"},
+    }
+    out = _obj(_keys(keys, types))
+    out["type"] = ["object", "null"]
+    return out
 
 
-def dsl_course_schema() -> dict:
+def course_schema() -> dict:
+    """The course org's `.github/course.yml` (decision 0039)."""
     admin = _obj(_keys(COURSE_ADMIN_KEYS), ("github_handle",))
-    card = _obj(_keys(COURSE_CARD_KEYS))
-    people = _obj(
-        {
-            "course_admins": {"type": "array", "items": admin},
-            "instructors": {"type": "array", "items": card},
-            "teaching_assistants": {"type": "array", "items": card},
-        }
-    )
-    defaults = _obj(_keys((*COURSE_DEFAULT_KEYS, *ASKED_DEFAULT_KEYS), _SPEC_TYPES))
-    # The seeded block holds only comments, so YAML reads it as null (`settings` reads {}).
-    defaults["type"] = ["object", "null"]
-    central_ref = {
+    toolkit_ref = {
         "type": "string",
         "pattern": f"^(?:{'|'.join(TIERS)}|[0-9a-f]{{40}})$",
     }
-    top = _keys(
-        COURSE_TOP_KEYS,
-        {
-            "central_ref": central_ref,
-            "site_link_extensions": {"type": "array", "items": _str()},
-            # The pattern `policy.contact` is held to.
-            "contact": {"type": "string", "pattern": r"^[^@\s]+@[^@\s]+$"},
-            "student_console": {"type": "boolean"},
-        },
+    course = _obj(
+        _keys(
+            COURSE_KEYS,
+            {TOOLKIT_REF_KEY: toolkit_ref, "student_console": {"type": "boolean"}},
+        )
     )
-    top |= {
+    site = dict(opencourse.SCHEMA)
+    top = {
+        COURSE_BLOCK: course,
+        PEOPLE_BLOCK: _obj({"course_admins": {"type": "array", "items": admin}}),
+        DEFAULTS_BLOCK: _defaults((*DEFAULT_FILE_KEYS, *COURSE_ASKED_KEYS)),
+        OPEN_SITE_BLOCK: site,
         # Optional setup steps and to-dos set aside (decision 0032): ids, unknown ones ignored.
         "set_aside": {"type": "array", "items": _str()},
-        "people": people,
-        ASSIGNMENT_DEFAULTS_KEY: defaults,
     }
-    return _doc(".github/dsl-course.yml", _obj(top))
+    return _doc(f".github/{COURSE_CONFIG}", _obj(top))
+
+
+def semester_schema() -> dict:
+    """The semester org's `semester-config/semester.yml` (decision 0039)."""
+    site = _obj({"syllabus": _str()})
+    top = {
+        PEOPLE_BLOCK: {"type": "array", "items": _person()},
+        DEFAULTS_BLOCK: _defaults(DEFAULT_FILE_KEYS),
+        STUDENT_SITE_BLOCK: site,
+    }
+    return _doc(f"{CONFIG_REPO}/{SEMESTER_FILE}", _obj(top))
+
+
+def institution_schema() -> dict:
+    """The toolkit's `institution.yml` (`policy.SCHEMA`)."""
+    return _doc("institution.yml", dict(policy.SCHEMA))
 
 
 def materials_schema() -> dict:
@@ -787,9 +794,8 @@ def names_json() -> dict:
         "join_repo": JOIN_REPO,
         "semester_topic": SEMESTER_TOPIC,
         "system_dir": records.SYSTEM_DIR,
-        "instructors_file": INSTRUCTORS_FILE,
-        "opencourse_file": opencourse.OPENCOURSE_FILE,
-        "assignments_file": ASSIGNMENTS_FILE,
+        "course_file": COURSE_CONFIG,
+        "semester_file": SEMESTER_FILE,
         "registry_file": SEMESTERS_PATH,
         "records": {kind: records.path(kind) for kind in records.RECORDS},
         # The hidden first line that routes a Join issue opened through the API.
@@ -894,11 +900,6 @@ def materials_json() -> dict:
     }
 
 
-def opencourse_schema() -> dict:
-    """The course's `opencourse.yml`: the public website's settings (`opencourse.parse`)."""
-    return _doc(f".github/{opencourse.OPENCOURSE_FILE}", dict(opencourse.SCHEMA))
-
-
 def labels_json() -> dict:
     """The words the console shows for the engine's values (`course.LABELS`) and the
     solution warning every surface offering `solution_datetime: now` carries, and the
@@ -920,8 +921,9 @@ def all_schemas() -> dict[str, dict]:
         "names.json": names_json(),
         "labels.json": labels_json(),
         "materials.json": materials_json(),
-        # The institution policy the engine runs on (`policy.load`): the defaults, kinds,
-        # site block, contact and licences, so the console holds no literal of its own.
+        # The institution file the engine runs on (`policy.load`): the site block and its
+        # contacts, the defaults, kinds, selection floor and licences, so the console holds
+        # no literal of its own.
         "policy.json": policy.load(),
         "schedule.schema.json": schedule_schema(),
         # WP-C removes: the console's schedule editor still writes the 0.10 shape and
@@ -929,14 +931,19 @@ def all_schemas() -> dict[str, dict]:
         "schedule-0.10.schema.json": json.loads(
             Path(__file__).with_name("schedule-0.10.schema.json").read_text()
         ),
-        "instructors.schema.json": instructors_schema(),
+        "course.schema.json": course_schema(),
+        "semester.schema.json": semester_schema(),
+        "institution.schema.json": institution_schema(),
         "students.schema.json": students_schema(),
         "teams.schema.json": teams_schema(),
         "grading_config.schema.json": grading_config_schema(),
-        "assignments.schema.json": assignments_schema(),
-        "dsl_course.schema.json": dsl_course_schema(),
         "materials.schema.json": materials_schema(),
-        "opencourse.schema.json": opencourse_schema(),
+        **{
+            f"{name}.schema.json": json.loads(
+                (FROZEN / f"{name}-0.10.schema.json").read_text()
+            )
+            for name in ("dsl_course", "assignments", "instructors", "opencourse")
+        },
         # The semester's PUBLIC student file, closed at every level (its allow-list).
         "student-status.schema.json": _doc(
             "student-status.json", student_status.json_schema()

@@ -1669,7 +1669,7 @@ def test_check_setup_still_reports_a_write_that_did_not_land(monkeypatch):
 def test_an_assignments_yml_that_is_not_yaml_is_a_problem_not_a_crash(monkeypatch):
     # Every run setting is unknown: no cutoff, no window, no marks can be computed, so
     # the status lists the ASSIGNMENTS problem and no assignment - and is still written.
-    monkeypatch.setattr(status_json.settings, "_assignments_text", lambda org: "a: [\n")
+    monkeypatch.setattr(status_json.settings, "_semester_text", lambda org: "a: [\n")
     monkeypatch.setattr(
         status_json.schedule,
         "_schedule_text",

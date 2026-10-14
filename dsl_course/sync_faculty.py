@@ -51,9 +51,11 @@ from .course import (
     COURSE_ADMIN_TEAM,
     COURSE_CONFIG,
     INSTRUCTOR_ROLES,
-    INSTRUCTORS_FILE,
     INSTRUCTORS_TEAM,
+    SEMESTER_FILE,
+    TOOLKIT_REF_KEY,
     active_today,
+    course_block,
     instructor_role,
     semester_of,
 )
@@ -77,7 +79,7 @@ ROLE_TEAM = {
     "teaching_assistants": INSTRUCTORS_TEAM,
     "course_admins": COURSE_ADMIN_TEAM,
 }
-SEMESTER_PEOPLE_PATH = INSTRUCTORS_FILE
+SEMESTER_PEOPLE_PATH = SEMESTER_FILE
 # The roles a semester declares: its teaching team, the people a notification is addressed
 # to and therefore the entries `email:` is required on. course_admins is course-level and
 # notified through the course org, not a semester's instructors.yml.
@@ -135,11 +137,11 @@ def _declared(
     (an entry without a valid one is skipped and, with `faults`, reported); or a course
     file's `people:` mapping of role -> list. `where` is the entry's place in the file as
     written - its identity in the digest's state."""
-    listed = meta.get("instructors")
+    listed = meta.get("people")
     if isinstance(listed, list):
         out: dict[str, list[tuple[str, object]]] = {}
         for index, p in enumerate(listed):
-            where = f"instructors[{index}]"
+            where = f"people[{index}]"
             role = instructor_role(p.get("role") if isinstance(p, dict) else "")
             if role is None:
                 lines = take_lines(p) if isinstance(p, dict) else {}
@@ -161,13 +163,15 @@ def _declared(
                 continue
             out.setdefault(role, []).append((where, p))
         return out
-    people = meta.get("people")
-    if not isinstance(people, dict):
+    if not isinstance(listed, dict):
         return None
-    take_lines(people)
+    # A course's `people:` names its course admins only (decision 0039 rule 3).
+    take_lines(listed)
+    admins = listed.get("course_admins") or []
     return {
-        role: [(f"people.{role}[{i}]", p) for i, p in enumerate(people.get(role) or [])]
-        for role in ROLE_TEAM
+        "course_admins": [
+            (f"people.course_admins[{i}]", p) for i, p in enumerate(admins)
+        ]
     }
 
 
@@ -504,11 +508,11 @@ def _load_semester_file(
     absent. Raises exactly what `load_yaml_config` raises otherwise, and
     `NoInstructorsList` for a present file that lists nobody."""
     meta = read_semester(semester_org).file(SEMESTER_PEOPLE_PATH).mapping(lines=lines)
-    listed = isinstance(meta, dict) and isinstance(meta.get("instructors"), list)
+    listed = isinstance(meta, dict) and isinstance(meta.get("people"), list)
     if meta is not None and not listed:
         raise NoInstructorsList(
             f"{semester_org}/{CONFIG_REPO}/{SEMESTER_PEOPLE_PATH} declares no "
-            f"`instructors:` list - nothing is reconciled from it"
+            f"`people:` list - nothing is reconciled from it"
         )
     return meta, SEMESTER_PEOPLE_PATH
 
@@ -646,11 +650,13 @@ def read_course_config(
     # Taken before the people block is parsed, so the top-level keys' lines are in hand
     # for `central_ref:` - and so the loader's reserved key cannot survive into anything
     # that renders this mapping.
-    lines = take_lines(meta)
+    take_lines(meta)
+    course = course_block(meta)
+    lines = take_lines(course)
     faculty = parse_faculty_from_meta(meta, faults, file=COURSE_CONFIG, repo=".github")
     try:
         resolve_central_ref(
-            meta.get("central_ref"), source=f"{course_org}/.github/{COURSE_CONFIG}"
+            course.get(TOOLKIT_REF_KEY), source=f"{course_org}/.github/{COURSE_CONFIG}"
         )
     except MissingCentralRef:
         # Not the exception's own message: it is written for a run log and names the file
@@ -659,11 +665,11 @@ def read_course_config(
         # it last had and takes no fix or improvement until this line is corrected.
         faults.append(
             _course_fault(
-                "`central_ref:` is not `main`, `release` or a full 40-character commit "
-                "SHA - every workflow this course seeds stays at its previous rendering "
-                "until it is corrected",
-                field="central_ref",
-                lineno=line_of(lines, "central_ref"),
+                f"`course.{TOOLKIT_REF_KEY}:` is not `main`, `release` or a full "
+                "40-character commit SHA - every workflow this course seeds stays at its "
+                "previous rendering until it is corrected",
+                field=TOOLKIT_REF_KEY,
+                lineno=line_of(lines, TOOLKIT_REF_KEY),
             )
         )
     return faculty

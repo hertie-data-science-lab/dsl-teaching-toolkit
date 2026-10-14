@@ -1966,7 +1966,7 @@ def run(
         # and held-solution faults cannot be worked out without the settings, and syncing
         # it without them posted Cleared for each (and a mail), then New again once fixed.
         log_err(
-            f"{semester_org}/{schedule.CONFIG_REPO}/{schedule.ASSIGNMENTS_FILE} is not "
+            f"{semester_org}/{schedule.CONFIG_REPO}/{schedule.SEMESTER_FILE} is not "
             f"valid YAML - nothing is released, handed out or graded until it is fixed"
         )
         if release:
@@ -1975,7 +1975,7 @@ def run(
                 config_digest.ASSIGNMENTS,
                 course_org,
                 semester_org,
-                [f for f in sched.faults if f.file == schedule.ASSIGNMENTS_FILE],
+                [f for f in sched.faults if f.file == schedule.SEMESTER_FILE],
                 schedule.in_semester_zone(sched, now),
                 dry_run,
             )

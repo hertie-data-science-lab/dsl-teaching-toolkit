@@ -10,13 +10,13 @@ name: Dispatch to the course org
 #
 #   scheduled-release  every file: an edited release, handout or solution moment takes
 #                      effect within the minute, and the scheduler's pre-flight checks
-#                      instructors.yml, students.csv and teams.csv and mails a fault to
+#                      semester.yml, students.csv and teams.csv and mails a fault to
 #                      whoever pushed it. Scoped to this semester (driver semester-config).
 #                      Grading sheets are deliberately not here: they are saved all day.
-#   sync-membership    students.csv, teams.csv, instructors.yml (access lands at once),
-#                      schedule.yml and assignments.yml (it rewrites assignments.lock.yml,
+#   sync-membership    students.csv, teams.csv, semester.yml (access lands at once, and
+#                      its defaults) and schedule.yml (it rewrites assignments.lock.yml,
 #                      the mirror the Join-team form reads).
-#   sync-site          schedule.yml, assignments.yml, instructors.yml, and teams.csv (an
+#   sync-site          schedule.yml, semester.yml, and teams.csv (an
 #                      assignment page lists the teams that have room).
 #   send-codes         students.csv: a roster push is the only way codes are sent. The send
 #                      fills only blank codes and mails only rows with no `code_sent_at`, so
@@ -25,7 +25,7 @@ name: Dispatch to the course org
 # Every event is idempotent on the receiving side, so firing on a push that changed nothing
 # relevant costs one run and nothing else.
 #
-# Reads the course org from THIS semester's own .system/dsl-course.yml `course:` pointer
+# Reads the course org from THIS semester's own .system/course.yml `course:` pointer
 # (single source of truth) with `yq`, preinstalled on GitHub's runners, so a quoted value
 # or a trailing comment reads as the org it names. Runs under secrets.DSL_BOT_TOKEN, which
 # needs Contents read here and Actions write on the course org's .github (both granted by
@@ -36,8 +36,7 @@ on:
     branches: [main]
     paths:
       - schedule.yml
-      - assignments.yml
-      - instructors.yml
+      - semester.yml
       - students.csv
       - teams.csv
 
@@ -61,9 +60,9 @@ jobs:
         run: |
           # The paths map: an event, then the files whose change fires it.
           paths="
-          scheduled-release schedule.yml assignments.yml instructors.yml students.csv teams.csv
-          sync-membership students.csv teams.csv instructors.yml schedule.yml assignments.yml
-          sync-site schedule.yml assignments.yml instructors.yml teams.csv
+          scheduled-release schedule.yml semester.yml students.csv teams.csv
+          sync-membership students.csv teams.csv semester.yml schedule.yml
+          sync-site schedule.yml semester.yml teams.csv
           send-codes students.csv
           "
           course_org=$(gh api "repos/$SEMESTER_ORG/__CONFIG_REPO__/contents/__POINTER__" \
@@ -74,7 +73,7 @@ jobs:
           fi
           # What this push changed, one name per line. A new branch (no `before`) or a
           # compare that fails counts as every file: an extra run is safe, a missed one is not.
-          every="schedule.yml assignments.yml instructors.yml students.csv teams.csv"
+          every="schedule.yml semester.yml students.csv teams.csv"
           changed=$(gh api "repos/$REPO/compare/$BEFORE...$AFTER" --jq '.files[].filename' 2>/dev/null) \
             || changed="$every"
           [ "${BEFORE//0/}" = "" ] && changed="$every"

@@ -59,11 +59,8 @@ from .bootstrap_course import semester_scaffold
 from .central import CENTRAL
 from .config import read_course, read_semester
 from .course import (
-    ASSIGNMENTS_FILE,
     CONFIG_REPO,
-    COURSE_CONFIG,
     COURSE_HUB_TOPIC,
-    INSTRUCTORS_FILE,
     JOIN_REPO,
     MAINTAINING_FILE,
     MATERIALS_REPO_PREFIX,
@@ -97,6 +94,10 @@ from .gh_contents import (
 )
 from .ghcli import forget_all, gh, git
 from .grading_spec import GRADING_FILE, assignment_title, parse_grading_spec
+from .legacy import OLD_ASSIGNMENTS_FILE as ASSIGNMENTS_FILE
+from .legacy import OLD_COURSE_FILE as COURSE_CONFIG
+from .legacy import OLD_INSTRUCTORS_FILE as INSTRUCTORS_FILE
+from .legacy import OLD_OPENCOURSE_FILE as OPENCOURSE_FILE
 from .log import CLIParser, add_preview_flag, log, log_err, log_ok, log_step
 from .materials import (
     EMPTY_ENTRY_KIND,
@@ -106,7 +107,7 @@ from .materials import (
     is_materials_repo,
 )
 from .materials import read as read_materials
-from .opencourse import OPENCOURSE_FILE, READINGS_MODES, OpenCourse
+from .opencourse import READINGS_MODES, OpenCourse
 from .opencourse import seed_text as opencourse_text
 from .profile_readme import profile_files, update_profile_readme
 from .readings import is_reading_overlay
@@ -119,7 +120,7 @@ from .repos import (
 )
 from .scaffold import materials_system_files, starter_line
 from .setting_readers import read_settings
-from .settings import ASSIGNMENT_DEFAULTS_KEY, RUN_KEYS
+from .settings import RUN_KEYS
 from .team_formation import TEAM_LOCK_PATH, sync_team_lock, team_lock_content
 from .welcome import (
     RETIRED_JOIN_FORMS,
@@ -145,6 +146,8 @@ OLD_SEMESTER_TOPIC = legacy.old_name(SEMESTER_TOPIC, legacy.SEMESTER_TOPICS)
 OLD_SEMESTERS_PATH = legacy.old_name(SEMESTERS_PATH, legacy.COURSE_GITHUB)
 OLD_TEMPLATE_PREFIX = legacy.old_name(TEMPLATE_TOPIC, legacy.COURSE_REPOS)
 RETIRED_COURSE_KEYS = tuple(legacy.renames(legacy.COURSE_CONFIG))
+# A 0.10 `dsl-course.yml`'s course-wide defaults block.
+ASSIGNMENT_DEFAULTS_KEY = legacy.old_name("defaults", legacy.COURSE_FILE_KEYS)
 LEGACY_SUBMIT_VIA = legacy.renames(legacy.GRADING_CONFIG)
 RENAMED_SETTINGS = legacy.renames(legacy.SETTINGS)
 
@@ -1489,7 +1492,7 @@ def schedule_shape(
 
     # 3. Assignments: `template`, `number`, `repo_name` where it is not the default, and
     # the `assignments.yml` block inline.
-    instance = settings.parse_instance(instance_text)
+    instance = settings.parse_legacy_assignments(instance_text)
     raw_blocks = (
         (yaml.load(instance_text or "", _Verbatim) or {}) if instance_text else {}
     )
@@ -2473,7 +2476,7 @@ def _schedule_clean(
     if text is None:
         return True
     sched = schedule.parse(
-        load_yaml_lines(text) or {}, settings.parse_instance(instance)
+        load_yaml_lines(text) or {}, settings.parse_legacy_assignments(instance)
     )
     bad = [f for f in sched.faults if f.code == NOT_MIGRATED]
     bad += [d for d in sched.dropped if NOT_MIGRATED in d]
@@ -2490,7 +2493,7 @@ def _instance_clean(text: str, *, legacy_ok: bool = False) -> bool:
     `schedule.yml` (NOT_MIGRATED until it has)."""
     faults = [
         f
-        for f in settings.parse_instance(text).faults
+        for f in settings.parse_legacy_assignments(text).faults
         if not (legacy_ok and f.code == NOT_MIGRATED)
     ]
     for fault in faults:
@@ -2715,7 +2718,7 @@ class Semester:
         return moves, files, deletes, old_pointer
 
     def pointer(self) -> bytes:
-        return template("semester/dsl-course.yml").format(course=self.course).encode()
+        return template("semester/course.yml").format(course=self.course).encode()
 
     def layout_done(self) -> bool:
         if not self.renamed():
@@ -2886,7 +2889,7 @@ class Semester:
         if current is not None and (text is None or text == self.keys_text()[1]):
             return None, []
         meta = _yaml(text)
-        existing = settings.parse_instance(current)
+        existing = settings.parse_legacy_assignments(current)
         lower = [
             ("semester", existing.defaults),
             ("course", settings.course_defaults(self.course)),

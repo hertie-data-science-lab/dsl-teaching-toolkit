@@ -24,6 +24,7 @@ from . import issues, notify, policy, scaffold, welcome
 from .course import (
     INSTRUCTORS_TEAM,
     active_today,
+    course_admins,
     is_repo_root,
     pages_repo,
     people_by_role,
@@ -735,7 +736,12 @@ def people_cards(
     course chooses to add rides along verbatim, so a new field needs a theme change but no
     change here.
     """
-    people = people_by_role(meta, semester=semester)
+    # A course's open site shows its course admins as its leads (decision 0039 rule 3).
+    people = (
+        people_by_role(meta)
+        if semester
+        else ({"instructors": course_admins(meta)} if course_admins(meta) else None)
+    )
     if people is None:
         return None
     today = date.today().isoformat()
