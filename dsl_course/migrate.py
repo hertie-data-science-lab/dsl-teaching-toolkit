@@ -1446,7 +1446,8 @@ def schedule_shape(
             new["number"] = n
         else:
             notes.append(f"assignments.{key}: no number today - give it one")
-        new["template"] = entry.get("course_source_repo")
+        if entry.get("course_source_repo") is not None:
+            new["template"] = entry["course_source_repo"]
         name = instance.dests.get(key) or key
         if name != (f"assignment-{n}" if n else key):
             new["repo_name"] = name
@@ -1479,6 +1480,14 @@ def schedule_shape(
     if assignments:
         out.append(_emit({"assignments": assignments}))
     instance_after = _without_block(instance_text, settings.ASSIGNMENTS_BLOCKS)
+    comments = sum(1 for line in text.splitlines() if line.lstrip().startswith("#"))
+    if comments:
+        # Rewritten from the data: a comment has no entry to travel with. Counted, never
+        # quoted (a person's words may name someone); git history keeps the old file.
+        notes.append(
+            f"{comments} comment line(s) of {schedule.SCHEDULE_PATH} are not carried "
+            "into the new shape - the old file stays in its history"
+        )
     return "\n".join(out), instance_after, notes, stops
 
 
@@ -2982,6 +2991,11 @@ class Semester:
         return self.keys_done() and self.shape_work()[1] is None
 
     def shape_plan(self) -> list[str]:
+        if not self.keys_done():
+            when = "listed once the keys step has run"
+            return [
+                f"{CONFIG_REPO}/{schedule.SCHEDULE_PATH}: one block per kind - {when}"
+            ]
         text, new, after, notes, _ = self.shape_work()
         out = [
             (
@@ -2993,7 +3007,14 @@ class Semester:
                     else ""
                 )
             ),
-            *_diff(schedule.SCHEDULE_PATH, text or "", new or ""),
+            # The new lines only: the old file's are faculty's own words and comments,
+            # which a public log never quotes - counted instead.
+            *(
+                line
+                for line in _diff(schedule.SCHEDULE_PATH, text or "", new or "")
+                if not line.startswith("  -")
+            ),
+            f"  ({len((text or '').splitlines())} line(s) of the old file replaced)",
         ]
         if after is not None:
             out += _diff(ASSIGNMENTS_FILE, self.instance_text() or "", after)

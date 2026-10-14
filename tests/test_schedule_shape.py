@@ -46,6 +46,13 @@ def _migrated(name: str) -> tuple[str, list[str], list[str]]:
     return text, notes, stops
 
 
+def migrate_comments(n: int) -> str:
+    return (
+        f"{n} comment line(s) of schedule.yml are not carried into the new shape - "
+        "the old file stays in its history"
+    )
+
+
 def _render(monkeypatch, tmp_path, sched) -> dict:
     monkeypatch.setattr(
         test_site.site, "load_grading_spec", lambda *a, **k: test_site._spec("")
@@ -84,7 +91,7 @@ def _no_files(text: str) -> str:
     """A row less what says whether its files are out: how a 0.10 second lab group (a
     session with nothing to ship) and its 0.11 slot (the lab's own files) are compared."""
     text = re.sub(r"links:\n(    [^\n]*\n|      [^\n]*\n)*", "", text)
-    text = re.sub(r"(no_materials|unreleased): true\n|links: \[\]\n", "", text)
+    text = re.sub(r"(no_materials|unreleased|repeat): true\n|links: \[\]\n", "", text)
     return text.split("---\n")[1]
 
 
@@ -94,7 +101,8 @@ def test_a_live_semester_migrates_and_renders_the_rows_it_did(
 ):
     global _TREE
     text, notes, stops = _migrated(name)
-    assert (notes, stops) == ([], [])
+    # Only the fixture's own two-line header is a comment to say is not carried over.
+    assert (notes, stops) == ([migrate_comments(2)], [])
     sched = schedule.parse(load_yaml_lines(text))
     assert sched.dropped == [] and sched.faults == []
     _TREE = _tree(name)
