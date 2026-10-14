@@ -80,6 +80,13 @@
         background-color: #ead9f6;
     }
 
+    // A break (a `semester:` entry of `type: break`): a grey band, quieter than any row
+    // that happens.
+    .table-row-break {
+        background-color: #ececec;
+        color: #555;
+    }
+
     .col-1 {
         padding: 2px;
         flex-basis: 10%;

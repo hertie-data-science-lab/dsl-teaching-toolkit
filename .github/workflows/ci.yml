@@ -122,7 +122,7 @@ jobs:
             "Open this semester in the student console" \
             "table-row-lecture" "table-row-lab" "table-row-assignment" \
             "table-row-due" "table-row-exam" "table-row-special_event" \
-            "table-row-semester" "table-row-drop-in"; do
+            "table-row-semester" "table-row-drop-in" "table-row-break"; do
             grep -rq -- "$needle" . || { echo "::error::$needle is nowhere in the build"; missing=1; }
           done
           # A tab per kind the fixture has rows of, each listing its own: lecture 1 is on

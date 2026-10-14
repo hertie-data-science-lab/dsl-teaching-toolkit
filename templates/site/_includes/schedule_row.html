@@ -10,7 +10,8 @@ fill the Event column. The engine's own rows keep their wording: an assignment's
 added on the toolkit side before its policy entry) is a plain row named by its kind, so the
 schedule keeps rendering.
 
-Date: a `dateless` row (`event_datetime: tbc`) has no `date:` and prints "TBC"; a
+Date: a break prints its first and last day (`until`). A `dateless` row (`event_datetime:
+tbc`) has no `date:` and prints "TBC"; a
 `hide_time` row (a whole-day row) prints its day and no clock time; `tbc` marks a
 provisional date "(TBC)"; `location`, when the schedule names one, goes under it.
 
@@ -47,6 +48,7 @@ what the row generates:
     TBC
     {% else %}
     {{ include.event.date | date: site.dateformat }}
+    {% if include.event.until %}- {{ include.event.until | date: site.dateformat }}{% endif %}
     {% unless include.event.hide_time %}
     {{ include.event.date | date: "%H:%M" }}
     {% endunless %}

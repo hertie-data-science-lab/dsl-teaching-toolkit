@@ -1442,6 +1442,26 @@ def _semester_entry(name: str, when: date) -> str:
     )
 
 
+def _break_entry(brk: schedule.Break) -> str:
+    """A `semester:` entry of `type: break` (decision 0038 amendment 2): one grey band on
+    the schedule from its first day to its last - `date:` and `until:`, whole days, its
+    `title:` (else "Break") and `details:`. Never a tab and never news."""
+    return (
+        f"---\n"
+        f"kind: break\n"
+        f"date: {iso_when(brk.start)}\n"
+        f"until: {iso_when(brk.end)}\n"
+        f"sort_at: {iso_when(brk.start)}\n"
+        f"hide_time: true\n"
+        f'title: "{q(brk.title or BREAK_TITLE)}"\n'
+        f"{_details(brk.details)}"
+        f"---\n"
+    )
+
+
+BREAK_TITLE = "Break"
+
+
 def sync_site(course_org: str, semester_org: str) -> int:
     """Regenerate the semester's student-facing site from the live org state: the term's
     rows by kind (released ones linked into the private content repos, planned ones marked
@@ -1598,6 +1618,10 @@ def sync_site(course_org: str, semester_org: str) -> int:
             event_entries["term-end.md"] = _semester_entry(
                 "Semester ends", sched.semester_end
             )
+        # Its breaks: a grey band each, named by key like every row file.
+        for brk in sched.breaks:
+            if brk.show_on_site:
+                event_entries[f"break-{slug(brk.key)}.md"] = _break_entry(brk)
 
         instructors_meta, instructors_path = _instructors_meta(semester_org)
         return SitePlan(
