@@ -1,8 +1,9 @@
-"""A session's reading list: which file in a `readings/NN_.../` folder is prose to inline,
-which are files to list, and how the prose nests under the heading above it.
+"""A reading list: how its prose nests under the heading above it (`demote_headings`,
+for a schedule entry's `reading_list:`, decision 0038 rule 5).
 
-The rule in one place, because the semester site, the public course site and the generated
-syllabus all render the same folder and used to each decide it for themselves.
+WP-P removes the rest: the `READINGS.md` overlay - a file in a readings folder inlined as
+prose - is read only by the open site (`public_site`) and the parked student console
+(`student_status`). The semester site and the syllabus read `reading_list:` instead.
 """
 
 from __future__ import annotations

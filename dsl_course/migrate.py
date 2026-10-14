@@ -30,7 +30,7 @@ real course the tier moves inside a HOLD of every org of the course (`--hold`,
 refuse is asked in the plan ("will stop here"): the preview fails there, and a run stops
 before its pause.
 
-Semester org, in order: preflight, pause, rename repos, layout, keys, proposed releases,
+Semester org, in order: preflight, pause, rename repos, layout, keys, schedule shape,
 topic, re-render, status, unpause. Course org: preflight, pause, registry, .system/,
 dsl-course.yml keys, template keys, seeded text, template starter (decision 0028:
 `starter:` written into each live template's grading_config.yml, read from its answer
@@ -69,7 +69,6 @@ from .course import (
     MATERIALS_REPO_PREFIX,
     MIGRATE_DRIVER,
     SEMESTER_TOPIC,
-    SETTING_PLACEHOLDER,
     SOLUTION_BRANCH,
     SUBMIT_VIA,
     SYLLABUS_SAMPLE_FILE,
@@ -87,9 +86,7 @@ from .discovery import (
     list_org_repos,
 )
 from .faults import NOT_MIGRATED, RunSettingInTemplate
-from .gh_commits import first_landed
 from .gh_contents import (
-    LINES,
     blob_sha,
     get_file_content,
     load_yaml_lines,
@@ -101,7 +98,7 @@ from .gh_contents import (
 from .ghcli import forget_all, gh, git
 from .grading_spec import GRADING_FILE, assignment_title, parse_grading_spec
 from .log import CLIParser, add_preview_flag, log, log_err, log_ok, log_step
-from .materials import MATERIALS_TOPIC, is_materials_repo, kinds_reader
+from .materials import MATERIALS_TOPIC, is_materials_repo
 from .opencourse import OPENCOURSE_FILE, READINGS_MODES, OpenCourse
 from .opencourse import seed_text as opencourse_text
 from .profile_readme import profile_files, update_profile_readme
@@ -113,14 +110,6 @@ from .repos import (
     set_repo_topics,
 )
 from .scaffold import materials_system_files, starter_line
-from .schedule import label_number, own_number
-from .schedule_plan import (
-    Aliases,
-    entry_kind,
-    needs_number,
-    offplan_folders,
-    planned_rows,
-)
 from .setting_readers import read_settings
 from .settings import ASSIGNMENT_DEFAULTS_KEY, RUN_KEYS
 from .team_formation import TEAM_LOCK_PATH, sync_team_lock, team_lock_content
@@ -1138,171 +1127,12 @@ def opencourse_from(config: str | None) -> OpenCourse:
     )
 
 
-# ------------------------------------------------------------------ proposed releases
-# Decision 0013 item 4: a semester whose materials repos hold folders no `releases:` entry
-# copies (released by hand) gets a releases plan PROPOSED, dated by the commit that
-# landed each folder. Faculty content: written beside the schedule, never into it.
-PROPOSED_RELEASES = records.path("proposed_releases")
-PROPOSAL_COMMIT = "migrate: propose releases"
-PROPOSAL_HEADER = f"""\
-# PROPOSED by the migration - read by nothing, and not part of schedule.yml.
-#
-# These folders of this semester were released outside the plan (no `releases:` entry
-# copies them): the site shows them unnumbered on their kind's tab, off the Schedule. To
-# put them in the plan, copy the entries you want under `releases:` in schedule.yml,
-# check each date (and title, where one is given), then delete this file. Each is dated by the commit that
-# first landed its folder in this semester. The dates have passed, so the next tick
-# copies each folder again from its course repo (nothing changes where the source has
-# not). `course_source_repo: {SETTING_PLACEHOLDER}`: no one course repo holds that
-# folder - name the one it came from.
-"""
-
-
-def _folder_slug(name: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "folder"
-
-
-def _folder_title(name: str) -> str:
-    """A folder's name as a title (`02_transformers-and-attention` -> `Transformers and
-    attention`)."""
-    name = re.sub(r"^0*\d+_", "", name)
-    return name.replace("-", " ").replace("_", " ").strip().capitalize()
-
-
-# A title that only restates a number (`Session 1`): the site's row would read `Lecture 1
-# - Session 1`, so the entry gets none and the row reads `Lecture 1` from its label.
-NUMBER_ONLY_TITLE = re.compile(
-    r"(session|lecture|lab|week|readings?)\s*\d+", re.IGNORECASE
-)
-
-
-def proposed_entries(
-    folders: list[tuple[str, str, str, datetime | None, str]],
-    taken: set[str],
-    tz,
-) -> str:
-    """The `releases:` block for `folders` (`(semester repo, folder, kind, landed, course
-    repo)`), in date order (an undated one last, `tbc`), each label `<kind>-NN` from the
-    folder's number (else its name), never one `taken`. A readings entry has no title; its
-    label's number joins it to its lecture (decision 0013 item 3). Nor has a folder whose
-    name only restates its number (`01_session-1`): its row reads `<Kind> N`, as off-plan."""
-    taken = set(taken)
-    rows = []
-    for repo, folder, kind, landed, source in sorted(
-        folders, key=lambda f: (f[3] is None, f[3] or datetime.min.replace(tzinfo=UTC))
-    ):
-        name = folder.rsplit("/", 1)[-1]
-        n = label_number(name)
-        base = f"{kind}-{n:02d}" if n is not None else _folder_slug(name)
-        label, i = base, 2
-        while label in taken:
-            label, i = f"{base}-{i}", i + 1
-        taken.add(label)
-        when = f"{landed.astimezone(tz):%Y-%m-%dT%H:%M}" if landed else "tbc"
-        rows += [f"  {label}:", f"    event_datetime: {when}"]
-        title = _folder_title(name)
-        if kind != "readings" and not NUMBER_ONLY_TITLE.fullmatch(title):
-            rows.append(f"    title: {_scalar(title)}")
-        rows += [
-            f"    kind: {kind}",
-            "    show_on_site: true",
-            "    deploy:",
-            f"      - course_source_repo: {_scalar(source)}",
-            f"        course_source_path: {_scalar(folder)}",
-        ]
-        if repo != schedule.DEFAULT_DEST_REPO:
-            rows.append(f"        semester_dest_repo: {_scalar(repo)}")
-    return "\n".join(["releases:", *rows]) + "\n"
-
-
 # ------------------------------------------------------------------ GitHub, narrowly
 
 
 # `{org: {repo name: listing row}}`: each org is listed once, and listed again only after
 # a step has written (`_forget`) - a rename or a topic changes what the listing says.
 _LISTINGS: dict[str, dict[str, dict]] = {}
-
-
-# ------------------------------------------------------------------ explicit numbers
-# Decision 0020 rule 6: a number is explicit, so every entry whose number was its POSITION
-# gets that number written as `number:`, and nothing a student sees moves. Entries whose
-# label carries the number are left alone.
-NUMBERS_COMMIT = "migrate: explicit numbers"
-
-
-def position_numbers(
-    sched: schedule.Schedule, aliases: Aliases
-) -> dict[tuple[str, str], int]:
-    """`{(block, key): n}` for every entry the engine before decision 0020 numbered by its
-    position, with that number: a shown release row of a numbered kind among the shown
-    rows of its kind in date order, and an assignment among the plan's by due date.
-    A readings row is not stamped: a number there joins it to that lecture."""
-    out: dict[tuple[str, str], int] = {}
-    # Undated entries never had a position (`undated_unnumbered` names them instead).
-    # Nor had an `events:` session (it postdates 0020).
-    rows = [r for r in planned_rows(sched, aliases) if not r.undated and not r.session]
-    lectures: set[int] = set()
-    position = 0
-    for r in rows:
-        if r.shown and r.kind == "lecture":
-            position += 1
-            lectures.add(own_number(r.number, r.key) or position)
-    counts: dict[str, int] = {}
-    for r in rows:
-        n = own_number(r.number, r.key)
-        if not r.shown or (r.kind == "readings" and n in lectures):
-            continue  # silent, or readings joined to a lecture: no row of its own
-        counts[r.kind] = counts.get(r.kind, 0) + 1
-        if n is None and r.kind != "readings":
-            out["releases", r.key] = counts[r.kind]
-    by_due = sorted(sched.assignments.items(), key=lambda kv: kv[1].due_datetime)
-    for position, (key, entry) in enumerate(by_due, start=1):
-        if own_number(entry.number, key) is None:
-            out["assignments", key] = position
-    return out
-
-
-def undated_unnumbered(sched: schedule.Schedule, aliases: Aliases) -> list[str]:
-    """The shown `releases:` keys of a numbered kind that are undated (`tbc`) and carry
-    no number: no position numbered them, so there is nothing to stamp, and each will be a
-    problem until it is dated and numbered."""
-    return [
-        r.label
-        for r in sched.releases
-        if r.when is None
-        and needs_number(r, entry_kind(r, aliases)[0])
-        and own_number(r.number, r.label) is None
-    ]
-
-
-def stamp_numbers(
-    text: str, stamps: dict[tuple[str, str], int]
-) -> tuple[str, dict[str, str]]:
-    """`text` with `number: <n>` written as the first key of each stamped entry, at its
-    own indent - every other line, comment and order kept - and `{key: why}` for each
-    entry it could not stamp (empty, or written as a flow mapping), for a person to fix
-    by hand."""
-    meta = load_yaml_lines(text) or {}
-    lines = text.splitlines(keepends=True)
-    inserts: list[tuple[int, str]] = []
-    declined: dict[str, str] = {}
-    for (block, key), n in stamps.items():
-        mapping = meta.get(block) if isinstance(meta, dict) else None
-        entry = mapping.get(key) if isinstance(mapping, dict) else None
-        at = (mapping or {}).get(LINES, {}).get(key)
-        own = entry.get(LINES, {}) if isinstance(entry, dict) else {}
-        children = [line for k, line in own.items() if k]
-        if not at or not children or min(children) <= at:
-            empty = entry is None or (isinstance(entry, dict) and not children)
-            declined[key] = "empty" if empty else "written as a flow mapping"
-            continue
-        first = lines[min(children) - 1]
-        indent = first[: len(first) - len(first.lstrip())]
-        eol = "\r\n" if lines[at - 1].endswith("\r\n") else "\n"
-        inserts.append((at, f"{indent}number: {n}{eol}"))
-    for at, line in sorted(inserts, reverse=True):
-        lines.insert(at, line)
-    return "".join(lines), declined
 
 
 def _listing(org: str) -> dict[str, dict]:
@@ -2156,9 +1986,15 @@ def _schedule_clean(
     return not bad
 
 
-def _instance_clean(text: str) -> bool:
-    """An `assignments.yml` this engine reads whole: YAML, and no line it refuses."""
-    faults = settings.parse_instance(text).faults
+def _instance_clean(text: str, *, legacy_ok: bool = False) -> bool:
+    """An `assignments.yml` this engine reads whole: YAML, and no line it refuses -
+    except, with `legacy_ok`, the per-assignment blocks the schedule-shape step moves into
+    `schedule.yml` (NOT_MIGRATED until it has)."""
+    faults = [
+        f
+        for f in settings.parse_instance(text).faults
+        if not (legacy_ok and f.code == NOT_MIGRATED)
+    ]
     for fault in faults:
         log_err(f"{ASSIGNMENTS_FILE} {fault.label}: {fault.what} - fix by hand")
     return not faults
@@ -2569,17 +2405,17 @@ class Semester:
         return (None if new == current else new), notes
 
     def keys_done(self) -> bool:
-        """The schedule holds only this engine's keys and reads clean, and the semester
-        has its `assignments.yml`. A key the line rewrite cannot reach (inside a flow
-        mapping, say) keeps this undone: the step then stops, naming the entry to fix by
-        hand."""
+        """The schedule holds none of the 0.9 keys this step rewrites, and the semester
+        has its `assignments.yml` reading clean. Whether the schedule reads clean is the
+        schedule-shape step's to say: this engine reads only the 0.11 shape."""
         if not self.renamed():
             return False
         text, new = self.keys_text()
+        instance = self.instance_text()
         return (
             text == new
-            and self.instance_text() is not None
-            and _schedule_clean(text, self.instance_text(), quiet=True)
+            and instance is not None
+            and _instance_clean(instance, legacy_ok=True)
         )
 
     def title_notes(self, meta: dict) -> list[str]:
@@ -2643,11 +2479,8 @@ class Semester:
         instance, _ = self.instance_work()
         if text != new and not entries_kept(text, new):
             return [f"the {schedule.SCHEDULE_PATH} rewrite would lose or add an entry"]
-        if instance is not None and not _instance_clean(instance):
+        if instance is not None and not _instance_clean(instance, legacy_ok=True):
             return [f"the {ASSIGNMENTS_FILE} it writes would not read clean"]
-        after = self.instance_text() if instance is None else instance
-        if not _schedule_clean(new, after):
-            return [f"{schedule.SCHEDULE_PATH} would still say NOT_MIGRATED"]
         return []
 
     def keys(self) -> bool:
@@ -2660,7 +2493,7 @@ class Semester:
                 return False
             files[schedule.SCHEDULE_PATH] = new.encode()
         if instance is not None:
-            if not _instance_clean(instance):
+            if not _instance_clean(instance, legacy_ok=True):
                 return False
             files[ASSIGNMENTS_FILE] = instance.encode()
         if not files:
@@ -2676,149 +2509,7 @@ class Semester:
             text == new
             and entries_kept(self.schedule_before, text)
             and instance is not None
-            and _instance_clean(instance)
-            and _schedule_clean(text, instance)
-        )
-
-    # explicit numbers --------------------------------------------------------
-    def numbers_work(
-        self,
-    ) -> tuple[str | None, str | None, dict, dict[str, str], list[str]]:
-        """`(schedule.yml now, as this step leaves it, {(block, key): n}, declined,
-        undated)`, over the schedule as the keys step leaves it."""
-        text, keyed = self.keys_text()
-        if keyed is None:
-            return text, None, {}, {}, []
-        sched = schedule.parse(
-            load_yaml_lines(keyed) or {}, settings.parse_instance(self.instance_text())
-        )
-        aliases = kinds_reader(self.course)
-        stamps = position_numbers(sched, aliases)
-        new, declined = stamp_numbers(keyed, stamps)
-        return text, new, stamps, declined, undated_unnumbered(sched, aliases)
-
-    def numbers_done(self) -> bool:
-        return self.keys_done() and not self.numbers_work()[2]
-
-    def numbers_plan(self) -> list[str]:
-        _, _, stamps, declined, undated = self.numbers_work()
-        return [
-            (
-                f"{CONFIG_REPO}/{schedule.SCHEDULE_PATH}: write `number:` on each entry "
-                f"numbered by its position, with the number it shows today"
-            ),
-            *(f"  {key}: {n}" for (_, key), n in stamps.items()),
-            *(
-                f"  {key}: {why} - add `number:` by hand"
-                for key, why in declined.items()
-            ),
-            *(
-                f"  {key}: undated: will show as a problem until dated and numbered"
-                for key in undated
-            ),
-        ]
-
-    def numbers_stops(self) -> list[str]:
-        declined = self.numbers_work()[3]
-        return [
-            f"{schedule.SCHEDULE_PATH} {key}: add `number:` by hand" for key in declined
-        ]
-
-    def numbers(self) -> bool:
-        text, new, _, declined, _ = self.numbers_work()
-        for key in declined:
-            log_err(f"{schedule.SCHEDULE_PATH} {key}: add `number:` by hand")
-        if not self.keys_done() or text is None or new is None:
-            return False
-        if new != text and not move_files(
-            self.org,
-            self.config(),
-            {},
-            NUMBERS_COMMIT,
-            files={schedule.SCHEDULE_PATH: new.encode()},
-        ):
-            return False
-        return not declined
-
-    # proposed releases -------------------------------------------------------
-    def offplan(self) -> list[tuple[str, str, str]]:
-        """`(repo, folder, kind)` for each folder of the semester's release repos that no
-        entry of the schedule - as the keys step leaves it - copies."""
-        _, text = self.keys_text()
-        sched = schedule.parse(
-            load_yaml_lines(text or "") or {},
-            settings.parse_instance(self.instance_text()),
-        )
-        deploys = [d for r in sched.releases for d in r.deploy]
-        listing = _listing(self.org)
-        dests = {schedule.DEFAULT_DEST_REPO, *(d.semester_dest_repo for d in deploys)}
-        trees = {
-            repo: list(_files(self.org, repo))
-            for repo in sorted(dests)
-            if repo in listing and not listing[repo].get("archived")
-        }
-        return offplan_folders(deploys, trees)
-
-    def proposal(self) -> str | None:
-        """The proposed releases plan (header and `releases:` block), or None when every
-        released folder is in the plan. Read once per run: each folder costs a history
-        read."""
-        if not hasattr(self, "_proposal"):
-            self._proposal = self._propose()
-        return self._proposal
-
-    def _propose(self) -> str | None:
-        folders = self.offplan()
-        if not folders:
-            return None
-        _, text = self.keys_text()
-        meta = _yaml(text)
-        course = Course(self.course)
-        sources = {r: set(_files(self.course, r)) for r in course.materials_repos()}
-        rows = []
-        for repo, folder, kind in folders:
-            holders = [
-                r
-                for r, paths in sources.items()
-                if any(p.startswith(f"{folder}/") for p in paths)
-            ]
-            source = holders[0] if len(holders) == 1 else SETTING_PLACEHOLDER
-            rows.append(
-                (repo, folder, kind, first_landed(self.org, repo, folder), source)
-            )
-        releases = meta.get("releases")
-        taken = {str(k) for k in releases} if isinstance(releases, dict) else set()
-        tz = schedule._tz(meta.get("timezone"))
-        return PROPOSAL_HEADER + proposed_entries(rows, taken, tz)
-
-    def proposal_done(self) -> bool:
-        """Proposed already (the file is there), or nothing to propose."""
-        if PROPOSED_RELEASES in _files(self.org, self.config()):
-            return True
-        return self.proposal() is None
-
-    def proposal_plan(self) -> list[str]:
-        text = self.proposal() or ""
-        block = [line for line in text.split("\n") if line and not line.startswith("#")]
-        return [
-            (
-                f"write {CONFIG_REPO}/{PROPOSED_RELEASES}: a releases plan for "
-                f"{len(self.offplan())} folder(s) released outside the plan, for faculty "
-                f"to copy into {schedule.SCHEDULE_PATH} by hand (never merged by this tool)"
-            ),
-            *(f"  {line}" for line in block),
-        ]
-
-    def propose(self) -> bool:
-        text = self.proposal()
-        if text is None:
-            return True
-        return move_files(
-            self.org,
-            self.config(),
-            {},
-            PROPOSAL_COMMIT,
-            files={PROPOSED_RELEASES: text.encode()},
+            and _instance_clean(instance, legacy_ok=True)
         )
 
     # topic -------------------------------------------------------------------
@@ -2915,29 +2606,6 @@ class Semester:
                 rollback=(
                     f"git revert the '{KEYS_COMMIT}' commit in {repo} (it holds "
                     f"{schedule.SCHEDULE_PATH} and {ASSIGNMENTS_FILE})"
-                ),
-            ),
-            Step(
-                "explicit numbers",
-                done=self.numbers_done,
-                plan=self.numbers_plan,
-                do=self.numbers,
-                verify=self.numbers_done,
-                stops=self.numbers_stops,
-                rollback=(
-                    f"git revert the '{NUMBERS_COMMIT}' commit in {repo} (it holds "
-                    f"only {schedule.SCHEDULE_PATH})"
-                ),
-            ),
-            Step(
-                "proposed releases",
-                done=self.proposal_done,
-                plan=self.proposal_plan,
-                do=self.propose,
-                verify=lambda: PROPOSED_RELEASES in _files(self.org, self.config()),
-                rollback=(
-                    f"git revert the '{PROPOSAL_COMMIT}' commit in {repo} (it holds "
-                    f"only {PROPOSED_RELEASES})"
                 ),
             ),
             Step(

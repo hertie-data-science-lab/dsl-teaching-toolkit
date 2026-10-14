@@ -300,7 +300,7 @@ def _entry_label(release: Release, sched: Schedule) -> str:
     # handout" and "the suffix is the whole label", neither of which names an assignment.
     if slug and slug in sched.assignments:
         return f"assignments.{slug} handout"
-    return f"releases.{release.label}"
+    return release.label
 
 
 def late_items(

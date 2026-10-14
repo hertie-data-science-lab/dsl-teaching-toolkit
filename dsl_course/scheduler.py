@@ -132,7 +132,6 @@ from .log import (
     log_step,
     plural,
 )
-from .materials import kinds_reader
 from .repos import listed_is_private, set_visibility
 from .run import current as current_run
 from .schedule import Release, grading_cutoff_datetime
@@ -261,8 +260,11 @@ def preview_summary(due: list[Release], decisions: list[Decision]) -> Summary:
 
 
 def _entry_ref(where: str) -> str:
-    """`releases.lecture-2` / `assignments.a1` -> the entry's own name."""
-    return where.split(".", 1)[1] if "." in where else where
+    """`assignments.a1` -> the assignment's key; a content entry's path (`lectures.week-2`,
+    the label a release is known by) as it stands, less any `.files[i]` under it."""
+    if where.startswith("assignments."):
+        return where[len("assignments.") :]
+    return where.split(".files", 1)[0]
 
 
 def source_decisions(faults: list[ConfigFault], now: datetime) -> list[Decision]:
@@ -738,28 +740,13 @@ def _unnumbered(
     """Decision 0020 rule 3: the plan's entries that need a number and have none, as
     `(faults for the schedule.yml digest, release labels held, assignment keys held)`.
     Guarded: a read that fails holds nothing this tick and says so, and its faults are
-    None, so the digest is left as it is rather than cleared (`_preflight_sources`).
-    A release whose kind comes only from a `materials.yml` that does not parse is not
-    held either: one line says so."""
+    None, so the digest is left as it is rather than cleared (`_preflight_sources`)."""
     try:
-        kinds = kinds_reader(course_org)
-        missing = schedule_plan.unnumbered(sched, kinds)
+        missing = schedule_plan.unnumbered(sched)
         faults = schedule_plan.number_faults(missing)
-        unsure = sorted(
-            {
-                r.deploy[0].course_source_repo
-                for r in sched.releases
-                if schedule_plan.kind_unknown(r, kinds)
-            }
-        )
     except Exception as exc:
         log_err(f"could not check the schedule's numbers ({type(exc).__name__})")
         return None, set(), set()
-    if unsure:
-        log(
-            f"  [numbers] {', '.join(unsure)}: materials.yml does not parse, so an entry "
-            "whose kind only it decides needs no number this tick"
-        )
     releases = {m.key for m in missing if m.block == "releases"}
     return faults, releases, {m.key for m in missing if m.block == "assignments"}
 

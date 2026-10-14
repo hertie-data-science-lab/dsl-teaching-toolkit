@@ -320,6 +320,16 @@ def _syllabus(request: Request) -> list[str]:
     return argv
 
 
+def _confirm_withheld(request: Request) -> list[str]:
+    return [
+        "confirm-withheld",
+        "--org",
+        request.course_org,
+        "--repo",
+        _a(request, "repo"),
+    ]
+
+
 def _new_materials(request: Request) -> list[str]:
     argv = [
         "materials",
@@ -675,6 +685,22 @@ _OPS = (
         module="scaffold",
         argv=_new_materials,
         refresh_after=True,
+    ),
+    Operation(
+        name="materials.confirm_withheld",
+        scope=COURSE,
+        required_team=INSTRUCTORS_TEAM,
+        args_schema=_args(
+            {"repo": _string(REPO_PATTERN, "The materials repo")},
+            required=("repo",),
+        ),
+        help="Confirm a materials repo's withheld patterns are reviewed, unchanged.",
+        done_text="Withheld patterns confirmed.",
+        doc="docs/08-release-materials-to-cohort.md",
+        module="scaffold",
+        argv=_confirm_withheld,
+        preview_flag="--preview",
+        real_flag="--no-preview",
     ),
     Operation(
         name="assignment.create",

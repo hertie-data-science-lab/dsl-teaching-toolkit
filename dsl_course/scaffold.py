@@ -6,13 +6,12 @@ code, so a new repo is always laid out the way the Release actions expect.
     scaffold materials   --org X --semester f2026                 -> course-materials-f2026
     scaffold assignment  --org X --name "Neural networks"         -> assignment-neural-networks
 
-Materials repos get `lectures/`, `readings/` and `labs/` `01_session-1/` skeletons (any
-top-level directory with an ordinal-prefixed subdirectory is a releasable section - add
-more, e.g. `datasets/`, freely; delete `labs/` if unused) and the run-from-repo Release
-workflows. Assignment repos get a starter on `main` for each format asked for (no tests -
-grading is faculty-side) and a `solution` branch carrying the model solution,
-`grading_config.yml`, and the HIDDEN tests, so generate never ships any of them to
-students.
+Materials repos get empty `lectures/`, `labs/` and `readings/` folders (names that mean
+nothing to the toolkit - the schedule says what each release is, decision 0038; add, rename
+or delete folders freely) and the run-from-repo Release workflows. Assignment repos get a
+starter on `main` for each format asked for (no tests - grading is faculty-side) and a
+`solution` branch carrying the model solution, `grading_config.yml`, and the HIDDEN tests,
+so generate never ships any of them to students.
 
 A materials repo can start from last year's instead of from the stubs: `--copy-from
 <repo>` copies every branch of it, history and all, and rewrites only the SYSTEM-owned
@@ -64,12 +63,20 @@ from .discovery import (
     discover_assignments,
     discover_semesters,
 )
-from .gh_contents import put_files
+from .gh_contents import get_file_with_sha, put_file, put_files
 from .ghcli import GIT_ENV, clone, gh, git, is_already_exists
-from .log import CLIParser, log, log_err, log_ok, log_skip, log_step
+from .log import (
+    CLIParser,
+    Summary,
+    add_preview_flag,
+    log,
+    log_err,
+    log_ok,
+    log_skip,
+    log_step,
+)
 from .materials import MATERIALS_TOPIC
-from .readings import READING_OVERLAY_FILE
-from .releaseignore import RELEASEIGNORE
+from .releaseignore import RELEASEIGNORE, confirmed, reviewed
 from .repos import (
     create_repo,
     default_branch,
@@ -162,37 +169,6 @@ def _syllabus_sample() -> str:
     title, _, body = example_course_file(EXAMPLE_SYLLABUS).partition("\n")
     return f"{title}\n{_SYLLABUS_SAMPLE_NOTICE}{body}"
 
-
-# The seeded reading list, shaped like a Hertie syllabus's readings block so a course
-# team can paste theirs straight in: `Required Readings` / `Optional Readings` as
-# sub-headings, and any further category (some syllabi add `Application Readings`)
-# works the same way - the site renders whatever headings this file has, nested under
-# the session's own. A stub rather than a `.gitkeep`: the folder's files are listed
-# automatically, but nothing about an empty folder said so, nor that this file is where
-# an online reading goes - the tab read blank with nothing to explain why.
-_READINGS_STUB = (
-    b"# Session 1 readings\n\n"
-    b"<!-- dsl-stub: this comment marks the reading list as still the scaffold's.\n"
-    b"     Write over it and it is yours - the toolkit never rewrites this file\n"
-    b"     either way. It is OPTIONAL: delete it and the files you put in this\n"
-    b"     folder are still listed. -->\n\n"
-    b"Drop the readings themselves into this folder - PDFs, slides, URLs as text\n"
-    b"files, notebooks - anything. Every file here is listed and linked for enrolled\n"
-    b"students and auditors automatically; you do not have to name them here as\n"
-    b"well.\n\n"
-    b"This file is for what a file cannot represent: explanations & directions,\n"
-    b"chapters & references, a link to read online, a proper citation format.\n\n"
-    b"## Required Readings\n\n"
-    b"- Author, *Title*, ch. 1.\n"
-    b"- https://example.org/an-online-reading\n\n"
-    b"## Optional Readings\n\n"
-    b"- Author, *Title*, ch. 2.\n\n"
-    b"What you write here is PUBLIC (it is a citation list). The files beside it\n"
-    b"stay behind the enrolled-student/auditor gate (unless the course runs a\n"
-    b"public open-courseware site in `actual-readings` mode, which serves them\n"
-    b"too). The session's learning objectives come from `details:` in\n"
-    b"schedule.yml.\n"
-)
 
 # The assignment's own definition, written from what New assignment was asked for.
 # INSTRUCTOR-OWNED from the moment it lands: nothing ever rewrites it, and every setting in
@@ -771,26 +747,16 @@ def _maintaining(org: str, repo: str) -> str:
         "Rule of thumb: edit the content folders and the two root files; leave `MAINTAINING.md` "
         "and `.github/workflows/` alone.\n\n"
         "## Structure\n\n"
-        "Any top-level directory containing at least one ordinal-prefixed subdirectory "
-        "(`01_`, `02_`, `03_`, ...) is a releasable section:\n\n"
-        "- `lectures/01_session-1/` - one folder per session's lecture files\n"
-        "- `labs/01_session-1/` - one folder per session's lab (delete the `labs/` folder "
-        "if your course has none)\n"
-        "- `readings/01_session-1/` - one folder per session's readings. Just drop the "
-        "readings in and every file is listed and linked for enrolled students "
-        "automatically. An additional `READINGS.md` (or `.txt`/`.bib`) is OPTIONAL prose - "
-        "a link to read online, or a citation; it is published publicly, while the files "
-        "stay behind the enrolled-student gate (unless a public site toggles on "
-        "`actual-readings`)\n"
-        "- root files - your syllabus under any name (`SYLLABUS.md`, `SYLLABUS.pdf`, ...) "
-        "and `README.md`: released by naming the file as the release path (the runner is "
-        "case sensitive)\n\n"
-        "Add more sessions by creating `lectures/02_session-2/`, `readings/02_session-2/`, ... "
-        "(only the ordinal prefix matters - name the rest whatever you like), or add a whole "
-        "new section (e.g. `datasets/01_intro/`). Nothing needs refreshing afterwards: the "
-        "Release workflows take the path as free text (`course_source_path`), so a new "
-        "session or section is releasable the moment you push it. **Refresh actions** "
-        "repopulates the repo/semester dropdowns, and runs itself nightly.\n\n"
+        "Any layout you like: folder names mean nothing to the toolkit. The semester's "
+        "`schedule.yml` says what each release is - a lecture, a lab, readings - and which "
+        "files it ships (`files:`, any path in this repo). The scaffold starts you with "
+        "empty `lectures/`, `labs/` and `readings/` folders; rename, add or delete them "
+        "freely. A reading list is written in the schedule (`reading_list:` on a "
+        "`readings:` entry), not in a file here.\n\n"
+        "A root file - your syllabus under any name (`SYLLABUS.md`, `SYLLABUS.pdf`, ...) "
+        "or `README.md` - is released by naming it as a file's `path` (the runner is case "
+        "sensitive). Nothing needs refreshing after you add a folder: a path is free text, "
+        "so new material is releasable the moment you push it.\n\n"
         "## Available actions\n\n" + actions_table + "\n"
         "## Public course website (optional) **[DEFERRED]**\n\n"
         "The **Publish course website** action can share this repo's materials on a public "
@@ -1042,12 +1008,11 @@ def scaffold_materials(
         user_files = {
             "README.md": materials_readme(org).encode(),
             "SYLLABUS.md": _SYLLABUS_STUB.format(tag=tag).encode(),
-            "lectures/01_session-1/.gitkeep": b"",
-            # A stub, not a .gitkeep: a text file here IS the published reading list (its
-            # contents are inlined on the site's Materials tab), and an empty folder gave
-            # no sign of that - the tab then reads blank with nothing to explain why.
-            f"readings/01_session-1/{READING_OVERLAY_FILE}": _READINGS_STUB,
-            "labs/01_session-1/.gitkeep": b"",
+            # Empty folders, named for nothing the toolkit reads (decision 0038): the
+            # schedule's entries say what each release is.
+            "lectures/.gitkeep": b"",
+            "labs/.gitkeep": b"",
+            "readings/.gitkeep": b"",
             RELEASEIGNORE: _RELEASEIGNORE_STUB.encode(),
         }
         # One commit for the skeleton: they all carried the same subject anyway, so
@@ -1566,6 +1531,33 @@ def scaffold_site(org: str) -> int:
     return 0
 
 
+CONFIRM_COMMIT = "chore: confirm the withheld patterns reviewed"
+
+
+def confirm_withheld(org: str, repo: str, preview: bool = True) -> Summary:
+    """The Confirm of a materials repo's "Withheld patterns reviewed" (plan 0.11.0 9b
+    ruling 6): `.releaseignore` gains `releaseignore.REVIEWED_MARK`, and nothing else in
+    it changes, so a course that withholds nothing can say so without an edit. A list
+    already reviewed (a pattern, or the mark) is left alone."""
+    found = get_file_with_sha(org, repo, RELEASEIGNORE)
+    text, sha = found if found else (None, None)
+    where = f"{repo}/{RELEASEIGNORE}"
+    if reviewed(text):
+        log_ok(f"{where} is already reviewed")
+        return Summary(f"{where} is already reviewed; nothing to confirm.")
+    if preview:
+        log(f"would mark {where} reviewed")
+        return Summary(f"Would mark {where} reviewed; nothing was written.")
+    if not put_file(
+        org, repo, RELEASEIGNORE, confirmed(text).encode(), CONFIRM_COMMIT, sha
+    ):
+        text = f"{where} could not be written."
+        log_err(text)
+        return Summary(text, reasons=[{"code": "WRITE_FAILED", "text": text}], code=1)
+    log_ok(f"{where} marked reviewed")
+    return Summary(f"Marked {where} reviewed.")
+
+
 def main() -> int:
     parser = CLIParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -1631,7 +1623,13 @@ def main() -> int:
     )
     ps = sub.add_parser("site")
     ps.add_argument("--org", required=True)
+    pc = sub.add_parser("confirm-withheld")
+    pc.add_argument("--org", required=True)
+    pc.add_argument("--repo", required=True, help="The materials repo")
+    add_preview_flag(pc, "Say what would be written; write nothing (default).")
     args = parser.parse_args()
+    if args.cmd == "confirm-withheld":
+        return confirm_withheld(args.org, args.repo, args.preview)
     if args.cmd == "assignment":
         answers = resolve_answers(
             {"formats": args.formats, "submit_via": args.submit_via},

@@ -2,8 +2,8 @@
 
 A Hertie syllabus lists, session by session, a title, its learning objectives and its
 readings. The semester's `semester-config/schedule.yml` already holds the first two
-(`title:` / `details:` of each lecture entry) and its readings entries name the third, so
-that plan can be written for the course team instead of by them.
+(`title:` / `details:` of each unit's first entry) and its readings entries name the third,
+so that plan can be written for the course team instead of by them.
 
 The syllabus is a faculty document, so a write touches ONLY the block between
 `<!-- dsl:weekly-plan -->` and `<!-- /dsl:weekly-plan -->` in the chosen Markdown file
@@ -20,12 +20,12 @@ inside the block, so no plan can break the next write. A syllabus that is not Ma
 PDF), not UTF-8, or too large to read is never written: the preview hands the block over
 to paste.
 
-Readings are read from the COURSE org's source repos, not from what has been released: a
-syllabus is written before the term starts, when nothing has shipped yet. Sessions, their
-numbers and the readings under each are the website's own rows
-(`schedule_plan.site_rows`): a numbered readings entry, from any repo, sits under the
-lecture with its number; any other readings entry closes the list under
-"Further readings".
+A session is a teaching unit (decision 0038): every entry sharing a `session:` id, headed
+by its first row by date, as the website's rows (`schedule_plan.site_rows`) have it. The
+readings under each are the unit's readings entries: their `reading_list:`, then the names
+of the files they copy, read from the COURSE org's source repos (a syllabus is written
+before the term starts, when nothing has shipped yet). Any other readings entry closes the
+list under "Further readings".
 
 `--course-source-repo` names the materials repo holding the syllabus; `--syllabus` the file
 in it (default: the one its `materials.yml` declares, else SYLLABUS.md). Neither limits
@@ -41,11 +41,10 @@ from __future__ import annotations
 import re
 import sys
 
-from . import schedule
+from . import policy, schedule
 from .faults import Unusable
 from .gh_contents import (
     blob_sha,
-    get_file_content,
     get_file_with_sha,
     put_file,
     repo_tree,
@@ -62,9 +61,9 @@ from .log import (
 )
 from .materials import PLAN_END, PLAN_START
 from .materials import read as read_materials
-from .readings import demote_headings, readings_block
+from .readings import demote_headings
 from .repos import default_branch
-from .schedule_plan import PlannedRow, planned_rows, site_rows
+from .schedule_plan import READINGS_KIND, PlannedRow, planned_rows, site_rows
 
 # How far a reading list's own headings are pushed down here: the syllabus puts a session at
 # `###`, so its `# Session N readings` has to land below that.
@@ -137,10 +136,11 @@ def place(text: str, body: str) -> str | None:
 
 
 def _readings_for(course_org: str, row: PlannedRow, trees: dict) -> str:
-    """A readings entry's reading list, from what its copies take out of the COURSE org:
-    a file, a folder, or a whole repo, each through `readings_block`, the rule the site
-    uses too. A repo that cannot be read raises, naming it."""
-    parts = []
+    """A readings entry's reading list: its `reading_list:` text, then the names of the
+    files its copies take out of the COURSE org (a file, a folder, or a whole repo). A
+    repo that cannot be read raises, naming it."""
+    parts = [row.reading_list.strip()] if row.reading_list.strip() else []
+    names: list[str] = []
     for d in row.deploys:
         repo, src = d.course_source_repo, d.course_source_path.strip("/")
         if repo not in trees:
@@ -152,20 +152,12 @@ def _readings_for(course_org: str, row: PlannedRow, trees: dict) -> str:
                 raise RuntimeError(
                     f"could not read {course_org}/{repo}: {exc}"
                 ) from exc
-        if src in trees[repo]:  # one file
-            base, _, name = src.rpartition("/")
-            names = [name]
-        else:  # a folder, or the whole repo
-            base, prefix = src, f"{src}/" if src else ""
-            names = [p[len(prefix) :] for p in trees[repo] if p.startswith(prefix)]
-        text = readings_block(
-            names,
-            lambda name, repo=repo, base=base: get_file_content(
-                course_org, repo, f"{base}/{name}" if base else name
-            ),
-        )
-        if text:
-            parts.append(text)
+        prefix = f"{src}/" if src else ""
+        names += [p for p in trees[repo] if p == src or p.startswith(prefix)]
+    if names:
+        # Raw filenames: deriving a citation from `blitzstein-ch1.pdf` would be inventing
+        # one. Faculty who want that write it in `reading_list:`.
+        parts.append("\n".join(f"- {n.rsplit('/', 1)[-1]}" for n in sorted(names)))
     return "\n\n".join(parts)
 
 
@@ -173,19 +165,20 @@ def build(course_org: str, semester_org: str) -> tuple[str, int]:
     """The weekly plan as markdown (a `###` per session, the block's own heading left to
     the syllabus), plus how many sessions it holds.
 
-    Sessions are the shown lecture rows of `schedule_plan.site_rows`, numbered as the
-    website numbers them, so the two cannot disagree about what session 3 is called."""
+    A session is a teaching unit: the shown, dated rows sharing a `session:` id (an
+    entry with none is a unit of its own), headed by the first of them by date, with the
+    readings attached to the unit (`schedule_plan.site_rows`), so the site and the
+    syllabus cannot disagree about what session 3 is called."""
     sched = schedule.load(semester_org)
-    rows = planned_rows(sched, lambda repo: read_materials(course_org, repo).kinds)
-    # An `events:` session (a lab's second group) repeats a week, it is not one.
-    shown = site_rows([r for r in rows if not r.session])
-    # Dated sessions only: a weekly plan has no week to put a TBC session in.
-    lectures = [
-        sr
-        for sr in shown
-        if sr.row.shown and sr.row.kind == "lecture" and not sr.row.undated
-    ]
-    further = [sr.row for sr in shown if sr.row.kind == "readings"]
+    shown = site_rows(planned_rows(sched))
+    units: dict[str, list] = {}
+    for sr in shown:
+        row = sr.row
+        # Dated sessions only: a weekly plan has no week to put a TBC session in.
+        if row.kind == READINGS_KIND or not row.shown or row.undated:
+            continue
+        units.setdefault(row.unit or row.key, []).append(sr)
+    further = [sr.row for sr in shown if sr.row.kind == READINGS_KIND]
     trees: dict[str, tuple[str, ...]] = {}
 
     def readings(entries: list[PlannedRow]) -> list[str]:
@@ -200,27 +193,26 @@ def build(course_org: str, semester_org: str) -> tuple[str, int]:
         return out
 
     out = []
-    for sr in lectures:
-        row = sr.row
-        out += [
-            (
-                f"### Session{f' {sr.number}' if sr.number else ''}"
-                f"{f': {row.subtitle}' if row.subtitle else ''}"
-            ),
-            "",
-        ]
+    for unit, members in units.items():
+        row = members[0].row
+        name = (
+            f"Session {unit}"
+            if row.unit
+            else policy.numbered_title(row.kind, members[0].number)
+        )
+        out += [f"### {name}{f': {row.subtitle}' if row.subtitle else ''}", ""]
         if row.details:
             out += [f"*Learning objectives.* {' '.join(row.details.split())}", ""]
-        out += readings(sr.readings)
+        out += readings([r for sr in members for r in sr.readings])
     tail = readings(further)
     if tail:
         out += ["### Further readings", "", *tail]
-    return "\n".join(out).rstrip() + "\n", len(lectures)
+    return "\n".join(out).rstrip() + "\n", len(units)
 
 
 def _unusable(exc: Unusable, counts: dict | None = None, body: str = "") -> Summary:
-    """A refusal for a source repo's `materials.yml` that does not parse: its kinds and
-    its syllabus are not known, so nothing is built or written on a guess."""
+    """A refusal for a source repo's `materials.yml` that does not parse: its syllabus is
+    not known, so nothing is written on a guess."""
     text = f"{exc}. Fix it and run this again."
     log_err(text)
     return Summary(
@@ -255,7 +247,7 @@ def main() -> int:
     if not sessions:
         log_err(
             f"{a.semester_org}'s schedule.yml names no dated sessions, so there is nothing "
-            "to write. Add `releases:` entries (see docs/07) and run this again."
+            "to write. Add `lectures:` entries (see docs/07) and run this again."
         )
         text = "The semester's schedule.yml has no dated sessions, so there is no list."
         return Summary(text, reasons=[{"code": "NO_SESSIONS", "text": text}], code=1)

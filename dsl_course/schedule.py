@@ -297,6 +297,17 @@ class Deploy:
 
 
 @dataclass
+class Slot:
+    """One time an entry HAPPENS: a row of its own on the site, with the entry's number,
+    title and files. `when` None is `tbc`; `location` and `details`, when given, are this
+    slot's and beat the entry's (two lab groups in two rooms)."""
+
+    when: datetime | date | None
+    location: str = ""
+    details: str = ""
+
+
+@dataclass
 class Release:
     """A labelled scheduled entry: when the thing HAPPENS (`event_datetime` in the YAML),
     plus, optionally, `deploy` actions (content copies) - or an `assignment` handout
@@ -349,6 +360,24 @@ class Release:
     show_on_site: bool = True
     # The line each of this entry's keys is written on - see `Deploy.lines`.
     lines: dict[str, int] = field(default_factory=dict, compare=False, repr=False)
+    # The teaching unit this entry belongs to (decision 0038 rule 3): entries of any kind
+    # sharing it are one unit - the syllabus groups by it, and a readings entry with it
+    # shows on the unit's first row. "" = none.
+    session: str = ""
+    # Where it happens: the Schedule row and the kind tab show it (a slot's own beats it).
+    location: str = ""
+    # Each time it happens, one row each (decision 0038 rule 3); empty = one row at `when`.
+    slots: list[Slot] = field(default_factory=list)
+    # A readings entry's reading list, markdown (decision 0038 rule 5).
+    reading_list: str = ""
+    # `files:` was written, even empty: an entry with `files: []` is a to-do, "no files
+    # yet"; one with no `files:` key is a plain session (plan 9b ruling 5).
+    files_written: bool = False
+
+    @property
+    def row_slots(self) -> list[Slot]:
+        """The rows this entry makes: its slots, else one at `when`."""
+        return self.slots or [Slot(self.when)]
 
     @property
     def is_event_only(self) -> bool:
@@ -469,9 +498,9 @@ class Event:
     # fires nothing, so this is the whole of what it does here; the twin of a silent
     # release, for a date faculty keep in the file without publishing it.
     show_on_site: bool = True
-    # A session's own `number:` ("Lab 1"); the row's number is resolved with the
-    # label's (`schedule_plan.planned_rows`), as on a release.
     number: int | None = None
+    # Where it happens, shown on its row and its kind's tab.
+    location: str = ""
 
 
 @dataclass

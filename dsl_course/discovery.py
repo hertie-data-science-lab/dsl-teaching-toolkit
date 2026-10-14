@@ -9,10 +9,6 @@ The semester registry is the one exception to "read it from the live org": semes
 can't be found by naming convention (they're arbitrary), so they're listed explicitly in
 the course org's .github/semesters.yml (register_semester appends; faculty &
 instructors can edit it by hand).
-
-The session-folder rule itself lives in course.session_dirs - this module is only the API
-transport for it (a recursive git-tree fetch); course.discover_sections is the local
-filesystem transport of the same rule.
 """
 
 from __future__ import annotations
@@ -34,14 +30,13 @@ from .course import (
     JOIN_REPO,
     SEMESTER_TOPIC,
     advertises_console,
-    session_dirs,
 )
 from .faults import ConfigFault, Unusable
-from .gh_contents import get_file_content, put_file, repo_tree
+from .gh_contents import get_file_content, put_file
 from .ghcli import ALL, EVERYTHING, FILE, FILES, META, gh, is_missing_resource, on_write
 from .log import log, log_err, log_ok, on_cli_start
 from .materials import is_materials_repo
-from .repos import default_branch, repo_exists, repo_is_archived, repo_missing
+from .repos import repo_exists, repo_is_archived, repo_missing
 
 # The standalone semester registry in the course org's .github repo.
 SEMESTERS_PATH = "semesters.yml"
@@ -665,36 +660,6 @@ def semester_content_repos(repos: list[dict]) -> list[str]:
     Takes the listing rather than the org, because its one caller (the semester site build)
     asks two questions of the same org and paid for two full paginated listings to do it."""
     return sorted(r["name"] for r in repos if not _is_infra_repo(r))
-
-
-def _repo_tree_dirs(org: str, repo: str) -> tuple[str, ...]:
-    """Every directory path in a repo's default-branch tree - one recursive fetch,
-    shared by every discovery helper that needs a repo's directory structure (rather
-    than listing each top-level directory individually - N+1 API calls).
-
-    The fetch itself (and its absent-vs-failed discrimination) is gh_contents.repo_tree, shared
-    with the site builder's blob-side twin: an absent/empty tree is genuinely no
-    directories, any other failure RAISES. It must never come back as "no sessions" - the
-    site clears and rewrites its collections from these rows, so one rate-limited fetch
-    would republish the semester site with every session row deleted."""
-    return repo_tree(org, repo, default_branch(org, repo, fallback="main"), "tree")
-
-
-def discover_release_sources(
-    org: str, content_repos: list[str]
-) -> list[tuple[str, str, str, int]]:
-    """(repo, subpath, folder_name, session_number) for every session folder found
-    across a semester's `content_repos` (see discover_semester_repos), covering both shapes
-    a release can produce: nested - a session folder inside a subpath of a shared repo,
-    `subpath/NN_.../` - or root - `NN_.../` directly at the repo root (what a `deploy:`
-    with a bare `semester_dest_repo` and no `semester_dest_path` produces). One recursive tree fetch per
-    repo; the exact folder name is captured too, so callers can list its files directly
-    with no further discovery call."""
-    return [
-        (repo, subpath, folder, n)
-        for repo in content_repos
-        for subpath, folder, n in session_dirs(_repo_tree_dirs(org, repo))
-    ]
 
 
 def discover_assignment_repos(course_org: str) -> list[dict]:

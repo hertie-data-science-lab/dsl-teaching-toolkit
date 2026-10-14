@@ -401,9 +401,8 @@ def release_rows(facts: SemesterFacts, extra: StudentFacts) -> list[dict]:
     """A row per entry the site shows (`schedule_plan.site_rows`, the `events:` sessions
     among them), numbered as the site numbers it, with the files it has landed and the
     readings attached to it. A row that ships nothing is `no_materials`, as on the site."""
-    aliases = lambda repo: facts.aliases.get(repo, {})
     out = []
-    for sr in site_rows(planned_rows(facts.sched, aliases)):
+    for sr in site_rows(planned_rows(facts.sched)):
         r = sr.row
         own = r.kind == "readings"
         links, prose, landed = _landed(facts, r, own, extra.link_extensions)
@@ -833,7 +832,7 @@ def gather(course: CourseFacts, facts: SemesterFacts, now: datetime) -> StudentF
         if spec.is_group and spec.team_formation_resolved == SELF_SELECT:
             extra.caps[key] = team_formation.team_cap(course.org, spec, org, key)
     # The reading lists: the prose overlays of every readings copy that has landed.
-    for sr in site_rows(planned_rows(sched, lambda repo: facts.aliases.get(repo, {}))):
+    for sr in site_rows(planned_rows(sched)):
         own = [sr.row] if sr.row.kind == "readings" else []
         for row in [*own, *sr.readings]:
             for repo, path in _landed(facts, row, True, frozenset())[1]:
