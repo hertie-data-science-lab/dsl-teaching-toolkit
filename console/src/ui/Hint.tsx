@@ -82,6 +82,7 @@ export function Hint({ children, doc, label = 'About this page', small = false }
     if (!open) return;
     const esc = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+      e.preventDefault(); // closes this popover only, not a full screen behind it
       if (leaving.current) clearTimeout(leaving.current);
       setHover(false);
       setFocus(false);

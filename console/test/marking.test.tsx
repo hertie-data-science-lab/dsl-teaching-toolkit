@@ -346,12 +346,34 @@ describe('the marking screen', () => {
     expect(q('.marking').getAttribute('role')).toBe('dialog');
     expect(icon().getAttribute('aria-label')).toBe('Exit full screen');
     expect(q('.marking .marks-bar')).not.toBeNull(); // the toolbar stays inside
-    await act(() => void document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
+    await act(() => void document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
     expect(q('.marking').classList.contains('full')).toBe(false);
     expect(document.activeElement).toBe(icon());
     await click(icon());
     await click(icon());
     expect(q('.marking').classList.contains('full')).toBe(false);
+  });
+
+  it('leaves full screen on when Escape closes a dialog or a ? popover inside it', async () => {
+    await marks();
+    const esc = () => act(() => void (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+    const isFull = () => q('.marking').classList.contains('full');
+    await click(q('button.full-toggle'));
+    await click(q('textarea[aria-label="Feedback for ada-l"] + button.area-open'));
+    await esc();
+    expect(root!.querySelector('textarea.big-editor')).toBeNull();
+    expect(isFull()).toBe(true);
+    await click(button('Student view'));
+    await esc();
+    expect(root!.querySelector('.student-view')).toBeNull();
+    expect(isFull()).toBe(true);
+    await act(() => q<HTMLButtonElement>('button[aria-label="About Feedback"]').focus());
+    expect(q<HTMLButtonElement>('button[aria-label="About Feedback"]').nextElementSibling).toBeNull(); // open: at the end of the page
+    await esc();
+    expect(q<HTMLButtonElement>('button[aria-label="About Feedback"]').nextElementSibling).not.toBeNull();
+    expect(isFull()).toBe(true);
+    await esc();
+    expect(isFull()).toBe(false);
   });
 
   it('keeps Return marks and Student view above the marking panel, and the toolbar to marking and saving', async () => {

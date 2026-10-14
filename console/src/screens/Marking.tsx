@@ -292,15 +292,17 @@ export function MarksTab(p: TabProps) {
     };
   }, []);
   // Full screen is an overlay over the page: Escape or the icon closes it, and focus goes back to the icon.
+  // Heard on window, after every listener on document: an Escape a dialog or a ? popover inside
+  // it has handled (prevented) closes only that.
   const exitFull = () => {
     setFull(false);
     fullBtn.current?.focus();
   };
   useEffect(() => {
     if (!full) return;
-    const esc = (e: KeyboardEvent) => e.key === 'Escape' && exitFull();
-    document.addEventListener('keydown', esc);
-    return () => document.removeEventListener('keydown', esc);
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && !e.defaultPrevented && exitFull();
+    window.addEventListener('keydown', esc);
+    return () => window.removeEventListener('keydown', esc);
   }, [full]);
   const text = file.kind === 'ready' ? file.text : null;
   const parsed = useMemo(() => {
