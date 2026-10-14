@@ -1672,6 +1672,9 @@ def _due(day: int, grading_day: int | None = None) -> AssignmentEntry:
         due_datetime=datetime(2026, 10, day, 23, 59, 59, tzinfo=BERLIN),
     )
     entry.window = None if grading_day is None else grading_day - day
+    if entry.window is not None:
+        # Written on the entry, as schedule.yml carries it (`AssignmentEntry.settings`).
+        entry.settings = {"late_window_days": entry.window}
     return entry
 
 
@@ -2493,6 +2496,10 @@ def _early_solutions() -> Schedule:
         }
     )
     sched.org = "Sem-f2026"
+    # Each window written on its entry, as schedule.yml carries it.
+    for slug, entry in sched.assignments.items():
+        if slug in _WINDOWS:
+            entry.settings = {"late_window_days": _WINDOWS[slug]}
     return sched
 
 

@@ -863,8 +863,7 @@ def _engine_reads(monkeypatch, module, handout, due) -> schedule.Schedule:
     text = schedule_edit.insert_block(
         SCHEDULE, RUN, module._schedule_blocks(RUN, handout, due)
     )
-    settings.semester_blocks.cache_clear()
-    monkeypatch.setattr(settings, "_schedule_text", lambda org: text)
+    settings.semester_defaults.cache_clear()
     sched = schedule.parse(yaml.safe_load(text))
     sched.org = SEMESTER
     return sched

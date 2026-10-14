@@ -1397,7 +1397,10 @@ def team_cap(
     if spec is not None and spec.max_team_size:
         return spec.max_team_size
     value, _ = settings.effective(
-        semester_org, slug, "max_team_size", course_org=course_org
+        semester_org,
+        "max_team_size",
+        inline=schedule.run_settings_of(semester_org, slug),
+        course_org=course_org,
     )
     return int(value)
 

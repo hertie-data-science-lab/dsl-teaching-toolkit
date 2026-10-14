@@ -342,31 +342,12 @@ def instance(semester_org: str) -> Instance:
     )
 
 
-@run.per_run(lambda semester_org: run.scope(semester_org, CONFIG_REPO, SCHEDULE_FILE))
-def _schedule_text(semester_org: str) -> str | None:
-    """`semester-config/schedule.yml`, or None when the semester has none (a 404). Any
-    other read failure raises (`get_file_content`)."""
-    return read_semester(semester_org).file(SCHEDULE_FILE).text
-
-
-def _inline(semester_org: str) -> dict[str, dict]:
-    """Each schedule.yml assignment entry's inline run settings (`inline_blocks`); none
-    when the file is absent or does not parse (its own digest says so)."""
-    text = _schedule_text(semester_org)
-    try:
-        data = yaml.safe_load(text or "") or {}
-    except yaml.YAMLError:
-        return {}
-    return inline_blocks(
-        data.get(ASSIGNMENTS_BLOCKS) if isinstance(data, dict) else None
-    )
-
-
 @run.per_run(lambda semester_org: run.scope(semester_org, CONFIG_REPO))
-def semester_blocks(semester_org: str) -> tuple[dict, dict[str, dict]]:
-    """`(defaults, {schedule key: its inline settings})`: the semester's
-    `assignments.yml` `defaults:` and each schedule.yml assignment entry's own settings,
-    each value through its reader; `({}, {})` when neither file is there (a 404). A read
+def semester_defaults(semester_org: str) -> dict:
+    """The semester's `assignments.yml` `defaults:`, each value through its reader; `{}`
+    when the file is not there (a 404). The assignment layer - the settings written on
+    each schedule.yml entry - is never read here: the caller hands it over from the
+    parsed `Schedule` (`AssignmentEntry.settings`), so schedule.yml is read once. A read
     that fails for any other reason RAISES and is not cached, and an `assignments.yml`
     that is not YAML raises `Unusable` - the same fail-closed rule as `course_defaults`:
     nothing hands out or grades on defaults the semester did not choose. `schedule.load`
@@ -378,7 +359,7 @@ def semester_blocks(semester_org: str) -> tuple[dict, dict[str, dict]]:
         )
     for fault in read.faults:
         log_err(f"  ! {ASSIGNMENTS_FILE} {fault.where}: {fault.what}")
-    return read.defaults, _inline(semester_org)
+    return read.defaults
 
 
 def institution_defaults() -> dict:
@@ -389,12 +370,14 @@ def institution_defaults() -> dict:
     return out
 
 
-def layers(course_org: str, semester_org: str = "", slug: str = "") -> list[Layer]:
-    """The layers for one assignment, nearest first."""
-    defaults, blocks = semester_blocks(semester_org)
+def layers(
+    course_org: str, semester_org: str = "", inline: Mapping | None = None
+) -> list[Layer]:
+    """The layers for one assignment, nearest first. `inline` is its schedule.yml entry's
+    own run settings (`AssignmentEntry.settings`), from the parsed plan."""
     return [
-        ("assignment", _usable(blocks.get(slug, {}) if slug else {})),
-        ("semester", _usable(defaults)),
+        ("assignment", _usable(inline or {})),
+        ("semester", _usable(semester_defaults(semester_org))),
         ("course", _usable(course_defaults(course_org))),
         ("institution", institution_defaults()),
     ]
@@ -441,18 +424,23 @@ def _course_of(semester_org: str, course_org: str) -> str:
 
 
 def effective(
-    semester_org: str, slug: str, key: str, *, course_org: str = ""
+    semester_org: str,
+    key: str,
+    *,
+    inline: Mapping | None = None,
+    course_org: str = "",
 ) -> tuple[object, str]:
-    """The effective value of run setting `key` for assignment `slug` of `semester_org`,
-    and the layer it came from: `assignment`, `semester`, `course` or `institution`."""
+    """The effective value of run setting `key` for an assignment of `semester_org`
+    whose schedule.yml entry states `inline`, and the layer it came from: `assignment`,
+    `semester`, `course` or `institution`."""
     course_org = _course_of(semester_org, course_org)
-    return resolve(key, layers(course_org, semester_org, slug))
+    return resolve(key, layers(course_org, semester_org, inline))
 
 
 def effective_all(
-    semester_org: str, slug: str, *, course_org: str = ""
+    semester_org: str, *, inline: Mapping | None = None, course_org: str = ""
 ) -> dict[str, tuple[object, str]]:
     """`effective` for every run key, off one set of layers."""
     course_org = _course_of(semester_org, course_org)
-    stack = layers(course_org, semester_org, slug)
+    stack = layers(course_org, semester_org, inline)
     return {key: resolve(key, stack) for key in RUN_KEYS}

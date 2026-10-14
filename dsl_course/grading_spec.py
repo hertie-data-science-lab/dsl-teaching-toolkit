@@ -245,7 +245,11 @@ def with_run_settings(
     `sources` saying which layer gave it. Without a semester, the semester's layers are
     empty. The shape rules hold for what the cascade brings, silently - a course default
     of `public` says nothing about an assignment that creates no repo of its own."""
-    resolved = settings.effective_all(semester_org, slug, course_org=course_org)
+    resolved = settings.effective_all(
+        semester_org,
+        inline=schedule.run_settings_of(semester_org, slug),
+        course_org=course_org,
+    )
     values = {key: value for key, (value, _) in resolved.items()}
     if not creates_unit_repos(spec.submit_via):
         values["visibility"] = "private"

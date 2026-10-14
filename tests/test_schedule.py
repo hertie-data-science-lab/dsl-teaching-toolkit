@@ -1438,20 +1438,11 @@ def test_the_late_cutoff_is_the_due_date_plus_the_effective_window(monkeypatch):
     assert schedule.grading_cutoff_datetime(sched, "a1") == due + timedelta(days=10)
     # The entry's own setting answers first; 0 is no late work at all.
     sched.org = "Sem"
-    monkeypatch.setattr(
-        settings,
-        "_schedule_text",
-        lambda org: "assignments:\n  a1:\n    late_window_days: 0\n",
-    )
     monkeypatch.setattr(settings, "course_org_for_semester", lambda org: "C")
+    sched.assignments["a1"].settings = {"late_window_days": 0}
     assert schedule.grading_cutoff_datetime(sched, "a1") == due
     # A late rule naming only the penalty names no window: no late work either.
-    settings.semester_blocks.cache_clear()
-    monkeypatch.setattr(
-        settings,
-        "_schedule_text",
-        lambda org: "assignments:\n  a1:\n    late_penalty_per_day: 5%\n",
-    )
+    sched.assignments["a1"].settings = {"late_penalty_per_day": "5%"}
     assert schedule.grading_cutoff_datetime(sched, "a1") == due
     assert schedule.grading_cutoff_datetime(sched, "unknown") is None
 

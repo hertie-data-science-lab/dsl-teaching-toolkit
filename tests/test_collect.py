@@ -352,7 +352,7 @@ def test_submit_url_is_read_for_external_only_and_https_only(monkeypatch):
         "moodle.edu",
         placeholder,
     ):
-        settings.semester_blocks.cache_clear()
+        settings.semester_defaults.cache_clear()
         spec = _resolved(
             monkeypatch, "submit_via: external\n", f"    submit_url: {bad}\n"
         )
@@ -361,7 +361,7 @@ def test_submit_url_is_read_for_external_only_and_https_only(monkeypatch):
         assert "is not a filled-in `https://` address" in said
     # And it describes a handover the toolkit does not see, so on any other shape it is a
     # line pointing students away from the repo they are supposed to push to.
-    settings.semester_blocks.cache_clear()
+    settings.semester_defaults.cache_clear()
     spec = _resolved(monkeypatch, "", f"    submit_url: {url}\n")
     assert spec.submit_url == ""
 
@@ -4395,11 +4395,11 @@ def _canonical(status: str, units: list[str]) -> str:
     )
     with pytest.MonkeyPatch.context() as mp:
         run_settings(mp, lambda org: LATE_YML)
-        settings.semester_blocks.cache_clear()
+        settings.semester_defaults.cache_clear()
         spec = grading_spec.sheet_spec(
             _sched(), "assignment-1", "assignment-1", gspec, False
         )
-    settings.semester_blocks.cache_clear()
+    settings.semester_defaults.cache_clear()
     sheet = grading_sheet.merge_sheet(
         None, spec, [(u, [u]) for u in units], {u: {"days_late": "0"} for u in units}
     )
@@ -5038,7 +5038,7 @@ def test_an_assignment_s_own_window_moves_the_cutoff(monkeypatch):
     collect.sync_sheet(
         "Course",
         "Semester",
-        _sched(),
+        _sched(settings={"late_window_days": 4, "late_penalty_per_day": "10%"}),
         "assignment-1",
         "assignment-1",
         "assignment-1-f2026",
@@ -6249,7 +6249,7 @@ def test_the_grading_moment_is_the_late_cutoff(monkeypatch):
     # Due plus the institution's 10 days, or the semester's own window.
     assert _collect_configs(monkeypatch)[0].fires == DUE_AT + timedelta(days=10)
     run_settings(monkeypatch, lambda org: "defaults:\n  late_window_days: 0\n")
-    settings.semester_blocks.cache_clear()
+    settings.semester_defaults.cache_clear()
     assert _collect_configs(monkeypatch)[0].fires == DUE_AT
 
 
@@ -6292,7 +6292,7 @@ def _split_run_keys(monkeypatch, config: str) -> None:
         monkeypatch,
         lambda org: f"assignments:\n  a3:\n{block}" if block else None,
     )
-    settings.semester_blocks.cache_clear()
+    settings.semester_defaults.cache_clear()
 
 
 def _visibility_run(monkeypatch, config, rows, *, handed_out=HANDED_OUT, dest=None):

@@ -622,14 +622,11 @@ def _team_entry(monkeypatch, config: str, *, now: datetime, teams_csv="", **kw) 
                 course_source_repo="assignment-3-f2026",
                 handout_datetime=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
                 due_datetime=datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+                # The window shuts at the late cutoff: the due date plus its 7 days.
+                settings={"late_window_days": 7},
             )
         },
         org="Semester-f2026",
-    )
-    # The window shuts at the late cutoff: the due date plus this semester's 7 days.
-    run_settings(
-        monkeypatch,
-        lambda org: "assignments:\n  assignment-3:\n    late_window_days: 7\n",
     )
     entry = sched.assignments["assignment-3"]
     return site._assignment_entry(

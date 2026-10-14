@@ -169,12 +169,13 @@ def _no_semester_is_closed_out(monkeypatch):
 def _no_course_or_semester_defaults(monkeypatch):
     """Answer the cascade's live reads (`settings`) with "nothing declared" by default:
     the course's `dsl-course.yml`, the semester's `assignments.yml`, the run settings
-    written on its schedule.yml entries and the semester's pointer to its course. Every spec read and every late cutoff resolves through them,
+    the settings written on a schedule.yml entry (`schedule.run_settings_of`, which reads
+    the parsed plan) and the semester's pointer to its course. Every spec read and every late cutoff resolves through them,
     and the institution's policy is the uninteresting answer for every test but the ones
     about a layer, which set their own after this fixture and win."""
     monkeypatch.setattr(settings, "org_meta", lambda org: {})
     monkeypatch.setattr(settings, "_assignments_text", lambda org: None)
-    monkeypatch.setattr(settings, "_schedule_text", lambda org: None)
+    monkeypatch.setattr(schedule, "run_settings_of", lambda org, slug: {})
     monkeypatch.setattr(settings, "course_org_for_semester", lambda org: "")
 
 
@@ -563,5 +564,11 @@ def run_settings(monkeypatch, read) -> None:
         }
         return defaults, yaml.safe_dump({"assignments": inline}, sort_keys=False)
 
+    def inline(org, slug):
+        text = split(org)[1]
+        blocks = (yaml.safe_load(text) or {}).get("assignments") if text else None
+        return settings.inline_blocks(blocks).get(slug, {})
+
     monkeypatch.setattr(settings, "_assignments_text", lambda org: split(org)[0])
-    monkeypatch.setattr(settings, "_schedule_text", lambda org: split(org)[1])
+    # The entry's own settings, as the parsed plan carries them (`AssignmentEntry.settings`).
+    monkeypatch.setattr(schedule, "run_settings_of", inline)

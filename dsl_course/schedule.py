@@ -1938,7 +1938,7 @@ def grading_cutoff_datetime(sched: Schedule, slug: str) -> datetime | None:
     entry = sched.assignments.get(slug)
     if entry is None or entry.due_datetime is None:
         return None
-    days, _ = settings.effective(sched.org, slug, "late_window_days")
+    days, _ = settings.effective(sched.org, "late_window_days", inline=entry.settings)
     return entry.due_datetime + timedelta(days=int(days or 0))
 
 
@@ -2028,6 +2028,17 @@ def _unreadable_fault(what: str, lineno: int | None = None) -> ConfigFault:
             "fix the YAML on the line above; every entry is ignored until the file parses"
         ),
     )
+
+
+def run_settings_of(semester_org: str, slug: str) -> dict:
+    """The run settings written on assignment `slug`'s schedule.yml entry
+    (`AssignmentEntry.settings`), off the plan `load` parses once per run; `{}` with no
+    semester or no such entry. The one way a caller holding only a semester and a key
+    reaches the cascade's assignment layer - schedule.yml is never read a second time."""
+    if not semester_org or not slug:
+        return {}
+    entry = load(semester_org).assignments.get(slug)
+    return dict(entry.settings) if entry else {}
 
 
 def load(semester_org: str) -> Schedule:

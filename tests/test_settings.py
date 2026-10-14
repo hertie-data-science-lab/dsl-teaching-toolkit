@@ -19,6 +19,9 @@ from dsl_course import (
 from dsl_course.gh_contents import load_yaml_lines
 from tests.conftest import run_settings
 
+# The real reader, before conftest answers it with "nothing written" for every test.
+RUN_SETTINGS_OF = schedule.run_settings_of
+
 PACKAGE = Path(settings.__file__).parent
 # The real read, before conftest's autouse fixture answers it with "no file".
 _READ_ASSIGNMENTS = settings._assignments_text
@@ -53,7 +56,9 @@ def semester(monkeypatch):
 
 
 def test_with_nothing_declared_every_value_is_the_institution_s():
-    got = settings.effective_all("Sem", "a1", course_org="Course")
+    got = settings.effective_all(
+        "Sem", inline=schedule.run_settings_of("Sem", "a1"), course_org="Course"
+    )
     ours = policy.defaults()
     assert got["max_team_size"] == (ours["max_team_size"], "institution")
     assert got["late_window_days"] == (ours["late_window_days"], "institution")
@@ -63,23 +68,40 @@ def test_with_nothing_declared_every_value_is_the_institution_s():
 
 
 def test_the_course_layer_answers_before_the_institution(course):
-    assert settings.effective("Sem", "a1", "late_window_days", course_org="C") == (
+    assert settings.effective(
+        "Sem",
+        inline=schedule.run_settings_of("Sem", "a1"),
+        key="late_window_days",
+        course_org="C",
+    ) == (
         7,
         "course",
     )
-    assert settings.effective("Sem", "a1", "visibility", course_org="C") == (
+    assert settings.effective(
+        "Sem",
+        inline=schedule.run_settings_of("Sem", "a1"),
+        key="visibility",
+        course_org="C",
+    ) == (
         "public",
         "course",
     )
-    assert settings.effective("Sem", "a1", "max_team_size", course_org="C")[1] == (
-        "institution"
-    )
+    assert settings.effective(
+        "Sem",
+        inline=schedule.run_settings_of("Sem", "a1"),
+        key="max_team_size",
+        course_org="C",
+    )[1] == ("institution")
 
 
 def test_assignments_yml_is_the_semester_and_assignment_layers(course, semester):
-    a1 = settings.effective_all("Sem", "a1", course_org="C")
+    a1 = settings.effective_all(
+        "Sem", inline=schedule.run_settings_of("Sem", "a1"), course_org="C"
+    )
     assert a1["max_team_size"] == (4, "semester")
-    a2 = settings.effective_all("Sem", "a2", course_org="C")
+    a2 = settings.effective_all(
+        "Sem", inline=schedule.run_settings_of("Sem", "a2"), course_org="C"
+    )
     assert a2["max_team_size"] == (2, "assignment")
     assert a2["visibility"] == ("public", "course")
 
@@ -87,20 +109,27 @@ def test_assignments_yml_is_the_semester_and_assignment_layers(course, semester)
 def test_the_late_pair_stays_paired_at_the_layer_that_states_it(course, semester):
     # The semester defaults state the window alone: that IS its rule, penalty none - the
     # course's 20% is not borrowed for the missing half.
-    a1 = settings.effective_all("Sem", "a1", course_org="C")
+    a1 = settings.effective_all(
+        "Sem", inline=schedule.run_settings_of("Sem", "a1"), course_org="C"
+    )
     assert a1["late_window_days"] == (5, "semester")
     assert a1["late_penalty_per_day"] == (None, "semester")
     # a2's own block states the penalty alone.
-    a2 = settings.effective_all("Sem", "a2", course_org="C")
+    a2 = settings.effective_all(
+        "Sem", inline=schedule.run_settings_of("Sem", "a2"), course_org="C"
+    )
     assert a2["late_penalty_per_day"] == ("5%", "assignment")
     assert a2["late_window_days"] == (None, "assignment")
 
 
 def test_no_assignments_yml_means_both_of_its_layers_are_empty(course):
-    assert settings.semester_blocks("Sem") == ({}, {})
-    assert settings.effective("Sem", "a2", "max_team_size", course_org="C")[1] == (
-        "institution"
-    )
+    assert settings.semester_defaults("Sem") == {}
+    assert settings.effective(
+        "Sem",
+        inline=schedule.run_settings_of("Sem", "a2"),
+        key="max_team_size",
+        course_org="C",
+    )[1] == ("institution")
 
 
 def test_a_semester_read_that_fails_raises_and_is_not_cached(monkeypatch):
@@ -115,16 +144,16 @@ def test_a_semester_read_that_fails_raises_and_is_not_cached(monkeypatch):
 
     monkeypatch.setattr(gh_contents, "get_file_content", read)
     with pytest.raises(RuntimeError):
-        settings.semester_blocks("Sem")
+        settings.semester_defaults("Sem")
     # A later read that succeeds is read, not the failure remembered as "nothing".
     answers.append("defaults:\n  max_team_size: 4\n")
-    assert settings.semester_blocks("Sem") == ({"max_team_size": 4}, {})
+    assert settings.semester_defaults("Sem") == {"max_team_size": 4}
 
 
 def test_an_absent_assignments_yml_is_the_empty_layer(monkeypatch):
     run_settings(monkeypatch, _READ_ASSIGNMENTS)
     monkeypatch.setattr(gh_contents, "get_file_content", lambda *a, **k: None)
-    assert settings.semester_blocks("Sem") == ({}, {})
+    assert settings.semester_defaults("Sem") == {}
 
 
 def test_a_course_read_that_fails_raises_and_is_not_cached(monkeypatch):
@@ -148,7 +177,12 @@ def test_a_value_the_reader_refuses_leaves_the_next_layer_to_answer(monkeypatch)
         monkeypatch,
         lambda org: "defaults:\n  max_team_size: lots\n",
     )
-    assert settings.effective("Sem", "a1", "max_team_size", course_org="C") == (
+    assert settings.effective(
+        "Sem",
+        inline=schedule.run_settings_of("Sem", "a1"),
+        key="max_team_size",
+        course_org="C",
+    ) == (
         policy.defaults()["max_team_size"],
         "institution",
     )
@@ -292,7 +326,9 @@ def test_a_closed_vocabulary_typo_leaves_the_next_layer_to_answer(
         settings, "org_meta", lambda org: {"assignment_defaults": {key: course_value}}
     )
     run_settings(monkeypatch, lambda org: f"defaults:\n  {key}: {typo}\n")
-    assert settings.effective("Sem", "a1", key, course_org="C") == (
+    assert settings.effective(
+        "Sem", inline=schedule.run_settings_of("Sem", "a1"), key=key, course_org="C"
+    ) == (
         course_value,
         "course",
     )
@@ -312,8 +348,13 @@ def test_an_entry_setting_typo_leaves_the_semester_default_to_answer(
     monkeypatch.setattr(
         settings, "_assignments_text", lambda org: f"defaults:\n  {key}: {good}\n"
     )
-    entry = f"assignments:\n  a1:\n    {inline}: {typo}\n"
-    monkeypatch.setattr(settings, "_schedule_text", lambda org: entry)
+    entry = (
+        f"assignments:\n  a1:\n    template: t\n    number: 1\n"
+        f"    due_datetime: 2026-10-13\n    {inline}: {typo}\n"
+    )
+    # The entry's settings come off the parsed plan (`schedule.run_settings_of`).
+    monkeypatch.setattr(schedule, "_schedule_text", lambda org: entry)
+    monkeypatch.setattr(schedule, "run_settings_of", RUN_SETTINGS_OF)
     monkeypatch.setattr(
         grading_spec, "_grading_text", lambda org, template: "type: group\n"
     )
@@ -388,7 +429,7 @@ def test_an_assignments_yml_that_is_not_yaml_stops_the_cascade(monkeypatch):
     assert read.unparseable and read.faults[0].file == settings.ASSIGNMENTS_FILE
     # Fail closed: nothing hands out or grades on defaults the semester did not choose.
     with pytest.raises(faults.Unusable):
-        settings.semester_blocks("Sem")
+        settings.semester_defaults("Sem")
 
 
 def test_the_schedule_carries_assignments_yml_s_faults(monkeypatch):

@@ -35,15 +35,13 @@ def _one(due) -> Schedule:
 
 @pytest.fixture
 def window(monkeypatch):
-    """Give the semester's assignments.yml a window for assignment-1."""
+    """Give the semester's assignments.yml a window (its `defaults:`)."""
 
     def set_days(days: int) -> None:
-        settings.semester_blocks.cache_clear()
+        settings.semester_defaults.cache_clear()
         run_settings(
             monkeypatch,
-            lambda org: (
-                f"assignments:\n  assignment-1:\n    late_window_days: {days}\n"
-            ),
+            lambda org: f"defaults:\n  late_window_days: {days}\n",
         )
 
     return set_days
