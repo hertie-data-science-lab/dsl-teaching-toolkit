@@ -937,11 +937,6 @@ def all_schemas() -> dict[str, dict]:
         # site block, contact and licences, so the console holds no literal of its own.
         "policy.json": policy.load(),
         "schedule.schema.json": schedule_schema(),
-        # WP-C removes: the console's schedule editor still writes the 0.10 shape and
-        # validates against that shape's schema, frozen, until it writes the 0.11 one.
-        "schedule-0.10.schema.json": json.loads(
-            Path(__file__).with_name("schedule-0.10.schema.json").read_text()
-        ),
         "instructors.schema.json": instructors_schema(),
         "students.schema.json": students_schema(),
         "teams.schema.json": teams_schema(),

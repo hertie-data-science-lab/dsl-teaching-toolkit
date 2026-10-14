@@ -36,11 +36,13 @@ const SCHEDULE = [
   'timezone: Europe/Berlin',
   'assignments:',
   '  assignment-2:',
-  '    course_source_repo: assignment-2-f2026',
+  '    number: 2',
+  '    template: assignment-2-f2026',
   '    handout_datetime: 2026-09-15T10:00',
   '    due_datetime: 2026-09-27T23:59',
   '  assignment-3:',
-  '    course_source_repo: assignment-3-f2026',
+  '    number: 3',
+  '    template: assignment-3-f2026',
   '    handout_datetime: 2026-09-16T10:00',
   '    due_datetime: 2026-09-20T23:59',
   '',
@@ -150,7 +152,7 @@ describe('the Overview form: schedule entry and assignments.yml block as one', (
   });
 
   it('names the entry to Update every copy and Collect now, so two entries may share one template', () => {
-    const shared = SCHEDULE.replace('course_source_repo: assignment-3-f2026', 'course_source_repo: assignment-2-f2026');
+    const shared = SCHEDULE.replace('template: assignment-3-f2026', 'template: assignment-2-f2026');
     const out = html(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'overview', files: filesWith({ [`${COHORT_ORG}/semester-config/schedule.yml`]: shared }) })} />);
     expect(out).toContain('>Collect now<');
     const ref = { slug: 'assignment-2', title: 'x', template: 'assignment-2-f2026', units: 1, group: false, when: '' };
@@ -297,13 +299,14 @@ describe('the wizards', () => {
     for (const k of ['number', 'semester', 'copy_from', 'team_formation', 'max_team_size', 'visibility', 'submit_url', 'late_window_days', 'late_penalty_per_day']) expect(args).not.toHaveProperty(k);
   });
 
-  it('adding it to a semester’s schedule asks the run settings, with defaults from the cascade', () => {
+  it('adding it to a semester’s schedule prewrites the run settings from the cascade (forms mock-up v3)', () => {
     const files = filesWith({ [`${COURSE_ORG}/assignment-4-f2026/grading_config.yml`]: 'type: group\n' });
     const out = html(<ScheduleScreen {...props({ entry: 'new', prefill: 'assignment-4-f2026', files })} />);
     expect(out).toContain('How this semester runs it');
-    expect(out).toContain('Written to assignments.yml with the entry.');
-    expect(out).toContain('Students form their own, institution default');
-    expect(out).toContain('up to 4, this course’s default');
-    expect(out).toContain('Due + 5 days at 5% a day, this semester’s default');
+    expect(out).toContain('(all inherited from the semester’s default config values unless changed here)');
+    expect(out).toMatch(/id="e-ts"[^>]*value="4"/);
+    expect(out).toMatch(/id="e-lw"[^>]*value="5"/);
+    expect(out).toMatch(/id="e-lp"[^>]*value="5"/);
+    expect(out).toMatch(/<option value="self_select" selected/);
   });
 });

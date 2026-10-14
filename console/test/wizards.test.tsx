@@ -486,23 +486,22 @@ describe('the wizard screens', () => {
     const files = new StaticFiles({ [`${COHORT_ORG}/semester-config/schedule.yml`]: 'timezone: Europe/Berlin\nassignments: {}\n' });
     const p: CohortProps = { course, cohort: course.cohorts[0], loaded: ready, files, now: NOW, entry: 'new', prefill: 'assignment-4-f2026' };
     const out = render(<ScheduleScreen {...p} />);
-    expect(out).toContain('Assignment entry');
+    expect(out).toContain('New assignment');
     expect(out).toContain('<option value="assignment-4-f2026" selected');
   });
 
   it('the schedule editor proposes the next number as the key and names templates by their title', () => {
     const tpl = example.course!.templates[0].repo;
     const files = new StaticFiles({
-      [`${COHORT_ORG}/semester-config/schedule.yml`]: 'timezone: Europe/Berlin\nassignments:\n  assignment-1:\n    course_source_repo: x\n    due_datetime: 2026-10-01\n',
+      [`${COHORT_ORG}/semester-config/schedule.yml`]: 'timezone: Europe/Berlin\nassignments:\n  assignment-1:\n    number: 1\n    template: x\n    due_datetime: 2026-10-01\n',
       [`${COURSE_ORG}/${tpl}/grading_config.yml`]: 'title: Group project\n',
     });
     const p: CohortProps = { course, cohort: course.cohorts[0], loaded: ready, files, now: NOW, entry: 'new', prefill: tpl };
     const out = render(<ScheduleScreen {...p} />);
-    expect(out).toContain(`<option value="${tpl}" selected>Group project</option>`);
+    expect(out).toContain(`<option value="${tpl}" selected>${tpl} (`);
     expect(out).toMatch(/<input id="e-num" type="number" min="1" max="999" value="2"/);
-    expect(out).toContain('The number students see. Prefilled with the next one; change it if this is not the next assignment.');
-    expect(out).toContain("Each student's repo is assignment-2-&lt;handle>.");
-    expect(out).toContain('<b>Assignment 2</b>');
+    expect(out).toContain('placeholder="assignment-2-&lt;handle or team> (default)"');
+    expect(out).toContain('>Give the due date, or turn on Dates TBC.</button>');
   });
 });
 

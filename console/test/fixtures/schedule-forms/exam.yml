@@ -1,0 +1,7 @@
+timezone: Europe/Berlin
+exams:
+  exam-midterm:
+    title: Midterm exam
+    event_datetime: 2026-10-20T10:00
+    location: Room 2.32
+    details: Bring a calculator.

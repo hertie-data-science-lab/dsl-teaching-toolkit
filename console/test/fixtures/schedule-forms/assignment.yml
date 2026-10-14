@@ -1,0 +1,7 @@
+timezone: Europe/Berlin
+assignments:
+  assignment-3:
+    number: 3
+    template: assignment-gradient-descent
+    handout_datetime: 2026-10-13T14:00
+    due_datetime: 2026-10-27T23:59

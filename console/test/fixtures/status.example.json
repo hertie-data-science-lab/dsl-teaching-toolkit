@@ -229,7 +229,8 @@
         "path": "lectures/05_trees"
       },
       "show_on_site": true,
-      "tbc": false
+      "tbc": false,
+      "number": 5
     }
   ],
   "assignments": [
@@ -258,7 +259,8 @@
           "value": "10%",
           "source": "institution"
         }
-      }
+      },
+      "number": 2
     }
   ],
   "students": {

@@ -2,9 +2,7 @@ import { parse } from 'yaml';
 import { describe, expect, it } from 'vitest';
 import { YamlText } from '../src/edit/yamlText';
 
-// WP-C removes: the schedule editor still writes the shape before decision 0038 amendment 2
-// (top-level `archive:`), so its tests read the seed as it was then.
-import TEMPLATE from './fixtures/schedule-seed-before-amendment-2.yml?raw';
+import TEMPLATE from '../../templates/semester-config/schedule.yml?raw';
 import POLICY from '../schemas/policy.json';
 
 // The template with the institution values its comments name filled in, as Bootstrap
@@ -26,29 +24,30 @@ describe('YamlText on the seeded schedule.yml', () => {
 
   it('fills the archive date and keeps the comment in its column', () => {
     const y = new YamlText(SEEDED);
-    y.assign(['archive', 'event_datetime'], '2027-01-31');
-    const line = y.text.split('\n').find((l) => l.startsWith('  event_datetime:'))!;
-    const before = SEEDED.split('\n').find((l) => l.startsWith('  event_datetime:'))!;
-    expect(line).toBe('  event_datetime: 2027-01-31  # optional (default: semester_end + 60 days)');
+    y.assign(['semester', 'archive', 'event_datetime'], '2027-01-31');
+    const line = y.text.split('\n').find((l) => l.startsWith('    event_datetime:'))!;
+    const before = SEEDED.split('\n').find((l) => l.startsWith('    event_datetime:'))!;
+    expect(line).toBe('    event_datetime: 2027-01-31      # optional (default: the end + 60 days)');
     expect(line.indexOf('#')).toBe(before.indexOf('#'));
     expect(comments(y.text)).toEqual(comments(SEEDED));
   });
 
-  it('adds a release block after the others, keeping every comment and the order of keys', () => {
+  it('adds a block after the others, keeping every comment and the order of keys', () => {
     const y = new YamlText(SEEDED);
-    y.set(['releases', 'lecture-1'], {
+    y.set(['lectures', 'lecture-1'], {
+      session: 1,
       event_datetime: '2026-09-10T10:00',
       title: 'Intro',
-      deploy: [{ course_source_repo: 'course-materials-f2026', course_source_path: 'lectures/01' }],
+      files: [{ from_course_repo: 'course-materials-f2026', from_path: 'lectures/01' }],
     });
-    y.set(['releases', 'lab-1'], { event_datetime: '2026-09-11', kind: 'lab' });
+    y.set(['lectures', 'lecture-2'], { session: 2, event_datetime: '2026-09-17' });
     expect(comments(y.text)).toEqual(comments(SEEDED));
     expect(y.text.startsWith(SEEDED)).toBe(true);
     const d = parse(y.text);
-    expect(Object.keys(d)).toEqual(['archive', 'releases']);
-    expect(Object.keys(d.releases)).toEqual(['lecture-1', 'lab-1']);
-    expect(d.releases['lecture-1'].deploy[0].course_source_path).toBe('lectures/01');
-    expect(d.archive.details).toContain('This semester is archived on {{date}}');
+    expect(Object.keys(d)).toEqual([...Object.keys(parse(SEEDED)), 'lectures']);
+    expect(Object.keys(d.lectures)).toEqual(['lecture-1', 'lecture-2']);
+    expect(d.lectures['lecture-1'].files[0].from_path).toBe('lectures/01');
+    expect(d.semester.archive.details).toContain('This semester is archived on {{date}}');
   });
 
   it('edits, removes and re-adds entries without touching the neighbours', () => {
@@ -65,11 +64,11 @@ describe('YamlText on the seeded schedule.yml', () => {
 
   it('turns a folded block into one line and back, keeping its header comment', () => {
     const y = new YamlText(SEEDED);
-    y.assign(['archive', 'details'], 'Archived on {{date}}.');
-    expect(y.text).toContain('  details: Archived on {{date}}. # optional, `{{date}}` is filled in automatically\n');
-    y.assign(['archive', 'details'], 'One\nTwo');
-    expect(parse(y.text).archive.details).toBe('One\nTwo');
-    expect(parse(y.text).archive.title).toBe('Semester archived');
+    y.assign(['semester', 'archive', 'details'], 'Archived on {{date}}.');
+    expect(y.text).toContain('    details: Archived on {{date}}. # optional, `{{date}}` is filled in automatically\n');
+    y.assign(['semester', 'archive', 'details'], 'One\nTwo');
+    expect(parse(y.text).semester.archive.details).toBe('One\nTwo');
+    expect(parse(y.text).semester.archive.title).toBe('Semester archived');
   });
 
   it('quotes strings PyYAML would read as booleans', () => {
