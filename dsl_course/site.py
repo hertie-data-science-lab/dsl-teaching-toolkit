@@ -69,14 +69,12 @@ from .discovery import (
     semester_content_repos,
     semester_is_live,
 )
-from .faults import Unusable
 from .gh_contents import get_file_content, repo_tree
 from .ghcli import clone
 from .gradebook import spoken_day
 from .grading_spec import load_grading_spec, total_points
 from .log import CLIParser, log, log_err, log_step, log_withheld
-from .materials import MATERIALS_FILE, Declared, publishable
-from .materials import read as read_materials
+from .materials import publishable, semester_syllabus
 from .opencourse import read as read_opencourse
 from .public_site import publish as publish_public_site
 from .readings import demote_headings
@@ -960,21 +958,6 @@ RETIRED_SITE_FILES = tuple(
 )
 
 
-@run.per_run(lambda course_org, repo: run.scope(course_org, repo, MATERIALS_FILE))
-def _materials(course_org: str, repo: str) -> Declared | None:
-    """`repo`'s `materials.yml`, or None when it cannot be used - said once per run, naming
-    the file. The site then looks for the default syllabus: one faculty file must not
-    freeze every semester's site."""
-    try:
-        return read_materials(course_org, repo)
-    except Unusable as exc:
-        log_err(
-            f"{course_org}/{exc} - the site looks for the default syllabus until it "
-            "is fixed"
-        )
-        return None
-
-
 def _declared_syllabus(
     course_org: str,
     semester_org: str,
@@ -989,7 +972,7 @@ def _declared_syllabus(
         sched,
         live_repos,
         lambda repo: _repo_tree(semester_org, repo)[1],
-        lambda repo: _materials(course_org, repo) or Declared(),
+        semester_syllabus(_instructors_meta(semester_org)[0]),
     )
     if found is None:
         return None

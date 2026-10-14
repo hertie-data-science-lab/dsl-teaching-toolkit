@@ -1,40 +1,28 @@
-"""materials: a materials repo's optional `materials.yml`, and the topic that marks it."""
+"""materials: the topic that marks a materials repo, the semester's syllabus, and folder
+kinds (the console's exported aliases and migrate's 0.10 reading kept)."""
 
 from __future__ import annotations
 
-import pytest
-
 from dsl_course import materials, schemas
-from dsl_course.faults import Unusable
 from dsl_course.schema_check import validate
-from tests.conftest import fake_config
 
 
-def test_absent_is_the_defaults():
-    assert materials.parse(None) == materials.Declared("SYLLABUS.md", {})
-    assert materials.parse({}) == materials.Declared()
+def test_the_semester_names_its_syllabus_and_absent_is_none():
+    # Decision 0039: `semester.yml` `student_site.syllabus`; no materials.yml is read.
+    meta = {"student_site": {"syllabus": "/E1282_syllabus.pdf"}}
+    assert materials.semester_syllabus(meta) == "E1282_syllabus.pdf"
+    assert materials.semester_syllabus({}) == ""
+    assert materials.semester_syllabus(None) == ""
+    assert materials.semester_syllabus({"student_site": "x"}) == ""
 
 
-def test_a_declared_syllabus_and_aliases():
-    declared = materials.parse(
-        {
-            "syllabus": "/E1282_syllabus.pdf",
-            "kinds": {"tutorials/": "Lab", "quiz": "other"},
-        }
-    )
-    assert declared.syllabus == "E1282_syllabus.pdf"
-    assert declared.kinds == {"tutorials": "lab", "quiz": "other"}
-
-
-def test_an_alias_to_a_kind_the_policy_does_not_know_lands_on_other():
-    assert materials.parse({"kinds": {"quiz": "quizzes"}}).kinds == {"quiz": "other"}
-
-
-def test_a_file_that_does_not_validate_is_refused_by_name():
-    with pytest.raises(Unusable, match=r"materials.yml.syllabs: is not a known field"):
-        materials.parse({"syllabs": "x.pdf"})
-    with pytest.raises(Unusable, match="kinds: must be object"):
-        materials.parse({"kinds": ["lab"]})
+def test_a_folders_kind_is_the_institutions_and_nothing_else():
+    # Ruling of 14 Oct 2026: kinds from institution.yml only - a plural or a key, case
+    # aside; any other folder is supporting files, whatever a materials.yml said.
+    assert materials.folder_kind("Labs/") == "lab"
+    assert materials.folder_kind("lecture") == "lecture"
+    assert materials.folder_kind("tutorials") == materials.ASSETS_KIND
+    assert materials.folder_kind("data") == materials.ASSETS_KIND
 
 
 def test_the_exported_schema_takes_what_the_parser_takes():
@@ -52,16 +40,7 @@ def test_the_topic_makes_a_materials_repo_not_the_name():
     )
 
 
-def test_a_file_that_is_not_yaml_is_unusable_not_a_traceback(monkeypatch):
-    fake_config(monkeypatch, lambda org, repo, path: "kinds: [not closed")
-    materials.read.cache_clear()
-    with pytest.raises(Unusable, match="cm/materials.yml is not valid YAML"):
-        materials.read("C", "cm")
-    materials.read.cache_clear()
-
-
 def test_folder_keys_and_aliases_match_whatever_the_case():
-    assert materials.parse({"kinds": {"Quiz": "exam"}}).kinds == {"quiz": "exam"}
     assert materials.infer_kind("Quiz", {"quiz": "exam"}) == "exam"
     assert materials.alias_kind("LABS") == "lab"
     assert materials.alias_kind("code") is None
@@ -91,9 +70,7 @@ def test_supporting_files_folders_are_assets_by_name():
 
 
 def test_a_folder_path_names_its_kind_and_the_repo_declaration_wins():
-    # Paths are keys too, parsed like names: trimmed and lowercased.
-    declared = materials.parse({"kinds": {"/Students/Lectures/": "lecture"}})
-    assert declared.kinds == {"students/lectures": "lecture"}
+    # The 0.10 inference migrate replays once (`migrate.old_materials` reads the map).
     # A built-in name one level down names its kind; two levels down it does not.
     assert materials.alias_kind("students/Labs") == "lab"
     assert materials.alias_kind("course/2026/labs") is None

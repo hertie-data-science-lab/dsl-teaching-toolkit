@@ -8,12 +8,13 @@ outside the markers.
 from __future__ import annotations
 
 from datetime import datetime
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
 
 from dsl_course import syllabus
-from dsl_course.materials import PLAN_END, PLAN_START, Declared
+from dsl_course.materials import PLAN_END, PLAN_START
 from dsl_course.schedule import Deploy, Release, Schedule
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -30,6 +31,15 @@ TREE = (
     "lectures/01_intro/deck.html",
     "readings/01_week-1/blitzstein.pdf",
 )
+
+
+def _semester_file(monkeypatch, meta: dict) -> None:
+    """The semester's `semester.yml`, parsed, as `syllabus` reads it."""
+    monkeypatch.setattr(
+        syllabus,
+        "read_semester",
+        lambda org: SimpleNamespace(semester=SimpleNamespace(meta=lambda: meta)),
+    )
 
 
 @pytest.fixture
@@ -77,7 +87,7 @@ def wired(monkeypatch):
         ]
     )
     monkeypatch.setattr(syllabus.schedule, "load", lambda org: sched)
-    monkeypatch.setattr(syllabus, "read_materials", lambda org, repo: Declared())
+    _semester_file(monkeypatch, {})
     monkeypatch.setattr(syllabus, "default_branch", lambda o, r: "main")
     monkeypatch.setattr(syllabus, "repo_tree", lambda o, r, b, k: TREE)
     return lambda: syllabus.build("Course", "Semester-f2026")[0]
@@ -356,9 +366,7 @@ def test_preview_and_write_both_hand_the_block_to_the_outcome(monkeypatch, wired
 def test_write_goes_between_the_markers_of_the_declared_syllabus(monkeypatch, wired):
     # Decision 0031 rule 9: the faculty's own words stay; only the marked block changes,
     # and the write is refused if the file moved on since it was read.
-    monkeypatch.setattr(
-        syllabus, "read_materials", lambda o, r: Declared("E1282.md", {}, True)
-    )
+    _semester_file(monkeypatch, {"student_site": {"syllabus": "E1282.md"}})
     written = _writable(monkeypatch)
     _argv(monkeypatch, "--no-preview")
     out = syllabus.main()
@@ -445,21 +453,27 @@ def test_a_syllabus_too_large_or_not_utf8_is_refused(monkeypatch, wired):
     assert [r["code"] for r in out.reasons] == ["NOT_UTF8"]
 
 
-def test_a_broken_materials_yml_is_a_refusal_not_a_traceback(monkeypatch, wired):
-    def unusable(o, r):
-        raise syllabus.Unusable("cm/materials.yml is not valid YAML")
+def test_a_broken_semester_yml_is_a_refusal_not_a_traceback(monkeypatch, wired):
+    def unusable():
+        raise syllabus.Unusable("semester-config/semester.yml is not valid YAML")
 
-    monkeypatch.setattr(syllabus, "read_materials", unusable)
+    monkeypatch.setattr(
+        syllabus,
+        "read_semester",
+        lambda org: SimpleNamespace(semester=SimpleNamespace(meta=unusable)),
+    )
     written = _writable(monkeypatch)
-    # The plan reads no materials.yml (decision 0038: no folder kinds), so the preview
-    # builds; the write needs its `syllabus:` and refuses.
+    # The plan reads only the schedule, so the preview builds; the write needs the
+    # semester's `student_site.syllabus` (decision 0039) and refuses.
     _argv(monkeypatch)
     assert syllabus.main() == 0
     _argv(monkeypatch, "--no-preview")
     out = syllabus.main()
     assert out == 1 and written == {}
     assert [r["code"] for r in out.reasons] == ["MATERIALS_UNUSABLE"]
-    assert out.text == "cm/materials.yml is not valid YAML. Fix it and run this again."
+    assert out.text == (
+        "semester-config/semester.yml is not valid YAML. Fix it and run this again."
+    )
 
 
 def test_a_titleless_entry_does_not_blank_a_session_the_site_names(wired, monkeypatch):

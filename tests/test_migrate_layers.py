@@ -236,3 +236,25 @@ def test_a_semester_that_ran_on_the_institutions_team_formation_keeps_it(
 def test_nothing_is_carried_where_the_course_or_semester_states_a_formation():
     assert migrate.carried_defaults({"team_formation": "assigned"}, {}) == {}
     assert migrate.carried_defaults({}, {"team_formation": "assigned"}) == {}
+
+
+def test_a_materials_yml_syllabus_folds_into_the_semesters_student_site(monkeypatch):
+    # No live org declares one (ruling of 14 Oct 2026): a synthetic copy. The 0.10 file
+    # is read once, by the migration; its kinds feed only the schedule-shape inference.
+    files = {
+        "materials.yml": "syllabus: /E1282_syllabus.pdf\nkinds:\n  Tutorials: lab\n"
+    }
+    monkeypatch.setattr(
+        migrate, "get_file_content", lambda org, repo, path: files.get(path)
+    )
+    syllabus, kinds = migrate.old_materials("C", "course-materials-f2026")
+    assert (syllabus, kinds) == ("E1282_syllabus.pdf", {"tutorials": "lab"})
+    inherited = [("institution", settings.institution_defaults())]
+    new, stops = migrate.semester_layer(
+        "x-f2026", "release", None, None, syllabus, inherited
+    )
+    assert stops == []
+    assert yaml.safe_load(new)["student_site"] == {"syllabus": "E1282_syllabus.pdf"}
+    assert migrate.semester_layer_kept(None, None, syllabus, new) == []
+    files.clear()
+    assert migrate.old_materials("C", "course-materials-f2026") == ("", {})

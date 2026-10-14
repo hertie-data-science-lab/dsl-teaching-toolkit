@@ -23,7 +23,6 @@ from dsl_course import (
     student_status,
 )
 from dsl_course.gh_contents import load_yaml_lines
-from dsl_course.materials import Declared
 from dsl_course.schema_check import validate
 from dsl_course.status_json import CourseFacts, SemesterFacts
 from tests.conftest import fake_config, repo_row
@@ -659,7 +658,6 @@ def test_gather_reads_briefs_only_for_what_is_out(monkeypatch):
     )
     monkeypatch.setattr(student_status, "default_branch", lambda *a, **k: "main")
     fake_config(monkeypatch, lambda *a: INSTRUCTORS)
-    monkeypatch.setattr(student_status, "read_materials", lambda org, repo: Declared())
     monkeypatch.setattr(student_status.team_formation, "team_cap", lambda *a, **k: 3)
     facts = _facts()
     extra = student_status.gather(_course(), facts, NOW)

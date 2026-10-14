@@ -132,8 +132,8 @@ from .materials import (
     alias_kind,
     infer_kind,
     is_materials_repo,
+    known_kind,
 )
-from .materials import read as read_materials
 from .opencourse import READINGS_MODES, OpenCourse
 from .opencourse import seed_text as opencourse_text
 from .profile_readme import profile_files, update_profile_readme
@@ -1929,6 +1929,24 @@ def course_layer_kept(
     return out
 
 
+OLD_MATERIALS_FILE = legacy.old_name(
+    f"{SEMESTER_FILE} student_site.syllabus", legacy.MATERIALS_ROOT
+)
+
+
+def old_materials(org: str, repo: str) -> tuple[str, dict[str, str]]:
+    """A materials repo's 0.10 `materials.yml`: `(declared syllabus or "", {folder:
+    kind})`. Absent, or not a mapping, declares nothing (the 0.10 engine refused such a
+    file and looked for the default)."""
+    data = _yaml(get_file_content(org, repo, OLD_MATERIALS_FILE))
+    syllabus = str(data.get("syllabus") or "").strip().strip("/")
+    kinds = data.get("kinds") if isinstance(data.get("kinds"), dict) else {}
+    return syllabus, {
+        str(folder).strip().strip("/").lower(): known_kind(str(kind))
+        for folder, kind in kinds.items()
+    }
+
+
 def _top_block(text: str, key: str) -> list[str] | None:
     """The lines of `text`'s top-level `key:` block, its own line first, through its last
     indented line (comments and blank lines after it left out); None when it has none."""
@@ -3483,10 +3501,7 @@ class Semester:
     # schedule shape ----------------------------------------------------------
     def _aliases(self, repo: str) -> Mapping[str, str]:
         """A source repo's `materials.yml` folder aliases, as 0.10 inferred kinds by."""
-        try:
-            return read_materials(self.course, repo).kinds
-        except Unusable:
-            return {}
+        return old_materials(self.course, repo)[1]
 
     def _reading_list(self, repo: str, path: str) -> str:
         """The READINGS.md (or .txt/.bib) text a copy of `path` from the course's `repo`
@@ -3578,6 +3593,22 @@ class Semester:
         live = _files(self.org, self.config())
         return SEMESTER_FILE in live and not set(OLD_SEMESTER_FILES) & set(live)
 
+    def _syllabus(self) -> tuple[str, list[str]]:
+        """The syllabus the semester's source repos declare in a 0.10 `materials.yml`
+        (folded into `student_site.syllabus`), and a stop when they declare two."""
+        text = get_file_content(self.org, self.config(), schedule.SCHEDULE_PATH)
+        sched = schedule.parse(load_yaml_lines(text or "") or {})
+        repos = sorted({d.course_source_repo for r in sched.releases for d in r.deploy})
+        found = {old_materials(self.course, repo)[0] for repo in repos} - {""}
+        if len(found) > 1:
+            stop = (
+                f"the source repos' {OLD_MATERIALS_FILE} declare {len(found)} syllabuses "
+                f"({', '.join(sorted(found))}) - {SEMESTER_FILE} names one: set "
+                f"`{STUDENT_SITE_BLOCK}.syllabus` by hand, then run again"
+            )
+            return "", [stop]
+        return (found.pop() if found else ""), []
+
     def layers_work(self) -> dict:
         """Everything the step reads and would write: the old texts, `files` (path ->
         bytes), `delete`, `notes` and `stops`. Empty `files` and `delete` = done."""
@@ -3608,9 +3639,8 @@ class Semester:
                     f"{SEMESTER_FILE} is already there beside the files it replaces - "
                     f"fold them into it by hand, then delete them"
                 )
-            # `materials.yml` `syllabus:` stays where it is until the maintainer rules
-            # where a semester's syllabus is declared (its fold is not written).
-            syllabus = ""
+            syllabus, more = self._syllabus()
+            stops += more
             inherited = settings.layers(self.course)[2:]
             carried = carried_defaults(
                 inherited[0][1],

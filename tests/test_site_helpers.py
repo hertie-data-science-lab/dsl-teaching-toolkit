@@ -18,7 +18,6 @@ import yaml
 
 from dsl_course import (
     gh_contents,
-    materials,
     policy,
     public_site,
     repos,
@@ -453,11 +452,11 @@ def test_a_reading_list_is_the_entries_text_nested_under_the_row():
     assert site._reading_list([dataclasses.replace(row, reading_list="  ")]) == ""
 
 
-def _syllabus(monkeypatch, releases, tree, declared=None):
+def _syllabus(monkeypatch, releases, tree, declared=""):
+    """The pin, with `declared` the semester's `student_site.syllabus` ("" = none)."""
     monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", tree))
-    monkeypatch.setattr(
-        site, "read_materials", lambda o, r: declared or materials.Declared()
-    )
+    meta = {"student_site": {"syllabus": declared}} if declared else {}
+    monkeypatch.setattr(site, "_instructors_meta", lambda org: (meta, "semester.yml"))
     return site._declared_syllabus(
         "C", "S", Schedule(releases=releases), frozenset({"materials"}), {}
     )
@@ -480,7 +479,7 @@ def test_the_default_syllabus_is_pinned_where_its_copy_landed(monkeypatch):
 
 def test_a_declared_syllabus_is_pinned_under_any_name(monkeypatch):
     # NLP's case: the syllabus is a PDF named for the course code.
-    declared = materials.Declared(syllabus="E1282_syllabus.pdf")
+    declared = "E1282_syllabus.pdf"
     for deploy, tree in (
         (_deploy("E1282_syllabus.pdf"), ("E1282_syllabus.pdf",)),
         (_deploy(""), ("E1282_syllabus.pdf", "lectures/01/a.pdf")),  # the whole repo
@@ -506,7 +505,7 @@ def test_undeclared_and_absent_falls_back_to_a_root_syllab_file(monkeypatch):
 
 
 def test_a_declared_syllabus_is_never_second_guessed(monkeypatch):
-    declared = materials.Declared(syllabus="E1282.pdf", declared=True)
+    declared = "E1282.pdf"
     releases = [_intro(_deploy("readings/01"))]
     assert _syllabus(monkeypatch, releases, ("syllabus-old.pdf",), declared) is None
 
