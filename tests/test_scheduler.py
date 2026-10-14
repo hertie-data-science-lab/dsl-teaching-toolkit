@@ -3889,31 +3889,32 @@ def test_the_config_preflight_checks_every_hand_edited_file(monkeypatch):
         "students.csv",
         "grading_sheets/",
         "grading_config.yml",
-        "assignments.yml",
     }
+    # semester.yml is two digests: its `people:` and its `defaults:`.
     assert set(synced) == everything
-    assert sorted(mailed) == sorted(everything)
+    assert sorted(mailed) == sorted([*everything, "semester.yml"])
 
 
 def test_an_assignments_yml_fault_from_the_definition_pass_goes_in_its_own_issue(
     monkeypatch, capsys
 ):
     template = ConfigFault("assignments.a1", "bad", file="grading_config.yml")
-    run = ConfigFault("assignments.a1", "drift", file="assignments.yml")
+    run = ConfigFault("assignments.a1", "drift", file="semester.yml")
     _rc, synced, _mailed = _config_preflight(monkeypatch, spec_faults=[template, run])
     assert synced["grading_config.yml"] == [template]
-    assert synced["assignments.yml"] == [run]
+    # The defaults digest syncs after the people digest, on the same file.
+    assert synced["semester.yml"] == [run]
     out = capsys.readouterr().out
     # Where each file is: the template's is in the course org, not the semester's.
     assert "in Semester-Org's `<assignment template>/grading_config.yml`" in out
-    assert "in Semester-Org's `semester-config/assignments.yml`" in out
+    assert "in Semester-Org's `semester-config/semester.yml`" in out
 
 
 def test_a_content_fault_reaches_that_files_digest_and_nobody_elses(monkeypatch):
     fault = _csv_fault()
     _rc, synced, _mailed = _config_preflight(monkeypatch, roster_faults=[fault])
     assert synced["students.csv"][0] == fault
-    assert synced["instructors.yml"] == []
+    assert synced["semester.yml"] == []
 
 
 @pytest.mark.parametrize(
@@ -5050,7 +5051,7 @@ def test_an_assignments_yml_that_is_not_yaml_holds_the_tick_green(monkeypatch):
     now = datetime(2026, 11, 1, tzinfo=timezone.utc)
     assert scheduler.run("Course", "Semester-f2026", now) == 0
     ((fault,),) = synced
-    assert fault.file == "assignments.yml"
+    assert fault.file == "semester.yml"
 
 
 # ------------------------------------------------------ the bot's pending invitations
@@ -5232,7 +5233,7 @@ def test_an_unparseable_assignments_yml_holds_the_schedule_digest(monkeypatch):
     # It synced the schedule.yml digest with no window, number, marks-return or
     # held-solution faults: Cleared for each, with a mail, then New again once fixed.
     broken = ConfigFault(
-        "", "this file is not valid YAML", file=schedule_mod.ASSIGNMENTS_FILE
+        "", "this file is not valid YAML", file=schedule_mod.SEMESTER_FILE
     )
     standing = ConfigFault("releases.wk1", "no number", file=schedule_mod.SCHEDULE_PATH)
     sched = Schedule(faults=[broken, standing])

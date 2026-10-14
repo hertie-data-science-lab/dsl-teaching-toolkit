@@ -147,24 +147,22 @@ Push to `main`.
 """
 
 PEOPLE = {
-    "people": {
-        "instructors": [
-            {
-                "github_handle": "prof-a",
-                "name": "Alex Instructor",
-                "photo": "/_images/pp/placeholder.jpg",
-                "url": "https://example.invalid/alex",
-                "title": "Professor of Data Science",
-            }
-        ],
-        "teaching_assistants": [
-            {
-                "github_handle": "ta-b",
-                "name": "Blair Assistant",
-                "photo": "/_images/pp/placeholder.jpg",
-            }
-        ],
-    }
+    "people": [
+        {
+            "github_handle": "prof-a",
+            "role": "instructor",
+            "name": "Alex Instructor",
+            "photo": "/_images/pp/placeholder.jpg",
+            "url": "https://example.invalid/alex",
+            "title": "Professor of Data Science",
+        },
+        {
+            "github_handle": "ta-b",
+            "role": "teaching_assistant",
+            "name": "Blair Assistant",
+            "photo": "/_images/pp/placeholder.jpg",
+        },
+    ]
 }
 
 
@@ -552,6 +550,7 @@ def data_files(hosted: site_repo.Hosted) -> dict[str, str]:
             SEMESTER_ORG,
             PEOPLE,
             edit_at=f"{SEMESTER_ORG}/semester-config/semester.yml",
+            semester=True,
         ),
         "_data/nav.yml": site_repo.nav_yaml(semester=True, kinds=kinds),
         "_data/materials.yml": site._materials_index(

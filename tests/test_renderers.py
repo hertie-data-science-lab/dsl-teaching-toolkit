@@ -588,7 +588,7 @@ def test_validate_schedule_workflow_is_seeded_with_the_central_repo_pinned():
     trigger = doc.get("on", doc.get(True))
 
     # fires where the file is edited, and on demand
-    assert trigger["push"]["paths"] == ["schedule.yml", "assignments.yml"]
+    assert trigger["push"]["paths"] == ["schedule.yml", "semester.yml"]
     assert trigger["push"]["branches"] == ["main"]
     assert "workflow_dispatch" in trigger
 

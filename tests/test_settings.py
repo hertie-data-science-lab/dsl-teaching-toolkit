@@ -474,7 +474,8 @@ def test_the_semester_wide_defaults_cascade_into_the_plan(monkeypatch):
     )
     sched = schedule.parse(
         load_yaml_lines(
-            "semester_end: 2026-12-18\narchive:\nlectures:\n  l1:\n"
+            "semester:\n  end: {type: end, event_datetime: 2026-12-18}\n"
+            "  archive: {type: archive}\nlectures:\n  l1:\n"
             "    event_datetime: 2026-10-01T10:00\n"
             "    files: [{from_course_repo: m, from_path: l1}]\n"
         ),

@@ -347,8 +347,10 @@ def test_the_semester_tick_costs_what_it_did(counted):
     gh = counted
     doc = status_json.collect_semester(COURSE, LIVE, NOW)
     # origin/main before decision 0034: 43. The root stub the plan copies (SYLLABUS.md)
-    # is the course gather's own read, so the memo answers it.
-    assert len(gh.calls) == 43
+    # is the course gather's own read, so the memo answers it. Decision 0039: one
+    # semester.yml where instructors.yml and assignments.yml were two, and teams.csv folded
+    # into students.csv (.system/roster.csv is the one new read): -2.
+    assert len(gh.calls) == 41
     assert doc["semester"]["template_moments"]["assignment-a2"] == (
         "2026-10-20T10:00:00+02:00"
     )
@@ -359,7 +361,8 @@ def test_the_course_tick_reads_one_file_per_semester(counted):
     doc = status_json.collect_course(COURSE, NOW)
     # origin/main: 18. Decision 0034 adds one status.json read per registered semester
     # (semesters.yml lists names only, so the two archived ones cost theirs too).
-    assert len(gh.calls) == 18 + 3
+    # Decision 0039: course.yml where dsl-course.yml and opencourse.yml were two (-1).
+    assert len(gh.calls) == 18 + 3 - 1
     for org in (LIVE, OLD1, OLD2):
         assert _reads_of(gh, org) == [
             f"repos/{org}/semester-config/contents/.system/status.json"

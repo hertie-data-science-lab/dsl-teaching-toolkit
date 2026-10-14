@@ -1418,7 +1418,9 @@ def test_the_banner_shows_only_for_a_course_that_opts_into_the_console(
         monkeypatch,
         tmp_path,
         Schedule(),
-        yaml_file=lambda *a: {"student_console": True} if a[-1] == "course.yml" else {},
+        yaml_file=lambda *a: (
+            {"course": {"student_console": True}} if a[-1] == "course.yml" else {}
+        ),
     )
     url = yaml.safe_load(on.files["_data/console.yml"])["url"]
     assert url.endswith("?semester=Semester-f2026#week")
@@ -1446,7 +1448,7 @@ def test_course_description_flows_from_course_metadata_into_config(
     assert "course_description" not in captured["plan"].config
 
     monkeypatch.setattr(
-        site, "yaml_file", lambda *a: {"course_description": "Nets, from 0."}
+        site, "yaml_file", lambda *a: {"course": {"description": "Nets, from 0."}}
     )
     fake_config(monkeypatch, site.yaml_file)
     assert site.sync_site("Course-Org", "Semester-f2026") == 0
@@ -1474,7 +1476,7 @@ def test_the_exported_config_keys_are_the_ones_the_sync_writes_and_the_seed_keep
     monkeypatch.setattr(site, "list_org_repos", lambda org: [])
     monkeypatch.setattr(site.schedule, "load", lambda org: Schedule())
     monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
-    meta = {"course_name": "Nets", "course_code": "E1", "course_description": "D."}
+    meta = {"course": {"name": "Nets", "code": "E1", "description": "D."}}
     monkeypatch.setattr(site, "yaml_file", lambda *a: meta)
     fake_config(monkeypatch, site.yaml_file)
     assert site.sync_site("Course-Org", "Semester-f2026") == 0
@@ -1517,7 +1519,9 @@ def test_site_still_builds_when_schedule_yml_does_not_parse(
         lambda org, build: captured.update(plan=build(tmp_path)) or 0,
     )
     monkeypatch.setattr(site, "list_org_repos", lambda org: [])
-    monkeypatch.setattr(site, "yaml_file", lambda *a: {"course_name": "Deep Learning"})
+    monkeypatch.setattr(
+        site, "yaml_file", lambda *a: {"course": {"name": "Deep Learning"}}
+    )
     fake_config(monkeypatch, site.yaml_file)
     monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
     # the REAL schedule.load, fed the malformed file
