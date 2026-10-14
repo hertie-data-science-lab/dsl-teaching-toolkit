@@ -1160,14 +1160,47 @@ SHAPE_HEADER = """\
 #   number          optional, default = session: the row word ("Lab 2"); REQUIRED on assignments
 #   event_datetime  a datetime, `tbc`, or a list of slots {at, location, details}
 #   files           from_course_repo, from_path, to_semester_repo, to_path, release_datetime
-# Field reference: docs/07-schedule-releases.md in the toolkit.
+# The term's own dates are the `semester:` block, each entry with a `type`: start, end,
+# break (`from`/`to`) or archive. Field reference: docs/07-schedule-releases.md.
 """
 # A label's own number, as 0.10 read it: trailing (`lecture_03`, `lab-9`) or leading
 # (`01_lab`). The migration reads it ONCE, to write `session:` / `number:`.
 _LABEL_NUMBER = re.compile(r"0*(\d+)$|^0*(\d+)[-_ ]")
 _FILE_FIELDS = legacy.renames(legacy.SCHEDULE_FILE)
 _ASSIGNMENT_FIELDS = legacy.renames(legacy.SCHEDULE_ASSIGNMENT)
-_SHAPE_TOP = ("timezone", "semester_start", "semester_end", "archive")
+# The 0.10 top-level keys of the term's own dates, and the `semester:` entry each becomes
+# (decision 0038 amendment 2): key and `type`.
+_SEMESTER_KEYS = {
+    "semester_start": "start",
+    "semester_end": "end",
+    "archive": "archive",
+}
+
+
+def _semester_block(old: dict) -> dict:
+    """The `semester:` block for a file that may still carry `semester_start`,
+    `semester_end` and `archive:` at the top: each becomes an entry of its `type`, beside
+    whatever entries the block already has."""
+    block = dict(old.get(schedule.SEMESTER_BLOCK) or {})
+    for top, kind in _SEMESTER_KEYS.items():
+        if top not in old or kind in block:
+            continue
+        value = old[top]
+        if kind == "archive":
+            extra = value if isinstance(value, dict) else {}
+            block[kind] = {"type": kind, **extra}
+        elif value not in (None, ""):
+            block[kind] = {"type": kind, "event_datetime": value}
+    return block
+
+
+def _guide(entry: dict) -> dict:
+    """A readings entry with `reading_list:` renamed `reading_guide:` (amendment 2)."""
+    if "reading_list" not in entry:
+        return entry
+    return {
+        ("reading_guide" if k == "reading_list" else k): v for k, v in entry.items()
+    }
 
 
 class _Verbatim(yaml.SafeLoader):
@@ -1269,7 +1302,7 @@ def _readings_twin(
         and t.strip()
     ]
     if texts:
-        twin["reading_list"] = "\n\n".join(texts) + "\n"
+        twin["reading_guide"] = "\n\n".join(texts) + "\n"
     return f"{key}-readings", {k: v for k, v in twin.items() if v not in (None, "")}
 
 
@@ -1310,6 +1343,20 @@ def schedule_shape(
     old = yaml.load(schedule_timing(schedule_keys(text)), _Verbatim) or {}
     if not isinstance(old, dict):
         return text, instance_text, notes, ["schedule.yml is not a mapping"]
+    if "releases" not in old and any(
+        isinstance(old.get(b), dict) for b in schedule.BLOCKS if b not in ("events",)
+    ):
+        # Already one block per kind (a file shaped before amendment 2): only the term's
+        # dates and the readings guide take their new names.
+        shaped = {
+            b: {k: _guide(e) if isinstance(e, dict) else e for k, e in old[b].items()}
+            for b in schedule.BLOCKS
+            if isinstance(old.get(b), dict)
+        }
+        assignments = (
+            old.get("assignments") if isinstance(old.get("assignments"), dict) else {}
+        )
+        return _shape_text(text, old, shaped, assignments, notes), None, notes, stops
     tz = schedule._tz(old.get("timezone"))
     releases = old.get("releases") if isinstance(old.get("releases"), dict) else {}
     events = old.get("events") if isinstance(old.get("events"), dict) else {}
@@ -1379,7 +1426,7 @@ def schedule_shape(
                 and t.strip()
             ]
             if texts:
-                new["reading_list"] = "\n\n".join(texts) + "\n"
+                new["reading_guide"] = "\n\n".join(texts) + "\n"
         blocks[policy.plural_of(kind)][key] = new
         if n and entry.get("show_on_site") is not False:
             hosts.setdefault((kind, n), key)
@@ -1533,16 +1580,31 @@ def schedule_shape(
             f"{ASSIGNMENTS_FILE} assignments.{key}: no such assignment in schedule.yml"
         )
 
+    instance_after = _without_block(instance_text, settings.ASSIGNMENTS_BLOCKS)
+    return (
+        _shape_text(text, old, blocks, assignments, notes),
+        instance_after,
+        notes,
+        stops,
+    )
+
+
+def _shape_text(
+    text: str, old: dict, blocks: dict, assignments: dict, notes: list[str]
+) -> str:
+    """The rewritten schedule.yml: the header, `timezone`, the `semester:` block, one
+    block per kind and `assignments:`; `notes` gains the count of comments left behind."""
     out = [SHAPE_HEADER]
-    for key in _SHAPE_TOP:
-        if key in old:
-            out.append(_emit({key: old[key]}))
+    if "timezone" in old:
+        out.append(_emit({"timezone": old["timezone"]}))
+    semester = _semester_block(old)
+    if semester:
+        out.append(_emit({schedule.SEMESTER_BLOCK: semester}))
     for block, entries in blocks.items():
         if entries:
             out.append(_emit({block: entries}))
     if assignments:
         out.append(_emit({"assignments": assignments}))
-    instance_after = _without_block(instance_text, settings.ASSIGNMENTS_BLOCKS)
     comments = sum(1 for line in text.splitlines() if line.lstrip().startswith("#"))
     if comments:
         # Rewritten from the data: a comment has no entry to travel with. Counted, never
@@ -1551,7 +1613,7 @@ def schedule_shape(
             f"{comments} comment line(s) of {schedule.SCHEDULE_PATH} are not carried "
             "into the new shape - the old file stays in its history"
         )
-    return "\n".join(out), instance_after, notes, stops
+    return "\n".join(out)
 
 
 _DATE_LIKE = re.compile(

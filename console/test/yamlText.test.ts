@@ -2,7 +2,9 @@ import { parse } from 'yaml';
 import { describe, expect, it } from 'vitest';
 import { YamlText } from '../src/edit/yamlText';
 
-import TEMPLATE from '../../templates/semester-config/schedule.yml?raw';
+// WP-C removes: the schedule editor still writes the shape before decision 0038 amendment 2
+// (top-level `archive:`), so its tests read the seed as it was then.
+import TEMPLATE from './fixtures/schedule-seed-before-amendment-2.yml?raw';
 import POLICY from '../schemas/policy.json';
 
 // The template with the institution values its comments name filled in, as Bootstrap

@@ -196,6 +196,7 @@ def _no_course_or_semester_defaults(monkeypatch):
     monkeypatch.setattr(settings, "org_meta", lambda org: {})
     monkeypatch.setattr(settings, "_semester_text", lambda org: None)
     monkeypatch.setattr(schedule, "run_settings_of", lambda org, slug: {})
+    monkeypatch.setattr(schedule, "shape_of", lambda org, slug: {})
     monkeypatch.setattr(settings, "course_org_for_semester", lambda org: "")
 
 

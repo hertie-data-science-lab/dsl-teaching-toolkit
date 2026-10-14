@@ -53,15 +53,18 @@ def test_parse_handles_splits_comma_and_space():
 
 def test_schedule_yml_seed_is_commented_and_covers_every_field():
     # Mostly-commented, like the old semester course.yml schedule block - faculty
-    # uncomment what they want to pin. The one live block is `archive:` at the end: the
-    # maintainer wants every semester to say in its own file what happens at term end, with
-    # the date left to its default and the sentence written out.
+    # uncomment what they want to pin. The one live entry is the `semester:` block's
+    # archive at the end (decision 0038 amendment 2): the maintainer wants every semester
+    # to say in its own file what happens at term end, with the date left to its default
+    # and the sentence written out.
     schedule = welcome.template("semester-config/schedule.yml")
-    skeleton, live = schedule.split("\narchive:\n")
+    skeleton, live = schedule.split("\nsemester:\n")
     assert all(
         line.startswith("#") or not line.strip() for line in skeleton.splitlines()
     )
-    assert live.startswith("  event_datetime:") and "details: >-" in live
+    live_lines = [ln for ln in live.splitlines() if not ln.lstrip().startswith("#")]
+    assert live_lines[0].startswith("  archive:") and "    type: archive" in live_lines
+    assert "details: >-" in live
     for key in (
         "timezone",
         # Decision 0038: a block per kind, each entry's fields, and its files'.
@@ -81,9 +84,10 @@ def test_schedule_yml_seed_is_commented_and_covers_every_field():
         "to_semester_repo",
         "to_path",
         "release_datetime",
-        "reading_list",
-        "semester_start",
-        "semester_end",
+        "reading_guide",
+        "type: start",
+        "type: end",
+        "type: break",
         "assignments",
         "template",
         "handout_datetime",
@@ -107,6 +111,9 @@ def test_schedule_yml_seed_is_commented_and_covers_every_field():
         "deploy:",
         "course_source_repo",
         "kind:",
+        "reading_list",
+        "semester_start",
+        "semester_end",
     ):
         assert key not in schedule, key
 
@@ -124,9 +131,9 @@ def test_the_seeded_archive_sentence_names_the_day_it_is_rendered_for():
         tag="f2026", year=2026, year_next=2027, timezone="Europe/Berlin", grace_days=60
     )
     meta = yaml.safe_load(seeded)
-    # The skeleton leaves `semester_end:` commented out, and the archive date defaults off
-    # it - so pin one, exactly as the semester filling this file in will.
-    meta["semester_end"] = "2026-12-18"
+    # The skeleton leaves the end date commented out, and the archive date defaults off it
+    # - so pin one, exactly as the semester filling this file in will.
+    meta["semester"]["end"] = {"type": "end", "event_datetime": "2026-12-18"}
     sched = schedule.parse(meta)
     assert sched.dropped == []
     row = site._archive_entry(sched.archive, date(2026, 12, 1))

@@ -78,12 +78,16 @@ from .schedule import (
     BLOCKS,
     KNOWN_ARCHIVE,
     KNOWN_ASSIGNMENT,
+    KNOWN_BREAK,
     KNOWN_ENTRY,
     KNOWN_FILE,
     KNOWN_READINGS,
+    KNOWN_SEMESTER_DATE,
     KNOWN_SLOT,
     KNOWN_TOP_LEVEL,
     READINGS_KIND,
+    SEMESTER_BLOCK,
+    SEMESTER_TYPES,
 )
 from .settings import (
     COURSE_ASKED_KEYS,
@@ -578,8 +582,9 @@ def ops_json() -> dict:
 
 
 def schedule_schema() -> dict:
-    """`semester-config/schedule.yml` (decision 0038): one block per kind, each a map of
-    entries, and `assignments:`; the run settings inline on an assignment entry."""
+    """`semester-config/schedule.yml` (decision 0038): the `semester:` block, one block
+    per kind, each a map of entries, and `assignments:`; the run settings inline on an
+    assignment entry."""
     whole = {"type": "integer", "minimum": 1}
     copy = _obj(
         _keys(KNOWN_FILE, {"from_course_repo": _str(), "from_path": _str()}),
@@ -608,14 +613,22 @@ def schedule_schema() -> dict:
             {
                 **run,
                 "number": whole,
+                # This semester's override of the template's shape (0038 amendment 2).
+                "type": _enum(ASSIGNMENT_TYPES),
+                "submit_via": _enum(SUBMIT_VIA),
                 "marks_return_datetime": {"oneOf": [_str(), marks_row]},
             },
         ),
         ("due_datetime", "template", "number"),
     )
-    archive = _obj(_keys(KNOWN_ARCHIVE, {"grace_days": {"type": "integer"}}))
-    # A bare `archive:` asks for the default date (`schedule._parse_archive`).
-    archive["type"] = ["object", "null"]
+    # The term's own dates (decision 0038 amendment 2): every entry names its `type`.
+    semester_entry = _obj(
+        _keys(
+            KNOWN_ARCHIVE | KNOWN_BREAK | KNOWN_SEMESTER_DATE,
+            {"type": _enum(SEMESTER_TYPES), "grace_days": {"type": "integer"}},
+        ),
+        ("type",),
+    )
     top = _keys(
         KNOWN_TOP_LEVEL,
         {
@@ -629,7 +642,7 @@ def schedule_schema() -> dict:
                 for block, kind in BLOCKS.items()
             },
             "assignments": {"type": "object", "additionalProperties": assignment},
-            "archive": archive,
+            SEMESTER_BLOCK: {"type": "object", "additionalProperties": semester_entry},
         },
     )
     return _doc(f"{CONFIG_REPO}/schedule.yml", _obj(top))

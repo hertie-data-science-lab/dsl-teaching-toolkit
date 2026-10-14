@@ -4,7 +4,9 @@
 import { render } from 'preact-render-to-string';
 import { parse } from 'yaml';
 import { describe, expect, it } from 'vitest';
-import SEEDED from '../../templates/semester-config/schedule.yml?raw';
+// WP-C removes: the schedule editor still writes the shape before decision 0038 amendment 2
+// (top-level `archive:`), so its tests read the seed as it was then.
+import SEEDED from './fixtures/schedule-seed-before-amendment-2.yml?raw';
 import { EnvCtx, type Env } from '../src/env';
 import { CONFLICT, saveText, type SaveState } from '../src/edit/save';
 import { YamlText, obj } from '../src/edit/yamlText';

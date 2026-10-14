@@ -512,6 +512,12 @@ def _events() -> dict[str, str]:
         ),
         "term-start.md": site._semester_entry("Semester starts", date(2026, 9, 7)),
         "term-end.md": site._semester_entry("Semester ends", end),
+        # A reading week: one grey band from its first day to its last.
+        "break-reading-week.md": site._break_entry(
+            schedule.Break(
+                "reading-week", date(2026, 10, 19), date(2026, 10, 23), "Reading week"
+            )
+        ),
         # Inside its notice window and with a sentence, which is the only shape that
         # carries `announce: true` - the one row the Updates box takes off the schedule.
         "semester-archived.md": site._archive_entry(

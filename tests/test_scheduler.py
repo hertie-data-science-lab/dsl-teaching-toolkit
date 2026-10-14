@@ -4474,7 +4474,7 @@ def test_a_semester_with_no_archive_date_earns_an_advisory_in_its_own_digest(
     # A fault with no clock: there is no moment it bites at, which is exactly what is
     # wrong with it. Not a parser drop, so `Validate schedule` stays green in August.
     (fault,) = scheduler._no_archive_date(Schedule())
-    assert "writes no `archive:` block" in fault.what
+    assert "has no `type: archive` entry" in fault.what
     assert "ever archive it" in fault.what
     assert fault.fires is None and fault.file == "schedule.yml"
     # And it stays a LINE. An undated fault sits at the notify bar by default, so without

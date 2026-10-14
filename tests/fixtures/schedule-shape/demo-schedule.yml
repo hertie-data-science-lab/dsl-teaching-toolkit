@@ -10,15 +10,22 @@
 #   number          optional, default = session: the row word ("Lab 2"); REQUIRED on assignments
 #   event_datetime  a datetime, `tbc`, or a list of slots {at, location, details}
 #   files           from_course_repo, from_path, to_semester_repo, to_path, release_datetime
-# Field reference: docs/07-schedule-releases.md in the toolkit.
+# The term's own dates are the `semester:` block, each entry with a `type`: start, end,
+# break (`from`/`to`) or archive. Field reference: docs/07-schedule-releases.md.
 
 timezone: Europe/Berlin
-semester_start: 2026-08-04
-semester_end: 2026-11-13
-archive:
-  event_datetime: 2027-01-12
-  show_on_site: true
-  details: 'This semester is archived on {date}: every repository in it becomes read-only. You keep read access, so you can still fork or clone anything you want to keep working on into your own account.'
+semester:
+  start:
+    type: start
+    event_datetime: 2026-08-04
+  end:
+    type: end
+    event_datetime: 2026-11-13
+  archive:
+    type: archive
+    event_datetime: 2027-01-12
+    show_on_site: true
+    details: 'This semester is archived on {date}: every repository in it becomes read-only. You keep read access, so you can still fork or clone anything you want to keep working on into your own account.'
 lectures:
   lecture-01:
     session: 1
@@ -184,7 +191,7 @@ readings:
     files:
       - from_course_repo: course-materials-f2026
         from_path: readings/01_deep-learning-in-public-policy
-    reading_list: |
+    reading_guide: |
       ## Readings
 
       The list in `readings/01_deep-learning-in-public-policy/READINGS.md`.
@@ -195,7 +202,7 @@ readings:
     files:
       - from_course_repo: course-materials-f2026
         from_path: readings/02_deep-neural-networks-1
-    reading_list: |
+    reading_guide: |
       ## Readings
 
       The list in `readings/02_deep-neural-networks-1/READINGS.md`.
@@ -206,7 +213,7 @@ readings:
     files:
       - from_course_repo: course-materials-f2026
         from_path: readings/03_deep-neural-networks-2
-    reading_list: |
+    reading_guide: |
       ## Readings
 
       The list in `readings/03_deep-neural-networks-2/READINGS.md`.
@@ -217,7 +224,7 @@ readings:
     files:
       - from_course_repo: course-materials-f2026
         from_path: readings/04_computer-vision-1-cnns
-    reading_list: |
+    reading_guide: |
       ## Readings
 
       The list in `readings/04_computer-vision-1-cnns/READINGS.md`.
@@ -228,7 +235,7 @@ readings:
     files:
       - from_course_repo: course-materials-f2026
         from_path: readings/05_computer-vision-2-modern-cnns
-    reading_list: |
+    reading_guide: |
       ## Readings
 
       The list in `readings/05_computer-vision-2-modern-cnns/READINGS.md`.
@@ -239,7 +246,7 @@ readings:
     files:
       - from_course_repo: course-materials-f2026
         from_path: readings/08_nlp-2-encoder-decoder-and-attention
-    reading_list: |
+    reading_guide: |
       ## Readings
 
       The list in `readings/08_nlp-2-encoder-decoder-and-attention/READINGS.md`.
@@ -257,7 +264,7 @@ readings:
     files:
       - from_course_repo: course-materials-f2026
         from_path: readings/10_policy-approaches-and-responsible-implementation
-    reading_list: |
+    reading_guide: |
       ## Readings
 
       The list in `readings/10_policy-approaches-and-responsible-implementation/READINGS.md`.
@@ -313,7 +320,6 @@ assignments:
   assignment-3-project:
     number: 8
     template: assignment-3-project-f2026
-    repo_name: assignment-3-project
     handout_datetime: 2026-09-15T14:00
     due_datetime: 2026-10-23T23:59
   assignment-4:

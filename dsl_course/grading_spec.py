@@ -252,6 +252,10 @@ def with_run_settings(
         course_org=course_org,
     )
     values = {key: value for key, (value, _) in resolved.items()}
+    # The schedule entry's override of the template's shape wins (decision 0038
+    # amendment 2); the template's own word otherwise.
+    shape = schedule.shape_of(semester_org, slug)
+    spec = replace(spec, **shape)
     if not creates_unit_repos(spec.submit_via):
         values["visibility"] = "private"
     if spec.submit_via != "external" or not values["submit_url"]:
@@ -259,7 +263,8 @@ def with_run_settings(
     return replace(
         spec,
         **values,
-        sources=tuple((key, source) for key, (_, source) in resolved.items()),
+        sources=tuple((key, source) for key, (_, source) in resolved.items())
+        + tuple((key, "assignment") for key in shape),
     )
 
 

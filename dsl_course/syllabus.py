@@ -22,7 +22,7 @@ to paste.
 
 A session is a teaching unit (decision 0038): every entry sharing a `session:` id, headed
 by its first row by date, as the website's rows (`schedule_plan.site_rows`) have it. The
-readings under each are the unit's readings entries: their `reading_list:`, then the names
+readings under each are the unit's readings entries: their `reading_guide:`, then the names
 of the files they copy, read from the COURSE org's source repos (a syllabus is written
 before the term starts, when nothing has shipped yet). Any other readings entry closes the
 list under "Further readings".
@@ -136,7 +136,7 @@ def place(text: str, body: str) -> str | None:
 
 
 def _readings_for(course_org: str, row: PlannedRow, trees: dict) -> str:
-    """A readings entry's reading list: its `reading_list:` text, then the names of the
+    """A readings entry's reading list: its `reading_guide:` text, then the names of the
     files its copies take out of the COURSE org (a file, a folder, or a whole repo). A
     repo that cannot be read raises, naming it."""
     parts = [row.reading_list.strip()] if row.reading_list.strip() else []
@@ -156,7 +156,7 @@ def _readings_for(course_org: str, row: PlannedRow, trees: dict) -> str:
         names += [p for p in trees[repo] if p == src or p.startswith(prefix)]
     if names:
         # Raw filenames: deriving a citation from `blitzstein-ch1.pdf` would be inventing
-        # one. Faculty who want that write it in `reading_list:`.
+        # one. Faculty who want that write it in `reading_guide:`.
         parts.append("\n".join(f"- {n.rsplit('/', 1)[-1]}" for n in sorted(names)))
     return "\n\n".join(parts)
 

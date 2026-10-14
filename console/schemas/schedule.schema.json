@@ -2,48 +2,6 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
-    "archive": {
-      "additionalProperties": false,
-      "properties": {
-        "details": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "event_datetime": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "grace_days": {
-          "type": "integer"
-        },
-        "show_on_site": {
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "tbc": {
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "title": {
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "type": [
-        "object",
-        "null"
-      ]
-    },
     "assets": {
       "additionalProperties": {
         "additionalProperties": false,
@@ -264,6 +222,14 @@
               "null"
             ]
           },
+          "submit_via": {
+            "enum": [
+              "assignment_repo",
+              "shared_dropbox_repo",
+              "external"
+            ],
+            "type": "string"
+          },
           "tbc": {
             "type": [
               "boolean",
@@ -282,6 +248,13 @@
               "string",
               "null"
             ]
+          },
+          "type": {
+            "enum": [
+              "individual",
+              "group"
+            ],
+            "type": "string"
           }
         },
         "required": [
@@ -1034,7 +1007,7 @@
             "minimum": 1,
             "type": "integer"
           },
-          "reading_list": {
+          "reading_guide": {
             "type": [
               "string",
               "null"
@@ -1067,17 +1040,71 @@
       },
       "type": "object"
     },
-    "semester_end": {
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "semester_start": {
-      "type": [
-        "string",
-        "null"
-      ]
+    "semester": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "details": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "event_datetime": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "from": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "grace_days": {
+            "type": "integer"
+          },
+          "show_on_site": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "tbc": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "to": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "type": {
+            "enum": [
+              "start",
+              "end",
+              "break",
+              "archive"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "type": "object"
+      },
+      "type": "object"
     },
     "timezone": {
       "type": [

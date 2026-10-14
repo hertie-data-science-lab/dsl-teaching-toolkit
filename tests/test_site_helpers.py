@@ -133,16 +133,14 @@ def test_people_yaml_passes_every_declared_display_field_through():
         "people": [
             {
                 "role": "instructor",
-                
-                    "github_handle": "jane",  # access-only - must NOT reach the card
-                    "start": "2020-01-01",
-                    "end": "2999-12-31",
-                    "name": "Prof. Jane",
-                    "photo": "j.jpg",
-                    "url": "u/jane",
-                    "title": "Professor of Things",
-                    "office_hours": "Tue 14:00, Room 3.21"
-                ,
+                "github_handle": "jane",  # access-only - must NOT reach the card
+                "start": "2020-01-01",
+                "end": "2999-12-31",
+                "name": "Prof. Jane",
+                "photo": "j.jpg",
+                "url": "u/jane",
+                "title": "Professor of Things",
+                "office_hours": "Tue 14:00, Room 3.21",
             }
         ]
     }
@@ -431,7 +429,7 @@ _READINGS_TREE = (
 
 
 def test_a_readings_folder_lists_every_file_it_holds(monkeypatch):
-    # Decision 0038 rule 5: the reading list is the schedule's `reading_list:`, so a
+    # Decision 0038 rule 5: the reading list is the schedule's `reading_guide:`, so a
     # READINGS.md in the folder is a file like any other.
     monkeypatch.setattr(site, "_repo_tree", lambda org, repo: ("main", _READINGS_TREE))
     landed = site._landed("C", _deploy("readings/01_week-1"), frozenset(), {})

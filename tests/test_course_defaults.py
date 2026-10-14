@@ -205,20 +205,25 @@ def test_the_seeded_skeleton_names_the_institution_s_defaults_and_sets_none():
     text = _seeded()
     ours = policy.defaults()
     assert f"# timezone: {ours['timezone']}" in text
-    assert f"semester_end + {ours['archive_grace_days']} days" in text
+    assert f"the end + {ours['archive_grace_days']} days" in text
     sched = schedule.parse(yaml.safe_load(text) or {})
     # Nothing copied into the semester: absent means the institution's default.
     assert sched.timezone == schedule.DEFAULT_TZ == ours["timezone"]
-    assert "\narchive:\n" in text
+    assert "\n    type: archive\n" in text
 
 
 def test_an_unusable_grace_days_is_flagged_and_the_sixty_days_stand():
     sched = schedule.parse(
-        {"semester_end": "2026-12-18", "archive": {"grace_days": "a month"}}
+        {
+            "semester": {
+                "end": {"type": "end", "event_datetime": "2026-12-18"},
+                "archive": {"type": "archive", "grace_days": "a month"},
+            }
+        }
     )
     assert sched.archive.when == date(2026, 12, 18) + schedule.ARCHIVE_GRACE
     (drop,) = sched.dropped
-    assert drop.startswith("archive.grace_days")
+    assert drop.startswith("semester.archive.grace_days")
 
 
 def test_the_course_seed_offers_every_default_and_nothing_retired():

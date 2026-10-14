@@ -65,11 +65,6 @@ MEMBERSHIP_DISPATCH = "sync-membership dispatch payload"
 STATUS_TODO_CHECK = "status.json to-do check"
 ROSTER_FILES = "semester-config students.csv / teams.csv"
 
-_GRADING_CONFIG_HOME = (
-    "in the assignment's own grading_config.yml, on the course template's "
-    "`solution` branch"
-)
-
 _BLOCKS = "a block per kind (`lectures:`, `labs:`, `readings:`, `exams:`, `events:`, `assets:`)"
 _MIGRATE = "run the 0.11.0 migration (`python3 -m dsl_course.migrate`)"
 
@@ -100,6 +95,40 @@ ROWS: tuple[Old, ...] = (
         "0.11.0",
         NOT_MIGRATED,
         "the block decides the kind",
+    ),
+    # The term's own dates before decision 0038 amendment 2: three top-level keys, now
+    # entries of the one `semester:` block.
+    Old(
+        "semester_start",
+        "a `semester:` entry of `type: start`",
+        SCHEDULE_TOP,
+        "0.11.0",
+        NOT_MIGRATED,
+        "the semester has no start date",
+    ),
+    Old(
+        "semester_end",
+        "a `semester:` entry of `type: end`",
+        SCHEDULE_TOP,
+        "0.11.0",
+        NOT_MIGRATED,
+        "the semester has no end date",
+    ),
+    Old(
+        "archive",
+        "a `semester:` entry of `type: archive`",
+        SCHEDULE_TOP,
+        "0.11.0",
+        NOT_MIGRATED,
+        "nothing archives this semester",
+    ),
+    Old(
+        "reading_list",
+        "reading_guide",
+        SCHEDULE_ENTRY,
+        "0.11.0",
+        NOT_MIGRATED,
+        "the row shows no reading guide",
     ),
     Old(
         "deploy",
@@ -174,18 +203,6 @@ ROWS: tuple[Old, ...] = (
         "0.11.0",
         NOT_MIGRATED,
         "none of these settings is read",
-    ),
-    # Settings that USED to live in a schedule.yml `assignments:` entry (decision 0009):
-    # flagged by name, so the note says where the declaration went. Live guidance.
-    Old(
-        "type",
-        _GRADING_CONFIG_HOME,
-        SCHEDULE_ASSIGNMENT,
-        "0.9.0",
-        cost=(
-            "the assignment is handed out and graded in whatever shape grading_config.yml "
-            "declares - individual when it declares none"
-        ),
     ),
     # ds01's hourly membership timer (an EXTERNAL system, ds01-infra) still sends it: read
     # as `all_semesters` with a log line and no fault until ds01-infra switches.

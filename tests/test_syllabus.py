@@ -123,7 +123,7 @@ def test_a_unit_is_one_session_whatever_its_entries(wired):
 
 
 def test_uploaded_files_are_named_after_the_reading_list(wired):
-    # The entry's `reading_list:` leads, and the files follow by NAME - never their
+    # The entry's `reading_guide:` leads, and the files follow by NAME - never their
     # bytes. Listing them is what stops a session whose readings are PDFs coming out as a
     # bare heading.
     out = wired()

@@ -1676,6 +1676,29 @@ def test_semester_rows_only_when_the_schedule_pins_the_bounds(monkeypatch, tmp_p
     assert "term-end.md" not in unbounded.collections["_events"]
 
 
+def test_a_semester_row_carries_the_entry_s_own_title_and_details(
+    monkeypatch, tmp_path
+):
+    sched = schedule_mod.parse(
+        {
+            "semester": {
+                "start": {
+                    "type": "start",
+                    "event_datetime": "2026-09-07",
+                    "title": "Welcome week",
+                    "details": "Orientation in the atrium.",
+                },
+                "end": {"type": "end", "event_datetime": "2026-12-18"},
+            }
+        }
+    )
+    events = _plan(monkeypatch, tmp_path, sched).collections["_events"]
+    assert 'title: "Welcome week"' in events["term-start.md"]
+    assert "Orientation in the atrium." in events["term-start.md"]
+    assert 'title: "Semester ends"' in events["term-end.md"]
+    assert "details:" not in events["term-end.md"]
+
+
 # -------------------------------------------------------- dest_repo mismatch (fix 4)
 
 

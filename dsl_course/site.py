@@ -1427,10 +1427,11 @@ def _archive_entry(archive: schedule.ArchiveRow, today: date) -> str:
     )
 
 
-def _semester_entry(name: str, when: date) -> str:
+def _semester_entry(name: str, when: date, details: str = "") -> str:
     """A semester-boundary row (the `semester` kind of the theme's schedule_row.html).
 
-    `name` ("Semester starts" / "Semester ends") is the row's TITLE. It used to be written to
+    `name` (the entry's `title:`, else "Semester starts" / "Semester ends") is the row's
+    TITLE, and `details` its Details cell. It used to be written to
     `name:`, which the theme prints in the Event column, beside a `description: ""` that
     left the Title cell permanently blank - so the one row type on the schedule read its
     name out of a different column from every other. The Event column now says "Semester",
@@ -1443,8 +1444,29 @@ def _semester_entry(name: str, when: date) -> str:
         f"sort_at: {iso_when(when)}\n"
         f"hide_time: true\n"
         f'title: "{q(name)}"\n'
+        f"{_details(details)}"
         f"---\n"
     )
+
+
+def _break_entry(brk: schedule.Break) -> str:
+    """A `semester:` entry of `type: break` (decision 0038 amendment 2): one grey band on
+    the schedule from its first day to its last - `date:` and `until:`, whole days, its
+    `title:` (else "Break") and `details:`. Never a tab and never news."""
+    return (
+        f"---\n"
+        f"kind: break\n"
+        f"date: {iso_when(brk.start)}\n"
+        f"until: {iso_when(brk.end)}\n"
+        f"sort_at: {iso_when(brk.start)}\n"
+        f"hide_time: true\n"
+        f'title: "{q(brk.title or BREAK_TITLE)}"\n'
+        f"{_details(brk.details)}"
+        f"---\n"
+    )
+
+
+BREAK_TITLE = "Break"
 
 
 def sync_site(course_org: str, semester_org: str) -> int:
@@ -1598,12 +1620,20 @@ def sync_site(course_org: str, semester_org: str) -> int:
         # The term's own boundaries, when the schedule pins them.
         if sched.semester_start:
             event_entries["term-start.md"] = _semester_entry(
-                "Semester starts", sched.semester_start
+                sched.semester_start_title,
+                sched.semester_start,
+                sched.semester_start_details,
             )
         if sched.semester_end:
             event_entries["term-end.md"] = _semester_entry(
-                "Semester ends", sched.semester_end
+                sched.semester_end_title,
+                sched.semester_end,
+                sched.semester_end_details,
             )
+        # Its breaks: a grey band each, named by key like every row file.
+        for brk in sched.breaks:
+            if brk.show_on_site:
+                event_entries[f"break-{slug(brk.key)}.md"] = _break_entry(brk)
 
         instructors_meta, instructors_path = _instructors_meta(semester_org)
         return SitePlan(

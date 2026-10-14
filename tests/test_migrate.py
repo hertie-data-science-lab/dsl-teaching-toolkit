@@ -1020,11 +1020,12 @@ def test_seeded_text_takes_the_new_names_and_the_instructors_words_are_listed(
 
     assert _main(monkeypatch, SEM, "--no-preview") == 0
     text = fake.tree(SEM, CONFIG_REPO)["schedule.yml"].decode()
-    assert "# This semester's schedule + auto-release plan." in text
-    assert "example-course/semester-org/schedule.yml" in text
-    assert "  title: Semester archived      # optional" in text
-    assert "    This semester is archived on {date}: every repository" in text
-    assert "# Our cohort meets on Tuesdays." in text  # theirs, left
+    # The seeded wording took the new names, then the schedule shape step moved the
+    # archive block into the `semester:` block (decision 0038 amendment 2), leaving the
+    # comments behind (counted in its notes, never quoted).
+    archive = yaml.safe_load(text)["semester"]["archive"]
+    assert archive["type"] == "archive" and archive["title"] == "Semester archived"
+    assert archive["details"].startswith("This semester is archived on {date}:")
     instructors = fake.tree(SEM, CONFIG_REPO)[INSTRUCTORS_FILE].decode()
     assert (
         "# This semester's own instructors: its instructors and teaching" in instructors
@@ -1103,11 +1104,16 @@ def test_every_new_seeded_line_is_the_current_templates():
     missing = [
         new for new in migrate.seeded_wording("main").values() if new not in current
     ]
-    # Decision 0038 retired the 0.10 schedule skeleton: its comment lines are reworded
-    # only in a cohort-era schedule.yml with no entries (the schedule shape step rewrites
-    # any other whole), so their new side is the 0.10 seed's, not today's.
-    assert all(line.startswith("# ") for line in missing), missing
-    assert len(missing) == 9
+    # Decision 0038 retired the 0.10 schedule skeleton, and its amendment 2 the top-level
+    # `archive:` block: these lines are reworded only on their way to the schedule shape
+    # step, which rewrites the file whole, so their new side is the 0.10 seed's.
+    retired = [
+        line
+        for line in missing
+        if not line.startswith("# ")
+        and not line.lstrip().startswith(("title:", "show_on_site:", "This semester"))
+    ]
+    assert retired == [], retired
     assert [new for _, new in migrate.seeded_blocks()] == [
         template("course/people-header.yml")
     ] * 2

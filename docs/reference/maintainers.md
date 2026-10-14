@@ -1012,7 +1012,8 @@ marks (`course.py`), the archive notice prefixes (`teardown.py`) and the digest 
 | `schedule.yml` `releases:` / `events:` entries and their `kind:` (0.11.0) | one block per kind (`lectures:`, `labs:`, ..., `events:` for `other`); a second group's event a slot of its entry (decision 0038) | rewritten by the schedule shape step |
 | `deploy:` `course_source_repo`, `course_source_path`, `semester_dest_repo`, `semester_dest_path`, `deploy_datetime` (0.11.0) | `files:` `from_course_repo`, `from_path`, `to_semester_repo`, `to_path`, `release_datetime` | the same |
 | assignment `course_source_repo`; `assignments.yml` `assignments.<k>` blocks and `semester_dest_repo` (0.11.0) | `template`; the run settings on the entry, `repo_name` | the same |
-| a readings folder's `READINGS.md`; `materials.yml` `kinds:` (0.11.0) | the entry's `reading_list:`; the block | the same writes `reading_list:`; `kinds:` is ignored |
+| a readings folder's `READINGS.md`; `materials.yml` `kinds:` (0.11.0) | the entry's `reading_guide:`; the block | the same writes `reading_guide:`; `kinds:` is ignored |
+| `schedule.yml` top-level `semester_start`, `semester_end`, `archive:`; a readings entry's `reading_list` (0.11.0, 0038 amendment 2) | `semester:` entries of `type: start`, `end`, `archive`; `reading_guide` | the same; a file already one block per kind takes only these renames |
 | site front matter `type:` | `kind:`, written beside `type:` until the pinned theme's next release reads `kind` | the semester and course websites (rewritten on every sync) |
 | `status.json` release and this-week rows `type` | `kind` | `dsl.status/1` |
 | CLI `--master-org` (assign, collect), `--source-org` (deploy); env `MASTER_ORG`, `SRC_ORG` | `--course-org`; `COURSE_ORG` | every CLI; rendered workflows |
@@ -1122,7 +1123,7 @@ templates said, in one commit, both re-read with this engine: zero `NOT_MIGRATED
 shape (decision 0038, `migrate.schedule_shape`: one block per kind, keys unchanged, `session:`
 from the number each lecture and lab showed, `number:` only where it differs, a second
 group's event a slot of its entry, `deploy:` fields renamed into `files:`, a READINGS.md's
-text into `reading_list:`, `template:` / `repo_name:` and `assignments.yml`'s blocks onto each
+text into `reading_guide:`, the term's dates into the `semester:` block, `template:` / `repo_name:` and `assignments.yml`'s blocks onto each
 assignment; comments are not carried, and the preview prints only the new lines - one
 `migrate: schedule shape` commit), topic, re-render (the lock synced first, so the Join team form reads it; drift
 checked over the dispatchers, README, pointer, lock, join files and org READMEs), status,

@@ -1288,27 +1288,29 @@ def _no_archive_date(sched: schedule.Schedule) -> list[ConfigFault]:
         return []
     if sched.archive is not None:
         what = (
-            "this semester's `archive:` block names no `event_datetime:` and the semester "
-            "no `semester_end`, so its archive date cannot be derived - nothing will "
-            "ever archive it"
+            "this semester's `type: archive` entry names no `event_datetime:` and the "
+            "semester no `type: end` entry, so its archive date cannot be derived - "
+            "nothing will ever archive it"
         )
         fix_text = (
-            "give the `archive:` block an `event_datetime:`, or add a `semester_end:`"
+            "give the `semester:` block's archive entry an `event_datetime:`, or add a "
+            "`type: end` entry"
         )
     else:
         what = (
-            "this semester writes no `archive:` block, so nothing will ever archive it - "
+            "this semester's `semester:` block has no `type: archive` entry, so nothing "
+            "will ever archive it - "
             "it stays live, writable and joinable after the semester ends"
         )
         fix_text = (
-            "add an `archive:` block; empty, it archives the semester 60 days after "
-            "`semester_end`"
+            "add `archive: {type: archive}` to the `semester:` block; with no date, it "
+            "archives the semester 60 days after its end"
         )
     return [
         ConfigFault(
             "",
             what,
-            field="archive",
+            field=schedule.SEMESTER_BLOCK,
             file=schedule.SCHEDULE_PATH,
             ceiling=Severity.ADVISORY,
             fix_text=fix_text,
