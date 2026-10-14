@@ -651,9 +651,9 @@ rebuilt from scratch each run`"]
 call `sync_site` in-process when they change something.
 
 **Row types.** The three collections are rebuilt from scratch each run, so a de-released row
-disappears. Each row carries its own `type`, and the theme picks a template - and therefore a
-colour - from it alone: `lecture`, `lab`, `assignment` (with a nested `due` event), `exam`,
-`special_event`, `term_date`. Lecture vs lab is decided by the **released section
+disappears. Each row carries its own `kind`, and one template labels and colours it from the
+policy's kinds: `lecture`, `lab`, `assignment` (with a nested `due` event), `exam`,
+`special_event`, `semester`. Lecture vs lab is decided by the **released section
 directory** (`labs/`), never by a faculty declaration; term rows are synthesised from
 `semester_start` / `semester_end`; undated entries sort to the end of term and render as
 TBC.
