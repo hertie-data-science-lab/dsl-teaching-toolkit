@@ -418,16 +418,15 @@ Decision 0034 (need, time, verdict), all computed by the engine so the console h
 - **Need.** Every stage (`stage_need`), materials check and to-do (`need`) is `needed`
   (without it automation cannot act, or a student gets something wrong) or `suggested`. C1-C3
   and K1-K6 are needed; C4-C6 suggested (there is no K7: the archive date is a to-do only).
-  Of a materials repo's checks only the content-kind folder is needed; the syllabus and its
-  weekly plan are ONE suggested check, `syllabus`. Once a repo has a kind folder, each folder
-  kind (lectures, labs, readings) none has is a suggested check `kind_folder:<kind>`, whose
-  to-do's `check` is `kind_folder`. A kind folder is a top folder, a folder one level down in
-  an unkinded top folder whose name is a built-in alias (`materials.ALIAS_DEPTH`), or a
-  `kinds:` path at any depth (`status_json.kind_folders`); withheld ones never count. A template's brief and starter are
+  A materials repo needs nothing once it exists (decision 0038: folders carry no kind); the
+  syllabus and its weekly plan are ONE suggested check, `syllabus`, and the reviewed
+  `.releaseignore` (`withheld`, confirmed by `materials.confirm_withheld`) another. An entry
+  written with `files: []` is the suggested to-do `schedule:files:<key>` (`check` `files`),
+  dated by the entry. A template's brief and starter are
   needed. The semester's suggested to-dos (`semester.todo[]`) are `site:home`,
   `schedule:archive_date` and `instructors:email` (a count, never a handle); the course
   description is the course to-do `course:description`. Every to-do names its `check`
-  (`kind_folder`, `syllabus`, `withheld`, `brief`, `starter`, `description`, `home`,
+  (`files`, `syllabus`, `withheld`, `brief`, `starter`, `description`, `home`,
   `archive_date`, `email`). K5 is done once the roster has a row (codes sent is the Students
   tab's meter), K6 once the site repo exists.
 - **Time.** `horizon` (both files) is `{days}`, the rolling window's length, off the one
@@ -508,7 +507,7 @@ layers above its own:
 | 2 | `central` (which ref an org runs), `repos` (existence, creation, topics, descriptions, the publication denylist), `gh_teams` (an org's settings and its teams), `issues` (one self-updating issue, found by its EXACT title), `pulls` (one pull request per HEAD BRANCH, created or adopted), `invitations` (the bot accepts its own org invitations, from registered course orgs only) |
 | 3 | `gh_contents` (file reads and writes, seeded stubs), `workflows_render` |
 | 4 | `config` (one reader per hand-edited config file: `read_course`, `read_semester`), `discovery`, `roster`/`teams`/`schedule`, `workflows_place` |
-| 5 and up | `access` (team permissions and the faculty floor), `materials` (the `materials.yml` escape hatch and the kind aliases), `opencourse` (the public website's `opencourse.yml`), `schedule_plan` (the rows a plan declares, one per release entry), `cadence` (the scheduler's driver-health and late-delivery alarms, read off its own run history), `join`, `profile_readme`, `scaffold`, `site_repo` (the Jekyll site repo both websites publish into), `site`, then the CLIs |
+| 5 and up | `access` (team permissions and the faculty floor), `materials` (`materials.yml`'s `syllabus`; its kind aliases only for the console and `public_site` until WP-P/WP-C), `opencourse` (the public website's `opencourse.yml`), `schedule_plan` (the rows a plan declares: one per slot of each entry, readings attached to their session's first row), `cadence` (the scheduler's driver-health and late-delivery alarms, read off its own run history), `join`, `profile_readme`, `scaffold`, `site_repo` (the Jekyll site repo both websites publish into), `site`, then the CLIs |
 | grading, each above the one before | `grading_sheet` (the sheet file: shape, load and dump, merge, mark arithmetic, what holds a mark), `grading_spec` (`grading_config.yml`, its faults, the `SheetSpec` it gives), `gradebook` (the `grades-<handle>` repos, what a student is shown, the semester grades file, `distributed.csv`), `receipts` (the Submission receipts issue), `distribute` (sending marks); `team_formation` (and its lock file) sits above `grading_spec` and `gradebook`, and `grades` is only the CLI over `distribute` |
 
 `legacy` is the one module that knows old names: every parser and `migrate` reads them from
@@ -601,11 +600,11 @@ archive grace, release destination repo), `kinds` (ordered row kinds with label,
 colour and row colour, `plural` (the block and tab name: `/lectures/`, Lectures), `numbered`
 and `shown` (default true); the engine and the console read every kind word from here
 (`policy.plural_of`, `kind_for_plural`, `numbered_kinds`, `shown_kinds`); `assignment`,
-`semester`, `archive` are `system: true` and `other` is required; the non-system kinds are what a release entry's `kind:` may say, and each one a
+`semester`, `archive` are `system: true` and `other` is required; each non-system kind is a
+`schedule.yml` block named by its `plural` (`other`'s is `events`; decision 0038), and each one a
 semester has rows of gets a tab on its site; every schedule row renders through the one
 `_includes/schedule_row.html`, labelled and coloured from the site's `_data/kinds.yml`;
-`assets`, "Supporting files" (`shown: false`), is released but never a row or a tab on either site, and is the kind of any folder no alias names
-(`materials.DEFAULT_KIND`, decision 0031; an entry with no copies stays `lecture`), `schedule_plan.site_rows` and `public_site.shown_sections`
+`assets`, "Supporting files" (`shown: false`), is released but never a row or a tab on either site: `schedule_plan.site_rows` and `public_site.shown_sections`
 drop it; the public website neither hosts nor links its files, since it hosts by section), `institution` (the site block), `contact` (the last fault address, after
 `DSL_MAINTAINER_EMAIL` and `GRAPH_SENDER`), `licences` (the open site's choices, default
 first).
@@ -616,19 +615,18 @@ A run setting (`settings.RUN_KEYS`: `team_formation`, `max_team_size`, `late_win
 
 | Source | File | Key |
 |---|---|---|
-| `assignment` | `semester-config/assignments.yml` | `assignments.<slug>.<key>` |
+| `assignment` | `semester-config/schedule.yml` | `assignments.<key>.<setting>` (`visibility` is written `assignment_repo_visibility`; `settings.inline_settings`) |
 | `semester` | `semester-config/assignments.yml` | `defaults.<key>` |
 | `course` | course `.github/dsl-course.yml` | `assignment_defaults.<key>` |
 | `institution` | `policy.yml` | `defaults.<key>` |
 
 The late pair is one rule: a layer stating either half answers both, the other half none.
-An absent `assignments.yml` leaves its two layers empty. A template's `grading_config.yml`
+An absent `assignments.yml` leaves its layer empty. A template's `grading_config.yml`
 states no run setting: one written there refuses the whole file as `RUN_SETTING_IN_TEMPLATE`
 (`grading_spec.TEMPLATE_KEYS` is what it reads). `settings.parse_instance` is the one parser of
-`assignments.yml`; `schedule.load` hands it to `schedule.parse`, which takes each entry's
-`semester_dest_repo` from it and carries its faults (and one per block for a key the plan
-does not name) beside the plan's, so they ride the `schedule.yml` digest and file in
-status.json as `ASSIGNMENTS`. The late cutoff has one resolver,
+`assignments.yml`, which holds `defaults:` only: a per-key `assignments:` block is
+`NOT_MIGRATED` (the migration's schedule shape step moves it onto the entries). Its faults
+ride the `schedule.yml` digest and file in status.json as `ASSIGNMENTS`. The late cutoff has one resolver,
 `schedule.grading_cutoff_datetime`: due + the effective `late_window_days`. A read of
 `dsl-course.yml` or `assignments.yml` that fails other than with a 404 raises and is not
 cached (an `assignments.yml` that is not YAML raises `Unusable`); a value a reader refuses
@@ -991,6 +989,10 @@ marks (`course.py`), the archive notice prefixes (`teardown.py`) and the digest 
 | receipts issue label `dsl-feedback`, mark `<!-- dsl-course: feedback -->` | `dsl-receipts`, `<!-- dsl-course: receipts -->` on new issues; the old label and mark stay RECOGNISED (append-only chain) - nothing to migrate | submission repos |
 | copy "receipts issue", "receipts thread" | "Submission receipts" issue | logs, forms, docs |
 | `schedule.yml` `type:` on a `releases:` entry or an `events:` entry | `kind:` (the template's `type:` individual/group is unchanged) | semester `schedule.yml` |
+| `schedule.yml` `releases:` / `events:` entries and their `kind:` (0.11.0) | one block per kind (`lectures:`, `labs:`, ..., `events:` for `other`); a second group's event a slot of its entry (decision 0038) | rewritten by the schedule shape step |
+| `deploy:` `course_source_repo`, `course_source_path`, `semester_dest_repo`, `semester_dest_path`, `deploy_datetime` (0.11.0) | `files:` `from_course_repo`, `from_path`, `to_semester_repo`, `to_path`, `release_datetime` | the same |
+| assignment `course_source_repo`; `assignments.yml` `assignments.<k>` blocks and `semester_dest_repo` (0.11.0) | `template`; the run settings on the entry, `repo_name` | the same |
+| a readings folder's `READINGS.md`; `materials.yml` `kinds:` (0.11.0) | the entry's `reading_list:`; the block | the same writes `reading_list:`; `kinds:` is ignored |
 | site front matter `type:` | `kind:`, written beside `type:` until the pinned theme's next release reads `kind` | the semester and course websites (rewritten on every sync) |
 | `status.json` release and this-week rows `type` | `kind` | `dsl.status/1` |
 | CLI `--master-org` (assign, collect), `--source-org` (deploy); env `MASTER_ORG`, `SRC_ORG` | `--course-org`; `COURSE_ORG` | every CLI; rendered workflows |
@@ -1096,14 +1098,13 @@ pause, rename repos (each old name must redirect), layout (records into `.system
 checked against the old file before anything is committed, the seeded skeleton replaced by
 the new one, the pointer moved in, samples deleted - one `migrate: layout` commit), keys
 (`schedule.yml` loses the keys that left it and `assignments.yml` gains what they and the
-templates said, in one commit, both re-read with this engine: zero `NOT_MIGRATED`), explicit
-numbers (decision 0020: `number:` written on each entry whose number was its position, with
-that number, so nothing a student sees moves; label-numbered entries and stand-alone readings
-left alone; a flow-mapped entry named for a hand fix), proposed
-releases (decision 0013: for folders of a kind section that no entry copies, a `releases:`
-plan dated by the commit that first landed each folder, written to
-`semester-config/.system/proposed-releases.yml` for faculty to copy by hand - never into
-`schedule.yml`), topic, re-render (the lock synced first, so the Join team form reads it; drift
+templates said, in one commit, both re-read with this engine: zero `NOT_MIGRATED`), schedule
+shape (decision 0038, `migrate.schedule_shape`: one block per kind, keys unchanged, `session:`
+from the number each lecture and lab showed, `number:` only where it differs, a second
+group's event a slot of its entry, `deploy:` fields renamed into `files:`, a READINGS.md's
+text into `reading_list:`, `template:` / `repo_name:` and `assignments.yml`'s blocks onto each
+assignment; comments are not carried, and the preview prints only the new lines - one
+`migrate: schedule shape` commit), topic, re-render (the lock synced first, so the Join team form reads it; drift
 checked over the dispatchers, README, pointer, lock, join files and org READMEs), status,
 unpause (status.json first, so re-enabled workflows never race it). A move never overwrites:
 a target holding other bytes refuses the whole commit, naming both paths. Course steps: preflight (not archived; no `cohort_defaults` / `semester_defaults`

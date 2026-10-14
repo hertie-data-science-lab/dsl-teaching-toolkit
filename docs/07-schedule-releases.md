@@ -14,314 +14,171 @@ The schedule file can be updated throughout the semester.
 
 ## Write your semester's plan
 
-> For a fully worked example schedule.yml (a full semester) see [here](../example-course/semester-org/schedule.yml).
+> A fully worked `schedule.yml` (a whole semester): [example-course/semester-org/schedule.yml](../example-course/semester-org/schedule.yml). The schedule it renders, live: [here](https://hertie-dsl-demo-f2026.github.io/schedule/).
 
-> An example of the automatically generated schedule on the deployed `.github.io` site can also be seen live [here](https://hertie-dsl-demo-f2026.github.io/schedule/). 
+`schedule.yml` holds **one block per kind** - `lectures:`, `labs:`, `readings:`, `exams:`, `drop-ins:`, `events:`, `assets:` (the institution's kinds, from `policy.yml`) - and `assignments:`. Two scalars bookend the semester, `semester_start:` and `semester_end:`, and an optional `archive:` block freezes it read-only.
 
-Three blocks carry the whole semester, and each is defined by what it **does**:
+Each block is a map. The **key** of an entry (`lecture-3`, `lab-2b`) is its id: it names the entry's site row and, for an assignment, its mark sheet. It is never shown to students and never read for a number - so call it anything, and renaming it is the only thing that changes it.
 
-- **`releases:`** - the entries that **deploy**: file(s) copied from course org staging -> the semester org, where students can access them.
-- **`assignments:`** - each assignment's whole lifecycle: hand-out, due date, grading.
-- **`events:`** - **display-only** calendar rows. Nothing deploys; the row simply appears on the semester site (an exam, a clinic, or a session with nothing to ship).
-
-Two scalars sit alongside them - `semester_start:` and `semester_end:` - which bookend the semester and render as rows of their own. An optional `archive:` block freezes the semester read-only - writing it is what turns that on.
-
-### One word per column
-
-The site's schedule table has four columns, and every block below fills them with the same four fields - so a field means the same thing wherever you write it:
-
-| Column | Field |
-|---|---|
-| **Event** | `kind:` - what kind of row this is |
-| **Date** | `event_datetime:` |
-| **Title** | `title:` |
-| **Details** | `details:` |
-
-`show_on_site:` (default `true`) and `tbc:` (default `false`) go with them everywhere. `details:` renders **above** whatever the Details cell already generates - the materials links, the "not released yet" note, the submit address - never instead of it.
-
-## `releases:` 
-
-Use this for releasing teaching materials, code, datasets, anything else.
-
-Each entry is one row on the semester site, in date order. The site names the row by its kind and its number (`Lecture 3`, `Lab 9`, `Drop-in 1`), plus your `title:` if you give one. The number is the entry's `number:`, else the number in its label (`lecture_03`, `lab-9`, `01_lab`). It is never counted, so adding or moving an entry renumbers nothing. A shown entry with neither is a problem: the console asks you to give it a number, and its release is skipped until you do. Two entries of one kind with the same number are a problem too. (Readings are the exception: a readings entry without a number is simply its own row.) The same numbers head the generated syllabus. Folder names mean nothing to the row: an `NN_` prefix is harmless, never needed. Each entry holds:
+### Entries of every kind
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|
-| `event_datetime` | **yes** | - | when the class happens - what the site's schedule shows; this entry's deploys ship an hour before it by default |
-| `deploy` (nested entry) | no | - | the copies this entry ships (a nested list - see below) |
-| `number` | unless the label carries one | the label's number | the row's number (`Lecture 3`); the console fills in the next one |
-| `kind` | no | inferred | the row's kind: one of the institution's kinds (Hertie: `lecture`, `lab`, `readings`, `exam`, `drop-in`, `assets`, `other`). Left out, it is inferred once from the folder the first copy lands in: `lectures`/`lecture` -> lecture, `labs`/`lab`/`tutorials` -> lab, `readings`/`reading`/`literature` -> readings, anything else -> assets (supporting files: released, never a row), unless the source repo's own `materials.yml` aliases say otherwise; an entry with no copies yet is a lecture ([02](02-add-materials-to-course.md#materialsyml)). The folder is the top folder of the DESTINATION path (for a copy into the repo's root: the copied name when it names a kind, as `lectures` copied whole does, else the destination repo), matched whatever its case. The console shows the inferred kind for you to confirm. An unknown value is flagged by **Validate schedule** and shown as `other`. Each kind gets its own tab on the site |
-| `title` | no | - | the session's name, shown beside the row's name ("Lecture 1 / Probability Theory") on the schedule and its kind's tab |
-| `details` | no | - | what the session covers - the **learning objectives** of a Hertie syllabus. Shown in the schedule's Details column AND under the row's heading on its kind's tab; may run to several paragraphs (use a `>` or `\|` block) |
-| `tbc` | no | `false` | signals the date is provisional: it fires as normal just the deployed site marks it **(TBC)** |
-| `show_on_site` | no | `true` | `false` releases **silently**: the deploys ship exactly as written and the entry is no row of its own (its files are in the semester site's All Materials). Readings are the exception; see [Silent releases](#silent-releases) |
+| `session` | on `lectures:` and `labs:` | - | the teaching unit (an integer): lecture 3, its lab and its readings share `session: 3`. Optional on `readings:` (absent: a row of its own); not used elsewhere |
+| `number` | no | `session` | the number in the row's name (`Lab 2`) when it differs from the unit |
+| `event_datetime` | **yes** | - | a datetime, a bare date, `tbc`, or a list of slots (below) |
+| `title` | no | - | the session's name, beside the row's name ("Lecture 1 / Probability Theory") |
+| `details` | no | - | what it covers (the learning objectives); shown on the Schedule and under the row's heading on its kind's tab; a `>` or `\|` block for paragraphs |
+| `location` | no | - | the room, shown under the date |
+| `tbc` | no | `false` | the date is provisional: the site marks it **(TBC)**; it still fires |
+| `show_on_site` | no | `true` | `false`: no row on the site; its files still ship (readings: see below) |
+| `files` | no | - | what ships (below) |
+| `reading_list` | no | - | `readings:` only: markdown, shown with the readings on the site |
 
+Each kind gets its own tab on the site, and its rows are named by the kind and the number (`Lecture 3`). Two shown entries of one kind with the same number are a problem. A lecture or lab without `session:` is a problem too (*Give lecture-3 a session*), and its files wait until it has one.
 
-NB: **the calendar event is not the release.** If nothing needs to ship at all, the row belongs under `events:` with the same `kind:`, not here (see [Sessions with nothing to ship](#sessions-with-nothing-to-ship)).
+**A row appears as soon as you write it, not when it ships.** Until its files land the row says so (*"Materials for lecture 3 are not yet released"*), then links what landed: a file as itself, a folder as GitHub shows it. An entry with `event_datetime: tbc` is a **TBC** row after the dated rows of its kind (never in Updates), and nothing ships until it has a date.
 
-### Silent releases
+### Slots: one entry, several times
 
-A week's readings often go out ahead of the lecture. Give them their own entry with `show_on_site: false`:
+A list under `event_datetime:` is one entry taught more than once - two lab groups - with one set of files:
 
 ```yaml
-  readings-4:
-    event_datetime: 2026-09-15T09:00
-    show_on_site: false
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: readings/04_week-4
+labs:
+  lab-1:
+    session: 1
+    title: Introduction
+    event_datetime:
+      - at: 2026-09-16T08:00
+        location: Lab 2.30
+        details: Group 1
+      - at: 2026-09-17T18:00
+        location: Lab 2.32
+        details: Group 2
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: labs/01_intro
 ```
 
-A readings entry with a number - its `number:`, else its label's (`readings-4`) - belongs to the lecture with that number, silent or not, whatever its date: that lecture's Schedule row links the readings and inlines the reading list, the Readings tab lists it under the lecture's name (the Lectures tab does not), and until the files land the Readings tab says they are still to come and a not-yet-released lecture names the readings' folder beside its own. Any other readings entry, or one whose number no shown lecture has, is a row of its own; a silent one is on the Readings tab only, unnumbered. In the console's schedule editor, **Joins lecture** on a readings entry sets its `number:`; leave it blank for a row of its own.
+Each slot is a row on the Schedule; the files ship once, an hour before the first slot, and only the first is ever news in the Updates box.
 
-Any other silent entry (setup files, a quiz solution) is no row: its files are in the semester site's All Materials, and the lectures around it keep their numbers. One that lands only root files (a `course-intro` shipping `SYLLABUS.md`) is a course document, pinned on the home page.
-
-### Folders released outside the plan
-
-A folder of a kind-named section (`lectures/`, `labs/`, `readings/`, ...) that no entry copies - released by hand, or by a semester with no `releases:` - still gets a row on its kind's tab, named for the folder, undated and unnumbered, and off the Schedule. A readings folder joins the lecture folder with the same `NN_` number. Write the entries to date them.
-
-NB: **a row appears as soon as you write it, not when it ships.** Every dated `releases:` entry gets its schedule row from the moment it lands on `main` - so writing the semester up front publishes the whole semester. Until its files ship the row carries no links and says so (*"**Materials for lecture 3 are not yet released** - they will appear in `materials/lectures/03_week-3` when they are."*), then links whatever its copies landed: a file as itself, a folder as GitHub shows it. An entry with several copies is one row linking all of them. An `assignments:` entry works the same way: its hand-out and due rows appear the day you write them, and what waits for the hand-out is the assignment's *content* - the brief, and the title the template's README gives it. Until then the row carries only the plan-side name (`Assignment 1`) and says it is not handed out yet. An entry with `event_datetime: tbc` shows as a **TBC** row after the last dated row of its kind (on the Schedule and its tab, never in Updates), and nothing ships until you give it a date.
-
-Nested under `deploy:` we have the following:
+### `files:`
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|
-| `course_source_repo` | **yes** | - | the repo in the COURSE org to copy from |
-| `course_source_path` | **yes** | - | the folder or file to copy, relative to `course_source_repo` - or `/` for the whole repo |
-| `semester_dest_repo` | no | `materials` | the semester repo to copy into - created on first release |
-| `semester_dest_path` | no | mirrors `course_source_path` | where it lands, relative to `semester_dest_repo` |
-| `deploy_datetime` | no | an hour before the entry's `event_datetime` (a whole-day `event_datetime`: the day's start) | ship this one copy at another time, earlier or later than the class it belongs to |
-
-NB: the hour-before default is for these materials copies only - an assignment's hand-out and solution ship at their own `handout_datetime` / `solution_datetime`. It also applies to a file written before it existed: a copy with no `deploy_datetime` there now ships an hour before its session.
-
-NB: `semester_dest_repo` is yours to choose - one shared `materials` repo, or one repo for lectures, another for labs etc; any non-existent repo and/or directory structure specified between `semester_dest_repo` and `semester_dest_path` is created on release if non-exist.
-
-NB: `course_source_path: /` (or `.`) releases the **whole repo**. Two root entries are left behind: `.github` (the faculty Release workflows) and `.system/` (the toolkit's files: your operating notes `MAINTAINING.md` and the syllabus example). Nested copies - a `labs/.github/` of your own - travel normally.
-
-NB: a root `README.md` or `SYLLABUS.md` still carrying the scaffold's placeholder is **withheld** from the release, with a warning on the run summary and everything else shipped - see [08 -> The unwritten root stubs](08-release-materials-to-cohort.md#the-unwritten-root-stubs-are-withheld-until-you-write-them).
-
-At a minimum only `course_source_repo` + `course_source_path` are required, everything else defaults:
+| `from_course_repo` | **yes** | - | the repo in the COURSE org to copy from |
+| `from_path` | **yes** | - | the folder or file to copy, or `/` for the whole repo |
+| `to_semester_repo` | no | `materials` | the semester repo to copy into - created on first release |
+| `to_path` | no | `from_path` | where it lands in `to_semester_repo` |
+| `release_datetime` | no | an hour before the first slot (a whole-day slot: the day's start) | ship this copy at another time |
 
 ```yaml
-releases:
-  lecture_02:
+lectures:
+  lecture-2:
+    session: 2
     event_datetime: 2026-09-15T10:00
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: lectures/02_intro
-# -> lands at materials/lectures/02_intro an hour before the class (09:00)
-
-  lab_02:
-    event_datetime: 2026-09-17T14:00
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: labs/02_intro
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: lectures/02_intro
+# -> lands at materials/lectures/02_intro at 09:00
 ```
-Each item under `deploy:` is one copy, and every path is relative to its own repo.
 
-Spell fields out only where a default doesn't fit - a different
-destination repo/path, or an early ship time:
+Folder names mean nothing: the block says what the entry is. A release only ever **adds** files, so solutions go out after the class as a second copy, staged **outside** the folder the lab ships:
 
 ```yaml
-releases:
-  lecture_02:
-    event_datetime: 2026-09-15T10:00   # class time - what the deployed site schedule will announce
-    deploy:
-      - course_source_repo: course-materials-f2026 # item 1
-        course_source_path: lectures/02_intro
-        semester_dest_repo: lecture_materials
-        deploy_datetime: 2026-09-14T18:00   # released the evening before
-      - course_source_repo: course-materials-f2026 # item 2
-        course_source_path: readings/02_intro
-        semester_dest_repo: lecture_materials   
-
-  lab_02:
-    event_datetime: 2026-09-17T14:00   # the lab session; with no deploy_datetime its copy ships an hour before (13:00)
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: labs/02_intro
-        semester_dest_repo: lab_materials
-
+      - from_course_repo: course-materials-f2026
+        from_path: solutions/labs/02_intro
+        to_path: labs/02_intro/solutions
+        release_datetime: 2026-09-17T18:00
 ```
 
-### Releasing solutions after the class
+No `files:` key: a session with nothing to ship (a row, never "not yet released"). `files: []`: files still to write - a to-do on the Dashboard.
 
-A deploy fires on its own `deploy_datetime`, and a release only ever **adds** files - so a
-second copy into the same session folder is how solutions reach students after the lab:
+NB: `from_path: /` releases the whole repo, less `.github` and `.system/`. A root `README.md` or `SYLLABUS.md` still carrying the scaffold's placeholder is **withheld** - see [08](08-release-materials-to-cohort.md#the-unwritten-root-stubs-are-withheld-until-you-write-them).
+
+### Readings
+
+A readings entry with a `session:` belongs to that unit: the unit's first row carries a **Readings** chip, and the Readings tab lists it under the lecture's name. One without is a row of its own. `show_on_site: false` keeps a session's readings off the Schedule; they stay on the Readings tab.
 
 ```yaml
-  lab_02:
-    event_datetime: 2026-09-17T14:00
-    title: Your first classifier
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: labs/02_intro          # the empty scripts, an hour before the lab
-      - course_source_repo: course-materials-f2026
-        course_source_path: solutions/labs/02_intro   # staged OUTSIDE labs/02_intro
-        semester_dest_path: labs/02_intro/solutions
-        deploy_datetime: 2026-09-17T18:00          # after the lab
+readings:
+  readings-4:
+    session: 4
+    event_datetime: 2026-09-15T09:00
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: readings/04_week-4
+    reading_list: |
+      - Goodfellow et al., *Deep Learning*, ch. 6.
 ```
 
-Both land on the same Lab row; the solutions links appear at 18:00 and never overwrite the
-scripts. **Stage the solutions outside the folder you release as the lab** - a `solutions/`
-inside `labs/02_intro` ships with the 13:00 copy.
+### Exams, drop-ins, events, assets
 
-## `assignments:` 
+`exams:` and `events:` entries are calendar rows - a midterm, a clinic, a guest lecture. A bare date is a whole day. `assets:` entries ship supporting files (data, setup) on their date and are never a row.
 
-Each assignment's **dates**, keyed by a key you choose. `course_source_repo` names the template it hands out from.
+```yaml
+exams:
+  midterm:
+    title: Midterm exam
+    event_datetime: 2026-11-03
+    location: Main hall
+events:
+  guest-lecture:
+    title: Guest lecture
+    event_datetime: tbc
+```
 
-**The key is shown to students**: it names their repo (`assignment-1-<handle>`) and heads the row on the site (`assignment-3-project` reads "Assignment 3 Project"). Keep it short; the assignment's name is the template's `title:`.
+## `assignments:`
+
+Each assignment's dates and run settings.
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|
-| `course_source_repo` | **yes** | - | the course-org template one repo per student (or team) is generated from |
-| `handout_datetime` | no* | - | when repos are provisioned, automatically. *Omit it to hand out by hand |
+| `number` | **yes** | - | "Assignment 1" on the site |
+| `template` | **yes** | - | the course-org template each student's (or team's) repo is generated from |
+| `repo_name` | no | `assignment-<number>` | what this semester's repos are called (`<repo_name>-<handle>`) |
+| `handout_datetime` | no | - | when repos are provisioned. Omit it to hand out by hand |
 | `due_datetime` | **yes** | - | the deadline students see; a bare date closes at **23:59:59** |
-| `solution_datetime` | no | - | when the model answer and rubric (the template's `solution/`) are pushed into every repo. Not the same as returning marks (marks go back without it), and it cannot be undone: think twice if the template is reused in a later semester. **No default**. Must be **after** `handout_datetime` (and needs it set), and **no earlier than the late cutoff** |
-| `marks_return_datetime` | no | - | when this assignment's marks go back, automatically (a scoped **Distribute grades** run), once every unit is marked; until then a problem says how many are not. If some emails fail they are retried only by pressing Return marks again; if every one fails, the next tick tries again. Internal: to show a "Marks expected" row, write it as `{event_datetime: 2026-10-27, show_on_site: true}` |
-| `details` | no | - | a sentence in the Details column of **both** its rows (out and due) |
-| `show_on_site` | no | `true` | `false` and the site says nothing about this assignment. It still hands out, snapshots and grades |
-| `tbc` | no | `false` | both rows marked **(TBC)**. **Display only** |
+| `solution_datetime` | no | - | when the template's `solution/` is pushed into every repo. **No default**; must be after `handout_datetime` (and needs it) and no earlier than the late cutoff. It cannot be undone |
+| `marks_return_datetime` | no | - | when marks go back automatically, once every unit is marked. `{event_datetime: ..., show_on_site: true}` also shows a "Marks expected" row |
+| `details`, `show_on_site`, `tbc` | no | - | as for any entry; on both its rows (out and due) |
 
-**The late cutoff is computed, never written:** `due_datetime` plus the assignment's `late_window_days` (below). `late_window_days: 0` means no late work.
+Run settings, each optional, written on the entry: `late_window_days`, `late_penalty_per_day`, `team_formation` (`self_select` or `assigned`), `max_team_size`, `assignment_repo_visibility` (`private`, `public`, `student_choice`; read when each repo is created), `marks_per_question`, `submit_url` (`submit_via: external` only). Nearest wins: the entry, then `semester-config/assignments.yml` `defaults:`, then the course's `assignment_defaults:` (`.github/dsl-course.yml`), then `policy.yml`. The late window and penalty go together: an entry naming one sets the other to none.
+
+**The late cutoff is computed, never written:** `due_datetime` plus `late_window_days`.
 
 ```yaml
 assignments:
-  assignment-1:
-    course_source_repo: assignment-linear-regression
+  linear-regression:
+    number: 1
+    template: assignment-linear-regression
     handout_datetime: 2026-09-22T09:00
     due_datetime: 2026-10-13
-    solution_datetime: 2026-10-16T09:00 # optional. No default - omitted = never
-```
-
-### `assignments.yml` - how this semester runs each assignment
-
-Beside `schedule.yml` in `semester-config`. Every key is optional; nearest wins: the assignment's block, then `defaults:`, then the course's `assignment_defaults:` (`.github/dsl-course.yml`), then the institution's (`policy.yml`). The late window and penalty go together: a block naming one sets the other to none.
-
-| Key | Where | Meaning |
-|---|---|---|
-| `late_window_days` | both | days after the due date that work is still accepted; `0` = none |
-| `late_penalty_per_day` | both | `10%` or `0.1`, of the earned mark, per day started; `0` = no deduction |
-| `team_formation` | both | `self_select` (the Join team form) or `assigned` (you write teams.csv) |
-| `max_team_size` | both | group assignments only |
-| `visibility` | both | `private`, `public` or `student_choice`. Read when each repo is created: change it before the first hand out; afterwards a change is a problem, not a move |
-| `submit_url` | both | `submit_via: external` only: the site's Submit button (`https://` only) |
-| `marks_per_question` | both | `true` (default) or `false`: whether returned marks show each question's mark and feedback; the score, late penalty, adjustment and final grade are shown either way |
-| `semester_dest_repo` | per assignment | what this semester's repos are called (default: the key) |
-
-```yaml
-defaults:
-  late_window_days: 7
-  late_penalty_per_day: 10%
-assignments:
-  assignment-1:
-    late_window_days: 2         # both halves: a block naming one sets the other to none
+    solution_datetime: 2026-10-16T09:00
+    late_window_days: 2
     late_penalty_per_day: 10%
-  assignment-2:
-    semester_dest_repo: homework-2
 ```
 
-A block for a key `schedule.yml` does not name is a problem; a key with no block runs on the defaults. **Validate schedule** checks both files on every push to either.
+A `template:` that does not exist is reported and the assignment skipped; an entry without one, or without `due_datetime:`, is dropped. An assignment without `number:` is a problem (*Give assignment-2 a number*) and does not hand out until it has one. Two assignments off one template must each name their own `repo_name`; the hand-out, collect and patch ops refuse such a template and name both, and the schedule fires each on its own dates.
 
-A `course_source_repo:` naming a repo that does not exist is reported loudly and the assignment is skipped. An entry missing it is dropped, like one missing `due_datetime:`.
-
-**Two assignments off one template** (a resit, or two halves of a semester) are allowed only when **every** entry citing it sets its own `semester_dest_repo` in `assignments.yml`. The buttons start from the template and cannot tell the two apart, so **Release assignment**, **Collect submissions** and **Patch** refuse such a template and name both; the schedule fires each on its own dates.
-
-Adding or renaming an assignment wakes **Sync membership**, which rewrites `semester-config/.system/assignments.lock.yml`, the mirror the **Join team** form reads. Its team-formation window runs from `handout_datetime` to the late cutoff ([09](09-release-assignment-to-cohort.md#group-assignments-creating-the-teams)).
-
-## `events:` 
-
-Could be an exam, a drop-in clinic, a guest lecture, a revision session, a second lab group: anything students should see on the calendar that releases no files.
-
-| Field | Required | Default | Meaning |
-|---|---|---|---|
-| `event_datetime` | **yes** | - | when it happens; as displayed on the deployed site schedule |
-| `kind` | no | `special_event` | `special_event`, `exam`, or any other row kind of `releases:` (`lecture`, `lab`, ...) - see below. An unknown value is flagged and shown as `special_event` |
-| `number` | no | the FIRST number in the label (`lab-01-group-2` is Lab 1) | a session's number (`Lab 1`); a label with two numbers and no `number:` is flagged by **Validate schedule** |
-| `title` | no | prettified label | the row label on the site; a session's defaults to the title of the shown release of the same kind and number |
-| `details` | no | - | what the row's Details column says: the room, the format, what to bring. There is no default - an exam with no `details:` says nothing, rather than the "Details to be confirmed." the toolkit used to write into every one |
-| `tbc` | no | `false` | the date is provisional: the site marks it **(TBC)** |
-| `show_on_site` | no | `true` | `false` keeps the row in this file and off the site |
-
-```yaml
-events:
-  mid-term:
-    kind: exam
-    title: MidTerm Exam
-    event_datetime: 2026-11-03
-
-  project-clinic:                     
-    title: Project clinic
-    event_datetime: 2026-11-17T10:00
-    tbc: true  # provisional' - site shows "(TBC)" next to the given date time.
-
-  guest-lecture:  
-    title: Guest lecture  
-    event_datetime: tbc # site will show just TBC, no proposed datetime
-                       # sorted end-of-term until a real date replaces
-```
-
-### Sessions with nothing to ship
-
-An event of a row kind (`lecture`, `lab`, `readings`, ...) is a session of that kind with no files: a row named like a release (`Lab 1`), in its colour, on the Schedule and its kind's tab, never "not yet released" and never in Updates. It counts for its week (no *Missing lab*), and is never *Nothing to release*. Two lab groups, one handout:
-
-```yaml
-releases:
-  lab-01:                               # group 1, with the files
-    kind: lab
-    title: Introduction
-    event_datetime: 2026-09-16T08:00
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: labs/01_intro
-        deploy_datetime: 2026-09-15T18:00  # the evening before group 1
-events:
-  lab-01-group-2:                       # group 2: "Lab 1 - Introduction", no files
-    kind: lab
-    number: 1                           # the label alone says 1 too; numbered, it is never flagged
-    details: Group 2, room 2.32
-    event_datetime: 2026-09-17T18:00
-```
-
-In the console it is the same sheet as a release: leave **What to release** empty and it is saved here; add a line and it moves to `releases:`.
+Adding or renaming an assignment wakes **Sync membership**, which rewrites `semester-config/.system/assignments.lock.yml` for the **Join team** form. The team-formation window runs from `handout_datetime` to the late cutoff ([09](09-release-assignment-to-cohort.md#group-assignments-creating-the-teams)).
 
 ## `archive:`
 
 When this semester is archived: every repository in the org archived, nothing deleted, nobody removed. See [Archiving the semester](10-grade-and-return-assignments.md#archiving-the-semester).
 
-**The block is the switch.** Write it and the semester is archived automatically; leave it out and nothing ever is. Every field inside it is optional. A new semester's seeded `schedule.yml` already carries the block, so filling in `semester_end` arms a freeze sixty days later; delete the block to opt out.
+**The block is the switch.** Write it and the semester is archived automatically; leave it out and nothing ever is. A new semester's seeded `schedule.yml` carries the block, so filling in `semester_end` arms a freeze sixty days later; delete the block to opt out.
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|
 | `event_datetime` | no | `semester_end` + `grace_days` | the day the whole semester org is archived |
-| `grace_days` | no | `60` | how many days after `semester_end` the default date falls |
+| `grace_days` | no | `60` | days after `semester_end` the default date falls |
 | `title` | no | `Semester archived` | the row's Title column |
-| `show_on_site` | no | `true` | a "Semester archived" row on the deployed schedule, and a notice in the site's Updates box for the fortnight before |
-| `details` | no | *none* | the sentence that row and that notice say - all of it; `{date}` in it is filled in with the archive date |
-| `tbc` | no | `false` | the date is provisional: the site marks it **(TBC)**. **Display only** - the archive still happens on the date above |
+| `show_on_site` | no | `true` | a row on the Schedule, and a notice in the Updates box for the fortnight before |
+| `details` | no | *none* | the sentence that row and notice say; `{date}` is filled in |
+| `tbc` | no | `false` | marks the date **(TBC)**. Display only |
 
-```yaml
-semester_end: 2026-12-18
-archive:
-  event_datetime: 2027-02-16  # optional - without it, 60 days after semester_end
-  details: >-                 # optional - what students are told, in your own words
-    This semester is archived on 2027-02-16: every repository in it becomes read-only.
-    You keep read access.
-```
-
-`details:` is where the sentence comes from, and the only place: there is no wording
-of the toolkit's own behind it, because what archiving means for your students is yours to
-say. Write none and the row still shows - "Semester archived", with its date - and says
-nothing under it, and nothing goes in the Updates box. The skeleton in a new semester's
-`schedule.yml` carries a suggested sentence ready to uncomment.
-
-`archive:` on its own means "yes, on the default date". With no block, or a block with
-neither an `event_datetime` nor a `semester_end` to count from, nothing is archived automatically and
-the semester's digest issue says so. Archiving such a semester is the **Archive semester**
-button with `force`.
-
----
-Full schema, field by field, see [here](DEPLOYMENT-CHECKLIST.md#scheduleyml).
+`archive:` on its own means "yes, on the default date". With no block, or no date to count from, nothing is archived automatically and the digest issue says so; archive such a semester with the `semester.archive` op and `force` (console, or `python -m dsl_course semester.archive`).
 
 ---
 
@@ -363,16 +220,16 @@ The run summary shows what the parser *understood*, not just what it rejected - 
 ```
 Parsed schedule.yml
   semester 2026-09-07 -> 2026-12-18  (Europe/Berlin)
-  11 release(s), 19 deploy(s) | 3 assignment(s) | 4 event(s)
+  16 entries, 20 file(s) | 3 assignment(s) | 4 event(s)
 ```
 
 **Empty weeks.** Each week of the term still to come (counted from `semester_start`, as the Dashboard's week strip numbers them) with nothing dated in it (no release, hand-out, due date, late cutoff, exam, event or archive) is an *Empty week* problem on the console's Dashboard. A week with something dated but no lecture, lab or readings release or session - for each of those kinds the semester runs weekly, that is, with a dated release in at least half (rounded up) of the weeks that have anything dated - is a *Missing lab* (etc.) problem instead; a hand-out or exam does not count, and one further-readings entry does not make readings weekly. An intentional gap (a reading or exam week) is dismissed with **Set aside**, which adds `empty_week:<monday>` (or `empty_week:<monday>:<kind>`, the Monday of the week's first day) to the course's `set_aside:` list.
 
-**Nothing to release.** A dated release still to come with no `deploy:` (or an empty one) is a *Nothing to release* problem: under **Coming up** until its date is within the next 7 days, then a problem. A release whose copies were all dropped is not one: the dropped copy is the problem. Its row still shows, as a session with nothing to ship does (never "not yet released", never in Updates); if the session really ships nothing, move it to [`events:`](#sessions-with-nothing-to-ship), or **Set aside** adds `nothing_to_release:<label>` to the same list.
+**No files yet.** An entry written with `files: []` (or `files:` and nothing under it) is a to-do on the Dashboard, dated by the entry: write its files, or delete the key if the session ships nothing.
 
 Three other ways to check, none of them required:
 
-1. **Read the counts.** **Check semester setup** reports the release plan and semester dates, and flags `N entry/ies DROPPED`.
+1. **Read the counts.** The `semester.check` op (console **Check semester setup**, or `python -m dsl_course semester.check`) reports the plan and semester dates, and flags `N entry/ies DROPPED`.
 2. **Validate by hand.** `python3 -m dsl_course.schedule --semester-org hertie-dsl-demo-f2026 --validate`, or `--file schedule.yml --validate` against a local copy. Without `--validate` it prints the schedule *as parsed*, as JSON.
 3. **Preview it.** Run **Scheduled release** by hand; `preview` defaults to **`true`**, so it lists what *would* open and releases nothing.
 
@@ -406,7 +263,7 @@ So the sources are checked against the course org in two places: **Validate sche
 
 One issue per semester, titled **"schedule.yml: planned releases cite sources not staged in the course org"**, kept current by the scheduler. It carries everything wrong with this file - a source nobody has staged, an entry the parser had to drop, a file that does not parse at all, a group assignment whose teams have not all formed (which stays listed after the window shuts, until you fix it):
 
-- its **body** is rewritten every run and always lists everything currently missing, grouped by severity, each line naming the exact field to edit (`releases.lecture_02` → `course_source_path`), the one sentence that would fix it, and a link at its line in your `schedule.yml`. Editing a body doesn't email anyone, so this is free to happen on every tick.
+- its **body** is rewritten every run and always lists everything currently missing, grouped by severity, each line naming the exact field to edit (`lectures.lecture-2` → `from_path`), the one sentence that would fix it, and a link at its line in your `schedule.yml`. Editing a body doesn't email anyone, so this is free to happen on every tick.
 - it **comments** only when something crosses a rung - a fault appears at warning, escalates, or clears - and `cc`s the same people the email is addressed to.
 - it **closes itself** when nothing in the file is left to fix.
 
@@ -422,23 +279,22 @@ By hand: add `--check-sources <course-org>` to either `--validate` form above. E
 
 ```
   2 SOURCE(S) NOT IN hertie-dsl-demo-course-e1234 YET:
-    [critical] releases.lecture_02 -> course_source_path - schedule.yml:36 - hertie-dsl-demo-course-e1234/course-materials-f2026/lectures/02_lecture does not exist - fires Wed 19 Aug 2026, 08:00 Europe/Berlin
-    [advisory] releases.lecture_09 -> course_source_path - schedule.yml:184 - hertie-dsl-demo-course-e1234/course-materials-f2026/lectures/09_lecture does not exist - fires Wed 04 Nov 2026, 08:00 Europe/Berlin
+    [critical] lectures.lecture-2 -> from_path - schedule.yml:36 - hertie-dsl-demo-course-e1234/course-materials-f2026/lectures/02_lecture does not exist - fires Wed 19 Aug 2026, 08:00 Europe/Berlin
+    [advisory] lectures.lecture-9 -> from_path - schedule.yml:184 - hertie-dsl-demo-course-e1234/course-materials-f2026/lectures/09_lecture does not exist - fires Wed 04 Nov 2026, 08:00 Europe/Berlin
 ```
 
 ## Dropped entries
 
-An entry that is valid YAML but not a valid *schedule* entry is **dropped**: it cannot be run, so the rest of the semester parses without it. This is the one fault a green run hides, so every drop is named in the run log, counted on **Check semester setup**, and turned into a non-zero exit by `--validate`.
+An entry that is valid YAML but not a valid *schedule* entry is **dropped**: it cannot be run, so the rest of the semester parses without it. This is the one fault a green run hides, so every drop is named in the run log, counted by `semester.check`, and turned into a non-zero exit by `--validate`.
 
 | Fault | What the semester loses |
 |---|---|
-| no valid `event_datetime` on a `releases:` or `events:` entry | nothing deploys, and no row appears on the site |
-| no valid `due_datetime` on an `assignments:` entry | no deadline, no submission snapshot, no autograding |
-| a `deploy` item missing `course_source_repo` or `course_source_path` | that one copy never ships |
+| no valid `event_datetime` on an entry of any kind | nothing ships, and no row appears on the site |
+| no valid `due_datetime`, or no `template`, on an `assignments:` entry | no deadline, no submission snapshot, no autograding |
+| a `files` item missing `from_course_repo` or `from_path` | that one copy never ships |
+| a key used in two blocks | the second entry is dropped |
 
-Kept rather than dropped - the entry still runs on its documented fallback, and the fallback is reported alongside the drops (so `--validate` catches it): a malformed `handout_datetime` (**nothing is ever handed out**), `marks_return_datetime` (marks go back by hand) or `deploy_datetime` (the copy ships at its default, an hour before the `event_datetime`); an unknown `kind:` on an event (shown as a plain special event); a typo'd or unknown key at any level; and an unknown `timezone:` (falls back to `Europe/Berlin`). An assignment's `type` or `max_team_size` is noted with where it lives now.
-
-An empty `deploy:` - the key written with nothing under it - is flagged too. It parses as "no copies", so the entry becomes a display-only row that ships nothing; if that is what you meant, delete the key (or write `deploy: []`) and the flag goes away.
+Kept rather than dropped - the entry still runs on its documented fallback, and the fallback is reported alongside the drops (so `--validate` catches it): a malformed `handout_datetime` (**nothing is ever handed out**), `marks_return_datetime` (marks go back by hand) or `release_datetime` (the copy ships at its default); one unreadable slot of several (the others stand); a typo'd or unknown key at any level; and an unknown `timezone:` (falls back to `Europe/Berlin`). An assignment's `type` or `max_team_size` is noted with where it lives now.
 
 `solution_datetime` is the exception that is **dropped, not kept**: malformed, missing its `handout_datetime`, not after it, or (in the schedule check on a push) before the late cutoff, the value is discarded and the model solution waits for a human. Honouring a bad one could ship the answers with the questions, and nothing undoes that.
 
@@ -446,7 +302,7 @@ An empty `deploy:` - the key written with nothing under it - is flagged too. It 
 
 - Everything naive is read in the semester's `timezone:` (default `Europe/Berlin`).
 - An explicit offset (`2026-09-15T14:00+00:00`) names that exact instant; it fires then, and the site shows it on the semester's own clock (`16:00` for a `Europe/Berlin` semester in September).
-- A **bare date** with no time means **00:00** on a release's `event_datetime`/`deploy_datetime` (the day opens), **23:59:59** on an assignment `due_datetime` (the day closes), and a whole day on an `events:` entry's `event_datetime` (the site shows a 09:00 placeholder).
+- A **bare date** with no time means **00:00** on an entry that ships files and on `release_datetime` (the day opens), **23:59:59** on an assignment `due_datetime` (the day closes), and a whole day on an `exams:` or `events:` entry.
 
 ## Deadline snapshots and autograding
 
@@ -462,7 +318,7 @@ Each assignment's **late cutoff** is `due_datetime` plus its `late_window_days`.
 
 ### Releasing the model solution
 
-`solution_datetime` is separate from all of the above, and has no default - a solution released the moment submissions close rewards anyone who pushes late, so you name the moment or it never fires. At that datetime the scheduled run pushes the template's `solution/` folder into every student/team repo, which is exactly what **Release assignment** with `solution_datetime: now` does by hand. Both are idempotent, so doing one after the other changes nothing. The push that first adds a `solution_datetime:` gets a notice on its commit saying so; a hand out with `now` (button or console) runs only straight after a preview of it by the same person.
+`solution_datetime` is separate from all of the above, and has no default - a solution released the moment submissions close rewards anyone who pushes late, so you name the moment or it never fires. At that datetime the scheduled run pushes the template's `solution/` folder into every student/team repo, which is exactly what the `assignment.handout_now` op with `solution_datetime: now` does by hand. Both are idempotent, so doing one after the other changes nothing. The push that first adds a `solution_datetime:` gets a notice on its commit saying so; a hand out with `now` (console or CLI) runs only straight after a preview of it by the same person.
 
 It must not fall before the late cutoff: students still handing in could read it. The schedule check on a push and the console refuse such a date when it is saved. One in the file anyway (a late window changed afterwards, say) is held by the scheduler and shown at the cutoff, and the digest issue names the line to move. A cutoff that cannot be worked out holds it too. Only the solution waits; hand outs, releases and the freeze run as written.
 

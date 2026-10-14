@@ -12,41 +12,27 @@ Deploy any path - a session folder, a dataset, a syllabus file, a code subpackag
 
 ## The schedule automatically handles releases in advance (recommended)
 
-A `deploy` entry in the semester's `schedule.yml` releases exactly what the workflow below does, at the datetime you give it: [Schedule releases](07-schedule-releases.md). One setup cost, and the entry appears on the deployed `<course>.github.io` site so students see the plan in advance.
+A `files:` item of a `schedule.yml` entry releases exactly what the ops below do, at the time you give it: [Schedule releases](07-schedule-releases.md). One setup cost, and the entry appears on the deployed `<course>.github.io` site so students see the plan in advance.
 
-## Release materials via manual dispatch
+## Release by hand
 
-The `release materials` workflow can be found in the course org's: 
-  1. `.github` → **Actions** tab → **Release materials** - e.g. [this demo repo](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/release-materials.yml) 
-  2. within any bootstrapped materials repo (i.e. any repo created using the `new materials repo` workflow) → **Actions** tab → **Release materials** - e.g. [this demo repo](https://github.com/hertie-dsl-demo-course-e1234/course-materials-f2026/actions)
+Two ops, in the console or on the CLI:
 
-The workflow's inputs are **the same fields as a `schedule.yml` `deploy` entry** - what you type here is exactly what you would have written in the schedule:
+- **`release.entry`** (`python -m dsl_course release.entry`) - ships one schedule entry's files now, ahead of their time.
+- **`release.adhoc`** (`python -m dsl_course release.adhoc`) - copies a path no entry names. It takes the fields of a `files:` item: `from_course_repo`, `from_path`, `to_semester_repo` (created if missing, private, `students` + `auditors` read) and `to_path` (default: `from_path`).
 
-| # | Input | Required | Default | Meaning |
-|---|---|---|---|---|
-| 1 | `course_source_repo` | yes | *(the repo you run it from; centrally, the latest dated repo)* | repo to release from in the COURSE org |
-| 2 | `course_source_path` | yes | - | folder or file to copy - or a **comma-separated list** |
-| 3 | `semester_org` | yes | *(latest semester)* | target semester org (dropdown) |
-| 4 | `semester_dest_repo` | yes | - | repo in the semester org (created if missing, private, `students` + `auditors` read) |
-| 5 | `semester_dest_path` | no | blank → mirrors `course_source_path` (recreates same structure) | where to put it |
+### How to specify release paths
 
-### [How to specify release paths](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/release-materials.yml)
-
-- **Release one file**: `course_source_path` = `lectures/02_intro` → lands at `materials/lectures/02_intro`.
-- **Release multiple specific files** - use a comma-separated list: `course_source_path` = `lectures/02_intro, readings/02_intro, labs/02_intro`  (each path mirrors itself into `semester_dest_repo`).
-- **Release a whole dir**: `course_source_path` = `lectures/` 
-- Root files are just paths too: `course_source_path` = `SYLLABUS.md` 
-- **Everything in one press:** `course_source_path` = `/` (or `.`) releases the whole repo, minus the faculty side of it: 
-  - `.git` (copying it would repoint the semester repo at the course repo), 
-  - `.github` (the Release workflows and their token wiring) 
-  - and `.system/` (your operating notes `MAINTAINING.md` and the syllabus example - never released). 
+- **One folder or file**: `from_path` = `lectures/02_intro` → lands at `materials/lectures/02_intro`.
+- Root files are just paths too: `from_path` = `SYLLABUS.md`.
+- **The whole repo**: `from_path` = `/` (or `.`), minus `.git`, `.github` and `.system/` (your operating notes `MAINTAINING.md` and the syllabus example - never released).
 
 Re-releasing is safe - copies are additive and idempotent.
 
 ### Phased code release
 
-The same workflow releases **code**, because code is just another path. Keep a growing package in a course-org repo (e.g. `lecture-code-f2026`) and disclose it topic by topic as you teach: 
-- `course_source_path` = `mlpkg/simulation` (a subpackage folder) or `mlpkg/train/warmup.py` (a single module). 
+The same copy releases **code**, because code is just another path. Keep a growing package in a course-org repo (e.g. `lecture-code-f2026`) and disclose it topic by topic as you teach: 
+- `from_path` = `mlpkg/simulation` (a subpackage folder) or `mlpkg/train/warmup.py` (a single module). 
 - Copies are additive, so each release extends what students already have 
 - release the package base early (e.g. `mlpkg/core`) so partial releases still import. The [example schedule](../example-course/semester-org/schedule.yml) shows the scheduled version of the same pattern (weeks 1, 3 and 5 each unlock an `mlpkg` subpackage).
 
@@ -88,14 +74,14 @@ into.
 ## Carrying semester edits back
 
 A fix typed into the semester's copy is not in the course org, so it is not in next semester's.
-**Propagate semester edits** (course org → Actions) copies each released path back from the
+The `release.propagate_back` op (console, or `python -m dsl_course release.propagate_back`) copies each released path back from the
 semester repo over its source in the course org, on a branch named for the semester, and opens
 one pull request per source repo for faculty to merge, cherry-pick or close. Run it with
 `preview` first to see the pairs.
 
 What it does and does not carry:
 
-- only paths that have actually been released - it walks the semester's `deploy:` entries;
+- only paths that have actually been released - it walks the `files:` of the semester's entries;
 - **deletions are not propagated**: a file you removed from the semester's copy stays in the
   course org, and the pull request says so;
 - a semester repo that is **behind its latest release** - one with the conflict pull request
@@ -137,6 +123,9 @@ What that means in practice:
 - **Nested.** A `.releaseignore` in a subfolder applies to that subfolder, and overrides the
   one above it. Patterns anchor to the file's own directory.
 - **Silent.** Withheld files simply do not appear. The run stays green and says nothing.
+- **Reviewed once.** Until the file says it has been reviewed, the Dashboard's materials
+  checklist asks you to; **Confirm** (the `materials.confirm_withheld` op) marks it reviewed
+  without changing a pattern, for a course that withholds nothing.
 - **Not retroactive.** Adding a pattern stops *future* copies; it does not delete a file you
   already released. Remove that from the semester repo by hand.
 - **Naming a withheld path is refused.** Asking to release a path a `.releaseignore` covers
