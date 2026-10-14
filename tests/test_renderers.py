@@ -29,6 +29,7 @@ from dsl_course import (
     workflows_place,
     workflows_render,
 )
+from dsl_course.ops.registry import REGISTRY
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -2681,10 +2682,25 @@ def test_the_course_page_lists_the_console_as_auto_handled():
     page = profile_readme.render_profile_readme(
         "My-Course-E1", "My Course", [], False, central_ref="main"
     )
-    auto = page.split("### Automatically handled")[1]
+    auto = page.split("## Workflows in this repo")[1]
     (row,) = [line for line in auto.splitlines() if "console.yml" in line]
     assert "Runs what the Instructor Console asks for" in row
     assert row.rstrip().endswith("| Auto-handled |")
+
+
+def test_the_course_page_lists_every_op_with_its_command():
+    # Decision 0041: the page's table is the console + CLI one, one row per registry op,
+    # and links no workflow the org no longer has.
+    page = profile_readme.render_profile_readme(
+        "My-Course-E1", "My Course", [], False, central_ref="main"
+    )
+    table = page.split("## What you can do")[1].split("## Workflows in this repo")[0]
+    for op in REGISTRY.values():
+        (row,) = [line for line in table.splitlines() if f"| `{op.name}` |" in line]
+        assert f"`python -m dsl_course {op.name} --course-org My-Course-E1" in row
+        assert op.help in row
+    for retired in seed.RETIRED_GITHUB_WORKFLOWS:
+        assert retired.removeprefix(".github/") not in page
 
 
 # The grading report's `graded` step, as the scheduler renders it.

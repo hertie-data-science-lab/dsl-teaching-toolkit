@@ -27,6 +27,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 
+from . import policy
 from .central import CENTRAL
 from .course import CONFIG_REPO, COURSE_CONFIG, JOIN_REPO
 from .discovery import (
@@ -41,6 +42,7 @@ from .discovery import (
 )
 from .gh_contents import get_file_content, put_files
 from .log import log, log_err, log_ok
+from .ops.registry import REGISTRY, SEMESTER, Operation
 
 
 def _visible_repos(repos: list[dict]) -> list[dict]:
@@ -211,6 +213,27 @@ def splice_repo_table(existing: str, repos: list[dict]) -> str | None:
     )
 
 
+def cli_command(op: Operation, org: str) -> str:
+    """The laptop command for `op` in this course org (decision 0041, `dsl_course.cli`):
+    its required arguments spelt as placeholders, previewing as every CLI does."""
+    parts = ["python -m dsl_course", op.name, "--course-org", org]
+    if op.scope == SEMESTER:
+        parts += ["--semester-org", "<semester-org>"]
+    for key in op.args_schema.get("required", []):
+        parts += ["--arg", f"{key}=<{key}>"]
+    return " ".join(parts)
+
+
+def _ops_table(org: str) -> str:
+    """One row per registry op: what it does, the Console, and the CLI command."""
+    url = policy.load()["institution"].get("console_url") or ""
+    console = f"[Console]({url})" if url else "Console"
+    return "\n".join(
+        f"| `{op.name}` | {op.help} | {console} | `{cli_command(op, org)}` |"
+        for op in REGISTRY.values()
+    )
+
+
 def render_dotgithub_readme(org: str, course_name: str, is_semester: bool) -> str:
     """The `.github` repo's OWN README - the orientation a faculty & instructors member sees on landing
     in this repo just after bootstrap. Distinct from profile/README.md (the org landing
@@ -222,7 +245,7 @@ def render_dotgithub_readme(org: str, course_name: str, is_semester: bool) -> st
 
 This is the **`.github` repo** for the `{org}` semester org. **Students and instructors rarely need to touch anything in this repo directly.**
 
-_Instructors (TAs and faculty assistants included): your action buttons aren't here - they live in the parent **course org's** `.github` control panel, on its Actions tab._
+_Instructors (TAs and faculty assistants included): nothing to run from here - every operation is in the Instructor Console, or `python -m dsl_course` from a laptop, against the parent **course org**._
 
 Built and kept in sync by the [DSL teaching toolkit](https://github.com/{CENTRAL}).
 """
@@ -233,9 +256,9 @@ Built and kept in sync by the [DSL teaching toolkit](https://github.com/{CENTRAL
 This is the **`.github` repo** for the `{org}` course org - the primary control panel faculty & instructors use
 to run and configure the course.
 
-## Run an action
+## Run an operation
 
-Open the **[Actions tab](https://github.com/{org}/.github/actions)**, pick a workflow, and click **Run workflow**. Workflows only show if you have write access - i.e. you're either (1) in this org's `course-admin` team (declared here, course-wide), or (2) in a semester's `instructors-<semester>` team (declared in that semester's own `semester-config/instructors.yml` then back-propagated). The full, annotated list of actions is on the **[org home page](https://github.com/{org})**.
+Every operation is a button in the **Instructor Console** and a command, `python -m dsl_course <op>`, from a laptop. Either needs you to be (1) in this org's `course-admin` team (declared here, course-wide), or (2) in a semester's `instructors` team (declared in that semester's own `semester-config/instructors.yml`). The full list, with each command, is on the **[org home page](https://github.com/{org})**. The [Actions tab](https://github.com/{org}/.github/actions) holds the automatic workflows those operations and the schedule run.
 
 ## Typical flow
 
@@ -243,8 +266,8 @@ Open the **[Actions tab](https://github.com/{org}/.github/actions)**, pick a wor
    Write the answer once on the `solution` branch and let **Derive student version** write `main`'s starter from it.
 2. Create an empty **semester org** for the year, add the bot as an Owner, then run **Bootstrap semester**.
 3. Each session: **Release materials** / **Release assignment** - or pre-schedule them in `schedule.yml` (recommended).
-4. Grading: the sheet appears at handout -> **Collect submissions** (or wait for the cron) -> type the marks -> **Distribute grades** (dry run first).
-5. End of term: **Archive semester** - freezes the year's student repos and seals the semester's private record. Nothing is deleted.
+4. Grading: the sheet appears at handout -> **Collect submissions** (or wait for the cron) -> type the marks -> **Return marks** (preview first).
+5. End of term: **Archive** - freezes the year's student repos and seals the semester's private record. Nothing is deleted.
 
 ## What's in here
 
@@ -358,48 +381,43 @@ List of all repositories associated with the course org. _Auto-discovered from t
 
 Edit & stage new course-related content in these, then release it to the relevant semester org.
 
-## Available actions for faculty, instructors & admin
+## What you can do
 
-All actions live in the [`.github` repo's Actions tab](https://github.com/{org}/.github/actions)
+Every operation below is a button in the Instructor Console and the same request from a
+laptop: `python -m dsl_course <op>` in a checkout of the
+[toolkit](https://github.com/{CENTRAL}), with `gh` signed in. A command previews unless
+given `--no-preview`; `python -m dsl_course <op> --help` lists its `--arg`s.
+
+| Operation | What it does | Console | Command |
+| --- | --- | --- | --- |
+{_ops_table(org)}
+
+## Workflows in this repo
+
+The [`.github` Actions tab](https://github.com/{org}/.github/actions) runs these
 _(automatically bootstrapped from the central
 [dsl-teaching-toolkit repo](https://github.com/{CENTRAL}))_:
 
-### Run directly by you (course instructors):
-
-| Action | What it does | Managed |
+| Workflow | What it does | Managed |
 | --- | --- | --- |
-| [**Bootstrap semester**](https://github.com/{org}/.github/actions/workflows/bootstrap-semester.yml) | Configures a freshly-created semester org (sets up scaffold repos, registers it with the course org, seeds workflow functionality). | Run by instructor |
-| [**Send enrolment codes**](https://github.com/{org}/.github/actions/workflows/send-codes.yml) | Generates enrolment codes for each student and emails each their code (to their Hertie email address). Students paste the code into the Join course issue. This keeps personal data out of the public repo. There is no button: a push to a semester's `students.csv` is what fires it, and it sends for real - so a re-send means clearing that row's `code_sent_at` and pushing again. | Automatic |
-| [**New materials repo**](https://github.com/{org}/.github/actions/workflows/new-materials.yml) | Scaffolds a correctly-structured `course-materials-<year>` repo (session folders + the Release workflows). Ready for material to be added. | Run by instructor |
-| [**New assignment**](https://github.com/{org}/.github/actions/workflows/new-assignment.yml) | Scaffolds an `assignment-<name>` template repo from five answers: brief + starter(s) on `main`; the `solution` branch carries the model solution and `grading_config.yml`, which defines the assignment from there on (hidden tests only when you asked for autograding). | Run by instructor |
-| [**Derive student version**](https://github.com/{org}/.github/actions/workflows/derive-student-version.yml) | Writes an assignment's student starter onto `main` from the ONE notebook you keep on its `solution` branch, with the fenced answers (`### BEGIN SOLUTION`, a `solution` cell tag, an Rmd `solution=TRUE` chunk) replaced by placeholders. So you maintain one file, not two. It never writes to `solution`, and it refuses to write a file that had nothing fenced in it. Preview first. | Run by instructor |
-| [**Generate syllabus**](https://github.com/{org}/.github/actions/workflows/generate-syllabus.yml) | Writes the weekly plan into your syllabus - one block per session, with its title, learning objectives and reading list - from a semester's `semester-config/schedule.yml`. Only the block between `<!-- dsl:weekly-plan -->` and `<!-- /dsl:weekly-plan -->` changes; without those lines it adds them under "## Weekly plan" at the end. | Run by instructor |
-| [**Check semester setup**](https://github.com/{org}/.github/actions/workflows/check-semester-setup.yml) | A per-semester checklist of everything configured (identity, people, schedule + release plan, roster, teams, grades) with direct edit links for anything missing. Read-only. | Run by instructor |
-| [**Publish course website**](https://github.com/{org}/.github/actions/workflows/publish-site.yml) | **[OPTIONAL]** **[DEFERRED]** Build/refresh a public openware site for the course `{org}.github.io`. This will share this course's lecture materials and (limited) readings with the open internet. Driven by `.github/opencourse.yml` (the console's Public website section), which is off by default; once on, a daily cron re-syncs it, so later materials edits appear without another click. It names a materials repo and how readings appear: `reading-list` (citations only) or `actual-readings` (also host the files). Because the materials repos are private, the site **hosts** the shared files itself. This is separate from each semester's student-facing site. | Run by instructor |
 | [**Release materials**](https://github.com/{org}/.github/actions/workflows/release-materials.yml) | Manually release materials to student-facing semester orgs *(NB: it is recommended to instead use the [scheduling function](https://github.com/{CENTRAL}/blob/{central_ref}/docs/07-schedule-releases.md) for regular releases)*. Select path(s) for any folder or file, one or several at a time. | Run by instructor |
 | [**Release assignment**](https://github.com/{org}/.github/actions/workflows/release-assignment.yml) | Generate one private repo per student from a chosen `assignment-*` template repo - or one shared drop box, or no repo at all, depending on the template's `submit_via`. *(NB: it is recommended to instead use the [scheduling function](https://github.com/{CENTRAL}/blob/{central_ref}/docs/07-schedule-releases.md) for regular releases)* | Run by instructor |
-| [**Patch released assignment**](https://github.com/{org}/.github/actions/workflows/patch-assignment.yml) | Fixed a file after the assignment went out? Commit it to the template, then run this: it pushes the file (or folder) into every submission repo as a new commit on the student's own branch - never a force-push - and posts a note on each Submission receipts issue. A file the student has already changed is left alone unless you tick `overwrite`. Preview first. | Run by instructor |
-| [**Collect submissions**](https://github.com/{org}/.github/actions/workflows/collect-submissions.yml) | Refresh an assignment's grading sheet now instead of waiting for the cron: re-read each submission, refill its `info:` block and post any receipt still owed. It never freezes anything. | Run by instructor |
-| [**Open team formation**](https://github.com/{org}/.github/actions/workflows/open-team-formation.yml) | Email every student still without a team for an assignment whose team-formation window is open - the cap, the closing day and a link to the semester's **Join team** form. The scheduler already sends this by itself when a window opens; press this to send it again on your own say-so. Nothing is said twice, so a second press reaches only whoever the first one could not. Leave `assignment` empty for every open window. Preview first. | Run by instructor |
-| [**Distribute grades**](https://github.com/{org}/.github/actions/workflows/distribute-grades.yml) | Send what the grading sheet holds: each student's private `grades-<handle>` repo, the semester grades file, and an email (needs the `GRAPH_*` secrets). Preview first. | Run by instructor |
-| [**Propagate semester edits**](https://github.com/{org}/.github/actions/workflows/propagate-semester.yml) | Carry a semester's edits to released material back here, as a pull request. For every path already released to that semester, what the semester has now is copied over this org's own copy on a branch `from-<semester-org>`, one commit per path, and one pull request per source repo - merge it, cherry-pick from it, or close it. Deletions are not propagated; a file the semester dropped is named in the pull request and left where it is. Preview first. | Run by instructor |
-| [**Archive semester**](https://github.com/{org}/.github/actions/workflows/archive-semester.yml) | Archive a finished semester early, or at all - the scheduler does it by itself only for a semester that writes an `archive:` block in `schedule.yml` (its `event_datetime:` defaults to `semester_end` + 60 days), after a fortnight's notice. It carries the semester's edits back first, then archives **every repository in the semester org** - students' work, the materials, `join`, the website, `.github` - records what was frozen in `semester-config/.system/archive.md`, and archives `semester-config` last. **Nobody is removed and nothing is deleted**: an archived repo is read-only for everyone, so students keep read access to their own work. Preview first; it refuses until the archive date has arrived, and `force` overrides that - which is how a semester with no block is closed out. | Run by instructor |
+| [**New materials repo**](https://github.com/{org}/.github/actions/workflows/new-materials.yml) | Scaffolds a correctly-structured `course-materials-<year>` repo (session folders + the Release workflows). Ready for material to be added. | Run by instructor |
+| [**New assignment**](https://github.com/{org}/.github/actions/workflows/new-assignment.yml) | Scaffolds an `assignment-<name>` template repo: brief + starter(s) on `main`; the `solution` branch carries the model solution and `grading_config.yml`. | Run by instructor |
+| [**Bootstrap semester**](https://github.com/{org}/.github/actions/workflows/bootstrap-semester.yml) | Configures a freshly-created semester org (scaffold repos, registration with this course org, workflows). | Run by instructor |
+| [**Collect submissions**](https://github.com/{org}/.github/actions/workflows/collect-submissions.yml) | Refresh an assignment's grading sheet now instead of waiting for the cron. The Console's *Collect now* runs it: grading runs student code in this workflow's own sandboxed job. | Console |
+| [**Distribute grades**](https://github.com/{org}/.github/actions/workflows/distribute-grades.yml) | Send what the grading sheet holds: each student's private `grades-<handle>` repo, the semester grades file, and an email. The Console's *Return marks* and the scheduler both run it, in one queue. | Console |
+| [**Send enrolment codes**](https://github.com/{org}/.github/actions/workflows/send-codes.yml) | Emails each student their enrolment code. There is no button: a push to a semester's `students.csv` fires it, and it sends for real. | Automatic |
+| [**Sync membership**](https://github.com/{org}/.github/actions/workflows/sync-membership.yml) | Reconciles teams and access from `students.csv`, `teams.csv`, this org's `people:` block and each semester's `instructors.yml`. Runs on a push to any of them and daily; a manual run walks every semester. | Auto-handled |
+| [**Sync site**](https://github.com/{org}/.github/actions/workflows/sync-site.yml) | Regenerates every semester's website from the org structure. Releases and schedule pushes already do; a manual run walks every semester. | Auto-handled |
+| [**Publish course website**](https://github.com/{org}/.github/actions/workflows/publish-site.yml) | **[OPTIONAL]** Builds the public open-courseware site `{org}.github.io` as `.github/opencourse.yml` says (off by default); a daily cron re-syncs it once on. | Auto-handled |
+| [**Refresh actions**](https://github.com/{org}/.github/actions/workflows/refresh-actions.yml) | Repopulates the dropdowns, re-equips content repos, and rebuilds this index. Runs itself nightly. | Auto-handled |
+| [**Scheduled release**](https://github.com/{org}/.github/actions/workflows/scheduled-release.yml) | Auto-releases whatever each semester's `schedule.yml` says is now due, about every 15 minutes. Manual runs default to a preview. | Auto-handled |
+| [**Console**](https://github.com/{org}/.github/actions/workflows/console.yml) | Runs what the Instructor Console asks for. Not for pressing by hand: the Console fills in the request and follows the run. | Auto-handled |
 
-NB: alternatively each materials repo *also* carries its own **Release** workflows (run from inside the repo).
+NB: each materials repo *also* carries its own **Release** workflows (run from inside the repo).
 
 ---
-
-### Automatically handled within the pipeline as standard
-
-The following are runnable by explicit ad hoc manual dispatch; course instructors can mostly ignore them:
-
-| Action | What it does | Managed |
-| --- | --- | --- |
-| [**Sync membership**](https://github.com/{org}/.github/actions/workflows/sync-membership.yml) | Reconciles org + `students`-team access (from `students.csv`), project teams (from `teams.csv`), `course_admins` (from this org's declared `people:` block, mirrored into every semester's own `course-admin` team), and each semester's own `instructors`/`teaching_assistants` (from its `semester-config/instructors.yml`, reconciled into that semester's `instructors` team AND a course-org `instructors-<semester>` team).<br><br> Triggers on (1) push (editing any of those files takes effect immediately, including removals so that the file is the live truth) and (2) on a daily cron (catches a faculty entry's `start`/`end` rotation with no edit that day);`workflow_dispatch` is a manual escape hatch. | Auto-handled |
-| [**Refresh actions**](https://github.com/{org}/.github/actions/workflows/refresh-actions.yml) | Repopulates the semester/source-repo/assignment dropdowns, re-equips content repos, and rebuilds this index. Runs itself nightly, so this org stays in step with the central toolkit on its own. | Auto-handled |
-| [**Scheduled release**](https://github.com/{org}/.github/actions/workflows/scheduled-release.yml) | Auto-releases whatever each semester's `semester-config/schedule.yml` `releases:` plan says is now due. It ticks about every 15 minutes, so each entry's `event_datetime` / `deploy_datetime` is honoured to roughly that. Manual runs default to a preview ("what opens when"). The manual workflows above still work for early/ad-hoc release. | Auto-handled |
-| [**Console**](https://github.com/{org}/.github/actions/workflows/console.yml) | Runs what the Instructor Console asks for. Not for pressing by hand: the Console fills in the request and follows the run. | Auto-handled |
-| _[**Sync site**](https://github.com/{org}/.github/actions/workflows/sync-site.yml)_ | _Regenerate a semester's website from the org structure (releases do this automatically; standard workflow has no need for manual sync)._ | Auto-handled |
 
 
 ## Repository structure (required)

@@ -748,6 +748,11 @@ def test_the_cli_runs_an_op_as_the_console_does(monkeypatch, capsys, engine):
     assert seen[-1][-1] == "--no-preview" and "--resend-unjoined" in seen[-1]
     assert "done: Codes sent: 3." in out
     (org, repo, path, content, _msg), _ = engine[0]
+    assert (org, repo, path) == (
+        SEMESTER,
+        "semester-config",
+        ".system/outcomes/roster.send_codes.json",
+    )
     assert json.loads(content)["summary"] == "Codes sent: 3."
     # Bare, it previews, as every CLI does.
     rc, out = _cli(monkeypatch, capsys, "roster.send_codes", *base)
