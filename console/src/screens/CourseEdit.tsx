@@ -14,7 +14,7 @@ import { termRank } from '../model/catalogue';
 import { KIND_LABEL } from '../model/format';
 import { sameHandle } from '../model/people';
 import { ALIAS_DEPTH, DEFAULT_SYLLABUS, FOLDER_KINDS, MATERIALS_FILE, NOTHING_DECLARED, aliasKind, inferKind, readDeclared, withMark } from '../model/materialsRules';
-import { fileValue, validCourse } from '../model/cascade';
+import { fileValue, validCourse } from '../model/settings';
 import { validator } from '../model/validate';
 import { generateSyllabus, publishWebsite, type Scope } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';

@@ -8,7 +8,7 @@ import { COURSE_REPO } from '../model/names';
 import { ghUrl } from '../ui/bits';
 import { DEFAULT_DEST_REPO } from '../model/policy';
 import { HANDOUT, RETURN_MARKS, RETURN_MARKS_ABOUT, RETURN_MARKS_ALWAYS, releaseAdhoc as adhocTiers, returnMarksTiers, updateCopies as copiesTiers } from '../tiers/ops';
-import type { Source } from '../model/cascade';
+import type { Source } from '../model/settings';
 import type { ComponentChildren } from 'preact';
 import type { OpDef } from './session';
 

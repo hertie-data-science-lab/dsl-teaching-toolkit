@@ -14,8 +14,8 @@ import {
 import { checkNow, derive, publishWebsite } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
 import { FormatPicker } from '../forms/FormatPicker';
-import { courseBlock, institutionLayer, lateWord, resolve, validGrading, valueWord, type Layers } from '../model/cascade';
-import { POLICY } from '../model/policy';
+import { effectiveOf, lateWord, validGrading, valueWord } from '../model/settings';
+import { CONTACT, POLICY } from '../model/policy';
 import { fromConfig, handsOutStarter, questionFileError, questionRows, questionsValue, settingsTiers, toConfig, type QuestionRow } from '../tiers/grading';
 import { pick, type Values } from '../tiers/types';
 import { SaveBar } from '../ui/edit';
@@ -372,10 +372,6 @@ export function RecentActivity({ p, lists, newest }: { p: CourseProps; lists: Ac
   );
 }
 
-/** The course layer over the institution's: what an assignment gets when its semester says nothing. */
-export function courseLayers(p: Pick<CourseProps, 'course' | 'files'>): Layers {
-  return { assignment: {}, semester: {}, course: courseBlock(p.files, p.course.org, p.course.meta), institution: institutionLayer() };
-}
 
 /** Where a course-level default comes from, in plain words. */
 const whose = (s: string) => (s === 'course' ? 'this course' : 'institution');
@@ -472,9 +468,10 @@ export function CourseScreen(p: CourseProps) {
   const lastPublish = recentActivity(ops.map((l) => l.filter((o) => o.op === 'course.publish_website' && o.conclusion !== 'previewed')), 1)[0];
   const cur = env?.ops.current.value;
   const publishing = cur?.phase === 'running' && cur.def.op === 'course.publish_website' && cur.def.courseOrg === course.org;
-  const layers = courseLayers(p);
-  const lateDays = resolve('late_window_days', layers), latePen = resolve('late_penalty_per_day', layers);
-  const team = resolve('max_team_size', layers);
+  // The course's effective defaults, course over institution, as the engine resolved them (status.json).
+  const defaults = v.course?.defaults;
+  const lateDays = effectiveOf(defaults, 'late_window_days'), latePen = effectiveOf(defaults, 'late_penalty_per_day');
+  const team = effectiveOf(defaults, 'max_team_size');
   const pub = v.course?.stages?.C6 === 'done';
   const about = detailsOf(course.meta ?? {}).about;
   const description = typeof about.course_description === 'string' ? about.course_description.trim() : '';
@@ -513,7 +510,7 @@ export function CourseScreen(p: CourseProps) {
           <dt>Name <Hint small label="About the name">The course’s name, as the console and the student site show it. In dsl-course.yml.</Hint></dt><dd>{course.name}</dd>
           <dt>Code <Hint small label="About the code">The course’s code in the catalogue, as students know it. In dsl-course.yml.</Hint></dt><dd>{course.code || 'not set'}</dd>
           <dt>Description <Hint small label="About the description">One paragraph about the course, shown on the public website. In dsl-course.yml.</Hint></dt><dd>{description || <span class="footnote">Not set</span>}</dd>
-          <dt>Contact <Hint small label="About the contact">Who students and the lab write to about the course. In dsl-course.yml; the institution’s contact when unset.</Hint></dt><dd>{fallback(about.contact, POLICY.contact)}</dd>
+          <dt>Contact <Hint small label="About the contact">Who students and the lab write to about the course. In dsl-course.yml; the institution’s contact when unset.</Hint></dt><dd>{fallback(about.contact, CONTACT)}</dd>
           <dt>Licence <Hint small label="About the licence">The licence the public website shows for your materials. In dsl-course.yml; the institution’s default when unset.</Hint></dt><dd>{fallback(about.licence, POLICY.licences[0].name)}</dd>
           <dt>Admins <Hint small label="Course admins, instructors and teaching assistants">Course admins can change everything in the course, every semester. A semester’s instructors and TAs are set on that semester’s Instructors page. In dsl-course.yml.</Hint></dt><dd>{course.admins.join(', ') || 'none'}</dd>
           <dt>Late work <Hint small label="About these defaults">Late work and max team size apply to every assignment unless its semester or the assignment sets its own. Each comes from this course, or from the institution when the course sets none.</Hint></dt><dd>{lateWord(lateDays.value, latePen.value)}, {whose(lateDays.source)}</dd>

@@ -13,7 +13,7 @@ import { invalidText, useSave } from '../edit/save';
 import { YamlText, deepEqual } from '../edit/yamlText';
 import { SchemaForm, effective, fieldErrors } from '../forms/Form';
 import { authorOf, copyFiles, type CopyResult } from '../github/client';
-import { validGrading } from '../model/cascade';
+import { validGrading } from '../model/settings';
 import { createAssignment, derive } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
 import { FormatPicker } from '../forms/FormatPicker';

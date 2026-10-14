@@ -294,7 +294,7 @@ describe('S6 schedule and S11 release', () => {
     expect(external).toContain('Handed in outside GitHub - see the brief');
     expect(external).not.toContain('Submit via');
     // Once handed out, the address the assignment names is linked by its host.
-    const linked = html(<ScheduleScreen {...props({ loaded: shaped('external', { settings: { submit_url: { value: 'https://moodle.example.org/mod/assign/1', source: 'assignment' } } }) })} />);
+    const linked = html(<ScheduleScreen {...props({ loaded: shaped('external', { settings: { submit_url: { value: 'https://moodle.example.org/mod/assign/1', source: 'entry' } } }) })} />);
     expect(linked).toContain('Handed in outside GitHub - <a href="https://moodle.example.org/mod/assign/1" target="_blank" rel="noopener">moodle.example.org</a>');
     expect(html(<ScheduleScreen {...props({ loaded: shaped('shared-dropbox-repo') })} />)).toContain('Submit via <code>assignment-2-submissions</code> (&lt;your-handle>/ folder)');
     expect(html(<ScheduleScreen {...props({ loaded: shaped('assignment-repo-public', { teams: 4 }) })} />)).toContain('Submit via <code>assignment-2-&lt;your-team></code> (public)');

@@ -57,10 +57,20 @@ export interface Problem {
   aside?: boolean;
 }
 
+/** One value's effective answer and the layer that gave it (`settings.SOURCES`). */
+export interface EffectiveValue {
+  value: string | number | boolean | null;
+  source: 'entry' | 'semester' | 'course' | 'institution';
+}
+/** Every effective value at one level, keyed as the files spell them (`assignment_repo_visibility`). */
+export type Effectives = Partial<Record<string, EffectiveValue>>;
+
 export interface CourseStatus {
   org: string;
   name: string;
   code: string;
+  /** Every `defaults:` key's effective value at the course level, and its source (decision 0039); absent on an older status. */
+  defaults?: Effectives;
   stages: Record<string, StageState>;
   /** One sentence per stage that is not done, saying why. */
   stage_why?: Record<string, string>;
@@ -133,6 +143,8 @@ export interface SemesterStatus {
   todo?: SemesterTodo[];
   verdict?: VerdictState;
   archive_date: string | null;
+  /** Every `defaults:` key's effective value at the semester level, and its source (decision 0039); absent on an older status. */
+  defaults?: Effectives;
 }
 
 export interface WeekItem {
@@ -176,7 +188,7 @@ export interface Assignment {
   returned: boolean;
   problem: boolean;
   /** Each run setting's effective value and where it came from (`status_json.run_settings`). */
-  settings?: Record<string, { value: string | number | boolean | null; source: 'assignment' | 'semester' | 'course' | 'institution' }>;
+  settings?: Effectives;
   /** Where the work is handed in, in the site's one word (`course.submit_shape`). Absent in an older status. */
   submit_shape?: string;
   /** The semester-side name (`semester_dest_repo`, else the slug): the per-unit repos' stem. Absent in an older status. */

@@ -13,10 +13,10 @@ import {
   HOLD_WORDS, NOTES_KEY, SNIPPETS_KEY, cellValue, effectivePenalty, finalGrade, holdReasons, lateRule, markerLines, num, overrideText, overrideValue, penaltyFigure, questionFile,
   questionPoints, readSheet, readSnippets, round, rowsChanged, scoreTotal, spread, studentMarks, type HoldReason, type HoldUnit, type Penalty, type Person, type Unit,
 } from '../model/marks';
-import { SOURCE_WORD, assignmentsFile, resolve, valueWord, withRunSetting } from '../model/cascade';
+import { SOURCE_WORD, assignmentsFile, valueWord, withRunSetting } from '../model/settings';
 import type { Env } from '../env';
 import type { ReadyProps } from './types';
-import { assignmentSettings, sheetName } from './RunSettings';
+import { sheetName } from './RunSettings';
 import { penaltyRate } from '../model/policy';
 import { marksDraft, marksWidths, saveMarksDraft, saveMarksWidths, type MarksDraft } from '../model/prefs';
 import { parseRoster, sameHandle } from '../model/people';
@@ -935,9 +935,9 @@ export function TeamsTab(p: TabProps) {
   const roster = p.files.file(p.cohort.org, CONFIG_REPO, 'students.csv');
   // teams.csv keys on the semester-side name, as the mark sheet does (`schedule.semester_name`).
   const teamsKey = sheetName(p, a.slug);
-  const layers = assignmentSettings(p, a.slug);
-  const size = layers ? resolve('max_team_size', layers) : null;
-  const formation = layers ? resolve('team_formation', layers) : null;
+  // The engine's answers (status.json); absent on an older status, and then no cap is applied.
+  const size = a.settings?.max_team_size ?? null;
+  const formation = a.settings?.team_formation ?? null;
   // While the settings are read, no cap is applied.
   const maxSize = typeof size?.value === 'number' ? size.value : Infinity;
   const table = file.kind === 'ready' ? readTable(file.text) : { header: TEAMS_HEADER, rows: [] };

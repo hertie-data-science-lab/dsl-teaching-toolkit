@@ -11,7 +11,7 @@ import { FORMAT_KEYS, SUBMIT_VIA_DEFAULT, SUBMIT_VIA_KEYS } from '../model/polic
 import { AUTOGRADE_EXAMPLE } from '../ui/bits';
 import { opt, type Tiers, type Values } from './types';
 
-export { VISIBILITY } from '../model/cascade';
+export { VISIBILITY } from '../model/settings';
 
 /** Every format a template may list (the schema's), with the engine's label. */
 export const FORMATS: [string, string][] = FORMAT_KEYS.map((k) => [k, labelOf('formats', k)]);

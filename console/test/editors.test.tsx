@@ -13,12 +13,12 @@ import { COURSE_FACTS } from '../src/tiers/course';
 import { GitHubClient } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
 import { StaticFiles } from './staticFiles';
-import { POLICY, penaltyRate } from '../src/model/policy';
+import { CONTACT, POLICY, penaltyRate } from '../src/model/policy';
 import { labelNumber, sessionNumber } from '../src/model/format';
 import { effectivePenalty, finalGrade, lateChoice, overrideText, overrideValue, penaltyText, questionFile, questionPoints, questionsFromRows, readSheet, scoreTotal } from '../src/model/marks';
 import { assignmentKey, blankDeploy, blankDraft, defaultDeployAt, deployAt, draftErrors, entryKey, freshId, needsNumber, nextNumber, readDraft, sessionBlock, unnumberedId, withNumber, writeDraft, type ArchiveDraft, type AssignmentDraft, type ReleaseDraft } from '../src/model/scheduleEdit';
 import { cutoffOf } from '../src/screens/RunSettings';
-import { validSchedule } from '../src/model/cascade';
+import { validSchedule } from '../src/model/settings';
 import { StatusStore, type Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
 import { DispatchAdapter } from '../src/ops/adapter';
@@ -525,7 +525,7 @@ const course: Course = {
 };
 const groupStatus: Status = {
   ...STATUS,
-  assignments: [...(STATUS.assignments ?? []), { slug: 'assignment-3', title: 'Group project', template: 'assignment-3-f2026', state: 'teams_forming', handout: '2026-09-20T10:00:00+02:00', due: '2026-10-20T23:59:00+02:00', grading_cutoff_datetime: '2026-10-30T23:59:00+02:00', solution_shown: null, units: 12, submissions: 0, teams: 1, marks: { filled: 0, total: 12 }, returned: false, problem: true }],
+  assignments: [...(STATUS.assignments ?? []), { slug: 'assignment-3', title: 'Group project', template: 'assignment-3-f2026', state: 'teams_forming', handout: '2026-09-20T10:00:00+02:00', due: '2026-10-20T23:59:00+02:00', grading_cutoff_datetime: '2026-10-30T23:59:00+02:00', solution_shown: null, units: 12, submissions: 0, teams: 1, marks: { filled: 0, total: 12 }, returned: false, problem: true, settings: { max_team_size: { value: 3, source: 'entry' }, team_formation: { value: 'self_select', source: 'institution' } } }],
 };
 const ready: Loaded = { kind: 'ready', status: groupStatus, sha: 's', stale: [] };
 const FILES: Record<string, string> = {
@@ -572,7 +572,7 @@ describe('editing screens', () => {
       expect(out).not.toContain(`/blob/main/${path}`);
     }
   });
-  it('teams shows the window, the team size from assignments.yml and who has no team', () => {
+  it('teams shows the window, the team size status states and who has no team', () => {
     const out = html(<AssignmentScreen {...props({ entry: 'assignment-3', tab: 'teams' })} />);
     expect(out).toContain('<h2 class="h1">Assignment 3: Group project <span class="hint-wrap">');
     expect(out).toContain('2 of 3 joined students in 1 teams; 1 without a team.');
@@ -628,7 +628,7 @@ describe('editing screens', () => {
   });
   it('course details asks for the contact and licence, with the institution’s in grey', () => {
     const out = html(<DetailsScreen {...cp} />);
-    expect(out).toContain(`placeholder="${POLICY.contact}"`);
+    expect(out).toContain(`placeholder="${CONTACT}"`);
     expect(out).toContain(`institution default: ${POLICY.licences[0].name}`);
     expect(out).toContain(`<option value="${POLICY.licences[1].name}"`);
     // The website's on/off is a switch here, beside the link to its own tab.

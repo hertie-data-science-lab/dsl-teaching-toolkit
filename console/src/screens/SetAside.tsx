@@ -11,7 +11,7 @@ import { invalidText, saveText } from '../edit/save';
 import { YamlText } from '../edit/yamlText';
 import type { FileState, Files } from '../model/files';
 import { COURSE_REPO } from '../model/names';
-import { validCourse } from '../model/cascade';
+import { validCourse } from '../model/settings';
 import { isIntentionalGap } from '../model/format';
 import { CheckLine } from '../ui/bits';
 import { MODAL_TEXT_ID, Modal } from '../ui/Modal';

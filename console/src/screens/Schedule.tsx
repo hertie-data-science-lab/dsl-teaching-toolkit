@@ -27,9 +27,9 @@ import { NotFound } from './Assignments';
 import { CheckNow, WithStatus, cohortScope, gradingConfig, todayOf, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 import { ASSIGNMENTS_FILE, CONFIG_REPO } from '../model/names';
-import { SOURCE_WORD, assignmentsFile, lateWord, resolve, usableBlock, validAssignments, validSchedule, type Layers } from '../model/cascade';
+import { SOURCE_WORD, assignmentsFile, lateWord, over, usableBlock, validAssignments, validSchedule } from '../model/settings';
 import { parse } from 'yaml';
-import { RunRows, SolutionNote, applicableKeys, assignmentsAfterSchedule, cutoffOf, forcedVisibility, runErrors, semesterLayers } from './RunSettings';
+import { RunRows, SolutionNote, applicableKeys, assignmentSettings, assignmentsAfterSchedule, cutoffOf, entryBelow, forcedVisibility, runErrors } from './RunSettings';
 import type { Values } from '../tiers/types';
 import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO, DEFAULT_TIMEZONE, SHOWN_KINDS } from '../model/policy';
 import { CONTENT_KINDS, EMPTY_ENTRY_KIND, FOLDER_KINDS, MATERIALS_FILE, inferKind, landingSection, readDeclared } from '../model/materialsRules';
@@ -268,13 +268,13 @@ function AssignmentForm({ p, d, set, errors, templates, isNew, run, tiered }: { 
   // The template's state in the one set of words (decision 0034).
   const tplState = tpl ? templateReadinessIn(p.status.course, tpl.repo, tiered) : null;
   const key = d.id || assignmentKey(d.number);
-  const af = assignmentsFile(p.files, p.cohort.org);
-  const doc = af && af !== 'loading' ? af.doc : {};
-  const layers = semesterLayers(p, doc, isNew ? '' : key);
-  const mine: Layers = isNew ? { ...layers, assignment: usableBlock(run.values) } : layers;
+  // A new entry: its own run settings over the semester's defaults; an existing one: the engine's answer.
+  const below = entryBelow(p);
+  const own = isNew ? usableBlock(run.values) : {};
+  const base = isNew ? below : assignmentSettings(p, key) ?? below;
   const cfg = d.template ? gradingConfig(p, d.template) : {};
-  const vis = forcedVisibility(cfg) ? 'private' : resolve('visibility', mine).value;
-  const late = resolve('late_window_days', mine);
+  const vis = forcedVisibility(cfg) ? 'private' : over('visibility', own, 'entry', base).value;
+  const late = over('late_window_days', own, 'entry', base);
   // Each template by its title (a copy may share one, so a repeated title says its repo too).
   const titles = templates.map((t) => String(gradingConfig(p, t.repo).title ?? '') || t.repo);
   const opts = templates.map((t, i) => ({ value: t.repo, label: titles.indexOf(titles[i]) !== titles.lastIndexOf(titles[i]) ? `${titles[i]} (${t.repo})` : titles[i] }));
@@ -314,13 +314,13 @@ function AssignmentForm({ p, d, set, errors, templates, isNew, run, tiered }: { 
       </div>
       <div class="field">
         <span class="label">Late cutoff <span class="default">computed</span></span>
-        <div class="readonly">{typeof late.value === 'number' && late.value > 0 ? `Due + ${lateWord(late.value, resolve('late_penalty_per_day', mine).value)}` : 'No late work: the cutoff is the due date'}, {SOURCE_WORD[late.source]}. The title is the assignment template’s.</div>
+        <div class="readonly">{typeof late.value === 'number' && late.value > 0 ? `Due + ${lateWord(late.value, over('late_penalty_per_day', own, 'entry', base).value)}` : 'No late work: the cutoff is the due date'}, {SOURCE_WORD[late.source]}. The title is the assignment template’s.</div>
       </div>
       {isNew ? (
         <div class="field">
           <span class="label">How this semester runs it</span>
           <p class="why">Each has the default shown; change one only for this assignment. Written to {ASSIGNMENTS_FILE} with the entry.</p>
-          <RunRows id="e-run" keys={applicableKeys(cfg, cfg.type === 'group')} layers={layers} draft={run.values} setDraft={run.set} errors={run.errors} defaultsHref="#assignments" forced={forcedVisibility(cfg)} />
+          <RunRows id="e-run" keys={applicableKeys(cfg, cfg.type === 'group')} below={below} draft={run.values} setDraft={run.set} errors={run.errors} defaultsHref="#assignments" forced={forcedVisibility(cfg)} />
         </div>
       ) : d.id ? <p class="footnote">Teams, late work, who sees each repo and the repo name: <a class="textlink" href={`#assignment-${d.id}/overview`}>on the assignment’s page</a>.</p> : null}
       {vis !== 'private' ? (
@@ -505,18 +505,16 @@ function View(p: ReadyProps) {
   // own run settings first). No stated window is none: the due date.
   const cutoffFor = (d: Draft): string | null => {
     if (d.kind !== 'assignments') return null;
-    const af = assignmentsFile(p.files, p.cohort.org);
     const isNew = !d.id;
-    const layers = semesterLayers(p, af && af !== 'loading' ? af.doc : {}, isNew ? '' : d.id);
-    const days = resolve('late_window_days', isNew ? { ...layers, assignment: usableBlock(newRunFor(d)) } : layers).value;
+    const base = isNew ? entryBelow(p) : assignmentSettings(p, d.id) ?? entryBelow(p);
+    const days = over('late_window_days', isNew ? usableBlock(newRunFor(d)) : {}, 'entry', base).value;
     return cutoffOf(d.dueDate, d.dueTime, typeof days === 'number' ? days : 0);
   };
   const errorsOf = (d: Draft) => draftErrors(prefill(d), { templateUsers, doc, kind: kindFor(d) }, cutoffFor(d));
   const newRunErrors = (d: Draft): Record<string, string> => {
     if (d.kind !== 'assignments') return {};
     const cfg = d.template ? gradingConfig(p, d.template) : {};
-    const af = assignmentsFile(p.files, p.cohort.org);
-    return runErrors(applicableKeys(cfg, cfg.type === 'group'), semesterLayers(p, af && af !== 'loading' ? af.doc : {}), newRunFor(d));
+    return runErrors(applicableKeys(cfg, cfg.type === 'group'), entryBelow(p), newRunFor(d));
   };
   const allErrors = dirtyKeys.some((k) => Object.keys(errorsOf(drafts[k])).length || (k === 'new' && Object.keys(newRunErrors(drafts[k])).length));
 

@@ -10,13 +10,17 @@ import { parse } from 'yaml';
 import { isObj } from '../edit/yamlText';
 import type { Author, GhRepo, GitHubClient } from '../github/client';
 import { str } from './format';
-import { CONFIG_REPO, COURSE_REPO, POINTER_PATH, REGISTRY_FILE, SEMESTER_TOPIC } from './names';
+import { CONFIG_REPO, COURSE_FILE, COURSE_REPO, POINTER_PATH, REGISTRY_FILE, SEMESTER_TOPIC } from './names';
 
 export const COURSE_HUB_TOPIC = 'dsl-course-hub';
 /** What makes a course repo an assignment template (decision 0014); the `assignment-` name is only the default. */
 export const TEMPLATE_TOPIC = 'dsl-assignment';
 export const REGISTRY_PATH = REGISTRY_FILE;
-export const COURSE_META_PATH = 'dsl-course.yml';
+export const COURSE_META_PATH = COURSE_FILE;
+
+/** `course.yml`'s `course:` block (name, code, description, toolkit_version_ref, licence); {} when absent. */
+export const courseBlock = (meta: Record<string, unknown> | null | undefined): Record<string, unknown> =>
+  isObj(meta?.course) ? (meta!.course as Record<string, unknown>) : {};
 
 export interface CohortRef {
   org: string;
@@ -34,7 +38,7 @@ export interface Course {
   cohorts: CohortRef[];
   /** Semesters New semester has listed that Bootstrap semester has not set up yet; not semesters of the course until it has. */
   settingUp?: CohortRef[];
-  meta: Record<string, unknown> | null; // dsl-course.yml as parsed, for Course details
+  meta: Record<string, unknown> | null; // course.yml as parsed, for Course details
 }
 
 /** "Course name, Fall 2026". */
@@ -115,9 +119,9 @@ export async function discoverCourse(client: GitHubClient, org: string, known?: 
   const settingUp = cohorts.filter((_, i) => configs[i] === null);
   return {
     org,
-    name: str(meta?.course_name) || org,
-    code: str(meta?.course_code),
-    description: str(meta?.course_description),
+    name: str(courseBlock(meta).name) || org,
+    code: str(courseBlock(meta).code),
+    description: str(courseBlock(meta).description),
     write,
     admins: (people.course_admins ?? []).map((a) => str(a.github_handle)).filter(Boolean),
     cohorts: cohorts.filter((c) => !settingUp.includes(c)),
@@ -128,11 +132,11 @@ export async function discoverCourse(client: GitHubClient, org: string, known?: 
 
 const topicsOf = async (client: GitHubClient, org: string, repo: GhRepo) => repo.topics ?? (await client.getRepoTopics(org, COURSE_REPO));
 
-/** A course org's `.github/dsl-course.yml` as parsed; null when absent or unreadable. */
+/** A course org's `.github/course.yml` as parsed; null when absent or unreadable. */
 const readMeta = (client: GitHubClient, org: string) => readYamlMap(client, org, COURSE_REPO, COURSE_META_PATH);
 
 /**
- * A semester's pointer to its course (`.system/dsl-course.yml` in its config repo); null when
+ * A semester's pointer to its course (`.system/course.yml` in its config repo); null when
  * absent or unreadable. The config repo is private, so a student reads null here.
  */
 const readPointer = (client: GitHubClient, org: string) => readYamlMap(client, org, CONFIG_REPO, POINTER_PATH);
@@ -157,10 +161,10 @@ export type Mode = 'instructor' | 'student';
 
 /** A semester org the person is a member of. */
 export interface Semester extends CohortRef {
-  /** The course org its pointer (`.system/dsl-course.yml` in the config repo) names; '' when it names none or cannot be read. */
+  /** The course org its pointer (`.system/course.yml` in the config repo) names; '' when it names none or cannot be read. */
   courseOrg: string;
   courseName: string;
-  /** The course's code (`course_code`), when its `dsl-course.yml` was read. */
+  /** The course's code (`course.code`), when its `course.yml` was read. */
   courseCode?: string;
   /** Archiving a semester archives its `.github` last but one, so an archived `.github` means an archived semester. */
   archived: boolean;
@@ -306,7 +310,7 @@ export async function discoverEstate(client: GitHubClient, who: { kind: TokenKin
   await Promise.all(
     [...new Set([...bare, ...invitedBare].map((s) => s.courseOrg).filter((c) => c && !byOrg.has(c.toLowerCase())))].map(async (c) => {
       const meta = await readMeta(client, c).catch(() => null);
-      names.set(c, { name: str(meta?.course_name), code: str(meta?.course_code) });
+      names.set(c, { name: str(courseBlock(meta).name), code: str(courseBlock(meta).code) });
     }),
   );
   const courseOf = (org: string) => {
