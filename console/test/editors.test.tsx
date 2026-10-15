@@ -381,6 +381,10 @@ describe('editing screens', () => {
     expect(out).toMatch(/<span class="ft-name">slides.html<\/span><span class="chip ">released to students<\/span>/);
     // solutions/ is the institution denylist's too (decision 0040): a folder release leaves it behind; only naming it ships it.
     expect(out).toMatch(/<span class="ft-name">a.py<\/span><span class="chip amber">only if named<\/span>/);
+    expect(out).toContain('<span class="ft-name">solutions/</span><span class="chip amber">only if named</span>');
+    expect(out).not.toContain('aria-label="Withhold labs/01/solutions/"');
+    // The panel's last line: a solution is not copied unless named, so it counts there, not as withheld.
+    expect(out).toContain('<p class="footnote">1 never copied (by default) · 0 withheld · 2 released</p>');
     expect(out).toContain('Weekly plan for the syllabus');
     // Copy opens the plan to copy; Write puts it into the syllabus (decision 0031 rule 9).
     expect(out).toContain('>Copy</button>');
@@ -408,6 +412,7 @@ describe('editing screens', () => {
     expect(out).toMatch(/<span class="ft-name">SYLLABUS.md<\/span><span class="chip ">released to students<\/span>/);
     expect(out).toContain('aria-label="Withhold SYLLABUS.md"');
     expect(out).not.toContain('class="file-list"');
+    expect(out).toContain('0 never copied (by default) · 0 withheld · 2 released');
   });
   it('the public website edits course.yml and asks for the confirmation the engine’s missing preview needs', () => {
     const out = html(<WebsiteScreen {...cp} />);

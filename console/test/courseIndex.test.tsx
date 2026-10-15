@@ -320,7 +320,7 @@ describe('materials checklist and edit links (decision 0024 rules 8 and 9)', () 
     // The syllabus (one check with its weekly plan) has its own ?.
     expect(out.match(/aria-label="About this check"/g)).toHaveLength(1);
     expect(out.match(/aria-label="About the syllabus"/g)).toHaveLength(1);
-    expect(out).toContain('Saving the list once, even empty, marks it reviewed.');
+    expect(out).toContain('Saving the list once, even unchanged, marks it reviewed.');
     expect(out).not.toContain('Kinds found');
     // The suggested: the syllabus row (its open part, the plan, is a suggestion), the withheld patterns.
     const t = text(<MaterialsChecklist checks={current} />);

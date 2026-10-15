@@ -5,7 +5,7 @@
 // (the import picker) has a tick per row, everything ticked until a line leaves it out. It reads as a
 // file tree (decision 0026 rule 5): indent guides, folder and file icons, withheld rows greyed with
 // the name struck through (`ft-out`), the kind chip on kind folders. A folder with something
-// withheld inside says how much, and how much still reaches students. `control` swaps the
+// withheld inside says how much. `control` swaps the
 // per-row control for the caller's own. `SelectionEditor` wraps it for every "which files" setting.
 
 import type { ComponentChildren } from 'preact';
@@ -38,24 +38,13 @@ interface Ctx extends Required<Pick<PatternTreeProps, 'patterns' | 'onChange' | 
   setNote: (n: { path: string; text: string } | null) => void;
 }
 
-const defaultFixed = (path: string) => (neverMaterial(path) ? 'never copied' : null);
+/** What no list can release (`materials.publishable`): solutions, tests, grading files, system files. */
+const defaultFixed = (path: string) => (neverMaterial(path) || denylisted(path) ? 'never copied' : null);
 
-/**
- * The files under a folder, in one walk: those withheld (fixed or by a line), and those that
- * reach students (not withheld, and never a denylisted or never-material one).
- */
-function counts(n: TreeNode, c: Ctx): { withheld: number; released: number } {
-  if (!n.children) {
-    const out = !!(c.fixed(n.path) || withheldBy(c.rules, n.path));
-    return { withheld: out ? 1 : 0, released: out || denylisted(n.path) ? 0 : 1 };
-  }
-  const sum = { withheld: 0, released: 0 };
-  for (const x of n.children) {
-    const k = counts(x, c);
-    sum.withheld += k.withheld;
-    sum.released += k.released;
-  }
-  return sum;
+/** How many files under a folder are withheld, fixed or by a line. */
+function withheldIn(n: TreeNode, c: Ctx): number {
+  if (!n.children) return c.fixed(n.path) || withheldBy(c.rules, n.path) ? 1 : 0;
+  return n.children.reduce((sum, x) => sum + withheldIn(x, c), 0);
 }
 
 function Control({ n, dir, s, c }: { n: TreeNode; dir: boolean; s: Standing; c: Ctx }) {
@@ -105,15 +94,15 @@ function Node({ n, depth, c }: { n: TreeNode; depth: number; c: Ctx }) {
       </li>
     );
   }
-  const count = counts(n, c);
+  const count = withheldIn(n, c);
   return (
-    <li class={`ft-dir${out ? ' ft-out' : ''}`}>
+    <li class={`ft-dir${fixed || out ? ' ft-out' : ''}`}>
       <details open={depth === 0}>
         <summary>
           {c.mode === 'select' ? control : null}
           <FolderHead name={n.name} />
           {c.kinds[n.path] ? <span class="chip">{c.kinds[n.path]}</span> : null}
-          {out ? <span class="chip amber">{c.withheldWord}</span> : count.withheld ? <span class="chip amber">{count.withheld} {c.withheldWord} · {count.released} {c.releasedWord}</span> : null}
+          {fixed ? <span class="chip amber">{fixed}</span> : out ? <span class="chip amber">{c.withheldWord}</span> : count ? <span class="chip amber">{count} {c.withheldWord}</span> : null}
           <Why s={s} word={c.withheldWord} />
           {c.mode === 'exclude' ? control : null}
           {note}

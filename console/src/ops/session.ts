@@ -233,11 +233,33 @@ export class OpsSession {
     }
   }
 
-  /** Press Preview (`preview`) or the verb (`run`) and follow the run to its outcome. */
-  async start(kind: 'preview' | 'run'): Promise<void> {
+  /**
+   * Run `def`'s verb as the panel's button does, minimised to the bar (a save's follow-up
+   * Refresh). Resolves true once GitHub has the run, false when none was started: an operation
+   * is running or pending, another one's panel is open, or the request was refused (its panel
+   * is closed again: the caller says what happens instead).
+   */
+  background(def: OpDef): Promise<boolean> {
     const c = this.current.value;
-    if (!c || c.phase === 'running') return;
-    if (kind === 'run' && !this.canRun(c)) return;
+    if (c && c.phase !== 'done') return Promise.resolve(false);
+    this.open(def);
+    this.minimise();
+    return new Promise((resolve) => void this.start('run', (ok) => {
+      if (!ok) this.close();
+      resolve(ok);
+    }));
+  }
+
+  /**
+   * Press Preview (`preview`) or the verb (`run`) and follow the run to its outcome.
+   * `submitted` hears once whether GitHub took the run.
+   */
+  async start(kind: 'preview' | 'run', submitted?: (ok: boolean) => void): Promise<void> {
+    const c = this.current.value;
+    if (!c || c.phase === 'running' || (kind === 'run' && !this.canRun(c))) {
+      submitted?.(false);
+      return;
+    }
     const def = c.def;
     const preview = kind === 'preview';
     const signal = this.watches.signal;
@@ -250,10 +272,11 @@ export class OpsSession {
       if (gone()) return;
       handle = await this.adapter.submit({ op: def.op, courseOrg: def.courseOrg, cohortOrg: def.cohortOrg, args, preview });
     } catch (e) {
-      if (gone()) return;
-      this.patch({ phase: 'ready', running: null, stopping: false, error: e instanceof Error ? e.message : String(e) });
+      if (!gone()) this.patch({ phase: 'ready', running: null, stopping: false, error: e instanceof Error ? e.message : String(e) });
+      submitted?.(false);
       return;
     }
+    submitted?.(true);
     if (gone()) return;
     this.patch({ handle });
     if (this.current.value?.stopping) void this.sendCancel(handle);

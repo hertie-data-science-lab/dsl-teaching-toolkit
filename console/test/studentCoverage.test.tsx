@@ -450,6 +450,23 @@ describe('11. the instructors', () => {
     expect(fake.seen.map((s) => s.url)).toEqual([`https://api.github.com/repos/${ORG}/${SITE}/contents/_images/pp/henrycgbaker.jpg`]);
     expect(sitePicture(`https://${ORG}.github.io/%E0%A4%A.jpg`, ORG)).toBeNull();
   });
+
+  it('reads a site picture over 1 MB through the blob API, up to the 5 MB cap', async () => {
+    const big = { type: 'file', content: '', encoding: 'none', sha: 'bigsha', size: 3 * 1024 * 1024 };
+    const huge = { type: 'file', content: '', encoding: 'none', sha: 'hugesha', size: 6 * 1024 * 1024 };
+    const fake = new FakeGitHub()
+      .on('GET', `/repos/${ORG}/${SITE}/contents/_images/pp/big.png`, big)
+      .on('GET', `/repos/${ORG}/${SITE}/contents/_images/pp/huge.png`, huge)
+      .on('GET', `/repos/${ORG}/${SITE}/git/blobs/bigsha`, { content: btoa('PNG'), encoding: 'base64' });
+    const src = new SiteSource(client(fake));
+    expect(await src.picture(ORG, `https://${ORG}.github.io/_images/pp/big.png`)).toBe(`data:image/png;base64,${btoa('PNG')}`);
+    expect(await src.picture(ORG, `https://${ORG}.github.io/_images/pp/huge.png`)).toBe('');
+    expect(fake.seen.map((s) => s.url.replace(`https://api.github.com/repos/${ORG}/${SITE}/`, ''))).toEqual([
+      'contents/_images/pp/big.png',
+      'git/blobs/bigsha',
+      'contents/_images/pp/huge.png',
+    ]);
+  });
 });
 
 describe('12. Your repos (Profile)', () => {

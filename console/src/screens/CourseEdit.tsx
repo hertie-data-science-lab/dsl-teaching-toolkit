@@ -4,7 +4,7 @@
 
 import { useRef, useState } from 'preact/hooks';
 import { useEnv, type Env } from '../env';
-import { badgeFiles } from '../edit/badges';
+import { badgeFiles, withholdCounts } from '../edit/badges';
 import { invalidText, useSave, type SaveState } from '../edit/save';
 import { YamlText, blank, compact, deepEqual, isObj, obj, render, type Path } from '../edit/yamlText';
 import { SchemaForm, fieldErrors } from '../forms/Form';
@@ -16,7 +16,8 @@ import { sameHandle } from '../model/people';
 import { KINDS } from '../model/policy';
 import { FLOORS, PUBLISH_DEFAULT, readSel, type Sel } from '../model/selection';
 import { institutionDefaults, rawBlock, semesterFile, validCourseFile, validSemesterBlocks, validSemesterFile, writeBlock } from '../model/settings';
-import { confirmWithheld, generateSyllabus, publishWebsite, type Scope } from '../ops/defs';
+import { checkNow, confirmWithheld, generateSyllabus, publishWebsite, type Scope } from '../ops/defs';
+import type { OpsSession } from '../ops/session';
 import { OpButtons } from '../ops/Panel';
 import { ABOUT, COURSE_FACTS, defaultsTiers } from '../tiers/course';
 import { WEBSITE_OFF_LIVE, publishWebsite as publishTiers } from '../tiers/ops';
@@ -42,6 +43,22 @@ const OPEN_SITE = 'open_course_site';
 export function newestScope(p: Pick<CourseProps, 'course'>): Scope | null {
   const k = p.course.cohorts[0];
   return k ? { courseOrg: p.course.org, cohortOrg: k.org, where: k.termLabel } : null;
+}
+
+/**
+ * After a materials save: the course's status reads the materials repos but no push to one
+ * rebuilds it, so start Refresh (the button's op, in the bar) and say when the checklist
+ * catches up. Never throws: a course with no semester, or a Refresh not started (one running
+ * already, another operation open, the request refused), leaves it to the next Refresh.
+ */
+export async function refreshAfterSave(ops: Pick<OpsSession, 'background'> | undefined, scope: Scope | null, where: string): Promise<string> {
+  let started = false;
+  try {
+    started = !!ops && !!scope && (await ops.background({ ...checkNow(scope), where }));
+  } catch {
+    /* the save stands either way */
+  }
+  return started ? 'The checklist updates in about a minute.' : 'The checklist updates at the next Refresh.';
 }
 
 
@@ -365,6 +382,12 @@ function WithholdEditor({ id, label, files, text, onText, loading, partial }: {
   );
 }
 
+/** The withheld panel's last line: the repo's files never copied, withheld by the list, and released. */
+export function WithholdSummary({ files, lines }: { files: string[]; lines: string[] }) {
+  const n = withholdCounts(files, lines);
+  return <p class="footnote">{n.never} never copied (by default) · {n.withheld} withheld · {n.released} released</p>;
+}
+
 /** `course.yml` `open_course_site:` as the website screen edits it (decision 0040: `publish` is a Selection plus `reading_lists`). */
 export interface Website {
   enabled: boolean;
@@ -542,6 +565,8 @@ export function MaterialsScreen(p: CourseProps) {
       ? `There is no ${syllabus} yet: write the syllabus first, or copy the plan.`
       : null;
   const [ignSave, runIgn] = useSave(env);
+  // Every save here feeds the course's checklist: Refresh it.
+  const after = () => refreshAfterSave(env?.ops, scope, course.name);
   // The syllabus line of the checklist; a status without one reads it off `ready`.
   const sylDone = m ? (m.checks?.find((c) => c.id === 'syllabus')?.done ?? m.state === 'ready') : false;
   const repos = p.files.repos(course.org);
@@ -562,7 +587,7 @@ export function MaterialsScreen(p: CourseProps) {
   // What Save writes: a list that withholds nothing is marked reviewed.
   const ignOut = withMark(ignDraft.endsWith('\n') || !ignDraft ? ignDraft : `${ignDraft}\n`);
   const saveIgn = async () => {
-    if (await runIgn({ owner: course.org, repo, path: '.releaseignore' }, ignOut, ignFile.kind === 'ready' ? ignFile.sha : null, { message: 'materials: edit what is withheld from students, from the DSL Teaching Console', statusRepo: [course.org, COURSE_REPO] })) setIgn(null);
+    if (await runIgn({ owner: course.org, repo, path: '.releaseignore' }, ignOut, ignFile.kind === 'ready' ? ignFile.sha : null, { message: 'materials: edit what is withheld from students, from the DSL Teaching Console', statusRepo: [course.org, COURSE_REPO], after })) setIgn(null);
   };
   return (
     <>
@@ -611,10 +636,11 @@ export function MaterialsScreen(p: CourseProps) {
           ) : <p class="footnote">Needs a semester: the plan is built from its schedule.</p>}
         </section>
         <section class="panel section">
-          <h2>Withheld from students <Hint label="About withheld files">Everything in this repo is released to students as it stands, by the schedule or by hand, unless a line here withholds it. Click a file or folder to withhold it; click again to release it. Use it for solutions, drafts and anything private.</Hint></h2>
+          <h2>Withheld from students <Hint label="About withheld files">Solutions, tests, grading files and system files are never copied. Everything else is released to students, by the schedule or by hand, unless a line here withholds it. Click a file or folder to withhold it; click again to release it. Use it for solutions, drafts and anything private.</Hint></h2>
           {tree.kind === 'absent' || tree.kind === 'error' ? <p class="footnote">Could not read the repo’s files.</p> : (
             <WithholdEditor id="ign-pat" label="Withheld patterns" files={files} text={ign ?? ignText} onText={setIgn} loading={tree.kind === 'loading'} partial={partial} />
           )}
+          {tree.kind === 'ready' ? <WithholdSummary files={files} lines={linesOf(ignDraft)} /> : null}
           {reviewCheck && !reviewCheck.done ? (
             <div class="actions">
               <ul class="setup"><ItemRow it={{ id: 'withheld', label: reviewCheck.label, kind: 'step', need: 'suggested', state: 'open', why: reviewCheck.why ?? undefined }} /></ul>
