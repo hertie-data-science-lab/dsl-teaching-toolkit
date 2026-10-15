@@ -101,8 +101,11 @@ describe('the withheld tree’s folder counts', () => {
 
   it('says how many files a folder withholds, and not how many are released', () => {
     const out = render(<PatternTree files={files} patterns={patterns} onChange={() => {}} />);
-    // Withheld: labs/02/lab.pdf, labs/02/key.pdf, and the never-material .DS_Store.
-    expect(out).toContain('<span class="ft-name">labs/</span><span class="chip amber">3 withheld</span>');
+    // Withheld: labs/02/lab.pdf, labs/02/key.pdf, the never-material .DS_Store and the denylisted solutions/a.py.
+    expect(out).toContain('<span class="ft-name">labs/</span><span class="chip amber">4 withheld</span>');
+    // A folder no list can release says so, with no toggle.
+    expect(out).toContain('<span class="ft-name">solutions/</span><span class="chip amber">never copied</span>');
+    expect(out).not.toContain('aria-label="Withhold labs/solutions/"');
     expect(out).toContain('<span class="ft-name">02/</span><span class="chip amber">2 withheld</span>');
     expect(out).not.toContain('· 2 released');
     // A folder with nothing withheld says nothing.

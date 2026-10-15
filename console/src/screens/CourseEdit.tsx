@@ -16,7 +16,8 @@ import { sameHandle } from '../model/people';
 import { ALIAS_DEPTH, DEFAULT_SYLLABUS, FOLDER_KINDS, MATERIALS_FILE, NOTHING_DECLARED, aliasKind, inferKind, readDeclared, withMark } from '../model/materialsRules';
 import { validCourse } from '../model/cascade';
 import { validator } from '../model/validate';
-import { generateSyllabus, publishWebsite, type Scope } from '../ops/defs';
+import { checkNow, generateSyllabus, publishWebsite, type Scope } from '../ops/defs';
+import type { OpsSession } from '../ops/session';
 import { OpButtons } from '../ops/Panel';
 import { ABOUT, COURSE_FACTS, courseDefaultTiers } from '../tiers/course';
 import { formatsList } from '../tiers/grading';
@@ -40,6 +41,22 @@ import { COURSE_REPO, OPENCOURSE_FILE } from '../model/names';
 export function newestScope(p: Pick<CourseProps, 'course'>): Scope | null {
   const k = p.course.cohorts[0];
   return k ? { courseOrg: p.course.org, cohortOrg: k.org, where: k.termLabel } : null;
+}
+
+/**
+ * After a materials save: the course's status reads the materials repos but no push to one
+ * rebuilds it, so start Refresh (the button's op, in the bar) and say when the checklist
+ * catches up. Never throws: a course with no semester, or a Refresh not started (one running
+ * already, another operation open, the request refused), leaves it to the next Refresh.
+ */
+export async function refreshAfterSave(ops: Pick<OpsSession, 'background'> | undefined, scope: Scope | null, where: string): Promise<string> {
+  let started = false;
+  try {
+    started = !!ops && !!scope && (await ops.background({ ...checkNow(scope), where }));
+  } catch {
+    /* the save stands either way */
+  }
+  return started ? 'The checklist updates in about a minute.' : 'The checklist updates at the next Refresh.';
 }
 
 
@@ -665,6 +682,8 @@ export function MaterialsScreen(p: CourseProps) {
       : null;
   const [ignSave, runIgn] = useSave(env);
   const scope = newestScope(p);
+  // Every save here feeds the course's checklist: Refresh it.
+  const after = () => refreshAfterSave(env?.ops, scope, course.name);
   // The syllabus line of the checklist; a status without one reads it off `ready`.
   const sylDone = m ? (m.checks?.find((c) => c.id === 'syllabus')?.done ?? m.state === 'ready') : false;
   const repos = p.files.repos(course.org);
@@ -683,13 +702,13 @@ export function MaterialsScreen(p: CourseProps) {
     const text = writeHolds(matFile.kind === 'ready' ? matFile.text : null, h);
     if (text === null) return;
     if (!validMaterials(new YamlText(text).toJS() ?? {})) return setState({ kind: 'bad', text: invalidText(MATERIALS_FILE, validMaterials) });
-    if (await run({ owner: course.org, repo, path: MATERIALS_FILE }, text, matFile.kind === 'ready' ? matFile.sha : null, { message: 'materials: edit the syllabus file and folder kinds, from the DSL Teaching Console', statusRepo: [course.org, COURSE_REPO] })) done();
+    if (await run({ owner: course.org, repo, path: MATERIALS_FILE }, text, matFile.kind === 'ready' ? matFile.sha : null, { message: 'materials: edit the syllabus file and folder kinds, from the DSL Teaching Console', statusRepo: [course.org, COURSE_REPO], after })) done();
   };
   const ignDraft = ign ?? ignText;
   // What Save writes: a list that withholds nothing is marked reviewed.
   const ignOut = withMark(ignDraft.endsWith('\n') || !ignDraft ? ignDraft : `${ignDraft}\n`);
   const saveIgn = async () => {
-    if (await runIgn({ owner: course.org, repo, path: '.releaseignore' }, ignOut, ignFile.kind === 'ready' ? ignFile.sha : null, { message: 'materials: edit what is withheld from students, from the DSL Teaching Console', statusRepo: [course.org, COURSE_REPO] })) setIgn(null);
+    if (await runIgn({ owner: course.org, repo, path: '.releaseignore' }, ignOut, ignFile.kind === 'ready' ? ignFile.sha : null, { message: 'materials: edit what is withheld from students, from the DSL Teaching Console', statusRepo: [course.org, COURSE_REPO], after })) setIgn(null);
   };
   return (
     <>

@@ -667,7 +667,10 @@ describe('editing screens', () => {
   it('materials settings previews what is withheld, and nothing about the public website', () => {
     const out = html(<MaterialsScreen {...cp} entry="course-materials-f2026" />);
     expect(out).toMatch(/<span class="ft-name">slides.html<\/span><span class="chip ">released to students<\/span>/);
-    expect(out).toMatch(/<span class="ft-name">a.py<\/span><span class="chip amber">withheld<\/span><span class="footnote">withheld by <code>solutions\/<\/code><\/span>/);
+    // A solution is never copied, whatever the list says: the tree and the last line agree.
+    expect(out).toContain('<span class="ft-name">a.py</span><span class="chip amber">never copied</span>');
+    expect(out).toContain('<span class="ft-name">solutions/</span><span class="chip amber">never copied</span>');
+    expect(out).not.toContain('aria-label="Withhold labs/01/solutions/"');
     // The panel's last line: a solution is never copied whatever the list says, so it counts there, not as withheld.
     expect(out).toContain('<p class="footnote">1 never copied (by default) · 0 withheld · 2 released</p>');
     expect(out).toContain('Weekly plan for the syllabus');

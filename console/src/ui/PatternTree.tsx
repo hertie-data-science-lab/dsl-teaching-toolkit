@@ -10,7 +10,7 @@
 
 import type { ComponentChildren } from 'preact';
 import { useState } from 'preact/hooks';
-import { buildTree, neverMaterial, standing, toggle, type Standing, type TreeNode } from '../edit/badges';
+import { buildTree, denylisted, neverMaterial, standing, toggle, type Standing, type TreeNode } from '../edit/badges';
 import { compileAll, withheldBy, type Rule } from '../edit/glob';
 import { FileHead, FolderHead } from './FileTree';
 
@@ -38,7 +38,8 @@ interface Ctx extends Required<Pick<PatternTreeProps, 'patterns' | 'onChange' | 
   setNote: (n: { path: string; text: string } | null) => void;
 }
 
-const defaultFixed = (path: string) => (neverMaterial(path) ? 'never copied' : null);
+/** What no list can release (`materials.publishable`): solutions, tests, grading files, system files. */
+const defaultFixed = (path: string) => (neverMaterial(path) || denylisted(path) ? 'never copied' : null);
 
 /** How many files under a folder are withheld, fixed or by a line. */
 function withheldIn(n: TreeNode, c: Ctx): number {
@@ -95,13 +96,13 @@ function Node({ n, depth, c }: { n: TreeNode; depth: number; c: Ctx }) {
   }
   const count = withheldIn(n, c);
   return (
-    <li class={`ft-dir${out ? ' ft-out' : ''}`}>
+    <li class={`ft-dir${fixed || out ? ' ft-out' : ''}`}>
       <details open={depth === 0}>
         <summary>
           {c.mode === 'select' ? control : null}
           <FolderHead name={n.name} />
           {c.kinds[n.path] ? <span class="chip">{c.kinds[n.path]}</span> : null}
-          {out ? <span class="chip amber">{c.withheldWord}</span> : count ? <span class="chip amber">{count} {c.withheldWord}</span> : null}
+          {fixed ? <span class="chip amber">{fixed}</span> : out ? <span class="chip amber">{c.withheldWord}</span> : count ? <span class="chip amber">{count} {c.withheldWord}</span> : null}
           <Why s={s} word={c.withheldWord} />
           {c.mode === 'exclude' ? control : null}
           {note}

@@ -103,3 +103,34 @@ describe('the same operation opened again', () => {
     expect(s.current.value?.dry).not.toBeNull();
   });
 });
+
+describe('a background run (a save’s follow-up Refresh)', () => {
+  it('runs minimised and says once GitHub has the run', async () => {
+    const a = new Flaky(0);
+    a.held = true;
+    const s = new OpsSession(a, { pollMs: 0, sleep: tick, outcomeTries: 1 });
+    expect(await s.background(defs.checkNow(scope))).toBe(true);
+    expect(s.current.value).toMatchObject({ phase: 'running', min: true });
+    // One already running or pending: no second run.
+    expect(await s.background(defs.checkNow(scope))).toBe(false);
+    s.reset();
+  });
+
+  it('leaves another operation’s open panel alone', async () => {
+    const s = new OpsSession(new Flaky(0), { pollMs: 0, sleep: tick });
+    s.open(defs.previewNext(scope));
+    expect(await s.background(defs.checkNow(scope))).toBe(false);
+    expect(s.current.value?.def.op).toBe('semester.preview_automation');
+  });
+
+  it('closes its panel again when the request is refused', async () => {
+    class Refused extends Flaky {
+      override async submit(): Promise<Handle> {
+        throw new Error('Forbidden');
+      }
+    }
+    const s = new OpsSession(new Refused(0), { pollMs: 0, sleep: tick });
+    expect(await s.background(defs.checkNow(scope))).toBe(false);
+    expect(s.current.value).toBeNull();
+  });
+});
