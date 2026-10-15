@@ -607,6 +607,37 @@ def test_the_teardown_record_reads_the_registrar_export_through_a_404(monkeypatc
     assert "1 student row(s)" in summary
 
 
+def test_a_config_file_is_read_through_a_spurious_404(monkeypatch):
+    # course.yml, semester.yml and the pointer all come through `config.read`.
+    from dsl_course import config
+
+    _record_gh(monkeypatch, [_NOT_FOUND, (0, _b64("name: NLP\n"))])
+    assert config.read_course("C").mapping() == {"name": "NLP"}
+
+
+def test_a_prune_confirms_an_absent_system_roster(monkeypatch):
+    # Absent is nobody onboarded, and a prune off it takes everyone's access away.
+    from dsl_course import roster
+
+    found = (0, _b64("email,github_handle\n"))
+    _record_gh(monkeypatch, [_NOT_FOUND, _NOT_FOUND, found, found])
+    assert roster._system_text("S") is None  # one 404, as an ordinary read
+    assert roster.confirm_system_text("S") is True
+    assert roster._system_text("S") == "email,github_handle\n"
+
+
+def test_confirming_the_withheld_list_never_writes_over_it(monkeypatch):
+    # Read as absent, the file would be written as the mark alone, every pattern gone.
+    from dsl_course import scaffold
+
+    calls = _record_gh(
+        monkeypatch, [_NOT_FOUND, (0, "abc123\n" + _b64("# to review\n")), (0, "")]
+    )
+    scaffold.confirm_withheld("C", "materials")
+    (put,) = [c for c in calls if "PUT" in c]
+    assert "sha=abc123" in put
+
+
 # ------------------------- a truncated tree listing is not a smaller repo
 
 

@@ -32,12 +32,18 @@ def _drive(monkeypatch, *, dry_run: bool, transport: bool = True, sends=None):
     written: list[str] = []
     sent: list = []
     files = roster_files(ROSTER)
-    monkeypatch.setattr(enrol_codes, "get_file_content", lambda o, r, p: files.get(p))
     monkeypatch.setattr(
-        enrol_codes, "get_file_with_sha", lambda org, repo, path: (files[path], "sha")
+        enrol_codes, "get_file_content", lambda o, r, p, **_kw: files.get(p)
     )
     monkeypatch.setattr(
-        gh_contents, "get_file_with_sha", lambda org, repo, path: (files[path], "sha")
+        enrol_codes,
+        "get_file_with_sha",
+        lambda org, repo, path, **_kw: (files[path], "sha"),
+    )
+    monkeypatch.setattr(
+        gh_contents,
+        "get_file_with_sha",
+        lambda org, repo, path, **_kw: (files[path], "sha"),
     )
 
     def put_file(org, repo, path, content, message, expected_sha=None):
@@ -145,12 +151,14 @@ def test_everyone_joining_mid_run_is_nothing_to_send(monkeypatch, capsys):
     ).replace("dee@uni.edu,Dee,auditor,,", "dee@uni.edu,Dee,auditor,deegh,")
     files = roster_files(ROSTER)
     later = roster_files(joined)[roster.SYSTEM_PATH]
-    monkeypatch.setattr(enrol_codes, "get_file_content", lambda o, r, p: files.get(p))
+    monkeypatch.setattr(
+        enrol_codes, "get_file_content", lambda o, r, p, **_kw: files.get(p)
+    )
     reads = iter(
         [(files[roster.SYSTEM_PATH], "sha1"), (later, "sha2"), (later, "sha2")]
     )
-    monkeypatch.setattr(enrol_codes, "get_file_with_sha", lambda *a: next(reads))
-    monkeypatch.setattr(gh_contents, "get_file_with_sha", lambda *a: next(reads))
+    monkeypatch.setattr(enrol_codes, "get_file_with_sha", lambda *a, **_kw: next(reads))
+    monkeypatch.setattr(gh_contents, "get_file_with_sha", lambda *a, **_kw: next(reads))
     puts: list[str | None] = []
 
     def put_file(org, repo, path, content, message, expected_sha=None):

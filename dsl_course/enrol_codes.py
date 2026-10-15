@@ -222,6 +222,17 @@ def run(semester_org: str) -> Outcome:
         f"Enrolment codes for {semester_org}: {added} new code(s), "
         f"emailing not-yet-onboarded students"
     )
+    if (
+        added
+        and raw is None
+        and get_file_with_sha(
+            semester_org, CONFIG_REPO, roster.SYSTEM_PATH, confirm_absent=True
+        )
+    ):
+        # `.system/roster.csv` read as absent gave every student a new code. Confirmed
+        # only here, about to write, since it is absent on every run until the first
+        # codes go out - and a spurious 404 starts the send again on the real file.
+        return run(semester_org)
     if added:
         new_codes = {
             s.email.strip(): s.enrol_code

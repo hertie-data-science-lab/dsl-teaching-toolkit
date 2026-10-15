@@ -42,10 +42,10 @@ class FakeRepo:
         self.deletes: list[tuple[str, str]] = []
         self.skips: list[str] = []
 
-    def get_file_content(self, org, repo, path, confirm_absent=False):
+    def get_file_content(self, org, repo, path, confirm_absent=False, **_kw):
         return self.files.get((repo, path))
 
-    def put_file(self, org, repo, path, content, message):
+    def put_file(self, org, repo, path, content, message, **_kw):
         self.files[(repo, path)] = content.decode()
         self.writes.append((repo, path))
         return True
@@ -1527,7 +1527,7 @@ def _confirm(monkeypatch, text, *, ok=True):
     monkeypatch.setattr(
         scaffold,
         "get_file_with_sha",
-        lambda org, repo, path: None if text is None else (text, "sha1"),
+        lambda org, repo, path, **_kw: None if text is None else (text, "sha1"),
     )
     monkeypatch.setattr(
         scaffold,

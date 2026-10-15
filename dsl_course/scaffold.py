@@ -1531,7 +1531,9 @@ def confirm_withheld(org: str, repo: str) -> Summary:
     ruling 6): `.releaseignore` gains `releaseignore.REVIEWED_MARK`, and nothing else in
     it changes, so a course that withholds nothing can say so without an edit. A list
     already reviewed (a pattern, or the mark) is left alone."""
-    found = get_file_with_sha(org, repo, RELEASEIGNORE)
+    # Absent, the file is written as the mark alone: a spurious 404 would replace every
+    # withheld pattern with it, so it is confirmed.
+    found = get_file_with_sha(org, repo, RELEASEIGNORE, confirm_absent=True)
     text, sha = found if found else (None, None)
     where = f"{repo}/{RELEASEIGNORE}"
     if reviewed(text):

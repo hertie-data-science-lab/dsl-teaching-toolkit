@@ -793,12 +793,14 @@ would see passes `confirm_absent=True`: the 404 is asked again after 1, 2 and 4 
 four 404s mean absent. A file that is there costs nothing extra. Confirmed: every
 hand-edited file `config.read` reads (`course.yml`, `semester.yml`, the semester's course
 pointer), `students.csv`, `schedule.yml` (read, and before a handout is recorded into it),
-`semesters.yml`, every `.releaseignore`, a profile README before it is reseeded, and the
-teardown record. A file that is absent on every tick until something happens is confirmed
-only when that thing is about to: the fire-once records (solution released, marks
-returned) and a snapshot just before each fires, and `grading_config.yml` just before a
-hand-out creates a repo, since its absence picks the repo shape. `seed_if_absent` writes
-with no sha, so GitHub refuses the write if the file was there after all.
+`semesters.yml`, every `.releaseignore` (and the one Confirm withheld rewrites), a profile
+README before it is reseeded, and the teardown record. A file that is absent on every tick
+until something happens is confirmed only when that thing is about to: the fire-once
+records (solution released, marks returned) and a snapshot just before each fires,
+`grading_config.yml` just before a hand-out creates a repo, since its absence picks the
+repo shape, and `.system/roster.csv` just before a prune or a first code write acts on
+nobody being onboarded. `seed_if_absent` writes with no sha, so GitHub refuses the write
+if the file was there after all.
 
 `Validate schedule` keeps its red X, its annotations and its commit comment on a push: those
 reach a person who is at the keyboard. the Console's Check shows which digests are standing

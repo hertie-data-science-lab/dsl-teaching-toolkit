@@ -268,6 +268,19 @@ def _system_text(semester_org: str) -> str | None:
     return get_file_content(semester_org, CONFIG_REPO, SYSTEM_PATH)
 
 
+def confirm_system_text(semester_org: str) -> bool:
+    """Before a prune acts on `.system/roster.csv` being absent, confirm the 404: absent
+    is nobody onboarded, and a prune off it takes every student's access away. True when
+    the 404 was spurious (the file is re-read from then on). Only the prune asks - the
+    file is absent on every run until a semester's first codes go out."""
+    if _system_text(semester_org) is None and get_file_content(
+        semester_org, CONFIG_REPO, SYSTEM_PATH, confirm_absent=True
+    ):
+        _system_text.cache_clear()
+        return True
+    return False
+
+
 def reread() -> None:
     """Forget the memoised roster texts, so the next `load` reads them again. For a caller
     that REPORTS the send columns (`status.json` counts codes sent) at the end of a run

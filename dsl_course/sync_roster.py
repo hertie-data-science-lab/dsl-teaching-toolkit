@@ -226,6 +226,17 @@ def sync(
             f"students.csv digest issue in {roster.CONFIG_REPO})"
         )
         return 0
+    # Rows, but nobody onboarded: `.system/roster.csv` read as absent. A prune off that
+    # takes everyone's access away, so the 404 is confirmed first - here, where it would
+    # act, since the file is absent on every run until the first codes go out.
+    if (
+        prune
+        and not dry_run
+        and students
+        and not any(s.onboarded for s in students)
+        and roster.confirm_system_text(semester_org)
+    ):
+        students = roster.load(semester_org) or []
     # An empty roster (header only - a freshly bootstrapped semester) is a valid state,
     # not an error: reconcile both role teams to empty like any other edit.
     wanted = desired_members(students)

@@ -255,10 +255,12 @@ def _files(monkeypatch, files: dict[str, str], *, writes_ok=True) -> list[str]:
     the texts written, in order."""
     written: list[str] = []
 
-    def with_sha(org, repo, path):
+    def with_sha(org, repo, path, **_kw):
         return (files[path], f"sha-{len(written)}") if path in files else None
 
-    monkeypatch.setattr(enrol_codes, "get_file_content", lambda o, r, p: files.get(p))
+    monkeypatch.setattr(
+        enrol_codes, "get_file_content", lambda o, r, p, **_kw: files.get(p)
+    )
     monkeypatch.setattr(enrol_codes, "get_file_with_sha", with_sha)
     monkeypatch.setattr(gh_contents, "get_file_with_sha", with_sha)
 
@@ -287,7 +289,9 @@ def test_a_refused_write_is_retried_against_the_fresh_roster(monkeypatch):
 
     monkeypatch.setattr(gh_contents, "put_file", fake_put_file)
     monkeypatch.setattr(
-        gh_contents, "get_file_with_sha", lambda org, repo, path: (FRESH, "fresh")
+        gh_contents,
+        "get_file_with_sha",
+        lambda org, repo, path, **_kw: (FRESH, "fresh"),
     )
     assert (
         enrol_codes.write_column(
@@ -305,7 +309,9 @@ def test_a_refused_write_is_retried_against_the_fresh_roster(monkeypatch):
 def test_the_retry_gives_up_after_a_bounded_number_of_attempts(monkeypatch):
     monkeypatch.setattr(gh_contents, "put_file", lambda *a, **k: False)
     monkeypatch.setattr(
-        gh_contents, "get_file_with_sha", lambda org, repo, path: (FRESH, "fresh")
+        gh_contents,
+        "get_file_with_sha",
+        lambda org, repo, path, **_kw: (FRESH, "fresh"),
     )
     assert (
         enrol_codes.write_column(
@@ -325,7 +331,9 @@ def test_a_code_that_arrived_in_between_is_left_alone(monkeypatch):
 
     monkeypatch.setattr(gh_contents, "put_file", fake_put_file)
     monkeypatch.setattr(
-        gh_contents, "get_file_with_sha", lambda org, repo, path: (theirs, "fresh")
+        gh_contents,
+        "get_file_with_sha",
+        lambda org, repo, path, **_kw: (theirs, "fresh"),
     )
     assert enrol_codes.write_column(
         "SEMESTER", None, "", "enrol_code", _codes(), "roster: assign"
@@ -340,10 +348,12 @@ def test_the_emails_carry_the_code_the_roster_actually_holds(monkeypatch):
     files = roster_files(STALE)
     del files[SYS]
     theirs = roster_files(HEADER + "ada@uni.edu,Ada,enrolled,,,dsl-theirs\n")[SYS]
-    monkeypatch.setattr(enrol_codes, "get_file_content", lambda o, r, p: files.get(p))
+    monkeypatch.setattr(
+        enrol_codes, "get_file_content", lambda o, r, p, **_kw: files.get(p)
+    )
     reads = [None, (theirs, "fresh")]
 
-    def with_sha(org, repo, path):
+    def with_sha(org, repo, path, **_kw):
         return reads.pop(0) if len(reads) > 1 else reads[0]
 
     monkeypatch.setattr(enrol_codes, "get_file_with_sha", with_sha)
