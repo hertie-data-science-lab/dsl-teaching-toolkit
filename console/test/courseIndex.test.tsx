@@ -363,7 +363,7 @@ describe('materials checklist and edit links (decision 0024 rules 8 and 9)', () 
     expect(out.match(/aria-label="About this check"/g)).toHaveLength(checks.length - 1);
     expect(out.match(/aria-label="About the syllabus"/g)).toHaveLength(1);
     expect(out).toContain('A repo with nothing of a content kind has nothing to release.');
-    expect(out).toContain('Saving the list once, even empty, marks it reviewed.');
+    expect(out).toContain('Saving the list once, even unchanged, marks it reviewed.');
     // Collapsed: no `open`. Every content kind but supporting files: a tick and its folders when present, nothing when not.
     expect(out).toContain('<details class="fold s-kinds"><summary>Kinds found</summary>');
     const kinds = out.split('<summary>Kinds found</summary>')[1].split('</details>')[0];

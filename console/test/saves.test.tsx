@@ -16,6 +16,7 @@ import type { Assignment, Status } from '../src/model/types';
 import { DispatchAdapter } from '../src/ops/adapter';
 import { OpsSession } from '../src/ops/session';
 import { AssignmentScreen } from '../src/screens/Assignments';
+import { MaterialsScreen } from '../src/screens/CourseEdit';
 import { StudentsScreen } from '../src/screens/People';
 import { ScheduleScreen } from '../src/screens/Schedule';
 import type { CohortProps } from '../src/screens/types';
@@ -529,5 +530,51 @@ describe('Save on the Students grid', () => {
     await settle(() => root!.textContent!.includes('There is no GitHub account'));
     expect(root!.textContent).toContain('There is no GitHub account called nobody-here.');
     expect(puts(gh, 'students.csv')).toEqual([]);
+  });
+});
+
+describe('Save on a materials repo’s settings starts Refresh', () => {
+  const MAT = 'course-materials-f2026';
+  const DISPATCH = `/repos/${COURSE_ORG}/.github/actions/workflows/console.yml/dispatches`;
+  const mat = () => new StaticFiles({ [`${COURSE_ORG}/${MAT}/.releaseignore`]: '# seeded, every line a comment\n' }, {}, { [`${COURSE_ORG}/${MAT}`]: ['SYLLABUS.md', 'labs/01/lab.pdf'] });
+  const cp = (f: StaticFiles, c: Course = course) => ({ course: c, loaded: { kind: 'absent' } as Loaded, cohortStates: {}, files: f, now: NOW, entry: MAT });
+  const withheldSave = () => [...root!.querySelectorAll('section')].find((s) => s.querySelector('h2')?.textContent?.startsWith('Withheld from students'))!;
+  const dispatches = (gh: FakeGitHub) => gh.seen.filter((s) => s.method === 'POST' && s.url.endsWith(DISPATCH));
+
+  async function saveWithheld(gh: FakeGitHub, c: Course = course) {
+    const env = envOf(gh, mat());
+    await mount(env, <MaterialsScreen {...cp(env.files as StaticFiles, c)} />);
+    const save = [...withheldSave().querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Save')!;
+    await click(save);
+    await settle(() => /checklist updates/.test(withheldSave().textContent ?? ''));
+    return env;
+  }
+
+  it('saves the review, then dispatches the Refresh op once, and says the checklist catches up', async () => {
+    const gh = github().on('POST', DISPATCH, { workflow_run_id: 77, run_url: 'u', html_url: 'h' });
+    const env = await saveWithheld(gh);
+    expect(body(puts(gh, '.releaseignore')[0])).toContain('# Reviewed: nothing withheld.');
+    expect(dispatches(gh)).toHaveLength(1);
+    const req = JSON.parse((dispatches(gh)[0].body as { inputs: { request: string } }).inputs.request);
+    expect(req).toMatchObject({ op: 'semester.check', course_org: COURSE_ORG, semester_org: COHORT_ORG, preview: false });
+    expect(withheldSave().textContent).toContain('Saved. The checklist updates in about a minute.');
+    // The Refresh runs in the bar, not over the screen.
+    expect(env.ops.current.value).toMatchObject({ phase: 'running', min: true });
+    env.ops.reset();
+  });
+
+  it('still saves when the Refresh is refused, and leaves it to the next Refresh', async () => {
+    const gh = github().on('POST', DISPATCH, () => json({ message: 'Must have admin rights' }, 403));
+    const env = await saveWithheld(gh);
+    expect(puts(gh, '.releaseignore')).toHaveLength(1);
+    expect(withheldSave().textContent).toContain('Saved. The checklist updates at the next Refresh.');
+    expect(env.ops.current.value).toBeNull();
+  });
+
+  it('starts nothing for a course with no semester', async () => {
+    const gh = github();
+    await saveWithheld(gh, { ...course, cohorts: [] });
+    expect(dispatches(gh)).toEqual([]);
+    expect(withheldSave().textContent).toContain('Saved. The checklist updates at the next Refresh.');
   });
 });

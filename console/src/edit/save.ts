@@ -81,6 +81,8 @@ export interface SaveOptions {
   statusRepo?: [string, string];
   /** Called once the commit lands, before the checks are followed: the file is saved. */
   onCommit?: () => void;
+  /** Once the save is good: a follow-up whose sentence ends the saved line. It must not throw. */
+  after?: () => Promise<string>;
 }
 
 /** Write `text` over `sha` (null for a new file), then report the checks. */
@@ -118,7 +120,8 @@ export async function saveText(env: Env, t: Target, text: string | null, sha: st
   }
   const head = v.ok ? 'Valid.' : 'Saved.';
   const tail = before > after ? (after ? ` ${before - after} problem${before - after > 1 ? 's' : ''} cleared; ${after} remain${after > 1 ? '' : 's'}.` : ' Problem cleared.') : '';
-  report({ kind: 'ok', text: `${head}${tail}${v.ok === null && v.text ? ` ${v.text}` : ''}` });
+  const more = opts.after ? ` ${await opts.after()}` : '';
+  report({ kind: 'ok', text: `${head}${tail}${v.ok === null && v.text ? ` ${v.text}` : ''}${more}` });
   return true;
 }
 
