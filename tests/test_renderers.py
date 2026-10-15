@@ -2458,7 +2458,7 @@ def test_a_renamed_org_is_corrected_even_with_no_repo_table_markers():
     page = "# old-org-f2026.\n\nJoin at https://github.com/old-org-f2026/welcome\n"
     monkey = {"profile/README.md": page}
     original = profile_readme.get_file_content
-    profile_readme.get_file_content = lambda org, repo, path: monkey.get(path)
+    profile_readme.get_file_content = lambda org, repo, path, **_kw: monkey.get(path)
     try:
         out = profile_readme._semester_profile_body("new-org-f2026", [], "SEEDED")
     finally:

@@ -9,7 +9,10 @@ import json
 
 import pytest
 
-from dsl_course import gh_contents, repos
+from dsl_course import gh_contents, repos, settings
+
+# The real reader, taken before `tests/conftest.py` answers it with "nothing declared".
+_ASSIGNMENTS_TEXT = settings._assignments_text
 
 # What `GET repos/{org}/{name}` answers. `repos._repo` reads the whole object once and
 # every question about the repo - default branch included - is asked of that.
@@ -464,6 +467,164 @@ def test_get_file_with_sha_is_none_only_for_a_genuine_404(monkeypatch):
     _record_gh(monkeypatch, [(1, "HTTP 403: rate limited")])
     with pytest.raises(RuntimeError, match="could not read"):
         gh_contents.get_file_with_sha("O", "R", "students.csv")
+
+
+# ------------------------- a reader that reports an absence confirms a 404
+
+_NOT_FOUND = (1, "gh: Not Found (HTTP 404)")
+
+
+def _confirmed(path: str = "dsl-course.yml") -> str | None:
+    return gh_contents.get_file_content("O", ".github", path, confirm_absent=True)
+
+
+def test_spurious_404s_then_the_file_read_the_file_and_hold_it(monkeypatch):
+    # GitHub has answered a 404 for a `.github/dsl-course.yml` that was there, and the
+    # course's admins were mailed that it was missing. The first answer that is not a 404
+    # is the answer, and it is what the run's memo keeps.
+    gh_contents.read_once(True)
+    waits: list[int] = []
+    monkeypatch.setattr(gh_contents, "_sleep", waits.append)
+    calls = _record_gh(monkeypatch, [_NOT_FOUND] * 3 + [(0, _b64("admins: [ada]\n"))])
+    for _ in range(2):
+        assert _confirmed() == "admins: [ada]\n"
+    assert len(calls) == 4  # nothing on the re-read
+    assert waits == [1, 2, 4]
+
+
+def test_four_404s_are_absent_and_held(monkeypatch):
+    gh_contents.read_once(True)
+    calls = _record_gh(monkeypatch, [_NOT_FOUND] * 4)
+    for _ in range(2):
+        assert _confirmed() is None
+    assert len(calls) == 4
+
+
+def test_a_file_that_is_there_costs_nothing_extra(monkeypatch):
+    calls = _record_gh(monkeypatch, [(0, _b64("x\n"))])
+    assert _confirmed() == "x\n"
+    assert len(calls) == 1
+
+
+def test_a_404_one_reader_holds_is_asked_again_by_one_that_confirms(monkeypatch):
+    gh_contents.read_once(True)
+    calls = _record_gh(monkeypatch, [_NOT_FOUND, (0, _b64("x\n"))])
+    assert gh_contents.get_file_content("O", ".github", "dsl-course.yml") is None
+    assert _confirmed() == "x\n"
+    assert gh_contents.get_file_content("O", ".github", "dsl-course.yml") == "x\n"
+    assert len(calls) == 2
+
+
+def test_a_404_then_a_failure_still_raises(monkeypatch):
+    # A confirming read is a read like any other: a rate limit on it is no absence.
+    calls = _record_gh(monkeypatch, [_NOT_FOUND, (1, "HTTP 403: rate limited")])
+    with pytest.raises(RuntimeError, match="could not read"):
+        _confirmed()
+    assert len(calls) == 2
+
+
+def test_a_non_404_failure_is_not_asked_again(monkeypatch):
+    calls = _record_gh(monkeypatch, [(1, "HTTP 403: rate limited"), (0, _b64("x"))])
+    with pytest.raises(RuntimeError, match="could not read"):
+        _confirmed()
+    assert len(calls) == 1
+
+
+def test_a_reader_that_does_not_confirm_takes_one_404(monkeypatch):
+    calls = _record_gh(monkeypatch, [_NOT_FOUND, (0, _b64("x"))])
+    assert gh_contents.get_file_content("O", "R", "optional.yml") is None
+    assert len(calls) == 1
+
+
+# ------------------------- the readers that act on an absence confirm it
+
+# Each: a spurious 404 then the file, and the reader acts on the file.
+
+
+def test_the_plan_is_read_through_a_spurious_404(monkeypatch):
+    from dsl_course import schedule
+
+    _record_gh(monkeypatch, [_NOT_FOUND, (0, _b64("timezone: Europe/Berlin\n"))])
+    assert schedule._schedule_text("S") == "timezone: Europe/Berlin\n"
+
+
+def test_a_releaseignore_is_applied_through_a_spurious_404(monkeypatch):
+    # Read as absent, nothing would be withheld and the solutions would be handed out.
+    from dsl_course import assign
+
+    tree = (".releaseignore", "README.md", "solutions/a.py")
+    monkeypatch.setattr(assign, "default_branch", lambda *a, **k: "main")
+    monkeypatch.setattr(assign, "repo_tree", lambda *a, **k: tree)
+    deleted: list = []
+    monkeypatch.setattr(
+        assign, "put_files", lambda *a, delete=(), **k: deleted.extend(delete) or True
+    )
+    _record_gh(monkeypatch, [_NOT_FOUND, (0, _b64("solutions/\n"))])
+    assert assign.withhold_from_template("S", "a1") is True
+    assert "solutions/a.py" in deleted
+
+
+def test_a_handout_is_recorded_into_the_plan_through_a_spurious_404(monkeypatch):
+    # Read as absent, the handout alone would be written over the whole plan.
+    from dsl_course import schedule
+
+    plan = "assignments:\n  a1:\n    due_datetime: 2026-10-01T09:00\n"
+    calls = _record_gh(monkeypatch, [_NOT_FOUND, (0, "abc123\n" + _b64(plan))])
+    schedule.record_handout("S", "a1", "2026-09-01T09:00")
+    (put,) = [c for c in calls if "PUT" in c]
+    assert "sha=abc123" in put
+
+
+def test_the_semester_registry_is_read_through_a_spurious_404(monkeypatch):
+    from dsl_course import discovery
+
+    _record_gh(monkeypatch, [_NOT_FOUND, (0, _b64("semesters:\n  - S1\n"))])
+    assert discovery.discover_semesters("C") == ["S1"]
+
+
+def test_a_handout_confirms_an_absent_definition(monkeypatch):
+    from dsl_course import grades
+
+    group = (0, _b64("type: group\n"))
+    _record_gh(monkeypatch, [_NOT_FOUND, _NOT_FOUND, group, group])
+    assert grades._grading_text("C", "t") is None  # an ordinary read takes one 404
+    grades.confirm_grading_text("C", "t")
+    assert grades._grading_text("C", "t") == "type: group\n"
+
+
+def test_a_handout_confirms_an_absent_semester_settings_file(monkeypatch):
+    monkeypatch.setattr(settings, "_assignments_text", _ASSIGNMENTS_TEXT)
+    _ASSIGNMENTS_TEXT.cache_clear()
+    late = (0, _b64("defaults: {}\n"))
+    _record_gh(monkeypatch, [_NOT_FOUND, _NOT_FOUND, late, late])
+    assert settings._assignments_text("S") is None
+    settings.confirm_assignments_text("S")
+    assert settings._assignments_text("S") == "defaults: {}\n"
+
+
+def test_a_seed_written_on_a_404_never_overwrites(monkeypatch):
+    # Sent with no sha: if the 404 was spurious GitHub refuses the write, where a fetched
+    # sha would have overwritten the faculty file.
+    calls = _record_gh(monkeypatch, [_NOT_FOUND, (0, "")])
+    assert gh_contents.seed_if_absent("O", "R", "x.md", b"stub\n", "seed") is True
+    (put,) = [c for c in calls if "PUT" in c]
+    assert not any(a.startswith("sha=") for a in put)
+    assert len(calls) == 2  # no sha fetched
+
+
+def test_the_teardown_record_reads_the_registrar_export_through_a_404(monkeypatch):
+    from dsl_course import teardown
+
+    _record_gh(monkeypatch, [_NOT_FOUND, (0, _b64("handle,grade\nada,1.0\n"))])
+    summary = teardown.registrar_summary("S", confirm_absent=True)
+    assert "1 student row(s)" in summary
+
+
+def test_a_site_config_is_read_through_a_spurious_404(monkeypatch):
+    from dsl_course import site_repo
+
+    _record_gh(monkeypatch, [_NOT_FOUND, (0, _b64("public: [decks]\n"))])
+    assert site_repo.yaml_file("C", "materials", "publish.yml") == {"public": ["decks"]}
 
 
 # ------------------------- a truncated tree listing is not a smaller repo

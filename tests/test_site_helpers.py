@@ -418,7 +418,9 @@ def test_a_readings_row_inlines_its_overlay_and_lists_everything_else(monkeypatc
     assert sorted(x.name for x in landed.links) == ["ch1.pdf", "notes.md", "refs.bib"]
     assert landed.overlays == ["readings/01_week-1/READINGS.md"]
     monkeypatch.setattr(
-        site, "get_file_content", lambda org, repo, path: "# Week 1\n\n- Blitzstein."
+        site,
+        "get_file_content",
+        lambda org, repo, path, **_kw: "# Week 1\n\n- Blitzstein.",
     )
     assert site._reading_list("C", [landed]) == "### Week 1\n\n- Blitzstein."
     # Any other kind keeps the overlay as a file.
@@ -938,7 +940,7 @@ def test_an_org_that_never_had_a_site_is_still_a_quiet_noop(monkeypatch):
 def test_a_failed_repo_listing_is_not_read_as_no_site(monkeypatch):
     monkeypatch.setattr(site_repo, "repo_exists", lambda org, name: False)
 
-    def boom(org):
+    def boom(org, **_kw):
         raise RuntimeError(f"could not list repos in {org}")
 
     monkeypatch.setattr(site_repo, "list_org_repos", boom)

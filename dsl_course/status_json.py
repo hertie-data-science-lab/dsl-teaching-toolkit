@@ -2710,7 +2710,7 @@ def _materials_facts(course_org: str, repo: str) -> MaterialsFacts:
         syllabus = "" if path in top else None
     folders = _dirs(top)
     releaseignore = (
-        get_file_content(course_org, repo, RELEASEIGNORE)
+        get_file_content(course_org, repo, RELEASEIGNORE, confirm_absent=True)
         if RELEASEIGNORE in top
         else None
     )

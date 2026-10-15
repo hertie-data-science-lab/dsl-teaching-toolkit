@@ -100,7 +100,7 @@ def test_the_inventory_names_an_org_on_the_old_topic_and_goes_partial(
 def _registry(monkeypatch, files: dict[str, str]) -> list[tuple[str, bytes]]:
     written: list[tuple[str, bytes]] = []
     monkeypatch.setattr(
-        discovery, "get_file_content", lambda org, repo, path: files.get(path)
+        discovery, "get_file_content", lambda org, repo, path, **_kw: files.get(path)
     )
     monkeypatch.setattr(
         discovery,
@@ -284,7 +284,7 @@ def _semester_files(monkeypatch, files: dict[str, dict]) -> None:
     monkeypatch.setattr(
         sync_faculty,
         "load_yaml_config",
-        lambda org, repo, path, lines=False: files.get(path),
+        lambda org, repo, path, lines=False, **k: files.get(path),
     )
 
 
@@ -429,7 +429,9 @@ def _hand_out(
     monkeypatch.setattr(assign, "listing_by_name", lambda org: None)
     monkeypatch.setattr(assign.schedule, "load", lambda org: citing("a1"))
     monkeypatch.setattr(
-        assign, "get_file_content", lambda org, repo, path, ref="": store.get(path)
+        assign,
+        "get_file_content",
+        lambda org, repo, path, ref="", **_kw: store.get(path),
     )
     monkeypatch.setattr(
         assign,
@@ -556,6 +558,7 @@ def test_a_template_naming_only_format_is_refused_whole(monkeypatch, capsys):
     student = assign.roster.Student("a@x", "A", "ada", "", "", "student")
     monkeypatch.setattr(assign.roster, "load", lambda org: [student])
     monkeypatch.setattr(assign.schedule, "load", lambda org: citing("a1"))
+    monkeypatch.setattr(settings, "confirm_assignments_text", lambda org: None)
     assert assign.provision_all("C", "a1", "S") == (1, False)
     assert NOT_MIGRATED in capsys.readouterr().err
     faults, parsed = grades.grading_spec_faults(
@@ -1002,7 +1005,9 @@ def test_semester_cards_never_come_from_the_old_people_shape(monkeypatch):
 def _gate_store(monkeypatch, *, put_ok=True) -> dict:
     store: dict = {}
     monkeypatch.setattr(
-        assign, "get_file_content", lambda org, repo, path, ref="": store.get(path)
+        assign,
+        "get_file_content",
+        lambda org, repo, path, ref="", **_kw: store.get(path),
     )
 
     def put(org, repo, path, body, msg, **k):

@@ -615,7 +615,7 @@ def seed_templates() -> dict[str, str]:
     }
 
 
-def yaml_file(org: str, repo: str, path: str) -> dict:
+def yaml_file(org: str, repo: str, path: str, confirm_absent: bool = True) -> dict:
     """A YAML config file from a repo as a mapping - `{}` when it is genuinely absent or
     empty (nothing declared: the site renders its defaults, which is correct).
 
@@ -623,8 +623,9 @@ def yaml_file(org: str, repo: str, path: str) -> dict:
     here (via load_yaml_config), to the per-semester isolation the callers already have. It
     used to be coerced to `{}`, so one bad indent in a semester's instructors.yml republished the
     site with the whole teaching team's cards wiped, green - exactly the failure
-    `_team_people` next door is hardened against."""
-    return load_yaml_config(org, repo, path) or {}
+    `_team_people` next door is hardened against. Absent is confirmed for the same reason:
+    a spurious 404 republishes the site without the cards."""
+    return load_yaml_config(org, repo, path, confirm_absent=confirm_absent) or {}
 
 
 def _team_people(course_org: str, team: str) -> list[tuple[str, str, str]]:

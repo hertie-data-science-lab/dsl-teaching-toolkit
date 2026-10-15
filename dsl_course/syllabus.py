@@ -161,7 +161,10 @@ def _readings_for(course_org: str, row: PlannedRow, trees: dict) -> str:
         text = readings_block(
             names,
             lambda name, repo=repo, base=base: get_file_content(
-                course_org, repo, f"{base}/{name}" if base else name
+                course_org,
+                repo,
+                f"{base}/{name}" if base else name,
+                confirm_absent=True,
             ),
         )
         if text:

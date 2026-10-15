@@ -1243,7 +1243,7 @@ def _stub_snapshot_write(
     every row falls to the committer date - which is what the tests written before that
     ladder existed expect. Stubbed, never called: nothing here reaches GitHub."""
     written: list[tuple[str, str]] = []
-    monkeypatch.setattr(collect, "load_snapshots", lambda org, slug: existing)
+    monkeypatch.setattr(collect, "load_snapshots", lambda org, slug, **_kw: existing)
     monkeypatch.setattr(
         collect,
         "listing_by_name",
@@ -1521,7 +1521,7 @@ def test_snapshot_assignment_never_overwrites_an_existing_snapshot(monkeypatch):
     def boom(*args, **kwargs):
         raise AssertionError("an existing snapshot must never be re-taken")
 
-    monkeypatch.setattr(collect, "load_snapshots", lambda org, slug: {"r": SHA})
+    monkeypatch.setattr(collect, "load_snapshots", lambda org, slug, **_kw: {"r": SHA})
     monkeypatch.setattr(collect, "_snapshot_sha", boom)
     monkeypatch.setattr(collect, "put_file", boom)
     assert (
@@ -1557,7 +1557,7 @@ def test_snapshot_assignment_with_no_targets_yet_writes_nothing_and_is_not_an_er
         raise AssertionError("an empty snapshot must never be frozen")
 
     monkeypatch.setattr(collect.schedule, "load", lambda org: citing(*TEMPLATES))
-    monkeypatch.setattr(collect, "load_snapshots", lambda org, slug: None)
+    monkeypatch.setattr(collect, "load_snapshots", lambda org, slug, **_kw: None)
     monkeypatch.setattr(collect, "submission_targets", lambda *a, **k: [])
     monkeypatch.setattr(collect, "put_file", boom)
     assert (
@@ -1570,12 +1570,12 @@ def test_snapshot_assignment_with_no_targets_yet_writes_nothing_and_is_not_an_er
 
 
 def test_load_snapshots_distinguishes_a_missing_file_from_blank_shas(monkeypatch):
-    monkeypatch.setattr(collect, "get_file_content", lambda *a: None)
+    monkeypatch.setattr(collect, "get_file_content", lambda *a, **_kw: None)
     assert collect.load_snapshots("Semester", "assignment-1") is None
     monkeypatch.setattr(
         collect,
         "get_file_content",
-        lambda *a: "repo,sha,recorded_at\nr,,2026-10-16T00:00:00+00:00\n",
+        lambda *a, **_kw: "repo,sha,recorded_at\nr,,2026-10-16T00:00:00+00:00\n",
     )
     assert collect.load_snapshots("Semester", "assignment-1") == {"r": ""}
 
@@ -1655,7 +1655,7 @@ def _stub_collect(monkeypatch, snapshots, grading: str | None = None):
             Target(f"{slug}-{h}", h, [h]) for h in ("anna", "ben", "cara")
         ],
     )
-    monkeypatch.setattr(collect, "load_snapshots", lambda org, slug: snapshots)
+    monkeypatch.setattr(collect, "load_snapshots", lambda org, slug, **_kw: snapshots)
     monkeypatch.setattr(collect, "load_snapshot_rows", lambda org, slug: {})
     monkeypatch.setattr(collect, "put_file", lambda *a, **k: True)
     monkeypatch.setattr(collect, "get_file_content", lambda *a, **k: "")
@@ -2147,7 +2147,7 @@ def test_the_shape_is_read_off_the_solution_branch_grading_config(monkeypatch):
     # the file on the TEMPLATE's solution branch is the only answer there is.
     seen = {}
 
-    def fake_get(org, repo, path, ref=""):
+    def fake_get(org, repo, path, ref="", **_kw):
         seen.update(org=org, repo=repo, path=path, ref=ref)
         return "type: group\nformats: [py]\n"
 
@@ -3487,7 +3487,7 @@ def test_snapshot_assignment_requires_and_passes_is_group_through(monkeypatch):
     # passes it in - and the argument is REQUIRED (keyword-only), so a forgetful future caller
     # can't silently freeze individual repos for a group assignment. Never inferred from
     # student-writable teams.csv (see test_submission_targets_*_ignores_*).
-    monkeypatch.setattr(collect, "load_snapshots", lambda org, slug: None)
+    monkeypatch.setattr(collect, "load_snapshots", lambda org, slug, **_kw: None)
     seen: list[bool] = []
     monkeypatch.setattr(
         collect,
@@ -3933,7 +3933,9 @@ def _sheet_env(
         "submission_targets",
         lambda org, slug, is_group, key=None, **k: targets,
     )
-    monkeypatch.setattr(collect, "get_file_with_sha", lambda org, repo, path: existing)
+    monkeypatch.setattr(
+        collect, "get_file_with_sha", lambda org, repo, path, **_kw: existing
+    )
     monkeypatch.setattr(collect, "load_snapshot_rows", lambda org, slug: rows)
     monkeypatch.setattr(
         collect,
@@ -3941,7 +3943,9 @@ def _sheet_env(
         lambda org, repo, deadline, **k: (pins or {}).get(repo, collect.Pin()),
     )
     monkeypatch.setattr(
-        collect, "get_file_content", lambda org, repo, path, ref="": contributions
+        collect,
+        "get_file_content",
+        lambda org, repo, path, ref="", **_kw: contributions,
     )
     monkeypatch.setattr(
         collect,
@@ -4290,7 +4294,7 @@ def test_the_refresh_writes_nothing_when_nothing_has_changed(monkeypatch):
     monkeypatch.setattr(
         collect,
         "get_file_with_sha",
-        lambda org, repo, path: (first, gh_contents.blob_sha(first.encode())),
+        lambda org, repo, path, **_kw: (first, gh_contents.blob_sha(first.encode())),
     )
     assert collect.sync_sheet(*args, **kwargs).written
 
@@ -4316,7 +4320,7 @@ def test_an_unchanged_sheet_before_the_due_date_says_why_there_was_nothing_to_do
     monkeypatch.setattr(
         collect,
         "get_file_with_sha",
-        lambda org, repo, path: (first, gh_contents.blob_sha(first.encode())),
+        lambda org, repo, path, **_kw: (first, gh_contents.blob_sha(first.encode())),
     )
     capsys.readouterr()
     assert collect.sync_sheet(*args, **kwargs).written
@@ -4344,7 +4348,7 @@ def test_an_unchanged_sheet_after_the_due_date_says_nothing_extra(monkeypatch, c
     monkeypatch.setattr(
         collect,
         "get_file_with_sha",
-        lambda org, repo, path: (first, gh_contents.blob_sha(first.encode())),
+        lambda org, repo, path, **_kw: (first, gh_contents.blob_sha(first.encode())),
     )
     capsys.readouterr()
     assert collect.sync_sheet(*args, **kwargs).written
@@ -4843,7 +4847,7 @@ def test_a_teams_contributions_are_read_at_the_pin_and_a_stub_reads_blank(monkey
     # deadline, and the grader is told what it said when the work was submitted.
     seen: list[str] = []
 
-    def contributions(org, repo, path, ref=""):
+    def contributions(org, repo, path, ref="", **_kw):
         seen.append(ref)
         return "Ada: Q1. Ben: Q2.\n"
 
@@ -4876,7 +4880,7 @@ def test_a_team_in_a_drop_box_is_asked_for_its_own_contributions_file(monkeypatc
     # folder is the only place its answer can be.
     seen: list[str] = []
 
-    def contributions(org, repo, path, ref=""):
+    def contributions(org, repo, path, ref="", **_kw):
         seen.append(path)
         return "Ada: Q1. Ben: Q2.\n"
 
@@ -4898,7 +4902,7 @@ def test_the_freeze_reads_contributions_at_the_frozen_sha(monkeypatch):
     frozen = "b" * 40
     seen: list[str] = []
 
-    def contributions(org, repo, path, ref=""):
+    def contributions(org, repo, path, ref="", **_kw):
         seen.append(ref)
         return "Ada: Q1. Ben: Q2.\n"
 
@@ -5129,7 +5133,7 @@ def test_the_grading_config_is_read_once_per_template_per_process(monkeypatch):
     monkeypatch.setattr(
         collect.grades,
         "get_file_content",
-        lambda org, repo, path, ref="": (reads.append(repo), "type: group")[1],
+        lambda org, repo, path, ref="", **_kw: (reads.append(repo), "type: group")[1],
     )
     collect.load_grading_spec("Course", "assignment-1-f2026")
     collect.load_grading_spec("Course", "assignment-1-f2026")
@@ -5141,7 +5145,7 @@ def test_the_definition_is_read_from_grading_config_yml(monkeypatch):
     # first - a template that has been renamed costs no extra read.
     paths: list[str] = []
 
-    def fake_get(org, repo, path, ref=""):
+    def fake_get(org, repo, path, ref="", **_kw):
         paths.append(path)
         return "type: group"
 
@@ -5842,7 +5846,7 @@ def _checkout(monkeypatch, files: dict[str, str]):
         lambda *a, **k: [Target("a1-alice", "alice", ["alice"])],
     )
     monkeypatch.setattr(
-        collect, "load_snapshots", lambda org, slug: {"a1-alice": "abc"}
+        collect, "load_snapshots", lambda org, slug, **_kw: {"a1-alice": "abc"}
     )
 
 
@@ -5889,7 +5893,9 @@ def test_a_grader_copy_from_a_drop_box_is_taken_from_the_units_own_folder(monkey
         "submission_targets",
         lambda *a, **k: [Target("a1-submissions", "alice", ["alice"], "alice/")],
     )
-    monkeypatch.setattr(collect, "load_snapshots", lambda org, slug: {"alice": "abc"})
+    monkeypatch.setattr(
+        collect, "load_snapshots", lambda org, slug, **_kw: {"alice": "abc"}
+    )
     picked: list[str] = []
     real_pick = collect.pick_grader_document
     monkeypatch.setattr(
@@ -5948,7 +5954,7 @@ def test_an_export_that_never_started_costs_one_copy_not_the_whole_pass(
     monkeypatch.setattr(
         collect,
         "load_snapshots",
-        lambda org, slug: {"a1-alice": "abc", "a1-ben": "abc"},
+        lambda org, slug, **_kw: {"a1-alice": "abc", "a1-ben": "abc"},
     )
     written = _capture_archive(monkeypatch)
     monkeypatch.setattr(collect, "_pdf_engine_present", lambda: False)
@@ -6893,7 +6899,7 @@ def _shared_snapshot(monkeypatch, pins: dict, pushed=""):
     """`snapshot_assignment` over a shared drop box. Returns the CSV it wrote."""
     written: list[tuple[str, str]] = []
     drop_box = "assignment-3-submissions"
-    monkeypatch.setattr(collect, "load_snapshots", lambda org, slug: None)
+    monkeypatch.setattr(collect, "load_snapshots", lambda org, slug, **_kw: None)
     monkeypatch.setattr(
         collect,
         "listing_by_name",

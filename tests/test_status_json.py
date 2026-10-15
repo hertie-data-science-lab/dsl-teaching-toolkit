@@ -701,9 +701,11 @@ def test_a_declared_pdf_syllabus_counts_once_it_is_there(monkeypatch):
         lambda org, repo: Declared(syllabus="E1282_syllabus.pdf"),
     )
     monkeypatch.setattr(
-        status_json, "get_file_content", lambda org, repo, path, ref="": None
+        status_json, "get_file_content", lambda org, repo, path, ref="", **_kw: None
     )
-    monkeypatch.setattr(status_json, "file_exists", lambda org, repo, path: False)
+    monkeypatch.setattr(
+        status_json, "file_exists", lambda org, repo, path, **_kw: False
+    )
     present = {"E1282_syllabus.pdf": "file", "lectures": "dir"}
     monkeypatch.setattr(status_json, "top_level", _repo_tree({"": present}))
     facts = status_json._materials_facts(COURSE, "nlp-materials")
@@ -1200,7 +1202,7 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
         (SEMESTER, f"{SEMESTER}.github.io", "index.md"): "# Welcome",
     }
 
-    def content(org, repo, path, ref=""):
+    def content(org, repo, path, ref="", **_kw):
         return files.get((org, repo, path))
 
     listings = {
@@ -1272,7 +1274,9 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
         "top_level",
         _repo_tree({"": {"SYLLABUS.md": "file", "lectures": "dir", ".system": "dir"}}),
     )
-    monkeypatch.setattr(status_json, "file_exists", lambda org, repo, path: False)
+    monkeypatch.setattr(
+        status_json, "file_exists", lambda org, repo, path, **_kw: False
+    )
     monkeypatch.setattr(gh_commits, "gh", lambda *a: (0, "2026-09-22T06:02:00Z"))
     monkeypatch.setattr(status_json, "get_team_members", lambda org, team: {"prof"})
     monkeypatch.setattr(grades, "_org_settings_faults", lambda org: [])
@@ -2048,7 +2052,9 @@ def test_only_unkinded_folders_with_numbered_subfolders_are_read_and_flagged(
     }
     monkeypatch.setattr(status_json, "top_level", _repo_tree(tree, listed))
     monkeypatch.setattr(status_json, "_declaration", lambda org, repo: Declared())
-    monkeypatch.setattr(status_json, "get_file_content", lambda org, repo, path: None)
+    monkeypatch.setattr(
+        status_json, "get_file_content", lambda org, repo, path, **_kw: None
+    )
     m = status_json._materials_facts(COURSE, "cm")
     assert m.numbered == ("quiz",)
     # The named folders (lectures/, data/) are never listed.
@@ -2067,7 +2073,7 @@ def test_a_folder_withheld_from_release_is_never_a_kinds_problem(monkeypatch):
     monkeypatch.setattr(
         status_json,
         "get_file_content",
-        lambda org, repo, path: "quiz/\n" if path == ".releaseignore" else None,
+        lambda org, repo, path, **_kw: "quiz/\n" if path == ".releaseignore" else None,
     )
     m = status_json._materials_facts(COURSE, "cm")
     assert m.numbered == ("drafts",)
@@ -2455,7 +2461,7 @@ def test_the_gather_reads_two_trees_and_the_record_never_a_source(monkeypatch):
     monkeypatch.setattr(
         status_json,
         "get_file_content",
-        lambda org, repo, path, ref="": reads.append(path) or _record(),
+        lambda org, repo, path, ref="", **_kw: reads.append(path) or _record(),
     )
     for config, mode, n in (
         (None, "derived", 1),  # no key, a derivable source: derived
@@ -2492,7 +2498,7 @@ def test_the_starter_is_checked_only_where_a_starter_is_handed_out(
     monkeypatch.setattr(
         status_json,
         "get_file_content",
-        lambda org, repo, path, ref="": (
+        lambda org, repo, path, ref="", **_kw: (
             config if path == "grading_config.yml" else "# Quiz"
         ),
     )
@@ -2957,7 +2963,7 @@ def test_gather_moments_reads_each_semesters_status_once(monkeypatch):
     }
     reads = []
 
-    def read(org, repo, path, ref=""):
+    def read(org, repo, path, ref="", **_kw):
         reads.append((org, repo, path))
         return files[org]
 
@@ -3472,7 +3478,9 @@ def _facts(monkeypatch, tree, declared=None, releaseignore=None, listed=None):
     monkeypatch.setattr(
         status_json,
         "get_file_content",
-        lambda org, repo, path: releaseignore if path == ".releaseignore" else None,
+        lambda org, repo, path, **_kw: (
+            releaseignore if path == ".releaseignore" else None
+        ),
     )
     return status_json._materials_facts(COURSE, "maths-materials")
 

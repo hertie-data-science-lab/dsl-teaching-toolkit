@@ -45,6 +45,15 @@ def _no_semester_schedule(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _absent_definitions_are_not_confirmed(monkeypatch):
+    """A hand-out confirms an absent `grading_config.yml` and `assignments.yml` before it
+    acts on one; these tests stub the definitions themselves, so there is nothing to ask
+    again. The confirmation's own tests are in test_grades and test_settings."""
+    monkeypatch.setattr(grades, "confirm_grading_text", lambda org, template: None)
+    monkeypatch.setattr(settings, "confirm_assignments_text", lambda org: None)
+
+
+@pytest.fixture(autouse=True)
 def _empty_semester_listing(monkeypatch):
     """provision_all answers "does this repo exist?" off the listing its CALLER holds, and
     the tests below hand it none - so what they reach is the fallback, a probe per repo.
@@ -1784,6 +1793,47 @@ def test_provision_all_answers_every_repo_off_the_callers_listing(
         },
     )
     assert created == ["assignment-1-bob-b"], "a listed repo was regenerated"
+
+
+def test_a_handout_with_nothing_to_create_confirms_no_absent_definition(
+    tmp_path, monkeypatch
+):
+    # A handed-out release re-fires every tick. Confirming an absent grading_config.yml or
+    # assignments.yml costs three reads and seven seconds, so only a pass that is about
+    # to create a repo may ask - never the steady state.
+    asked: list = []
+    monkeypatch.setattr(
+        grades, "confirm_grading_text", lambda *a: asked.append(a) and False
+    )
+    monkeypatch.setattr(
+        settings, "confirm_assignments_text", lambda *a: asked.append(a) and False
+    )
+    every = {
+        "assignment-1": _ready_template(),
+        "assignment-1-ada-l": repo_row("assignment-1-ada-l"),
+        "assignment-1-bob-b": repo_row("assignment-1-bob-b"),
+    }
+    assert _listing_run(tmp_path, monkeypatch, every) == []
+    assert asked == []
+    del every["assignment-1-bob-b"]
+    assert _listing_run(tmp_path, monkeypatch, every) == ["assignment-1-bob-b"]
+    assert asked == [("COURSE", "assignment-1-f2026"), ("SEMESTER",)]
+
+
+def test_a_definition_found_on_confirming_restarts_the_handout_on_it(
+    tmp_path, monkeypatch
+):
+    # The shape was worked out from a spurious 404: work it out again from the file.
+    found = iter([True, False])
+    monkeypatch.setattr(grades, "confirm_grading_text", lambda *a: next(found))
+    loads: list = []
+    real = assign.load_grading_spec
+    monkeypatch.setattr(
+        assign, "load_grading_spec", lambda *a, **k: loads.append(a) or real(*a, **k)
+    )
+    created = _listing_run(tmp_path, monkeypatch, {"assignment-1": _ready_template()})
+    assert len(loads) == 2
+    assert created == ["assignment-1-ada-l", "assignment-1-bob-b"]
 
 
 def test_no_listing_at_all_falls_back_to_probing_each_repo(tmp_path, monkeypatch):

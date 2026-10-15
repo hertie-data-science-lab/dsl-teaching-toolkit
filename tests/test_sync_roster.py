@@ -158,7 +158,7 @@ def test_students_csv_is_read_once_per_semester_but_each_caller_parses_its_own(
     monkeypatch.setattr(
         roster,
         "get_file_content",
-        lambda org, repo, path: (
+        lambda org, repo, path, **k: (
             reads.append(org)
             or (HEADER + "\nada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n")
         ),

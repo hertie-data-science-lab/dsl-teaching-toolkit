@@ -1247,6 +1247,20 @@ def _grading_text(course_org: str, template: str) -> str | None:
     return get_file_content(course_org, template, GRADING_FILE, ref=SOLUTION_BRANCH)
 
 
+def confirm_grading_text(course_org: str, template: str) -> bool:
+    """Before a hand-out creates a repo off a template having NO definition, confirm the
+    404: absent is an individual assignment, and a group one handed out as a repo per
+    student cannot be taken back. True when the 404 was spurious (the definition is
+    re-read from then on). Only that hand-out asks - the definition is optional, so
+    confirming it on every read would cost every tick of every undeclared template."""
+    if _grading_text(course_org, template) is None and get_file_content(
+        course_org, template, GRADING_FILE, ref=SOLUTION_BRANCH, confirm_absent=True
+    ):
+        _grading_text.cache_clear()
+        return True
+    return False
+
+
 def declared_grading_spec(
     course_org: str, template: str, *, semester_org: str = "", slug: str = ""
 ) -> GradingSpec | None:
@@ -3844,7 +3858,8 @@ def marks_due(
         if when is None or when > now:
             continue
         name = schedule.semester_name(key, entry)
-        if get_file_content(semester_org, CONFIG_REPO, marks_return_record(name)):
+        record = marks_return_record(name)
+        if get_file_content(semester_org, CONFIG_REPO, record):
             continue
         if specs is None:
             specs = sheet_specs(course_org, sched)
@@ -3863,6 +3878,11 @@ def marks_due(
         units = ((sheet or {}).get(spec.container_key) or {}) if sheet else {}
         blank = _not_marked(spec, sheet) if sheet else {}
         if sheet and units and not blank:
+            # The fire-once record, confirmed only now the return would fire: a spurious
+            # 404 would return the marks a second time, and before this point the record
+            # is absent on every tick of a marking backlog.
+            if get_file_content(semester_org, CONFIG_REPO, record, confirm_absent=True):
+                continue
             ready.append(key)
             continue
         # A blank unit with no submission is not a marking backlog: counted apart.

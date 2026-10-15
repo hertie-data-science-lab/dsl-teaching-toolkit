@@ -2127,8 +2127,13 @@ def _schedule_text(semester_org: str) -> str | None:
     `Schedule`, so every caller gets its own object (nothing shared to mutate) and the
     loud "N entries DROPPED" report is still printed once per caller, exactly as before.
     `record_handout` clears it after its write; tests/conftest.py clears it between
-    tests."""
-    return get_file_content(semester_org, CONFIG_REPO, SCHEDULE_PATH)
+    tests.
+
+    Absent reads as an empty plan - nothing released, a site built with no schedule - so
+    a 404 is confirmed (`gh_contents._CONFIRM_WAITS`)."""
+    return get_file_content(
+        semester_org, CONFIG_REPO, SCHEDULE_PATH, confirm_absent=True
+    )
 
 
 def _unreadable_fault(what: str, lineno: int | None = None) -> ConfigFault:
@@ -2409,7 +2414,10 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
                     paths,
                     # `repo` bound now, not looked up later: the read is eager, but a
                     # lambda over a loop variable is one edit away from not being.
-                    lambda p, _r=repo: get_file_content(course_org, _r, p),
+                    # Only a `.releaseignore` the tree lists is read: a 404 is spurious.
+                    lambda p, _r=repo: get_file_content(
+                        course_org, _r, p, confirm_absent=True
+                    ),
                 )
             )
         except RuntimeError:
@@ -2757,7 +2765,10 @@ def record_handout(semester_org: str, slug: str, stamp: str | None = None) -> No
     The edit is made against a FRESH read and written with that read's sha, so a faculty
     edit committed during a long run is refused rather than reverted; one retry re-reads
     and re-applies (as `enrol_codes.write_codes` does)."""
-    read = get_file_with_sha(semester_org, CONFIG_REPO, SCHEDULE_PATH)
+    # Absent, the handout alone would be written over the whole plan: confirm a 404.
+    read = get_file_with_sha(
+        semester_org, CONFIG_REPO, SCHEDULE_PATH, confirm_absent=True
+    )
     text, sha = read if read is not None else ("", None)
     # This is the one writer of schedule.yml inside a run, so it is the one place the
     # per-process read memo can go stale. Dropped up front: every path below either

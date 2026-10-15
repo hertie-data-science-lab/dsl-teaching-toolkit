@@ -74,7 +74,7 @@ def org(monkeypatch):
     monkeypatch.setattr(
         teardown,
         "get_file_content",
-        lambda o, r, p: "hertie_email,name,github_handle\na@uni.edu,Ada,ada-l\n",
+        lambda o, r, p, **_kw: "hertie_email,name,github_handle\na@uni.edu,Ada,ada-l\n",
     )
     monkeypatch.setattr(
         teardown.propagate,
@@ -456,7 +456,9 @@ def test_the_registrar_export_is_summarised_by_its_row_count(monkeypatch):
     monkeypatch.setattr(
         teardown,
         "get_file_content",
-        lambda o, r, p: "hertie_email,name,github_handle,a1\na@uni.edu,Ada,ada-l,80\n",
+        lambda o, r, p, **_kw: (
+            "hertie_email,name,github_handle,a1\na@uni.edu,Ada,ada-l,80\n"
+        ),
     )
     summary = teardown.registrar_summary(SEMESTER)
     assert summary == ".system/semester-gradebook.csv, 1 student row(s)"
@@ -464,5 +466,5 @@ def test_the_registrar_export_is_summarised_by_its_row_count(monkeypatch):
 
 
 def test_a_semester_that_never_distributed_a_grade_says_so(monkeypatch):
-    monkeypatch.setattr(teardown, "get_file_content", lambda o, r, p: None)
+    monkeypatch.setattr(teardown, "get_file_content", lambda o, r, p, **_kw: None)
     assert "NOT here" in teardown.registrar_summary(SEMESTER)

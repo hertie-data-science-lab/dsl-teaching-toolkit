@@ -222,7 +222,7 @@ def _spec(text: str, **run) -> grades.GradingSpec:
     return dataclasses.replace(grades.parse_grading_spec(text), **run)
 
 
-def _get_file_content(_org: str, _repo: str, path: str) -> str | None:
+def _get_file_content(_org: str, _repo: str, path: str, **_kw) -> str | None:
     if path.endswith("READINGS.md"):
         return READINGS_MD
     if path == "README.md":

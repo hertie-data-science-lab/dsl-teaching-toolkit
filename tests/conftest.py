@@ -77,6 +77,13 @@ def _team_lag_waits_cost_nothing(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _confirming_a_404_costs_nothing(monkeypatch):
+    """`gh_contents` asks an alarm read's 404 again, after waits, before it counts: a test
+    that stubs an absent file should not wait."""
+    monkeypatch.setattr(gh_contents, "_sleep", lambda s: None)
+
+
+@pytest.fixture(autouse=True)
 def _no_start_of_run_hooks(monkeypatch):
     """Mark the start-of-run hooks as already run, so a test that parses a CLI's command
     line does not read the API budget (a live `GET /user`). The budget line's own tests

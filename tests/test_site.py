@@ -1462,7 +1462,9 @@ def test_site_still_builds_when_schedule_yml_does_not_parse(
     monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
     # the REAL schedule.load, fed the malformed file
     monkeypatch.setattr(
-        site.schedule, "get_file_content", lambda org, repo, path: MALFORMED_SCHEDULE
+        site.schedule,
+        "get_file_content",
+        lambda org, repo, path, **_kw: MALFORMED_SCHEDULE,
     )
 
     assert site.sync_site("Course-Org", "Semester-f2026") == 0
@@ -1824,14 +1826,14 @@ def test_yaml_file_raises_on_a_malformed_file_rather_than_wiping_what_it_feeds(
     # and republish the site with every teaching-team card gone, green.
     err = _bad_indent_error()
     monkeypatch.setattr(
-        site_repo, "load_yaml_config", lambda *a: (_ for _ in ()).throw(err)
+        site_repo, "load_yaml_config", lambda *a, **_kw: (_ for _ in ()).throw(err)
     )
     with pytest.raises(yaml.YAMLError):
         site_repo.yaml_file("Semester-f2026", "semester-config", "instructors.yml")
 
 
 def test_yaml_file_reads_an_absent_file_as_nothing_declared(monkeypatch):
-    monkeypatch.setattr(site_repo, "load_yaml_config", lambda *a: None)
+    monkeypatch.setattr(site_repo, "load_yaml_config", lambda *a, **_kw: None)
     assert (
         site_repo.yaml_file("Semester-f2026", "semester-config", "instructors.yml")
         == {}
@@ -2462,7 +2464,7 @@ def _layout(
     tree = tuple((LAYOUTS / f"{name}-tree.txt").read_text().split("\n")[:-1])
     monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", tree))
     monkeypatch.setattr(site, "read_materials", lambda o, r: materials.Declared())
-    monkeypatch.setattr(site, "get_file_content", lambda o, r, p: f"- from {p}")
+    monkeypatch.setattr(site, "get_file_content", lambda o, r, p, **_kw: f"- from {p}")
     kinds = lambda repo: (aliases or {}).get(repo, {})
     out, _tabs = site._site_rows(
         "S",
@@ -2962,7 +2964,7 @@ def test_every_semester_of_one_run_reuses_the_courses_policy(monkeypatch, tmp_pa
     # read once for the run, and `main` drops the memo when the run ends.
     asked = []
 
-    def yaml_file(org, repo, path):
+    def yaml_file(org, repo, path, *_):
         asked.append(path)
         return {"public": ["lectures/**"]} if path == site.PUBLISH_FILE else {}
 
@@ -3021,7 +3023,7 @@ def test_the_policy_is_read_from_the_source_repo_the_plan_names(monkeypatch):
     # which is the repo whose files the site links and whose bytes get copied.
     asked: list[tuple[str, str, str]] = []
 
-    def yaml_file(org, repo, path):
+    def yaml_file(org, repo, path, *_):
         asked.append((org, repo, path))
         return {"public": ["lectures/**/*.html"]}
 
