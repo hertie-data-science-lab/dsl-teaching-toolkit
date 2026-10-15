@@ -201,8 +201,11 @@ def _roster_text(semester_org: str) -> str | None:
 
         The TEXT is memoised rather than `load`'s rows, so every caller still gets its own
         parse (nobody can mutate another's list) and the loud "roster missing" line is still
-        printed where it happens. Cleared between tests (tests/conftest.py)."""
-    return get_file_content(semester_org, CONFIG_REPO, ROSTER_PATH)
+        printed where it happens. Cleared between tests (tests/conftest.py).
+
+    An absent roster is a fault mailed to the semester, so a 404 is asked again before
+    it counts."""
+    return get_file_content(semester_org, CONFIG_REPO, ROSTER_PATH, confirm_absent=True)
 
 
 def reread() -> None:

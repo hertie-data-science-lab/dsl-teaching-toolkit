@@ -758,7 +758,9 @@ unset mail transport - and the maintainer is emailed its log tail. `faults.Unusa
 whole distinction: it IS a RuntimeError, so every consumer still stops for it, but a `gh`
 read that failed is not one. `gh_contents.get_file_content` draws the same line at the API -
 None only for a 404, raise otherwise - which is why an absent file is faculty's to fix and a
-rate limit is not.
+rate limit is not. GitHub sends spurious 404s, so a reader that reports an absent file to a
+person (`dsl-course.yml`, `instructors.yml`, `students.csv`) passes `confirm_absent=True`:
+the 404 is asked again after 1, 2 and 4 s, and only four 404s mean absent.
 
 `Validate schedule` keeps its red X, its annotations and its commit comment on a push: those
 reach a person who is at the keyboard. `Check semester setup` shows which digests are standing

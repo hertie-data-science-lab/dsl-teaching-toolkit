@@ -284,7 +284,7 @@ def _semester_files(monkeypatch, files: dict[str, dict]) -> None:
     monkeypatch.setattr(
         sync_faculty,
         "load_yaml_config",
-        lambda org, repo, path, lines=False: files.get(path),
+        lambda org, repo, path, lines=False, **k: files.get(path),
     )
 
 

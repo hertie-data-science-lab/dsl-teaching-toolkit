@@ -466,6 +466,73 @@ def test_get_file_with_sha_is_none_only_for_a_genuine_404(monkeypatch):
         gh_contents.get_file_with_sha("O", "R", "students.csv")
 
 
+# ------------------------- a reader that reports an absence confirms a 404
+
+_NOT_FOUND = (1, "gh: Not Found (HTTP 404)")
+
+
+def _confirmed(path: str = "dsl-course.yml") -> str | None:
+    return gh_contents.get_file_content("O", ".github", path, confirm_absent=True)
+
+
+def test_spurious_404s_then_the_file_read_the_file_and_hold_it(monkeypatch):
+    # GitHub has answered a 404 for a `.github/dsl-course.yml` that was there, and the
+    # course's admins were mailed that it was missing. The first answer that is not a 404
+    # is the answer, and it is what the run's memo keeps.
+    gh_contents.read_once(True)
+    waits: list[int] = []
+    monkeypatch.setattr(gh_contents, "_sleep", waits.append)
+    calls = _record_gh(monkeypatch, [_NOT_FOUND] * 3 + [(0, _b64("admins: [ada]\n"))])
+    for _ in range(2):
+        assert _confirmed() == "admins: [ada]\n"
+    assert len(calls) == 4  # nothing on the re-read
+    assert waits == [1, 2, 4]
+
+
+def test_four_404s_are_absent_and_held(monkeypatch):
+    gh_contents.read_once(True)
+    calls = _record_gh(monkeypatch, [_NOT_FOUND] * 4)
+    for _ in range(2):
+        assert _confirmed() is None
+    assert len(calls) == 4
+
+
+def test_a_file_that_is_there_costs_nothing_extra(monkeypatch):
+    calls = _record_gh(monkeypatch, [(0, _b64("x\n"))])
+    assert _confirmed() == "x\n"
+    assert len(calls) == 1
+
+
+def test_a_404_one_reader_holds_is_asked_again_by_one_that_confirms(monkeypatch):
+    gh_contents.read_once(True)
+    calls = _record_gh(monkeypatch, [_NOT_FOUND, (0, _b64("x\n"))])
+    assert gh_contents.get_file_content("O", ".github", "dsl-course.yml") is None
+    assert _confirmed() == "x\n"
+    assert gh_contents.get_file_content("O", ".github", "dsl-course.yml") == "x\n"
+    assert len(calls) == 2
+
+
+def test_a_404_then_a_failure_still_raises(monkeypatch):
+    # A confirming read is a read like any other: a rate limit on it is no absence.
+    calls = _record_gh(monkeypatch, [_NOT_FOUND, (1, "HTTP 403: rate limited")])
+    with pytest.raises(RuntimeError, match="could not read"):
+        _confirmed()
+    assert len(calls) == 2
+
+
+def test_a_non_404_failure_is_not_asked_again(monkeypatch):
+    calls = _record_gh(monkeypatch, [(1, "HTTP 403: rate limited"), (0, _b64("x"))])
+    with pytest.raises(RuntimeError, match="could not read"):
+        _confirmed()
+    assert len(calls) == 1
+
+
+def test_a_reader_that_does_not_confirm_takes_one_404(monkeypatch):
+    calls = _record_gh(monkeypatch, [_NOT_FOUND, (0, _b64("x"))])
+    assert gh_contents.get_file_content("O", "R", "optional.yml") is None
+    assert len(calls) == 1
+
+
 # ------------------------- a truncated tree listing is not a smaller repo
 
 

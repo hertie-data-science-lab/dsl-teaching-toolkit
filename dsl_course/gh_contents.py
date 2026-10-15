@@ -10,6 +10,7 @@ import hashlib
 import io
 import json
 import re
+import time
 from collections.abc import Callable, Iterable
 from functools import cache
 from pathlib import PurePosixPath
@@ -65,19 +66,73 @@ def read_once(on: bool) -> None:
     global _reads, _blobs
     _reads, _blobs = ({}, {}) if on else (None, None)
     _stale.clear()
+    _absent.clear()
+
+
+# GitHub's Contents API has answered a spurious 404 for a file that is there: from
+# 2026-10-15 about one read in ten of `hertie-nlp-e1282/.github`, and each one told the
+# course's admins by email that `dsl-course.yml` was missing. So a reader whose absent
+# file becomes a fault shown to a person asks a 404 again after each of these waits, and
+# the file is absent only when every answer is a 404: at one in ten, two bad reads in a
+# row would still be a false email every few days at 96 ticks a day. A file that is there
+# costs nothing extra. Opt-in rather than for every read: absent files are routine (an
+# optional config, state not written yet), and asking each again cost a quarter more
+# reads per run.
+_CONFIRM_WAITS = (1, 2, 4)
+_sleep = time.sleep
+# The confirmed 404s, by the very answer the memo holds: a 404 held from a reader that did
+# not confirm is asked again, and one forgotten by a write and read afresh is a new answer.
+_absent: dict[tuple[str, tuple[str, ...]], tuple[int, str]] = {}
 
 
 def _read(
-    org: str, repo: str, *args: str, reader: Callable | None = None
+    org: str,
+    repo: str,
+    *args: str,
+    reader: Callable | None = None,
+    confirm_absent: bool = False,
 ) -> tuple[int, str]:
     """`gh(*args)` for a read of `org/repo`, through the memo when it is on. `reader` is
-    the caller's own `gh`, for a module whose tests stub the name it imported."""
+    the caller's own `gh`, for a module whose tests stub the name it imported.
+
+    `confirm_absent` asks a 404 - fresh or held - again past the memo until an answer is
+    not a 404 or `_CONFIRM_WAITS` run out, and the memo keeps that last answer."""
     gh_ = reader or gh
-    if _reads is None:
-        return gh_(*args)
+    first = _held_read(org, repo, args, gh_)
+    if not confirm_absent or first[0] == 0 or not is_missing_resource(first[1]):
+        return first
+    repo_key, key = f"{org}/{repo}".casefold(), _key(org, repo, args)
+    if _absent.get((repo_key, key)) is first:
+        return first  # this run has already confirmed it
+    for wait in _CONFIRM_WAITS:
+        _sleep(wait)
+        code, out = gh_(*args)
+        if code == 0 or not is_missing_resource(out):
+            break
+    answer = (code, out)
+    if _reads is not None:
+        held = _reads.setdefault(repo_key, {})
+        if code == 0 or is_missing_resource(out) or "HTTP 409" in out:
+            held[key] = answer
+            if code != 0:
+                _absent[(repo_key, key)] = answer
+        else:
+            held.pop(key, None)
+    return answer
+
+
+def _key(org: str, repo: str, args: tuple[str, ...]) -> tuple[str, ...]:
     # The owner and repo are not case-sensitive on GitHub; the path inside the repo is.
     prefix = f"repos/{org}/{repo}"
-    key = tuple(a.replace(prefix, prefix.casefold(), 1) for a in args)
+    return tuple(a.replace(prefix, prefix.casefold(), 1) for a in args)
+
+
+def _held_read(
+    org: str, repo: str, args: tuple[str, ...], gh_: Callable
+) -> tuple[int, str]:
+    if _reads is None:
+        return gh_(*args)
+    key = _key(org, repo, args)
     held = _reads.setdefault(f"{org}/{repo}".casefold(), {})
     if key in held:
         return held[key]
@@ -1096,7 +1151,9 @@ def _decoded(encoded: str) -> str:
     return base64.b64decode(encoded).decode("utf-8")
 
 
-def get_file_content(org: str, repo: str, path: str, ref: str = "") -> str | None:
+def get_file_content(
+    org: str, repo: str, path: str, ref: str = "", confirm_absent: bool = False
+) -> str | None:
     """Fetch a file's decoded text content (from `ref`, default branch if empty).
 
     None means the file is genuinely absent (a 404) - nothing else. Any other failure to
@@ -1104,13 +1161,18 @@ def get_file_content(org: str, repo: str, path: str, ref: str = "") -> str | Non
     "not configured yet" and would otherwise read a transient API failure as an empty
     roster/schedule/registry and cheerfully do nothing. Same rule as repo_blob_shas.
     A file over 1 MiB, which the Contents API sends no content for, is read by its blob
-    (`_whole`), so a blank answer is a genuinely empty file."""
+    (`_whole`), so a blank answer is a genuinely empty file.
+
+    `confirm_absent=True` is for a caller that reports an absent file to a person: a 404
+    is asked again before it is None (`_CONFIRM_WAITS`)."""
     url = f"repos/{org}/{repo}/contents/{path}"
     if ref:
         url += f"?ref={ref}"
     if (held := _peek(org, repo, "api", url, "--jq", _SHA_THEN_CONTENT)) is not None:
         return held[0]  # this run already read the file with its sha
-    code, out = _read(org, repo, "api", url, "--jq", ".content")
+    code, out = _read(
+        org, repo, "api", url, "--jq", ".content", confirm_absent=confirm_absent
+    )
     if code != 0:
         if is_missing_resource(out):
             return None
@@ -1128,10 +1190,7 @@ def _peek(org: str, repo: str, *args: str) -> tuple[str, str] | None:
     """`(decoded text, blob sha)` from a file read this run already holds under `args`
     - either shape, since one answers the other - or None when it holds none."""
     held = (_reads or {}).get(f"{org}/{repo}".casefold(), {})
-    prefix = f"repos/{org}/{repo}"
-    code, out = held.get(
-        tuple(a.replace(prefix, prefix.casefold(), 1) for a in args), (1, "")
-    )
+    code, out = held.get(_key(org, repo, args), (1, ""))
     if code != 0:
         return None
     if args[-1] == ".content":
@@ -1390,7 +1449,7 @@ def path_commit_subjects(org: str, repo: str, path: str) -> tuple[str, ...]:
 
 
 def load_yaml_config(
-    org: str, repo: str, path: str, lines: bool = False
+    org: str, repo: str, path: str, lines: bool = False, confirm_absent: bool = False
 ) -> dict | None:
     """Fetch + parse a YAML config file into a mapping, correctly distinguishing the three
     states callers that prune depend on:
@@ -1408,8 +1467,10 @@ def load_yaml_config(
     `lines` stamps every mapping with the line each of its keys is written on (see
     `LineLoader`), for a caller that has to tell somebody WHICH line to go and fix. Off by
     default: the stamp is a reserved key, and a caller that does not consume it would
-    render it."""
-    content = get_file_content(org, repo, path)
+    render it.
+
+    `confirm_absent` is get_file_content's: for a caller that reports an absent file."""
+    content = get_file_content(org, repo, path, confirm_absent=confirm_absent)
     if content is None:
         return None
     try:
