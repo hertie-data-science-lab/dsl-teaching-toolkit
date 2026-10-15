@@ -8,6 +8,7 @@
 import { useState } from 'preact/hooks';
 import type { Files } from '../model/files';
 import { Modal } from './Modal';
+import { neverMaterial } from '../edit/badges';
 import { PatternTree } from './PatternTree';
 
 export interface Picked {
@@ -25,6 +26,8 @@ export function pathVerdict(files: Files, org: string, repo: string, path: strin
 }
 
 const noChange = () => {};
+/** A schedule entry that names a denylisted path ships it (`selection.deny`), so only never-material names are fixed here. */
+const pickFixed = (path: string) => (neverMaterial(path) ? 'never copied' : null);
 
 export function FilePicker({ files, org, repos, others = [], onPick, onClose }: { files: Files; org: string; repos: string[]; others?: string[]; onPick: (p: Picked[]) => void; onClose: () => void }) {
   const all = [...repos, ...others];
@@ -51,7 +54,7 @@ export function FilePicker({ files, org, repos, others = [], onPick, onClose }: 
         {tree?.kind === 'loading' ? <p class="footnote">Reading {repo}…</p>
           : tree?.kind === 'error' ? <p class="footnote">Could not read {repo}; it is tried again shortly. A path can still be typed below.</p>
           : tree?.kind === 'absent' ? <p class="footnote">{repo} was not found in the course, or you cannot read it.</p>
-          : <PatternTree files={paths} patterns={patterns} onChange={noChange} mode="select" releasedWord="" control={tick} />}
+          : <PatternTree files={paths} patterns={patterns} onChange={noChange} mode="select" releasedWord="" fixed={pickFixed} control={tick} />}
         <div class="field">
           <label for="pick-typed">Or type a path <span class="default">it need not exist yet</span></label>
           <div class="pick-typed">

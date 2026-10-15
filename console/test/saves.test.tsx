@@ -477,4 +477,17 @@ describe('Save on a materials repo’s settings starts Refresh', () => {
     expect(dispatches(gh)).toEqual([]);
     expect(withheldSave().textContent).toContain('Saved. The checklist updates at the next Refresh.');
   });
+
+  it('starts nothing after the syllabus choice: the course’s checklist reads the repo, not semester.yml', async () => {
+    const gh = github().on('POST', DISPATCH, { workflow_run_id: 78, run_url: 'u', html_url: 'h' });
+    const f = new StaticFiles({ [`${COHORT_ORG}/semester-config/semester.yml`]: 'student_site:\n  syllabus: SYLLABUS.md\n' }, {}, { [`${COURSE_ORG}/${MAT}`]: ['SYLLABUS.md', 'PLAN.md'] });
+    await mount(envOf(gh, f), <MaterialsScreen {...cp(f)} />);
+    const sylSave = () => [...root!.querySelectorAll('section')].find((s) => s.querySelector('h2')?.textContent?.startsWith('Syllabus'))!;
+    await type('#m-syl', 'PLAN.md', 'change');
+    await click([...sylSave().querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Save')!);
+    await settle(() => puts(gh, 'semester.yml').length > 0 && /Saved|Valid/.test(sylSave().textContent ?? ''));
+    expect(body(puts(gh, 'semester.yml')[0])).toContain('syllabus: PLAN.md');
+    expect(dispatches(gh)).toEqual([]);
+    expect(sylSave().textContent).not.toContain('checklist updates');
+  });
 });

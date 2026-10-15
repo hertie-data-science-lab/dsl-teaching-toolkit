@@ -636,7 +636,7 @@ export function MaterialsScreen(p: CourseProps) {
           ) : <p class="footnote">Needs a semester: the plan is built from its schedule.</p>}
         </section>
         <section class="panel section">
-          <h2>Withheld from students <Hint label="About withheld files">Solutions, tests, grading files and system files are never copied. Everything else is released to students, by the schedule or by hand, unless a line here withholds it. Click a file or folder to withhold it; click again to release it. Use it for solutions, drafts and anything private.</Hint></h2>
+          <h2>Withheld from students <Hint label="About withheld files">Solutions, tests, grading files and system files are never copied unless a schedule entry names them. Everything else is released to students, by the schedule or by hand, unless a line here withholds it. Click a file or folder to withhold it; click again to release it. Use it for solutions, drafts and anything private.</Hint></h2>
           {tree.kind === 'absent' || tree.kind === 'error' ? <p class="footnote">Could not read the repo’s files.</p> : (
             <WithholdEditor id="ign-pat" label="Withheld patterns" files={files} text={ign ?? ignText} onText={setIgn} loading={tree.kind === 'loading'} partial={partial} />
           )}

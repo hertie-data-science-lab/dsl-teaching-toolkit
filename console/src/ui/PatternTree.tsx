@@ -38,7 +38,7 @@ interface Ctx extends Required<Pick<PatternTreeProps, 'patterns' | 'onChange' | 
   setNote: (n: { path: string; text: string } | null) => void;
 }
 
-/** What no list can release (`materials.publishable`): solutions, tests, grading files, system files. */
+/** What no list can release (`selection.publishable`): solutions, tests, grading files, system files. */
 const defaultFixed = (path: string) => (neverMaterial(path) || denylisted(path) ? 'never copied' : null);
 
 /** How many files under a folder are withheld, fixed or by a line. */

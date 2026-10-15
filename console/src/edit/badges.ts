@@ -37,7 +37,7 @@ export function badgeFiles(files: string[], lines: string[]): Badged {
 
 /**
  * A repo's files under one withhold list, counted three ways: never copied whatever the list says
- * (`materials.publishable`: denylisted or never-material), withheld by a line, and released.
+ * (`selection.publishable`: denylisted or never-material, unless a release names it), withheld by a line, and released.
  */
 export function withholdCounts(files: string[], lines: string[]): { never: number; withheld: number; released: number } {
   const rs = compileAll(lines);

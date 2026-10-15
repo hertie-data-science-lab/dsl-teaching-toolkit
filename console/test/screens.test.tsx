@@ -334,6 +334,11 @@ describe('S6 schedule and S11 release', () => {
     expect(out).toContain('aria-label="Pick lectures/"');
     expect(out).toMatch(/notes\.pdf.*?<span class="chip amber">withheld<\/span>/s);
     expect(out).not.toContain('released to students');
+    // A schedule entry that names a solution ships it: the picker does not call it never copied.
+    const sol = new StaticFiles({}, {}, { [`${COURSE_ORG}/course-materials-f2026`]: ['solutions/labs/02/key.py'] });
+    const solOut = html(<FilePicker files={sol} org={COURSE_ORG} repos={['course-materials-f2026']} onPick={() => {}} onClose={() => {}} />);
+    expect(solOut).toContain('aria-label="Pick solutions/labs/02/key.py"');
+    expect(solOut).not.toContain('never copied');
     expect(out).toContain('Or type a path');
     expect(out).toContain('it need not exist yet');
   });
