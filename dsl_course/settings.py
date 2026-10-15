@@ -285,6 +285,19 @@ def _assignments_text(semester_org: str) -> str | None:
     return get_file_content(semester_org, CONFIG_REPO, ASSIGNMENTS_FILE)
 
 
+def confirm_assignments_text(semester_org: str) -> bool:
+    """Before a hand-out creates a repo with the semester having no `assignments.yml`,
+    confirm the 404: absent, it runs on the course defaults. True when the 404 was
+    spurious. Only that hand-out asks - the file is optional, so confirming it on every
+    read would cost every tick without one."""
+    if _assignments_text(semester_org) is None and get_file_content(
+        semester_org, CONFIG_REPO, ASSIGNMENTS_FILE, confirm_absent=True
+    ):
+        _assignments_text.cache_clear()
+        return True
+    return False
+
+
 def instance(semester_org: str) -> Instance:
     """The semester's `assignments.yml`, read and parsed; empty for no semester or no
     file. A read that fails other than with a 404 raises."""

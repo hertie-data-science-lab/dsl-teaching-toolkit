@@ -506,10 +506,14 @@ def _load_semester_file(
     absent. A semester that has only the old `people.yml` is refused as NOT_MIGRATED:
     read as absent, it would keep nobody's access and tell nobody why. Raises exactly what
     `load_yaml_config` raises otherwise."""
-    meta = (
-        load_yaml_config(semester_org, CONFIG_REPO, SEMESTER_PEOPLE_PATH, lines=True)
-        if lines
-        else load_yaml_config(semester_org, CONFIG_REPO, SEMESTER_PEOPLE_PATH)
+    # Absent is a fault mailed to the teaching team, so a 404 is asked again before it
+    # counts.
+    meta = load_yaml_config(
+        semester_org,
+        CONFIG_REPO,
+        SEMESTER_PEOPLE_PATH,
+        lines=lines,
+        confirm_absent=True,
     )
     listed = isinstance(meta, dict) and isinstance(meta.get("instructors"), list)
     # The old file beside a new one that lists nobody - absent, or the seeded all-comment
@@ -668,7 +672,9 @@ def read_course_config(
     # FAILED still comes out as a bare RuntimeError, which is the distinction this whole
     # function is about. `read_semester_people` reads its file exactly this way.
     try:
-        meta = load_yaml_config(course_org, ".github", COURSE_CONFIG, lines=True)
+        meta = load_yaml_config(
+            course_org, ".github", COURSE_CONFIG, lines=True, confirm_absent=True
+        )
     except yaml.YAMLError:
         faults.append(
             _course_fault("this file is not valid YAML, so none of it is read")

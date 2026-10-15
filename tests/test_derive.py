@@ -286,7 +286,7 @@ class _Repo:
         monkeypatch.setattr(
             derive,
             "get_file_content",
-            lambda o, r, path, ref="": self.files.get(path),
+            lambda o, r, path, ref="", **_kw: self.files.get(path),
         )
 
         def put_files(org, repo, files, message):
@@ -311,7 +311,7 @@ def test_the_run_writes_main_and_never_reads_or_writes_anything_but_solution(
     monkeypatch.setattr(
         derive,
         "get_file_content",
-        lambda o, r, path, ref="": refs.append(ref) or repo.files.get(path),
+        lambda o, r, path, ref="", **_kw: refs.append(ref) or repo.files.get(path),
     )
     assert derive.derive_student_version("Course", "assignment-1-f2026", False) == 0
     assert set(refs) == {derive.SOLUTION_BRANCH}
@@ -400,7 +400,7 @@ def test_a_file_github_will_not_serve_is_a_reason_naming_it(monkeypatch):
         monkeypatch
     )
 
-    def read(org, repo, path, ref=""):
+    def read(org, repo, path, ref="", **_kw):
         if path == "solution/b.py":
             raise RuntimeError(f"could not read {org}/{repo}/{path}: HTTP 403")
         return FENCED_PY
@@ -624,7 +624,7 @@ def test_a_source_that_cannot_be_read_as_text_is_refused_and_main_is_left(monkey
     ):
         repo = _Repo({"solution/big.py": FENCED_PY}).install(monkeypatch)
 
-        def unreadable(o, r, path, ref="", exc=failure):
+        def unreadable(o, r, path, ref="", exc=failure, **_kw):
             if path == "solution/big.py":
                 raise exc
 

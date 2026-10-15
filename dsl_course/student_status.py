@@ -772,7 +772,9 @@ def _announcements(org: str, site: str) -> list[dict]:
     for path in sorted(
         p for p in tree if p.startswith(f"{ANNOUNCEMENTS_DIR}/") and p.endswith(".md")
     ):
-        fm, body = _front_matter(get_file_content(org, site, path) or "")
+        # Listed by the tree, so a 404 is spurious: confirmed, not an announcement lost.
+        text = get_file_content(org, site, path, confirm_absent=True)
+        fm, body = _front_matter(text or "")
         when = fm.get("date")
         if not when:
             continue
@@ -831,7 +833,8 @@ def gather(course: CourseFacts, facts: SemesterFacts, now: datetime) -> StudentF
         own = [sr.row] if sr.row.kind == "readings" else []
         for row in [*own, *sr.readings]:
             for repo, path in _landed(facts, row, True, frozenset())[1]:
-                extra.overlays[(repo, path)] = get_file_content(org, repo, path) or ""
+                text = get_file_content(org, repo, path, confirm_absent=True)
+                extra.overlays[(repo, path)] = text or ""
     try:
         extra.syllabus = declared_syllabus(
             sched,

@@ -758,7 +758,18 @@ unset mail transport - and the maintainer is emailed its log tail. `faults.Unusa
 whole distinction: it IS a RuntimeError, so every consumer still stops for it, but a `gh`
 read that failed is not one. `gh_contents.get_file_content` draws the same line at the API -
 None only for a 404, raise otherwise - which is why an absent file is faculty's to fix and a
-rate limit is not.
+rate limit is not. GitHub sends spurious 404s, so a reader that acts on an absence a person
+would see passes `confirm_absent=True`: the 404 is asked again after 1, 2 and 4 s, and only
+four 404s mean absent. A file that is there costs nothing extra. Confirmed: the fault files
+(`dsl-course.yml`, `instructors.yml`, `students.csv`), `schedule.yml` (read, and before a
+handout is recorded into it), `semesters.yml`, every `.releaseignore`, the site's
+`instructors.yml` and `dsl-course.yml`, a profile README before it is reseeded, and the
+teardown record. A file that is absent on every tick until something happens is confirmed
+only when that thing is about to: the fire-once records (solution released, marks
+returned) and a snapshot just before each fires, and `grading_config.yml` and
+`assignments.yml` just before a hand-out creates a repo, since their absence picks the
+repo shape. `seed_if_absent` writes with no sha, so GitHub refuses the write if the file
+was there after all.
 
 `Validate schedule` keeps its red X, its annotations and its commit comment on a push: those
 reach a person who is at the keyboard. `Check semester setup` shows which digests are standing

@@ -6,6 +6,8 @@ semester-scoping/tag-matching helpers, which decide what gets reconciled.
 
 from __future__ import annotations
 
+import base64
+
 import pytest
 import yaml
 
@@ -753,6 +755,25 @@ def test_a_course_config_that_could_not_be_READ_still_raises(monkeypatch):
         raise AssertionError("a read failure must not read as a broken file")
 
 
+def test_a_spurious_404_on_the_course_config_is_not_reported_missing(monkeypatch):
+    # GitHub answered a 404 for a dsl-course.yml that was there, and the course's admins
+    # were mailed that it was missing. The confirming read finds it.
+    answers = [
+        (1, "gh: Not Found (HTTP 404)"),
+        (
+            0,
+            base64.b64encode(
+                b"people:\n  course_admins:\n    - github_handle: jan-g\n"
+            ).decode(),
+        ),
+    ]
+    monkeypatch.setattr(gh_contents, "gh", lambda *a, **k: answers.pop(0))
+    found: list = []
+    faculty = sync_faculty.read_course_config("Course-Org", found)
+    assert [p["github_handle"] for p in faculty["course_admins"]] == ["jan-g"]
+    assert found == []
+
+
 def test_a_clean_course_config_has_no_faults(monkeypatch):
     faculty, found = _course(
         monkeypatch,
@@ -901,7 +922,7 @@ def test_an_unknown_role_is_reported_and_holds_every_removal(monkeypatch, capsys
     monkeypatch.setattr(
         sync_faculty,
         "load_yaml_config",
-        lambda org, repo, path, lines=False: (
+        lambda org, repo, path, lines=False, **k: (
             yaml.safe_load(text) if path == sync_faculty.SEMESTER_PEOPLE_PATH else None
         ),
     )

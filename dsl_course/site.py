@@ -197,7 +197,9 @@ def _publish_policy(course_org: str, source_repo: str) -> GitIgnoreSpec | None:
     unpublish a whole course's rendered decks over a typo, on a green run. The second is
     a `RuntimeError`, the faculty-fixable config fault every caller of `sync_site` (a
     hand-out, the CLI) reports in one line and survives."""
-    declared = yaml_file(course_org, source_repo, PUBLISH_FILE).get("public")
+    # Optional, so not confirmed: absent on most courses, and asking every sync again
+    # costs more than a mirror unpublished for one sync and restored on the next.
+    declared = yaml_file(course_org, source_repo, PUBLISH_FILE, False).get("public")
     if declared is None:
         return None
     if not isinstance(declared, list) or not all(isinstance(x, str) for x in declared):
@@ -535,7 +537,10 @@ def _reading_list(semester_org: str, landed: list[_Landed]) -> str:
     parts = []
     for item in landed:
         for path in item.overlays:
-            text = (get_file_content(semester_org, item.repo, path) or "").strip()
+            # A landed overlay is there: a 404 is spurious, and would publish the row
+            # with its reading list emptied.
+            text = get_file_content(semester_org, item.repo, path, confirm_absent=True)
+            text = (text or "").strip()
             if text:
                 parts.append(demote_headings(text))
     return "\n\n".join(parts)

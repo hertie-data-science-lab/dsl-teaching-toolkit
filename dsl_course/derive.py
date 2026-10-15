@@ -612,8 +612,9 @@ def derive_student_version(
     )
     # A config GitHub would not serve reads as one without the key: the markers decide.
     try:
+        # Absent, a template declared handwritten would be derived over.
         config = get_file_content(
-            course_org, template, GRADING_FILE, ref=SOLUTION_BRANCH
+            course_org, template, GRADING_FILE, ref=SOLUTION_BRANCH, confirm_absent=True
         )
     except RuntimeError:
         config = None
@@ -646,7 +647,9 @@ def derive_student_version(
     texts: dict[str, str] = {}
     for path in sources:
         try:
-            text = get_file_content(course_org, template, path, ref=SOLUTION_BRANCH)
+            text = get_file_content(
+                course_org, template, path, ref=SOLUTION_BRANCH, confirm_absent=True
+            )
         except (RuntimeError, UnicodeDecodeError) as exc:
             # GitHub refused the read (permission, rate limit, network), or the file is
             # not text. The answer names the file and says why; it is the course's own

@@ -225,11 +225,14 @@ def freeze_order(semester_org: str, repos: list[dict]) -> list[dict]:
     )
 
 
-def registrar_summary(semester_org: str) -> str:
+def registrar_summary(semester_org: str, confirm_absent: bool = False) -> str:
     """One plain-text line for the record: what the registrar export holds, or that there
     is none. A ROW COUNT, never a row - this string is printed to the run log too, and the
-    log of a course org's `.github` is world-readable."""
-    text = get_file_content(semester_org, CONFIG_REPO, SEMESTER_CSV_NAME)
+    log of a course org's `.github` is world-readable. `confirm_absent` for the real run,
+    whose record is permanent: a spurious 404 must not say no grade was ever sent."""
+    text = get_file_content(
+        semester_org, CONFIG_REPO, SEMESTER_CSV_NAME, confirm_absent=confirm_absent
+    )
     if text is None:
         return f"{SEMESTER_CSV_NAME} is NOT here - no grade was ever sent"
     rows = len(list(read_csv(text, (), SEMESTER_CSV_NAME)))
@@ -490,7 +493,7 @@ def close_out(
         # It goes on, and says what the real run would need.
         log(f"  {not_due} A real run would need --force.")
 
-    registrar = registrar_summary(semester_org)
+    registrar = registrar_summary(semester_org, confirm_absent=not dry_run)
     log(f"  registrar export: {registrar}")
     propagated, errors = _carry_back(course_org, semester_org, dry_run)
     errors += _close_notices(semester_org, dry_run)

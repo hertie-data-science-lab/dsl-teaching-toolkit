@@ -692,16 +692,18 @@ def _solution_due(
     name = schedule.semester_name(slug, entry)
     if solution_released(semester_org, name):
         return False
-    if not _collects(course_org, entry):
-        return True
-    try:
-        frozen = load_snapshots(semester_org, name) is not None
-    except RuntimeError as exc:
-        log_err(f"  could not read the snapshot of {name} ({type(exc).__name__})")
-        frozen = False
-    if not frozen:
-        log(f"  [hold] solution {slug} - its submissions are not frozen yet.")
-    return frozen
+    if _collects(course_org, entry):
+        try:
+            frozen = load_snapshots(semester_org, name) is not None
+        except RuntimeError as exc:
+            log_err(f"  could not read the snapshot of {name} ({type(exc).__name__})")
+            frozen = False
+        if not frozen:
+            log(f"  [hold] solution {slug} - its submissions are not frozen yet.")
+            return False
+    # The fire-once record, confirmed only now the solution would ship: a spurious 404
+    # would push it again, and while it is held the record is absent on every tick.
+    return not solution_released(semester_org, name, confirm_absent=True)
 
 
 def _held_solution_faults(sched: schedule.Schedule, now: datetime) -> list[ConfigFault]:
