@@ -197,6 +197,8 @@ export const decodeBase64 = (b64: string) => new TextDecoder().decode(fromBase64
 
 /** The contents API's base64 ceiling: above it a file's bytes come from the blob API. */
 export const ONE_MB = 1024 * 1024;
+/** The largest file `getSmallBytes` reads (a site photo becomes a data: URL). */
+export const SMALL_BYTES_CAP = 5 * ONE_MB;
 /** How many bytes of file content the client keeps by blob sha. */
 export const BYTES_KEPT = 64 * ONE_MB;
 
@@ -676,10 +678,15 @@ export class GitHubClient {
     return r?.state ?? null;
   }
 
-  /** A small file's bytes through the contents API (up to 1 MB), or null when it is absent. */
+  /**
+   * A small file's bytes, or null when it is absent or over SMALL_BYTES_CAP: the contents API up
+   * to 1 MB; above it that API sends no content, so the bytes come from the blob API by `sha`.
+   */
   async getSmallBytes(owner: string, repo: string, path: string): Promise<Uint8Array | null> {
-    const r = await this.getOrNull<{ type?: string; content?: string }>(`/repos/${owner}/${repo}/contents/${encPath(path)}`);
-    return r && r.type === 'file' && r.content ? fromBase64(r.content) : null;
+    const r = await this.getOrNull<{ type?: string; content?: string; sha?: string; size?: number }>(`/repos/${owner}/${repo}/contents/${encPath(path)}`);
+    if (!r || r.type !== 'file') return null;
+    if (r.content) return fromBase64(r.content);
+    return r.sha && r.size && r.size <= SMALL_BYTES_CAP ? this.getBytes(owner, repo, path, r.sha, r.size) : null;
   }
 
   /** Whether `user` is a member of `org` (as far as the caller may see). */
