@@ -174,7 +174,7 @@ export function courseItems(c: CourseStatus, tiered: Tiered[], list: string[] | 
 const CHECK_HINT: Record<string, string> = {
   kind_folder: 'A repo with nothing of a content kind has nothing to release.',
   syllabus: 'The file the student site pins as the syllabus. Still the template text until you write it.',
-  withheld: 'The whole repo is released as it stands unless a line here withholds it. Saving the list once, even empty, marks it reviewed.',
+  withheld: 'Solutions, tests, grading files and system files are never copied. Everything else is released unless a line here withholds it. Saving the list once, even unchanged, marks it reviewed.',
 };
 
 /** A repo's checklist split by need (decision 0034): "Needed", then "Suggested". */

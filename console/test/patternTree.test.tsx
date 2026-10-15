@@ -5,7 +5,7 @@
 import { readFileSync } from 'node:fs';
 import { render } from 'preact-render-to-string';
 import { describe, expect, it } from 'vitest';
-import { exactLine, toggle } from '../src/edit/badges';
+import { exactLine, toggle, withholdCounts } from '../src/edit/badges';
 import { compileAll, withheldBy } from '../src/edit/glob';
 import { PatternTree } from '../src/ui/PatternTree';
 
@@ -96,14 +96,24 @@ describe('the withheld tree’s rows (decision 0024 rule 10)', () => {
 });
 
 describe('the withheld tree’s folder counts', () => {
-  it('says how many files a folder withholds and how many reach students, side by side', () => {
-    const files = ['labs/01/lab.pdf', 'labs/01/notes.md', 'labs/02/lab.pdf', 'labs/02/key.pdf', 'labs/.DS_Store', 'labs/solutions/a.py'];
-    const out = render(<PatternTree files={files} patterns={['*.pdf', '!labs/01/lab.pdf']} onChange={() => {}} />);
-    // Withheld: labs/02/lab.pdf, labs/02/key.pdf, and the never-material .DS_Store. Released:
-    // labs/01/lab.pdf and labs/01/notes.md; never the denylisted solutions/.
-    expect(out).toContain('<span class="ft-name">labs/</span><span class="chip amber">3 withheld · 2 released to students</span>');
-    expect(out).toContain('<span class="ft-name">02/</span><span class="chip amber">2 withheld · 0 released to students</span>');
+  const files = ['labs/01/lab.pdf', 'labs/01/notes.md', 'labs/02/lab.pdf', 'labs/02/key.pdf', 'labs/.DS_Store', 'labs/solutions/a.py'];
+  const patterns = ['*.pdf', '!labs/01/lab.pdf'];
+
+  it('says how many files a folder withholds, and not how many are released', () => {
+    const out = render(<PatternTree files={files} patterns={patterns} onChange={() => {}} />);
+    // Withheld: labs/02/lab.pdf, labs/02/key.pdf, and the never-material .DS_Store.
+    expect(out).toContain('<span class="ft-name">labs/</span><span class="chip amber">3 withheld</span>');
+    expect(out).toContain('<span class="ft-name">02/</span><span class="chip amber">2 withheld</span>');
+    expect(out).not.toContain('· 2 released');
     // A folder with nothing withheld says nothing.
-    expect(render(<PatternTree files={files} patterns={[]} onChange={() => {}} />)).not.toContain('released to students</span><span class="chip amber">');
+    expect(render(<PatternTree files={files} patterns={[]} onChange={() => {}} />)).not.toContain('<span class="ft-name">01/</span><span class="chip amber">');
+  });
+
+  it('counts the whole repo three ways: never copied, withheld by a line, released', () => {
+    // Never copied: .DS_Store and the denylisted solutions/a.py. Withheld: labs/02's two pdfs.
+    expect(withholdCounts(files, patterns)).toEqual({ never: 2, withheld: 2, released: 2 });
+    // A line naming a never-copied file does not move it to withheld.
+    expect(withholdCounts(files, ['solutions/'])).toEqual({ never: 2, withheld: 0, released: 4 });
+    expect(withholdCounts([], patterns)).toEqual({ never: 0, withheld: 0, released: 0 });
   });
 });

@@ -668,6 +668,8 @@ describe('editing screens', () => {
     const out = html(<MaterialsScreen {...cp} entry="course-materials-f2026" />);
     expect(out).toMatch(/<span class="ft-name">slides.html<\/span><span class="chip ">released to students<\/span>/);
     expect(out).toMatch(/<span class="ft-name">a.py<\/span><span class="chip amber">withheld<\/span><span class="footnote">withheld by <code>solutions\/<\/code><\/span>/);
+    // The panel's last line: a solution is never copied whatever the list says, so it counts there, not as withheld.
+    expect(out).toContain('<p class="footnote">1 never copied (by default) · 0 withheld · 2 released</p>');
     expect(out).toContain('Weekly plan for the syllabus');
     // Copy opens the plan to copy; Write puts it into the syllabus (decision 0031 rule 9).
     expect(out).toContain('>Copy</button>');
@@ -695,6 +697,7 @@ describe('editing screens', () => {
     expect(out).toMatch(/<span class="ft-name">SYLLABUS.md<\/span><span class="chip ">released to students<\/span>/);
     expect(out).toContain('aria-label="Withhold SYLLABUS.md"');
     expect(out).not.toContain('class="file-list"');
+    expect(out).toContain('0 never copied (by default) · 0 withheld · 2 released');
   });
   it('the public website edits opencourse.yml and asks for the confirmation the engine’s missing preview needs', () => {
     const out = html(<WebsiteScreen {...cp} />);

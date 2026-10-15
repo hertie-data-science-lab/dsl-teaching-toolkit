@@ -5,7 +5,7 @@ import { useRef, useState } from 'preact/hooks';
 import materialsSchema from '../../schemas/materials.schema.json';
 import opencourseSchema from '../../schemas/opencourse.schema.json';
 import { useEnv, type Env } from '../env';
-import { badgeFiles, denylisted, neverMaterial } from '../edit/badges';
+import { badgeFiles, denylisted, neverMaterial, withholdCounts } from '../edit/badges';
 import { compileAll, withheldBy } from '../edit/glob';
 import { invalidText, useSave, type SaveState } from '../edit/save';
 import { YamlText, compact, deepEqual, obj } from '../edit/yamlText';
@@ -384,6 +384,12 @@ function WithholdEditor({ id, label, files, text, onText, loading, partial, kind
   );
 }
 
+/** The withheld panel's last line: the repo's files never copied, withheld by the list, and released. */
+export function WithholdSummary({ files, lines }: { files: string[]; lines: string[] }) {
+  const n = withholdCounts(files, lines);
+  return <p class="footnote">{n.never} never copied (by default) · {n.withheld} withheld · {n.released} released</p>;
+}
+
 export interface Website {
   enabled: boolean;
   source_repo: string;
@@ -742,11 +748,12 @@ export function MaterialsScreen(p: CourseProps) {
           <SaveBar state={kindSave} onSave={() => void saveMat({ syllabus: baseSyl, kinds: curKinds }, runKind, setKindSave, () => setKindsDraft(null))} small disabled={kindsDraft === null || deepEqual(kindsDraft, baseKinds) || declared === null} file={matRef} />
         </section>
         <section class="panel section">
-          <h2>Withheld from students <Hint label="About withheld files">Everything in this repo is released to students as it stands, by the schedule or by hand, unless a line here withholds it. Click a file or folder to withhold it; click again to release it. Use it for solutions, drafts and anything private.</Hint></h2>
+          <h2>Withheld from students <Hint label="About withheld files">Solutions, tests, grading files and system files are never copied. Everything else is released to students, by the schedule or by hand, unless a line here withholds it. Click a file or folder to withhold it; click again to release it. Use it for solutions, drafts and anything private.</Hint></h2>
           {tree.kind === 'absent' || tree.kind === 'error' ? <p class="footnote">Could not read the repo’s files.</p> : (
             <WithholdEditor id="ign-pat" label="Withheld patterns" files={files} text={ign ?? ignText} onText={setIgn} loading={tree.kind === 'loading'} partial={partial}
               kinds={kinds} withheldWord="withheld" releasedWord="released to students" />
           )}
+          {tree.kind === 'ready' ? <WithholdSummary files={files} lines={linesOf(ignDraft)} /> : null}
           <p class="footnote">This reads the repo’s top-level .releaseignore; one in a subfolder still applies there.</p>
           <SaveBar state={ignSave} onSave={() => void saveIgn()} small disabled={ignFile.kind === 'loading' || (ignFile.kind === 'ready' && ignOut === ignText)} file={ignRef} />
         </section>

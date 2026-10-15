@@ -1017,7 +1017,7 @@ def materials_checks(m: MaterialsFacts) -> list[dict]:
             "Withheld patterns reviewed",
             SUGGESTED,
             _reviewed(m.releaseignore),
-            "Nothing is withheld from students yet; review the withheld patterns.",
+            "Check that what is withheld from students is right.",
         ),
         *_missing_kind_rows(found, shown),
     )

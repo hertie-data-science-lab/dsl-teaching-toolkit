@@ -41,6 +41,17 @@ export function badgeFiles(files: string[], lines: string[]): Badged {
 }
 
 /**
+ * A repo's files under one withhold list, counted three ways: never copied whatever the list says
+ * (`materials.publishable`: denylisted or never-material), withheld by a line, and released.
+ */
+export function withholdCounts(files: string[], lines: string[]): { never: number; withheld: number; released: number } {
+  const rs = compileAll(lines);
+  const n = { never: 0, withheld: 0, released: 0 };
+  for (const f of files) n[neverMaterial(f) || denylisted(f) ? 'never' : withheldBy(rs, f) ? 'withheld' : 'released']++;
+  return n;
+}
+
+/**
  * The line that names exactly this file or folder: anchored at the root, a folder with its `/`,
  * and every character a pattern reads specially escaped (`[ ] * ? \\`, and a leading `!` or `#`),
  * so `a[b]/notes.pdf` withholds that file and not `ab/notes.pdf`.
