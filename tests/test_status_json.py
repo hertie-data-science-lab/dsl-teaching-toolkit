@@ -664,7 +664,7 @@ def test_a_release_carries_the_number_the_site_gives_it():
 def test_a_pdf_syllabus_at_the_root_counts_once_it_is_there(monkeypatch):
     # No materials.yml is read (decision 0039): a root file named as a syllabus is it.
     monkeypatch.setattr(
-        status_json, "get_file_content", lambda org, repo, path, ref="": None
+        status_json, "get_file_content", lambda org, repo, path, ref="", **_kw: None
     )
     present = {"E1282_syllabus.pdf": "file", "lectures": "dir"}
     monkeypatch.setattr(status_json, "top_level", _repo_tree({"": present}))
@@ -1164,7 +1164,7 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
         (SEMESTER, f"{SEMESTER}.github.io", "index.md"): "# Welcome",
     }
 
-    def content(org, repo, path, ref=""):
+    def content(org, repo, path, ref="", **_kw):
         return files.get((org, repo, path))
 
     listings = {
@@ -2196,7 +2196,7 @@ def test_the_gather_reads_two_trees_and_the_record_never_a_source(monkeypatch):
     monkeypatch.setattr(
         status_json,
         "get_file_content",
-        lambda org, repo, path, ref="": reads.append(path) or _record(),
+        lambda org, repo, path, ref="", **_kw: reads.append(path) or _record(),
     )
     for config, mode, n in (
         (None, "derived", 1),  # no key, a derivable source: derived
@@ -2233,7 +2233,7 @@ def test_the_starter_is_checked_only_where_a_starter_is_handed_out(
     monkeypatch.setattr(
         status_json,
         "get_file_content",
-        lambda org, repo, path, ref="": (
+        lambda org, repo, path, ref="", **_kw: (
             config if path == "grading_config.yml" else "# Quiz"
         ),
     )
@@ -2705,7 +2705,7 @@ def test_gather_moments_reads_each_semesters_status_once(monkeypatch):
     }
     reads = []
 
-    def read(org, repo, path, ref=""):
+    def read(org, repo, path, ref="", **_kw):
         reads.append((org, repo, path))
         return files[org]
 

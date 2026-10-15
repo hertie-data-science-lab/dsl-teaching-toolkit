@@ -42,7 +42,7 @@ class FakeRepo:
         self.deletes: list[tuple[str, str]] = []
         self.skips: list[str] = []
 
-    def get_file_content(self, org, repo, path):
+    def get_file_content(self, org, repo, path, confirm_absent=False):
         return self.files.get((repo, path))
 
     def put_file(self, org, repo, path, content, message):

@@ -364,7 +364,10 @@ def _read_semesters(
     because a registry nobody can read is a registry nothing may be pruned against - as
     `faults.Unusable`, which says this is a file faculty must fix rather than a read that
     failed, so an unattended run can skip it and stay green."""
-    content = get_file_content(course_org, ".github", SEMESTERS_PATH)
+    # Absent is "no semesters": every semester drops out of the tick and the site.
+    content = get_file_content(
+        course_org, ".github", SEMESTERS_PATH, confirm_absent=True
+    )
     if not content:
         return []
     try:

@@ -211,7 +211,7 @@ class FakeGitHub:
             p[len(prefix) :].split("/")[0]: "file" for p in tree if p.startswith(prefix)
         }
 
-    def get_file_content(self, org, repo, path, ref=""):
+    def get_file_content(self, org, repo, path, ref="", **_kw):
         found = self._repo(org, repo)
         if found is None:
             return None

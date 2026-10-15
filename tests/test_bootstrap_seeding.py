@@ -98,10 +98,10 @@ class FakeOrg:
         self.skips: list[str] = []
         self.labels: list[tuple[str, str]] = []
 
-    def get_file_content(self, org, repo, path):
+    def get_file_content(self, org, repo, path, **_kw):
         return self.files.get((repo, path))
 
-    def put_file(self, org, repo, path, content, message):
+    def put_file(self, org, repo, path, content, message, **_kw):
         self.files[(repo, path)] = content.decode()
         self.writes.append((repo, path))
         return True
@@ -940,7 +940,7 @@ def _stub_refresh(
     monkeypatch.setattr(seed, "unregister_semester", lambda course, semester: True)
     store = {seed.MISSES_PATH: "".join(f"{m}\n" for m in prior_misses)}
     monkeypatch.setattr(
-        seed, "get_file_content", lambda org, repo, path: store.get(path)
+        seed, "get_file_content", lambda org, repo, path, **_kw: store.get(path)
     )
     monkeypatch.setattr(
         seed,

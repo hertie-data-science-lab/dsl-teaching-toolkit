@@ -596,7 +596,10 @@ def _semester_profile_body(org: str, repos: list[dict], seeded: str) -> str | No
     a rule in here: keying it on a leftover "auto-generated" footer would have flattened
     any page whose prose an instructor had reworded while leaving the footer in place,
     which nothing ever told them was load-bearing."""
-    existing = get_file_content(org, ".github", "profile/README.md")
+    # Absent is reseeded over: confirm a 404 before an instructor's page is replaced.
+    existing = get_file_content(
+        org, ".github", "profile/README.md", confirm_absent=True
+    )
     if existing is None:
         return seeded
     # Before anything else, and whether or not the markers are there: a page naming an org

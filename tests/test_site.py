@@ -1530,7 +1530,9 @@ def test_site_still_builds_when_schedule_yml_does_not_parse(
     monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
     # the REAL schedule.load, fed the malformed file
     monkeypatch.setattr(
-        site.schedule, "get_file_content", lambda org, repo, path: MALFORMED_SCHEDULE
+        site.schedule,
+        "get_file_content",
+        lambda org, repo, path, **_kw: MALFORMED_SCHEDULE,
     )
 
     assert site.sync_site("Course-Org", "Semester-f2026") == 0
@@ -1924,14 +1926,14 @@ def test_yaml_file_raises_on_a_malformed_file_rather_than_wiping_what_it_feeds(
     # and republish the site with every teaching-team card gone, green.
     err = _bad_indent_error()
     monkeypatch.setattr(
-        site_repo, "load_yaml_config", lambda *a: (_ for _ in ()).throw(err)
+        site_repo, "load_yaml_config", lambda *a, **_kw: (_ for _ in ()).throw(err)
     )
     with pytest.raises(yaml.YAMLError):
         site_repo.yaml_file("Semester-f2026", "semester-config", "semester.yml")
 
 
 def test_yaml_file_reads_an_absent_file_as_nothing_declared(monkeypatch):
-    monkeypatch.setattr(site_repo, "load_yaml_config", lambda *a: None)
+    monkeypatch.setattr(site_repo, "load_yaml_config", lambda *a, **_kw: None)
     assert (
         site_repo.yaml_file("Semester-f2026", "semester-config", "semester.yml") == {}
     )

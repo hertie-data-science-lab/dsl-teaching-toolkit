@@ -278,6 +278,20 @@ def _grading_text(course_org: str, template: str) -> str | None:
     return get_file_content(course_org, template, GRADING_FILE, ref=SOLUTION_BRANCH)
 
 
+def confirm_grading_text(course_org: str, template: str) -> bool:
+    """Before a hand-out creates a repo off a template having NO definition, confirm the
+    404: absent is the defaults, and repos handed out in the wrong shape cannot be taken
+    back. True when the 404 was spurious (the definition is re-read from then on). Only
+    that hand-out asks - the definition is optional, so confirming it on every read would
+    cost every tick of every undeclared template."""
+    if _grading_text(course_org, template) is None and get_file_content(
+        course_org, template, GRADING_FILE, ref=SOLUTION_BRANCH, confirm_absent=True
+    ):
+        _grading_text.cache_clear()
+        return True
+    return False
+
+
 def declared_grading_spec(
     course_org: str, template: str, *, semester_org: str = "", slug: str = ""
 ) -> GradingSpec | None:

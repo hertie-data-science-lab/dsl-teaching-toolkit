@@ -121,7 +121,8 @@ def marks_due(
         if when is None or when > now:
             continue
         name = schedule.semester_name(key, entry)
-        if get_file_content(semester_org, CONFIG_REPO, marks_return_record(name)):
+        record = marks_return_record(name)
+        if get_file_content(semester_org, CONFIG_REPO, record):
             continue
         if specs is None:
             specs = sheet_specs(course_org, sched)
@@ -140,6 +141,11 @@ def marks_due(
         units = ((sheet or {}).get(spec.container_key) or {}) if sheet else {}
         blank = _not_marked(spec, sheet) if sheet else {}
         if sheet and units and not blank:
+            # The fire-once record, confirmed only now the return would fire: a spurious
+            # 404 would return the marks a second time, and before this point the record
+            # is absent on every tick of a marking backlog.
+            if get_file_content(semester_org, CONFIG_REPO, record, confirm_absent=True):
+                continue
             ready.append(key)
             continue
         # A blank unit with no submission is not a marking backlog: counted apart.

@@ -228,14 +228,16 @@ def world(monkeypatch) -> World:
 
     monkeypatch.setattr(relink, "path_commit_subjects", subjects)
 
-    def roster_read(org, repo, path, ref=""):
+    def roster_read(org, repo, path, ref="", **_kw):
         text = w.files[path]
         return (text, blob_sha(text.encode()))
 
     monkeypatch.setattr(relink, "get_file_with_sha", roster_read)
     monkeypatch.setattr(enrol_codes, "get_file_with_sha", roster_read)
     monkeypatch.setattr(gh_contents, "get_file_with_sha", roster_read)
-    monkeypatch.setattr(relink, "get_file_content", lambda o, r, p: w.files.get(p))
+    monkeypatch.setattr(
+        relink, "get_file_content", lambda o, r, p, **_kw: w.files.get(p)
+    )
 
     def roster_write(org, repo, path, content, message, expected_sha=None, **k):
         assert path == roster.SYSTEM_PATH, "the relink writes only the engine's file"
@@ -426,7 +428,9 @@ def test_a_second_run_does_nothing(world):
 
 
 def test_the_roster_memo_is_cleared_once_the_id_moves(world, monkeypatch):
-    monkeypatch.setattr(roster, "get_file_content", lambda o, r, p: world.files.get(p))
+    monkeypatch.setattr(
+        roster, "get_file_content", lambda o, r, p, **_kw: world.files.get(p)
+    )
     roster.load(ORG)
     assert run_context.current().holds(roster._system_text) == 1
     run(world)

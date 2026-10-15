@@ -55,7 +55,7 @@ def test_unregister_semester_rewrites_the_registry_without_it(monkeypatch):
     monkeypatch.setattr(
         discovery,
         "get_file_content",
-        lambda *a: "semesters:\n- Semester-f2025\n- Semester-f2026\n",
+        lambda *a, **_kw: "semesters:\n- Semester-f2025\n- Semester-f2026\n",
     )
     written: list = []
     monkeypatch.setattr(discovery, "put_file", lambda *a: written.append(a) or True)
@@ -70,7 +70,9 @@ def test_unregister_semester_writes_nothing_for_one_already_absent(monkeypatch):
     # Idempotent: the nightly refresh probes every semester every night, and a no-op must
     # not put a commit into the course org's .github repo each time.
     monkeypatch.setattr(
-        discovery, "get_file_content", lambda *a: "semesters:\n- Semester-f2026\n"
+        discovery,
+        "get_file_content",
+        lambda *a, **_kw: "semesters:\n- Semester-f2026\n",
     )
     monkeypatch.setattr(
         discovery, "put_file", lambda *a: pytest.fail("wrote for an absent semester")

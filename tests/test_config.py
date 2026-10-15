@@ -13,7 +13,7 @@ from dsl_course.faults import Unusable
 def _files(monkeypatch, files: dict[tuple[str, str, str], str]) -> list:
     reads = []
 
-    def get(org, repo, path, ref=""):
+    def get(org, repo, path, ref="", **_kw):
         reads.append((org, repo, path))
         return files.get((org, repo, path))
 

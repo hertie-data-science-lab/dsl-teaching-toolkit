@@ -1632,7 +1632,7 @@ def test_deploy_many_counts_a_raised_site_sync(monkeypatch):
     monkeypatch.setattr(deploy, "repo_team_permissions", lambda *a: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
-    def boom(course, semester):
+    def boom(course, semester, **_kw):
         raise RuntimeError("tree read failed")
 
     monkeypatch.setattr("dsl_course.site.sync_site", boom)
@@ -1768,7 +1768,7 @@ def test_the_sheet_refresh_runs_through_the_whole_late_window(monkeypatch):
     sched = _assignments(**{"assignment-1": _due(13)})
     refreshed = _no_sheet_refresh(monkeypatch)
     monkeypatch.setattr(scheduler, "_assignment_template", lambda *a: "assignment-1")
-    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug: None)
+    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug, **_kw: None)
     monkeypatch.setattr(scheduler, "snapshot_assignment", lambda *a, **k: None)
     scheduler._refresh_sheets(
         "COURSE",
@@ -1794,7 +1794,9 @@ def _stub_snapshots(monkeypatch, existing: set[str]):
     """Track snapshot_assignment calls; `existing` are the slugs already frozen."""
     taken: list[tuple[str, str, str, str | None]] = []
     monkeypatch.setattr(
-        scheduler, "load_snapshots", lambda org, slug: {} if slug in existing else None
+        scheduler,
+        "load_snapshots",
+        lambda org, slug, **_kw: {} if slug in existing else None,
     )
     monkeypatch.setattr(
         scheduler,
@@ -1913,7 +1915,7 @@ def test_run_dry_run_snapshots_nothing(monkeypatch):
 
 
 def test_run_reports_a_failed_snapshot(monkeypatch):
-    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug: None)
+    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug, **_kw: None)
     monkeypatch.setattr(
         scheduler,
         "snapshot_assignment",
@@ -2045,7 +2047,7 @@ def _no_sheet_refresh(monkeypatch) -> list[tuple[str, str]]:
 def _only_snapshots_taken(monkeypatch):
     """Snapshots always succeed and are never the subject of these tests."""
     _no_sheet_refresh(monkeypatch)
-    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug: {})
+    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug, **_kw: {})
     monkeypatch.setattr(
         scheduler,
         "snapshot_assignment",
@@ -2059,7 +2061,7 @@ def test_the_sheet_refresh_runs_from_the_due_date_not_the_cutoff(monkeypatch):
     # Marking starts at the due date, and the first late push lands then too - so the sheet
     # has to be current from then, not from the cutoff a week later.
     refreshed = _no_sheet_refresh(monkeypatch)
-    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug: None)
+    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug, **_kw: None)
     monkeypatch.setattr(
         scheduler,
         "snapshot_assignment",
@@ -2122,7 +2124,7 @@ def test_a_tick_takes_one_semester_listing_and_hands_it_to_every_pass(
         seen["handout"] = kw.get("listing")
         return 0, False
 
-    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug: None)
+    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug, **_kw: None)
     monkeypatch.setattr(scheduler, "snapshot_assignment", _snapshot)
     monkeypatch.setattr(scheduler, "sync_sheet", _sheet)
     monkeypatch.setattr(scheduler, "provision_all", _provision)
@@ -2171,7 +2173,9 @@ def test_a_frozen_assignments_sheet_is_left_to_the_cutoff(monkeypatch):
     # re-derive facts the freeze has already settled - and would do it FIRST, since this
     # pass runs before the autograde.
     refreshed = _no_sheet_refresh(monkeypatch)
-    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug: {})  # frozen
+    monkeypatch.setattr(
+        scheduler, "load_snapshots", lambda org, slug, **_kw: {}
+    )  # frozen
     monkeypatch.setattr(scheduler, "_assignment_template", lambda org, slug, entry: "t")
     monkeypatch.setattr(scheduler, "has_autograde_results", lambda org, slug: True)
     monkeypatch.setattr(
@@ -2433,9 +2437,9 @@ def test_the_solution_rides_on_the_handout_release_once_its_datetime_passes(
 
     released = {"yet": False}
     monkeypatch.setattr(
-        "dsl_course.scheduler.solution_released", lambda org, slug: released["yet"]
+        "dsl_course.scheduler.solution_released", lambda org, slug, **_: released["yet"]
     )
-    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug: {})
+    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug, **_kw: {})
 
     def one(now):
         (r,) = scheduler._handout_releases("Course-Org", "Semester-f2026", sched, now)
@@ -2514,8 +2518,8 @@ def test_a_solution_inside_the_late_window_is_held_then_released(monkeypatch):
         "_assignment_template",
         lambda org, slug, entry: entry.course_source_repo,
     )
-    monkeypatch.setattr(scheduler, "solution_released", lambda org, slug: False)
-    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug: {})
+    monkeypatch.setattr(scheduler, "solution_released", lambda org, slug, **_: False)
+    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug, **_kw: {})
     sched = _early_solutions()
 
     def solutions(now):
@@ -2562,14 +2566,14 @@ def test_a_held_solution_is_a_warning_at_its_schedule_line(monkeypatch):
 
 def test_a_solution_whose_cutoff_cannot_be_known_is_held(monkeypatch):
     # No course pointer, or a cascade that raises: never the institution's window.
-    monkeypatch.setattr(scheduler, "solution_released", lambda org, slug: False)
-    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug: {})
+    monkeypatch.setattr(scheduler, "solution_released", lambda org, slug, **_: False)
+    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug, **_kw: {})
     sched = _early_solutions()
     late = datetime(2027, 1, 1, tzinfo=BERLIN)
     monkeypatch.setattr(settings, "course_org_for_semester", lambda org: "")
     assert not scheduler._solution_due("C", "Sem-f2026", sched, "assignment-1", late)
 
-    def unreadable(sched, slug):
+    def unreadable(sched, slug, **_kw):
         raise Unusable("assignments.yml is not YAML")
 
     monkeypatch.setattr(settings, "course_org_for_semester", lambda org: "Course")
@@ -2584,16 +2588,18 @@ def test_a_solution_waits_for_the_snapshot_of_what_it_answers(monkeypatch):
     # to freeze, so its solution never waits.
     _WINDOWS.update({"assignment-1": 0})
     monkeypatch.setattr(settings, "course_org_for_semester", lambda org: "Course")
-    monkeypatch.setattr(scheduler, "solution_released", lambda org, slug: False)
+    monkeypatch.setattr(scheduler, "solution_released", lambda org, slug, **_: False)
     sched = _early_solutions()
     late = datetime(2027, 1, 1, tzinfo=BERLIN)
     frozen: dict = {}
-    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug: frozen.get(slug))
+    monkeypatch.setattr(
+        scheduler, "load_snapshots", lambda org, slug, **_kw: frozen.get(slug)
+    )
     assert not scheduler._solution_due("C", "Sem-f2026", sched, "assignment-1", late)
     frozen["assignment-1"] = {"anna": "sha"}
     assert scheduler._solution_due("C", "Sem-f2026", sched, "assignment-1", late)
 
-    def unreadable(org, slug):
+    def unreadable(org, slug, **_kw):
         raise RuntimeError("gh: Server Error (HTTP 502)")
 
     monkeypatch.setattr(scheduler, "load_snapshots", unreadable)
@@ -2610,7 +2616,7 @@ def test_run_re_sorts_handouts_into_the_release_plan(monkeypatch):
     # due_releases documents event_datetime order, and the plan is sorted at parse time -
     # but the synthesised handouts are appended afterwards, so without a re-sort a
     # September handout is processed after a December release.
-    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug: {})
+    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug, **_kw: {})
     monkeypatch.setattr(
         scheduler,
         "snapshot_assignment",
@@ -2674,7 +2680,7 @@ def test_an_unparseable_plan_leaves_the_exit_code_alone_and_keeps_the_digest_ope
     monkeypatch.setattr(
         scheduler.schedule,
         "get_file_content",
-        lambda org, repo, path: MALFORMED_SCHEDULE,
+        lambda org, repo, path, **_kw: MALFORMED_SCHEDULE,
     )
     synced: dict = {}
     monkeypatch.setattr(
@@ -2705,7 +2711,7 @@ def test_a_dry_run_of_an_unparseable_plan_is_green_too(monkeypatch):
     monkeypatch.setattr(
         scheduler.schedule,
         "get_file_content",
-        lambda org, repo, path: MALFORMED_SCHEDULE,
+        lambda org, repo, path, **_kw: MALFORMED_SCHEDULE,
     )
     now = datetime(2026, 10, 14, tzinfo=timezone.utc)
     assert scheduler.run("Course-Org", "Semester-Org", now, dry_run=True) == 0
@@ -2718,7 +2724,9 @@ def test_dropped_entries_alone_stay_advisory(monkeypatch):
     monkeypatch.setattr(
         scheduler.schedule,
         "get_file_content",
-        lambda org, repo, path: "releases:\n  lab-1:\n    title: no date at all\n",
+        lambda org, repo, path, **_kw: (
+            "releases:\n  lab-1:\n    title: no date at all\n"
+        ),
     )
     now = datetime(2026, 10, 14, tzinfo=timezone.utc)
     assert scheduler.run("Course-Org", "Semester-Org", now) == 0
@@ -2736,7 +2744,7 @@ def test_the_release_phase_counts_a_raised_site_sync(monkeypatch):
         lambda *a, **k: (0, True),  # something changed
     )
 
-    def boom(course, semester):
+    def boom(course, semester, **_kw):
         raise RuntimeError("tree read failed")
 
     monkeypatch.setattr("dsl_course.site.sync_site", boom)
@@ -2922,10 +2930,12 @@ def test_autograde_only_waits_for_the_snapshot_file(monkeypatch):
             "--no-preview",
         ],
     )
-    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, name: None)
+    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, name, **_kw: None)
     assert scheduler.main() == 0
     assert graded == []
-    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, name: {"anna": "sha"})
+    monkeypatch.setattr(
+        scheduler, "load_snapshots", lambda org, name, **_kw: {"anna": "sha"}
+    )
     assert scheduler.main() == 0
     assert len(graded) == 1
 
@@ -3102,7 +3112,7 @@ def test_a_cadence_read_that_fails_reddens_the_run_and_releases_anyway(
         scheduler.discovery, "discover_semesters", lambda org: ["Semester-A"]
     )
 
-    def boom(org):
+    def boom(org, **_kw):
         raise RuntimeError("gh: HTTP 502")
 
     monkeypatch.setattr(scheduler.cadence, "fetch_runs", boom)
@@ -3123,7 +3133,7 @@ def test_a_lateness_check_that_raises_reddens_the_run_and_releases_anyway(
         scheduler.discovery, "discover_semesters", lambda org: ["Semester-A"]
     )
 
-    def boom(*a):
+    def boom(*a, **_kw):
         raise RuntimeError("a plan this reader cannot walk")
 
     monkeypatch.setattr(scheduler.cadence, "late_items", boom)
@@ -3192,7 +3202,7 @@ def test_a_semester_listing_that_cannot_be_read_says_so_and_goes_red(
     # The listing is the first read of every tick and sat outside any try, so one transient
     # fault ended the run in a raw traceback - nothing a faculty member could act on. It is
     # also not "no semesters": the run must go red so the failure issue still files.
-    def boom(org):
+    def boom(org, **_kw):
         raise RuntimeError("gh: Internal Server Error (HTTP 500)")
 
     monkeypatch.setattr(scheduler.discovery, "discover_semesters", boom)
@@ -3215,7 +3225,7 @@ def test_a_registry_nobody_can_parse_releases_nothing_and_stays_green(
     # course org and a maintainer mail every six hours, about a file the maintainer cannot
     # edit. `_preflight_course` has already put it on the course digest and mailed the
     # admins, so the listing lists nothing and the tick is green.
-    def boom(org):
+    def boom(org, **_kw):
         raise Unusable("malformed semester registry in Course-Org/.github")
 
     monkeypatch.setattr(scheduler.discovery, "discover_semesters", boom)
@@ -3394,7 +3404,7 @@ def test_a_digest_that_cannot_be_written_never_stops_a_release(monkeypatch):
 
 def test_a_source_check_that_cannot_run_is_not_read_as_everything_missing(monkeypatch):
     # A rate limit must not be reported as 22 broken entries.
-    def boom(sched, org):
+    def boom(sched, org, **_kw):
         raise RuntimeError("API rate limit exceeded")
 
     monkeypatch.setattr(scheduler.schedule, "source_faults", boom)
@@ -3595,7 +3605,7 @@ def test_the_snapshot_pass_reads_each_passed_deadline_once(monkeypatch):
     # autograde phase (which asks the same file, in its own job) still refuses it.
     reads: list[str] = []
     monkeypatch.setattr(
-        scheduler, "load_snapshots", lambda org, name: reads.append(name) or None
+        scheduler, "load_snapshots", lambda org, name, **_kw: reads.append(name) or None
     )
     monkeypatch.setattr(scheduler, "_assignment_template", lambda org, slug, entry: "t")
     monkeypatch.setattr(
@@ -3647,8 +3657,8 @@ def _real_snapshot_then_autograde(monkeypatch, targets):
     `load_snapshots` stays None throughout, which is the truth here: nothing was frozen,
     so the file the autograde phase gates on is still absent."""
     graded: list[tuple] = []
-    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, name: None)
-    monkeypatch.setattr(collect_mod, "load_snapshots", lambda org, name: None)
+    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, name, **_kw: None)
+    monkeypatch.setattr(collect_mod, "load_snapshots", lambda org, name, **_kw: None)
     monkeypatch.setattr(
         collect_mod,
         "submission_targets",
@@ -3703,10 +3713,12 @@ def test_autograde_waits_for_a_completed_snapshot(monkeypatch):
     now = datetime(2026, 11, 1, tzinfo=timezone.utc)
     # The gate is the DURABLE marker - the snapshot file - not what the release phase
     # froze a moment ago: this phase is its own job, in its own process.
-    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, name: None)
+    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, name, **_kw: None)
     assert scheduler._autograde_passed_deadlines("C", "K", sched, now, False) == 0
     assert graded == []
-    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, name: {"anna": "sha"})
+    monkeypatch.setattr(
+        scheduler, "load_snapshots", lambda org, name, **_kw: {"anna": "sha"}
+    )
     assert scheduler._autograde_passed_deadlines("C", "K", sched, now, False) == 0
     assert len(graded) == 1
 
@@ -4824,7 +4836,7 @@ def test_the_freeze_is_told_which_assignments_share_a_drop_box(monkeypatch):
     # guessed downstream: a wrong answer freezes the semester against repos that do not
     # exist and cannot be corrected afterwards, because the snapshot is write-once.
     taken: list[dict] = []
-    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug: None)
+    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug, **_kw: None)
     monkeypatch.setattr(
         scheduler,
         "snapshot_assignment",
@@ -4909,7 +4921,7 @@ def _sheet_reads(monkeypatch, scores: dict[str, object], marker: bool = False):
         {"submissions": {h: {"score_individual": v} for h, v in scores.items()}}
     )
 
-    def get(org, repo, path, ref=""):
+    def get(org, repo, path, ref="", **_kw):
         reads.append(path)
         if "marks-returned" in path:
             return '{"returned": "x"}' if marker else None

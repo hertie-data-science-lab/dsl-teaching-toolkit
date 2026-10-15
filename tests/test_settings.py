@@ -138,7 +138,7 @@ def test_a_semester_read_that_fails_raises_and_is_not_cached(monkeypatch):
     run_settings(monkeypatch, _READ_SEMESTER)
     answers = [RuntimeError("could not read Sem/semester-config/assignments.yml: 403")]
 
-    def read(org, repo, path, ref=""):
+    def read(org, repo, path, ref="", **_kw):
         answer = answers.pop(0)
         if isinstance(answer, Exception):
             raise answer

@@ -254,8 +254,11 @@ def by_handle(students: list[Student]) -> dict[str, Student]:
 def _students_text(semester_org: str) -> str | None:
     """students.csv's text, read ONCE per semester per process. The TEXT is memoised
     rather than `load`'s rows, so every caller gets its own parse. Held by the run
-    (`run.per_run`): a write to the file forgets it."""
-    return get_file_content(semester_org, CONFIG_REPO, STUDENTS_PATH)
+    (`run.per_run`): a write to the file forgets it. An absent roster is a fault mailed
+    to the semester, so a 404 is asked again before it counts."""
+    return get_file_content(
+        semester_org, CONFIG_REPO, STUDENTS_PATH, confirm_absent=True
+    )
 
 
 @run.per_run(lambda semester_org: run.scope(semester_org, CONFIG_REPO, SYSTEM_PATH))

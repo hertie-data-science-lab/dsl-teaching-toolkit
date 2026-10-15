@@ -934,7 +934,7 @@ def test_an_org_that_never_had_a_site_is_still_a_quiet_noop(monkeypatch):
 def test_a_failed_repo_listing_is_not_read_as_no_site(monkeypatch):
     monkeypatch.setattr(site_repo, "repo_exists", lambda org, name: False)
 
-    def boom(org):
+    def boom(org, **_kw):
         raise RuntimeError(f"could not list repos in {org}")
 
     monkeypatch.setattr(site_repo, "list_org_repos", boom)

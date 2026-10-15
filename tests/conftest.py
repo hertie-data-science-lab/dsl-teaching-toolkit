@@ -21,6 +21,7 @@ from dsl_course import (
     central,
     config,
     discovery,
+    gh_contents,
     gh_teams,
     ghcli,
     grading_sheet,
@@ -118,6 +119,13 @@ def _team_lag_waits_cost_nothing(monkeypatch):
     at once, so a test that stubs a 404 member listing does not wait two real minutes."""
     monkeypatch.setattr(gh_teams, "_lag_spent", 0)
     monkeypatch.setattr(gh_teams, "_sleep", lambda s: None)
+
+
+@pytest.fixture(autouse=True)
+def _confirming_a_404_costs_nothing(monkeypatch):
+    """`gh_contents` asks an alarm read's 404 again, after waits, before it counts: a test
+    that stubs an absent file should not wait."""
+    monkeypatch.setattr(gh_contents, "_sleep", lambda s: None)
 
 
 @pytest.fixture(autouse=True)

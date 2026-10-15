@@ -63,6 +63,7 @@ import yaml
 
 from . import (
     gradebook,
+    grading_spec,
     receipts,
     records,
     roster,
@@ -285,8 +286,11 @@ def withhold_from_template(semester_org: str, template: str) -> bool:
         # Inside the guard: `get_file_content` raises on any non-404 failure, and an
         # unhandled raise here escapes through provision_all into the hourly scheduler and
         # takes every later semester's release with it.
+        # Only a `.releaseignore` the tree lists is read, so a 404 is spurious - and
+        # taken as "nothing withheld" it would hand the solutions out.
         withheld = excluded_in_tree(
-            paths, lambda p: get_file_content(semester_org, template, p)
+            paths,
+            lambda p: get_file_content(semester_org, template, p, confirm_absent=True),
         )
     except RuntimeError as exc:
         log_err(
@@ -1456,13 +1460,17 @@ def solution_record_path(slug: str) -> str:
     return f"{SOLUTION_RECORD_DIR}/{slug}.json"
 
 
-def solution_released(semester_org: str, slug: str) -> bool:
+def solution_released(
+    semester_org: str, slug: str, confirm_absent: bool = False
+) -> bool:
     """Whether the model solution for `slug` has already been pushed to this semester.
 
     Read by the scheduler, so a passed `solution_datetime` fires exactly once. The manual
     Release assignment path does NOT consult it - an operator asking for `solution_datetime: now` is
     asking for it now, and push_solution is an idempotent overwrite anyway."""
-    return file_exists(semester_org, CONFIG_REPO, solution_record_path(slug))
+    return file_exists(
+        semester_org, CONFIG_REPO, solution_record_path(slug), confirm_absent
+    )
 
 
 def record_solution_released(semester_org: str, slug: str, repos: int) -> bool:
@@ -1703,6 +1711,26 @@ def _release_units(
     return results, any(k != "skipped" for k in results), units, solution_unavailable
 
 
+def _creates_any(
+    gspec: grading_spec.GradingSpec,
+    semester_org: str,
+    slug: str,
+    sheet_units: list[tuple[str, list[str]]],
+    listing: dict[str, dict] | None,
+) -> bool:
+    """Whether this handout would create a repo: the semester template, the drop box or
+    a unit's repo missing from the listing. Without a listing, assume it would."""
+    if not gspec.creates_repos:
+        return False
+    if listing is None:
+        return True
+    if gspec.submit_shared:
+        names = [slug, shared_repo(slug)]
+    else:
+        names = [slug, *(submission_repo(slug, unit) for unit, _ in sheet_units)]
+    return any(name not in listing for name in names)
+
+
 def provision_all(
     course_org: str,
     template: str,
@@ -1921,6 +1949,28 @@ def provision_all(
     # repo, so it is taken once, here, rather than at the top of two arms that could then
     # come to freeze different things. A dry run creates nothing and so takes none - each
     # arm says what it would do and returns before it would be used.
+    #
+    # An ABSENT definition is a shape too (the defaults), and repos made in the wrong one
+    # cannot be taken back - so before the first create, a 404 on it is confirmed, and a
+    # spurious one starts the handout again on the real answer. Only then: a handed-out
+    # release re-fires every tick and almost always creates nothing.
+    if (
+        not dry_run
+        and _creates_any(gspec, semester_org, slug, sheet_units, listing)
+        and grading_spec.confirm_grading_text(course_org, template)
+    ):
+        return provision_all(
+            course_org,
+            template,
+            semester_org,
+            roster_path=roster_path,
+            solution=solution,
+            touch_existing=touch_existing,
+            scheduled=scheduled,
+            slug=key,
+            listing=listing,
+            sync=sync,
+        )
     semester_template = ""
     if gspec.creates_repos and not dry_run:
         frozen = ensure_semester_template(

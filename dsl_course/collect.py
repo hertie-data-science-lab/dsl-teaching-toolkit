@@ -1149,7 +1149,10 @@ def has_autograde_results(semester_org: str, slug: str) -> bool:
         branch = default_branch(semester_org, CONFIG_REPO)
         present = repo_blob_shas(semester_org, CONFIG_REPO, branch)
     except RuntimeError:
-        return any(file_exists(semester_org, CONFIG_REPO, r) for r in records)
+        return any(
+            file_exists(semester_org, CONFIG_REPO, r, confirm_absent=True)
+            for r in records
+        )
     return any(r in present for r in records)
 
 
@@ -1214,11 +1217,15 @@ def mark_graded(semester_org: str, slug: str) -> bool:
     )
 
 
-def load_snapshots(semester_org: str, slug: str) -> dict[str, str] | None:
+def load_snapshots(
+    semester_org: str, slug: str, confirm_absent: bool = False
+) -> dict[str, str] | None:
     """{repo: sha} from this assignment's snapshot CSV, or None if no snapshot was ever
     taken (the two are different: a recorded blank sha means "no submission", while no
     file at all means grading has to fall back to client-supplied commit dates)."""
-    content = get_file_content(semester_org, CONFIG_REPO, snapshot_path(slug))
+    content = get_file_content(
+        semester_org, CONFIG_REPO, snapshot_path(slug), confirm_absent=confirm_absent
+    )
     return parse_snapshots(content) if content is not None else None
 
 
@@ -1363,6 +1370,12 @@ def snapshot_assignment(
             f"(not generated yet); a later tick takes it"
         )
         return SnapshotResult.NOTHING_TO_FREEZE
+    # Never re-snapshot: a spurious 404 above would re-pin every repo past the deadline.
+    # Confirmed only here, about to write, because until then the file is absent on every
+    # tick that has nothing to freeze yet.
+    if load_snapshots(semester_org, slug, confirm_absent=True) is not None:
+        log_skip(f"snapshot {snapshot_path(slug)}")
+        return SnapshotResult.PRESENT
     if not put_file(
         semester_org,
         CONFIG_REPO,

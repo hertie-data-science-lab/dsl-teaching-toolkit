@@ -287,7 +287,7 @@ def _writable(monkeypatch, text: str | None = SYLLABUS_TEXT, ok: bool = True) ->
     monkeypatch.setattr(
         syllabus,
         "get_file_with_sha",
-        lambda o, r, p: None if text is None else (text, "abc123"),
+        lambda o, r, p, **_kw: None if text is None else (text, "abc123"),
     )
 
     def put(o, r, p, c, m, expected_sha=None):
@@ -440,11 +440,13 @@ def test_a_syllabus_too_large_or_not_utf8_is_refused(monkeypatch, wired):
     assert [r["code"] for r in out.reasons] == ["TOO_LARGE"]
     # A truly empty file is written into.
     monkeypatch.setattr(
-        syllabus, "get_file_with_sha", lambda o, r, p: ("", syllabus.blob_sha(b""))
+        syllabus,
+        "get_file_with_sha",
+        lambda o, r, p, **_kw: ("", syllabus.blob_sha(b"")),
     )
     assert syllabus.main() == 0 and written["SYLLABUS.md"].startswith("## Weekly plan")
 
-    def latin1(o, r, p):
+    def latin1(o, r, p, **_kw):
         raise UnicodeDecodeError("utf-8", b"\xe9", 0, 1, "invalid continuation byte")
 
     monkeypatch.setattr(syllabus, "get_file_with_sha", latin1)

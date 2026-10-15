@@ -226,13 +226,17 @@ def freeze_order(semester_org: str, repos: list[dict]) -> list[dict]:
     )
 
 
-def registrar_summary(semester_org: str) -> str:
+def registrar_summary(semester_org: str, confirm_absent: bool = False) -> str:
     """One plain-text line for the record: what the semester grades file holds, or that
     there is none. A ROW COUNT, never a row - this string is printed to the run log too, and
     the log of a course org's `.github` is world-readable. A semester that returned no marks
-    since 0.11.0 still has the file under `records.RETIRED_SEMESTER_GRADES`."""
+    since 0.11.0 still has the file under `records.RETIRED_SEMESTER_GRADES`.
+    `confirm_absent` for the real run, whose record is permanent: a spurious 404 must not
+    say no grade was ever sent."""
     for path in (SEMESTER_CSV_NAME, records.RETIRED_SEMESTER_GRADES):
-        text = get_file_content(semester_org, CONFIG_REPO, path)
+        text = get_file_content(
+            semester_org, CONFIG_REPO, path, confirm_absent=confirm_absent
+        )
         if text is not None:
             rows = len(list(read_csv(text, (), path)))
             return f"{path}, {rows} student row(s)"
@@ -493,7 +497,7 @@ def close_out(
         # It goes on, and says what the real run would need.
         log(f"  {not_due} A real run would need --force.")
 
-    registrar = registrar_summary(semester_org)
+    registrar = registrar_summary(semester_org, confirm_absent=not dry_run)
     log(f"  semester grades file: {registrar}")
     propagated, errors = _carry_back(course_org, semester_org, dry_run)
     errors += _close_notices(semester_org, dry_run)

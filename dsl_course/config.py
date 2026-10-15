@@ -85,8 +85,11 @@ class ConfigFile:
 
 def read(org: str, repo: str, path: str) -> ConfigFile:
     """`org/repo/path` as a `ConfigFile`. A read that failed other than with a 404 raises
-    (`gh_contents.get_file_content`)."""
-    return ConfigFile(org, repo, path, gh_contents.get_file_content(org, repo, path))
+    (`gh_contents.get_file_content`). A 404 is confirmed before it is ABSENT: every file
+    read here is one a set-up org has, and its absence is a fault mailed to people, a
+    course with no admins, or a semester with no settings."""
+    text = gh_contents.get_file_content(org, repo, path, confirm_absent=True)
+    return ConfigFile(org, repo, path, text)
 
 
 def read_local(root: Path, path: str) -> ConfigFile:

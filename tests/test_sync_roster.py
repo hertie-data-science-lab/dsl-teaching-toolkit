@@ -161,7 +161,7 @@ def test_students_csv_is_read_once_per_semester_but_each_caller_parses_its_own(
     monkeypatch.setattr(
         roster,
         "get_file_content",
-        lambda org, repo, path: reads.append(path) or files[path],
+        lambda org, repo, path, **_kw: reads.append(path) or files[path],
     )
     first = roster.load("SEMESTER")
     second = roster.load("SEMESTER")

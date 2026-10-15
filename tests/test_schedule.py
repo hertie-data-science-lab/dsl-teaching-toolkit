@@ -690,7 +690,9 @@ def test_a_run_keeps_an_early_solution_and_holds_it_until_the_cutoff(monkeypatch
     # At RUN time nothing is dropped: `load` keeps the date as written, and the cutoff it is
     # held until comes from the whole cascade - here the course's 5-day window.
     text = yaml.safe_dump(_with_solution("2026-10-16T09:00"))
-    monkeypatch.setattr(schedule, "get_file_content", lambda org, repo, path: text)
+    monkeypatch.setattr(
+        schedule, "get_file_content", lambda org, repo, path, **_kw: text
+    )
     monkeypatch.setattr(settings, "course_org_for_semester", lambda org: "Course")
     monkeypatch.setattr(
         settings,
@@ -846,12 +848,12 @@ def test_record_handout_round_trips_through_the_parser(monkeypatch):
         "text": "assignments:\n  assignment-1:\n    template: a-f2026\n    due_datetime: 2026-10-13\n"
     }
     monkeypatch.setattr(
-        S, "get_file_with_sha", lambda org, repo, path: (store["text"], "sha0")
+        S, "get_file_with_sha", lambda org, repo, path, **_kw: (store["text"], "sha0")
     )
     monkeypatch.setattr(
         gh_contents,
         "get_file_with_sha",
-        lambda org, repo, path: (store["text"], "sha0"),
+        lambda org, repo, path, **_kw: (store["text"], "sha0"),
     )
     writes = []
     monkeypatch.setattr(
@@ -882,7 +884,7 @@ def test_the_plan_is_read_once_per_semester_and_a_handout_reopens_it(monkeypatch
     monkeypatch.setattr(
         schedule,
         "get_file_content",
-        lambda org, repo, path: reads.append(org) or "timezone: Europe/Berlin\n",
+        lambda org, repo, path, **_kw: reads.append(org) or "timezone: Europe/Berlin\n",
     )
     schedule.load("Semester-f2026")
     schedule.load("Semester-f2026")
@@ -893,10 +895,10 @@ def test_the_plan_is_read_once_per_semester_and_a_handout_reopens_it(monkeypatch
 
     monkeypatch.setattr(gh_contents, "put_file", lambda *a, **k: True)
     monkeypatch.setattr(
-        schedule, "get_file_with_sha", lambda org, repo, path: ("", "sha0")
+        schedule, "get_file_with_sha", lambda org, repo, path, **_kw: ("", "sha0")
     )
     monkeypatch.setattr(
-        gh_contents, "get_file_with_sha", lambda org, repo, path: ("", "sha0")
+        gh_contents, "get_file_with_sha", lambda org, repo, path, **_kw: ("", "sha0")
     )
     schedule.record_handout("Semester-f2026", "assignment-1", "2026-09-22T14:05")
     schedule.load("Semester-f2026")
@@ -940,7 +942,7 @@ def test_unparseable_schedule_loads_as_empty_and_says_so_loudly(monkeypatch, cap
     from dsl_course import schedule as S
 
     monkeypatch.setattr(
-        S, "get_file_content", lambda org, repo, path: MALFORMED_SCHEDULE
+        S, "get_file_content", lambda org, repo, path, **_kw: MALFORMED_SCHEDULE
     )
 
     sched = S.load("Semester-f2026")
@@ -971,7 +973,7 @@ def test_a_wellformed_schedule_is_untouched_by_the_yaml_guard(monkeypatch, capsy
         "      - from_course_repo: course-materials-f2026\n"
         "        from_path: labs/01_lab\n"
     )
-    monkeypatch.setattr(S, "get_file_content", lambda org, repo, path: good)
+    monkeypatch.setattr(S, "get_file_content", lambda org, repo, path, **_kw: good)
 
     sched = S.load("Semester-f2026")
 
@@ -988,7 +990,7 @@ def test_a_non_mapping_schedule_still_loads_as_empty(monkeypatch, capsys):
     from dsl_course import schedule as S
 
     monkeypatch.setattr(
-        S, "get_file_content", lambda org, repo, path: "- just\n- a list\n"
+        S, "get_file_content", lambda org, repo, path, **_kw: "- just\n- a list\n"
     )
     sched = S.load("Semester-f2026")
     assert sched.unparseable and not sched.releases
@@ -1007,7 +1009,7 @@ def test_an_unparseable_plan_is_one_fault_not_an_empty_plan(monkeypatch):
     from dsl_course import schedule as S
 
     monkeypatch.setattr(
-        S, "get_file_content", lambda org, repo, path: MALFORMED_SCHEDULE
+        S, "get_file_content", lambda org, repo, path, **_kw: MALFORMED_SCHEDULE
     )
 
     (fault,) = S.load("Semester-f2026").faults
@@ -1028,7 +1030,7 @@ def test_a_comment_only_schedule_is_empty_not_unparseable(monkeypatch, capsys):
     from dsl_course import schedule as S
 
     monkeypatch.setattr(
-        S, "get_file_content", lambda org, repo, path: "# nothing yet\n"
+        S, "get_file_content", lambda org, repo, path, **_kw: "# nothing yet\n"
     )
     assert S.load("Semester-f2026") == Schedule()
     assert capsys.readouterr().err == ""
@@ -1244,7 +1246,7 @@ def test_load_logs_every_dropped_entry_loudly(monkeypatch, capsys):
     monkeypatch.setattr(
         S,
         "get_file_content",
-        lambda org, repo, path: (
+        lambda org, repo, path, **_kw: (
             "assignments:\n  assignment-2:\n    number: 2\n    due_datetime: 2026-11-13\n"
         ),
     )
@@ -1365,7 +1367,7 @@ def test_load_never_raises_when_a_block_is_a_list(monkeypatch, capsys):
     monkeypatch.setattr(
         S,
         "get_file_content",
-        lambda org, repo, path: "releases:\n  - event_datetime: 2026-09-01\n",
+        lambda org, repo, path, **_kw: "releases:\n  - event_datetime: 2026-09-01\n",
     )
     sched = S.load("Semester-f2026")  # must not raise
     assert sched.releases == []
@@ -1377,7 +1379,7 @@ def test_load_parses_once_per_run_and_every_caller_hears_and_owns_it(
 ):
     reads = []
 
-    def get(org, repo, path):
+    def get(org, repo, path, **_kw):
         reads.append(path)
         return "releases:\n  - event_datetime: 2026-09-01\n"
 
@@ -1795,9 +1797,11 @@ def test_record_handout_says_so_loudly_when_the_file_shape_defeats_the_edit(
     from dsl_course import schedule as S
 
     flow = "assignments: {assignment-1: {due_datetime: 2026-10-13}}\n"
-    monkeypatch.setattr(S, "get_file_with_sha", lambda org, repo, path: (flow, "sha0"))
     monkeypatch.setattr(
-        gh_contents, "get_file_with_sha", lambda org, repo, path: (flow, "sha0")
+        S, "get_file_with_sha", lambda org, repo, path, **_kw: (flow, "sha0")
+    )
+    monkeypatch.setattr(
+        gh_contents, "get_file_with_sha", lambda org, repo, path, **_kw: (flow, "sha0")
     )
     monkeypatch.setattr(
         "dsl_course.gh_contents.put_file",
@@ -1819,9 +1823,11 @@ def test_record_handout_says_so_loudly_when_the_write_itself_fails(monkeypatch, 
     from dsl_course import schedule as S
 
     good = "assignments:\n  assignment-1:\n    due_datetime: 2026-10-13\n"
-    monkeypatch.setattr(S, "get_file_with_sha", lambda org, repo, path: (good, "sha0"))
     monkeypatch.setattr(
-        gh_contents, "get_file_with_sha", lambda org, repo, path: (good, "sha0")
+        S, "get_file_with_sha", lambda org, repo, path, **_kw: (good, "sha0")
+    )
+    monkeypatch.setattr(
+        gh_contents, "get_file_with_sha", lambda org, repo, path, **_kw: (good, "sha0")
     )
     monkeypatch.setattr("dsl_course.gh_contents.put_file", lambda *a, **k: False)
 
@@ -1842,12 +1848,14 @@ def test_record_handout_never_reverts_an_edit_made_while_it_ran(monkeypatch):
     after = before + "  assignment-2:\n    due_datetime: 2026-11-20\n"
     store = {"text": before, "sha": "sha0"}
     monkeypatch.setattr(
-        S, "get_file_with_sha", lambda org, repo, path: (store["text"], store["sha"])
+        S,
+        "get_file_with_sha",
+        lambda org, repo, path, **_kw: (store["text"], store["sha"]),
     )
     monkeypatch.setattr(
         gh_contents,
         "get_file_with_sha",
-        lambda org, repo, path: (store["text"], store["sha"]),
+        lambda org, repo, path, **_kw: (store["text"], store["sha"]),
     )
     writes: list[str] = []
 
@@ -1865,7 +1873,7 @@ def test_record_handout_never_reverts_an_edit_made_while_it_ran(monkeypatch):
     # the edit lands between the read and the write
     original_read = S.get_file_with_sha
 
-    def moving_read(org, repo, path):
+    def moving_read(org, repo, path, **_kw):
         text, sha = original_read(org, repo, path)
         if store["text"] == before:
             store["text"], store["sha"] = after, "sha1"
@@ -1889,7 +1897,7 @@ def test_validate_is_invalid_for_a_semester_plan_that_does_not_parse(
     # hourly cron cannot be frozen by one semester's typo, and the validator read the
     # fallback as a verdict. The two forms answer the same question and must agree.
     monkeypatch.setattr(
-        schedule, "get_file_content", lambda org, repo, path: MALFORMED_SCHEDULE
+        schedule, "get_file_content", lambda org, repo, path, **_kw: MALFORMED_SCHEDULE
     )
     monkeypatch.setattr(
         "sys.argv", ["schedule", "--semester-org", "Semester-f2026", "--validate"]
@@ -1905,7 +1913,7 @@ def test_validate_cli_reports_an_unreadable_semester_schedule(monkeypatch, capsy
     # An absent schedule.yml is an empty Schedule (valid: nothing planned yet), but a read
     # that failed outright now raises - the CLI turns that into a line and a red run,
     # rather than a traceback or a false "OK: nothing dropped".
-    def boom(semester_org):
+    def boom(semester_org, **_kw):
         raise RuntimeError("could not read Semester-f2026/semester-config/schedule.yml")
 
     monkeypatch.setattr(schedule, "load", boom)
@@ -2069,7 +2077,7 @@ def test_an_unreadable_repo_is_never_reported_as_missing(monkeypatch, capsys):
     monkeypatch.setattr(schedule, "repo_missing", lambda org, repo: False)
     monkeypatch.setattr(schedule, "default_branch", lambda org, repo: "main")
 
-    def boom(org, repo, branch, kind=""):
+    def boom(org, repo, branch, kind="", **_kw):
         raise RuntimeError("API rate limit exceeded")
 
     monkeypatch.setattr(schedule, "repo_tree", boom)
