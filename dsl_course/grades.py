@@ -425,10 +425,24 @@ def new_sheet(spec: SheetSpec, units: list[tuple[str, list[str]]]) -> dict:
     }
 
 
+def _is_blank_entry(entry: object) -> bool:
+    """True when a member's entry holds nothing a grader typed: no entry at all, or a
+    mapping whose every value is blank (`_blank_person()`, or a part of it)."""
+    if entry is None:
+        return True
+    return isinstance(entry, dict) and all(
+        value is None or (isinstance(value, str) and not value.strip())
+        for value in entry.values()
+    )
+
+
 def _merged_people(existing: object, members: list[str]) -> object:
     """A team's `members:` mapping brought up to date: everyone already there is kept
     exactly as found, and a member who joined the team since the last write is appended
-    blank. Left alone entirely if the grader turned it into something else."""
+    blank. A member who left keeps their entry, at the end, if a grader typed anything in
+    it; a blank one is dropped, or a student who moved team would sit in both and hold
+    both teams' marks as a duplicate. Left alone entirely if the grader turned it into
+    something else."""
     if not isinstance(existing, dict):
         return existing
     old = dict(existing)
@@ -436,7 +450,9 @@ def _merged_people(existing: object, members: list[str]) -> object:
         handle: (old.pop(handle) if handle in old else _blank_person())
         for handle in members
     }
-    people.update(old)  # a member who left the team keeps their marks, at the end
+    people.update(
+        {handle: entry for handle, entry in old.items() if not _is_blank_entry(entry)}
+    )
     return people
 
 
@@ -482,7 +498,9 @@ def merge_sheet(
 
     Everything else is the grader's and is kept exactly as found: their marks, their
     feedback, keys they invented, and blocks for units that have since left the semester (a
-    withdrawn student's marks are not ours to delete). Deleted keys are not re-added either
+    withdrawn student's marks are not ours to delete). The one exception is a team member
+    who left with a blank entry: it is dropped, as it holds nothing of the grader's
+    (`_merged_people`). Deleted keys are not re-added either
     - a grader who removed `notes_not_shared_with_students` meant it, and a file that grows
     the key back on every tick is one nobody can tidy.
 
