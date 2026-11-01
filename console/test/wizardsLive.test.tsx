@@ -190,6 +190,30 @@ describe('New assignment: import', () => {
     expect([...root.querySelectorAll('button')].some((b) => b.textContent === 'Derive the student version now')).toBe(true);
   });
 
+  it('offers the semester it was opened from in the last step, not the newest one', async () => {
+    const T = 'assignment-quiz-1';
+    const two: Course = { ...course, cohorts: [...course.cohorts, { org: 'hertie-dsl-demo-course-s2027', term: 's2027', termLabel: 'Spring 2027' }] };
+    const gh = new FakeGitHub()
+      .on('GET', `/repos/${COURSE}/${T}`, { name: T })
+      .on('GET', `/repos/${COURSE}/${T}/branches/main`, { name: 'main', commit: { sha: 'h1', commit: { tree: { sha: 'tr1' } } } })
+      .on('GET', `/repos/${COURSE}/${T}/branches/solution`, { name: 'solution', commit: { sha: 'h2', commit: { tree: { sha: 'tr2' } } } })
+      .on('GET', `/repos/${COURSE}/${T}/contents/grading_config.yml?ref=solution`, fileBody('grading_config.yml', 'title: Quiz 1\n', 'g1'));
+    const client = new GitHubClient({ token: () => 't', fetch: gh.fetch });
+    const env = { client, user: { login: 'a-example', id: 1, name: null, email: null, avatar_url: '' }, files: new StaticFiles(), kind: 'classic', ops: { runs: { value: [] } } } as unknown as Env;
+    const v = { name: 'Quiz 1', start: 'fresh', type: 'individual', submit_via: 'assignment_repo', formats: ['ipynb'], autograde: 'false', completion_check: 'auto', grader_pdf: false };
+    const verified = { 1: signature(v, S1), 2: signature(v, S2), 3: signature(v, S3), 4: signature(v, S4), 5: signature(v, S5) };
+    localStorage.setItem(`dsl-console:wizard:new-assignment:${COURSE}`, JSON.stringify({ v, verified, extrasSaved: T }));
+    const props = { course: two, loaded: { kind: 'absent' } as const, cohortStates: {}, files: new StaticFiles(), now, cohort: 'hertie-dsl-demo-course-f2026' };
+    root = document.createElement('div');
+    document.body.appendChild(root);
+    await act(async () => render(<EnvCtx.Provider value={env}><NewAssignmentScreen {...props} step={6} /></EnvCtx.Provider>, root!));
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    expect(root.textContent).toContain('Created.');
+    expect(root.querySelector<HTMLSelectElement>('#na-sem')!.value).toBe('hertie-dsl-demo-course-f2026');
+    expect(root.querySelector('a[href*="#schedule-new"]')!.getAttribute('href')).toBe(`?cohort=hertie-dsl-demo-course-f2026&template=${T}#schedule-new`);
+  });
+
   it('never says Created while the source cannot be read: the check fails with its sentence and a way to read it again', async () => {
     const T = 'assignment-regression';
     let sourceUp = false;

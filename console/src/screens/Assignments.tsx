@@ -16,6 +16,7 @@ import { replaceHash, tabHref, type AssignmentTab } from '../router';
 import { ProblemCards } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { asgSummary } from './Cohort';
+import { courseOf } from './Course';
 import { MarksTab, TeamsTab } from './Marking';
 import { AssignmentRun, SemesterDefaults, sheetName } from './RunSettings';
 import { WithStatus, cohortName, cohortScope, tzOf, yearOf } from './common';
@@ -52,6 +53,35 @@ function teamless(p: ReadyProps, slug: string): number | null {
   return joined.filter((s) => !placed.has(s.handle.toLowerCase())).length;
 }
 
+/** The course's templates no entry of this semester's schedule uses; null while the course's list is read. */
+export function unscheduled(p: ReadyProps): string[] | null {
+  if (p.courseLoaded?.kind === 'loading') return null;
+  const c = courseOf({ loaded: p.courseLoaded ?? { kind: 'loading' }, cohortStates: { [p.cohort.org]: p.loaded } });
+  if (!c) return null;
+  const used = new Set((p.status.assignments ?? []).map((a) => a.template.toLowerCase()));
+  return (c.templates ?? []).map((t) => t.repo).filter((r) => !used.has(r.toLowerCase()));
+}
+
+/** Templates a person made in the course and has not put in this semester's schedule, so the page shows they exist. */
+function Unscheduled({ p }: { p: ReadyProps }) {
+  const list = unscheduled(p);
+  if (!list?.length) return null;
+  return (
+    <section class="panel section" id="unscheduled">
+      <div class="section-head"><h2>Not in this semester yet</h2></div>
+      <p class="footnote">Course assignment templates this semester’s schedule does not use. Add one to the schedule to hand it out.</p>
+      <ul class="rows">
+        {list.map((repo) => (
+          <li>
+            <span class="r-title"><a href={`?course=${p.course.org}#template-${repo}`}>{repo}</a></span>
+            <span class="r-side"><a class="btn small quiet" href={`?cohort=${p.cohort.org}&template=${encodeURIComponent(repo)}#schedule-new`}>Add to the schedule</a></span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function Index(p: ReadyProps) {
   const { status, now } = p;
   const tz = tzOf(status), year = yearOf(now, tz);
@@ -67,7 +97,7 @@ function Index(p: ReadyProps) {
             {list.length === 1 ? 'One' : list.length} this semester.{open ? ` ${open === 1 ? 'One is' : `${open} are`} open.` : ''}{marking ? ` ${marking === 1 ? 'One is' : `${marking} are`} being marked.` : ''}
           </p>
         </div>
-        <div class="actions"><a class="btn" href={`?course=${p.course.org}#new-assignment-1`}>New assignment</a></div>
+        <div class="actions"><a class="btn" href={`?cohort=${p.cohort.org}#new-assignment-1`}>New assignment</a></div>
       </div>
       <div class="table-wrap">
         <table class="grid" style="min-width:960px">
@@ -97,6 +127,7 @@ function Index(p: ReadyProps) {
           </tbody>
         </table>
       </div>
+      <Unscheduled p={p} />
       <SemesterDefaults p={p} />
     </>
   );

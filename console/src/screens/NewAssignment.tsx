@@ -226,7 +226,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
   const [s1, setS1] = useState<{ busy: boolean; list: Check[] | null }>({ busy: false, list: null });
   const [save, runSave, setSave] = useSave(env);
   const [copy, setCopy] = useState<{ busy: boolean; line?: string; results?: CopyResult[] }>({ busy: false });
-  const [semester, setSemester] = useState('');
+  const [semester, setSemester] = useState(p.cohort ?? '');
   const setV = (nv: Values) => set({ v: nv });
   const go = (k: number) => {
     if (typeof location !== 'undefined') location.hash = `#new-assignment-${k}`;

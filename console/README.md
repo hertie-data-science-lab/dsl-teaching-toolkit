@@ -212,7 +212,8 @@ every semester's status has loaded the columns keep a fixed layout (`SETTLING_CO
 panels do not move as each arrives. The semester Dashboard's line under its title says only
 what the banner does not: the start, while the semester has no end date (the exams and the
 archive date are on the Schedule and the agenda). It has no Assignments panel: each
-assignment's state and progress are on the Assignments tab. Its Students panel is the roster
+assignment's state and progress are on the Assignments tab, which also lists the course's
+templates the semester's schedule does not use, each with Add to the schedule. Its Students panel is the roster
 meter plus every state, each line opening the Students tab: on the roster with no code sent
 yet, codes sent but not joined yet, and joined (`status.json` does not say who has an org
 invitation still to accept, so that step is not counted); it is hidden once every row has joined.
@@ -453,7 +454,8 @@ and the retired Archive page `#archive` to `#schedule-archive` (its explanation 
 archive row, its Archive button on that entry).
 Wizards: `#new-course-1..4`, `#new-semester-1..3`, `#new-assignment-1..4`, `#new-materials`; a
 step past the first unfinished one opens that one instead. `?template=<repo>#schedule-new`
-opens a new assignment entry for that template; `?folder=<repo>/<path>#materials` the materials
+opens a new assignment entry for that template; `?cohort=<org>#new-assignment-1` offers that
+semester first at the wizard's end; `?folder=<repo>/<path>#materials` the materials
 index with that folder open; `?wizard=new-semester-3` adds a link back.
 A problem's `fix {screen, entry}` is `#<screen>-<entry>`.
 The course or semester rides in the query string: `?cohort=<org>` or `?course=<org>`

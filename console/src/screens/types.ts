@@ -23,6 +23,8 @@ export interface CohortProps {
   prefill?: string;
   /** The course's names were checked and are current (`CourseProps.migrated`): course-file saves wait for it. Absent in render tests. */
   courseMigrated?: boolean;
+  /** The course's public status, read for the side nav anyway: its template list is fresher than the semester's copy. Absent in render tests. */
+  courseLoaded?: Loaded;
 }
 
 /** A semester screen whose status is ready. */
@@ -41,6 +43,8 @@ export interface CourseProps {
   entry?: string;
   /** A folder to open on the course materials index (`?folder=<repo>/<path>`). */
   folder?: string;
+  /** The semester the page was opened from (`?cohort=`): New assignment's choice of schedule. */
+  cohort?: string;
 }
 
 export interface HomeProps {
