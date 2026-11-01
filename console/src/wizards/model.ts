@@ -128,6 +128,16 @@ export function signature(v: Values, keys: string[]): string {
   return JSON.stringify(keys.map((k) => v[k] ?? null));
 }
 
+/**
+ * `verified` with step `k` stamped `sig`. A step continued with changed answers drops the
+ * stamps after it: they were confirmed against the old answers, and an optional step left
+ * empty would otherwise still match and show done before the person reaches it again.
+ */
+export function stamp(verified: Record<string, string>, k: number, sig: string): Record<string, string> {
+  if (verified[k] === sig) return verified;
+  return { ...Object.fromEntries(Object.entries(verified).filter(([s]) => Number(s) < k)), [k]: sig };
+}
+
 // ------------------------------------------------------------------ New assignment
 
 /**

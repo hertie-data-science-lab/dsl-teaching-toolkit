@@ -31,7 +31,7 @@ import { PatternTree } from '../ui/PatternTree';
 import { useDraft } from '../wizards/drafts';
 import {
   APP_SLUG, IMPORT_UNTICKED_MAIN, IMPORT_UNTICKED_SOLUTION, ORDINAL_WARNING, assignmentArgs, formatError, installUrl, liveSemesters, openAt, ordinalInName,
-  parseSource, signature, sourceFixed, starterChoice, templateRepo, tickedEntries, type SourceRepo,
+  parseSource, signature, sourceFixed, stamp, starterChoice, templateRepo, tickedEntries, type SourceRepo,
 } from '../wizards/model';
 import { allOk, checkFree, checkTemplate, readSource, useLive, usePoll, type Check, type SourceBranch, type SourceRead } from '../wizards/verify';
 import { Checks, Rail, StepCard, Verified, WizError } from '../wizards/Wizard';
@@ -334,7 +334,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
         const list = [await checkFree(env.client, course.org, repo, repo)];
         setS1({ busy: false, list });
         if (allOk(list)) {
-          set({ verified: { ...d.verified, '1': signature(v, S1) } });
+          set({ verified: stamp(d.verified, 1, signature(v, S1)) });
           go(2);
         }
       }}>Continue</button>
@@ -353,7 +353,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
     );
     foot = (
       <button class="btn" type="button" disabled={Object.keys(errs).length > 0} onClick={() => {
-        set({ verified: { ...d.verified, [String(step)]: signature(v, step === 2 ? S2 : S3) } });
+        set({ verified: stamp(d.verified, step, signature(v, step === 2 ? S2 : S3)) });
         go(step + 1);
       }}>Continue</button>
     );
@@ -369,7 +369,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
     );
     foot = (
       <button class="btn" type="button" onClick={() => {
-        set({ verified: { ...d.verified, '4': signature(v, S4) } });
+        set({ verified: stamp(d.verified, 4, signature(v, S4)) });
         go(5);
       }}>Continue</button>
     );
@@ -379,7 +379,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
     const bad = rows.map((r) => questionFileError(r.file)).find(Boolean);
     const files = toCopy.find((c) => c.branch === 'main')?.entries.map((e) => e.path) ?? [];
     const next = (nv: Values) => {
-      set({ v: nv, verified: { ...d.verified, '5': signature(nv, S5) } });
+      set({ v: nv, verified: stamp(d.verified, 5, signature(nv, S5)) });
       go(6);
     };
     body = (
