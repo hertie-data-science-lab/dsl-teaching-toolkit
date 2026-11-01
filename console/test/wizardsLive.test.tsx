@@ -177,8 +177,9 @@ describe('New assignment: import', () => {
     expect(root.textContent).toContain('Copied 2 files to main.');
     expect([...root.querySelectorAll('button')].some((b) => b.textContent === 'Copy again')).toBe(false);
     expect(gh.seen.find((x) => x.method === 'POST' && x.url.endsWith('/git/trees'))!.body).toMatchObject({ base_tree: 'tr1', tree: [{ path: 'README.md' }, { path: 'data/x.csv' }] });
-    expect(root.textContent).toContain('Created. Nothing reaches students until you add it to a schedule.');
-    expect(root.textContent).toContain('Add to the Fall 2026 schedule');
+    expect(root.textContent).toContain('Course template created.');
+    expect(root.textContent).toContain('Add to a semester');
+    expect(root.textContent).toContain('Nothing reaches students until you add it to a semester instance.');
     // Written by hand: nothing to derive. Derived: Derive is offered straight away.
     expect(root.textContent).not.toContain('Derive the student version now');
     const key = `dsl-console:wizard:new-assignment:${COURSE}`;
@@ -188,7 +189,7 @@ describe('New assignment: import', () => {
     render(null, root);
     await act(async () => render(<EnvCtx.Provider value={env}><NewAssignmentScreen {...props} step={6} /></EnvCtx.Provider>, root!));
     await act(async () => { await vi.advanceTimersByTimeAsync(100); });
-    expect(root.textContent).toContain('Created.');
+    expect(root.textContent).toContain('Course template created.');
     expect([...root.querySelectorAll('button')].some((b) => b.textContent === 'Derive the student version now')).toBe(true);
   });
 
@@ -227,7 +228,7 @@ describe('New assignment: import', () => {
     const put = gh.seen.filter((x) => x.method === 'PUT');
     expect(put).toHaveLength(1);
     expect(decodeBase64((put[0].body as { content: string }).content)).toContain('Q1: 10');
-    expect(root.textContent).toContain('Created. Nothing reaches students until you add it to a schedule.');
+    expect(root.textContent).toContain('Course template created.');
     expect(root.querySelector('a[href*="#schedule-new"]')!.getAttribute('href')).toBe(`?cohort=hertie-dsl-demo-course-f2026&template=${T}#schedule-new`);
     expect([...root.querySelectorAll('button')].some((b) => b.textContent === 'Save the marking settings')).toBe(false);
   });
@@ -251,7 +252,7 @@ describe('New assignment: import', () => {
     await act(async () => render(<EnvCtx.Provider value={env}><NewAssignmentScreen {...props} step={6} /></EnvCtx.Provider>, root!));
     await act(async () => { await vi.advanceTimersByTimeAsync(100); });
     await act(async () => { await vi.advanceTimersByTimeAsync(100); });
-    expect(root.textContent).toContain('Created.');
+    expect(root.textContent).toContain('Course template created.');
     expect(root.querySelector<HTMLSelectElement>('#na-sem')!.value).toBe('hertie-dsl-demo-course-f2026');
     expect(root.querySelector('a[href*="#schedule-new"]')!.getAttribute('href')).toBe(`?cohort=hertie-dsl-demo-course-f2026&template=${T}#schedule-new`);
   });
@@ -322,13 +323,13 @@ describe('New assignment: import', () => {
     expect(gh.seen.find((x) => x.method === 'POST' && x.url.endsWith('/git/trees') && (x.body as { base_tree: string }).base_tree === 'tr2')!.body).toMatchObject({ tree: [{ path: 'answer.ipynb' }, { path: 'tests/test_x.py' }] });
     expect(root.textContent).toContain('Copied 1 file to main.');
     expect(root.textContent).toContain('Copy again to try only what is missing.');
-    expect(root.textContent).not.toContain('Created.');
+    expect(root.textContent).not.toContain('Course template created.');
     const again = [...root.querySelectorAll<HTMLButtonElement>('button.btn')].find((b) => b.textContent === 'Copy again')!;
     expect(again).toBeTruthy();
     await act(async () => { again.click(); await vi.advanceTimersByTimeAsync(100); });
     await act(async () => { await vi.advanceTimersByTimeAsync(100); });
     expect(trees()).toEqual(['tr1', 'tr2', 'tr2']);
     expect(root.textContent).toContain('Copied 2 files to solution.');
-    expect(root.textContent).toContain('Created. Nothing reaches students until you add it to a schedule.');
+    expect(root.textContent).toContain('Course template created.');
   });
 });

@@ -429,9 +429,22 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
         {attempted && missing.length && !said && !copy.busy ? <WizError>Not copied to {missing.join(' or ')} yet. Copy again to try only what is missing.</WizError> : null}
         {checksOk && !importPending && extrasPending ? <p class="footnote">The marking settings the create step does not take are written to grading_config.yml next.</p> : null}
         <SaveLine state={save} />
+        {ready ? <Verified>Course template created.</Verified> : null}
+        {checksOk ? (
+          <>
+            <CheckLine cls="warn">Nothing reaches students until you add it to a semester instance.</CheckLine>
+            <div class="actions">
+              {pick ? (
+                <>
+                  {live.length > 1 ? <select id="na-sem" aria-label="Semester" onChange={(e) => setSemester((e.target as HTMLSelectElement).value)}>{live.map((c) => <option value={c.org} selected={c.org === pick.org}>{c.termLabel}</option>)}</select> : null}
+                  <a class="btn outline" href={`?cohort=${pick.org}&template=${encodeURIComponent(repo)}#schedule-new`}>Add to a semester</a>
+                </>
+              ) : <a class="btn outline" href={`?course=${course.org}#new-semester-1`}>Set up a semester first</a>}
+            </div>
+          </>
+        ) : null}
         {ready ? (
           <>
-            <Verified>Created. Nothing reaches students until you add it to a schedule.</Verified>
             <div class="actions">
               <OpenButton org={course.org} repo={repo} /><a class="btn outline" href={uploadUrl(course.org, repo)} target="_blank" rel="noopener">Upload files on GitHub <Ext /></a>
             </div>
@@ -442,19 +455,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
             ) : null}
           </>
         ) : created ? null : <p class="footnote">Creating makes an assignment template with a main branch for the brief and a solution branch for marking.{src ? ' The ticked files are copied next with your GitHub account.' : ''}</p>}
-        {checksOk ? (
-          <>
-            <div class="actions">
-              {pick ? (
-                <>
-                  {live.length > 1 ? <select id="na-sem" aria-label="Semester" onChange={(e) => setSemester((e.target as HTMLSelectElement).value)}>{live.map((c) => <option value={c.org} selected={c.org === pick.org}>{c.termLabel}</option>)}</select> : null}
-                  <a class="btn outline" href={`?cohort=${pick.org}&template=${encodeURIComponent(repo)}#schedule-new`}>{live.length > 1 ? 'Add to a schedule' : `Add to the ${pick.termLabel} schedule`}</a>
-                </>
-              ) : <a class="btn outline" href={`?course=${course.org}#new-semester-1`}>Set up a semester first</a>}
-            </div>
-            {ready ? <div><button class="btn small quiet" type="button" onClick={() => { clear(); go(1); }}>Start another assignment</button></div> : null}
-          </>
-        ) : null}
+        {ready ? <div><button class="btn small quiet" type="button" onClick={() => { clear(); go(1); }}>Start another assignment</button></div> : null}
         {tplNow && !tpl.busy && tplNow.checks.some((c) => c.ok === false) && created ? <WizError>The assignment template is not complete yet. This page checks again by itself; if it stays like this, open the run from All operations.</WizError> : null}
       </>
     );
