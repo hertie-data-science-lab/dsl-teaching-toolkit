@@ -33,7 +33,7 @@ import {
   APP_SLUG, IMPORT_UNTICKED_MAIN, IMPORT_UNTICKED_SOLUTION, ORDINAL_WARNING, assignmentArgs, formatError, installUrl, liveSemesters, openAt, ordinalInName,
   parseSource, signature, sourceFixed, starterChoice, templateRepo, tickedEntries, type SourceRepo,
 } from '../wizards/model';
-import { allOk, checkFree, checkTemplate, readSource, useLive, type Check, type SourceBranch, type SourceRead } from '../wizards/verify';
+import { allOk, checkFree, checkTemplate, readSource, useLive, usePoll, type Check, type SourceBranch, type SourceRead } from '../wizards/verify';
 import { Checks, Rail, StepCard, Verified, WizError } from '../wizards/Wizard';
 import { Questions, STARTER_DOC, courseOf } from './Course';
 import { courseScope } from './common';
@@ -216,8 +216,10 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
   const repo = templateRepo(v.name);
   const name = String(v.name ?? '').trim();
   const courseFormats = formatsList(((course.meta?.assignment_defaults ?? {}) as Record<string, unknown>).formats);
-  const runs = env?.ops.runs.value.length ?? 0;
-  const tpl = useLive(env && repo ? async () => ({ repo, r: await checkTemplate(env.client, course.org, repo) }) : null, [repo, runs, asked]);
+  // The newest run this session finished: a run is listed only once it ends, so the check runs again when the create run is done.
+  const finishedRuns = env?.ops.runs.value ?? [];
+  const lastRun = finishedRuns[0]?.run_id ?? 0;
+  const tpl = useLive(env && repo ? async () => ({ repo, r: await checkTemplate(env.client, course.org, repo) }) : null, [repo, lastRun, asked]);
   const tplNow = tpl.value?.repo === repo ? tpl.value.r : null;
   // Ours only when step 1 found the name free: a repo that was already there is a clash, not a creation.
   const created = !!repo && d.verified['1'] === signature(v, S1) && !!tplNow && tplNow.checks[0].ok === true;
@@ -254,8 +256,12 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
   const attempted = d.imported?.repo === repo;
   const missing = toCopy.filter((c) => !importDone.includes(c.branch)).map((c) => c.branch);
   const checksOk = created && allOk(tplNow?.checks);
+  // GitHub can list a new repo before its branches: once a create run ended, the check repeats until it passes.
+  const createRan = finishedRuns.some((r) => r.op === 'assignment.create' && r.course === course.org && r.conclusion !== 'failed');
+  usePoll(tpl, !!env && step === 6 && !!repo && (created || createRan) && !checksOk);
 
   const w = effective(tiers3, effective(tiers2, v));
+  const extrasPending = created && Object.keys(extrasOf(w)).length > 0 && d.extrasSaved !== repo;
   const writeExtras = async () => {
     if (!tplNow?.config) return;
     const text = withExtras(tplNow.config.text, extrasOf(w));
@@ -289,6 +295,14 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
     autoCopied.current = repo;
     void runCopy();
   }, [copyNow]);
+  // The marking settings are saved by themselves, once, after the checks pass and any copy has run; the button is the retry.
+  const autoSaved = useRef('');
+  const saveNow = checksOk && extrasPending && !!tplNow?.config && !copy.busy && (!importPending || attempted) && save.kind !== 'busy' && autoSaved.current !== repo;
+  useEffect(() => {
+    if (!saveNow) return;
+    autoSaved.current = repo;
+    void writeExtras();
+  }, [saveNow]);
 
   let heading = '', body, foot;
   const createdNote = created && step < 6 ? <p class="note">{repo} is created. Change its settings on the <a href={`#template-${repo}`}>assignment template's settings</a>.</p> : null;
@@ -387,7 +401,6 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
     const rows = ((v.questions as QuestionRow[] | undefined) ?? []).filter((r) => r.name.trim());
     const total = rows.reduce((n, r) => n + (Number(r.points) || 0), 0);
     const def = createAssignment(courseScope(p), repo, name, assignmentArgs(v), src ? srcKey : undefined);
-    const extrasPending = created && Object.keys(extrasOf(w)).length > 0 && d.extrasSaved !== repo;
     const ready = checksOk && !importPending && !extrasPending;
     heading = ready ? 'Created' : 'Check and create';
     const live = liveSemesters(course.cohorts, (c) => {
@@ -427,6 +440,10 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
                 <OpButtons def={derive(courseScope(p), repo, repo, name)} small label="Derive the student version now" />
               </div>
             ) : null}
+          </>
+        ) : created ? null : <p class="footnote">Creating makes an assignment template with a main branch for the brief and a solution branch for marking.{src ? ' The ticked files are copied next with your GitHub account.' : ''}</p>}
+        {checksOk ? (
+          <>
             <div class="actions">
               {pick ? (
                 <>
@@ -435,10 +452,10 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
                 </>
               ) : <a class="btn outline" href={`?course=${course.org}#new-semester-1`}>Set up a semester first</a>}
             </div>
-            <div><button class="btn small quiet" type="button" onClick={() => { clear(); go(1); }}>Start another assignment</button></div>
+            {ready ? <div><button class="btn small quiet" type="button" onClick={() => { clear(); go(1); }}>Start another assignment</button></div> : null}
           </>
-        ) : created ? null : <p class="footnote">Creating makes an assignment template with a main branch for the brief and a solution branch for marking.{src ? ' The ticked files are copied next with your GitHub account.' : ''}</p>}
-        {tplNow && !tpl.busy && tplNow.checks.some((c) => c.ok === false) && created ? <WizError>The assignment template is not complete yet. Check again in a minute; if it stays like this, open the run from All operations.</WizError> : null}
+        ) : null}
+        {tplNow && !tpl.busy && tplNow.checks.some((c) => c.ok === false) && created ? <WizError>The assignment template is not complete yet. This page checks again by itself; if it stays like this, open the run from All operations.</WizError> : null}
       </>
     );
     foot = readFailed ? (
@@ -447,8 +464,8 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
       <button class="btn" type="button" disabled={!env || !repo || (!!src && !read)} onClick={() => env?.ops.open(def, 'run')}>Create assignment</button>
     ) : checksOk && importPending && read?.main ? (
       attempted ? <button class="btn" type="button" disabled={copy.busy} onClick={() => void runCopy()}>Copy again</button> : null
-    ) : checksOk && extrasPending ? (
-      <button class="btn" type="button" disabled={save.kind === 'busy' || !tplNow?.config} onClick={() => void writeExtras()}>Save the marking settings</button>
+    ) : checksOk && extrasPending && save.kind === 'bad' ? (
+      <button class="btn" type="button" disabled={!tplNow?.config} onClick={() => void writeExtras()}>Save the marking settings</button>
     ) : (
       <button class="btn small outline" type="button" disabled={tpl.busy} onClick={() => tpl.run()}>Check again</button>
     );

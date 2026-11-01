@@ -4,6 +4,7 @@
 // return, which goes stale after an hour.
 
 import { render } from 'preact';
+import { signal } from '@preact/signals';
 import { act } from 'preact/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EnvCtx, type Env } from '../src/env';
@@ -16,6 +17,7 @@ import { NewCohortScreen } from '../src/screens/NewCohort';
 import { NewCourseScreen } from '../src/screens/NewCourse';
 import { INSTALL_RETURN_MS, rememberInstallReturn, takeInstallReturn } from '../src/wizards/drafts';
 import { POLL_MS } from '../src/wizards/verify';
+import { StatusStore } from '../src/model/status';
 import { FakeGitHub, fileBody, json } from './fake';
 
 const ORG = 'hertie-deep-learning-e2345';
@@ -188,6 +190,46 @@ describe('New assignment: import', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(100); });
     expect(root.textContent).toContain('Created.');
     expect([...root.querySelectorAll('button')].some((b) => b.textContent === 'Derive the student version now')).toBe(true);
+  });
+
+  it('checks again when the create run ends and until the branches show, then saves the marking settings by itself', async () => {
+    const T = 'assignment-test';
+    let made = false, branchReads = 0;
+    const gh = new FakeGitHub()
+      .on('GET', `/repos/${COURSE}/${T}`, () => (made ? json({ name: T }) : json({ message: 'Not Found' }, 404)))
+      .on('GET', `/repos/${COURSE}/${T}/branches/main`, { name: 'main', commit: { sha: 'h1', commit: { tree: { sha: 'tr1' } } } })
+      // GitHub lists the new repo before its solution branch: the first read after the run misses it.
+      .on('GET', `/repos/${COURSE}/${T}/branches/solution`, () => (++branchReads > 1 ? json({ name: 'solution', commit: { sha: 'h2', commit: { tree: { sha: 'tr2' } } } }) : json({ message: 'Not Found' }, 404)))
+      .on('GET', `/repos/${COURSE}/${T}/contents/grading_config.yml?ref=solution`, fileBody('grading_config.yml', 'title: Test\n', 'g1'))
+      .on('PUT', `/repos/${COURSE}/${T}/contents/grading_config.yml`, { content: { sha: 'g2' }, commit: { sha: 'c2' } })
+      .on('GET', /\/check-runs/, { check_runs: [] });
+    const client = new GitHubClient({ token: () => 't', fetch: gh.fetch });
+    const runs = signal<{ run_id: number; op: string; conclusion: string; summary: string; finished: string; course: string }[]>([]);
+    const env = { client, user: { login: 'a-example', id: 1, name: null, email: null, avatar_url: '' }, files: new StaticFiles(), kind: 'classic', ops: { runs }, statuses: new StatusStore(client), pollMs: 0 } as unknown as Env;
+    const v = { name: 'Test', start: 'fresh', type: 'individual', submit_via: 'assignment_repo', formats: ['ipynb'], autograde: 'false', completion_check: 'auto', grader_pdf: false, questions: [{ name: 'Q1', points: '10', file: '' }] };
+    const verified = { 1: signature(v, S1), 2: signature(v, S2), 3: signature(v, S3), 4: signature(v, S4), 5: signature(v, S5) };
+    localStorage.setItem(`dsl-console:wizard:new-assignment:${COURSE}`, JSON.stringify({ v, verified }));
+    root = document.createElement('div');
+    document.body.appendChild(root);
+    await act(async () => render(<EnvCtx.Provider value={env}><NewAssignmentScreen course={course} loaded={{ kind: 'absent' }} cohortStates={{}} files={new StaticFiles()} now={now} step={6} /></EnvCtx.Provider>, root!));
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    expect(root.textContent).toContain('Create assignment');
+    // The create run ends: the check runs again at once, finds no solution branch yet, and repeats by itself.
+    made = true;
+    await act(async () => { runs.value = [{ run_id: 9, op: 'assignment.create', conclusion: 'done', summary: '', finished: '2026-09-30T10:01:00Z', course: COURSE }]; });
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    expect(branchReads).toBe(1);
+    expect(root.textContent).toContain('The assignment template is not complete yet.');
+    await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS); });
+    for (let i = 0; i < 5; i++) await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    expect(branchReads).toBe(2);
+    // No click: the points are written to grading_config.yml, and the step says Created with the schedule link.
+    const put = gh.seen.filter((x) => x.method === 'PUT');
+    expect(put).toHaveLength(1);
+    expect(decodeBase64((put[0].body as { content: string }).content)).toContain('Q1: 10');
+    expect(root.textContent).toContain('Created. Nothing reaches students until you add it to a schedule.');
+    expect(root.querySelector('a[href*="#schedule-new"]')!.getAttribute('href')).toBe(`?cohort=hertie-dsl-demo-course-f2026&template=${T}#schedule-new`);
+    expect([...root.querySelectorAll('button')].some((b) => b.textContent === 'Save the marking settings')).toBe(false);
   });
 
   it('offers the semester it was opened from in the last step, not the newest one', async () => {
