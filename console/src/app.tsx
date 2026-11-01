@@ -268,7 +268,7 @@ export function App({ state: s }: { state: AppState }) {
         name={ctx.course.name} semester={ctx.cohort ? { org: ctx.cohort.org, termLabel: ctx.cohort.termLabel } : undefined} />
     );
   } else if (wiz || screen in COURSE_SCREENS || !ctx.cohort) {
-    const cp: CourseProps = { migrated: courseMigrated, course: ctx.course, loaded: s.statuses.course(ctx.course.org).value, cohortStates, files: s.files, now: s.now.value, entry: route.entry, folder: sel.folder };
+    const cp: CourseProps = { migrated: courseMigrated, course: ctx.course, loaded: s.statuses.course(ctx.course.org).value, cohortStates, files: s.files, now: s.now.value, entry: route.entry, folder: sel.folder, cohort: ctx.cohort?.org };
     body = wiz?.name === 'new-semester' ? <NewCohortScreen {...cp} step={wiz.step} />
       : wiz?.name === 'new-assignment' ? <NewAssignmentScreen {...cp} step={wiz.step} />
       : wiz?.name === 'new-materials' ? <NewMaterialsScreen {...cp} />
@@ -288,7 +288,7 @@ export function App({ state: s }: { state: AppState }) {
   } else {
     const cp: CohortProps = {
       course: ctx.course, cohort: ctx.cohort, loaded: cohortLoaded ?? { kind: 'loading' }, files: s.files, now: s.now.value, entry: route.entry, tab: route.tab, open: route.open,
-      heartbeat: s.heartbeat(ctx.course.org), prefill: sel.template, courseMigrated,
+      heartbeat: s.heartbeat(ctx.course.org), prefill: sel.template, courseMigrated, courseLoaded: s.statuses.course(ctx.course.org).value,
     };
     const screens: Record<string, () => preact.JSX.Element> = {
       dashboard: () => <CohortScreen {...cp} />,

@@ -198,6 +198,25 @@ describe('the Assignments index', () => {
     expect(out).toContain('One this semester. One is being marked.');
     expect(out).not.toContain('late window');
   });
+  it('lists the course templates the schedule does not use, each with a link to add it', () => {
+    const own: Loaded = { kind: 'ready', status: { ...status, course: { ...status.course!, templates: [...status.course!.templates, { repo: 'assignment-quiz-1', state: 'ready' }] } }, sha: 'c', stale: [] };
+    const out = render(<AssignmentsScreen {...props({ courseLoaded: own })} />);
+    expect(out).toContain('<h2>Not in this semester yet</h2>');
+    expect(out).toContain(`href="?cohort=${COHORT_ORG}&amp;template=assignment-quiz-1#schedule-new">Add to the schedule</a>`);
+    expect(out).toContain(`href="?course=${COURSE_ORG}#template-assignment-quiz-1">assignment-quiz-1</a>`);
+    expect(out).not.toContain('template=assignment-3-f2026'); // in the schedule
+    // No course status read (a render test): the semester's copy of the course block.
+    const copy = render(<AssignmentsScreen {...props({ loaded: { kind: 'ready', status: { ...status, assignments: [solo] }, sha: 's', stale: [] } })} />);
+    expect(copy).toContain('template=assignment-3-f2026#schedule-new');
+  });
+  it('shows no such list when every template is scheduled, or while the course status is read', () => {
+    expect(render(<AssignmentsScreen {...props()} />)).not.toContain('Not in this semester yet');
+    const one = { kind: 'ready' as const, status: { ...status, assignments: [solo] }, sha: 's', stale: [] };
+    expect(render(<AssignmentsScreen {...props({ loaded: one, courseLoaded: { kind: 'loading' } })} />)).not.toContain('Not in this semester yet');
+  });
+  it('opens New assignment from this semester, so its last step offers this semester first', () => {
+    expect(render(<AssignmentsScreen {...props()} />)).toContain(`href="?cohort=${COHORT_ORG}#new-assignment-1">New assignment</a>`);
+  });
 });
 
 describe('entry releases', () => {
