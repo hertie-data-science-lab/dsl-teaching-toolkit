@@ -2058,12 +2058,18 @@ def _problem_entries(problems: list[dict]) -> set[str]:
 
 def run_settings(spec: grades.GradingSpec) -> dict[str, dict]:
     """Each run setting's effective value and the layer it came from (`settings`), so the
-    console shows "5 days, this course's default" without a cascade of its own."""
+    console shows "5 days, this course's default" without a cascade of its own.
+
+    No late window for work handed in outside GitHub (`collects_commits`, as every other
+    late gate asks it): its cutoff is the due date, so the console never quotes one."""
     sources = dict(spec.sources)
-    return {
+    out = {
         key: {"value": getattr(spec, key), "source": sources.get(key, "institution")}
         for key in settings.RUN_KEYS
     }
+    if not spec.collects_commits:
+        out["late_window_days"]["value"] = None
+    return out
 
 
 def render_assignments(facts: SemesterFacts, now: datetime) -> list[dict]:

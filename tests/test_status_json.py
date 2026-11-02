@@ -3748,3 +3748,14 @@ def test_external_work_goes_from_open_to_marking_at_the_due_date(via, late_windo
     assert state(entry.due_datetime - timedelta(hours=1)) == "open"
     after = entry.due_datetime + timedelta(hours=1)
     assert state(after) == ("late_window" if late_window else "marking")
+
+
+def test_run_settings_quote_no_late_window_for_external_work():
+    # Its cutoff is the due date, so the console must not quote the window it ignores.
+    sources = (("late_window_days", "institution"),)
+    external = grades.GradingSpec(
+        submit_via="external", late_window_days=10, sources=sources
+    )
+    repo = grades.GradingSpec(late_window_days=10, sources=sources)
+    assert status_json.run_settings(external)["late_window_days"]["value"] is None
+    assert status_json.run_settings(repo)["late_window_days"]["value"] == 10
