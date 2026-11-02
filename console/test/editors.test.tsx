@@ -410,6 +410,8 @@ describe('marks arithmetic, as grades.py does it', () => {
     expect(finalGrade(50, effectivePenalty(0.1, 2), 4)).toBeCloseTo(44);
     expect(finalGrade(10, effectivePenalty(0.5, 3), -2)).toBe(0);
     expect(finalGrade(null, effectivePenalty(0.1, 1), 5)).toBeNull();
+    // A penalty past 100% (days late a marker enters have no window) takes the total and no more.
+    expect(finalGrade(40, effectivePenalty(0.1, 15), 5)).toBeCloseTo(5);
   });
 
   it('takes the late penalty the grader chose, as grades.effective_penalty does', () => {

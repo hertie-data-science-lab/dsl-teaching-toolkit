@@ -593,6 +593,12 @@ def test_final_grade_is_floored_at_zero():
     assert final_grade(5, None, None, "-40") == Decimal(0)
 
 
+def test_final_grade_caps_the_penalty_at_the_whole_total():
+    # Days late a marker enters have no window: 15 days at 10% is 150%, which takes the
+    # total to nothing and no further, so the adjustment still counts.
+    assert final_grade(40, penalty_rate("10%"), 15, "+5") == Decimal(5)
+
+
 def test_final_grade_needs_no_late_policy():
     assert final_grade(37, None, None, None) == Decimal(37)
     assert final_grade(37, penalty_rate("10%"), None, None) == Decimal(37)

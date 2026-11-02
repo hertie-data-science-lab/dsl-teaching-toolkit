@@ -1014,7 +1014,9 @@ def final_grade(
     late_penalty: object = None,
 ) -> Decimal | None:
     """`total x (1 - penalty) + adjustment`, floored at 0, where the penalty is `rate x
-    days_late` unless the grader waived or set it (`effective_penalty`).
+    days_late` unless the grader waived or set it (`effective_penalty`), capped at the
+    whole total: days late a marker enters have no window to stop them, and a runaway
+    penalty must not eat the adjustment too.
 
     Derived on OUTPUT and never stored: the sheet has no `final_grade` field, so there is
     no stale cell for this to disagree with. A blank adjustment is 0 and a blank rate or
@@ -1025,7 +1027,8 @@ def final_grade(
     earned = as_decimal(total)
     if earned is None:
         return None
-    earned *= Decimal(1) - effective_penalty(rate, days_late, late_penalty).fraction
+    penalty = min(effective_penalty(rate, days_late, late_penalty).fraction, Decimal(1))
+    earned *= Decimal(1) - penalty
     return max(Decimal(0), earned + (as_decimal(adjustment) or Decimal(0)))
 
 

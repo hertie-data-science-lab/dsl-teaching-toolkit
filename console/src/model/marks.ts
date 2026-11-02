@@ -188,10 +188,10 @@ export function effectivePenalty(rate: number | null, daysLate: unknown, latePen
   return { fraction: choice.set ?? rate * days, mode: choice.mode, late };
 }
 
-/** `total x (1 - penalty) + adjustment`, floored at 0; null when there is no total. */
+/** `total x (1 - penalty) + adjustment`, the penalty capped at 1 and the result floored at 0; null when there is no total. */
 export function finalGrade(total: number | null, penalty: Penalty, adjustment: unknown): number | null {
   if (total === null) return null;
-  return Math.max(0, total * (1 - penalty.fraction) + (num(adjustment) ?? 0));
+  return Math.max(0, total * (1 - Math.min(penalty.fraction, 1)) + (num(adjustment) ?? 0));
 }
 
 const percent = (fraction: number) => Math.round(fraction * 1000) / 10;
