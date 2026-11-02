@@ -1496,8 +1496,10 @@ def record_solution_released(semester_org: str, slug: str, repos: int) -> bool:
 # so must withhold the fire-once release marker. Every OTHER `failed-*` happens AFTER the
 # push (a dead handle, an unreachable team, a Submission receipts issue that would not open) and is
 # persistent, so withholding the marker for one would re-clone every submission repo every
-# hour for the rest of the term - the exact cost the marker exists to prevent.
-_SOLUTION_NOT_PUSHED = ("failed-solution", "failed-create", "failed-drop-box")
+# hour for the rest of the term - the exact cost the marker exists to prevent. A drop box
+# whose grants or ruleset failed is the same: `_release_shared` reports `failed-solution`
+# itself when there was no drop box to push into.
+_SOLUTION_NOT_PUSHED = ("failed-solution", "failed-create")
 
 
 # What one handout arm did, in the four facts `provision_all`'s tail reads off it: the
@@ -1587,7 +1589,12 @@ def _release_shared(
         # Counted like any other handout failure, through the same `results` the tail
         # reads: the repos (here, the repo) are what this function is judged on.
         results["failed-drop-box"] = 1
-        return results, changed, [], False
+        # A grant or the ruleset failing (a dead handle, say) is persistent and must not
+        # hold the answer back from everyone else; only a drop box that is not there does.
+        if not exists_in(listing, semester_org, drop_box):
+            if solution:
+                results["failed-solution"] = 1
+            return results, changed, [], False
     solution_unavailable = False
     if solution and any(unit.casefold() == SOLUTION_DIR for unit, _ in sheet_units):
         # A unit named `solution` owns the folder the answer would land in: pushing would

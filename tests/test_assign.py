@@ -3639,6 +3639,43 @@ def test_a_failed_drop_box_solution_push_writes_no_record(
     assert _shared(monkeypatch, tmp_path, solution=True)[0] == 1
 
 
+def test_a_drop_box_grant_that_fails_does_not_hold_the_solution_back(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
+):
+    # A dead handle fails its grant on every tick; the drop box is there all the same, so
+    # the answer goes in and is recorded, as a per-unit repo's would be.
+    monkeypatch.setattr(
+        assign,
+        "add_collaborator",
+        lambda org, repo, handle, permission="push", person=False: False,
+    )
+    monkeypatch.setattr(assign, "exists_in", lambda listing, org, name: True)
+    sol = tmp_path / "t" / "solution"
+    monkeypatch.setattr(assign, "fetch_solution", lambda org, template, dest: sol)
+    pushed: list = []
+    monkeypatch.setattr(
+        assign, "push_solution", lambda org, repo, d: pushed.append(repo) or True
+    )
+    recorded: list = []
+    monkeypatch.setattr(
+        assign,
+        "record_solution_released",
+        lambda org, slug, repos: recorded.append(slug) or True,
+    )
+    assert _shared(monkeypatch, tmp_path, solution=True)[0] == 1
+    assert pushed == ["assignment-1-submissions"] and recorded == ["assignment-1"]
+
+
+def test_no_drop_box_means_no_solution_and_no_record(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
+):
+    monkeypatch.setattr(assign, "generate_from_template", lambda **kw: False)
+    monkeypatch.setattr(assign, "exists_in", lambda listing, org, name: False)
+    monkeypatch.setattr(assign, "fetch_solution", _boom)
+    monkeypatch.setattr(assign, "record_solution_released", _boom)
+    assert _shared(monkeypatch, tmp_path, solution=True)[0] == 1
+
+
 def test_the_drop_box_solution_touches_no_units_folder(tmp_path, monkeypatch):
     # The drop box holds every unit's own folder; the answer lands beside them, at the
     # top level, and none of their files is rewritten.
