@@ -126,7 +126,8 @@ export function handout(s: Scope, a: AsgRef): OpDef {
   return {
     ...base(s, 'assignment.handout_now', a.slug), confirmInPanel: true, name: 'Hand out', title: a.title, where: a.when,
     intro: 'Creates each student’s or team’s repo now instead of at the scheduled time.',
-    verb: `Hand out to ${a.units} ${a.group ? 'teams' : 'students'}`, running: 'Handing out', cancel: 'Stop after the current repo; repos already made stay',
+    // Units count the copies made, so none before the hand out: the verb names no number then.
+    verb: a.units ? `Hand out to ${a.units} ${a.group ? 'teams' : 'students'}` : `Hand out to every ${a.group ? 'team' : 'student'}`, running: 'Handing out', cancel: 'Stop after the current repo; repos already made stay',
     args: { course_source_repo: a.template }, options: HANDOUT, target: reposLike(s.cohortOrg ?? s.courseOrg, a.name || a.slug),
   };
 }

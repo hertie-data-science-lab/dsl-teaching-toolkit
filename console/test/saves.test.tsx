@@ -354,31 +354,73 @@ describe('Save on an assignment entry handed out by hand', () => {
   const MANUAL = `${SCHEDULE}  assignment-3:\n    course_source_repo: assignment-4-f2026\n    due_datetime: 2026-10-10T23:59\n`;
   const asked = () => root!.querySelector('.modal')?.textContent ?? '';
   async function addManual(gh: FakeGitHub, f: StaticFiles) {
-    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'new', prefill: 'assignment-4-f2026' })} />);
+    const env = envOf(gh, f);
+    await mount(env, <ScheduleScreen {...props(f, { entry: 'new', prefill: 'assignment-4-f2026' })} />);
     await click(root!.querySelectorAll('input[name="e-ho"]')[1]);
     await type('#e-due', '2026-10-10');
     await click(buttons('Save')[0]);
+    return env;
   }
+  const dispatched = (gh: FakeGitHub) => gh.seen.filter((x) => x.method === 'POST');
 
   it('asks before saving a new entry with no hand out date, and Cancel writes nothing', async () => {
     const gh = github(), f = files();
     await addManual(gh, f);
-    expect(asked()).toContain('Save with no hand out date?');
-    expect(asked()).toContain('Nothing goes out until you press Hand out now on the assignment’s page: students see no brief and there is no mark sheet.');
+    expect(asked()).toContain('Hand out now?');
+    expect(asked()).toContain('You chose to hand out by hand. Until it is handed out students see no brief and there is no mark sheet.');
+    expect(buttons('Save and hand out now')).toHaveLength(1);
     await click(button('Cancel'));
     await settle(() => false);
     expect(root!.querySelector('.modal')).toBeNull();
     expect(gh.seen.filter((x) => x.method === 'PUT')).toEqual([]);
   });
 
-  it('writes the entry with no handout_datetime once confirmed', async () => {
+  it('Save, hand out later writes the entry with no handout_datetime and hands nothing out', async () => {
     const gh = github(), f = files();
-    await addManual(gh, f);
-    await click(button('Save without a date'));
+    const env = await addManual(gh, f);
+    await click(button('Save, hand out later'));
     await settle(() => puts(gh, 'schedule.yml').length > 0);
     const entry = parse(body(puts(gh, 'schedule.yml')[0])).assignments['assignment-3'];
     expect(entry.due_datetime).toBe('2026-10-10T23:59');
     expect(entry).not.toHaveProperty('handout_datetime');
+    expect(env.ops.current.value).toBeNull();
+  });
+
+  it('Save and hand out now saves, then opens Hand out on the saved entry without running it', async () => {
+    const gh = github(), f = files();
+    const env = await addManual(gh, f);
+    await click(button('Save and hand out now'));
+    await settle(() => env.ops.current.value !== null);
+    expect(puts(gh, 'schedule.yml')).toHaveLength(1);
+    const cur = env.ops.current.value!;
+    expect([cur.def.op, cur.def.key, cur.def.args, cur.phase]).toEqual(['assignment.handout_now', 'assignment-3', { course_source_repo: 'assignment-4-f2026' }, 'ready']);
+    expect(cur.def.verb).toBe('Hand out to every student');
+    expect(dispatched(gh)).toEqual([]);
+  });
+
+  it('opens no hand out when the save fails', async () => {
+    const gh = github(['schedule.yml']), f = files();
+    const env = await addManual(gh, f);
+    await click(button('Save and hand out now'));
+    await settle(() => puts(gh, 'schedule.yml').length > 0 && !root!.textContent!.includes('Saving'));
+    expect(root!.querySelector('#e-due')).not.toBeNull(); // the draft is kept
+    expect(env.ops.current.value).toBeNull();
+  });
+
+  it('offers only Save, hand out later when two entries newly have no date', async () => {
+    const gh = github(), f = files();
+    const env = envOf(gh, f);
+    await mount(env, <ScheduleScreen {...props(f, { entry: 'assignment-2' })} />);
+    await click(root!.querySelectorAll('input[name="e-ho"]')[1]);
+    await act(() => render(<EnvCtx.Provider value={env}><ScheduleScreen {...props(f, { entry: 'new' })} /></EnvCtx.Provider>, root!));
+    await click(button('Assignment'));
+    await type('#e-tpl', 'assignment-3-f2026', 'change');
+    await click(root!.querySelectorAll('input[name="e-ho"]')[1]);
+    await type('#e-due', '2026-10-10');
+    await click(buttons('Save')[0]);
+    expect(asked()).toContain('Hand out now?');
+    expect(buttons('Save and hand out now')).toHaveLength(0);
+    expect(buttons('Save, hand out later')).toHaveLength(1);
   });
 
   it('asks when an edit drops the hand out date', async () => {
@@ -386,7 +428,7 @@ describe('Save on an assignment entry handed out by hand', () => {
     await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'assignment-2' })} />);
     await click(root!.querySelectorAll('input[name="e-ho"]')[1]);
     await click(buttons('Save')[0]);
-    expect(asked()).toContain('Save with no hand out date?');
+    expect(asked()).toContain('Hand out now?');
   });
 
   it('does not ask again for an entry already handed out by hand', async () => {
