@@ -609,6 +609,84 @@ describe('who Return marks would email (the engine’s last-told record)', () =>
   });
 });
 
+describe('points per question from the Marks tab', () => {
+  const FLAT = 'type: individual\nautograde: true\nformats: [py]\n';
+  const ONE_SCORE = SHEET.replace('    score_individual:\n      Q1: 8\n      Q2: 9', '    score_individual: 12');
+  const NO_SCORE = SHEET.replace('    score_individual:\n      Q1: 8\n      Q2: 9', '    score_individual:').replace('    score_individual:\n      Q1: pass\n      Q2:', '    score_individual:');
+  const toggle = () => root!.querySelector<HTMLButtonElement>('.marks-tools .points-toggle');
+  const editor = () => root!.querySelector('.points-edit');
+
+  it('offers to set points where the template has none, and to edit them where it has', async () => {
+    await marks(files(SHEET, FLAT));
+    expect(toggle()!.textContent).toBe('Set points per question');
+    render(null, root!);
+    root!.remove();
+    await marks();
+    expect(toggle()!.textContent).toBe('Edit points per question');
+  });
+
+  it('opens the rows editor in place, saying it changes the template for every semester', async () => {
+    await marks();
+    expect(editor()).toBeNull();
+    await click(toggle()!);
+    expect([...editor()!.querySelectorAll<HTMLInputElement>('input[aria-label$=" name"]')].map((x) => x.value)).toEqual(['Q1', 'Q2']);
+    expect(editor()!.textContent).toContain('This changes the assignment template, for every semester that uses it.');
+    expect(editor()!.textContent).not.toContain('single score');
+    await click(button('Cancel'));
+    expect(editor()).toBeNull();
+  });
+
+  it('saves the points into the template’s grading_config.yml on solution, and the grid gains the columns', async () => {
+    const gh = github();
+    await marks(files(NO_SCORE, FLAT), gh);
+    expect(q('thead').textContent).not.toContain('Points per question');
+    await click(toggle()!);
+    await type('input[aria-label="Question 1 points"]', '15');
+    await click(button('Add a question'));
+    await type('input[aria-label="Question 2 points"]', '25');
+    await click(button('Save points'));
+    await settle(() => editor() === null);
+    const put = puts(gh);
+    expect(put).toHaveLength(1);
+    expect(put[0].url).toContain(`/repos/${COURSE_ORG}/assignment-2-f2026/contents/grading_config.yml`);
+    expect((put[0].body as { branch: string }).branch).toBe('solution');
+    expect(parse(body(put[0]))).toEqual({ type: 'individual', autograde: true, formats: ['py'], questions: { Q1: 15, Q2: 25 } });
+    expect(q('thead').textContent).toContain('Points per question');
+    expect(root!.querySelector('input[aria-label="Q1 (out of 15) for ada-l"]')).not.toBeNull();
+    expect(toggle()!.textContent).toBe('Edit points per question');
+  });
+
+  it('says a row with a single score keeps it as its total, only where the sheet has one', async () => {
+    await marks(files(ONE_SCORE, FLAT));
+    await click(toggle()!);
+    expect(editor()!.textContent).toContain('A row that already has a single score keeps it as its total until you enter points per question.');
+  });
+
+  it('shows a single score as the total once questions exist, and a question mark typed over it saves per question', async () => {
+    const gh = github();
+    await marks(files(ONE_SCORE, CONFIG), gh);
+    const ada = () => [...root!.querySelectorAll('tr.unit-row')][0];
+    expect(ada().querySelector<HTMLInputElement>('input[aria-label="Q1 (out of 10) for ada-l"]')!.value).toBe('');
+    expect(ada().querySelector('td.calc')!.textContent).toBe('12');
+    expect(ada().hasAttribute('data-unmarked')).toBe(false);
+    await type('input[aria-label="Q1 (out of 10) for ada-l"]', '7');
+    expect(ada().querySelector('td.calc')!.textContent).toBe('7');
+    await click(button('Save marks'));
+    await settle(() => puts(gh).length > 0);
+    expect(parse(body(puts(gh)[0])).submissions['ada-l'].score_individual).toEqual({ Q1: 7 });
+  });
+
+  it('will not save a question marked from a file outside the submission', async () => {
+    const gh = github();
+    await marks(files(SHEET, CONFIG), gh);
+    await click(toggle()!);
+    await type('input[aria-label="Question 1 file"]', '../secret.tex');
+    expect(editor()!.textContent).toContain('../secret.tex is not a file inside the submission.');
+    expect(button('Save points').disabled).toBe(true);
+    expect(puts(gh)).toHaveLength(0);
+  });
+});
+
 describe('the Submitted column', () => {
   const submitted = () => [...root!.querySelectorAll('tr.unit-row')].map((r) => r.querySelector('td.sys')!.textContent);
   it('shows a recorded time short and as written (no timezone shift), a date alone as a day, and anything else as written', async () => {

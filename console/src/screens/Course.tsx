@@ -3,7 +3,7 @@
 import { Fragment, type ComponentChildren } from 'preact';
 import { useMemo, useState } from 'preact/hooks';
 import { useEnv } from '../env';
-import { invalidText, useSave } from '../edit/save';
+import { invalidText, useSave, type SaveOptions, type SaveState, type Target } from '../edit/save';
 import { YamlText, deepEqual } from '../edit/yamlText';
 import { Invalid, SchemaForm, effective, fieldErrors } from '../forms/Form';
 import { KIND_LABEL, ago, fmtDay, fmtShort, opLabel, templateName } from '../model/format';
@@ -631,6 +631,29 @@ export function Questions({ rows, set, files }: { rows: QuestionRow[]; set: (r: 
   );
 }
 
+/**
+ * Writes a template's grading_config.yml on its `solution` branch: `edit` changes the file's text,
+ * the schema checks the result, then `run` (a `useSave` save) commits it. Template settings and
+ * the Marks tab's points per question both save through here.
+ */
+export async function saveGradingConfig(
+  run: (t: Target, text: string | null, sha: string | null, opts: SaveOptions) => Promise<boolean>,
+  report: (s: SaveState) => void,
+  org: string,
+  repo: string,
+  file: { text: string; sha: string },
+  edit: (y: YamlText) => void,
+  message: string,
+): Promise<boolean> {
+  const y = new YamlText(file.text);
+  edit(y);
+  if (!validGrading(y.toJS())) {
+    report({ kind: 'bad', text: invalidText('grading_config.yml', validGrading) });
+    return false;
+  }
+  return run({ owner: org, repo, path: 'grading_config.yml', branch: 'solution' }, y.text, file.sha, { message: `${message}, from the DSL Teaching Console`, statusRepo: [org, COURSE_REPO] });
+}
+
 export function TemplateScreen(p: CourseProps) {
   const { course, entry } = p;
   const env = useEnv();
@@ -678,12 +701,12 @@ export function TemplateScreen(p: CourseProps) {
   const doSave = async () => {
     if (file.kind !== 'ready') return;
     if (Object.keys(errors).length) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
-    const y = new YamlText(file.text);
     const was = toConfig(effective(tiers, base)), now = toConfig(effective(tiers, cur));
-    for (const k of Object.keys({ ...was, ...now })) if (!deepEqual(was[k], now[k])) y.assign([k], now[k]);
-    if (qdraft !== null && !deepEqual(qdraft, baseQ)) y.assign(['questions'], questionsValue(qdraft, cfg.questions));
-    if (!validGrading(y.toJS())) return setSave({ kind: 'bad', text: invalidText('grading_config.yml', validGrading) });
-    if (await runSave({ owner: course.org, repo, path: 'grading_config.yml', branch: 'solution' }, y.text, file.sha, { message: `template: edit the settings, from the DSL Teaching Console`, statusRepo: [course.org, COURSE_REPO] })) {
+    const edit = (y: YamlText) => {
+      for (const k of Object.keys({ ...was, ...now })) if (!deepEqual(was[k], now[k])) y.assign([k], now[k]);
+      if (qdraft !== null && !deepEqual(qdraft, baseQ)) y.assign(['questions'], questionsValue(qdraft, cfg.questions));
+    };
+    if (await saveGradingConfig(runSave, setSave, course.org, repo, file, edit, 'template: edit the settings')) {
       setValues(null);
       setQdraft(null);
     }
