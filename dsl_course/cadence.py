@@ -349,7 +349,8 @@ def late_items(
             moments.append((label, release.when))
     for slug, entry in sched.assignments.items():
         # The freeze moment: late here means submissions kept arriving past the deadline the
-        # snapshot was supposed to pin. It needs no template repo, so it is always asked.
+        # snapshot was supposed to pin. Asked for every assignment; its cutoff hangs on how
+        # the work is handed in, which the caller read off each template (`submit_vias`).
         at = grading_cutoff_datetime(sched, slug, submit_via=submit_vias[slug])
         if at is not None:
             moments.append((f"assignments.{slug} snapshot", at))

@@ -1553,10 +1553,11 @@ def grading_config_faults(
         template = entry.course_source_repo
         if not template:
             continue  # the plan itself is faulty; schedule.yml's own digest says so
-        # The shape is in the file being checked, so a fault is timed off the repo
-        # shapes' cutoff and moved to the due date below once the parse says external.
+        # The shape is in the file being checked, so a fault is timed off a repo shape's
+        # cutoff (the window's end) and moved to the due date below once the parse says
+        # external.
         fires = schedule.grading_cutoff_datetime(
-            sched, slug, submit_via=GradingSpec.submit_via
+            sched, slug, submit_via="assignment_repo"
         )
         text = _grading_text(course_org, template)
         if text is None:
