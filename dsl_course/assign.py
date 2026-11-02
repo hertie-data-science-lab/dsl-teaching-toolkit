@@ -1491,12 +1491,12 @@ def record_solution_released(semester_org: str, slug: str, repos: int) -> bool:
     )
 
 
-# provision_one statuses that mean the model solution did NOT reach that unit's repo, and
+# Statuses that mean the model solution did NOT reach a unit's repo or the drop box, and
 # so must withhold the fire-once release marker. Every OTHER `failed-*` happens AFTER the
 # push (a dead handle, an unreachable team, a Submission receipts issue that would not open) and is
 # persistent, so withholding the marker for one would re-clone every submission repo every
 # hour for the rest of the term - the exact cost the marker exists to prevent.
-_SOLUTION_NOT_PUSHED = ("failed-solution", "failed-create")
+_SOLUTION_NOT_PUSHED = ("failed-solution", "failed-create", "failed-drop-box")
 
 
 # What one handout arm did, in the four facts `provision_all`'s tail reads off it: the
@@ -1538,6 +1538,8 @@ def _release_external(
 
 
 def _release_shared(
+    course_org: str,
+    template: str,
     semester_template: str,
     semester_org: str,
     slug: str,
@@ -1551,27 +1553,24 @@ def _release_shared(
     listing: dict[str, dict] | None,
 ) -> _Released | None:
     """The `shared_dropbox_repo` arm: ONE private drop box for the whole semester,
-    generated from the frozen semester template, with push for every unit.
+    generated from the frozen semester template, with push for every unit - and, when
+    asked, the model solution pushed ONCE into its top-level `solution/` folder, beside the
+    units' own folders and touching none of them.
 
-    No units are returned: there is no repo per unit here, so nothing downstream that
-    counts them - the solution record above all - has anything to count."""
+    No units are returned: there is no repo per unit here. A solution that could not be
+    fetched or pushed is reported the way the per-unit arm reports it, so the fire-once
+    record is written only over a push that landed (`provision_all`)."""
     drop_box = shared_repo(slug)
     log_step(
         f"Releasing {slug} to {semester_org}: freeze semester template, then one private "
         f"drop box {semester_org}/{drop_box} with push for {what}"
     )
-    if solution:
-        # Nowhere private to put it - see the `shared_dropbox_repo` note beside
-        # `course.SUBMIT_VIA`.
-        # The fire-once marker is deliberately not written (`can_hold_solution` gates it),
-        # so an instructor who corrects the shape can still release it.
-        log(
-            f"  (no model solution to push - {slug} has one drop box the whole "
-            f"semester can read)"
-        )
     if dry_run:
         _dry_run_semester_template(semester_org, slug)
-        log(f"    PREVIEW  {semester_org}/{drop_box}  <- push for {what}")
+        log(
+            f"    PREVIEW  {semester_org}/{drop_box}  <- push for {what}"
+            f"{' + solution' if solution else ''}"
+        )
         return None
     drop_box_ok, changed = ensure_drop_box(
         semester_template,
@@ -1587,7 +1586,20 @@ def _release_shared(
         # Counted like any other handout failure, through the same `results` the tail
         # reads: the repos (here, the repo) are what this function is judged on.
         results["failed-drop-box"] = 1
-    return results, changed, [], False
+        return results, changed, [], False
+    solution_unavailable = False
+    if solution:
+        with tempfile.TemporaryDirectory() as soldir:
+            sol_dir = fetch_solution(course_org, template, Path(soldir) / "t")
+            if sol_dir is None:
+                log_err("  ! no usable solution to push into the drop box")
+                solution_unavailable = True
+            elif push_solution(semester_org, drop_box, sol_dir):
+                log(f"  solution -> {semester_org}/{drop_box}/{SOLUTION_DIR}/")
+            else:
+                log_err(f"  ! could not push the solution to {semester_org}/{drop_box}")
+                results["failed-solution"] = 1
+    return results, changed, [], solution_unavailable
 
 
 def _release_units(
@@ -2016,6 +2028,8 @@ def provision_all(
         released = _release_external(semester_org, slug, what, solution, dry_run)
     elif gspec.submit_shared:
         released = _release_shared(
+            course_org,
+            template,
             semester_template,
             semester_org,
             slug,
@@ -2174,10 +2188,12 @@ def provision_all(
         # never pushed one, so its fire-once marker must not be written over the absence.
         and gspec.can_hold_solution
         and not solution_unavailable
-        and bool(units)
+        # The drop box is there whoever has onboarded; a repo per unit is not.
+        and (bool(units) or gspec.submit_shared)
         and not any(results.get(s) for s in _SOLUTION_NOT_PUSHED)
     )
-    if solution_pushed and not record_solution_released(semester_org, slug, len(units)):
+    repos = 1 if gspec.submit_shared else len(units)
+    if solution_pushed and not record_solution_released(semester_org, slug, repos):
         log_err(
             f"the solution for {slug} shipped, but its fire-once record could not be "
             f"written to {semester_org}/semester-config - until it is, every hourly tick "

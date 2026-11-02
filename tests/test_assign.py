@@ -3341,7 +3341,8 @@ def test_a_public_handout_opens_no_feedback_issue(
 #
 # `submit_via: shared_dropbox_repo` freezes the semester template as usual - the brief lives there - and
 # then makes exactly ONE repo, `<slug>-submissions`, with every unit on `push`. There is
-# no repo per unit, so there is no Submission receipts issue, no receipt and no model solution; and
+# no repo per unit, so there is no Submission receipts issue and no receipt; the model
+# solution goes ONCE into the drop box's own `solution/` folder; and
 # the drop box's existence is not the record a per-unit repo's is, so the grant loop
 # re-runs every tick and asks who is granted already.
 
@@ -3594,17 +3595,83 @@ def test_an_unprotected_drop_box_reds_the_handout(
     assert _shared(monkeypatch, tmp_path) == (1, True)
 
 
-def test_a_shared_handout_opens_no_feedback_issue_and_pushes_no_solution(
-    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks, feedback_issues, capsys
+def test_a_shared_handout_opens_no_feedback_issue(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks, feedback_issues
 ):
-    # One repo the whole semester can read is not a place to put a student's marks, nor the
-    # model answer. The fire-once solution marker is deliberately not written, so an
-    # instructor who corrects the shape can still release it.
-    monkeypatch.setattr(assign, "fetch_solution", _boom)
-    monkeypatch.setattr(assign, "record_solution_released", _boom)
-    assert _shared(monkeypatch, tmp_path, solution=True) == (0, True)
+    # One repo the whole semester can read is not a place to put a student's marks.
+    assert _shared(monkeypatch, tmp_path) == (0, True)
     assert feedback_issues == []
-    assert "no model solution to push" in capsys.readouterr().out
+
+
+def test_a_shared_solution_goes_into_the_drop_box_once_and_is_recorded(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
+):
+    # The drop box is private, so it can hold the model answer: ONE push into its own
+    # `solution/` folder, and the fire-once record over it, so no later tick re-pushes.
+    sol = tmp_path / "t" / "solution"
+    monkeypatch.setattr(assign, "fetch_solution", lambda org, template, dest: sol)
+    pushed: list = []
+    monkeypatch.setattr(
+        assign, "push_solution", lambda org, repo, d: pushed.append((repo, d)) or True
+    )
+    recorded: list = []
+    monkeypatch.setattr(
+        assign,
+        "record_solution_released",
+        lambda org, slug, repos: recorded.append((slug, repos)) or True,
+    )
+    assert _shared(monkeypatch, tmp_path, solution=True) == (0, True)
+    assert pushed == [("assignment-1-submissions", sol)]
+    assert recorded == [("assignment-1", 1)]
+    # The next tick, its record written, does not ask for the solution again.
+    assert _shared(monkeypatch, tmp_path)[0] == 0
+    assert len(pushed) == 1 and len(recorded) == 1
+
+
+def test_a_failed_drop_box_solution_push_writes_no_record(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
+):
+    monkeypatch.setattr(
+        assign, "fetch_solution", lambda org, template, dest: tmp_path / "solution"
+    )
+    monkeypatch.setattr(assign, "push_solution", lambda *a: False)
+    monkeypatch.setattr(assign, "record_solution_released", _boom)
+    assert _shared(monkeypatch, tmp_path, solution=True)[0] == 1
+
+
+def test_the_drop_box_solution_touches_no_units_folder(tmp_path, monkeypatch):
+    # The drop box holds every unit's own folder; the answer lands beside them, at the
+    # top level, and none of their files is rewritten.
+    sol = tmp_path / "t" / "solution"
+    sol.mkdir(parents=True)
+    (sol / "answers.py").write_text("the model answer")
+
+    def fake_clone(org, repo, wd):
+        (wd / "ada-l").mkdir(parents=True)
+        (wd / "ada-l" / "work.py").write_text("ada's work")
+        return True
+
+    monkeypatch.setattr(assign, "clone", fake_clone)
+    tree: dict = {}
+
+    def fake_git(*args):
+        if "add" in args:
+            wd = Path(args[args.index("-C") + 1])
+            tree.update(
+                {
+                    p.relative_to(wd).as_posix(): p.read_text()
+                    for p in wd.rglob("*")
+                    if p.is_file()
+                }
+            )
+        return (0, "")
+
+    monkeypatch.setattr(assign, "git", fake_git)
+    assert assign.push_solution("SEMESTER", "assignment-1-submissions", sol)
+    assert tree == {
+        "ada-l/work.py": "ada's work",
+        "solution/answers.py": "the model answer",
+    }
 
 
 def test_a_shared_dry_run_writes_nothing_at_all(

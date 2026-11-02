@@ -1482,8 +1482,8 @@ def grading_spec_faults(
                 f"`solution_datetime:`, but `submit_via: {spec.submit_via}` with "
                 f"`visibility: {spec.visibility}` gives it no private repo of its own to "
                 f"push the model solution into - it is never pushed where the world can "
-                f"read it, where the students can publish it, or where the whole semester "
-                f"shares one repo, so that moment passes and nothing is released",
+                f"read it or where the students can publish it, so that moment passes and "
+                f"nothing is released",
                 field="visibility",
                 lineno=lines.get(("visibility",)),
                 fix="remove `solution_datetime:` from this assignment's entry in "

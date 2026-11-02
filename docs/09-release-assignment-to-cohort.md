@@ -61,8 +61,9 @@ Education upgrade lands, so until then the drop box is left unprotected and the 
 says so. Each unit pushes into its own `<handle>/` or `<team>/` folder and can read
 everyone else's.
 
-There is no Submission receipts issue and no model solution push - one repo the whole semester reads
-is not a place for either. The handout re-fires every quarter of an hour
+There is no Submission receipts issue - one repo the whole semester reads is not a place for
+one. The model solution goes in **once**, into the drop box's own top-level `solution/`
+folder, and touches no unit's folder. The handout re-fires every quarter of an hour
 like any other, and a student who onboards later is granted push on the next tick.
 
 ### An assignment whose repos are public
