@@ -469,7 +469,7 @@ describe('Return marks from the marking screen', () => {
     expect(button('Return marks to 1 student')).toBeDefined();
     await click(button('Return marks to 1 student'));
     const facts = [...root!.querySelectorAll('.op-facts p')].map((p) => p.textContent);
-    expect(facts).toEqual(['1 student gets marks · 1 not marked yet (skipped) · 1 held (fix first)', 'Final: median 17, range 17–17, 1 held']);
+    expect(facts).toEqual(['1 student gets new marks · 0 already told and unchanged · 1 not marked yet (skipped) · 1 held (fix first)', 'Final: median 17, range 17–17, 1 held']);
   });
 
   it('says unsaved rows are not counted until saved', async () => {
@@ -530,6 +530,82 @@ describe('Return marks from the marking screen', () => {
   it('names who a preview would email, from the private preview issue', () => {
     const def = returnMarks({ courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' }, { slug: 'a', title: 'A', template: 't', units: 1, group: false, when: 'Marking' }, 1, 'a', null, [], 'extra');
     expect(def.dryExtra).toBe('extra');
+  });
+});
+
+describe('who Return marks would email (the engine’s last-told record)', () => {
+  const TOLD_PATH = `${COHORT_ORG}/semester-config/.system/returned/assignment-2.yml`;
+  /** A unit's block as the sheet carries it. */
+  const block = (sheet: string, key: string) => {
+    const at = sheet.indexOf(`  ${key}:\n`);
+    const next = sheet.slice(at + 1).search(/\n {2}\S/);
+    return sheet.slice(at, next < 0 ? undefined : at + 1 + next + 1);
+  };
+  const record = (container: string, ...blocks: string[]) => `# Last told by Return marks; written by the toolkit.\n${container}:\n${blocks.join('')}`;
+  const withTold = (told: string | null, sheet = SHEET) => {
+    const f = files(sheet);
+    if (told !== null) (f as unknown as { map: Record<string, string> }).map[TOLD_PATH] = told;
+    return f;
+  };
+  const big = () => q<HTMLButtonElement>('.return-block button.btn.big');
+  const why = () => root!.querySelector('.return-why')?.textContent ?? null;
+  const ADA = block(SHEET, 'ada-l');
+
+  it('counts every marked, unheld student when nobody has been told yet', async () => {
+    await marks(withTold(null));
+    expect(big().textContent).toBe('Return marks to 1 student');
+    expect(big().disabled).toBe(false);
+    expect(why()).toBeNull();
+  });
+
+  it('greys the button out when everyone marked has been told these marks', async () => {
+    const gh = github(), f = withTold(record('submissions', ADA)), env = envOf(gh, f);
+    await mount(env, <><AssignmentScreen {...props(f)} /><OpPanel /></>);
+    expect(big().textContent).toBe('Return marks to 0 students');
+    expect(big().disabled).toBe(true);
+    expect(big().getAttribute('aria-disabled')).toBe('true');
+    expect(why()).toBe('Everyone marked has been told these marks');
+    await click(big());
+    expect(env.ops.current.value).toBeNull();
+    expect(button('Student view').disabled).toBe(false);
+  });
+
+  it('counts a unit whose score changed since it was told', async () => {
+    await marks(withTold(record('submissions', ADA.replace('Q1: 8', 'Q1: 7'))));
+    expect(big().textContent).toBe('Return marks to 1 student');
+  });
+
+  it('does not count a change only in private notes or in the submission facts', async () => {
+    await marks(withTold(record('submissions', ADA.replace('Check the plot.', 'Older note.').replace('2026-09-27T20:00', '2026-09-26T09:00').replace('8/10', '7/10'))));
+    expect(big().textContent).toBe('Return marks to 0 students');
+  });
+
+  it('counts a change in the days late', async () => {
+    await marks(withTold(record('submissions', ADA.replace('days_late: 0', 'days_late: 1'))));
+    expect(big().textContent).toBe('Return marks to 1 student');
+  });
+
+  it('counts a marked unit absent from the record, and says who is already told', async () => {
+    const sheet = SHEET.replace('  cy-d:\n    info:\n      submitted:\n      days_late:\n      autograde:\n    score_individual:\n      Q1:', '  cy-d:\n    info:\n      submitted:\n      days_late:\n      autograde:\n    score_individual:\n      Q1: 5');
+    const gh = github(), f = withTold(record('submissions', ADA), sheet), env = envOf(gh, f);
+    await mount(env, <><AssignmentScreen {...props(f)} /><OpPanel /></>);
+    expect(big().textContent).toBe('Return marks to 1 student');
+    await click(big());
+    expect(q('.op-facts p').textContent).toBe('1 student gets new marks · 1 already told and unchanged · 0 not marked yet (skipped) · 1 held (fix first)');
+  });
+
+  it('does not count unsaved edits, and says to save them', async () => {
+    await marks(withTold(record('submissions', ADA)));
+    await type('input[aria-label="Q1 (out of 10) for cy-d"]', '6');
+    expect(big().textContent).toBe('Return marks to 0 students');
+    expect(big().disabled).toBe(true);
+    expect(why()).toBe('Save marks to return them');
+  });
+
+  it('says nothing is marked yet on a sheet without a mark', async () => {
+    await marks(withTold(null, SHEET.replace('      Q1: 8\n      Q2: 9', '      Q1:\n      Q2:').replace('Q1: pass', 'Q1:')));
+    expect(big().textContent).toBe('Return marks to 0 students');
+    expect(why()).toBe('Nothing is marked yet');
   });
 });
 
@@ -705,6 +781,22 @@ describe('teams and people on the grid', () => {
     await mountTeams(teamFiles(TEAMS.replace('      ben-k:\n        adjustment_individual:', '      ben-k:\n        adjustment_individual: -2')));
     expect(root!.querySelectorAll('tr.member-row')).toHaveLength(3);
     expect(button('Open all teams')).toBeUndefined();
+  });
+
+  it('counts teams for Return marks, a changed member adjustment counting the team', async () => {
+    const TOLD = `${COHORT_ORG}/semester-config/.system/returned/assignment-2.yml`;
+    const told = (sheet: string) => {
+      const f = teamFiles();
+      (f as unknown as { map: Record<string, string> }).map[TOLD] = `# Last told.\n${sheet}`;
+      return f;
+    };
+    const big = () => q<HTMLButtonElement>('.return-block button.btn.big');
+    await mountTeams(told(TEAMS));
+    expect([big().textContent, big().disabled]).toEqual(['Return marks to 0 teams', true]);
+    render(null, root!);
+    root!.remove();
+    await mountTeams(told(TEAMS.replace('      ben-k:\n        adjustment_individual:', '      ben-k:\n        adjustment_individual: 2')));
+    expect([big().textContent, big().disabled]).toEqual(['Return marks to 1 team', false]);
   });
 
   it('names an individual student, handle under the name, and keeps Adjustment behind its chip', async () => {

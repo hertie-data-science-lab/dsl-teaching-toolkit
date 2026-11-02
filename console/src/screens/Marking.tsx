@@ -11,7 +11,7 @@ import { Invalid } from '../forms/Form';
 import { assignmentTitle, fmtDay, fmtShort, fmtTime, fmtWhen, plural, str } from '../model/format';
 import {
   HOLD_WORDS, NOTES_KEY, cellValue, daysLateFault, effectivePenalty, finalGrade, holdReasons, lateRule, num, overrideText, overrideValue, percentOff, questionFile,
-  questionPoints, readSheet, round, rowsChanged, scoreTotal, spread, studentMarks, unitDaysLate, type HoldReason, type HoldUnit, type Penalty, type Person, type Unit,
+  questionPoints, readSheet, readTold, round, rowsChanged, scoreTotal, sheetUnits, spread, studentMarks, toldPath, unitDaysLate, untold, type HoldReason, type HoldUnit, type Penalty, type Person, type Unit,
 } from '../model/marks';
 import { SOURCE_WORD, resolve, valueWord } from '../model/cascade';
 import { HandOutNow, assignmentSettings, isExternal, sheetName } from './RunSettings';
@@ -315,8 +315,14 @@ export function MarksTab(p: TabProps) {
   const parsed = useMemo(() => {
     if (text === null) return null;
     const y = new YamlText(text);
-    return y.errors.length ? { error: y.errors[0] } : { sheet: readSheet(text, y.toJS()) };
+    if (y.errors.length) return { error: y.errors[0] };
+    const doc = y.toJS();
+    return { sheet: readSheet(text, doc), blocks: sheetUnits(doc) };
   }, [text]);
+  // What each unit was last told (the engine's record): Return marks emails only the units whose saved marks differ.
+  const toldFile = p.files.file(org, CONFIG_REPO, toldPath(name));
+  const toldText = toldFile.kind === 'ready' ? toldFile.text : null;
+  const lastTold = useMemo(() => readTold(toldText), [toldText]);
   const roster = p.files.file(org, CONFIG_REPO, 'students.csv');
   const rosterText = roster.kind === 'ready' ? roster.text : null;
   const students = useMemo(() => (rosterText === null ? [] : parseRoster(rosterText).rows), [rosterText]);
@@ -356,17 +362,22 @@ export function MarksTab(p: TabProps) {
   // grades. Only a saved sheet moves them, so they are not worked out again per keystroke.
   const saved = useMemo(() => {
     if (!sheetRead) return null;
+    const blocks = parsed?.blocks ?? {};
     const daysOf = (u: Unit) => unitDaysLate(u.info, external, u.daysLate);
     const held = holdReasons(sheetRead.units.map((u) => holdUnit(u, u.score, u.latePenalty, (pr) => pr.adjustment, daysOf(u), external)), questions, rate);
     const isHeld = heldIn(held);
     const heldUnits = sheetRead.units.filter((u) => isHeld(u)).length;
     const skipped = sheetRead.units.filter((u) => !isHeld(u) && noMark(u.score)).length;
+    // Marked and not held: those whose saved block differs from what they were last told get new marks.
+    const ready = sheetRead.units.filter((u) => !isHeld(u) && !noMark(u.score));
+    const sending = ready.filter((u) => untold(blocks[u.key], lastTold[u.key])).length;
+    const anyMark = sheetRead.units.some((u) => !noMark(u.score));
     const finals = sheetRead.units.flatMap((u) => {
       const pen = effectivePenalty(rate, daysOf(u), u.latePenalty);
       return u.people.filter((pr) => !held[pr.handle]).map((pr) => finalGrade(scoreTotal(u.score, questions), pen, pr.adjustment)).filter((f): f is number => f !== null);
     });
-    return { heldUnits, skipped, sending: sheetRead.units.length - heldUnits - skipped, finals, held: Object.keys(held).length };
-  }, [sheetRead, questions, rate, external]);
+    return { heldUnits, skipped, sending, told: ready.length - sending, ready: ready.length, anyMark, finals, held: Object.keys(held).length };
+  }, [sheetRead, lastTold, questions, rate, external]);
   const rule = lateRuleOf(a);
   const max = qs.reduce((n, [, m]) => n + (Number(questionPoints(m)) || 0), 0);
   const group = a.teams !== null && a.teams !== undefined;
@@ -667,10 +678,10 @@ export function MarksTab(p: TabProps) {
     next.focus();
     next.select?.();
   };
-  const { sending, skipped, heldUnits, finals, held } = saved!;
+  const { sending, told: toldUnits, ready: readyUnits, anyMark, skipped, heldUnits, finals, held } = saved!;
   const facts = [
     ...(changed ? [`${plural(changed, 'unsaved row')} ${changed === 1 ? 'is' : 'are'} not counted until you save`] : []),
-    `${plural(sending, noun)} ${sending === 1 ? 'gets' : 'get'} marks · ${skipped} not marked yet (skipped) · ${heldUnits} held (fix first)`,
+    `${plural(sending, noun)} ${sending === 1 ? 'gets' : 'get'} new marks · ${toldUnits} already told and unchanged · ${skipped} not marked yet (skipped) · ${heldUnits} held (fix first)`,
     spread(finals, held),
   ];
   const people = sheet.units.flatMap((u) => u.people.map((pr) => ({ u, pr })));
@@ -681,10 +692,17 @@ export function MarksTab(p: TabProps) {
     setPending(null);
   };
   const returnDef = returnMarks(scope, asgRef(a, group), sending, name, late, facts, <PreviewEmails org={org} slug={name} />);
+  // Nobody to email: the button is greyed out, and a line says why.
+  const why = sending ? null
+    : changed ? 'Save marks to return them'
+    : !anyMark ? 'Nothing is marked yet'
+    : !readyUnits ? 'Fix the held rows to return them'
+    : 'Everyone marked has been told these marks';
   // Returning is its own block above the grid: the panel it opens holds the figures and Preview.
   const returnBlock = (
     <div class="return-block">
-      <span class="return-main"><OpOpen def={returnDef} cls="btn big" label={returnDef.verb} />{p.open ? <OpenOnArrival slug={a.slug} def={returnDef} start={p.open === 'return-run' ? 'run' : 'preview'} /> : null}</span>
+      <span class="return-main"><OpOpen def={returnDef} cls="btn big" label={returnDef.verb} disabled={!sending} />{p.open ? <OpenOnArrival slug={a.slug} def={returnDef} start={p.open === 'return-run' ? 'run' : 'preview'} /> : null}</span>
+      {why ? <p class="footnote return-why">{why}</p> : null}
       <button class="btn small quiet" type="button" onClick={() => setViewing('')}>Student view</button>
     </div>
   );
