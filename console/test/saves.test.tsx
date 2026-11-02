@@ -400,6 +400,35 @@ describe('Save on an assignment entry handed out by hand', () => {
   });
 });
 
+describe('Hand out now beside a saved entry handed out by hand', () => {
+  const MANUAL = `${SCHEDULE}  assignment-3:\n    course_source_repo: assignment-4-f2026\n    due_datetime: 2026-10-10T23:59\n`;
+  const waiting: Assignment = { ...solo, slug: 'assignment-3', title: 'Quiz', template: 'assignment-4-f2026', state: 'declared', handout: null, teams: null };
+  const loaded = (a: Assignment): Loaded => ({ ...ready, status: { ...ready.status, assignments: [solo, a] } });
+  const handOutNow = () => buttons('Hand out now').length;
+
+  it('shows on the Schedule entry and the Overview form while the engine reports it declared', async () => {
+    const gh = github(), f = files({ [`${COHORT_ORG}/semester-config/schedule.yml`]: MANUAL });
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'assignment-3', loaded: loaded(waiting) })} />);
+    expect(handOutNow()).toBe(1);
+    // A draft that leaves the manual choice is not what schedule.yml says: no button.
+    await click(root!.querySelectorAll('input[name="e-ho"]')[0]);
+    expect(handOutNow()).toBe(0);
+    render(null, root!);
+    await mount(envOf(gh, f), <AssignmentScreen {...props(f, { entry: 'assignment-3', tab: 'overview', loaded: loaded(waiting) })} />);
+    expect(q('#run-settings').textContent).toContain('Hand out now');
+  });
+
+  it('does not show once handed out, nor for a new entry', async () => {
+    const gh = github(), f = files({ [`${COHORT_ORG}/semester-config/schedule.yml`]: MANUAL });
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'assignment-3', loaded: loaded({ ...waiting, state: 'open', handout: '2026-09-20T10:00:00+02:00' }) })} />);
+    expect(handOutNow()).toBe(0);
+    render(null, root!);
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'new', prefill: 'assignment-4-f2026', loaded: loaded(waiting) })} />);
+    await click(root!.querySelectorAll('input[name="e-ho"]')[1]);
+    expect(handOutNow()).toBe(0);
+  });
+});
+
 describe('Save on the marks grid', () => {
   it('writes the team’s score and its feedback per question', async () => {
     const gh = github(), f = files();

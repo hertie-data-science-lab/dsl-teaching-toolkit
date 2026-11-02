@@ -170,6 +170,14 @@ describe('the assignment hub', () => {
     expect(render(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'marks' })} />)).not.toContain('>Hand out now</button>');
   });
 
+  it('offers Hand out now on an index row handed out by hand, and on no other', () => {
+    const byHand = { ...solo, slug: 'assignment-5', state: 'declared' as const, handout: null };
+    const dated = { ...solo, slug: 'assignment-6', state: 'declared' as const, handout: '2026-10-01T10:00:00+02:00' };
+    const out = render(<AssignmentsScreen {...props({ loaded: { kind: 'ready', status: { ...status, assignments: [solo, byHand, dated] }, sha: 's', stale: [] } })} />);
+    expect(out.match(/>Hand out now<\/button>/g)).toHaveLength(1);
+    expect(out.indexOf('>Hand out now</button>')).toBeGreaterThan(out.indexOf('#assignment-assignment-5'));
+  });
+
   it('renders the named tab over the default one', () => {
     const out = render(<AssignmentScreen {...props({ entry: 'assignment-3', tab: 'overview' })} />);
     expect(current(out)).toBe('Overview');

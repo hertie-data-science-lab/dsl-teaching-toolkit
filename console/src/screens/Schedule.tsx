@@ -30,7 +30,7 @@ import type { CohortProps, ReadyProps } from './types';
 import { ASSIGNMENTS_FILE, CONFIG_REPO } from '../model/names';
 import { SOURCE_WORD, assignmentsFile, lateWord, resolve, usableBlock, validAssignments, validSchedule, type Layers } from '../model/cascade';
 import { parse } from 'yaml';
-import { RunRows, SolutionNote, applicableKeys, assignmentsAfterSchedule, cutoffOf, forcedVisibility, runErrors, semesterLayers } from './RunSettings';
+import { HandOutNow, RunRows, SolutionNote, waitingHandOut, applicableKeys, assignmentsAfterSchedule, cutoffOf, forcedVisibility, runErrors, semesterLayers } from './RunSettings';
 import type { Values } from '../tiers/types';
 import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO, DEFAULT_TIMEZONE } from '../model/policy';
 import { CONTENT_KINDS, EMPTY_ENTRY_KIND, MATERIALS_FILE, inferKind, landingSection, readDeclared } from '../model/materialsRules';
@@ -264,7 +264,7 @@ export interface NewRun {
   errors: Record<string, string>;
 }
 
-function AssignmentForm({ p, d, set, errors, templates, isNew, run, tiered }: { p: ReadyProps; d: AssignmentDraft; set: Setter<AssignmentDraft>; errors: Record<string, string>; templates: { repo: string; state: string }[]; isNew: boolean; run: NewRun; tiered: Tiered[] }) {
+function AssignmentForm({ p, d, set, errors, templates, isNew, run, tiered, waiting }: { p: ReadyProps; d: AssignmentDraft; set: Setter<AssignmentDraft>; errors: Record<string, string>; templates: { repo: string; state: string }[]; isNew: boolean; run: NewRun; tiered: Tiered[]; waiting: Assignment | null }) {
   const tpl = templates.find((t) => t.repo === d.template);
   // The template's state in the one set of words (decision 0034).
   const tplState = tpl ? templateReadinessIn(p.status.course, tpl.repo, tiered) : null;
@@ -302,6 +302,7 @@ function AssignmentForm({ p, d, set, errors, templates, isNew, run, tiered }: { 
           <label class="choice"><input type="radio" name="e-ho" checked={!d.manual} onChange={() => set({ manual: false })} /><b>At a time</b><span>Automation hands out then.</span></label>
           <label class="choice"><input type="radio" name="e-ho" checked={d.manual} onChange={() => set({ manual: true })} /><b>I will hand out manually</b><span>You press Hand out now on its page; until then students see no brief and there is no mark sheet.</span></label>
         </div>
+        {waiting ? <div class="actions"><HandOutNow p={p} a={waiting} small /></div> : null}
       </div>
       {!d.manual ? (
         <div class="cond"><div class="row-2">
@@ -658,7 +659,7 @@ function View(p: ReadyProps) {
             <div class="form">
               {d.kind !== 'semester' && d.kind !== 'archive' ? <div class="field"><span class="label">Identifier</span><div class="ident">{ident}<span>derived, as the student site does</span></div></div> : null}
               {d.kind === 'session' ? <ReleaseForm p={p} d={d} set={set} errors={errors} repos={repos} inferred={inferredOf(d)} />
-                : d.kind === 'assignments' ? <AssignmentForm p={p} d={d} set={set} errors={errors} templates={templates} isNew={key === 'new'} tiered={tiered} run={{ values: newRun, set: (v) => { setNewRun(v); if (save.kind !== 'busy') setSave({ kind: 'idle' }); }, errors: newRunErrors(d) }} />
+                : d.kind === 'assignments' ? <AssignmentForm p={p} d={d} set={set} errors={errors} templates={templates} isNew={key === 'new'} tiered={tiered} waiting={key === 'new' ? null : waitingHandOut(assignmentOf.get(key), baseOf(key), d)} run={{ values: newRun, set: (v) => { setNewRun(v); if (save.kind !== 'busy') setSave({ kind: 'idle' }); }, errors: newRunErrors(d) }} />
                 : d.kind === 'events' ? <EventForm d={d} set={set} errors={errors} />
                 : d.kind === 'semester' ? <SemesterForm d={d} set={set} errors={errors} />
                 : <ArchiveForm d={d} set={set} errors={errors} />}

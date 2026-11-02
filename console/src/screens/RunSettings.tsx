@@ -14,9 +14,11 @@ import {
   LATE_PAIR, REPO_NAME_RE, RUN_KEYS, semesterName, SOURCE_WORD, assignmentsFile, below, courseBlock, effectiveWord, lateWord, layersOf, rawBlock, resolve, scheduleFile, usableBlock,
   validAssignments, validSchedule, valueWord, writeBlock, type Block, type Layers, type RunKey, type YamlFile,
 } from '../model/cascade';
-import { addDays, fmtWhen } from '../model/format';
+import { addDays, assignmentTitle, fmtDay, fmtWhen } from '../model/format';
 import { ASSIGNMENTS_FILE, CONFIG_REPO } from '../model/names';
-import { draftErrors, readDraft, writeDraft, type AssignmentDraft } from '../model/scheduleEdit';
+import { draftErrors, readDraft, writeDraft, type AssignmentDraft, type Draft } from '../model/scheduleEdit';
+import { handout, type AsgRef } from '../ops/defs';
+import { OpButtons } from '../ops/Panel';
 import { SOLUTION_WARNING } from '../model/labels';
 import type { Assignment } from '../model/types';
 import { pastDue } from '../model/assignment';
@@ -27,7 +29,7 @@ import type { FieldTier, Values } from '../tiers/types';
 import { CheckLine, EditFile, Loading } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveBar } from '../ui/edit';
-import { gradingConfig, tzOf, yearOf } from './common';
+import { cohortScope, gradingConfig, tzOf, yearOf } from './common';
 import type { ReadyProps } from './types';
 
 
@@ -49,6 +51,26 @@ export function assignmentSettings(p: Pick<ReadyProps, 'files' | 'course' | 'coh
 export function sheetName(p: Pick<ReadyProps, 'files' | 'cohort'>, key: string): string {
   const f = assignmentsFile(p.files, p.cohort.org);
   return f && f !== 'loading' ? semesterName(f.doc, key) : key;
+}
+
+/** The assignment as Hand out now names it, wherever it is offered. */
+export function handoutRef(p: Pick<ReadyProps, 'files' | 'cohort'>, a: Assignment, group: boolean, tz: string, year: number): AsgRef {
+  return { slug: a.slug, title: assignmentTitle(a), template: a.template, units: a.units, group, when: a.handout ? `Scheduled ${fmtDay(a.handout, tz, year)}` : 'Hand out by hand', name: sheetName(p, a.slug) };
+}
+
+/** Hand out now (its Preview and verb) for an assignment not yet handed out. */
+export function HandOutNow({ p, a, small }: { p: ReadyProps; a: Assignment; small?: boolean }) {
+  const tz = tzOf(p.status), year = yearOf(p.now, tz);
+  return <OpButtons def={handout(cohortScope(p), handoutRef(p, a, a.teams !== null && a.teams !== undefined, tz, year))} label="Hand out now" small={small} />;
+}
+
+/**
+ * The assignment to offer Hand out now for beside an entry's hand out choice: only a saved entry
+ * handed out by hand, its choice unchanged in the draft, that the engine still reports declared.
+ * Never a draft: the op hands out what schedule.yml says.
+ */
+export function waitingHandOut(a: Assignment | undefined, saved: Draft | null, d: Draft): Assignment | null {
+  return a?.state === 'declared' && saved?.kind === 'assignments' && saved.manual && d.kind === 'assignments' && d.manual ? a : null;
 }
 
 const toValues = (b: Block): Values => Object.fromEntries(Object.entries(b).map(([k, v]) => [k, v === null ? undefined : v]));
@@ -248,8 +270,8 @@ export function SolutionNote() {
 const T = (label: string, widget: FieldTier['widget'], extra: Partial<FieldTier> = {}): FieldTier => ({ tier: 'default', label, widget, ...extra });
 
 /** Timings as the Overview form edits them: hand out, due, the computed late cutoff, solution shown. */
-function Timings({ d, set, errors, cutoff, days, lateOk, solutionOff, tz, year }: {
-  d: AssignmentDraft; set: (patch: Partial<AssignmentDraft>) => void; errors: Record<string, string>; cutoff: string | null; days: unknown; lateOk: boolean; solutionOff: string | null; tz: string; year: number;
+function Timings({ d, set, errors, cutoff, days, lateOk, solutionOff, tz, year, handOut }: {
+  d: AssignmentDraft; set: (patch: Partial<AssignmentDraft>) => void; errors: Record<string, string>; cutoff: string | null; days: unknown; lateOk: boolean; solutionOff: string | null; tz: string; year: number; handOut?: preact.ComponentChildren;
 }) {
   const F = (k: keyof AssignmentDraft & string, t: FieldTier, error?: string) => (
     <Field id={`ov-${k}`} k={k} t={t} value={d[k]} values={d as unknown as Values} error={error} set={(key, v) => set({ [key]: v ?? (t.widget === 'checkbox' ? false : '') } as Partial<AssignmentDraft>)} />
@@ -262,6 +284,7 @@ function Timings({ d, set, errors, cutoff, days, lateOk, solutionOff, tz, year }
           <label class="choice"><input type="radio" name="ov-ho" checked={!d.manual} onChange={() => set({ manual: false })} /><b>At a time</b><span>Automation hands out then.</span></label>
           <label class="choice"><input type="radio" name="ov-ho" checked={d.manual} onChange={() => set({ manual: true })} /><b>I will hand out manually</b><span>From this page.</span></label>
         </div>
+        {handOut}
       </div>
       {!d.manual ? <div class="cond"><div class="row-2">{F('handoutDate', T('Hand out on', 'date'), errors.handout)}{F('handoutTime', T('At', 'time'))}</div></div> : null}
       <div class="row-2">{F('dueDate', T('Due', 'date', { tier: 'ask' }), errors.due)}{F('dueTime', T('At', 'time', { tier: 'ask' }))}</div>
@@ -349,7 +372,8 @@ export function AssignmentRun({ p, a, group }: { p: ReadyProps; a: Assignment; g
       <div class="form">
         <div class="form-section">
           <h3>Dates</h3>
-          <Timings d={d} set={change} errors={tErr} cutoff={cutoffOf(d.dueDate, d.dueTime, days)} days={days} lateOk={typeof days === 'number' && days > 0} solutionOff={solutionOff} tz={tz} year={year} />
+          <Timings d={d} set={change} errors={tErr} cutoff={cutoffOf(d.dueDate, d.dueTime, days)} days={days} lateOk={typeof days === 'number' && days > 0} solutionOff={solutionOff} tz={tz} year={year}
+            handOut={waitingHandOut(a, baseT, d) ? <div class="actions"><HandOutNow p={p} a={a} small /></div> : null} />
         </div>
         <div class="form-section">
           <h3>Run settings</h3>

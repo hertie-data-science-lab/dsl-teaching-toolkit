@@ -17,8 +17,8 @@ import { ProblemCards } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { asgSummary } from './Cohort';
 import { courseOf } from './Course';
-import { MarksTab, TeamsTab, handoutRef } from './Marking';
-import { AssignmentRun, SemesterDefaults, sheetName } from './RunSettings';
+import { MarksTab, TeamsTab } from './Marking';
+import { AssignmentRun, HandOutNow, SemesterDefaults, handoutRef, sheetName } from './RunSettings';
 import { WithStatus, cohortName, cohortScope, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 import { CONFIG_REPO } from '../model/names';
@@ -115,7 +115,7 @@ function Index(p: ReadyProps) {
                   <span class={`chip ${a.state === 'open' ? 'asg' : ''}`}>{ASSIGNMENT_WORD[a.state]}</span>
                   {a.state === 'late_window' ? <><br /><span class="footnote">late work to {fmtDay(a.grading_cutoff_datetime, tz, year)}</span></> : null}
                 </td>
-                <td class="num">{nextDate(a, tz, year)}</td>
+                <td class="num">{nextDate(a, tz, year)}{a.state === 'declared' && !a.handout ? <div class="actions" style="margin-top:6px"><HandOutNow p={p} a={a} small /></div> : null}</td>
                 <td class="num">{asgSummary(a, tz, year).split('; ').pop()}</td>
                 <td class="num">{isGroup(a) ? <>{a.teams} formed{free !== null ? <><br /><span class="footnote">{free} without a team</span></> : null}</> : <span class="footnote">—</span>}</td>
                 <td class="num">{a.marks.total ? `${a.marks.filled} / ${a.marks.total}` : <span class="footnote">No marks yet</span>}</td>

@@ -14,12 +14,12 @@ import {
   questionPoints, readSheet, round, rowsChanged, scoreTotal, spread, studentMarks, type HoldReason, type HoldUnit, type Penalty, type Person, type Unit,
 } from '../model/marks';
 import { SOURCE_WORD, resolve, valueWord } from '../model/cascade';
-import { assignmentSettings, sheetName } from './RunSettings';
+import { HandOutNow, assignmentSettings, sheetName } from './RunSettings';
 import { penaltyRate } from '../model/policy';
 import { marksDraft, marksSubFolded, marksWidths, saveMarksDraft, saveMarksSubFolded, saveMarksWidths, type MarksDraft } from '../model/prefs';
 import { parseRoster, sameHandle } from '../model/people';
 import type { Assignment } from '../model/types';
-import { handout, returnMarks, teamsWindow, type AsgRef, type LateReturn } from '../ops/defs';
+import { returnMarks, teamsWindow, type AsgRef, type LateReturn } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
 import type { OpDef } from '../ops/session';
 import { assignmentHref, replaceHash, tabHref } from '../router';
@@ -29,7 +29,6 @@ import { Hint } from '../ui/Hint';
 import { SaveBar } from '../ui/edit';
 import { Check } from '../ui/icons';
 import type { TabProps } from './Assignments';
-import type { ReadyProps } from './types';
 import { cohortScope, todayOf, tzOf, useGradingConfig, yearOf } from './common';
 import { CONFIG_REPO } from '../model/names';
 import { formatsList } from '../tiers/grading';
@@ -50,11 +49,6 @@ export function lateReturn(a: Assignment, now: number, tz: string, year: number)
 
 function asgRef(a: Assignment, group: boolean): AsgRef {
   return { slug: a.slug, title: assignmentTitle(a), template: a.template, units: a.units, group, when: 'Marking' };
-}
-
-/** The assignment as Hand out now names it, on the Overview and the Marks tab alike. */
-export function handoutRef(p: Pick<ReadyProps, 'files' | 'cohort'>, a: Assignment, group: boolean, tz: string, year: number): AsgRef {
-  return { slug: a.slug, title: assignmentTitle(a), template: a.template, units: a.units, group, when: a.handout ? `Scheduled ${fmtDay(a.handout, tz, year)}` : 'Hand out by hand', name: sheetName(p, a.slug) };
 }
 
 // --------------------------------------------------------------------------- marks
@@ -399,7 +393,7 @@ export function MarksTab(p: TabProps) {
       : 'Not handed out yet, so nothing has reached students. The mark sheet appears when you press Hand out now, with a row for every student or team.';
     return (
       <>{headOnly}<section class="panel section stub"><h2>No mark sheet yet</h2><p>{said}</p>
-        {waiting ? <div class="actions"><OpButtons def={handout(scope, handoutRef(p, a, group, tz, year))} label="Hand out now" /></div> : null}
+        {waiting ? <div class="actions"><HandOutNow p={p} a={a} /></div> : null}
       </section></>
     );
   }
