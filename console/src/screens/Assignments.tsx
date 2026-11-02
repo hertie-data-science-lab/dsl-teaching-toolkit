@@ -5,7 +5,7 @@ import { readTable } from '../edit/csv';
 import { parseRoster } from '../model/people';
 import { ASSIGNMENT_WORD, assignmentIdent, assignmentTitle, fmtDay, fmtTime, fmtWhen } from '../model/format';
 import type { Assignment, Status } from '../model/types';
-import { pastDue, phaseOf, submissionsOf, type Phase } from '../model/assignment';
+import { isGroup, pastDue, phaseOf, submissionsOf, type Phase } from '../model/assignment';
 import { RepoChip } from '../ui/SetupPanel';
 import { templateReadinessIn, tier } from '../model/readiness';
 import { Check } from '../ui/icons';
@@ -109,12 +109,12 @@ function Index(p: ReadyProps) {
               <tr>
                 <td>
                   <a class="rowlink" href={`#assignment-${a.slug}`}>{assignmentTitle(a)}</a><br />
-                  <span class="footnote">{a.teams !== null && a.teams !== undefined ? 'In teams' : 'Alone'}</span>
+                  <span class="footnote">{isGroup(a) ? 'In teams' : 'Alone'}</span>
                 </td>
                 <td>
                   <span class={`chip ${a.state === 'open' ? 'asg' : ''}`}>{ASSIGNMENT_WORD[a.state]}</span>
                   {a.state === 'late_window' ? <><br /><span class="footnote">late work to {fmtDay(a.grading_cutoff_datetime, tz, year)}</span></> : null}
-                  {waitsByHand(a) ? <><br /><ManualWaiting a={a} /></> : null}
+                  {waitsByHand(a) ? <><br /><ManualWaiting /></> : null}
                 </td>
                 <td class="num">{nextDate(a, tz, year)}{waitsByHand(a) ? <div class="actions" style="margin-top:6px"><HandOutNow p={p} a={a} small /></div> : null}</td>
                 <td class="num">{asgSummary(a, tz, year).split('; ').pop()}</td>
@@ -151,8 +151,6 @@ const LIFE: [string, Phase][] = [
 function stepOf(a: Assignment): number {
   return LIFE.findIndex(([, ph]) => ph === phaseOf(a));
 }
-
-export const isGroup = (a: Assignment) => a.teams !== null && a.teams !== undefined;
 
 /** The tab an assignment opens on: Teams while teams form, Marks from the due date (decision 0037). */
 export function defaultTab(a: Assignment): AssignmentTab {

@@ -350,9 +350,11 @@ describe('Save on the schedule’s new assignment entry', () => {
   });
 });
 
+// assignment-3, saved with no hand out date.
+const MANUAL = `${SCHEDULE}  assignment-3:\n    course_source_repo: assignment-4-f2026\n    due_datetime: 2026-10-10T23:59\n`;
+const asked = () => root!.querySelector('.modal')?.textContent ?? '';
+
 describe('Save on an assignment entry handed out by hand', () => {
-  const MANUAL = `${SCHEDULE}  assignment-3:\n    course_source_repo: assignment-4-f2026\n    due_datetime: 2026-10-10T23:59\n`;
-  const asked = () => root!.querySelector('.modal')?.textContent ?? '';
   async function addManual(gh: FakeGitHub, f: StaticFiles) {
     const env = envOf(gh, f);
     await mount(env, <ScheduleScreen {...props(f, { entry: 'new', prefill: 'assignment-4-f2026' })} />);
@@ -443,7 +445,6 @@ describe('Save on an assignment entry handed out by hand', () => {
 });
 
 describe('Save on the Overview form, switched to hand out by hand', () => {
-  const asked = () => root!.querySelector('.modal')?.textContent ?? '';
   async function switchToManual(gh: FakeGitHub, f: StaticFiles) {
     const env = envOf(gh, f);
     await mount(env, <AssignmentScreen {...props(f, { entry: 'assignment-2', tab: 'overview' })} />);
@@ -489,7 +490,6 @@ describe('Save on the Overview form, switched to hand out by hand', () => {
 });
 
 describe('Hand out now beside a saved entry handed out by hand', () => {
-  const MANUAL = `${SCHEDULE}  assignment-3:\n    course_source_repo: assignment-4-f2026\n    due_datetime: 2026-10-10T23:59\n`;
   const waiting: Assignment = { ...solo, slug: 'assignment-3', title: 'Quiz', template: 'assignment-4-f2026', state: 'declared', handout: null, teams: null };
   const loaded = (a: Assignment): Loaded => ({ ...ready, status: { ...ready.status, assignments: [solo, a] } });
   const handOutNow = () => buttons('Hand out now').length;

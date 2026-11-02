@@ -2052,11 +2052,9 @@ def run_settings(spec: grades.GradingSpec) -> dict[str, dict]:
     }
 
 
-def render_assignments(
-    facts: SemesterFacts, problems: list[dict], now: datetime
-) -> list[dict]:
-    """One row per assignment the schedule declares. `problem`: a `now` or `soon` problem
-    names it or its template (a `later` one is coming up, not wrong yet)."""
+def render_assignments(facts: SemesterFacts, now: datetime) -> list[dict]:
+    """One row per assignment the schedule declares; `problem` is set by
+    `flag_assignments` once the semester's problems are tiered."""
     templates = handed_out_assignments(list(facts.listing.values()))
     sheet_specs = {}
     for k, e in facts.sched.assignments.items():
@@ -2132,11 +2130,12 @@ def render_assignments(
                 "submit_shape": spec.submit_shape,
             }
         )
-    return flag_assignments(rows, problems)
+    return rows
 
 
 def flag_assignments(rows: list[dict], problems: list[dict]) -> list[dict]:
-    """Set each row's `problem` off the tiered `problems` (`render_assignments`)."""
+    """Set each row's `problem`: a `now` or `soon` problem names it or its template (a
+    `later` one is coming up, not wrong yet)."""
     flagged = _problem_entries(_biting(problems))
     for row in rows:
         row["problem"] = row["slug"] in flagged or row["template"] in flagged
@@ -2623,7 +2622,7 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
     # A late release another problem already holds back is not told twice.
     held = {p["release"] for p in problems if "release" in p}
     problems += late_problems(facts, releases, held, now)
-    assignments = render_assignments(facts, [], now)
+    assignments = render_assignments(facts, now)
     problems += not_handed_out_problems(facts, assignments, now)
     problems = _unique_ids(_tier(problems, now))
     course_block, _ = render_course(

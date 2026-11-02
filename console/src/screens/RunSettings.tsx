@@ -22,7 +22,7 @@ import type { OpDef } from '../ops/session';
 import { OpButtons } from '../ops/Panel';
 import { SOLUTION_WARNING } from '../model/labels';
 import type { Assignment } from '../model/types';
-import { pastDue } from '../model/assignment';
+import { isGroup, pastDue } from '../model/assignment';
 import { penaltyRate } from '../model/policy';
 import { round } from '../model/marks';
 import { RUN_LABEL, lateError, runTier, runTiers } from '../tiers/runSettings';
@@ -62,15 +62,13 @@ export function handoutRef(p: Pick<ReadyProps, 'files' | 'cohort'>, a: Pick<Assi
 /** Whether an assignment set to hand out by hand is still waiting for Hand out now. */
 export const waitsByHand = (a: Pick<Assignment, 'state' | 'handout'>) => a.state === 'declared' && !a.handout;
 
-/** The tag on an assignment set to hand out by hand and not handed out yet (Schedule, Assignments). */
-export function ManualWaiting({ a }: { a: Pick<Assignment, 'state' | 'handout'> }) {
-  return waitsByHand(a) ? <span class="chip amber">Manual hand-out: not handed out yet</span> : null;
-}
+/** The tag on an assignment that `waitsByHand` (Schedule, Assignments). */
+export const ManualWaiting = () => <span class="chip amber">Manual hand-out: not handed out yet</span>;
 
 /** Hand out now for an assignment not yet handed out: one button, its panel the confirmation. */
 export function HandOutNow({ p, a, small }: { p: ReadyProps; a: Assignment; small?: boolean }) {
   const tz = tzOf(p.status), year = yearOf(p.now, tz);
-  return <OpButtons def={handout(cohortScope(p), handoutRef(p, a, a.teams !== null && a.teams !== undefined, tz, year))} label="Hand out now" small={small} />;
+  return <OpButtons def={handout(cohortScope(p), handoutRef(p, a, isGroup(a), tz, year))} label="Hand out now" small={small} />;
 }
 
 /**

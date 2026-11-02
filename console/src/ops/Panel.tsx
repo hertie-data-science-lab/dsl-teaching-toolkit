@@ -234,7 +234,8 @@ export function OpPanel() {
     );
   }
   const values = d.options ? effective(d.options, c.values) : c.values;
-  const mode = modeOf(d.op) === 'direct' && d.previewWhen?.(values) ? 'preview' : modeOf(d.op);
+  const opMode = modeOf(d.op);
+  const mode = opMode === 'direct' && d.previewWhen?.(values) ? 'preview' : opMode;
   const invalid = d.options ? Object.keys(fieldErrors(opSpec(d.op).args_schema, d.options, c.values)).length > 0 : false;
   let body, foot;
   if (d.info) {

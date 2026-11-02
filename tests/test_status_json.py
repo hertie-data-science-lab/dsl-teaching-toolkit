@@ -822,28 +822,38 @@ def test_a_shape_with_no_repo_per_unit_is_open_once_handed_out(via, kind):
     assert row["state"] == "declared"
 
 
+# Handed out by hand: assignment-2 has no handout_datetime. LATER is past its cutoff.
+MANUAL_SCHED = _sched(SCHEDULE.replace("    handout_datetime: 2026-09-15T10:00\n", ""))
+LATER = datetime(2026, 10, 12, 9, 0, tzinfo=UTC)
+
+
+def _handed_out_listing() -> dict:
+    """The listing once assignment-2 is handed out: its semester template exists."""
+    return _semester().listing | {
+        "assignment-2": repo_row(
+            "assignment-2", isTemplate=True, topics=["assignment-template"]
+        )
+    }
+
+
 @pytest.mark.parametrize("via", ["assignment_repo", "external"])
 def test_an_assignment_nobody_handed_out_stays_declared_past_its_dates(via):
     # Handed out by hand (no handout_datetime) and never pressed: due 27 Sep, cutoff 7 Oct.
     # Past both it is still declared, so the console still offers Hand out now.
-    sched = _sched(SCHEDULE.replace("    handout_datetime: 2026-09-15T10:00\n", ""))
     spec = grades.GradingSpec(type="individual", submit_via=via)
-    later = datetime(2026, 10, 12, 9, 0, tzinfo=UTC)
 
     def state(listing: dict) -> str:
-        semester = _semester(sched=sched, specs={"assignment-2": spec}, listing=listing)
-        doc = _render(semester=semester, now=later)
+        semester = _semester(
+            sched=MANUAL_SCHED, specs={"assignment-2": spec}, listing=listing
+        )
+        doc = _render(semester=semester, now=LATER)
         return next(a for a in doc["assignments"] if a["slug"] == "assignment-2")[
             "state"
         ]
 
     assert state(_semester().listing) == "declared"
     # Once handed out (its semester template exists) the dates rule again, nobody onboarded or not.
-    out = _semester().listing | {
-        "assignment-2": repo_row(
-            "assignment-2", isTemplate=True, topics=["assignment-template"]
-        )
-    }
+    out = _handed_out_listing()
     assert state(out) == "marking"
     assert state(out | {"assignment-2-ada": repo_row("assignment-2-ada")}) == "marking"
 
@@ -860,12 +870,11 @@ NEVER = "was never handed out; its due date, Sun 27 Sep, has passed."
         # horizon, soon inside it, now once it has passed.
         (datetime(2026, 9, 14, 12, 0, tzinfo=UTC), ("later", f"{MANUAL} {YET}")),
         (NOW, ("soon", f"{MANUAL} {YET}")),
-        (datetime(2026, 10, 12, 9, 0, tzinfo=UTC), ("now", f"{MANUAL} {NEVER}")),
+        (LATER, ("now", f"{MANUAL} {NEVER}")),
     ],
 )
 def test_an_assignment_handed_out_by_hand_and_never_pressed_is_a_problem(now, expected):
-    sched = _sched(SCHEDULE.replace("    handout_datetime: 2026-09-15T10:00\n", ""))
-    doc = _render(semester=_semester(sched=sched), now=now)
+    doc = _render(semester=_semester(sched=MANUAL_SCHED), now=now)
     (problem,) = [p for p in doc["problems"] if p.get("kind") == "NOT_HANDED_OUT"]
     assert (problem["bites"], problem["text"]) == expected
     assert problem["fix"]["screen"] == "assignment"
@@ -874,32 +883,27 @@ def test_an_assignment_handed_out_by_hand_and_never_pressed_is_a_problem(now, ex
 
 
 def test_a_handed_out_or_scheduled_assignment_raises_no_hand_out_problem():
-    later = datetime(2026, 10, 12, 9, 0, tzinfo=UTC)
     # Scheduled (assignment-2 15 Sep, assignment-3 20 Oct): its own date counts it out.
-    doc = _render(now=later)
+    doc = _render(now=LATER)
     assert not [p for p in doc["problems"] if p.get("kind") == "NOT_HANDED_OUT"]
     # By hand, and pressed: the semester template exists.
-    sched = _sched(SCHEDULE.replace("    handout_datetime: 2026-09-15T10:00\n", ""))
-    listing = _semester().listing | {
-        "assignment-2": repo_row(
-            "assignment-2", isTemplate=True, topics=["assignment-template"]
-        )
-    }
-    doc = _render(semester=_semester(sched=sched, listing=listing), now=later)
+    listing = _handed_out_listing()
+    doc = _render(semester=_semester(sched=MANUAL_SCHED, listing=listing), now=LATER)
     assert not [p for p in doc["problems"] if p.get("kind") == "NOT_HANDED_OUT"]
 
 
 def test_an_assignment_whose_sheet_has_rows_is_out_without_a_record():
     # External: no repos, so the hand-out is told by its record, or by the sheet it wrote.
     # A record that never landed must not leave it declared (and Hand out now offered again).
-    sched = _sched(SCHEDULE.replace("    handout_datetime: 2026-09-15T10:00\n", ""))
     spec = grades.GradingSpec(type="individual", submit_via="external")
     sheet = {
         "submissions": {"ada": {"info": {"submitted": None}, "score_individual": None}}
     }
 
     def state(sheets: dict) -> str:
-        semester = _semester(sched=sched, specs={"assignment-2": spec}, sheets=sheets)
+        semester = _semester(
+            sched=MANUAL_SCHED, specs={"assignment-2": spec}, sheets=sheets
+        )
         doc = _render(semester=semester)
         return next(a for a in doc["assignments"] if a["slug"] == "assignment-2")[
             "state"
@@ -1712,7 +1716,7 @@ def test_a_held_solution_says_the_cutoff_it_is_held_until():
             "    due_datetime: 2026-09-27T23:59\n    solution_datetime: 2026-09-30T09:00\n",
         )
     )
-    (a2, a3) = status_json.render_assignments(_semester(sched=sched), [], NOW)
+    (a2, a3) = status_json.render_assignments(_semester(sched=sched), NOW)
     assert a2["solution_shown"] == "2026-09-30T09:00:00+02:00"
     # the institution's 10 days: held until the late cutoff, not dropped
     assert a2["solution_held_until"] == a2["grading_cutoff_datetime"]

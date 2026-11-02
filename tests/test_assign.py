@@ -1647,45 +1647,8 @@ def test_an_allocated_assignment_with_no_teams_names_the_teaching_team(
     assert rc.text == "Handed out project: no teams yet; you assign the teams from now."
 
 
-def test_a_group_handout_pressed_after_the_cutoff_says_the_window_is_shut(
-    tmp_path, monkeypatch
-):
-    # The plan's due date is long past (tests.plans.DUE): the window the press opens is
-    # already shut, so "students form teams from now" would send them to a closed form.
-    # Not refused: the hand-out is still recorded, and the teaching team assigns teams.
-    monkeypatch.setattr(assign.teams, "load", lambda semester_org: {})
-    monkeypatch.setattr(assign.teams, "teams_for", lambda rows, slug: {})
-    monkeypatch.setattr(
-        assign,
-        "load_grading_spec",
-        lambda org, template, **_: grades.GradingSpec(
-            type="group", submit_via="external"
-        ),
-    )
-    recorded: list[str] = []
-    monkeypatch.setattr(
-        "dsl_course.schedule.record_handout",
-        lambda semester_org, slug, stamp=None: recorded.append(slug),
-    )
-    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
-    rc, _ = assign.provision_all(
-        "COURSE", "project-f2026", "SEMESTER", roster_path=path
-    )
-    assert rc == 0
-    assert rc.text == (
-        "Handed out project: no teams yet; the team window is already closed, so "
-        "assign the teams on its Teams tab (teams.csv)."
-    )
-    assert recorded == ["project"]
-
-
-@pytest.mark.parametrize("via", ["assignment_repo", "external", "shared_dropbox_repo"])
-def test_a_pressed_group_handout_with_no_teams_records_it_in_every_shape(
-    tmp_path, monkeypatch, via
-):
-    # A shape with no repos took its record from the sheet landing in the tail, which a
-    # press with no team never reaches: nothing was recorded, so team formation (which
-    # runs from `handout_datetime`) never opened and every press failed.
+def _press_with_no_teams(monkeypatch, via: str) -> list[tuple[str, str]]:
+    """A group assignment of shape `via` with no team yet; returns the hand-outs recorded."""
     monkeypatch.setattr(assign.teams, "load", lambda semester_org: {})
     monkeypatch.setattr(assign.teams, "teams_for", lambda rows, slug: {})
     monkeypatch.setattr(
@@ -1698,17 +1661,44 @@ def test_a_pressed_group_handout_with_no_teams_records_it_in_every_shape(
         "dsl_course.schedule.record_handout",
         lambda semester_org, slug, stamp=None: recorded.append((semester_org, slug)),
     )
+    return recorded
+
+
+def _press(tmp_path, **kw):
     path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
+    return assign.provision_all(
+        "COURSE", "project-f2026", "SEMESTER", roster_path=path, **kw
+    )
 
-    def run(**kw):
-        return assign.provision_all(
-            "COURSE", "project-f2026", "SEMESTER", roster_path=path, **kw
-        )
 
-    rc, _ = run(dry_run=True)
+def test_a_group_handout_pressed_after_the_cutoff_says_the_window_is_shut(
+    tmp_path, monkeypatch
+):
+    # The plan's due date is long past (tests.plans.DUE): the window the press opens is
+    # already shut, so "students form teams from now" would send them to a closed form.
+    # Not refused: the hand-out is still recorded, and the teaching team assigns teams.
+    recorded = _press_with_no_teams(monkeypatch, "external")
+    rc, _ = _press(tmp_path)
+    assert rc == 0
+    assert rc.text == (
+        "Handed out project: no teams yet; the team window is already closed, so "
+        "assign the teams on its Teams tab (teams.csv)."
+    )
+    assert recorded == [("SEMESTER", "project")]
+
+
+@pytest.mark.parametrize("via", ["assignment_repo", "external", "shared_dropbox_repo"])
+def test_a_pressed_group_handout_with_no_teams_records_it_in_every_shape(
+    tmp_path, monkeypatch, via
+):
+    # A shape with no repos took its record from the sheet landing in the tail, which a
+    # press with no team never reaches: nothing was recorded, so team formation (which
+    # runs from `handout_datetime`) never opened and every press failed.
+    recorded = _press_with_no_teams(monkeypatch, via)
+    rc, _ = _press(tmp_path, dry_run=True)
     assert rc == 0 and rc.text.startswith("Preview: project would be handed out")
     assert recorded == [], "a preview records nothing"
-    rc, changed = run()
+    rc, changed = _press(tmp_path)
     assert (rc, changed) == (0, False)
     assert recorded == [("SEMESTER", "project")]
 
