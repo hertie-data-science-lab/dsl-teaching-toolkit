@@ -322,9 +322,33 @@ describe('Preview buttons', () => {
 
   it('keeps the gate’s Preview and drops the ones nobody acts on', () => {
     // Publishing has no engine preview at all: it asks for a tick instead.
-    for (const def of ALL.filter((d) => d.confirmInPanel)) expect(modeOf(def.op), def.op).toBe(opSpec(def.op).preview ? 'preview' : 'direct');
+    for (const def of ALL.filter((d) => d.confirmInPanel)) expect(modeOf(def.op), def.op).toBe(opSpec(def.op).preview && !PREVIEW_NOT_OFFERED.has(def.op) ? 'preview' : 'direct');
     for (const op of PREVIEW_NOT_OFFERED) expect(modeOf(op), op).toBe('direct');
     expect(modeOf('semester.preview_automation')).toBe('previewOnly');
+  });
+});
+
+describe('Hand out now', () => {
+  const texts = () => [...root!.querySelectorAll('.drawer-foot button')].map((b) => b.textContent?.trim());
+  it('is one button whose panel verb is the confirmation, with a preview only for the solution', async () => {
+    const adapter = new Scripted();
+    const ops = session(adapter);
+    const def = defs.handout(scope, { slug: 'assignment-5', title: 'Assignment 5', template: 'assignment-5-f2026', units: 0, group: false, when: 'Hand out by hand' });
+    await mount(envOf(ops), <><OpButtons def={def} label="Hand out now" /><OpPanel /></>);
+    expect([...root!.querySelectorAll('button')].map((b) => b.textContent?.trim())).toEqual(['Hand out now']);
+    await act(() => (root!.querySelector('button') as HTMLElement).click());
+    // Open, not running: the panel's verb (or Cancel) decides.
+    expect(ops.current.value?.phase).toBe('ready');
+    expect(adapter.submitted).toBe(0);
+    expect(texts()).toEqual(['Hand out to every student', 'Cancel']);
+    // The engine runs a hand out with the solution only after its preview.
+    await act(() => ops.setValues({ ...ops.current.value!.values, solution_datetime: 'now' }));
+    expect(texts()).toContain('Preview');
+  });
+
+  it('names the schedule key, not the semester-side name, so a template two entries share can be handed out', () => {
+    const def = defs.handout(scope, { slug: 'resit-5', title: 'Assignment 5 (resit)', template: 'assignment-5-f2026', units: 0, group: false, when: 'Hand out by hand', name: 'assignment-5-resit' });
+    expect(def.args).toEqual({ course_source_repo: 'assignment-5-f2026', assignment: 'resit-5' });
   });
 });
 

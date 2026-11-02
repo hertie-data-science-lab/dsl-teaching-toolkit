@@ -44,6 +44,8 @@ export interface OpDef {
   needsCheck?: { label: string; sub: string; arg?: string };
   proposed?: boolean;
   previewProposed?: boolean;
+  /** A direct op's panel offers its preview after all for these values (the engine refuses the run without one). */
+  previewWhen?: (values: Record<string, unknown>) => boolean;
   /** The preview's button in the panel and on the screen, where it is not a preview to the user ("Copy"). */
   previewLabel?: string;
   /** An information panel with no operation behind it (Export). */

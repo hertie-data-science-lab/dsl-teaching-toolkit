@@ -1391,25 +1391,27 @@ def _scheduled(monkeypatch, key: str, dest: str, source: str):
     )
 
 
-def _two_on_one_template(monkeypatch):
-    """A plan where two entries hand out from one template, each naming its own repos."""
+def _two_on_one_template(monkeypatch, numbered: bool = False):
+    """A plan where two entries hand out from one template, each naming its own repos
+    (`numbered`: each with a number, as a manual run requires)."""
     from datetime import datetime, timezone
 
     from dsl_course.schedule import AssignmentEntry
 
-    def entry(dest):
+    def entry(dest, number):
         return AssignmentEntry(
             due_datetime=datetime(2026, 11, 1, tzinfo=timezone.utc),
             course_source_repo="assignment-2-f2026",
             semester_dest_repo=dest,
+            number=number if numbered else None,
         )
 
     monkeypatch.setattr(
         "dsl_course.schedule.load",
         lambda org: Schedule(
             assignments={
-                "assignment-2": entry("assignment-2"),
-                "assignment-2-resit": entry("assignment-2-resit"),
+                "assignment-2": entry("assignment-2", 2),
+                "assignment-2-resit": entry("assignment-2-resit", 3),
             }
         ),
     )
@@ -1518,12 +1520,22 @@ def test_the_granted_team_slug_matches_the_one_sync_teams_reconciles(
     }
 
 
-def test_a_group_handout_with_no_teams_yet_waits_on_the_cron_and_fails_on_the_button(
+def _due_ahead(monkeypatch):
+    """A plan whose late cutoff is still ahead, so a press opens a window that is open."""
+    ahead = datetime(2099, 1, 5, 23, 59, tzinfo=timezone.utc)
+    monkeypatch.setattr(
+        "dsl_course.schedule.load", lambda org: citing(*TEMPLATES, due=ahead)
+    )
+
+
+def test_a_group_handout_with_no_teams_yet_waits_on_the_cron_and_opens_on_the_button(
     tmp_path, monkeypatch, capsys
 ):
     # Teams form when students click 'Join team', days after the handout datetime. The
     # hourly cron counted the empty CSV as a failure and went red every tick until the
-    # first team formed; an operator pressing the button still needs to be told.
+    # first team formed. The button's press is what opens formation, so it is green too,
+    # and says who forms the teams.
+    _due_ahead(monkeypatch)
     monkeypatch.setattr(assign.teams, "load", lambda semester_org: {})
     monkeypatch.setattr(assign.teams, "teams_for", lambda rows, slug: {})
 
@@ -1547,9 +1559,9 @@ def test_a_group_handout_with_no_teams_yet_waits_on_the_cron_and_fails_on_the_bu
     assert run(scheduled=True) == (0, False)
     out = capsys.readouterr().out
     assert "[wait] no teams" in out and "the first team forms" in out
-    assert run() == (1, False)
-    err = capsys.readouterr().err
-    assert "no teams for" in err and "students self-select" in err
+    rc, changed = run()
+    assert (rc, changed) == (0, False)
+    assert rc.text == "Handed out project: no teams yet; students form teams from now."
 
 
 def test_a_group_handout_with_no_teams_records_the_moment_it_went_out(
@@ -1586,6 +1598,7 @@ def test_a_group_assignment_nobody_declared_a_formation_for_waits_on_students(
     # answers, so the wait names the students and not the teaching team. The REAL read,
     # not the file's autouse stub, off a template that says only `type: group`.
     monkeypatch.setattr(assign, "load_grading_spec", grades.load_grading_spec)
+    _due_ahead(monkeypatch)
     monkeypatch.setattr(assign.teams, "load", lambda semester_org: {})
     monkeypatch.setattr(assign.teams, "teams_for", lambda rows, slug: {})
     monkeypatch.setattr(grades, "_grading_text", lambda org, template: "type: group\n")
@@ -1601,9 +1614,8 @@ def test_a_group_assignment_nobody_declared_a_formation_for_waits_on_students(
 
     assert run(scheduled=True) == (0, False)
     assert "the first team forms" in capsys.readouterr().out
-    assert run() == (1, False)
-    err = capsys.readouterr().err
-    assert "students self-select" in err and "team_formation: assigned" not in err
+    rc, _ = run()
+    assert rc == 0 and "students form teams from now" in rc.text
 
 
 def test_an_allocated_assignment_with_no_teams_names_the_teaching_team(
@@ -1612,6 +1624,7 @@ def test_an_allocated_assignment_with_no_teams_names_the_teaching_team(
     # `team_formation: assigned` means the Join-team form refuses every request, so
     # telling this course to wait for students to self-select points them at a door that
     # is shut. Who fills teams.csv is the assignment's own declaration.
+    _due_ahead(monkeypatch)
     monkeypatch.setattr(assign.teams, "load", lambda semester_org: {})
     monkeypatch.setattr(assign.teams, "teams_for", lambda rows, slug: {})
     monkeypatch.setattr(
@@ -1631,9 +1644,83 @@ def test_an_allocated_assignment_with_no_teams_names_the_teaching_team(
 
     assert run(scheduled=True) == (0, False)
     assert "the instructors write them into teams.csv" in capsys.readouterr().out
-    assert run() == (1, False)
-    err = capsys.readouterr().err
-    assert "team_formation: assigned" in err and "self-select" not in err
+    rc, _ = run()
+    assert rc == 0
+    assert rc.text == "Handed out project: no teams yet; you assign the teams from now."
+
+
+def _press_with_no_teams(monkeypatch, via: str) -> list[tuple[str, str]]:
+    """A group assignment of shape `via` with no team yet; returns the hand-outs recorded."""
+    monkeypatch.setattr(assign.teams, "load", lambda semester_org: {})
+    monkeypatch.setattr(assign.teams, "teams_for", lambda rows, slug: {})
+    monkeypatch.setattr(
+        assign,
+        "load_grading_spec",
+        lambda org, template, **_: grades.GradingSpec(type="group", submit_via=via),
+    )
+    recorded: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "dsl_course.schedule.record_handout",
+        lambda semester_org, slug, stamp=None: recorded.append((semester_org, slug)),
+    )
+    return recorded
+
+
+def _press(tmp_path, **kw):
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
+    return assign.provision_all(
+        "COURSE", "project-f2026", "SEMESTER", roster_path=path, **kw
+    )
+
+
+def test_a_group_handout_pressed_after_the_cutoff_says_the_window_is_shut(
+    tmp_path, monkeypatch
+):
+    # The plan's due date is long past (tests.plans.DUE): the window the press opens is
+    # already shut, so "students form teams from now" would send them to a closed form.
+    # Not refused: the hand-out is still recorded, and the teaching team assigns teams.
+    recorded = _press_with_no_teams(monkeypatch, "external")
+    rc, _ = _press(tmp_path)
+    assert rc == 0
+    assert rc.text == (
+        "Handed out project: no teams yet; the team window is already closed, so "
+        "assign the teams on its Teams tab (teams.csv)."
+    )
+    assert recorded == [("SEMESTER", "project")]
+
+
+@pytest.mark.parametrize("via", ["assignment_repo", "external", "shared_dropbox_repo"])
+def test_a_pressed_group_handout_with_no_teams_records_it_in_every_shape(
+    tmp_path, monkeypatch, via
+):
+    # A shape with no repos took its record from the sheet landing in the tail, which a
+    # press with no team never reaches: nothing was recorded, so team formation (which
+    # runs from `handout_datetime`) never opened and every press failed.
+    recorded = _press_with_no_teams(monkeypatch, via)
+    rc, _ = _press(tmp_path, dry_run=True)
+    assert rc == 0 and rc.text.startswith("Preview: project would be handed out")
+    assert recorded == [], "a preview records nothing"
+    rc, changed = _press(tmp_path)
+    assert (rc, changed) == (0, False)
+    assert recorded == [("SEMESTER", "project")]
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_a_pressed_group_handout_with_the_solution_and_no_teams_is_refused(
+    tmp_path, monkeypatch, dry_run
+):
+    # No team means no repo to push the solution into, and the repos teams get later never
+    # receive it: refused red, recording nothing. `main` records a preview and spends one
+    # only on rc 0 (test_renames: a failed hand out keeps its preview), so neither happens.
+    recorded = _press_with_no_teams(monkeypatch, "assignment_repo")
+    rc, changed = _press(tmp_path, solution=True, dry_run=dry_run)
+    assert (rc, changed) == (1, False)
+    assert rc.text == (
+        "No teams yet, so there is no repo to put the solution in: hand out without "
+        "the solution, and release it once teams have formed."
+    )
+    assert rc.reasons == [{"code": "NO_TEAMS_FOR_SOLUTION", "text": rc.text}]
+    assert recorded == []
 
 
 # --------------- a failed solution push outranks every other fault (the marker depends on it)
@@ -2579,10 +2666,43 @@ def test_the_assignment_flag_picks_the_entry_to_patch(monkeypatch):
     assert _cli(monkeypatch, "--patch-path", "starter.py")["slug"] == ""
 
 
-def test_the_assignment_flag_is_refused_on_a_hand_out(monkeypatch):
-    # Which of two entries hands out is the schedule's answer, not the button's.
-    with pytest.raises(SystemExit):
-        _cli(monkeypatch, "--assignment", "a2-resit")
+def test_the_assignment_flag_names_the_entry_to_hand_out(monkeypatch):
+    # The console's Hand out now names the schedule key it was pressed on, so a manual
+    # entry sharing its template (a resit) can be handed out; none = as before.
+    _two_on_one_template(monkeypatch, numbered=True)
+    seen: dict = {}
+    monkeypatch.setattr(assign, "listing_by_name", lambda org: None)
+    monkeypatch.setattr(
+        assign, "provision_all", lambda *a, **kw: (seen.update(kw), (0, True))[1]
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["assign", "--course-org", "COURSE", "--course-source-repo",
+         "assignment-2-f2026", "--semester-org", "SEMESTER",
+         "--assignment", "assignment-2-resit"],
+    )  # fmt: skip
+    assert assign.main() == 0
+    assert seen["slug"] == "assignment-2-resit"
+
+
+def test_a_hand_out_naming_one_of_two_entries_records_only_that_one(
+    tmp_path, monkeypatch
+):
+    # Two entries on one template, the resit handed out by hand: only its record is
+    # written, and the other entry stays as it was.
+    recorded = _press_with_no_teams(monkeypatch, "assignment_repo")
+    _two_on_one_template(monkeypatch)
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
+    rc, _ = assign.provision_all(
+        "COURSE",
+        "assignment-2-f2026",
+        "SEMESTER",
+        roster_path=path,
+        slug="assignment-2-resit",
+    )
+    assert rc == 0 and "Handed out assignment-2-resit" in rc.text
+    assert recorded == [("SEMESTER", "assignment-2-resit")]
 
 
 def test_the_public_log_never_names_a_submission_repo(monkeypatch, capsys):
@@ -3221,7 +3341,8 @@ def test_a_public_handout_opens_no_feedback_issue(
 #
 # `submit_via: shared_dropbox_repo` freezes the semester template as usual - the brief lives there - and
 # then makes exactly ONE repo, `<slug>-submissions`, with every unit on `push`. There is
-# no repo per unit, so there is no Submission receipts issue, no receipt and no model solution; and
+# no repo per unit, so there is no Submission receipts issue and no receipt; the model
+# solution goes ONCE into the drop box's own `solution/` folder; and
 # the drop box's existence is not the record a per-unit repo's is, so the grant loop
 # re-runs every tick and asks who is granted already.
 
@@ -3474,17 +3595,158 @@ def test_an_unprotected_drop_box_reds_the_handout(
     assert _shared(monkeypatch, tmp_path) == (1, True)
 
 
-def test_a_shared_handout_opens_no_feedback_issue_and_pushes_no_solution(
-    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks, feedback_issues, capsys
+def test_a_shared_handout_opens_no_feedback_issue(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks, feedback_issues
 ):
-    # One repo the whole semester can read is not a place to put a student's marks, nor the
-    # model answer. The fire-once solution marker is deliberately not written, so an
-    # instructor who corrects the shape can still release it.
+    # One repo the whole semester can read is not a place to put a student's marks.
+    assert _shared(monkeypatch, tmp_path) == (0, True)
+    assert feedback_issues == []
+
+
+def test_a_shared_solution_goes_into_the_drop_box_once_and_is_recorded(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
+):
+    # The drop box is private, so it can hold the model answer: ONE push into its own
+    # `solution/` folder, and the fire-once record over it, so no later tick re-pushes.
+    sol = tmp_path / "t" / "solution"
+    monkeypatch.setattr(assign, "fetch_solution", lambda org, template, dest: sol)
+    pushed: list = []
+    monkeypatch.setattr(
+        assign, "push_solution", lambda org, repo, d: pushed.append((repo, d)) or True
+    )
+    recorded: list = []
+    monkeypatch.setattr(
+        assign,
+        "record_solution_released",
+        lambda org, slug, repos: recorded.append((slug, repos)) or True,
+    )
+    assert _shared(monkeypatch, tmp_path, solution=True) == (0, True)
+    assert pushed == [("assignment-1-submissions", sol)]
+    assert recorded == [("assignment-1", 1)]
+    # The next tick, its record written, does not ask for the solution again.
+    assert _shared(monkeypatch, tmp_path)[0] == 0
+    assert len(pushed) == 1 and len(recorded) == 1
+
+
+def test_a_failed_drop_box_solution_push_writes_no_record(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
+):
+    monkeypatch.setattr(
+        assign, "fetch_solution", lambda org, template, dest: tmp_path / "solution"
+    )
+    monkeypatch.setattr(assign, "push_solution", lambda *a: False)
+    monkeypatch.setattr(assign, "record_solution_released", _boom)
+    assert _shared(monkeypatch, tmp_path, solution=True)[0] == 1
+
+
+def test_a_drop_box_grant_that_fails_does_not_hold_the_solution_back(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
+):
+    # A dead handle fails its grant on every tick; the drop box is there all the same, so
+    # the answer goes in and is recorded, as a per-unit repo's would be.
+    monkeypatch.setattr(
+        assign,
+        "add_collaborator",
+        lambda org, repo, handle, permission="push", person=False: False,
+    )
+    monkeypatch.setattr(assign, "exists_in", lambda listing, org, name: True)
+    sol = tmp_path / "t" / "solution"
+    monkeypatch.setattr(assign, "fetch_solution", lambda org, template, dest: sol)
+    pushed: list = []
+    monkeypatch.setattr(
+        assign, "push_solution", lambda org, repo, d: pushed.append(repo) or True
+    )
+    recorded: list = []
+    monkeypatch.setattr(
+        assign,
+        "record_solution_released",
+        lambda org, slug, repos: recorded.append(slug) or True,
+    )
+    assert _shared(monkeypatch, tmp_path, solution=True)[0] == 1
+    assert pushed == ["assignment-1-submissions"] and recorded == ["assignment-1"]
+
+
+def test_no_drop_box_means_no_solution_and_no_record(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
+):
+    monkeypatch.setattr(assign, "generate_from_template", lambda **kw: False)
+    monkeypatch.setattr(assign, "exists_in", lambda listing, org, name: False)
     monkeypatch.setattr(assign, "fetch_solution", _boom)
     monkeypatch.setattr(assign, "record_solution_released", _boom)
-    assert _shared(monkeypatch, tmp_path, solution=True) == (0, True)
-    assert feedback_issues == []
-    assert "no model solution to push" in capsys.readouterr().out
+    assert _shared(monkeypatch, tmp_path, solution=True)[0] == 1
+
+
+def test_the_drop_box_solution_touches_no_units_folder(tmp_path, monkeypatch):
+    # The drop box holds every unit's own folder; the answer lands beside them, at the
+    # top level, and none of their files is rewritten.
+    sol = tmp_path / "t" / "solution"
+    sol.mkdir(parents=True)
+    (sol / "answers.py").write_text("the model answer")
+
+    def fake_clone(org, repo, wd):
+        (wd / "ada-l").mkdir(parents=True)
+        (wd / "ada-l" / "work.py").write_text("ada's work")
+        return True
+
+    monkeypatch.setattr(assign, "clone", fake_clone)
+    tree: dict = {}
+
+    def fake_git(*args):
+        if "add" in args:
+            wd = Path(args[args.index("-C") + 1])
+            tree.update(
+                {
+                    p.relative_to(wd).as_posix(): p.read_text()
+                    for p in wd.rglob("*")
+                    if p.is_file()
+                }
+            )
+        return (0, "")
+
+    monkeypatch.setattr(assign, "git", fake_git)
+    assert assign.push_solution("SEMESTER", "assignment-1-submissions", sol)
+    assert tree == {
+        "ada-l/work.py": "ada's work",
+        "solution/answers.py": "the model answer",
+    }
+
+
+def test_a_drop_box_solution_is_never_pushed_over_a_unit_named_solution(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks, capsys
+):
+    # The unit's folder IS `solution/`: pushing would write into their work. Counted as a
+    # failed push, so no record is written, and the log names the slug and nobody else.
+    monkeypatch.setattr(assign, "fetch_solution", _boom)
+    monkeypatch.setattr(assign, "push_solution", _boom)
+    monkeypatch.setattr(assign, "record_solution_released", _boom)
+    code, _ = _shared(
+        monkeypatch,
+        tmp_path,
+        rows=("sol@uni.edu,Sol,enrolled,Solution,42,dsl-abc",),
+        solution=True,
+    )
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "assignment-1" in err and "`solution/`" in err and "Sol" not in err
+
+
+def test_a_drop_box_solution_pressed_before_the_late_cutoff_is_refused(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
+):
+    # One repo every student reads: the answer must not reach it while work still arrives.
+    from tests.plans import citing
+
+    future = datetime(2099, 1, 1, tzinfo=timezone.utc)
+    monkeypatch.setattr(
+        "dsl_course.schedule.load",
+        lambda org: citing("assignment-1-f2026", due=future),
+    )
+    monkeypatch.setattr(assign, "fetch_solution", _boom)
+    monkeypatch.setattr(assign, "record_solution_released", _boom)
+    summary, changed = _shared(monkeypatch, tmp_path, solution=True)
+    assert summary == 1 and not changed
+    assert summary.reasons[0]["code"] == assign.SOLUTION_BEFORE_CUTOFF_CODE
+    assert drop_box["generated"] == [] and sheet_writes == []
 
 
 def test_a_shared_dry_run_writes_nothing_at_all(

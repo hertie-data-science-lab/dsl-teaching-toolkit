@@ -97,6 +97,19 @@ Things whose *literal spelling* is depended on from outside Python:
   predates the window keeps forming teams.
   `tests/test_join_templates.py` runs the SHIPPED scanner over the writer's real output;
   keep that pairing.
+- **`grades.returned_record`'s SHAPE.** `semester-config/.system/returned/<sheet>.yml` is
+  each unit's block, under the sheet's own `submissions:` / `teams:`, exactly as the sheet
+  held it when the last real Return marks left every person in the unit told
+  (`_told_units`: their `distributed.csv` email row matches their marks digest, and no mark
+  of theirs on that sheet is held), beside the top-level `late_penalty_per_day` they went
+  out under (a changed rate re-emails every late unit whose block did not move). A scoped
+  run rewrites only its own sheet's record, so a unit told through another sheet's run
+  keeps counting here until this sheet's next run: a deliberate, safe over-count, since a
+  scoped run cannot know what the other sheets' current marks were sent. The console
+  compares it with the sheet to count who a further Return marks would email, so it
+  keeps the sheet's own dump (`_sheet_yaml`).
+  Which keys count is the console's `TOLD_KEYS` (`model/marks.ts`), the sheet-side
+  mirror of `grades._GRADER_KEYS`: change one, change the other.
 - **An assignment page's URL** - `schedule.AssignmentPage` (`<nn>-<semester name>`, or the
   name alone for an entry with no number; the number from `schedule.assignment_pages`) names the site's `_assignments/` file, and
   `AssignmentPage.url` is every link to the assignment's teams: its page on the semester site
@@ -464,6 +477,9 @@ Decision 0034 (need, time, verdict), all computed by the engine so the console h
   assignments.yml values bite at their assignment's hand-out; visibility drift and a late
   release with no other problem (`schedule:<entry>:LATE`) stand now; a cited root stub
   still the placeholder is `schedule:<entry>:SOURCE_UNWRITTEN` at the release's moment;
+  an assignment set to hand out by hand and still `declared` is
+  `assignment:<key>:NOT_HANDED_OUT` at its due date (fix: the assignment's page; it
+  leaves the row's `problem` flag alone, since the row's state already says it);
   `opencourse.yml` that does not parse is a `now` problem while the website is on. The
   digest's mail ladder is a separate clock and unchanged.
 - **Verdict.** `course.verdict` / `semester.verdict`: `fixing` (a `now`/`soon` problem;
@@ -638,7 +654,9 @@ states no run setting: one written there refuses the whole file as `NOT_MIGRATED
 `semester_dest_repo` from it and carries its faults (and one per block for a key the plan
 does not name) beside the plan's, so they ride the `schedule.yml` digest and file in
 status.json as `ASSIGNMENTS`. The late cutoff has one resolver,
-`schedule.grading_cutoff_datetime`: due + the effective `late_window_days`. A read of
+`schedule.grading_cutoff_datetime`: due + the effective `late_window_days`, or the due date
+itself for `submit_via: external` (no commits, so no late window). It takes the template's
+`submit_via` as a required argument, since `schedule` cannot read the template. A read of
 `dsl-course.yml` or `assignments.yml` that fails other than with a 404 raises and is not
 cached (an `assignments.yml` that is not YAML raises `Unusable`); a value a reader refuses
 states nothing, and the next layer answers.

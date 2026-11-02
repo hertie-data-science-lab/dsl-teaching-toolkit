@@ -2527,7 +2527,7 @@ def test_a_held_solution_is_a_warning_at_its_schedule_line(monkeypatch):
     monkeypatch.setattr(settings, "course_org_for_semester", lambda org: "Course")
     sched = _early_solutions()
     (fault,) = scheduler._held_solution_faults(
-        sched, datetime(2026, 10, 1, tzinfo=BERLIN)
+        "Course-Org", sched, datetime(2026, 10, 1, tzinfo=BERLIN)
     )
     assert (fault.where, fault.field, fault.lineno, fault.file, fault.ceiling) == (
         "assignments.assignment-1",
@@ -2544,7 +2544,7 @@ def test_a_held_solution_is_a_warning_at_its_schedule_line(monkeypatch):
     )
     # once the cutoff has passed the solution has gone out: nothing to say
     after = datetime(2026, 10, 21, tzinfo=BERLIN)
-    assert scheduler._held_solution_faults(sched, after) == []
+    assert scheduler._held_solution_faults("Course-Org", sched, after) == []
 
 
 def test_a_solution_whose_cutoff_cannot_be_known_is_held(monkeypatch):

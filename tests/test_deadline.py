@@ -14,7 +14,7 @@ from dsl_course.schedule import Schedule, grading_cutoff_datetime, parse
 
 
 def grading_datetime_iso(sched: Schedule, slug: str) -> str | None:
-    at = grading_cutoff_datetime(sched, slug)
+    at = grading_cutoff_datetime(sched, slug, submit_via="assignment_repo")
     return at.isoformat() if at is not None else None
 
 

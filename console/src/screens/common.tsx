@@ -2,10 +2,14 @@ import type { ComponentChildren, VNode } from 'preact';
 import { useMemo, useState } from 'preact/hooks';
 import { parse } from 'yaml';
 import { useEnv } from '../env';
+import { invalidText, useSave, type SaveState } from '../edit/save';
+import { YamlText } from '../edit/yamlText';
+import { validGrading } from '../model/cascade';
 import { cohortName } from '../model/discovery';
 import { dayKey, zoned } from '../model/format';
-import { CONFIG_REPO } from '../model/names';
-import { DEFAULT_TIMEZONE } from '../model/policy';
+import type { FileState, TreeState } from '../model/files';
+import { CONFIG_REPO, COURSE_REPO } from '../model/names';
+import { DEFAULT_TIMEZONE, LEGACY_SUBMIT_VIA } from '../model/policy';
 import type { Operation, Status } from '../model/types';
 import { checkNow, keepFuture, previewNext, type Scope } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
@@ -26,16 +30,23 @@ export const tzOf = (s: Status) => s.semester?.timezone ?? DEFAULT_TIMEZONE;
 export const yearOf = (now: number, tz: string) => zoned(new Date(now).toISOString(), tz).y;
 export const todayOf = (now: number, tz: string) => dayKey(new Date(now).toISOString(), tz);
 
-const configText = (p: ReadyProps, template: string): string | null => {
+/** What reading a template's files needs: the course (its org) and the file cache. */
+type TemplateReader = Pick<ReadyProps, 'course' | 'files'>;
+
+const configText = (p: TemplateReader, template: string): string | null => {
   const f = p.files.file(p.course.org, template, 'grading_config.yml', 'solution');
   return f.kind === 'ready' ? f.text : null;
 };
 
+/** grading_config.yml parsed, `submit_via` in its current spelling (course.canonical_submit_via), so every shape test reads one word. */
 function parseConfig(text: string | null): Record<string, unknown> {
   if (text === null) return {};
   try {
     const d = parse(text);
-    return d && typeof d === 'object' ? (d as Record<string, unknown>) : {};
+    if (!d || typeof d !== 'object') return {};
+    const cfg = d as Record<string, unknown>;
+    const via = typeof cfg.submit_via === 'string' ? cfg.submit_via.trim().toLowerCase() : null;
+    return via === null ? cfg : { ...cfg, submit_via: LEGACY_SUBMIT_VIA[via] ?? via };
   } catch {
     return {};
   }
@@ -47,9 +58,49 @@ export function gradingConfig(p: ReadyProps, template: string): Record<string, u
 }
 
 /** gradingConfig for a component: parsed again only when the file's text changes. */
-export function useGradingConfig(p: ReadyProps, template: string): Record<string, unknown> {
+export function useGradingConfig(p: TemplateReader, template: string): Record<string, unknown> {
   const text = configText(p, template);
   return useMemo(() => parseConfig(text), [text]);
+}
+
+/** A template's grading_config.yml to edit: the file, its parsed config, its save line, and `commit`. */
+export interface GradingConfigEdit {
+  file: FileState;
+  cfg: Record<string, unknown>;
+  save: SaveState;
+  setSave: (s: SaveState) => void;
+  /** Applies `edit` to the file's text, checks the result against the schema (saying what is wrong
+   *  on the save line), and saves it; whether it saved. */
+  commit: (edit: (y: YamlText) => void, message: string) => Promise<boolean>;
+}
+
+/**
+ * Edits a template's grading_config.yml on its `solution` branch: the template's settings page and
+ * the Marks tab's points per question both write through here, so the two cannot drift on the
+ * branch, the schema check or the status repo a save reports to.
+ */
+export function useGradingConfigEdit(p: TemplateReader, template: string): GradingConfigEdit {
+  const env = useEnv();
+  const org = p.course.org;
+  const file = p.files.file(org, template, 'grading_config.yml', 'solution');
+  const cfg = useGradingConfig(p, template);
+  const [save, run, setSave] = useSave(env);
+  const commit = async (edit: (y: YamlText) => void, message: string) => {
+    if (file.kind !== 'ready') return false;
+    const y = new YamlText(file.text);
+    edit(y);
+    if (!validGrading(y.toJS())) {
+      setSave({ kind: 'bad', text: invalidText('grading_config.yml', validGrading) });
+      return false;
+    }
+    return run({ owner: org, repo: template, path: 'grading_config.yml', branch: 'solution' }, y.text, file.sha, { message: `${message}, from the DSL Teaching Console`, statusRepo: [org, COURSE_REPO] });
+  };
+  return { file, cfg, save, setSave, commit };
+}
+
+/** A template's files a question can be marked from: every file but the dot-files, [] until the tree is read. */
+export function questionFiles(tree: TreeState): string[] {
+  return tree.kind === 'ready' ? tree.paths.filter((x) => !x.dir && !x.path.startsWith('.')).map((x) => x.path) : [];
 }
 
 /** Who an operation on the course acts for. */

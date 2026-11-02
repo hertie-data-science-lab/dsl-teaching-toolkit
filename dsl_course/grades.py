@@ -191,6 +191,10 @@ QUESTION_FEEDBACK_KEY = "feedback_per_question"
 # late rule's own arithmetic, and what an absent key means), `waive`, or the whole penalty
 # as a percent or fraction (`10%`, `0.1`). Never seeded: it appears when a grader writes it.
 LATE_PENALTY_KEY = "late_penalty"
+# Work handed in outside GitHub has no `info:` to time it, so the GRADER says how many
+# whole days late each unit was, here, beside its marks; blank (as seeded) counts as 0.
+# Theirs like every key outside `info:`, so a refresh or the freeze never touches it.
+DAYS_LATE_KEY = "days_late"
 _SCORE_COMMENT = "yours: the question names and maxima come from grading_config.yml"
 _SEP = " · "  # what separates the facts on one header line
 # Inline comments line up at one column across the whole sheet, so the maxima read as a
@@ -400,6 +404,8 @@ def _fresh_block(spec: SheetSpec, members: list[str], info: dict | None = None) 
     block: dict = {}
     if spec.collects_commits:
         block[INFO_KEY] = _fresh_info(spec) | (info or {})
+    else:
+        block[DAYS_LATE_KEY] = None
     if spec.is_group:
         block[spec.feedback_key] = None
         block["members"] = {handle: _blank_person() for handle in members}
@@ -738,7 +744,10 @@ def _config_facts(spec: SheetSpec) -> list[str]:
     shape.append("autograde on" if spec.autograde else "autograde off")
     timing = [f"due {spec.due_display}"] if spec.due_display else []
     if not spec.collects_commits:
-        timing.append("no late arithmetic")
+        rate = spec.late_penalty_per_day
+        timing.append(
+            "days late entered by the marker" + (f" at {rate}/day" if rate else "")
+        )
     elif spec.late_window_days and spec.cutoff_display:
         rate = spec.late_penalty_per_day
         timing.append(
@@ -755,7 +764,8 @@ def _auto_filled_sentence(spec: SheetSpec) -> str:
     if not spec.collects_commits:
         return (
             "Auto-filled by the toolkit: nothing. This assignment is submitted outside "
-            "GitHub, so there is no `info:` block and no late arithmetic."
+            "GitHub, so there is no `info:` block: you enter each unit's `days_late`, "
+            "and the late penalty is worked out from it."
         )
     clauses = [
         "`submitted` and `days_late` fill at the due date and refresh after each late push"
@@ -785,11 +795,12 @@ def _you_fill_in_sentence(spec: SheetSpec) -> str:
     fields.append(f"{spec.score_key}{qualifier}")
     if spec.questions:
         fields.append(f"{QUESTION_FEEDBACK_KEY} (optional, one per question)")
-    if spec.collects_commits:
-        fields.append(
-            f"{LATE_PENALTY_KEY} (optional, on a late unit: apply, waive, "
-            "or the whole penalty as 10%)"
-        )
+    if not spec.collects_commits:
+        fields.append(f"{DAYS_LATE_KEY} (whole days late, 0 when on time)")
+    fields.append(
+        f"{LATE_PENALTY_KEY} (optional, on a late unit: apply, waive, "
+        "or the whole penalty as 10%)"
+    )
     return (
         f"You fill in: {', '.join(fields)}. Anything you type is never touched. Nothing "
         f"reaches a student until you run Distribute grades. YAML comments you add are "
@@ -897,8 +908,14 @@ def dump_sheet(sheet: dict, spec: SheetSpec, status_line: str) -> str:
 
     Deterministic - the same sheet, spec and status give byte-identical text - because the
     write path compares blob shas, and text that churned would commit on every tick."""
-    body = yaml.dump(
-        sheet,
+    return _sheet_header(spec, status_line) + _annotate(_sheet_yaml(sheet), spec)
+
+
+def _sheet_yaml(data: dict) -> str:
+    """`data` as the sheet's own YAML, with no header or annotations: one dump for the
+    sheet and for every record that carries its blocks, so one parser reads both."""
+    return yaml.dump(
+        data,
         Dumper=_SheetDumper,
         sort_keys=False,
         allow_unicode=True,
@@ -907,7 +924,6 @@ def dump_sheet(sheet: dict, spec: SheetSpec, status_line: str) -> str:
         # that moved with the text would churn the file.
         width=10**6,
     )
-    return _sheet_header(spec, status_line) + _annotate(body, spec)
 
 
 def _plain(number: Decimal) -> str:
@@ -1021,7 +1037,9 @@ def final_grade(
     late_penalty: object = None,
 ) -> Decimal | None:
     """`total x (1 - penalty) + adjustment`, floored at 0, where the penalty is `rate x
-    days_late` unless the grader waived or set it (`effective_penalty`).
+    days_late` unless the grader waived or set it (`effective_penalty`), capped at the
+    whole total: days late a marker enters have no window to stop them, and a runaway
+    penalty must not eat the adjustment too.
 
     Derived on OUTPUT and never stored: the sheet has no `final_grade` field, so there is
     no stale cell for this to disagree with. A blank adjustment is 0 and a blank rate or
@@ -1032,7 +1050,8 @@ def final_grade(
     earned = as_decimal(total)
     if earned is None:
         return None
-    earned *= Decimal(1) - effective_penalty(rate, days_late, late_penalty).fraction
+    penalty = min(effective_penalty(rate, days_late, late_penalty).fraction, Decimal(1))
+    earned *= Decimal(1) - penalty
     return max(Decimal(0), earned + (as_decimal(adjustment) or Decimal(0)))
 
 
@@ -1482,8 +1501,8 @@ def grading_spec_faults(
                 f"`solution_datetime:`, but `submit_via: {spec.submit_via}` with "
                 f"`visibility: {spec.visibility}` gives it no private repo of its own to "
                 f"push the model solution into - it is never pushed where the world can "
-                f"read it, where the students can publish it, or where the whole semester "
-                f"shares one repo, so that moment passes and nothing is released",
+                f"read it or where the students can publish it, so that moment passes and "
+                f"nothing is released",
                 field="visibility",
                 lineno=lines.get(("visibility",)),
                 fix="remove `solution_datetime:` from this assignment's entry in "
@@ -1553,8 +1572,12 @@ def grading_config_faults(
         template = entry.course_source_repo
         if not template:
             continue  # the plan itself is faulty; schedule.yml's own digest says so
-        # The window-less cutoff: the spec that holds the window is what is read next.
-        fires = schedule.grading_cutoff_datetime(sched, slug)
+        # The shape is in the file being checked, so a fault is timed off a repo shape's
+        # cutoff (the window's end) and moved to the due date below once the parse says
+        # external.
+        fires = schedule.grading_cutoff_datetime(
+            sched, slug, submit_via="assignment_repo"
+        )
         text = _grading_text(course_org, template)
         if text is None:
             faults += _undeclared_faults(slug, template, course_org, fires)
@@ -1575,6 +1598,13 @@ def grading_config_faults(
             releases_solution=entry.solution_datetime is not None,
             semester_org=semester_org,
         )
+        if spec is not None and not spec.collects_commits:
+            due = schedule.grading_cutoff_datetime(
+                sched, slug, submit_via=spec.submit_via
+            )
+            for fault in spec_faults:
+                if fault.fires == fires:
+                    fault.fires = due
         faults += spec_faults
         if handed_out and spec is not None and spec.visibility_is_students:
             hands_the_flag_over = True
@@ -1907,7 +1937,9 @@ def team_lock_entries(
         if formation == SELF_SELECT:
             # The same call the semester site's team-formation callout makes, so the page
             # that invites a student in and the form that lets them in shut together.
-            window, closes = schedule.formation_state(sched, key, now)
+            window, closes = schedule.formation_state(
+                sched, key, now, submit_via=spec.submit_via
+            )
             shuts = closes.date().isoformat() if closes is not None else ""
             page = pages.get(key, "")
         entries[key] = (
@@ -2132,6 +2164,7 @@ def sheet_spec(
     `schedule.yml`. Nothing here is written into the sheet as data - it reaches the grader
     as the comment header, which is regenerated on every write."""
     entry = sched.assignments.get(key)
+    cutoff = schedule.grading_cutoff_datetime(sched, key, submit_via=gspec.submit_via)
     return SheetSpec(
         slug=slug,
         title=title or gspec.title or slug,
@@ -2145,12 +2178,9 @@ def sheet_spec(
         autograde=gspec.autograde,
         completion_check=gspec.runs_completion_check,
         due_display=_display_moment(entry.due_datetime if entry else None),
-        cutoff_display=_display_moment(schedule.grading_cutoff_datetime(sched, key)),
+        cutoff_display=_display_moment(cutoff),
         due_long=_display_long(entry.due_datetime if entry else None, sched.timezone),
-        cutoff_long=_display_long(
-            schedule.grading_cutoff_datetime(sched, key),
-            sched.timezone,
-        ),
+        cutoff_long=_display_long(cutoff, sched.timezone),
         due_at=entry.due_datetime if entry else None,
         not_migrated=gspec.not_migrated,
     )
@@ -2742,7 +2772,7 @@ def student_view(
     person = _people(spec, unit_key, block).get(handle) if spec.is_group else block
     person = person if isinstance(person, dict) else {}
     score = block.get(spec.score_key)
-    days_late = info.get("days_late")
+    days_late = unit_days_late(spec, block)
     rate = penalty_rate(spec.late_penalty_per_day)
     late_penalty = block.get(LATE_PENALTY_KEY)
     final = final_grade(
@@ -2774,7 +2804,10 @@ def student_view(
             "submitted": _submitted_display(
                 info.get("submitted"), not spec.collects_commits
             ),
-            "days_late": days_late,
+            # As recorded: a grader's blank is not a claim that the work was on time.
+            "days_late": days_late
+            if spec.collects_commits
+            else block.get(DAYS_LATE_KEY),
             "penalty": _penalty_display(rate, days_late, late_penalty),
             "team": unit_key if spec.is_group else None,
             "team_feedback": block.get("feedback_group") if spec.is_group else None,
@@ -2789,6 +2822,7 @@ HOLD_REASONS = {
     "score": "a non-numeric value in a per-question map",
     "adjustment": "a non-numeric adjustment",
     "late_penalty": "a late penalty that is not apply, waive or a percentage",
+    "days_late": "days late that are not a whole number",
     "question": "a question the assignment does not declare",
     "duplicate": "a handle in more than one submission unit",
     "returned": "another of their marks held, one they have already been sent",
@@ -2804,6 +2838,26 @@ def _is_typo(value: object) -> bool:
     produces, is exactly the case: it read as no adjustment at all while the grader
     believed a penalty had been waived."""
     return not is_blank(value) and as_decimal(value) is None
+
+
+def unit_days_late(spec: SheetSpec, block: dict) -> object:
+    """How many days late one unit's work was: the toolkit's `info.days_late` where it
+    times commits, the grader's `days_late` (`DAYS_LATE_KEY`) where the work is handed in
+    outside GitHub, blank counting as 0. THE reader, so the penalty, the hold and the
+    gradebook all take the same days."""
+    if spec.collects_commits:
+        return (block.get(INFO_KEY) or {}).get("days_late")
+    value = block.get(DAYS_LATE_KEY)
+    return 0 if is_blank(value) else value
+
+
+def _days_late_fault(spec: SheetSpec, block: dict) -> str:
+    """`days_late` when a grader's days late is not a whole number of days, 0 or more."""
+    if spec.collects_commits:
+        return ""
+    days = as_decimal(unit_days_late(spec, block))
+    ok = days is not None and days >= 0 and days == days.to_integral_value()
+    return "" if ok else "days_late"
 
 
 def _score_fault(spec: SheetSpec, score: object) -> str:
@@ -2871,14 +2925,18 @@ def sheet_hold_reasons(
         # An unreadable `late_penalty` holds only a LATE unit: on an on-time one, or under
         # no late rule, there is nothing for it to apply to (`effective_penalty`), so it
         # holds nobody's mark.
-        days = as_decimal((block.get(INFO_KEY) or {}).get("days_late"))
-        fault = _score_fault(spec, block.get(spec.score_key)) or (
-            "late_penalty"
-            if has_rule
-            and days is not None
-            and days > 0
-            and late_choice(block.get(LATE_PENALTY_KEY)).mode == "invalid"
-            else ""
+        days = as_decimal(unit_days_late(spec, block))
+        fault = (
+            _score_fault(spec, block.get(spec.score_key))
+            or _days_late_fault(spec, block)
+            or (
+                "late_penalty"
+                if has_rule
+                and days is not None
+                and days > 0
+                and late_choice(block.get(LATE_PENALTY_KEY)).mode == "invalid"
+                else ""
+            )
         )
         for handle, person in _people(spec, unit_key, block).items():
             # Folded, as the gradebooks are (`build_gradebooks`): `Alice` in one team and
@@ -2921,6 +2979,13 @@ _HOLD_FAULT = {
         ),
         "write apply, waive or the whole penalty as a percentage (10%) on {at}",
     ),
+    "days_late": (
+        (
+            "the days late on this line are not a whole number, so nothing for this "
+            "unit is sent"
+        ),
+        "write the whole days late on {at} - 0 when it was on time",
+    ),
     "question": (
         (
             "this line marks a question the assignment does not declare, so nothing "
@@ -2947,6 +3012,8 @@ _HOLD_PLAIN = {
     "returned for that student.",
     "late_penalty": "{where} has a late penalty that is not apply, waive or a "
     "percentage, so nothing is returned for that student or team.",
+    "days_late": "{where} has days late that are not a whole number, so nothing is "
+    "returned for that student or team.",
     "question": "{where} marks a question the assignment does not have, so nothing is "
     "returned for that student or team.",
     "duplicate": "{where} lists a student who is also in another team or entry, so "
@@ -2970,6 +3037,8 @@ def _hold_field(spec: SheetSpec, reason: str) -> str:
     typed."""
     if reason == "late_penalty":
         return LATE_PENALTY_KEY
+    if reason == "days_late":
+        return DAYS_LATE_KEY
     return (
         spec.score_key if reason in ("score", "question") else "adjustment_individual"
     )
@@ -2989,6 +3058,8 @@ def _hold_line(
         path = base + (spec.score_key,)
     elif reason == "late_penalty":
         path = base + (LATE_PENALTY_KEY,)
+    elif reason == "days_late":
+        path = base + (DAYS_LATE_KEY,)
     elif reason == "adjustment":
         path = base + (
             ("members", handle, "adjustment_individual")
@@ -3152,10 +3223,9 @@ def needs_hand_decision(spec: SheetSpec, block: dict) -> bool:
     score = block.get(spec.score_key)
     if score_total(score, spec.questions) is not None or not _verbatim(score):
         return False
-    info = block.get(INFO_KEY) or {}
     penalty = effective_penalty(
         penalty_rate(spec.late_penalty_per_day),
-        info.get("days_late"),
+        unit_days_late(spec, block),
         block.get(LATE_PENALTY_KEY),
     )
     return penalty.fraction > 0
@@ -3292,10 +3362,10 @@ def _readme_grade_line(view: dict, grade: str) -> str:
     it is written now.
 
     Written only where there is a separate score AND something timed it. A hand-marked unit
-    has a final grade and no score behind it, an `external` assignment counts no days, and
-    a team's score is not in a member's view at all (`student_view`) - in each of those the
-    final grade is the whole of what there is to say, and `**Score:** 40 · **Final grade:**
-    40` would be arithmetic theatre. The helpers are the display ones the table already
+    has a final grade and no score behind it, an `external` unit with no days entered has
+    nothing timed, and a team's score is not in a member's view at all (`student_view`) -
+    in each of those the final grade is the whole of what there is to say, and `**Score:**
+    40 · **Final grade:** 40` would be arithmetic theatre. The helpers are the display ones the table already
     uses, so a row and its section cannot word the same fact differently."""
     total = score_total(view.get("score"))
     late = _late_display(view.get("days_late"))
@@ -4193,7 +4263,8 @@ def _with_told(
 
 # The view keys a GRADER writes. The rest - `max_points`, `submitted`, `days_late` - are
 # the toolkit's facts about the assignment and fill in on their own, so a book carrying
-# only those has changed without there being anything for a student to read.
+# only those has changed without there being anything for a student to read. The console's
+# `TOLD_KEYS` (console/src/model/marks.ts) is the sheet keys behind these: keep in step.
 _GRADER_KEYS = (
     "final_grade",
     "score",
@@ -4372,12 +4443,14 @@ def _final_record(
     now: str,
     counts: dict[str, int],
     delete: list[str],
+    returned: dict[str, bytes],
 ) -> bool:
     """The registrar's export and the record of what went out, in ONE commit - together
     with the retired files this semester is migrating off, so the old and the new can
     never both be present for a reader to choose between - and, for a scoped return,
-    `marker`'s returned record."""
-    writes = {DISTRIBUTED_PATH: dump_distributed(record).encode()}
+    `marker`'s returned record. `returned` is each covered sheet's `returned_record`, in
+    the same commit so it can never claim a unit told that `distributed.csv` does not."""
+    writes = {DISTRIBUTED_PATH: dump_distributed(record).encode(), **returned}
     if registrar is None:
         # `roster.load` answers None for a roster it could not READ and [] for one with no
         # rows, and the export is one row per ENROLLED student - so regenerating it from
@@ -4408,6 +4481,58 @@ def _final_record(
             f"emails were recorded before they went, so the next run re-sends none"
         )
     return recorded
+
+
+def returned_record_path(name: str) -> str:
+    """Where `returned_record` of sheet `name` lives in semester-config."""
+    return records.path("returned", f"{name}.yml")
+
+
+_RETURNED_HEADER = """\
+# SYSTEM-OWNED - do not edit, edits here are overwritten. Written by Return marks: what
+# each unit was last told. A unit absent here has not been told its current marks.
+"""
+
+
+def _told_units(
+    spec: SheetSpec,
+    sheet: dict,
+    told: dict[str, str],
+    marks: dict[str, str],
+    held: dict[str, dict[str, tuple[str, str]]],
+) -> dict[str, dict]:
+    """The sheet's units of which EVERY person would not be emailed by another run: their
+    email row (`told`, casefolded handle -> digest) carries their live marks digest
+    (`marks`, the same keys), and none of their marks for this sheet is held. Anyone else
+    - mail failed, no roster address, `notify` off for a mark that moved, no gradebook
+    written, a held mark - leaves the whole unit out, so the console keeps counting it.
+    Read off the run's final state, so a unit told by an earlier run whose marks have not
+    moved since is in."""
+    holding = {str(handle).casefold() for handle in held.get(spec.slug) or {}}
+    out: dict[str, dict] = {}
+    for unit, block in _units(spec, sheet):
+        members = [str(m).casefold() for m in _people(spec, unit, block)]
+        if members and all(
+            m not in holding and m in marks and told.get(m) == marks[m] for m in members
+        ):
+            out[unit] = block
+    return out
+
+
+def returned_record(spec: SheetSpec, told_units: dict[str, dict]) -> str:
+    """The `.system/returned/<name>.yml` text: each told unit's block exactly as the sheet
+    carried it, under the sheet's own container key and in its own dump, so the console
+    compares the two with one parser and counts a unit whose block has moved since.
+
+    Beside the container, the `late_penalty_per_day` those marks went out under (blank for
+    none): a changed rate moves every late unit's final grade - so the engine would email
+    them - while their blocks stay identical, and only this tells the console so."""
+    return _RETURNED_HEADER + _sheet_yaml(
+        {
+            "late_penalty_per_day": spec.late_penalty_per_day,
+            spec.container_key: told_units,
+        }
+    )
 
 
 def _returned_units(
@@ -4792,6 +4917,13 @@ def distribute(
         for handle in told:
             record[(handle, "", CHANNEL_EMAIL)] = (live[handle], now, "")
         counts["emails"] = len(told)
+        # Every sheet's told units read off these two, so they are built once a run.
+        emailed = {
+            target.casefold(): digest
+            for (target, slug, channel), (digest, _at, _issue) in record.items()
+            if not slug and channel == CHANNEL_EMAIL
+        }
+        current = {handle.casefold(): digest for handle, digest in live.items()}
         return _final_record(
             semester_org,
             record,
@@ -4812,6 +4944,15 @@ def distribute(
             now=now,
             counts=counts,
             delete=[*([NOTIFIED_PATH] if migrating else []), *retired],
+            # The sheets this run covered: a scoped run renders the ones already
+            # returned too, but their records stay as their own runs wrote them.
+            returned={
+                returned_record_path(slug): returned_record(
+                    specs[slug],
+                    _told_units(specs[slug], sheets[slug], emailed, current, held),
+                ).encode()
+                for slug in ([assignment] if assignment else sorted(sheets))
+            },
         )
 
     failed_mail, told = 0, []

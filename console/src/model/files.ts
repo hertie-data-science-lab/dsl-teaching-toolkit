@@ -108,6 +108,12 @@ export class LiveFiles implements Files {
     if (c) this.client.lastCommitDate(owner, repo, path).then((v) => (c.value = v), () => {});
   }
 
+  /** Read again every file held under `dir` of a repo (at any ref): a run rewrote some of them, and which is not known. */
+  refreshUnder(owner: string, repo: string, dir: string): void {
+    const under = `${owner}/${repo}/${dir}/`;
+    for (const k of [...this.files.keys()]) if (k.startsWith(under)) this.files.delete(k);
+  }
+
   tree(owner: string, repo: string, ref = 'HEAD'): TreeState {
     return this.ask(this.trees, `${owner}/${repo}@${ref}`, async (): Promise<TreeState> => {
       const t = await this.client.listTree(owner, repo, ref, true);

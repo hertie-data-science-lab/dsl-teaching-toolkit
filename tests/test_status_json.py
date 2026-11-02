@@ -748,7 +748,7 @@ events:
     event_datetime: 2026-09-22T23:59
 """
     )
-    rows = status_json.this_week(sched, [], [], NOW, planned_rows(sched))
+    rows = status_json.this_week(sched, [], [], NOW, planned_rows(sched), specs={})
     assert [r["ref"] for r in rows] == ["e0", "e1"]
     assert rows[0]["when"] == "2026-09-23T00:00:00+02:00"
 
@@ -820,6 +820,102 @@ def test_a_shape_with_no_repo_per_unit_is_open_once_handed_out(via, kind):
         if a["slug"] == "assignment-2"
     )
     assert row["state"] == "declared"
+
+
+# Handed out by hand: assignment-2 has no handout_datetime. LATER is past its cutoff.
+MANUAL_SCHED = _sched(SCHEDULE.replace("    handout_datetime: 2026-09-15T10:00\n", ""))
+LATER = datetime(2026, 10, 12, 9, 0, tzinfo=UTC)
+
+
+def _handed_out_listing() -> dict:
+    """The listing once assignment-2 is handed out: its semester template exists."""
+    return _semester().listing | {
+        "assignment-2": repo_row(
+            "assignment-2", isTemplate=True, topics=["assignment-template"]
+        )
+    }
+
+
+@pytest.mark.parametrize("via", ["assignment_repo", "external"])
+def test_an_assignment_nobody_handed_out_stays_declared_past_its_dates(via):
+    # Handed out by hand (no handout_datetime) and never pressed: due 27 Sep, cutoff 7 Oct.
+    # Past both it is still declared, so the console still offers Hand out now.
+    spec = grades.GradingSpec(type="individual", submit_via=via)
+
+    def state(listing: dict) -> str:
+        semester = _semester(
+            sched=MANUAL_SCHED, specs={"assignment-2": spec}, listing=listing
+        )
+        doc = _render(semester=semester, now=LATER)
+        return next(a for a in doc["assignments"] if a["slug"] == "assignment-2")[
+            "state"
+        ]
+
+    assert state(_semester().listing) == "declared"
+    # Once handed out (its semester template exists) the dates rule again, nobody onboarded or not.
+    out = _handed_out_listing()
+    assert state(out) == "marking"
+    assert state(out | {"assignment-2-ada": repo_row("assignment-2-ada")}) == "marking"
+
+
+MANUAL = "assignment-2 is set to hand out manually (no scheduled hand-out) and"
+YET = "has not been handed out yet. Due Sun 27 Sep."
+NEVER = "was never handed out; its due date, Sun 27 Sep, has passed."
+
+
+@pytest.mark.parametrize(
+    ("now", "expected"),
+    [
+        # Due 27 Sep 23:59 Berlin, tiered by `_tier` off that date: later beyond the
+        # horizon, soon inside it, now once it has passed.
+        (datetime(2026, 9, 14, 12, 0, tzinfo=UTC), ("later", f"{MANUAL} {YET}")),
+        (NOW, ("soon", f"{MANUAL} {YET}")),
+        (LATER, ("now", f"{MANUAL} {NEVER}")),
+    ],
+)
+def test_an_assignment_handed_out_by_hand_and_never_pressed_is_a_problem(now, expected):
+    doc = _render(semester=_semester(sched=MANUAL_SCHED), now=now)
+    (problem,) = [p for p in doc["problems"] if p.get("kind") == "NOT_HANDED_OUT"]
+    assert (problem["bites"], problem["text"]) == expected
+    assert problem["fix"]["screen"] == "assignment"
+    assert problem["fix"]["entry"] == "assignment-2"
+    assert problem["fix"]["line"] == MANUAL_SCHED.assignments["assignment-2"].lines[""]
+    # Not the row's `problem` flag, which the index labels a template problem: the row's
+    # declared state, with no hand-out date, already tells it there.
+    row = next(a for a in doc["assignments"] if a["slug"] == "assignment-2")
+    assert (row["state"], row["handout"], row["problem"]) == ("declared", None, False)
+    assert validate(doc, schemas.status_schema()) == []
+
+
+def test_a_handed_out_or_scheduled_assignment_raises_no_hand_out_problem():
+    # Scheduled (assignment-2 15 Sep, assignment-3 20 Oct): its own date counts it out.
+    doc = _render(now=LATER)
+    assert not [p for p in doc["problems"] if p.get("kind") == "NOT_HANDED_OUT"]
+    # By hand, and pressed: the semester template exists.
+    listing = _handed_out_listing()
+    doc = _render(semester=_semester(sched=MANUAL_SCHED, listing=listing), now=LATER)
+    assert not [p for p in doc["problems"] if p.get("kind") == "NOT_HANDED_OUT"]
+
+
+def test_an_assignment_whose_sheet_has_rows_is_out_without_a_record():
+    # External: no repos, so the hand-out is told by its record, or by the sheet it wrote.
+    # A record that never landed must not leave it declared (and Hand out now offered again).
+    spec = grades.GradingSpec(type="individual", submit_via="external")
+    sheet = {
+        "submissions": {"ada": {"info": {"submitted": None}, "score_individual": None}}
+    }
+
+    def state(sheets: dict) -> str:
+        semester = _semester(
+            sched=MANUAL_SCHED, specs={"assignment-2": spec}, sheets=sheets
+        )
+        doc = _render(semester=semester)
+        return next(a for a in doc["assignments"] if a["slug"] == "assignment-2")[
+            "state"
+        ]
+
+    assert state({}) == "declared"
+    assert state({"assignment-2": sheet}) == "open"
 
 
 def test_a_group_assignment_nobody_declared_a_formation_for_is_forming_teams(
@@ -1625,7 +1721,7 @@ def test_a_held_solution_says_the_cutoff_it_is_held_until():
             "    due_datetime: 2026-09-27T23:59\n    solution_datetime: 2026-09-30T09:00\n",
         )
     )
-    (a2, a3) = status_json.render_assignments(_semester(sched=sched), [], NOW)
+    (a2, a3) = status_json.render_assignments(_semester(sched=sched), NOW)
     assert a2["solution_shown"] == "2026-09-30T09:00:00+02:00"
     # the institution's 10 days: held until the late cutoff, not dropped
     assert a2["solution_held_until"] == a2["grading_cutoff_datetime"]
@@ -3424,11 +3520,16 @@ def test_a_session_event_fills_its_kinds_week():
 def test_this_week_lists_a_session_event_under_its_kind():
     sched = _sched(SESSIONS)
     now = datetime(2026, 10, 13, 9, 0, tzinfo=UTC)
-    rows = status_json.this_week(sched, [], [], now, planned_rows(sched))
+    rows = status_json.this_week(sched, [], [], now, planned_rows(sched), specs={})
     (lab,) = [r for r in rows if r["ref"] == "lab-2-only-group"]
     assert (lab["kind"], lab["title"], lab["state"]) == ("lab", "Trees", "planned")
     early = status_json.this_week(
-        sched, [], [], datetime(2026, 10, 8, 9, 0, tzinfo=UTC), planned_rows(sched)
+        sched,
+        [],
+        [],
+        datetime(2026, 10, 8, 9, 0, tzinfo=UTC),
+        planned_rows(sched),
+        specs={},
     )
     (group,) = [r for r in early if r["ref"] == "lab-1-group-2"]
     assert group["title"] == "Lab 1"
@@ -3438,7 +3539,12 @@ def test_this_week_titles_a_session_as_the_release_it_repeats():
     # No `title:` of its own: the lab 1 release's, as on the site row.
     sched = _sched(SESSIONS.replace("  lab_1:\n", "  lab_1:\n    title: Regression\n"))
     week = status_json.this_week(
-        sched, [], [], datetime(2026, 10, 8, 9, 0, tzinfo=UTC), planned_rows(sched)
+        sched,
+        [],
+        [],
+        datetime(2026, 10, 8, 9, 0, tzinfo=UTC),
+        planned_rows(sched),
+        specs={},
     )
     (group,) = [r for r in week if r["ref"] == "lab-1-group-2"]
     assert (group["kind"], group["title"]) == ("lab", "Regression")
@@ -3617,3 +3723,39 @@ def test_a_missing_kind_is_a_suggested_course_todo_for_the_kind_folder_check():
         if t["id"] == "materials:cm:kind_folder:lab"
     ]
     assert lab["set_aside"] is True
+
+
+@pytest.mark.parametrize(
+    ("via", "late_window"),
+    [("external", False), ("assignment_repo", True), ("shared_dropbox_repo", True)],
+)
+def test_external_work_goes_from_open_to_marking_at_the_due_date(via, late_window):
+    sched = schedule.parse(
+        {
+            "assignments": {
+                "a1": {"course_source_repo": "a", "due_datetime": "2026-10-13T12:00"}
+            }
+        }
+    )
+    entry = sched.assignments["a1"]
+    spec = grades.GradingSpec(submit_via=via)
+    cutoff = schedule.grading_cutoff_datetime(sched, "a1", submit_via=via)
+    units = 0 if via == "external" else 3
+
+    def state(at: datetime) -> str:
+        return status_json.assignment_state(at, entry, cutoff, spec, units, False, True)
+
+    assert state(entry.due_datetime - timedelta(hours=1)) == "open"
+    after = entry.due_datetime + timedelta(hours=1)
+    assert state(after) == ("late_window" if late_window else "marking")
+
+
+def test_run_settings_quote_no_late_window_for_external_work():
+    # Its cutoff is the due date, so the console must not quote the window it ignores.
+    sources = (("late_window_days", "institution"),)
+    external = grades.GradingSpec(
+        submit_via="external", late_window_days=10, sources=sources
+    )
+    repo = grades.GradingSpec(late_window_days=10, sources=sources)
+    assert status_json.run_settings(external)["late_window_days"]["value"] is None
+    assert status_json.run_settings(repo)["late_window_days"]["value"] == 10

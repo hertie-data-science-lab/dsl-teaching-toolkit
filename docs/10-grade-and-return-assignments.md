@@ -53,9 +53,10 @@ teams:
 | `feedback_per_question` (where questions are declared; the team's on a group sheet) | you, optional | yes: a list after the overall feedback, inside the team's quote on a group sheet; a blank cell is not sent |
 | `score_group` | you | never shown as-is; each member's gradebook shows only the final grade it derives - the score itself too, but only for a team with no repo of its own (`shared_dropbox_repo`, `external`) |
 | `adjustment_individual` | you - the ONLY override of the mark, in both shapes | **no** - only the final grade it produced |
+| `days_late` (per student or team, top level; `submit_via: external` only, which has no `info:`) | you: whole days late, blank is 0 | as `days_late`, with the penalty it costs |
 | `late_penalty` (per student or team, beside `info:`; optional) | you: `apply` (the default), `waive`, or the whole penalty as `15%` / `0.15` | with their marks (Distribute grades), the penalty that applied: `-20%`, `waived` or `-15% (set by hand)`; a submission receipt quotes the late rule's own figure only |
 | `notes_not_shared_with_students` (each person's; on a group sheet the team's own too, beside `feedback_group`) | you | **never** |
-| final grade | derived on output, never stored | yes |
+| final grade | derived on output, never stored: score less the late penalty (at most the whole score), plus the adjustment, floored at 0 | yes |
 
 The final mark is `total × (1 − rate × days_late) + adjustment`, floored at 0. A late
 unit's `late_penalty` changes the middle term: `waive` (or `0%`) takes nothing off, and `15%` takes
@@ -88,9 +89,17 @@ Held) count from the sheet as typed, and a held row says why, by the same rules 
 Enter moves down a column of numbers; in a text box Ctrl+Enter (⌘+Enter) does. **Student view**
 shows what one student's marks page will hold. Unsaved marks stay in this browser until saved, and
 are offered back (Restore or Discard) on the next visit; a save that meets someone else's keeps
-both and says how many rows they changed. Return marks counts who gets marks, who is skipped and
-who is held (and how many unsaved rows it leaves out), gives the final grades in one line, and after a
+both and says how many rows they changed. **Return marks to N** counts the students (teams) it
+would email now: marked, not held, on `students.csv`, and new or changed since they were last told
+(private notes and the submission facts other than days late do not count; a changed late rate
+counts every late one it applies to). At 0 it is greyed out and says why. Its
+panel counts who gets new marks, who was already told, who is skipped, who is held and who is not
+on the roster (and how many unsaved rows it leaves out), gives the final grades in one line, and after a
 preview names who would be emailed. The Overview's Return marks opens this same panel on the Marks tab.
+**Set points per question** (or **Edit**) above the grid writes `questions:` into the template's
+`grading_config.yml`, as its settings page does, so it applies to every semester that uses the
+template; a row that already has a single score keeps it as its total until you enter points per question. Before the
+hand-out there is no sheet: the tab says when it hands out and offers **Hand out now**.
 
 ### When a sheet has something nobody can act on
 
@@ -138,7 +147,9 @@ Between the due date and the cutoff the sheet refreshes off committer dates alon
 
 An assignment whose `grading_config.yml` says `submit_via: external` has no `info:` block at all:
 no repo is created for it, so there is no commit to time and nothing waits on the cutoff: mark it
-and run **Distribute grades** whenever you like.
+and run **Distribute grades** whenever you like. Its cutoff is the due date. You enter each unit's
+`days_late` beside its marks (the Marks tab's **Days late**; blank is 0), and the late penalty,
+`late_penalty` waive and override work on it as on any other shape.
 
 For `submit_via: shared_dropbox_repo` the timing is per FOLDER of the one drop box: `submitted` is the
 last commit at or before the cutoff that touches `<handle>/` (or `<team>/`) **and was made
@@ -198,8 +209,10 @@ after one correction reaches one student. The emails are recorded just before th
 run that fails afterwards never mails anyone twice. If some emails fail, they are retried
 only when you press Return marks again; if every one fails, `marks_return_datetime` tries
 again on its own. It also keeps trying while any mark is held, and sends only what has not
-gone out. A `grading_config.yml` refused as `NOT_MIGRATED` stops its sheet refresh and
-Return marks until the migration runs. Untick `notify` to skip the email.
+gone out. What each student or team was last told is kept in
+`.system/returned/<assignment>.yml`; one missing from it still has news to hear. A
+`grading_config.yml` refused as `NOT_MIGRATED` stops its sheet refresh and Return marks
+until the migration runs. Untick `notify` to skip the email.
 
 Two options, both off by default. `include_feedback` puts the markers' feedback text into
 the email: the overall feedback, then each question's. `receipt_note` posts one line,

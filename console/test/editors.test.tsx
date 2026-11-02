@@ -16,7 +16,7 @@ import { StaticFiles } from './staticFiles';
 import { POLICY, penaltyRate } from '../src/model/policy';
 import { labelNumber, sessionNumber } from '../src/model/format';
 import { effectivePenalty, finalGrade, lateChoice, overrideText, overrideValue, penaltyText, questionFile, questionPoints, questionsFromRows, readSheet, scoreTotal } from '../src/model/marks';
-import { assignmentKey, blankDeploy, blankDraft, defaultDeployAt, deployAt, draftErrors, entryKey, freshId, needsNumber, nextNumber, readDraft, sessionBlock, unnumberedId, withNumber, writeDraft, type ArchiveDraft, type AssignmentDraft, type ReleaseDraft } from '../src/model/scheduleEdit';
+import { assignmentKey, blankDeploy, blankDraft, defaultDeployAt, deployAt, draftErrors, entryKey, freshId, needsNumber, newlyManual, nextNumber, readDraft, sessionBlock, unnumberedId, withNumber, writeDraft, type ArchiveDraft, type AssignmentDraft, type ReleaseDraft } from '../src/model/scheduleEdit';
 import { cutoffOf } from '../src/screens/RunSettings';
 import { validSchedule } from '../src/model/cascade';
 import { StatusStore, type Loaded } from '../src/model/status';
@@ -130,6 +130,19 @@ describe('the schedule entry sheet model', () => {
     expect(draftErrors({ ...ok, number: 1 }, { doc }).number).toBe('assignment-1 is already in this schedule.');
     expect(draftErrors({ ...ok, number: '' }, { doc }).number).toBe('A number is needed.');
     expect(draftErrors({ ...ok, number: 2.5 }, { doc }).number).toBe('A whole number from 1 to 999.');
+  });
+
+  it('asks about a hand out by hand only when the entry newly has no hand out date', () => {
+    const d = blankDraft('handout', { repo: '' }) as AssignmentDraft;
+    const manual = { ...d, manual: true };
+    expect(newlyManual(manual, null)).toBe(true);
+    expect(newlyManual(manual, d)).toBe(true);
+    expect(newlyManual(manual, manual)).toBe(false);
+    expect(newlyManual(d, null)).toBe(false);
+    expect(newlyManual(blankDraft('lecture', { repo: '' }), null)).toBe(false);
+    // The engine reports it out: its copies exist, nothing to ask.
+    expect(newlyManual(manual, d, 'declared')).toBe(true);
+    expect(newlyManual(manual, d, 'open')).toBe(false);
   });
 
   it('adds a release to the seeded file and keeps every comment', () => {
@@ -397,6 +410,8 @@ describe('marks arithmetic, as grades.py does it', () => {
     expect(finalGrade(50, effectivePenalty(0.1, 2), 4)).toBeCloseTo(44);
     expect(finalGrade(10, effectivePenalty(0.5, 3), -2)).toBe(0);
     expect(finalGrade(null, effectivePenalty(0.1, 1), 5)).toBeNull();
+    // A penalty past 100% (days late a marker enters have no window) takes the total and no more.
+    expect(finalGrade(40, effectivePenalty(0.1, 15), 5)).toBeCloseTo(5);
   });
 
   it('takes the late penalty the grader chose, as grades.effective_penalty does', () => {

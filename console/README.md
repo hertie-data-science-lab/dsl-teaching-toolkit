@@ -212,7 +212,8 @@ every semester's status has loaded the columns keep a fixed layout (`SETTLING_CO
 panels do not move as each arrives. The semester Dashboard's line under its title says only
 what the banner does not: the start, while the semester has no end date (the exams and the
 archive date are on the Schedule and the agenda). It has no Assignments panel: each
-assignment's state and progress are on the Assignments tab. Its Students panel is the roster
+assignment's state and progress are on the Assignments tab, which also lists the course's
+templates the semester's schedule does not use, each with Add to the schedule. Its Students panel is the roster
 meter plus every state, each line opening the Students tab: on the roster with no code sent
 yet, codes sent but not joined yet, and joined (`status.json` does not say who has an org
 invitation still to accept, so that step is not counted); it is hidden once every row has joined.
@@ -398,12 +399,13 @@ a first visit, mostly free 304s after).
   ref `main`, one `request` input; contracts section 1). `src/ops/adapter.ts` dispatches with
   `return_run_details`, polls the run's job listing alone (`src/github/poll.ts`, the one poll loop: every 3 s, every
   10 s after 30 s, nothing while the tab is hidden), and reads the public `dsl-outcome` annotation and the
-  private outcome file. Hand out, return marks, archive, update every copy and send new codes
+  private outcome file. Return marks, archive, update every copy and send new codes
   offer a preview beside the verb, never required: the page's verb opens the panel and the
   panel's verb runs, behind the op's confirmation box where it has one; publishing the public website, which has no
   engine preview, asks for a confirmation. Other previews are offered only where they
   show something you act on (`PREVIEW_NOT_OFFERED` in `src/ops/registry.ts` lists the ones
-  that are not). The run popup lists each job step once (GitHub's "Post ..." steps are left
+  that are not). Hand out now is one button whose panel verb confirms; its panel offers the
+  preview only for a hand out with the solution, which the engine refuses without one. The run popup lists each job step once (GitHub's "Post ..." steps are left
   out), resizes by its bottom-left grip, and its Stop cancels the workflow run
   (`POST .../actions/runs/{id}/cancel`), saying "Stopping…" until GitHub ends it and then
   "Stopped". Once a run ends, "See on GitHub" opens the op's `target` (`src/ops/defs.ts`):
@@ -453,7 +455,8 @@ and the retired Archive page `#archive` to `#schedule-archive` (its explanation 
 archive row, its Archive button on that entry).
 Wizards: `#new-course-1..4`, `#new-semester-1..3`, `#new-assignment-1..4`, `#new-materials`; a
 step past the first unfinished one opens that one instead. `?template=<repo>#schedule-new`
-opens a new assignment entry for that template; `?folder=<repo>/<path>#materials` the materials
+opens a new assignment entry for that template; `?cohort=<org>#new-assignment-1` offers that
+semester first at the wizard's end; `?folder=<repo>/<path>#materials` the materials
 index with that folder open; `?wizard=new-semester-3` adds a link back.
 A problem's `fix {screen, entry}` is `#<screen>-<entry>`.
 The course or semester rides in the query string: `?cohort=<org>` or `?course=<org>`

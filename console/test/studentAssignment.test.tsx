@@ -96,12 +96,17 @@ describe('the assignment page', () => {
     expect(pub).toContain('Your work goes in your repo a1-octo .');
     const box = text(page({ ...A, submitVia: 'shared_dropbox_repo', shape: 'shared-dropbox-repo', privateRepo: false }, mine({ units: { a1: { slug: 'a1', repo: 'a1-submissions', team: null, members: null, shared: true } } })));
     expect(box).toContain('Push your work into the octo/ folder of a1-submissions - that push is your submission.');
-    const ext = { ...A, submitVia: 'external' as const, shape: 'external', submitUrl: 'https://moodle.example.org/x', cutoffSentence: '', shapeNote: '' };
+    // The engine's cutoff for external work is the due date, and its late rule is blank without a rate.
+    const ext = { ...A, submitVia: 'external' as const, shape: 'external', submitUrl: 'https://moodle.example.org/x', cutoffSentence: '', shapeNote: '', lateRule: '', lateCutoff: A.due };
     const e = render(page(ext, mine({ units: {} })));
     expect(e).toContain('href="https://moodle.example.org/x"');
     expect(text(page(ext, mine({ units: {} })))).toContain('Submit on moodle.example.org Handed in outside GitHub.');
     expect(text(page({ ...ext, submitUrl: '' }, mine({ units: {} })))).toContain('Handed in outside GitHub. See the brief.');
     expect(text(page(ext, mine({ units: {} })))).not.toContain('Late work');
+    // With a rate: the rule the marker counts against, and no window or cutoff.
+    const rated = text(page({ ...ext, lateRule: '10% of the grade per day late, counted by your marker' }, mine({ units: {} })));
+    expect(rated).toContain('Late work: 10% of the grade per day late, counted by your marker.');
+    expect(rated).not.toContain('until');
   });
 
   it('says the 0.9.0 pending sentence before the hand-out', () => {

@@ -242,7 +242,7 @@ def _handout(request: Request) -> list[str]:
     argv = _assign_base(request)
     if _a(request, "solution_datetime"):
         argv += ["--solution-datetime", _a(request, "solution_datetime")]
-    return argv
+    return [*argv, *_entry(request)]
 
 
 def _entry(request: Request) -> list[str]:
@@ -452,6 +452,7 @@ _OPS = (
         args_schema=_args(
             {
                 "course_source_repo": _TEMPLATE,
+                "assignment": _ENTRY,
                 "solution_datetime": _enum(
                     (SOLUTION_NOW,),
                     f"`{SOLUTION_NOW}` also pushes the solution branch. {SOLUTION_WARNING}",

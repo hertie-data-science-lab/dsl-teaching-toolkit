@@ -19,5 +19,8 @@ export const phaseOf = (a: Pick<Assignment, 'state'>): Phase => PHASE[a.state];
 /** Whether an assignment's due date has passed, by the engine's state. */
 export const pastDue = (a: Pick<Assignment, 'state'>): boolean => phaseOf(a) === 'marking' || phaseOf(a) === 'returned';
 
+/** Whether the assignment is done in teams (the engine reports a team count only then). */
+export const isGroup = (a: Pick<Assignment, 'teams'>): boolean => a.teams !== null && a.teams !== undefined;
+
 /** Submissions so far; a gradebook that does not say counts none. */
 export const submissionsOf = (a: Pick<Assignment, 'submissions'>): number => a.submissions ?? 0;

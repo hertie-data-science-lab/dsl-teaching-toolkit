@@ -1156,26 +1156,27 @@ def test_the_page_says_where_the_work_goes_exactly_once():
     assert flat.count("page.submit_url") == 3
 
 
-def test_a_timed_assignment_carries_the_late_rule_and_an_external_one_carries_none(
+def test_a_timed_assignment_carries_its_window_and_an_external_one_the_markers_days(
     generated,
 ):
     # What happens after the deadline belongs with the deadline's own answer, so it closes
-    # the callout paragraph - off `late_rule`, which site.py writes for a shape that
-    # collects commits and for no other. `external` creates no repo, pins no commit and
-    # counts no day (`course.collects_commits`), so a rule quoted there would describe a
-    # deadline this toolkit does not hold.
+    # the callout paragraph - off `late_rule`. `external` times no commit, so its rule has
+    # no window or cutoff: the rate, and that the marker counts the days.
     layout = _liquid_templates()["_layouts/assignment.html"]
     flat = " ".join(_strip_comments(layout).split())
     sentence = "{% if page.late_rule %}Late work: {{ page.late_rule }}.{% endif %}"
     assert flat.count(sentence) == 1
     repo_arm = _external_arm(layout, "{% elsif page.repo_url %}", "{% endunless %}")
-    assert "page.late_rule" in repo_arm
+    assert sentence in " ".join(repo_arm.split())
     external = _external_arm(
         layout,
         '{% if page.submit_shape == "external" %}',
         "{% elsif page.repo_url %}",
     )
-    assert "late_rule" not in external
+    assert (
+        "{% if page.late_rule %} Late work: {{ page.late_rule }}.{% endif %}"
+        in external
+    )
     timed = _front_matter(
         generated["collections"]["_assignments"]["01-assignment-1.md"]
     )
@@ -1183,7 +1184,10 @@ def test_a_timed_assignment_carries_the_late_rule_and_an_external_one_carries_no
     off_github = _front_matter(
         generated["collections"]["_assignments"]["03-assignment-3.md"]
     )
-    assert "late_rule" not in off_github
+    assert (
+        off_github["late_rule"]
+        == "10% of the grade per day late, counted by your marker"
+    )
 
 
 def test_every_repo_arm_closes_with_the_cutoff_and_the_late_rule_in_that_order(
@@ -1289,7 +1293,9 @@ def test_the_external_callout_says_only_where_the_work_is_handed_in(generated):
     flat = " ".join(_strip_comments(arm).split())
     assert (
         "<p>Handed in outside GitHub."
-        "{% unless page.submit_url %} See the brief.{% endunless %}</p>" in flat
+        "{% unless page.submit_url %} See the brief.{% endunless %}"
+        "{% if page.late_rule %} Late work: {{ page.late_rule }}.{% endif %}</p>"
+        in flat
     )
     assert "Submit on {{ page.submit_host }}" in flat
     # And nothing about a repo, a push or a mark.
