@@ -574,7 +574,7 @@ function View(p: ReadyProps) {
   };
 
   // An assignment newly handed out by hand asks first: until Hand out now, nothing reaches students.
-  const manualKeys = dirtyKeys.filter((k) => newlyManual(drafts[k], baseOf(k)));
+  const manualKeys = dirtyKeys.filter((k) => newlyManual(drafts[k], baseOf(k), assignmentOf.get(k)?.state));
   const requestSave = () => {
     if (!allErrors && manualKeys.length) setAskManual(true);
     else void doSave();

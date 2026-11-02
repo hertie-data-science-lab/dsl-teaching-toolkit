@@ -9,6 +9,7 @@ import { solutionBeforeCutoff } from './labels';
 import { EMPTY_ENTRY_KIND } from './materialsRules';
 import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO } from './policy';
 import { isSession } from './schedule';
+import type { AssignmentState } from './types';
 
 export type Block = 'releases' | 'assignments' | 'events';
 
@@ -462,10 +463,11 @@ function moment(when: string, endOfDay = false): string {
 /**
  * Whether saving `d` leaves an assignment with no hand out date that had one (`base` is the
  * saved entry, null for a new one): nothing goes out until someone presses Hand out now, so the
- * Save asks first. An entry already handed out by hand is not asked about again.
+ * Save asks first. An entry already handed out by hand is not asked about again, nor one the
+ * engine reports out (`state` past `declared`): its copies exist already.
  */
-export function newlyManual(d: Draft, base: Draft | null): boolean {
-  return d.kind === 'assignments' && d.manual && !(base?.kind === 'assignments' && base.manual);
+export function newlyManual(d: Draft, base: Draft | null, state?: AssignmentState): boolean {
+  return d.kind === 'assignments' && d.manual && !(base?.kind === 'assignments' && base.manual) && (state === undefined || state === 'declared');
 }
 
 /**

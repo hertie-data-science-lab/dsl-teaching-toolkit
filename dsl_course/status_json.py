@@ -2133,16 +2133,19 @@ def render_assignments(facts: SemesterFacts, now: datetime) -> list[dict]:
     return rows
 
 
+NOT_HANDED_OUT = "NOT_HANDED_OUT"
+
+
 def flag_assignments(rows: list[dict], problems: list[dict]) -> list[dict]:
     """Set each row's `problem`: a `now` or `soon` problem names it or its template (a
-    `later` one is coming up, not wrong yet)."""
-    flagged = _problem_entries(_biting(problems))
+    `later` one is coming up, not wrong yet). `NOT_HANDED_OUT` is left out: the row's
+    state (`declared`, no hand-out date) already says it, and the console tags it."""
+    flagged = _problem_entries(
+        [p for p in _biting(problems) if p.get("kind") != NOT_HANDED_OUT]
+    )
     for row in rows:
         row["problem"] = row["slug"] in flagged or row["template"] in flagged
     return rows
-
-
-NOT_HANDED_OUT = "NOT_HANDED_OUT"
 
 
 def not_handed_out_problems(
@@ -2175,7 +2178,7 @@ def not_handed_out_problems(
                 "stops": "Students have no brief and there is no mark sheet; press "
                 "Hand out now.",
                 "fix": {
-                    **_schedule_fix(facts.org, key, None),
+                    **_schedule_fix(facts.org, key, line_of(entry.lines, "")),
                     "screen": "assignment",
                 },
                 "when": due.isoformat(),

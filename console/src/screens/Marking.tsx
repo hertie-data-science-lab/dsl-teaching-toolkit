@@ -946,12 +946,13 @@ export function TeamsTab(p: TabProps) {
           <section class="panel section">
             <h2>Window</h2>
             <p>
-              <span class={`chip ${window === 'open' ? 'ok' : ''}`}>{window === 'open' ? 'Open' : window === 'pending' ? 'Not open yet' : window === 'closed' ? 'Closed' : assigned ? 'You assign' : 'Not open yet'}</span>{' '}
+              <span class={`chip ${window === 'open' ? 'ok' : ''}`}>{window === 'open' ? 'Open' : window === 'closed' ? 'Closed' : assigned ? 'You assign' : window === 'never' && a.state !== 'declared' ? 'Never opens' : 'Not open yet'}</span>{' '}
               {window === 'open' ? `Students can form and join teams on the assignment’s page until ${fmtDay(closes, tz, year)}.`
                 : window === 'pending' ? `Opens at hand out, ${fmtDay(opens, tz, year)}.`
                 : window === 'closed' ? 'Only you can change teams now.'
                 : assigned ? 'You assign every team here; students cannot form their own.'
-                : 'Opens when you press Hand out now. Until then you can assign teams here.'}
+                : a.state === 'declared' ? 'Opens when you press Hand out now. Until then you can assign teams here.'
+                : 'Students cannot form teams on the assignment’s page; assign them here.'}
             </p>
             {window === 'never' && a.state === 'declared' ? <div class="actions"><HandOutNow p={p} a={a} small /></div> : null}
             {assigned ? null : <p class="footnote">The window runs from hand out until the late cutoff: the due date plus the late window.</p>}

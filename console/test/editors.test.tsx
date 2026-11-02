@@ -140,6 +140,9 @@ describe('the schedule entry sheet model', () => {
     expect(newlyManual(manual, manual)).toBe(false);
     expect(newlyManual(d, null)).toBe(false);
     expect(newlyManual(blankDraft('lecture', { repo: '' }), null)).toBe(false);
+    // The engine reports it out: its copies exist, nothing to ask.
+    expect(newlyManual(manual, d, 'declared')).toBe(true);
+    expect(newlyManual(manual, d, 'open')).toBe(false);
   });
 
   it('adds a release to the seeded file and keeps every comment', () => {

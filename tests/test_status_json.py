@@ -879,6 +879,11 @@ def test_an_assignment_handed_out_by_hand_and_never_pressed_is_a_problem(now, ex
     assert (problem["bites"], problem["text"]) == expected
     assert problem["fix"]["screen"] == "assignment"
     assert problem["fix"]["entry"] == "assignment-2"
+    assert problem["fix"]["line"] == MANUAL_SCHED.assignments["assignment-2"].lines[""]
+    # Not the row's `problem` flag, which the index labels a template problem: the row's
+    # declared state, with no hand-out date, already tells it there.
+    row = next(a for a in doc["assignments"] if a["slug"] == "assignment-2")
+    assert (row["state"], row["handout"], row["problem"]) == ("declared", None, False)
     assert validate(doc, schemas.status_schema()) == []
 
 

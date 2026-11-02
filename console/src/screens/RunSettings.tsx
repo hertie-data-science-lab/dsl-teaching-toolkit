@@ -97,9 +97,10 @@ export function draftHandout(p: ReadyProps, d: AssignmentDraft): OpDef {
  * now; `onSave(true)` saves, then opens Hand out on it.
  */
 export function HandOutDialog({ one, onSave, onClose }: { one: boolean; onSave: (handOut: boolean) => void; onClose: () => void }) {
+  const it = one ? 'it is' : 'they are';
   return (
     <Modal small title="Hand out now?" onClose={onClose}>
-      <p id={MODAL_TEXT_ID}>You chose to hand out by hand. Until it is handed out students see no brief and there is no mark sheet.</p>
+      <p id={MODAL_TEXT_ID}>You chose to hand out by hand. Until {it} handed out students see no brief and there is no mark sheet.</p>
       <div class="actions">
         {/* Several at once: each is handed out from its own page. */}
         {one ? <button class="btn" type="button" onClick={() => { onClose(); onSave(true); }}>Save and hand out now</button> : null}
@@ -408,7 +409,7 @@ export function AssignmentRun({ p, a, group }: { p: ReadyProps; a: Assignment; g
     if (handOut) env?.ops.open(draftHandout(p, d));
   };
   // An entry newly handed out by hand asks first, as the Schedule's Save does.
-  const requestSave = () => (dirtyT && !hasErrors && newlyManual(d, baseT) ? setAskManual(true) : void doSave());
+  const requestSave = () => (dirtyT && !hasErrors && newlyManual(d, baseT, a.state) ? setAskManual(true) : void doSave());
   const repoName = typeof r.semester_dest_repo === 'string' ? r.semester_dest_repo : '';
   return (
     <section class="panel section" aria-label="How this semester runs it" id="run-settings">
