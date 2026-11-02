@@ -822,6 +822,32 @@ def test_a_shape_with_no_repo_per_unit_is_open_once_handed_out(via, kind):
     assert row["state"] == "declared"
 
 
+@pytest.mark.parametrize("via", ["assignment_repo", "external"])
+def test_an_assignment_nobody_handed_out_stays_declared_past_its_dates(via):
+    # Handed out by hand (no handout_datetime) and never pressed: due 27 Sep, cutoff 7 Oct.
+    # Past both it is still declared, so the console still offers Hand out now.
+    sched = _sched(SCHEDULE.replace("    handout_datetime: 2026-09-15T10:00\n", ""))
+    spec = grades.GradingSpec(type="individual", submit_via=via)
+    later = datetime(2026, 10, 12, 9, 0, tzinfo=UTC)
+
+    def state(listing: dict) -> str:
+        semester = _semester(sched=sched, specs={"assignment-2": spec}, listing=listing)
+        doc = _render(semester=semester, now=later)
+        return next(a for a in doc["assignments"] if a["slug"] == "assignment-2")[
+            "state"
+        ]
+
+    assert state(_semester().listing) == "declared"
+    # Once handed out (its semester template exists) the dates rule again, nobody onboarded or not.
+    out = _semester().listing | {
+        "assignment-2": repo_row(
+            "assignment-2", isTemplate=True, topics=["assignment-template"]
+        )
+    }
+    assert state(out) == "marking"
+    assert state(out | {"assignment-2-ada": repo_row("assignment-2-ada")}) == "marking"
+
+
 def test_a_group_assignment_nobody_declared_a_formation_for_is_forming_teams(
     monkeypatch,
 ):

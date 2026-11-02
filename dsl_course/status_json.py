@@ -1975,12 +1975,14 @@ def assignment_state(
     spec: grades.GradingSpec,
     units: int,
     returned: bool,
-    out: bool = False,
+    out: bool,
 ) -> str:
     """`declared | teams_forming | blocked | open | late_window | marking | returned`
     (lifecycle, per assignment), by the assignment's own clock:
 
-    returned once marks have gone back for every unit; marking from the cutoff;
+    returned once marks have gone back for every unit; declared, whatever the dates say,
+    while nothing is out (no unit's copy and not `out`: a hand-out by hand nobody has
+    pressed yet still waits for it past its due date); marking from the cutoff;
     late_window between the due date and the cutoff; before the due date, open once the
     work is out: any unit's copy handed out, or, for a shape with no repo per unit
     (`external`, `shared_dropbox_repo`), the assignment `handed_out` (`out`). A group
@@ -1990,6 +1992,8 @@ def assignment_state(
     cascade's, `self_select` unless somebody declared `assigned`)."""
     if returned:
         return "returned"
+    if units == 0 and not out:
+        return "declared"
     if cutoff is not None and now >= cutoff:
         return "marking"
     if now >= entry.due_datetime:
