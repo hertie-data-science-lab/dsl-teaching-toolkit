@@ -9,7 +9,7 @@ import { Field, Invalid } from '../forms/Form';
 import { KIND_LABEL, RELEASE_WORD, TYPE_CLASS, TYPE_LABEL, siteRowWord, fmtDay, fmtTime, fmtWhen, heldSentence, kindIdent, markWord, releaseIdent, repoWords, sortKey } from '../model/format';
 import { needsANumber, parseSchedule, scheduleRows, type Block, type Row } from '../model/schedule';
 import {
-  assignmentKey, blankDeploy, blankDraft, defaultDeployAt, entryKey, keyEntry, deployAt, draftErrors, freshId, needsNumber, nextNumber, readDraft, sessionBlock, unnumberedId, withNumber, writeDraft,
+  assignmentKey, blankDeploy, blankDraft, defaultDeployAt, entryKey, keyEntry, deployAt, draftErrors, freshId, needsNumber, newlyManual, nextNumber, readDraft, sessionBlock, unnumberedId, withNumber, writeDraft,
   type AssignmentDraft, type KindOf, type ArchiveDraft, type DeployDraft, type Draft, type EventDraft, type ReleaseDraft, type SemesterDraft,
 } from '../model/scheduleEdit';
 import type { Assignment, Release } from '../model/types';
@@ -29,7 +29,7 @@ import type { CohortProps, ReadyProps } from './types';
 import { ASSIGNMENTS_FILE, CONFIG_REPO } from '../model/names';
 import { SOURCE_WORD, assignmentsFile, lateWord, resolve, usableBlock, validAssignments, validSchedule, type Layers } from '../model/cascade';
 import { parse } from 'yaml';
-import { RunRows, SolutionNote, applicableKeys, assignmentsAfterSchedule, cutoffOf, forcedVisibility, runErrors, semesterLayers } from './RunSettings';
+import { HandOutDialog, HandOutNow, ManualWaiting, RunRows, waitsByHand, SolutionNote, draftHandout, waitingHandOut, applicableKeys, assignmentsAfterSchedule, cutoffOf, forcedVisibility, runErrors, semesterLayers } from './RunSettings';
 import type { Values } from '../tiers/types';
 import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO, DEFAULT_TIMEZONE } from '../model/policy';
 import { CONTENT_KINDS, EMPTY_ENTRY_KIND, MATERIALS_FILE, inferKind, landingSection, readDeclared } from '../model/materialsRules';
@@ -263,7 +263,7 @@ export interface NewRun {
   errors: Record<string, string>;
 }
 
-function AssignmentForm({ p, d, set, errors, templates, isNew, run, tiered }: { p: ReadyProps; d: AssignmentDraft; set: Setter<AssignmentDraft>; errors: Record<string, string>; templates: { repo: string; state: string }[]; isNew: boolean; run: NewRun; tiered: Tiered[] }) {
+function AssignmentForm({ p, d, set, errors, templates, isNew, run, tiered, waiting }: { p: ReadyProps; d: AssignmentDraft; set: Setter<AssignmentDraft>; errors: Record<string, string>; templates: { repo: string; state: string }[]; isNew: boolean; run: NewRun; tiered: Tiered[]; waiting: Assignment | null }) {
   const tpl = templates.find((t) => t.repo === d.template);
   // The template's state in the one set of words (decision 0034).
   const tplState = tpl ? templateReadinessIn(p.status.course, tpl.repo, tiered) : null;
@@ -299,8 +299,9 @@ function AssignmentForm({ p, d, set, errors, templates, isNew, run, tiered }: { 
         <span class="label">Hand out</span>
         <div class="choices">
           <label class="choice"><input type="radio" name="e-ho" checked={!d.manual} onChange={() => set({ manual: false })} /><b>At a time</b><span>Automation hands out then.</span></label>
-          <label class="choice"><input type="radio" name="e-ho" checked={d.manual} onChange={() => set({ manual: true })} /><b>I will hand out manually</b><span>From the assignment page.</span></label>
+          <label class="choice"><input type="radio" name="e-ho" checked={d.manual} onChange={() => set({ manual: true })} /><b>I will hand out manually</b><span>Hand out now when you save, or later from its page; until then students see no brief and there is no mark sheet.</span></label>
         </div>
+        {waiting ? <div class="actions"><HandOutNow p={p} a={waiting} small /></div> : null}
       </div>
       {!d.manual ? (
         <div class="cond"><div class="row-2">
@@ -456,6 +457,8 @@ function View(p: ReadyProps) {
   );
   const [removed, setRemoved] = useState<Record<string, Block>>({});
   const [save, setSave] = useState<SaveState>({ kind: 'idle' });
+  // The Save that would leave an assignment with no hand out date waits on this question.
+  const [askManual, setAskManual] = useState(false);
   const file = useSchedFile(p);
   const sf = file && file !== 'loading' ? file : null;
   const schedExists = p.files.file(p.cohort.org, CONFIG_REPO, 'schedule.yml').kind !== 'absent';
@@ -463,6 +466,8 @@ function View(p: ReadyProps) {
   const sched = useMemo(() => (sf && !sf.error ? parseSchedule(sf.text) : null), [sf?.text]);
   const rows = scheduleRows(status, sched, now, tz);
   const assignmentOf = new Map((status.assignments ?? []).map((a) => [a.slug, a]));
+  // An assignment set to hand out by hand that has not gone out: its rows carry the tag.
+  const waiting = (slug: string) => { const a = assignmentOf.get(slug); return a !== undefined && waitsByHand(a); };
   const key = p.entry;
   // A row's sheet key: its id, qualified for an `events:` entry whose id a release also has.
   const rowKey = (r: { block: Block; entry: string }) => (r.entry === 'semester' || r.entry === 'archive' ? r.entry : entryKey(doc, r.block, r.entry));
@@ -519,7 +524,8 @@ function View(p: ReadyProps) {
   };
   const allErrors = dirtyKeys.some((k) => Object.keys(errorsOf(drafts[k])).length || (k === 'new' && Object.keys(newRunErrors(drafts[k])).length));
 
-  const doSave = async () => {
+  /** Save every change; `handOutKey`, an entry newly handed out by hand, then opens Hand out on it once the save lands. */
+  const doSave = async (handOutKey?: string) => {
     if (!sf || sf.error) return;
     if (allErrors) {
       setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
@@ -556,12 +562,22 @@ function View(p: ReadyProps) {
     const first: Step = { target: { owner: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }, text: out.text, sha: sf.sha, opts: { message: `schedule: ${what}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] } };
     // Once the schedule is written its drafts are gone, whatever happens to assignments.yml:
     // a retry must not add the entry a second time.
-    await saveSteps(env, setSave, first, second, newAsg ? 'Entry saved without its run settings' : 'Entry removed, but its block is still in assignments.yml', () => {
+    const ho = handOutKey ? written[dirtyKeys.indexOf(handOutKey)] : undefined;
+    const saved = await saveSteps(env, setSave, first, second, newAsg ? 'Entry saved without its run settings' : 'Entry removed, but its block is still in assignments.yml', () => {
       setDrafts({});
       setRemoved({});
       setNewRun({});
       if (newId && typeof location !== 'undefined') location.hash = `#schedule-${newId}`;
     });
+    // The op's own panel, as Hand out now opens it: its preview and confirmation; it never runs by itself.
+    if (saved && ho?.kind === 'assignments') env?.ops.open(draftHandout(p, ho));
+  };
+
+  // An assignment newly handed out by hand asks first: until Hand out now, nothing reaches students.
+  const manualKeys = dirtyKeys.filter((k) => newlyManual(drafts[k], baseOf(k), assignmentOf.get(k)?.state));
+  const requestSave = () => {
+    if (!allErrors && manualKeys.length) setAskManual(true);
+    else void doSave();
   };
 
   const counts: Record<Block, number> = { releases: 0, assignments: 0, events: 0 };
@@ -590,6 +606,7 @@ function View(p: ReadyProps) {
     ) : m ? <><ReleaseMarks m={m} entry={r.entry} />{m.late ? <a class="textlink" href={`#release-${r.entry}`}>Details</a> : null}</>
       : rel && !ref ? <><span class="st-note">{NOTHING_TO_RELEASE}</span><a class="textlink" href={`#schedule-${rk}`}>Edit</a></>
       : ref && rel?.state === 'planned' ? <><span class="st-chip">planned</span><OpOpen def={releaseEarly(scope, ref)} cls="btn small" label="Release early" /></>
+      : r.block === 'assignments' && waiting(r.entry) ? <ManualWaiting />
       : <span class="st-chip">{r.state}</span>;
     items.push(
       <li class={`trow ${TYPE_CLASS[r.type] ?? 'evt'}${markClass(m)}${key === rk ? ' current' : ''}${gone ? ' removed' : ''}${r.show ? '' : ' off-site'}`} data-entry={r.entry}>
@@ -649,7 +666,7 @@ function View(p: ReadyProps) {
             <div class="form">
               {d.kind !== 'semester' && d.kind !== 'archive' ? <div class="field"><span class="label">Identifier</span><div class="ident">{ident}<span>derived, as the student site does</span></div></div> : null}
               {d.kind === 'session' ? <ReleaseForm p={p} d={d} set={set} errors={errors} repos={repos} inferred={inferredOf(d)} />
-                : d.kind === 'assignments' ? <AssignmentForm p={p} d={d} set={set} errors={errors} templates={templates} isNew={key === 'new'} tiered={tiered} run={{ values: newRun, set: (v) => { setNewRun(v); if (save.kind !== 'busy') setSave({ kind: 'idle' }); }, errors: newRunErrors(d) }} />
+                : d.kind === 'assignments' ? <AssignmentForm p={p} d={d} set={set} errors={errors} templates={templates} isNew={key === 'new'} tiered={tiered} waiting={key === 'new' ? null : waitingHandOut(assignmentOf.get(key), baseOf(key), d)} run={{ values: newRun, set: (v) => { setNewRun(v); if (save.kind !== 'busy') setSave({ kind: 'idle' }); }, errors: newRunErrors(d) }} />
                 : d.kind === 'events' ? <EventForm d={d} set={set} errors={errors} />
                 : d.kind === 'semester' ? <SemesterForm d={d} set={set} errors={errors} />
                 : <ArchiveForm d={d} set={set} errors={errors} />}
@@ -666,7 +683,7 @@ function View(p: ReadyProps) {
             {d.kind === 'archive' && !archived ? <div class="savebar"><span class="footnote">{archivePassed ? 'The archive date has passed.' : 'Archiving before the scheduled date asks you to confirm.'}</span><OpButtons def={archive(scope, archiveWhen, archivePassed)} /></div> : null}
             <SaveLine state={save} />
             <div class="savebar">
-              <button class="btn" type="button" disabled={save.kind === 'busy' || !dirty} onClick={() => void doSave()}>Save</button>
+              <button class="btn" type="button" disabled={save.kind === 'busy' || !dirty} onClick={requestSave}>Save</button>
               <EditFile org={p.cohort.org} repo={CONFIG_REPO} path="schedule.yml" exists={schedExists} line={key !== 'new' && key !== 'semester' ? lineOf(sf.text, keyEntry(doc, key)[1], key === 'archive' ? 0 : 2) : undefined} />
               {key !== 'new' && key !== 'semester' && key !== 'archive' && keyEntry(doc, key)[0] && !removed[key] ? (
                 <button class="btn small quiet" type="button" style="margin-left:auto" onClick={() => { setRemoved({ ...removed, [key]: keyEntry(doc, key)[0]! }); if (typeof location !== 'undefined') location.hash = '#schedule'; }}>Remove</button>
@@ -727,7 +744,8 @@ function View(p: ReadyProps) {
         {sheet}
       </div>
       {!key ? <SaveLine state={save} /> : null}
-      <UnsavedBar count={dirty} busy={save.kind === 'busy'} onDiscard={() => { setDrafts({}); setRemoved({}); setSave({ kind: 'idle' }); }} onSave={() => void doSave()} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml', exists: schedExists }} />
+      <UnsavedBar count={dirty} busy={save.kind === 'busy'} onDiscard={() => { setDrafts({}); setRemoved({}); setSave({ kind: 'idle' }); }} onSave={requestSave} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml', exists: schedExists }} />
+      {askManual ? <HandOutDialog one={manualKeys.length === 1} onSave={(h) => void doSave(h ? manualKeys[0] : undefined)} onClose={() => setAskManual(false)} /> : null}
     </>
   );
 }

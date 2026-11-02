@@ -14,7 +14,7 @@ import {
   questionPoints, readSheet, round, rowsChanged, scoreTotal, spread, studentMarks, type HoldReason, type HoldUnit, type Penalty, type Person, type Unit,
 } from '../model/marks';
 import { SOURCE_WORD, resolve, valueWord } from '../model/cascade';
-import { assignmentSettings, sheetName } from './RunSettings';
+import { HandOutNow, assignmentSettings, sheetName } from './RunSettings';
 import { penaltyRate } from '../model/policy';
 import { marksDraft, marksSubFolded, marksWidths, saveMarksDraft, saveMarksSubFolded, saveMarksWidths, type MarksDraft } from '../model/prefs';
 import { parseRoster, sameHandle } from '../model/people';
@@ -385,8 +385,18 @@ export function MarksTab(p: TabProps) {
     </>
   );
   if (file.kind === 'loading') return <>{headOnly}<Loading what="Reading the mark sheet" /></>;
-  if (file.kind !== 'ready')
-    return <>{headOnly}<section class="panel section stub"><h2>No mark sheet yet</h2><p>{group && !a.teams ? 'No teams yet, so no mark sheet: it appears with the first team.' : 'The mark sheet appears at hand out, with a row for every student or team.'}</p></section></>;
+  if (file.kind !== 'ready') {
+    // Not handed out yet (an entry handed out by hand waits for Hand out now): say so, and offer it here.
+    const waiting = a.state === 'declared';
+    const said = !waiting ? (group && !a.teams ? 'No teams yet, so no mark sheet: it appears with the first team.' : 'The mark sheet appears at hand out, with a row for every student or team.')
+      : a.handout && Date.parse(a.handout) > now ? `Hands out ${fmtWhen(a.handout, tz, year)}; the mark sheet appears then.`
+      : 'Not handed out yet, so nothing has reached students. The mark sheet appears when you press Hand out now, with a row for every student or team.';
+    return (
+      <>{headOnly}<section class="panel section stub"><h2>No mark sheet yet</h2><p>{said}</p>
+        {waiting ? <div class="actions"><HandOutNow p={p} a={a} /></div> : null}
+      </section></>
+    );
+  }
   if (!parsed?.sheet)
     return <>{headOnly}<CheckLine cls="bad">The mark sheet does not parse ({parsed?.error}). Fix it with Edit the file directly.</CheckLine></>;
   const { sheet } = parsed;
@@ -936,13 +946,15 @@ export function TeamsTab(p: TabProps) {
           <section class="panel section">
             <h2>Window</h2>
             <p>
-              <span class={`chip ${window === 'open' ? 'ok' : ''}`}>{window === 'open' ? 'Open' : window === 'pending' ? 'Not open yet' : window === 'closed' ? 'Closed' : assigned ? 'You assign' : 'Never opens'}</span>{' '}
+              <span class={`chip ${window === 'open' ? 'ok' : ''}`}>{window === 'open' ? 'Open' : window === 'closed' ? 'Closed' : assigned ? 'You assign' : window === 'never' && a.state !== 'declared' ? 'Never opens' : 'Not open yet'}</span>{' '}
               {window === 'open' ? `Students can form and join teams on the assignment’s page until ${fmtDay(closes, tz, year)}.`
                 : window === 'pending' ? `Opens at hand out, ${fmtDay(opens, tz, year)}.`
                 : window === 'closed' ? 'Only you can change teams now.'
                 : assigned ? 'You assign every team here; students cannot form their own.'
-                : 'This assignment is handed out by hand, so students cannot form teams on the assignment’s page; assign them here.'}
+                : a.state === 'declared' ? 'Opens when you press Hand out now. Until then you can assign teams here.'
+                : 'Students cannot form teams on the assignment’s page; assign them here.'}
             </p>
+            {window === 'never' && a.state === 'declared' ? <div class="actions"><HandOutNow p={p} a={a} small /></div> : null}
             {assigned ? null : <p class="footnote">The window runs from hand out until the late cutoff: the due date plus the late window.</p>}
             {window === 'open' && free.length ? <div class="actions"><OpButtons def={teamsWindow(cohortScope(p), asgRef(a, true), fmtDay(closes, tz, year))} small label={`Email ${free.length} without a team`} /></div> : null}
             <a class="textlink" href={`#schedule-${a.slug}`}>Change the dates in the schedule</a>

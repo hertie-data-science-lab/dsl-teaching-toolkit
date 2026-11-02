@@ -9,17 +9,20 @@ import { useEnv } from '../env';
 import { invalidText, saveSteps, useSave, type SaveState, type Step } from '../edit/save';
 import { YamlText, compact, deepEqual, obj, type Path } from '../edit/yamlText';
 import { Field, SchemaForm, fieldErrors } from '../forms/Form';
-import { Modal } from '../ui/Modal';
+import { MODAL_TEXT_ID, Modal } from '../ui/Modal';
 import {
   LATE_PAIR, REPO_NAME_RE, RUN_KEYS, semesterName, SOURCE_WORD, assignmentsFile, below, courseBlock, effectiveWord, lateWord, layersOf, rawBlock, resolve, scheduleFile, usableBlock,
   validAssignments, validSchedule, valueWord, writeBlock, type Block, type Layers, type RunKey, type YamlFile,
 } from '../model/cascade';
-import { addDays, fmtWhen } from '../model/format';
+import { addDays, assignmentTitle, fmtDay, fmtWhen } from '../model/format';
 import { ASSIGNMENTS_FILE, CONFIG_REPO } from '../model/names';
-import { draftErrors, readDraft, writeDraft, type AssignmentDraft } from '../model/scheduleEdit';
+import { draftErrors, newlyManual, readDraft, writeDraft, type AssignmentDraft, type Draft } from '../model/scheduleEdit';
+import { handout, type AsgRef } from '../ops/defs';
+import type { OpDef } from '../ops/session';
+import { OpButtons } from '../ops/Panel';
 import { SOLUTION_WARNING } from '../model/labels';
 import type { Assignment } from '../model/types';
-import { pastDue } from '../model/assignment';
+import { isGroup, pastDue } from '../model/assignment';
 import { penaltyRate } from '../model/policy';
 import { round } from '../model/marks';
 import { RUN_LABEL, lateError, runTier, runTiers } from '../tiers/runSettings';
@@ -27,7 +30,7 @@ import type { FieldTier, Values } from '../tiers/types';
 import { CheckLine, EditFile, Loading } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveBar } from '../ui/edit';
-import { gradingConfig, tzOf, yearOf } from './common';
+import { cohortScope, gradingConfig, tzOf, yearOf } from './common';
 import type { ReadyProps } from './types';
 
 
@@ -49,6 +52,63 @@ export function assignmentSettings(p: Pick<ReadyProps, 'files' | 'course' | 'coh
 export function sheetName(p: Pick<ReadyProps, 'files' | 'cohort'>, key: string): string {
   const f = assignmentsFile(p.files, p.cohort.org);
   return f && f !== 'loading' ? semesterName(f.doc, key) : key;
+}
+
+/** The assignment as Hand out now names it, wherever it is offered. */
+export function handoutRef(p: Pick<ReadyProps, 'files' | 'cohort'>, a: Pick<Assignment, 'slug' | 'title' | 'number' | 'template' | 'units' | 'handout'>, group: boolean, tz: string, year: number): AsgRef {
+  return { slug: a.slug, title: assignmentTitle(a), template: a.template, units: a.units, group, when: a.handout ? `Scheduled ${fmtDay(a.handout, tz, year)}` : 'Hand out by hand', name: sheetName(p, a.slug) };
+}
+
+/** Whether an assignment set to hand out by hand is still waiting for Hand out now. */
+export const waitsByHand = (a: Pick<Assignment, 'state' | 'handout'>) => a.state === 'declared' && !a.handout;
+
+/** The tag on an assignment that `waitsByHand` (Schedule, Assignments). */
+export const ManualWaiting = () => <span class="chip amber">Manual hand-out: not handed out yet</span>;
+
+/** Hand out now for an assignment not yet handed out: one button, its panel the confirmation. */
+export function HandOutNow({ p, a, small }: { p: ReadyProps; a: Assignment; small?: boolean }) {
+  const tz = tzOf(p.status), year = yearOf(p.now, tz);
+  return <OpButtons def={handout(cohortScope(p), handoutRef(p, a, isGroup(a), tz, year))} label="Hand out now" small={small} />;
+}
+
+/**
+ * The assignment to offer Hand out now for beside an entry's hand out choice: only a saved entry
+ * handed out by hand, its choice unchanged in the draft, that the engine still reports declared.
+ * Never a draft: the op hands out what schedule.yml says.
+ */
+export function waitingHandOut(a: Assignment | undefined, saved: Draft | null, d: Draft): Assignment | null {
+  return a?.state === 'declared' && saved?.kind === 'assignments' && saved.manual && d.kind === 'assignments' && d.manual ? a : null;
+}
+
+/**
+ * Hand out for an entry just saved, from its draft: status.json lags the save, and the op
+ * needs only the template (the engine reads the entry from schedule.yml as committed).
+ */
+export function draftHandout(p: ReadyProps, d: AssignmentDraft): OpDef {
+  const cfg = gradingConfig(p, d.template);
+  const tz = tzOf(p.status), year = yearOf(p.now, tz);
+  const a = { slug: d.id, title: String(cfg.title ?? ''), number: typeof d.number === 'number' ? d.number : null, template: d.template, units: 0, handout: null };
+  return handout(cohortScope(p), handoutRef(p, a, cfg.type === 'group', tz, year));
+}
+
+/**
+ * The question a Save asks when it newly leaves an entry with no hand out date, on the
+ * Schedule and the Overview alike. `one` (exactly one such entry) offers Save and hand out
+ * now; `onSave(true)` saves, then opens Hand out on it.
+ */
+export function HandOutDialog({ one, onSave, onClose }: { one: boolean; onSave: (handOut: boolean) => void; onClose: () => void }) {
+  const it = one ? 'it is' : 'they are';
+  return (
+    <Modal small title="Hand out now?" onClose={onClose}>
+      <p id={MODAL_TEXT_ID}>You chose to hand out by hand. Until {it} handed out students see no brief and there is no mark sheet.</p>
+      <div class="actions">
+        {/* Several at once: each is handed out from its own page. */}
+        {one ? <button class="btn" type="button" onClick={() => { onClose(); onSave(true); }}>Save and hand out now</button> : null}
+        <button class={one ? 'btn outline' : 'btn'} type="button" onClick={() => { onClose(); onSave(false); }}>Save, hand out later</button>
+        <button class="btn quiet" type="button" onClick={onClose}>Cancel</button>
+      </div>
+    </Modal>
+  );
 }
 
 const toValues = (b: Block): Values => Object.fromEntries(Object.entries(b).map(([k, v]) => [k, v === null ? undefined : v]));
@@ -248,8 +308,8 @@ export function SolutionNote() {
 const T = (label: string, widget: FieldTier['widget'], extra: Partial<FieldTier> = {}): FieldTier => ({ tier: 'default', label, widget, ...extra });
 
 /** Timings as the Overview form edits them: hand out, due, the computed late cutoff, solution shown. */
-function Timings({ d, set, errors, cutoff, days, lateOk, solutionOff, tz, year }: {
-  d: AssignmentDraft; set: (patch: Partial<AssignmentDraft>) => void; errors: Record<string, string>; cutoff: string | null; days: unknown; lateOk: boolean; solutionOff: string | null; tz: string; year: number;
+function Timings({ d, set, errors, cutoff, days, lateOk, solutionOff, tz, year, handOut }: {
+  d: AssignmentDraft; set: (patch: Partial<AssignmentDraft>) => void; errors: Record<string, string>; cutoff: string | null; days: unknown; lateOk: boolean; solutionOff: string | null; tz: string; year: number; handOut?: preact.ComponentChildren;
 }) {
   const F = (k: keyof AssignmentDraft & string, t: FieldTier, error?: string) => (
     <Field id={`ov-${k}`} k={k} t={t} value={d[k]} values={d as unknown as Values} error={error} set={(key, v) => set({ [key]: v ?? (t.widget === 'checkbox' ? false : '') } as Partial<AssignmentDraft>)} />
@@ -260,8 +320,9 @@ function Timings({ d, set, errors, cutoff, days, lateOk, solutionOff, tz, year }
         <span class="label">Hand out</span>
         <div class="choices">
           <label class="choice"><input type="radio" name="ov-ho" checked={!d.manual} onChange={() => set({ manual: false })} /><b>At a time</b><span>Automation hands out then.</span></label>
-          <label class="choice"><input type="radio" name="ov-ho" checked={d.manual} onChange={() => set({ manual: true })} /><b>I will hand out manually</b><span>From this page.</span></label>
+          <label class="choice"><input type="radio" name="ov-ho" checked={d.manual} onChange={() => set({ manual: true })} /><b>I will hand out manually</b><span>Hand out now when you save, or later from this page.</span></label>
         </div>
+        {handOut}
       </div>
       {!d.manual ? <div class="cond"><div class="row-2">{F('handoutDate', T('Hand out on', 'date'), errors.handout)}{F('handoutTime', T('At', 'time'))}</div></div> : null}
       <div class="row-2">{F('dueDate', T('Due', 'date', { tier: 'ask' }), errors.due)}{F('dueTime', T('At', 'time', { tier: 'ask' }))}</div>
@@ -296,6 +357,7 @@ export function AssignmentRun({ p, a, group }: { p: ReadyProps; a: Assignment; g
   const [timing, setTiming] = useState<AssignmentDraft | null>(null);
   const [run, setRun] = useState<Values | null>(null);
   const [save, setSave] = useState<SaveState>({ kind: 'idle' });
+  const [askManual, setAskManual] = useState(false);
   const sf = scheduleFile(p.files, p.cohort.org);
   const af = assignmentsFile(p.files, p.cohort.org);
   if (sf === 'loading' || af === 'loading') return <section class="panel section"><h2>How this semester runs it</h2><Loading what="Reading the schedule and assignments.yml" /></section>;
@@ -322,8 +384,10 @@ export function AssignmentRun({ p, a, group }: { p: ReadyProps; a: Assignment; g
   // Past the due date the engine recomputes the cutoff and every late deduction off a changed late rule.
   const lateMoved = dirtyR && pastDue(a) && LATE_PAIR.some((k) => !deepEqual(compact({ k: r[k] }), compact({ k: beforeRun[k] })));
   const change = (patch: Partial<AssignmentDraft>) => { setTiming({ ...d, ...patch }); setSave({ kind: 'idle' }); };
-  const doSave = async () => {
-    if (Object.keys(tErr).length || Object.keys(rErr).length) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
+  const hasErrors = Object.keys(tErr).length > 0 || Object.keys(rErr).length > 0;
+  /** Save both files; `handOut` then opens Hand out on the entry once the save lands. */
+  const doSave = async (handOut = false) => {
+    if (hasErrors) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
     // Both files are built and checked before either is written; then the schedule goes
     // first, since a block in assignments.yml for a key the schedule does not name is a problem.
     let first: Step | null = null, second: Step | null = null;
@@ -340,8 +404,12 @@ export function AssignmentRun({ p, a, group }: { p: ReadyProps; a: Assignment; g
       if (!validAssignments(y.toJS() ?? {})) return setSave({ kind: 'bad', text: invalidText(ASSIGNMENTS_FILE, validAssignments) });
       second = { target: { owner: p.cohort.org, repo: CONFIG_REPO, path: ASSIGNMENTS_FILE }, text: y.text, sha: af!.sha, opts: { message: `assignments: edit ${a.slug}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] } };
     }
-    if (await saveSteps(env, setSave, first, second, 'Dates saved; run settings not saved', () => setTiming(null))) setRun(null);
+    if (!(await saveSteps(env, setSave, first, second, 'Dates saved; run settings not saved', () => setTiming(null)))) return;
+    setRun(null);
+    if (handOut) env?.ops.open(draftHandout(p, d));
   };
+  // An entry newly handed out by hand asks first, as the Schedule's Save does.
+  const requestSave = () => (dirtyT && !hasErrors && newlyManual(d, baseT, a.state) ? setAskManual(true) : void doSave());
   const repoName = typeof r.semester_dest_repo === 'string' ? r.semester_dest_repo : '';
   return (
     <section class="panel section" aria-label="How this semester runs it" id="run-settings">
@@ -349,7 +417,8 @@ export function AssignmentRun({ p, a, group }: { p: ReadyProps; a: Assignment; g
       <div class="form">
         <div class="form-section">
           <h3>Dates</h3>
-          <Timings d={d} set={change} errors={tErr} cutoff={cutoffOf(d.dueDate, d.dueTime, days)} days={days} lateOk={typeof days === 'number' && days > 0} solutionOff={solutionOff} tz={tz} year={year} />
+          <Timings d={d} set={change} errors={tErr} cutoff={cutoffOf(d.dueDate, d.dueTime, days)} days={days} lateOk={typeof days === 'number' && days > 0} solutionOff={solutionOff} tz={tz} year={year}
+            handOut={waitingHandOut(a, baseT, d) ? <div class="actions"><HandOutNow p={p} a={a} small /></div> : null} />
         </div>
         <div class="form-section">
           <h3>Run settings</h3>
@@ -367,10 +436,11 @@ export function AssignmentRun({ p, a, group }: { p: ReadyProps; a: Assignment; g
         </div>
         <div class="form-section">
           {lateMoved ? <CheckLine cls="warn">{LATE_MOVES}</CheckLine> : null}
-          <SaveBar state={save} onSave={() => void doSave()} disabled={!dirtyT && !dirtyR} file={dirtyR && !dirtyT ? { org: p.cohort.org, repo: CONFIG_REPO, path: ASSIGNMENTS_FILE, exists: p.files.file(p.cohort.org, CONFIG_REPO, ASSIGNMENTS_FILE).kind !== 'absent' } : { org: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }} />
+          <SaveBar state={save} onSave={requestSave} disabled={!dirtyT && !dirtyR} file={dirtyR && !dirtyT ? { org: p.cohort.org, repo: CONFIG_REPO, path: ASSIGNMENTS_FILE, exists: p.files.file(p.cohort.org, CONFIG_REPO, ASSIGNMENTS_FILE).kind !== 'absent' } : { org: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }} />
           <p class="lives">Dates live in <code>{CONFIG_REPO}/schedule.yml</code>; run settings in <code>{CONFIG_REPO}/{ASSIGNMENTS_FILE}</code>.</p>
         </div>
       </div>
+      {askManual ? <HandOutDialog one onSave={(h) => void doSave(h)} onClose={() => setAskManual(false)} /> : null}
     </section>
   );
 }

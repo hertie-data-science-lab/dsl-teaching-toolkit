@@ -158,6 +158,37 @@ describe('the assignment hub', () => {
     expect(alone).toContain('The mark sheet appears at hand out');
   });
 
+  it('offers Hand out now on the Marks tab of an assignment not yet handed out', () => {
+    const marks = (a: Assignment) => render(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'marks', loaded: { kind: 'ready', status: { ...status, assignments: [a, team] }, sha: 's', stale: [] } })} />);
+    const byHand = marks({ ...solo, state: 'declared', handout: null });
+    expect(byHand).toContain('Not handed out yet, so nothing has reached students. The mark sheet appears when you press Hand out now');
+    expect(byHand).toContain('>Hand out now</button>');
+    const later = marks({ ...solo, state: 'declared', handout: '2026-10-01T10:00:00+02:00' });
+    expect(later).toContain('Hands out Thu 1 Oct');
+    expect(later).toContain('the mark sheet appears then.');
+    expect(later).toContain('>Hand out now</button>');
+    expect(render(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'marks' })} />)).not.toContain('>Hand out now</button>');
+  });
+
+  it('offers Hand out now on an index row handed out by hand, and on no other', () => {
+    const byHand = { ...solo, slug: 'assignment-5', state: 'declared' as const, handout: null };
+    const dated = { ...solo, slug: 'assignment-6', state: 'declared' as const, handout: '2026-10-01T10:00:00+02:00' };
+    const out = render(<AssignmentsScreen {...props({ loaded: { kind: 'ready', status: { ...status, assignments: [solo, byHand, dated] }, sha: 's', stale: [] } })} />);
+    expect(out.match(/>Hand out now<\/button>/g)).toHaveLength(1);
+    expect(out.match(/Manual hand-out: not handed out yet/g)).toHaveLength(1);
+    expect(out.indexOf('>Hand out now</button>')).toBeGreaterThan(out.indexOf('#assignment-assignment-5'));
+  });
+
+  it('tells a declared assignment set to hand out by hand when it goes out, on the Overview and the Teams tab', () => {
+    const byHand = { ...team, state: 'declared' as const, handout: null, teams: 0 };
+    const at = (tab: 'overview' | 'teams') => render(<AssignmentScreen {...props({ entry: 'assignment-3', tab, loaded: { kind: 'ready', status: { ...status, assignments: [solo, byHand] }, sha: 's', stale: [] } })} />);
+    expect(at('overview')).toContain('Hands out when you press Hand out now.');
+    const teams = at('teams');
+    expect(teams).toContain('Opens when you press Hand out now. Until then you can assign teams here.');
+    expect(teams).toContain('>Hand out now</button>');
+    expect(teams).not.toContain('students cannot form teams');
+  });
+
   it('renders the named tab over the default one', () => {
     const out = render(<AssignmentScreen {...props({ entry: 'assignment-3', tab: 'overview' })} />);
     expect(current(out)).toBe('Overview');

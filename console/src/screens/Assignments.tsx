@@ -5,11 +5,11 @@ import { readTable } from '../edit/csv';
 import { parseRoster } from '../model/people';
 import { ASSIGNMENT_WORD, assignmentIdent, assignmentTitle, fmtDay, fmtTime, fmtWhen } from '../model/format';
 import type { Assignment, Status } from '../model/types';
-import { pastDue, phaseOf, submissionsOf, type Phase } from '../model/assignment';
+import { isGroup, pastDue, phaseOf, submissionsOf, type Phase } from '../model/assignment';
 import { RepoChip } from '../ui/SetupPanel';
 import { templateReadinessIn, tier } from '../model/readiness';
 import { Check } from '../ui/icons';
-import { collect, handout, updateCopies, type AsgRef } from '../ops/defs';
+import { collect, updateCopies } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
 import { useEffect } from 'preact/hooks';
 import { replaceHash, tabHref, type AssignmentTab } from '../router';
@@ -18,7 +18,7 @@ import { Hint } from '../ui/Hint';
 import { asgSummary } from './Cohort';
 import { courseOf } from './Course';
 import { MarksTab, TeamsTab } from './Marking';
-import { AssignmentRun, SemesterDefaults, sheetName } from './RunSettings';
+import { AssignmentRun, HandOutNow, ManualWaiting, SemesterDefaults, handoutRef, sheetName, waitsByHand } from './RunSettings';
 import { WithStatus, cohortName, cohortScope, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 import { CONFIG_REPO } from '../model/names';
@@ -109,13 +109,14 @@ function Index(p: ReadyProps) {
               <tr>
                 <td>
                   <a class="rowlink" href={`#assignment-${a.slug}`}>{assignmentTitle(a)}</a><br />
-                  <span class="footnote">{a.teams !== null && a.teams !== undefined ? 'In teams' : 'Alone'}</span>
+                  <span class="footnote">{isGroup(a) ? 'In teams' : 'Alone'}</span>
                 </td>
                 <td>
                   <span class={`chip ${a.state === 'open' ? 'asg' : ''}`}>{ASSIGNMENT_WORD[a.state]}</span>
                   {a.state === 'late_window' ? <><br /><span class="footnote">late work to {fmtDay(a.grading_cutoff_datetime, tz, year)}</span></> : null}
+                  {waitsByHand(a) ? <><br /><ManualWaiting /></> : null}
                 </td>
-                <td class="num">{nextDate(a, tz, year)}</td>
+                <td class="num">{nextDate(a, tz, year)}{waitsByHand(a) ? <div class="actions" style="margin-top:6px"><HandOutNow p={p} a={a} small /></div> : null}</td>
                 <td class="num">{asgSummary(a, tz, year).split('; ').pop()}</td>
                 <td class="num">{isGroup(a) ? <>{a.teams} formed{free !== null ? <><br /><span class="footnote">{free} without a team</span></> : null}</> : <span class="footnote">—</span>}</td>
                 <td class="num">{a.marks.total ? `${a.marks.filled} / ${a.marks.total}` : <span class="footnote">No marks yet</span>}</td>
@@ -150,8 +151,6 @@ const LIFE: [string, Phase][] = [
 function stepOf(a: Assignment): number {
   return LIFE.findIndex(([, ph]) => ph === phaseOf(a));
 }
-
-export const isGroup = (a: Assignment) => a.teams !== null && a.teams !== undefined;
 
 /** The tab an assignment opens on: Teams while teams form, Marks from the due date (decision 0037). */
 export function defaultTab(a: Assignment): AssignmentTab {
@@ -231,7 +230,7 @@ function Overview(p: TabProps) {
   const big = cur >= 3 ? a.marks.filled : cur <= 1 ? (a.teams ?? 0) : (submissionsOf(a));
   const bigOf = cur >= 3 ? a.marks.total : a.units;
   const scope = cohortScope(p);
-  const ref: AsgRef = { slug: a.slug, title: assignmentTitle(a), template: a.template, units: a.units, group, when: a.handout ? `Scheduled ${fmtDay(a.handout, tz, year)}` : 'Hand out by hand', name: sheetName(p, a.slug) };
+  const ref = handoutRef(p, a, group, tz, year);
   const tree = p.files.tree(p.course.org, a.template);
   const templateFiles = tree.kind === 'ready' ? tree.paths.filter((x) => !x.dir && !x.path.startsWith('.github/')).map((x) => x.path) : [];
   // While students can push: from hand out until the late cutoff.
@@ -290,8 +289,8 @@ function Overview(p: TabProps) {
         <section class="panel section">
           <div class="section-head"><h2>What you can do, by state</h2><span class="meta">Preview never changes anything students see</span></div>
           <ul class="state-actions">
-            {row(cur === 0 ? 'now' : 'past', 'Declared', handedOut ? `Handed out ${fmtWhen(a.handout, tz, year)} to ${a.units} ${group ? 'teams' : 'students'}.` : 'Hands out at its time, or now.',
-              handedOut ? null : <div class="sa-op"><span class="opname">Hand out now</span><OpButtons def={handout(scope, ref)} small /></div>)}
+            {row(cur === 0 ? 'now' : 'past', 'Declared', handedOut ? `Handed out ${fmtWhen(a.handout, tz, year)} to ${a.units} ${group ? 'teams' : 'students'}.` : a.handout ? 'Hands out at its time, or now.' : 'Hands out when you press Hand out now.',
+              handedOut ? null : <div class="sa-op"><span class="opname">Hand out now</span><HandOutNow p={p} a={a} small /></div>)}
             {group ? row(cur === 1 ? 'now' : 'past', 'Teams forming', 'Students form teams on the assignment’s page in the student console; you can assign the rest.', <div class="sa-op"><a class="btn small quiet" href={tabHref(a.slug, 'teams')}>Open teams</a></div>) : null}
             {row(cur === 2 ? 'now' : cur > 2 ? 'past' : 'later', 'Open',
               cur < 2 ? 'Opens after hand out.' : cur > 2 ? `Closed ${fmtDay(a.due, tz, year)}.` : pushWhy,

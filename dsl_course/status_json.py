@@ -1975,12 +1975,14 @@ def assignment_state(
     spec: grades.GradingSpec,
     units: int,
     returned: bool,
-    out: bool = False,
+    out: bool,
 ) -> str:
     """`declared | teams_forming | blocked | open | late_window | marking | returned`
     (lifecycle, per assignment), by the assignment's own clock:
 
-    returned once marks have gone back for every unit; marking from the cutoff;
+    returned once marks have gone back for every unit; declared, whatever the dates say,
+    while nothing is out (no unit's copy and not `out`: a hand-out by hand nobody has
+    pressed yet still waits for it past its due date); marking from the cutoff;
     late_window between the due date and the cutoff; before the due date, open once the
     work is out: any unit's copy handed out, or, for a shape with no repo per unit
     (`external`, `shared_dropbox_repo`), the assignment `handed_out` (`out`). A group
@@ -1990,6 +1992,8 @@ def assignment_state(
     cascade's, `self_select` unless somebody declared `assigned`)."""
     if returned:
         return "returned"
+    if units == 0 and not out:
+        return "declared"
     if cutoff is not None and now >= cutoff:
         return "marking"
     if now >= entry.due_datetime:
@@ -2048,12 +2052,9 @@ def run_settings(spec: grades.GradingSpec) -> dict[str, dict]:
     }
 
 
-def render_assignments(
-    facts: SemesterFacts, problems: list[dict], now: datetime
-) -> list[dict]:
-    """One row per assignment the schedule declares. `problem`: a `now` or `soon` problem
-    names it or its template (a `later` one is coming up, not wrong yet)."""
-    flagged = _problem_entries(_biting(problems))
+def render_assignments(facts: SemesterFacts, now: datetime) -> list[dict]:
+    """One row per assignment the schedule declares; `problem` is set by
+    `flag_assignments` once the semester's problems are tiered."""
     templates = handed_out_assignments(list(facts.listing.values()))
     sheet_specs = {}
     for k, e in facts.sched.assignments.items():
@@ -2102,7 +2103,10 @@ def render_assignments(
                     spec,
                     units,
                     returned,
-                    handed_out(name, entry, templates, now),
+                    # A sheet with rows is out too: a shape with no repos whose sheet
+                    # landed but whose hand-out record did not would otherwise wait for a
+                    # second Hand out now forever.
+                    handed_out(name, entry, templates, now) or on_sheet > 0,
                 ),
                 "handout": _iso(entry.handout_datetime),
                 "due": _iso(entry.due_datetime),
@@ -2119,7 +2123,7 @@ def render_assignments(
                 else None,
                 "marks": {"filled": filled, "total": total},
                 "returned": returned,
-                "problem": slug in flagged or entry.course_source_repo in flagged,
+                "problem": False,
                 "settings": run_settings(spec),
                 # The site's due-row word (`course.submit_shape`), so the console's
                 # schedule says where to submit exactly as the site does.
@@ -2127,6 +2131,60 @@ def render_assignments(
             }
         )
     return rows
+
+
+NOT_HANDED_OUT = "NOT_HANDED_OUT"
+
+
+def flag_assignments(rows: list[dict], problems: list[dict]) -> list[dict]:
+    """Set each row's `problem`: a `now` or `soon` problem names it or its template (a
+    `later` one is coming up, not wrong yet). `NOT_HANDED_OUT` is left out: the row's
+    state (`declared`, no hand-out date) already says it, and the console tags it."""
+    flagged = _problem_entries(
+        [p for p in _biting(problems) if p.get("kind") != NOT_HANDED_OUT]
+    )
+    for row in rows:
+        row["problem"] = row["slug"] in flagged or row["template"] in flagged
+    return rows
+
+
+def not_handed_out_problems(
+    facts: SemesterFacts, rows: list[dict], now: datetime
+) -> list[dict]:
+    """`NOT_HANDED_OUT`: an assignment set to hand out by hand (no `handout_datetime`) that
+    is still `declared`. Dated at its due date, so `_tier` escalates it like every dated
+    problem: `later`, then `soon` inside the horizon, `now` once the due date has passed.
+    A scheduled hand-out never is: its own date counts it out (`handed_out`), so one whose
+    run failed is not told apart here."""
+    out = []
+    declared = {r["slug"] for r in rows if r["state"] == "declared"}
+    for key, entry in facts.sched.assignments.items():
+        due = entry.due_datetime
+        if key not in declared or entry.handout_datetime is not None:
+            continue
+        manual = f"{key} is set to hand out manually (no scheduled hand-out) and"
+        text = (
+            f"{manual} was never handed out; its due date, {_day(due)}, has passed."
+            if due <= now
+            else f"{manual} has not been handed out yet. Due {_day(due)}."
+        )
+        out.append(
+            {
+                "id": f"assignment:{_slugify(key)}:{NOT_HANDED_OUT}",
+                "scope": "semester",
+                "stage": "K4",
+                "kind": NOT_HANDED_OUT,
+                "text": text,
+                "stops": "Students have no brief and there is no mark sheet; press "
+                "Hand out now.",
+                "fix": {
+                    **_schedule_fix(facts.org, key, line_of(entry.lines, "")),
+                    "screen": "assignment",
+                },
+                "when": due.isoformat(),
+            }
+        )
+    return out
 
 
 def render_releases(
@@ -2567,6 +2625,8 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
     # A late release another problem already holds back is not told twice.
     held = {p["release"] for p in problems if "release" in p}
     problems += late_problems(facts, releases, held, now)
+    assignments = render_assignments(facts, now)
+    problems += not_handed_out_problems(facts, assignments, now)
     problems = _unique_ids(_tier(problems, now))
     course_block, _ = render_course(
         course, now, [p for p in problems if p["scope"] == "course"], moments
@@ -2582,7 +2642,7 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
     todo = semester_todo(facts, today, set_aside_ids(course.meta))
     week, weeks = semester_weeks(sched.semester_start, sched.semester_end, today)
     tag = semester_of(facts.org)
-    assignments = render_assignments(facts, problems, now)
+    assignments = flag_assignments(assignments, problems)
     stale = facts.site_last_update is None or (
         facts.config_last_update is not None
         and facts.site_last_update < facts.config_last_update

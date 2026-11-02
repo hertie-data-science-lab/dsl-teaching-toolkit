@@ -1276,8 +1276,8 @@ def main() -> int:
         "--assignment",
         default="",
         metavar="KEY",
-        help="Patch mode: the schedule.yml assignments key, needed only when two entries "
-        "hand out from this template.",
+        help="The schedule.yml assignments key, needed only when two entries hand out "
+        "from this template: the entry to hand out, or (patch mode) to patch.",
     )
     # Both modes preview unless told `--no-preview` (decision 0012): handing out creates a
     # repo per student, and patching commits into every one of them.
@@ -1286,11 +1286,6 @@ def main() -> int:
         "List the repos that would be created or patched; change nothing (default).",
     )
     args = parser.parse_args()
-    if args.assignment and not args.patch_path:
-        parser.error(
-            "--assignment picks the entry to patch; a hand out of a template two "
-            "entries share belongs to the schedule"
-        )
     when = args.solution_datetime.strip().lower()
     if when not in ("", SOLUTION_NOW):
         parser.error(
@@ -1326,11 +1321,13 @@ def main() -> int:
                 text, reasons=[{"code": NOT_SCHEDULED, "text": text}], code=1
             )
         # ... and a number (decision 0020 rule 3), refused the same way.
-        refusal = unnumbered_assignment(sched, args.template)
+        refusal = unnumbered_assignment(sched, args.template, args.assignment)
         if refusal:
             return refuse_unnumbered(refusal)
         if when == SOLUTION_NOW and not args.preview:
-            refused = preview_first(args.semester_org, args.template, preview=False)
+            refused = preview_first(
+                args.semester_org, args.template, preview=False, entry=args.assignment
+            )
             if refused is not None:
                 return refused
         rc, _changed = provision_all(
@@ -1340,13 +1337,18 @@ def main() -> int:
             roster_path=args.roster,
             solution=when == SOLUTION_NOW,
             dry_run=args.preview,
+            # The entry the console names (a resit sharing its template); none = the
+            # template's only entry, as before.
+            slug=args.assignment,
             # ONE listing of the semester for this press, taken here because there is no
             # tick above to have taken it: every repo question below is answered off it,
             # and None (it could not be read) falls back to a probe per repo.
             listing=listing_by_name(args.semester_org),
         )
         if when == SOLUTION_NOW and args.preview and rc == 0:
-            refused = preview_first(args.semester_org, args.template, preview=True)
+            refused = preview_first(
+                args.semester_org, args.template, preview=True, entry=args.assignment
+            )
             if refused is not None:
                 return refused
         if when == SOLUTION_NOW and not args.preview and rc == 0:
@@ -1362,6 +1364,7 @@ def main() -> int:
 SOLUTION_PREVIEW = records.path("solution_preview")
 PREVIEW_FIRST = "PREVIEW_FIRST"
 NOT_SCHEDULED = "NOT_SCHEDULED"
+NO_TEAMS_FOR_SOLUTION = "NO_TEAMS_FOR_SOLUTION"
 
 
 def _actor() -> str:
@@ -1379,7 +1382,11 @@ def _refusal(text: str) -> Summary:
 
 
 def preview_first(
-    semester_org: str, template: str, preview: bool, now: datetime | None = None
+    semester_org: str,
+    template: str,
+    preview: bool,
+    now: datetime | None = None,
+    entry: str = "",
 ) -> Summary | None:
     """The one gate on a hand out WITH the solution (`--solution-datetime now`): it pushes
     the model answer and rubric into every student's repo, and cannot be undone. A preview
@@ -1392,6 +1399,10 @@ def preview_first(
     now = now or datetime.now(timezone.utc)
     actor = _actor()
     want = {"actor": actor.casefold(), "template": template, "solution": SOLUTION_NOW}
+    if (
+        entry
+    ):  # a named entry's preview licenses that entry, not its template's other one
+        want["assignment"] = entry
     if preview:
         body = json.dumps({**want, "at": now.isoformat()}, indent=2, sort_keys=True)
         if not put_file(
@@ -1756,10 +1767,10 @@ def provision_all(
     green wait, not the error a button press gets.
 
     `slug` names WHICH schedule entry is being handed out, and only the scheduler can
-    answer it: it knows which release it is firing. The button asks nobody - a template
-    two entries hand out from is refused below, because they make different repos for
-    different students and keep separate grades, and guessing is a whole semester's work in
-    the wrong place.
+    answer it: the scheduler knows which release it is firing, and the console's Hand out
+    now names the entry it was pressed on. Without it a template two entries hand out from
+    is refused below, because they make different repos for different students and keep
+    separate grades, and guessing is a whole semester's work in the wrong place.
 
     `listing` is the semester's repos keyed by name, off the ONE listing its caller already
     holds - the tick's (`scheduler.run`) or the one the button takes for itself - and BOTH
@@ -1800,10 +1811,11 @@ def provision_all(
     # the semester-side name, exactly as it does everywhere else in this file.
     #
     # Two entries handing out from one template is legitimate - a resit off the same
-    # brief - and `resolve_target` refuses to choose between them. The REMEDY is this
-    # caller's to name: the button cannot answer, because it is one press and the answer
-    # decides which half of the semester gets repos, so it is sent to the schedule, which
-    # fires each entry on its own datetime and therefore knows which one it is.
+    # brief - and `resolve_target` refuses to choose between them unless `slug` names one
+    # (the scheduler, or the console's Hand out now). The REMEDY is for a caller that
+    # named none - the Release assignment workflow, whose one press cannot say which half
+    # of the semester gets repos - so it is sent to the schedule, which fires each entry
+    # on its own datetime and therefore knows which one it is.
     target = schedule.resolve_target(
         sched,
         template,
@@ -1854,15 +1866,33 @@ def provision_all(
             # Without it a HAND-FIRED release of a self-select assignment opened nothing at
             # all: the team-formation window runs from `handout_datetime`, so a press on an
             # entry that carries none left no lock scalar, no Assignment field for a
-            # student to pick, no site callout, no mail and no fault - while the error
-            # below points the teaching team at a form that would refuse every request.
+            # student to pick, no site callout, no mail and no fault - while the error it
+            # ended in pointed the teaching team at a form that would refuse every request.
             # The one thing that would have started the semester off was the thing the press
             # could not do. Write-once, so the scheduled handout - which fired off the very
             # datetime it would write - re-reads the file and changes nothing.
             #
-            # Only where repos are the product: a shape that creates none takes its signal
-            # from the SHEET landing instead (see the tail), and this branch writes none.
-            if gspec.creates_repos:
+            # Every shape: one that creates no repos takes its signal from the SHEET landing
+            # in the tail, which this branch never reaches, so with no team it recorded
+            # nothing and team formation never opened. The record is the whole hand-out
+            # here: its push to schedule.yml syncs the site (the brief) and the Join-team
+            # form, and the sheet follows the first team. Never in a preview.
+            #
+            # Not with the solution: no repo exists to put it in, and the repos teams get
+            # later never receive it. Refused (red) before anything is recorded, so `main`
+            # neither records a preview nor spends one (both only on rc 0).
+            if solution:
+                text = (
+                    "No teams yet, so there is no repo to put the solution in: hand out "
+                    "without the solution, and release it once teams have formed."
+                )
+                log_err(text)
+                return Summary(
+                    text,
+                    reasons=[{"code": NO_TEAMS_FOR_SOLUTION, "text": text}],
+                    code=1,
+                ), False
+            if not dry_run:
                 schedule.record_handout(semester_org, key)
             if scheduled:
                 # Teams appear days after the handout datetime either way - and the cron
@@ -1878,16 +1908,26 @@ def provision_all(
                     f"fires on the tick after {arrives}"
                 )
                 return 0, False
-            how = (
-                "students self-select via the 'Join team' issue, or seed the CSV"
-                if self_select
-                else "this assignment allocates teams (`team_formation: assigned`), so "
-                "the instructors fill the CSV - the Join-team form refuses it"
-            )
-            log_err(
-                f"no teams for `{key}` in {semester_org}/semester-config/teams.csv - {how}."
-            )
-            return 1, False
+            # The press opened team formation, which is what it is for: a green run that
+            # says who forms the teams, not an error about the empty CSV. Pressed after the
+            # late cutoff the window it opens is already shut, so only the teaching team
+            # can make teams.
+            cutoff = schedule.grading_cutoff_datetime(sched, key)
+            if cutoff is not None and datetime.now(timezone.utc) >= cutoff:
+                how = (
+                    "the team window is already closed, so assign the teams on its "
+                    "Teams tab (teams.csv)"
+                )
+            elif self_select:
+                how = "students form teams from now"
+            else:
+                how = "you assign the teams from now"
+            if dry_run:
+                return Summary(
+                    f"Preview: {slug} would be handed out; no teams yet; {how}."
+                ), False
+            log(f"  no teams for `{key}` yet - handed out; {how}")
+            return Summary(f"Handed out {slug}: no teams yet; {how}."), False
         # teams.csv is student-writable (the "Join team" issue appends rows), so its
         # handles must pass the SAME roster allowlist sync_teams applies: only enrolled,
         # onboarded roster handles - never a typo or a stranger's login that would be INVITED
