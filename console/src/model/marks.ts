@@ -107,6 +107,37 @@ export function rowsChanged(before: string, after: string): number {
   return [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((k) => !deepEqual(a[k], b[k])).length;
 }
 
+/** Where the engine records what each unit was last told (`.system/returned/<sheet name>.yml` in the config repo). */
+export const toldPath = (name: string) => `.system/returned/${name}.yml`;
+
+/**
+ * The units of a "last told" record (the sheet's own container and dialect): each unit's block as
+ * it stood when its people were last emailed. Absent or unreadable: nobody has been told yet.
+ */
+export function readTold(text: string | null): Record<string, unknown> {
+  if (text === null) return {};
+  const y = new YamlText(text);
+  return y.errors.length ? {} : sheetUnits(y.toJS());
+}
+
+/** A unit's block as students are told it: private notes and the submission facts gone (bar `info.days_late`), blank cells as absent. */
+function toldPart(v: unknown, key = ''): unknown {
+  if (!isObj(v)) return v;
+  const out: Record<string, unknown> = {};
+  for (const [k, x] of Object.entries(v)) {
+    if (k === NOTES_KEY || blank(x)) continue;
+    if (key === 'info' && k !== 'days_late') continue;
+    const part = toldPart(x, k);
+    if (!(isObj(part) && !Object.keys(part).length)) out[k] = part;
+  }
+  return out;
+}
+
+/** Whether a saved unit block differs from what its people were last told (`told` undefined: never told). */
+export function untold(block: unknown, told: unknown): boolean {
+  return told === undefined || !deepEqual(toldPart(block), toldPart(told));
+}
+
 /** One `questions:` entry's maximum: `Q1: 15`, or `Q1: {points: 15, file: report.tex}`. */
 export function questionPoints(entry: unknown): unknown {
   return isObj(entry) ? (entry.points ?? null) : entry;

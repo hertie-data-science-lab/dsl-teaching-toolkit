@@ -809,6 +809,7 @@ table.marks thead tr:first-child th:first-child { position: sticky; left: 0; z-i
 /* Return marks: its own block above the marking panel, right-aligned, with Student view under it. */
 .return-block { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; margin-bottom: 12px; }
 .return-block .return-main { display: inline-flex; align-items: center; gap: 4px; }
+.return-block .return-why { margin: 0; }
 .btn.big { font-size: 15.5px; padding: 8px 20px; min-height: 42px; }
 .marks-filters .full-toggle { margin-left: auto; }
 .icon-btn { display: inline-grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 1px solid var(--rule-strong); border-radius: 6px; background: var(--surface); color: var(--ink-2); font-size: 17px; line-height: 1; cursor: pointer; }

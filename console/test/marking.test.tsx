@@ -469,7 +469,7 @@ describe('Return marks from the marking screen', () => {
     expect(button('Return marks to 1 student')).toBeDefined();
     await click(button('Return marks to 1 student'));
     const facts = [...root!.querySelectorAll('.op-facts p')].map((p) => p.textContent);
-    expect(facts).toEqual(['1 student gets marks · 1 not marked yet (skipped) · 1 held (fix first)', 'Final: median 17, range 17–17, 1 held']);
+    expect(facts).toEqual(['1 student gets new marks · 0 already told and unchanged · 1 not marked yet (skipped) · 1 held (fix first)', 'Final: median 17, range 17–17, 1 held']);
   });
 
   it('says unsaved rows are not counted until saved', async () => {
@@ -530,6 +530,160 @@ describe('Return marks from the marking screen', () => {
   it('names who a preview would email, from the private preview issue', () => {
     const def = returnMarks({ courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' }, { slug: 'a', title: 'A', template: 't', units: 1, group: false, when: 'Marking' }, 1, 'a', null, [], 'extra');
     expect(def.dryExtra).toBe('extra');
+  });
+});
+
+describe('who Return marks would email (the engine’s last-told record)', () => {
+  const TOLD_PATH = `${COHORT_ORG}/semester-config/.system/returned/assignment-2.yml`;
+  /** A unit's block as the sheet carries it. */
+  const block = (sheet: string, key: string) => {
+    const at = sheet.indexOf(`  ${key}:\n`);
+    const next = sheet.slice(at + 1).search(/\n {2}\S/);
+    return sheet.slice(at, next < 0 ? undefined : at + 1 + next + 1);
+  };
+  const record = (container: string, ...blocks: string[]) => `# Last told by Return marks; written by the toolkit.\n${container}:\n${blocks.join('')}`;
+  const withTold = (told: string | null, sheet = SHEET) => {
+    const f = files(sheet);
+    if (told !== null) (f as unknown as { map: Record<string, string> }).map[TOLD_PATH] = told;
+    return f;
+  };
+  const big = () => q<HTMLButtonElement>('.return-block button.btn.big');
+  const why = () => root!.querySelector('.return-why')?.textContent ?? null;
+  const ADA = block(SHEET, 'ada-l');
+
+  it('counts every marked, unheld student when nobody has been told yet', async () => {
+    await marks(withTold(null));
+    expect(big().textContent).toBe('Return marks to 1 student');
+    expect(big().disabled).toBe(false);
+    expect(why()).toBeNull();
+  });
+
+  it('greys the button out when everyone marked has been told these marks', async () => {
+    const gh = github(), f = withTold(record('submissions', ADA)), env = envOf(gh, f);
+    await mount(env, <><AssignmentScreen {...props(f)} /><OpPanel /></>);
+    expect(big().textContent).toBe('Return marks to 0 students');
+    expect(big().disabled).toBe(true);
+    expect(big().getAttribute('aria-disabled')).toBe('true');
+    expect(why()).toBe('Everyone marked has been told these marks');
+    await click(big());
+    expect(env.ops.current.value).toBeNull();
+    expect(button('Student view').disabled).toBe(false);
+  });
+
+  it('counts a unit whose score changed since it was told', async () => {
+    await marks(withTold(record('submissions', ADA.replace('Q1: 8', 'Q1: 7'))));
+    expect(big().textContent).toBe('Return marks to 1 student');
+  });
+
+  it('does not count a change only in private notes or in the submission facts', async () => {
+    await marks(withTold(record('submissions', ADA.replace('Check the plot.', 'Older note.').replace('2026-09-27T20:00', '2026-09-26T09:00').replace('8/10', '7/10'))));
+    expect(big().textContent).toBe('Return marks to 0 students');
+  });
+
+  it('counts a change in the days late', async () => {
+    await marks(withTold(record('submissions', ADA.replace('days_late: 0', 'days_late: 1'))));
+    expect(big().textContent).toBe('Return marks to 1 student');
+  });
+
+  it('counts a marked unit absent from the record, and says who is already told', async () => {
+    const sheet = SHEET.replace('  cy-d:\n    info:\n      submitted:\n      days_late:\n      autograde:\n    score_individual:\n      Q1:', '  cy-d:\n    info:\n      submitted:\n      days_late:\n      autograde:\n    score_individual:\n      Q1: 5');
+    const gh = github(), f = withTold(record('submissions', ADA), sheet), env = envOf(gh, f);
+    await mount(env, <><AssignmentScreen {...props(f)} /><OpPanel /></>);
+    expect(big().textContent).toBe('Return marks to 1 student');
+    await click(big());
+    expect(q('.op-facts p').textContent).toBe('1 student gets new marks · 1 already told and unchanged · 0 not marked yet (skipped) · 1 held (fix first)');
+  });
+
+  it('does not count unsaved edits, and says to save them', async () => {
+    await marks(withTold(record('submissions', ADA)));
+    await type('input[aria-label="Q1 (out of 10) for cy-d"]', '6');
+    expect(big().textContent).toBe('Return marks to 0 students');
+    expect(big().disabled).toBe(true);
+    expect(why()).toBe('Save marks to return them');
+  });
+
+  it('says nothing is marked yet on a sheet without a mark', async () => {
+    await marks(withTold(null, SHEET.replace('      Q1: 8\n      Q2: 9', '      Q1:\n      Q2:').replace('Q1: pass', 'Q1:')));
+    expect(big().textContent).toBe('Return marks to 0 students');
+    expect(why()).toBe('Nothing is marked yet');
+  });
+});
+
+describe('points per question from the Marks tab', () => {
+  const FLAT = 'type: individual\nautograde: true\nformats: [py]\n';
+  const ONE_SCORE = SHEET.replace('    score_individual:\n      Q1: 8\n      Q2: 9', '    score_individual: 12');
+  const NO_SCORE = SHEET.replace('    score_individual:\n      Q1: 8\n      Q2: 9', '    score_individual:').replace('    score_individual:\n      Q1: pass\n      Q2:', '    score_individual:');
+  const toggle = () => root!.querySelector<HTMLButtonElement>('.marks-tools .points-toggle');
+  const editor = () => root!.querySelector('.points-edit');
+
+  it('offers to set points where the template has none, and to edit them where it has', async () => {
+    await marks(files(SHEET, FLAT));
+    expect(toggle()!.textContent).toBe('Set points per question');
+    render(null, root!);
+    root!.remove();
+    await marks();
+    expect(toggle()!.textContent).toBe('Edit points per question');
+  });
+
+  it('opens the rows editor in place, saying it changes the template for every semester', async () => {
+    await marks();
+    expect(editor()).toBeNull();
+    await click(toggle()!);
+    expect([...editor()!.querySelectorAll<HTMLInputElement>('input[aria-label$=" name"]')].map((x) => x.value)).toEqual(['Q1', 'Q2']);
+    expect(editor()!.textContent).toContain('This changes the assignment template, for every semester that uses it.');
+    expect(editor()!.textContent).not.toContain('single score');
+    await click(button('Cancel'));
+    expect(editor()).toBeNull();
+  });
+
+  it('saves the points into the template’s grading_config.yml on solution, and the grid gains the columns', async () => {
+    const gh = github();
+    await marks(files(NO_SCORE, FLAT), gh);
+    expect(q('thead').textContent).not.toContain('Points per question');
+    await click(toggle()!);
+    await type('input[aria-label="Question 1 points"]', '15');
+    await click(button('Add a question'));
+    await type('input[aria-label="Question 2 points"]', '25');
+    await click(button('Save points'));
+    await settle(() => editor() === null);
+    const put = puts(gh);
+    expect(put).toHaveLength(1);
+    expect(put[0].url).toContain(`/repos/${COURSE_ORG}/assignment-2-f2026/contents/grading_config.yml`);
+    expect((put[0].body as { branch: string }).branch).toBe('solution');
+    expect(parse(body(put[0]))).toEqual({ type: 'individual', autograde: true, formats: ['py'], questions: { Q1: 15, Q2: 25 } });
+    expect(q('thead').textContent).toContain('Points per question');
+    expect(root!.querySelector('input[aria-label="Q1 (out of 15) for ada-l"]')).not.toBeNull();
+    expect(toggle()!.textContent).toBe('Edit points per question');
+  });
+
+  it('says a row with a single score keeps it as its total, only where the sheet has one', async () => {
+    await marks(files(ONE_SCORE, FLAT));
+    await click(toggle()!);
+    expect(editor()!.textContent).toContain('A row that already has a single score keeps it as its total until you enter points per question.');
+  });
+
+  it('shows a single score as the total once questions exist, and a question mark typed over it saves per question', async () => {
+    const gh = github();
+    await marks(files(ONE_SCORE, CONFIG), gh);
+    const ada = () => [...root!.querySelectorAll('tr.unit-row')][0];
+    expect(ada().querySelector<HTMLInputElement>('input[aria-label="Q1 (out of 10) for ada-l"]')!.value).toBe('');
+    expect(ada().querySelector('td.calc')!.textContent).toBe('12');
+    expect(ada().hasAttribute('data-unmarked')).toBe(false);
+    await type('input[aria-label="Q1 (out of 10) for ada-l"]', '7');
+    expect(ada().querySelector('td.calc')!.textContent).toBe('7');
+    await click(button('Save marks'));
+    await settle(() => puts(gh).length > 0);
+    expect(parse(body(puts(gh)[0])).submissions['ada-l'].score_individual).toEqual({ Q1: 7 });
+  });
+
+  it('will not save a question marked from a file outside the submission', async () => {
+    const gh = github();
+    await marks(files(SHEET, CONFIG), gh);
+    await click(toggle()!);
+    await type('input[aria-label="Question 1 file"]', '../secret.tex');
+    expect(editor()!.textContent).toContain('../secret.tex is not a file inside the submission.');
+    expect(button('Save points').disabled).toBe(true);
+    expect(puts(gh)).toHaveLength(0);
   });
 });
 
@@ -705,6 +859,22 @@ describe('teams and people on the grid', () => {
     await mountTeams(teamFiles(TEAMS.replace('      ben-k:\n        adjustment_individual:', '      ben-k:\n        adjustment_individual: -2')));
     expect(root!.querySelectorAll('tr.member-row')).toHaveLength(3);
     expect(button('Open all teams')).toBeUndefined();
+  });
+
+  it('counts teams for Return marks, a changed member adjustment counting the team', async () => {
+    const TOLD = `${COHORT_ORG}/semester-config/.system/returned/assignment-2.yml`;
+    const told = (sheet: string) => {
+      const f = teamFiles();
+      (f as unknown as { map: Record<string, string> }).map[TOLD] = `# Last told.\n${sheet}`;
+      return f;
+    };
+    const big = () => q<HTMLButtonElement>('.return-block button.btn.big');
+    await mountTeams(told(TEAMS));
+    expect([big().textContent, big().disabled]).toEqual(['Return marks to 0 teams', true]);
+    render(null, root!);
+    root!.remove();
+    await mountTeams(told(TEAMS.replace('      ben-k:\n        adjustment_individual:', '      ben-k:\n        adjustment_individual: 2')));
+    expect([big().textContent, big().disabled]).toEqual(['Return marks to 1 team', false]);
   });
 
   it('names an individual student, handle under the name, and keeps Adjustment behind its chip', async () => {
