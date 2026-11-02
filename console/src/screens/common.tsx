@@ -5,7 +5,7 @@ import { useEnv } from '../env';
 import { cohortName } from '../model/discovery';
 import { dayKey, zoned } from '../model/format';
 import { CONFIG_REPO } from '../model/names';
-import { DEFAULT_TIMEZONE } from '../model/policy';
+import { DEFAULT_TIMEZONE, LEGACY_SUBMIT_VIA } from '../model/policy';
 import type { Operation, Status } from '../model/types';
 import { checkNow, keepFuture, previewNext, type Scope } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
@@ -31,11 +31,15 @@ const configText = (p: ReadyProps, template: string): string | null => {
   return f.kind === 'ready' ? f.text : null;
 };
 
+/** grading_config.yml parsed, `submit_via` in its current spelling (course.canonical_submit_via), so every shape test reads one word. */
 function parseConfig(text: string | null): Record<string, unknown> {
   if (text === null) return {};
   try {
     const d = parse(text);
-    return d && typeof d === 'object' ? (d as Record<string, unknown>) : {};
+    if (!d || typeof d !== 'object') return {};
+    const cfg = d as Record<string, unknown>;
+    const via = typeof cfg.submit_via === 'string' ? cfg.submit_via.trim().toLowerCase() : null;
+    return via === null ? cfg : { ...cfg, submit_via: LEGACY_SUBMIT_VIA[via] ?? via };
   } catch {
     return {};
   }

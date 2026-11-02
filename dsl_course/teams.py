@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from functools import cache
 
-from .course import CONFIG_REPO, INSTRUCTORS_TEAM, ROLE_TEAMS
+from .course import CONFIG_REPO, INSTRUCTORS_TEAM, ROLE_TEAMS, SOLUTION_DIR
 from .faults import ConfigFault, csv_row_fault
 from .gh_contents import get_file_content, read_csv
 
@@ -33,6 +33,9 @@ FIELDS = ("assignment", "team", "github_handle")
 # would add the student to it and prune the real admins. The workflow refuses these at the
 # form; this is the backstop for a row that reached the CSV any other way.
 RESERVED_TEAM_SLUGS = ROLE_TEAMS
+# Team NAMES no team may take, whatever the assignment: a shared drop box gives each team a
+# `<team>/` folder beside the model answer's `solution/` (`assign._release_shared`).
+RESERVED_TEAM_NAMES = (SOLUTION_DIR,)
 
 
 def team_slug(assignment: str, team: str) -> str:
@@ -98,7 +101,7 @@ def parse(
             continue
         if faults is not None:
             faults += _row_faults(lineno, assignment, team, handle, claimed, allowed)
-        if is_reserved_slug(team_slug(assignment, team)):
+        if is_reserved_slug(team_slug(assignment, team)) or team in RESERVED_TEAM_NAMES:
             continue  # ignored, as its fault says - and so it claims nobody either
         was = claimed.setdefault((assignment, handle), (team, lineno))
         if was[0] != team:
@@ -131,6 +134,17 @@ def _row_faults(
                 "this row names a FACULTY team - the toolkit will not manage one from "
                 "teams.csv, so the row is ignored",
                 fix=_HANDLES_FIX,
+            )
+        )
+    elif team in RESERVED_TEAM_NAMES:
+        found.append(
+            csv_row_fault(
+                TEAMS_PATH,
+                lineno,
+                "team",
+                f"`{team}` is reserved (a shared drop box keeps the model answer in a "
+                f"folder of that name), so the row is ignored",
+                fix="give the team another name",
             )
         )
     was = claimed.get((assignment, handle))

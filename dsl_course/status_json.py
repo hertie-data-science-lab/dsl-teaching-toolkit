@@ -1299,12 +1299,15 @@ ScheduledMoment = tuple[
 ]
 
 
-def schedule_moments(sched: schedule.Schedule) -> list[ScheduledMoment]:
+def schedule_moments(
+    sched: schedule.Schedule, *, specs: Mapping[str, grades.GradingSpec]
+) -> list[ScheduledMoment]:
     """Every dated moment of the schedule, in plan order, as `(when, what, key, entry)`: a
     release (`release`, and `deploy` for each copy's own moment), an assignment's
     `hand_out`, `due` and late `cutoff`, an `exam` or `event` (an `events:` session: its
     kind, `lab`), and the `archive`. A `tbc` entry has none. `this_week` lists some of
-    them; the empty-week check counts them all."""
+    them; the empty-week check counts them all. `specs` (by schedule key) says how each
+    assignment is handed in, which its cutoff hangs on."""
     out: list = []
     for r in sched.releases:
         out.append((r.when, "release", r.label, r))
@@ -1313,7 +1316,16 @@ def schedule_moments(sched: schedule.Schedule) -> list[ScheduledMoment]:
         out += [
             (a.handout_datetime, "hand_out", slug, a),
             (a.due_datetime, "due", slug, a),
-            (schedule.grading_cutoff_datetime(sched, slug), "cutoff", slug, a),
+            (
+                schedule.grading_cutoff_datetime(
+                    sched,
+                    slug,
+                    submit_via=specs.get(slug, grades.GradingSpec()).submit_via,
+                ),
+                "cutoff",
+                slug,
+                a,
+            ),
         ]
     for e in sched.events:
         out.append((e.when, "exam" if e.kind == "exam" else "event", e.label, e))
@@ -1347,7 +1359,9 @@ def empty_week_problems(
         return []
     tz = ZoneInfo(sched.timezone)
     today = now.astimezone(tz).date()
-    days = {_local_day(when, tz) for when, *_ in schedule_moments(sched)}
+    days = {
+        _local_day(when, tz) for when, *_ in schedule_moments(sched, specs=facts.specs)
+    }
     aliases = lambda repo: facts.aliases.get(repo, {})
     # A session of the kind with nothing to ship (an `events:` lab) counts as one.
     kinds = [(r.when, entry_kind(r, aliases)[0]) for r in sched.releases]
@@ -2044,12 +2058,18 @@ def _problem_entries(problems: list[dict]) -> set[str]:
 
 def run_settings(spec: grades.GradingSpec) -> dict[str, dict]:
     """Each run setting's effective value and the layer it came from (`settings`), so the
-    console shows "5 days, this course's default" without a cascade of its own."""
+    console shows "5 days, this course's default" without a cascade of its own.
+
+    No late window for work handed in outside GitHub (`collects_commits`, as every other
+    late gate asks it): its cutoff is the due date, so the console never quotes one."""
     sources = dict(spec.sources)
-    return {
+    out = {
         key: {"value": getattr(spec, key), "source": sources.get(key, "institution")}
         for key in settings.RUN_KEYS
     }
+    if not spec.collects_commits:
+        out["late_window_days"]["value"] = None
+    return out
 
 
 def render_assignments(facts: SemesterFacts, now: datetime) -> list[dict]:
@@ -2067,7 +2087,9 @@ def render_assignments(facts: SemesterFacts, now: datetime) -> list[dict]:
     for slug, entry in facts.sched.assignments.items():
         spec = facts.specs.get(slug, grades.GradingSpec())
         name = schedule.semester_name(slug, entry)
-        cutoff = schedule.grading_cutoff_datetime(facts.sched, slug)
+        cutoff = schedule.grading_cutoff_datetime(
+            facts.sched, slug, submit_via=spec.submit_via
+        )
         units = len(assignment_rows(facts.listing, name)) if facts.listing else 0
         sheet, sspec = facts.sheets.get(name), sheet_specs.get(name)
         filled, on_sheet, submitted = sheet_counts(sheet, sspec)
@@ -2114,7 +2136,9 @@ def render_assignments(facts: SemesterFacts, now: datetime) -> list[dict]:
                 "solution_shown": _iso(solution),
                 # Set before the late cutoff: the scheduler holds it until then.
                 "solution_held_until": _iso(
-                    schedule.solution_held_until(facts.sched, slug)
+                    schedule.solution_held_until(
+                        facts.sched, slug, submit_via=spec.submit_via
+                    )
                 ),
                 "units": units,
                 "submissions": submitted,
@@ -2240,6 +2264,8 @@ def this_week(
     assignments: list[dict],
     now: datetime,
     planned: list[PlannedRow],
+    *,
+    specs: Mapping[str, grades.GradingSpec],
 ) -> list[dict]:
     """What happens from the start of today to the same moment seven days on, in the
     semester's zone: releases, hand-outs, due dates and events (an `events:` session under
@@ -2274,7 +2300,7 @@ def this_week(
     by_id = {r["id"]: r for r in releases}
     by_slug = {a["slug"]: a for a in assignments}
     sessions = {r.key: r for r in planned if r.session}
-    for when, what, key, entry in schedule_moments(sched):
+    for when, what, key, entry in schedule_moments(sched, specs=specs):
         if what == "release":
             state = by_id.get(key, {}).get("state", "planned")
             add(when, what, key, entry.title or key, state)
@@ -2678,7 +2704,9 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
             "template_moments": {repo: _iso(m.when) for repo, m in moments.items()},
         },
         "problems": problems,
-        "this_week": this_week(sched, releases, assignments, now, planned),
+        "this_week": this_week(
+            sched, releases, assignments, now, planned, specs=facts.specs
+        ),
         "releases": releases,
         "assignments": assignments,
         "students": {

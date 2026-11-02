@@ -230,8 +230,9 @@ def open_windows(
     found: list[Window] = []
     for key in keys:
         entry = sched.assignments[key]
-        opens, closes = schedule.formation_window(sched, key)
-        state, _ = schedule.formation_state(sched, key, now)
+        via = grades.load_grading_spec(course_org, entry.course_source_repo).submit_via
+        opens, closes = schedule.formation_window(sched, key, submit_via=via)
+        state, _ = schedule.formation_state(sched, key, now, submit_via=via)
         if closes is None or state == "pending":
             continue
         # `closed` is two different things: a door that never opens - an assignment handed

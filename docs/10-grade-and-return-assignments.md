@@ -53,9 +53,10 @@ teams:
 | `feedback_per_question` (where questions are declared; the team's on a group sheet) | you, optional | yes: a list after the overall feedback, inside the team's quote on a group sheet; a blank cell is not sent |
 | `score_group` | you | never shown as-is; each member's gradebook shows only the final grade it derives - the score itself too, but only for a team with no repo of its own (`shared_dropbox_repo`, `external`) |
 | `adjustment_individual` | you - the ONLY override of the mark, in both shapes | **no** - only the final grade it produced |
+| `days_late` (per student or team, top level; `submit_via: external` only, which has no `info:`) | you: whole days late, blank is 0 | as `days_late`, with the penalty it costs |
 | `late_penalty` (per student or team, beside `info:`; optional) | you: `apply` (the default), `waive`, or the whole penalty as `15%` / `0.15` | with their marks (Distribute grades), the penalty that applied: `-20%`, `waived` or `-15% (set by hand)`; a submission receipt quotes the late rule's own figure only |
 | `notes_not_shared_with_students` (each person's; on a group sheet the team's own too, beside `feedback_group`) | you | **never** |
-| final grade | derived on output, never stored | yes |
+| final grade | derived on output, never stored: score less the late penalty (at most the whole score), plus the adjustment, floored at 0 | yes |
 
 The final mark is `total × (1 − rate × days_late) + adjustment`, floored at 0. A late
 unit's `late_penalty` changes the middle term: `waive` (or `0%`) takes nothing off, and `15%` takes
@@ -139,7 +140,9 @@ Between the due date and the cutoff the sheet refreshes off committer dates alon
 
 An assignment whose `grading_config.yml` says `submit_via: external` has no `info:` block at all:
 no repo is created for it, so there is no commit to time and nothing waits on the cutoff: mark it
-and run **Distribute grades** whenever you like.
+and run **Distribute grades** whenever you like. Its cutoff is the due date. You enter each unit's
+`days_late` beside its marks (the Marks tab's **Days late**; blank is 0), and the late penalty,
+`late_penalty` waive and override work on it as on any other shape.
 
 For `submit_via: shared_dropbox_repo` the timing is per FOLDER of the one drop box: `submitted` is the
 last commit at or before the cutoff that touches `<handle>/` (or `<team>/`) **and was made

@@ -13,6 +13,8 @@ export const NOTES_KEY = 'notes_not_shared_with_students';
 export const QUESTION_FEEDBACK_KEY = 'feedback_per_question';
 /** The unit's late penalty, beside `info:`: `apply` (absent means the same), `waive`, or the whole penalty (`25%`) (grades.LATE_PENALTY_KEY). */
 export const LATE_PENALTY_KEY = 'late_penalty';
+/** Work handed in outside GitHub: the grader's whole days late, beside the marks; blank is 0 (grades.DAYS_LATE_KEY). */
+export const DAYS_LATE_KEY = 'days_late';
 
 export interface Person {
   handle: string;
@@ -34,6 +36,9 @@ export interface Unit {
   questionFeedbackPath: Path;
   latePenalty: unknown;
   latePenaltyPath: Path;
+  /** The grader's days late, where the work is handed in outside GitHub (no `info:`). */
+  daysLate: unknown;
+  daysLatePath: Path;
   /** The team's own private notes (a group sheet; a person's notes are on the person). */
   notes: unknown;
   notesPath: Path | null;
@@ -64,6 +69,7 @@ export function readSheet(text: string, doc: unknown): Sheet {
         key, info, score: u.score_group ?? null, scorePath: [container, key, 'score_group'], feedback: u.feedback_group ?? null, feedbackPath: [container, key, 'feedback_group'],
         questionFeedback: obj(u[QUESTION_FEEDBACK_KEY]), questionFeedbackPath: [container, key, QUESTION_FEEDBACK_KEY],
         latePenalty: u[LATE_PENALTY_KEY] ?? null, latePenaltyPath: [container, key, LATE_PENALTY_KEY],
+        daysLate: u[DAYS_LATE_KEY] ?? null, daysLatePath: [container, key, DAYS_LATE_KEY],
         notes: u[NOTES_KEY] ?? null, notesPath: [container, key, NOTES_KEY],
         people: Object.entries(obj(u.members)).map(([handle, m]) => {
           const mm = obj(m);
@@ -74,6 +80,7 @@ export function readSheet(text: string, doc: unknown): Sheet {
       key, info, score: u.score_individual ?? null, scorePath: [container, key, 'score_individual'], feedback: null, feedbackPath: null,
       questionFeedback: obj(u[QUESTION_FEEDBACK_KEY]), questionFeedbackPath: [container, key, QUESTION_FEEDBACK_KEY],
       latePenalty: u[LATE_PENALTY_KEY] ?? null, latePenaltyPath: [container, key, LATE_PENALTY_KEY],
+      daysLate: u[DAYS_LATE_KEY] ?? null, daysLatePath: [container, key, DAYS_LATE_KEY],
       notes: null, notesPath: null,
       people: [{ handle: key, adjustment: u.adjustment_individual ?? null, feedback: u.feedback_individual ?? null, notes: u[NOTES_KEY] ?? null, base: [container, key] }],
     };
@@ -181,10 +188,10 @@ export function effectivePenalty(rate: number | null, daysLate: unknown, latePen
   return { fraction: choice.set ?? rate * days, mode: choice.mode, late };
 }
 
-/** `total x (1 - penalty) + adjustment`, floored at 0; null when there is no total. */
+/** `total x (1 - penalty) + adjustment`, the penalty capped at 1 and the result floored at 0; null when there is no total. */
 export function finalGrade(total: number | null, penalty: Penalty, adjustment: unknown): number | null {
   if (total === null) return null;
-  return Math.max(0, total * (1 - penalty.fraction) + (num(adjustment) ?? 0));
+  return Math.max(0, total * (1 - Math.min(penalty.fraction, 1)) + (num(adjustment) ?? 0));
 }
 
 const percent = (fraction: number) => Math.round(fraction * 1000) / 10;
@@ -243,14 +250,16 @@ export function cellValue(raw: string): string | number | null {
  * pop-up alike: "<rate> of the total per day started, up to <window> days"; null with no late penalty.
  * `windowDays` is the late window (`late_window_days`), which caps the days counted.
  */
-export function lateRule(rate: number | null, windowDays?: unknown): string | null {
+export function lateRule(rate: number | null, windowDays?: unknown, entered = false): string | null {
   if (rate === null) return null;
+  // Handed in outside GitHub: no window, and the marker says how many days late.
+  if (entered) return `${percent(rate)}% of the total per day late, on the days late you enter`;
   const days = num(windowDays);
   return `${percent(rate)}% of the total per day started${days ? `, up to ${plural(days, 'day')}` : ''}`;
 }
 
 /** Why Return marks holds a mark back (grades.HOLD_REASONS; `returned` is the run's own and not here). */
-export type HoldReason = 'penalty' | 'score' | 'adjustment' | 'late_penalty' | 'question' | 'duplicate';
+export type HoldReason = 'penalty' | 'score' | 'adjustment' | 'late_penalty' | 'days_late' | 'question' | 'duplicate';
 
 /** Each reason as the grid's held chip says it (grades._HOLD_PREVIEW, in the grader's words). */
 export const HOLD_WORDS: Record<HoldReason, string> = {
@@ -258,6 +267,7 @@ export const HOLD_WORDS: Record<HoldReason, string> = {
   score: 'a question mark that is not a number',
   adjustment: 'an adjustment that is not a number',
   late_penalty: 'a late penalty that is not apply, waive or a percentage',
+  days_late: 'days late that are not a whole number',
   question: 'a mark for a question the assignment does not have',
   duplicate: 'in more than one team',
 };
@@ -277,6 +287,8 @@ const typo = (v: unknown) => !blank(v) && decimal(v) === null;
 export interface HoldUnit {
   score: unknown;
   daysLate: unknown;
+  /** Whether `daysLate` is the grader's own (work handed in outside GitHub), and so checked. */
+  byMarker?: boolean;
   latePenalty: unknown;
   people: { handle: string; adjustment: unknown }[];
 }
@@ -286,6 +298,19 @@ function scoreFault(score: unknown, questions: Record<string, unknown> | null): 
   if (!isObj(score)) return null;
   if (questions && Object.keys(questions).length && Object.keys(score).some((k) => !(k in questions))) return 'question';
   return Object.values(score).some(typo) ? 'score' : null;
+}
+
+/** A grader's days late that is not blank and not a whole number, 0 or more (grades._days_late_fault). */
+export function daysLateFault(v: unknown): boolean {
+  if (blank(v)) return false;
+  const d = decimal(v);
+  return d === null || d < 0 || !Number.isInteger(d);
+}
+
+/** One unit's days late: the toolkit's `info.days_late`, or for external work the grader's, blank counting as 0 (grades.unit_days_late). */
+export function unitDaysLate(info: Record<string, unknown> | null, external: boolean, typed: unknown): unknown {
+  if (!external) return info?.days_late;
+  return blank(typed) ? 0 : typed;
 }
 
 /** A word for a score under a penalty that takes something off (grades.needs_hand_decision). */
@@ -304,7 +329,7 @@ export function holdReasons(units: HoldUnit[], questions: Record<string, unknown
   const seen = new Set<string>();
   for (const u of units) {
     const days = decimal(u.daysLate);
-    const fault = scoreFault(u.score, questions) ?? (rate !== null && days !== null && days > 0 && lateChoice(u.latePenalty).mode === 'bad' ? 'late_penalty' : null);
+    const fault = scoreFault(u.score, questions) ?? (u.byMarker && daysLateFault(u.daysLate) ? 'days_late' : null) ?? (rate !== null && days !== null && days > 0 && lateChoice(u.latePenalty).mode === 'bad' ? 'late_penalty' : null);
     for (const pr of u.people) {
       const folded = pr.handle.toLowerCase();
       if (seen.has(folded)) {

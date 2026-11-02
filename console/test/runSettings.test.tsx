@@ -13,6 +13,7 @@ import type { Assignment, Status } from '../src/model/types';
 import * as defs from '../src/ops/defs';
 import { AssignmentScreen, AssignmentsScreen } from '../src/screens/Assignments';
 import { cardsDone } from '../src/screens/NewCohort';
+import { defaultsLine, semesterLayers } from '../src/screens/RunSettings';
 import { ScheduleScreen } from '../src/screens/Schedule';
 import type { CohortProps } from '../src/screens/types';
 import { assignmentArgs } from '../src/wizards/model';
@@ -96,11 +97,50 @@ describe('the Overview form: schedule entry and assignments.yml block as one', (
     expect(out).toContain('Private, institution default');
     expect(out).toContain('Applies to copies handed out after this change; existing copies keep theirs.');
     expect(out).toContain('Change for this assignment');
-    expect(out).toContain('<a class="textlink" href="#assignments">Change the default</a>');
+    // The semester's defaults are changed on the Assignments page, never from a row.
+    expect(out).not.toContain('Change the default');
     expect(out).toContain('Repo name in this semester');
     // Alone: no team settings; their own repo: no external link.
     expect(out).not.toContain('How teams form');
     expect(out).not.toContain('Link to where they submit');
+  });
+
+  it('for work handed in outside GitHub: no late window, no visibility, no solution, and the penalty on the marker’s days late', () => {
+    const files = filesWith({ [`${COURSE_ORG}/assignment-2-f2026/grading_config.yml`]: 'type: individual\nsubmit_via: external\nquestions:\n  Q1: 10\n' });
+    const out = html(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'overview', files })} />);
+    expect(out).toContain('No late window: handed in outside GitHub, so the cutoff is the due date.');
+    expect(out).not.toContain('(due + 5 days)');
+    expect(out).not.toContain('<span class="label">Late work</span>');
+    expect(out).toContain('Late penalty');
+    expect(out).toContain('5% a day, this semester’s default');
+    expect(out).toContain('Applied to the days late you enter on the Marks tab. No late window: work is handed in outside GitHub.');
+    expect(out).not.toContain('Who can see each student’s repo');
+    expect(out).not.toContain('the repo holds the brief only');
+    expect(out).not.toContain('Solution shown');
+    expect(out).not.toContain('Show the solution');
+    // The link is the assignment's own: its row is the field, with no default to change.
+    expect(out).toContain('Link to where they submit');
+    expect(out).toContain('id="ov-submit_url"');
+    // No repo, but the name still names the mark sheet and the site page.
+    expect(out).toContain('Name in this semester (sheet and site page)');
+    expect(out).not.toContain('Repo name in this semester');
+  });
+
+  it('reads the legacy `submit_via: github` as a repo per student: the solution, visibility and late window all apply', () => {
+    const files = filesWith({ [`${COURSE_ORG}/assignment-2-f2026/grading_config.yml`]: 'type: individual\nsubmit_via: github\nquestions:\n  Q1: 10\n' });
+    const out = html(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'overview', files })} />);
+    expect(out).toContain('Show the solution');
+    expect(out).toContain('Who can see each student’s repo');
+    expect(out).toContain('(due + 5 days)');
+    expect(out).not.toContain('Not available: student repos are not private');
+  });
+
+  it('offers the solution for a shared drop box, which is always private', () => {
+    const files = filesWith({ [`${COURSE_ORG}/assignment-2-f2026/grading_config.yml`]: 'type: individual\nsubmit_via: shared_dropbox_repo\nquestions:\n  Q1: 10\n' });
+    const out = html(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'overview', files })} />);
+    expect(out).toContain('Show the solution');
+    expect(out).toContain('Private: a shared drop box is always private.');
+    expect(out).toContain('(due + 5 days)');
   });
 
   it('marks a solution shown before the late cutoff, so the form will not save it', () => {
@@ -161,21 +201,25 @@ describe('the Overview form: schedule entry and assignments.yml block as one', (
 });
 
 describe('the semester’s defaults', () => {
-  it('are one line below the Assignments list; Change opens the form as a modal, Escape closes it', async () => {
+  it('open from the Semester defaults button beside New assignment, as a modal with their summary; Escape closes it', async () => {
     const out = html(<AssignmentsScreen {...props()} />);
-    expect(out).toContain('Defaults: 5 days, 5%, teams of 4.');
-    expect(out.indexOf('Defaults: 5 days')).toBeGreaterThan(out.indexOf('</table>'));
+    expect(out).not.toContain('Defaults: 5 days');
+    expect(out).toMatch(/<div class="actions"><button class="btn quiet" type="button" aria-haspopup="dialog">Semester defaults<\/button><a class="btn"[^>]*>New assignment<\/a>/);
     expect(out).not.toContain('role="dialog"');
 
     const root = document.createElement('div');
     document.body.appendChild(root);
     await act(() => mount(<AssignmentsScreen {...props()} />, root));
-    const change = [...root.querySelectorAll('button')].find((b) => b.textContent === 'Change')!;
+    const change = [...root.querySelectorAll('button')].find((b) => b.textContent === 'Semester defaults')!;
     change.focus();
     await act(() => change.click());
     const dialog = root.querySelector('[role="dialog"]')!;
     expect(dialog.getAttribute('aria-modal')).toBe('true');
     expect(dialog.textContent).toContain('Defaults for this semester’s assignments');
+    expect(dialog.textContent).toContain('Defaults: 5 days, 5%, teams of 4.');
+    // One submission site may serve every assignment handed in outside GitHub.
+    expect(dialog.querySelector('#sd-submit_url')).not.toBeNull();
+    expect(dialog.textContent).toContain('Submission link (assignments handed in outside GitHub)');
     expect(dialog.querySelector<HTMLInputElement>('#sd-late_window_days')!.value).toBe('5');
     expect(dialog.textContent).toContain('this course’s default: up to 4');
     expect(dialog.textContent).toContain('institution default: Students form their own');
@@ -219,8 +263,8 @@ describe('the semester’s defaults', () => {
   });
 
   it('print the penalty as a percentage however the file writes it', () => {
-    const out = html(<AssignmentsScreen {...props({ files: filesWith({ [`${COHORT_ORG}/semester-config/assignments.yml`]: 'defaults:\n  late_window_days: 3\n  late_penalty_per_day: 0.05\n' }) })} />);
-    expect(out).toContain('Defaults: 3 days, 5%, teams of 4.');
+    const f = filesWith({ [`${COHORT_ORG}/semester-config/assignments.yml`]: 'defaults:\n  late_window_days: 3\n  late_penalty_per_day: 0.05\n' });
+    expect(defaultsLine(semesterLayers({ files: f, course, cohort }, { defaults: { late_window_days: 3, late_penalty_per_day: 0.05 } }))).toBe('Defaults: 3 days, 5%, teams of 4.');
   });
 
   it('are asked once in New semester, as an optional card', () => {

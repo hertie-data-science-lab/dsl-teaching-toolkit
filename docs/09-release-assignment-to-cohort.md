@@ -61,8 +61,10 @@ Education upgrade lands, so until then the drop box is left unprotected and the 
 says so. Each unit pushes into its own `<handle>/` or `<team>/` folder and can read
 everyone else's.
 
-There is no Submission receipts issue and no model solution push - one repo the whole semester reads
-is not a place for either. The handout re-fires every quarter of an hour
+There is no Submission receipts issue - one repo the whole semester reads is not a place for
+one. The model solution goes in **once**, into the drop box's own top-level `solution/`
+folder, and touches no unit's folder; `now` before the late cutoff is refused, and no team
+may be named `solution`. The handout re-fires every quarter of an hour
 like any other, and a student who onboards later is granted push on the next tick.
 
 ### An assignment whose repos are public
@@ -176,6 +178,9 @@ assignments:
 - **The late window** is the assignment's `late_window_days` in the semester's `assignments.yml` (with
   `late_penalty_per_day`, a percentage of the earned grade per day started). Between the due
   date and the cutoff the grading sheet keeps refreshing and each late push earns a receipt.
+  `submit_via: external` has no late window: its cutoff is the due date, and the marker enters each
+  unit's days late on the sheet (the Marks tab), charged at `late_penalty_per_day`; students
+  see that rate, with no window or cutoff.
   Where neither the semester nor the course states them, the Hertie standard applies:
   10% per day started, collected for up to 10 days. `late_window_days: 0` accepts nothing
   after the deadline.

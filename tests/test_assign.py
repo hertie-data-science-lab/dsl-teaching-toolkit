@@ -3341,7 +3341,8 @@ def test_a_public_handout_opens_no_feedback_issue(
 #
 # `submit_via: shared_dropbox_repo` freezes the semester template as usual - the brief lives there - and
 # then makes exactly ONE repo, `<slug>-submissions`, with every unit on `push`. There is
-# no repo per unit, so there is no Submission receipts issue, no receipt and no model solution; and
+# no repo per unit, so there is no Submission receipts issue and no receipt; the model
+# solution goes ONCE into the drop box's own `solution/` folder; and
 # the drop box's existence is not the record a per-unit repo's is, so the grant loop
 # re-runs every tick and asks who is granted already.
 
@@ -3594,17 +3595,158 @@ def test_an_unprotected_drop_box_reds_the_handout(
     assert _shared(monkeypatch, tmp_path) == (1, True)
 
 
-def test_a_shared_handout_opens_no_feedback_issue_and_pushes_no_solution(
-    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks, feedback_issues, capsys
+def test_a_shared_handout_opens_no_feedback_issue(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks, feedback_issues
 ):
-    # One repo the whole semester can read is not a place to put a student's marks, nor the
-    # model answer. The fire-once solution marker is deliberately not written, so an
-    # instructor who corrects the shape can still release it.
+    # One repo the whole semester can read is not a place to put a student's marks.
+    assert _shared(monkeypatch, tmp_path) == (0, True)
+    assert feedback_issues == []
+
+
+def test_a_shared_solution_goes_into_the_drop_box_once_and_is_recorded(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
+):
+    # The drop box is private, so it can hold the model answer: ONE push into its own
+    # `solution/` folder, and the fire-once record over it, so no later tick re-pushes.
+    sol = tmp_path / "t" / "solution"
+    monkeypatch.setattr(assign, "fetch_solution", lambda org, template, dest: sol)
+    pushed: list = []
+    monkeypatch.setattr(
+        assign, "push_solution", lambda org, repo, d: pushed.append((repo, d)) or True
+    )
+    recorded: list = []
+    monkeypatch.setattr(
+        assign,
+        "record_solution_released",
+        lambda org, slug, repos: recorded.append((slug, repos)) or True,
+    )
+    assert _shared(monkeypatch, tmp_path, solution=True) == (0, True)
+    assert pushed == [("assignment-1-submissions", sol)]
+    assert recorded == [("assignment-1", 1)]
+    # The next tick, its record written, does not ask for the solution again.
+    assert _shared(monkeypatch, tmp_path)[0] == 0
+    assert len(pushed) == 1 and len(recorded) == 1
+
+
+def test_a_failed_drop_box_solution_push_writes_no_record(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
+):
+    monkeypatch.setattr(
+        assign, "fetch_solution", lambda org, template, dest: tmp_path / "solution"
+    )
+    monkeypatch.setattr(assign, "push_solution", lambda *a: False)
+    monkeypatch.setattr(assign, "record_solution_released", _boom)
+    assert _shared(monkeypatch, tmp_path, solution=True)[0] == 1
+
+
+def test_a_drop_box_grant_that_fails_does_not_hold_the_solution_back(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
+):
+    # A dead handle fails its grant on every tick; the drop box is there all the same, so
+    # the answer goes in and is recorded, as a per-unit repo's would be.
+    monkeypatch.setattr(
+        assign,
+        "add_collaborator",
+        lambda org, repo, handle, permission="push", person=False: False,
+    )
+    monkeypatch.setattr(assign, "exists_in", lambda listing, org, name: True)
+    sol = tmp_path / "t" / "solution"
+    monkeypatch.setattr(assign, "fetch_solution", lambda org, template, dest: sol)
+    pushed: list = []
+    monkeypatch.setattr(
+        assign, "push_solution", lambda org, repo, d: pushed.append(repo) or True
+    )
+    recorded: list = []
+    monkeypatch.setattr(
+        assign,
+        "record_solution_released",
+        lambda org, slug, repos: recorded.append(slug) or True,
+    )
+    assert _shared(monkeypatch, tmp_path, solution=True)[0] == 1
+    assert pushed == ["assignment-1-submissions"] and recorded == ["assignment-1"]
+
+
+def test_no_drop_box_means_no_solution_and_no_record(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
+):
+    monkeypatch.setattr(assign, "generate_from_template", lambda **kw: False)
+    monkeypatch.setattr(assign, "exists_in", lambda listing, org, name: False)
     monkeypatch.setattr(assign, "fetch_solution", _boom)
     monkeypatch.setattr(assign, "record_solution_released", _boom)
-    assert _shared(monkeypatch, tmp_path, solution=True) == (0, True)
-    assert feedback_issues == []
-    assert "no model solution to push" in capsys.readouterr().out
+    assert _shared(monkeypatch, tmp_path, solution=True)[0] == 1
+
+
+def test_the_drop_box_solution_touches_no_units_folder(tmp_path, monkeypatch):
+    # The drop box holds every unit's own folder; the answer lands beside them, at the
+    # top level, and none of their files is rewritten.
+    sol = tmp_path / "t" / "solution"
+    sol.mkdir(parents=True)
+    (sol / "answers.py").write_text("the model answer")
+
+    def fake_clone(org, repo, wd):
+        (wd / "ada-l").mkdir(parents=True)
+        (wd / "ada-l" / "work.py").write_text("ada's work")
+        return True
+
+    monkeypatch.setattr(assign, "clone", fake_clone)
+    tree: dict = {}
+
+    def fake_git(*args):
+        if "add" in args:
+            wd = Path(args[args.index("-C") + 1])
+            tree.update(
+                {
+                    p.relative_to(wd).as_posix(): p.read_text()
+                    for p in wd.rglob("*")
+                    if p.is_file()
+                }
+            )
+        return (0, "")
+
+    monkeypatch.setattr(assign, "git", fake_git)
+    assert assign.push_solution("SEMESTER", "assignment-1-submissions", sol)
+    assert tree == {
+        "ada-l/work.py": "ada's work",
+        "solution/answers.py": "the model answer",
+    }
+
+
+def test_a_drop_box_solution_is_never_pushed_over_a_unit_named_solution(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks, capsys
+):
+    # The unit's folder IS `solution/`: pushing would write into their work. Counted as a
+    # failed push, so no record is written, and the log names the slug and nobody else.
+    monkeypatch.setattr(assign, "fetch_solution", _boom)
+    monkeypatch.setattr(assign, "push_solution", _boom)
+    monkeypatch.setattr(assign, "record_solution_released", _boom)
+    code, _ = _shared(
+        monkeypatch,
+        tmp_path,
+        rows=("sol@uni.edu,Sol,enrolled,Solution,42,dsl-abc",),
+        solution=True,
+    )
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "assignment-1" in err and "`solution/`" in err and "Sol" not in err
+
+
+def test_a_drop_box_solution_pressed_before_the_late_cutoff_is_refused(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
+):
+    # One repo every student reads: the answer must not reach it while work still arrives.
+    from tests.plans import citing
+
+    future = datetime(2099, 1, 1, tzinfo=timezone.utc)
+    monkeypatch.setattr(
+        "dsl_course.schedule.load",
+        lambda org: citing("assignment-1-f2026", due=future),
+    )
+    monkeypatch.setattr(assign, "fetch_solution", _boom)
+    monkeypatch.setattr(assign, "record_solution_released", _boom)
+    summary, changed = _shared(monkeypatch, tmp_path, solution=True)
+    assert summary == 1 and not changed
+    assert summary.reasons[0]["code"] == assign.SOLUTION_BEFORE_CUTOFF_CODE
+    assert drop_box["generated"] == [] and sheet_writes == []
 
 
 def test_a_shared_dry_run_writes_nothing_at_all(

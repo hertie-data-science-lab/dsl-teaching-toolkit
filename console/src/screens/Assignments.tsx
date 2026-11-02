@@ -92,12 +92,12 @@ function Index(p: ReadyProps) {
     <>
       <div class="page-head">
         <div>
-          <h2 class="h1">Assignments <Hint doc="09-release-assignment-to-cohort.md">An assignment opens at hand out and is marked from the due date, while late work still arrives until the late cutoff; then marks are returned. Dates live in the schedule. This semester’s defaults are below the list.</Hint></h2>
+          <h2 class="h1">Assignments <Hint doc="09-release-assignment-to-cohort.md">An assignment opens at hand out and is marked from the due date, while late work still arrives until the late cutoff; then marks are returned. Dates live in the schedule. This semester’s defaults are under Semester defaults.</Hint></h2>
           <p class="lede">
             {list.length === 1 ? 'One' : list.length} this semester.{open ? ` ${open === 1 ? 'One is' : `${open} are`} open.` : ''}{marking ? ` ${marking === 1 ? 'One is' : `${marking} are`} being marked.` : ''}
           </p>
         </div>
-        <div class="actions"><a class="btn" href={`?cohort=${p.cohort.org}#new-assignment-1`}>New assignment</a></div>
+        <div class="actions"><SemesterDefaults p={p} /><a class="btn" href={`?cohort=${p.cohort.org}#new-assignment-1`}>New assignment</a></div>
       </div>
       <div class="table-wrap">
         <table class="grid" style="min-width:960px">
@@ -129,7 +129,6 @@ function Index(p: ReadyProps) {
         </table>
       </div>
       <Unscheduled p={p} />
-      <SemesterDefaults p={p} />
     </>
   );
 }

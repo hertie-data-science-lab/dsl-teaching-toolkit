@@ -11,6 +11,7 @@ issue may carry labels, timestamps and minutes, never a handle or a repo name.
 
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -19,6 +20,9 @@ from conftest import issue_row
 
 from dsl_course import cadence, course, ghcli, issues, settings
 from dsl_course.schedule import AssignmentEntry, Deploy, Release, Schedule
+
+# Every assignment here is handed in as a repo: its cutoff has the late window.
+REPO_SHAPES = defaultdict(lambda: "assignment_repo")
 
 BERLIN = ZoneInfo("Europe/Berlin")
 NOW = datetime(2026, 9, 4, 12, 0, tzinfo=timezone.utc)
@@ -256,7 +260,10 @@ def test_late_items_only_reports_moments_that_fell_in_this_gap():
     releases, sched = _plan()
     # The gap opened at 08:00 Berlin (06:00 UTC), so everything in the plan is inside it.
     prev = datetime(2026, 9, 4, 6, 0, tzinfo=timezone.utc)
-    labels = [i.label for i in cadence.late_items(releases, sched, prev, NOW)]
+    labels = [
+        i.label
+        for i in cadence.late_items(releases, sched, prev, NOW, submit_vias=REPO_SHAPES)
+    ]
     assert labels == [
         "releases.lecture_02 -> deploy[1]",  # 09:00 Berlin, the earliest
         "assignments.assignment-1 handout",  # 09:30
@@ -271,7 +278,7 @@ def test_a_term_written_entirely_in_the_past_is_not_late():
     # but nothing in it fell in THIS gap, so nothing here shipped late.
     releases, sched = _plan()
     prev = NOW - timedelta(minutes=20)
-    assert cadence.late_items(releases, sched, prev, NOW) == []
+    assert cadence.late_items(releases, sched, prev, NOW, submit_vias=REPO_SHAPES) == []
 
 
 def test_a_moment_inside_the_slo_is_not_late():
@@ -281,7 +288,10 @@ def test_a_moment_inside_the_slo_is_not_late():
     # old - exactly at it, and the rule is strictly greater.
     now = datetime(2026, 9, 4, 9, 30, tzinfo=timezone.utc)
     prev = now - timedelta(days=7)
-    labels = [i.label for i in cadence.late_items(releases, sched, prev, now)]
+    labels = [
+        i.label
+        for i in cadence.late_items(releases, sched, prev, now, submit_vias=REPO_SHAPES)
+    ]
     assert "releases.lecture_02 -> deploy[0]" not in labels
     assert "assignments.assignment-1 solution" not in labels
     assert "assignments.assignment-1 handout" in labels
@@ -289,7 +299,7 @@ def test_a_moment_inside_the_slo_is_not_late():
 
 def test_without_a_previous_tick_there_is_no_gap_to_report():
     releases, sched = _plan()
-    assert cadence.late_items(releases, sched, None, NOW) == []
+    assert cadence.late_items(releases, sched, None, NOW, submit_vias=REPO_SHAPES) == []
 
 
 def test_a_display_only_entry_is_never_late():
@@ -300,14 +310,22 @@ def test_a_display_only_entry_is_never_late():
         ]
     )
     prev = NOW - timedelta(days=1)
-    assert cadence.late_items(sched.releases, sched, prev, NOW) == []
+    assert (
+        cadence.late_items(sched.releases, sched, prev, NOW, submit_vias=REPO_SHAPES)
+        == []
+    )
 
 
 def test_a_tbc_entry_is_never_late():
     sched = Schedule(
         releases=[Release(label="tbc", when=None, assignment="assignment-1-f2026")]
     )
-    assert cadence.late_items(sched.releases, sched, NOW - timedelta(days=1), NOW) == []
+    assert (
+        cadence.late_items(
+            sched.releases, sched, NOW - timedelta(days=1), NOW, submit_vias=REPO_SHAPES
+        )
+        == []
+    )
 
 
 def test_neither_handout_nor_solution_is_reported_without_a_synthesised_release():
@@ -319,7 +337,11 @@ def test_neither_handout_nor_solution_is_reported_without_a_synthesised_release(
     labels = [
         i.label
         for i in cadence.late_items(
-            list(sched.releases), sched, NOW - timedelta(days=1), NOW
+            list(sched.releases),
+            sched,
+            NOW - timedelta(days=1),
+            NOW,
+            submit_vias=REPO_SHAPES,
         )
     ]
     assert "assignments.assignment-1 handout" not in labels
@@ -331,7 +353,9 @@ def test_a_late_label_names_a_yaml_field_and_never_a_repo_or_a_person():
     # The semester issue is private, but the same labels reach the run log of a PUBLIC repo,
     # and `describe()` output would name the course org's template repos.
     releases, sched = _plan()
-    items = cadence.late_items(releases, sched, NOW - timedelta(days=1), NOW)
+    items = cadence.late_items(
+        releases, sched, NOW - timedelta(days=1), NOW, submit_vias=REPO_SHAPES
+    )
     assert items
     for item in items:
         assert item.label.startswith(("releases.", "assignments."))

@@ -1821,7 +1821,7 @@ def sync_sheet(
     spec = sheet_spec(sched, key, slug, gspec, is_group)
     entry = sched.assignments.get(key)
     due = entry.due_datetime if entry else None
-    cutoff = schedule.grading_cutoff_datetime(sched, key)
+    cutoff = schedule.grading_cutoff_datetime(sched, key, submit_via=gspec.submit_via)
 
     targets: list[Target] = []
     if units is None:
@@ -3413,7 +3413,7 @@ def collect(
     # only if unscheduled. Pinned to an explicit instant in the SEMESTER's timezone, once,
     # here, so every consumer below (the commits API `until=`, `git log --before`, the log
     # lines) reads the same moment instead of each defaulting to the runner's UTC.
-    at = schedule.grading_cutoff_datetime(sched, key)
+    at = schedule.grading_cutoff_datetime(sched, key, submit_via=gspec.submit_via)
     cutoff = local_deadline(
         at.isoformat() if at else _today_in_semester_tz(sched), sched.timezone
     )

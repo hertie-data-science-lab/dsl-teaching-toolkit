@@ -7,7 +7,7 @@
 import { h } from 'preact';
 import { questionFile, questionPoints, questionsFromRows } from '../model/marks';
 import { helpOf, labelOf } from '../model/labels';
-import { FORMAT_KEYS, SUBMIT_VIA_DEFAULT, SUBMIT_VIA_KEYS } from '../model/policy';
+import { FORMAT_KEYS, LEGACY_SUBMIT_VIA, SUBMIT_VIA_DEFAULT, SUBMIT_VIA_KEYS } from '../model/policy';
 import { AUTOGRADE_EXAMPLE } from '../ui/bits';
 import { opt, type Tiers, type Values } from './types';
 
@@ -74,7 +74,7 @@ export function fromConfig(cfg: Record<string, unknown>, read?: string): Values 
   return {
     title: s('title'),
     type: s('type') ?? 'individual',
-    submit_via: s('submit_via') === 'github' ? SUBMIT_VIA_DEFAULT : (s('submit_via') ?? SUBMIT_VIA_DEFAULT),
+    submit_via: LEGACY_SUBMIT_VIA[s('submit_via') ?? ''] ?? s('submit_via') ?? SUBMIT_VIA_DEFAULT,
     formats: formatsList(cfg.formats),
     autograde: bool(cfg.autograde),
     tests: s('tests'),

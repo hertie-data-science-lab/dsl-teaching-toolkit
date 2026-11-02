@@ -238,6 +238,13 @@ const puts = (gh: FakeGitHub) => gh.seen.filter((s: Seen) => s.method === 'PUT')
 const body = (s: Seen) => decodeBase64((s.body as { content: string }).content);
 const props = (f: StaticFiles, over: Partial<CohortProps> = {}): CohortProps => ({ course, cohort, loaded: ready, files: f, now: NOW, entry: 'assignment-2', tab: 'marks', ...over });
 const marks = (f = files(), gh = github()) => mount(envOf(gh, f), <AssignmentScreen {...props(f)} />);
+/** The same assignment handed in outside GitHub, as status.json states it: no late window. */
+const external: Assignment = { ...solo, submit_shape: 'external', settings: { ...solo.settings!, late_window_days: { value: null, source: 'institution' } } };
+const EXT_SHEET = () => SHEET.replace(/ {4}info:\n( {6}.*\n)+/g, '');
+const marksExternal = (gh = github()) => {
+  const f = files(EXT_SHEET(), `submit_via: external\n${CONFIG}`);
+  return mount(envOf(gh, f), <AssignmentScreen {...props(f, { loaded: { ...ready, status: { ...STATUS, assignments: [external] } } })} />);
+};
 const filter = (word: string) => [...root!.querySelectorAll<HTMLButtonElement>('.chip.filter')].find((b) => b.textContent?.startsWith(word))!;
 
 describe('what a template runs at the cutoff (grades.GradingSpec)', () => {
@@ -308,12 +315,41 @@ describe('the marking screen', () => {
     expect(q('thead').textContent).not.toContain('Tests');
   });
 
-  it('hides the submission columns for work handed in outside GitHub, and says so', async () => {
-    const external = SHEET.replace(/ {4}info:\n( {6}.*\n)+/g, '');
-    await marks(files(external));
-    expect(root!.textContent).toContain('Submitted outside GitHub: no dates, no late penalty.');
+  it('hides the submission columns for work handed in outside GitHub, and asks the days late instead', async () => {
+    await marksExternal();
+    expect(root!.textContent).toContain('Submitted outside GitHub: no dates. Enter the days late; the late penalty is worked out from them.');
     expect(q('thead').textContent).not.toContain('From the submission');
+    expect(q('thead').textContent).toContain('Days late');
     expect(button('From the submission ▾')).toBeUndefined();
+    // Blank is 0: on time, nothing off.
+    expect(q<HTMLInputElement>('input[aria-label="Days late for ada-l"]').placeholder).toBe('0');
+    // No window to quote: the rule is per day late, on the days entered.
+    expect(root!.textContent).not.toMatch(/up to \d+ days/);
+    expect(root!.textContent).toContain('late penalties (10% of the total per day late, on the days late you enter) are worked out for you');
+  });
+
+  it('takes the late penalty off the days late a marker enters, and writes them to the unit', async () => {
+    const gh = github();
+    await marksExternal(gh);
+    const ada = () => [...root!.querySelectorAll('tr.unit-row')].find((r) => r.textContent?.includes('ada-l'))!;
+    expect(ada().querySelector('td.pen')!.textContent).toBe('');
+    await type('input[aria-label="Days late for ada-l"]', '2');
+    expect(ada().querySelector('td.pen .val')!.textContent).toBe('−20%');
+    expect(q('input[aria-label="Apply the late penalty for ada-l"]')).not.toBeNull();
+    await click(button('Save marks'));
+    await settle(() => puts(gh).length > 0);
+    expect(body(puts(gh)[0])).toMatch(/ {2}ada-l:\n(?: {4}.*\n)*? {4}days_late: 2\n/);
+  });
+
+  it('holds a mark whose days late are not a whole number', async () => {
+    await marksExternal();
+    await type('input[aria-label="Days late for ada-l"]', 'two');
+    expect(root!.textContent).toContain('days late that are not a whole number');
+  });
+
+  it('asks no days late of work handed in on GitHub', async () => {
+    await marks();
+    expect(root!.querySelector('input[aria-label="Days late for ada-l"]')).toBeNull();
   });
 
   it('folds the submission columns to one chip per row', async () => {

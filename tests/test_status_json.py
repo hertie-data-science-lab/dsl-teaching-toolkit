@@ -748,7 +748,7 @@ events:
     event_datetime: 2026-09-22T23:59
 """
     )
-    rows = status_json.this_week(sched, [], [], NOW, planned_rows(sched))
+    rows = status_json.this_week(sched, [], [], NOW, planned_rows(sched), specs={})
     assert [r["ref"] for r in rows] == ["e0", "e1"]
     assert rows[0]["when"] == "2026-09-23T00:00:00+02:00"
 
@@ -3520,11 +3520,16 @@ def test_a_session_event_fills_its_kinds_week():
 def test_this_week_lists_a_session_event_under_its_kind():
     sched = _sched(SESSIONS)
     now = datetime(2026, 10, 13, 9, 0, tzinfo=UTC)
-    rows = status_json.this_week(sched, [], [], now, planned_rows(sched))
+    rows = status_json.this_week(sched, [], [], now, planned_rows(sched), specs={})
     (lab,) = [r for r in rows if r["ref"] == "lab-2-only-group"]
     assert (lab["kind"], lab["title"], lab["state"]) == ("lab", "Trees", "planned")
     early = status_json.this_week(
-        sched, [], [], datetime(2026, 10, 8, 9, 0, tzinfo=UTC), planned_rows(sched)
+        sched,
+        [],
+        [],
+        datetime(2026, 10, 8, 9, 0, tzinfo=UTC),
+        planned_rows(sched),
+        specs={},
     )
     (group,) = [r for r in early if r["ref"] == "lab-1-group-2"]
     assert group["title"] == "Lab 1"
@@ -3534,7 +3539,12 @@ def test_this_week_titles_a_session_as_the_release_it_repeats():
     # No `title:` of its own: the lab 1 release's, as on the site row.
     sched = _sched(SESSIONS.replace("  lab_1:\n", "  lab_1:\n    title: Regression\n"))
     week = status_json.this_week(
-        sched, [], [], datetime(2026, 10, 8, 9, 0, tzinfo=UTC), planned_rows(sched)
+        sched,
+        [],
+        [],
+        datetime(2026, 10, 8, 9, 0, tzinfo=UTC),
+        planned_rows(sched),
+        specs={},
     )
     (group,) = [r for r in week if r["ref"] == "lab-1-group-2"]
     assert (group["kind"], group["title"]) == ("lab", "Regression")
@@ -3713,3 +3723,39 @@ def test_a_missing_kind_is_a_suggested_course_todo_for_the_kind_folder_check():
         if t["id"] == "materials:cm:kind_folder:lab"
     ]
     assert lab["set_aside"] is True
+
+
+@pytest.mark.parametrize(
+    ("via", "late_window"),
+    [("external", False), ("assignment_repo", True), ("shared_dropbox_repo", True)],
+)
+def test_external_work_goes_from_open_to_marking_at_the_due_date(via, late_window):
+    sched = schedule.parse(
+        {
+            "assignments": {
+                "a1": {"course_source_repo": "a", "due_datetime": "2026-10-13T12:00"}
+            }
+        }
+    )
+    entry = sched.assignments["a1"]
+    spec = grades.GradingSpec(submit_via=via)
+    cutoff = schedule.grading_cutoff_datetime(sched, "a1", submit_via=via)
+    units = 0 if via == "external" else 3
+
+    def state(at: datetime) -> str:
+        return status_json.assignment_state(at, entry, cutoff, spec, units, False, True)
+
+    assert state(entry.due_datetime - timedelta(hours=1)) == "open"
+    after = entry.due_datetime + timedelta(hours=1)
+    assert state(after) == ("late_window" if late_window else "marking")
+
+
+def test_run_settings_quote_no_late_window_for_external_work():
+    # Its cutoff is the due date, so the console must not quote the window it ignores.
+    sources = (("late_window_days", "institution"),)
+    external = grades.GradingSpec(
+        submit_via="external", late_window_days=10, sources=sources
+    )
+    repo = grades.GradingSpec(late_window_days=10, sources=sources)
+    assert status_json.run_settings(external)["late_window_days"]["value"] is None
+    assert status_json.run_settings(repo)["late_window_days"]["value"] == 10
