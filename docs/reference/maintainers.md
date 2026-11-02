@@ -101,8 +101,13 @@ Things whose *literal spelling* is depended on from outside Python:
   each unit's block, under the sheet's own `submissions:` / `teams:`, exactly as the sheet
   held it when the last real Return marks left every person in the unit told
   (`_told_units`: their `distributed.csv` email row matches their marks digest, and no mark
-  of theirs on that sheet is held). The console compares it with the sheet to count who a
-  further Return marks would email, so it keeps the sheet's own dump (`_sheet_yaml`).
+  of theirs on that sheet is held), beside the top-level `late_penalty_per_day` they went
+  out under (a changed rate re-emails every late unit whose block did not move). A scoped
+  run rewrites only its own sheet's record, so a unit told through another sheet's run
+  keeps counting here until this sheet's next run: a deliberate, safe over-count, since a
+  scoped run cannot know what the other sheets' current marks were sent. The console
+  compares it with the sheet to count who a further Return marks would email, so it
+  keeps the sheet's own dump (`_sheet_yaml`).
   Which keys count is the console's `TOLD_KEYS` (`model/marks.ts`), the sheet-side
   mirror of `grades._GRADER_KEYS`: change one, change the other.
 - **An assignment page's URL** - `schedule.AssignmentPage` (`<nn>-<semester name>`, or the

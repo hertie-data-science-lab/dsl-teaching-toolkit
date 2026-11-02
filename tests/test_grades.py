@@ -3008,7 +3008,26 @@ def test_the_returned_record_carries_each_told_unit_as_the_sheet_had_it(
     assert text.startswith("# SYSTEM-OWNED")
     # Block for block what the sheet holds, so the console compares the two with one
     # parser - the grader's private note included: semester-config is private.
-    assert _told(cfg_files) == grades.parse_sheet(_TWO_SHEET)
+    told = _told(cfg_files)
+    assert told["submissions"] == grades.parse_sheet(_TWO_SHEET)["submissions"]
+    assert set(told) == {"late_penalty_per_day", "submissions"}
+
+
+def test_the_returned_record_carries_the_late_rate_its_marks_went_out_under(
+    tmp_path, monkeypatch
+):
+    # A changed rate moves every late unit's final grade with no block moving, so the
+    # console must see the rate the told marks were worked out with.
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": _TWO_SHEET},
+        grading=_GRADING_YML.replace("10%", "25%"),
+        roster_rows=_TWO_ROSTER,
+        sent=2,
+    )
+    ((_cfg, cfg_files, _d),) = out["config"]
+    assert _told(cfg_files)["late_penalty_per_day"] == "25%"
 
 
 def test_a_unit_whose_email_failed_is_left_out_of_the_returned_record(
@@ -3057,7 +3076,7 @@ def test_no_email_at_all_leaves_every_new_mark_out_of_the_returned_record(
 ):
     out = _distribute(monkeypatch, tmp_path, notify=False)
     ((_cfg, cfg_files, _d),) = out["config"]
-    assert _told(cfg_files) == {"submissions": {}}
+    assert _told(cfg_files)["submissions"] == {}
 
 
 def test_a_preview_writes_no_returned_record(tmp_path, monkeypatch):

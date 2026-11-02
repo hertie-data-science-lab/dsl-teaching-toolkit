@@ -4504,8 +4504,17 @@ def _told_units(
 def returned_record(spec: SheetSpec, told_units: dict[str, dict]) -> str:
     """The `.system/returned/<name>.yml` text: each told unit's block exactly as the sheet
     carried it, under the sheet's own container key and in its own dump, so the console
-    compares the two with one parser and counts a unit whose block has moved since."""
-    return _RETURNED_HEADER + _sheet_yaml({spec.container_key: told_units})
+    compares the two with one parser and counts a unit whose block has moved since.
+
+    Beside the container, the `late_penalty_per_day` those marks went out under (blank for
+    none): a changed rate moves every late unit's final grade - so the engine would email
+    them - while their blocks stay identical, and only this tells the console so."""
+    return _RETURNED_HEADER + _sheet_yaml(
+        {
+            "late_penalty_per_day": spec.late_penalty_per_day,
+            spec.container_key: told_units,
+        }
+    )
 
 
 def _returned_units(
