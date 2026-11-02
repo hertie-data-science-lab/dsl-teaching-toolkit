@@ -32,6 +32,7 @@ from dsl_course.grades import (
     sheet_faults,
     sheet_hold_reasons,
     sheet_path,
+    student_view,
 )
 
 QUESTIONS = {"Q1": "15", "Q2": "10"}
@@ -108,7 +109,9 @@ def test_an_externally_submitted_assignment_has_no_info_block_at_all():
     # the override is the grader's, not the machine's.
     block = new_sheet(individual(submit_via="external"), SOLO)["submissions"]["ada-l"]
     assert "info" not in block
-    assert list(block) == [*PERSON_KEYS, "score_individual"]
+    # In its place, the grader's own days late, blank (on time) until they say otherwise.
+    assert list(block) == ["days_late", *PERSON_KEYS, "score_individual"]
+    assert block["days_late"] is None
 
 
 def test_declared_questions_become_a_blank_skeleton_and_nothing_else_does():
@@ -365,6 +368,7 @@ def test_an_external_sheet_says_the_toolkit_fills_nothing():
     text = dump_sheet(new_sheet(spec, SOLO), spec, "FROZEN 20 Sep 2026 23:59")
     assert "Auto-filled by the toolkit: nothing." in text
     assert "submitted outside GitHub" in text
+    assert "you enter each unit's `days_late`" in text
 
 
 def test_the_maxima_and_the_info_notice_are_re_emitted_beside_the_fields():
@@ -1032,3 +1036,54 @@ def test_a_set_penalty_of_nothing_reads_as_waived():
     assert grades._penalty_display(rate, 2, "0%") == "waived"
     assert grades._penalty_display(rate, 2, "waive") == "waived"
     assert final_grade(20, rate, 2, None, "0%") == Decimal(20)
+
+
+# ------------------------------------------- external work: the grader's days late
+
+
+def _external(**kw) -> SheetSpec:
+    return individual(submit_via="external", late_penalty_per_day="10%", **kw)
+
+
+def test_external_days_late_are_the_graders_and_cost_the_late_rule():
+    spec = _external()
+    block = {"days_late": 2, "score_individual": 80}
+    view = student_view(spec, "ada-l", block, "ada-l")
+    assert (view["final_grade"], view["days_late"], view["penalty"]) == (
+        "64",
+        2,
+        "-20%",
+    )
+    # Blank, or a sheet written before the key existed, is on time.
+    for on_time in ({"days_late": None}, {}):
+        view = student_view(spec, "ada-l", on_time | {"score_individual": 80}, "ada-l")
+        assert (view["final_grade"], view.get("penalty")) == ("80", None)
+    # The grader's waive works as on a repo shape.
+    waived = block | {"late_penalty": "waive"}
+    assert student_view(spec, "ada-l", waived, "ada-l")["final_grade"] == "80"
+
+
+def test_external_days_late_survive_a_refresh_and_the_freeze():
+    spec = _external()
+    sheet = new_sheet(spec, SOLO)
+    sheet["submissions"]["ada-l"]["days_late"] = 3
+    for frozen in (False, True):
+        merged = merge_sheet(sheet, spec, SOLO, {}, frozen=frozen)
+        assert merged["submissions"]["ada-l"]["days_late"] == 3
+        assert "info" not in merged["submissions"]["ada-l"]
+        assert merged["submissions"]["ben-k"]["days_late"] is None
+    text = dump_sheet(merge_sheet(sheet, spec, SOLO, {}), spec, "OPEN")
+    assert parse_sheet(text)["submissions"]["ada-l"]["days_late"] == "3"
+
+
+@pytest.mark.parametrize("bad", ["two", -1, 1.5, "1.5"])
+def test_external_days_late_that_are_not_a_whole_number_hold_the_mark(bad):
+    spec = _external()
+    sheet = new_sheet(spec, SOLO)
+    sheet["submissions"]["ada-l"].update(days_late=bad, score_individual=80)
+    text = dump_sheet(sheet, spec, "OPEN")
+    faults: list = []
+    held = sheet_hold_reasons(spec, sheet, faults, text, "assignment-1")
+    assert held == {"ada-l": "days_late"}
+    (fault,) = faults
+    assert fault.field == "days_late" and "ada-l" not in fault.plain
