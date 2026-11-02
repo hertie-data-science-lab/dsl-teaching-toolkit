@@ -464,6 +464,8 @@ Decision 0034 (need, time, verdict), all computed by the engine so the console h
   assignments.yml values bite at their assignment's hand-out; visibility drift and a late
   release with no other problem (`schedule:<entry>:LATE`) stand now; a cited root stub
   still the placeholder is `schedule:<entry>:SOURCE_UNWRITTEN` at the release's moment;
+  an assignment set to hand out by hand and still `declared` is
+  `assignment:<key>:NOT_HANDED_OUT` at its due date (fix: the assignment's page);
   `opencourse.yml` that does not parse is a `now` problem while the website is on. The
   digest's mail ladder is a separate clock and unchanged.
 - **Verdict.** `course.verdict` / `semester.verdict`: `fixing` (a `now`/`soon` problem;
