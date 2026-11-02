@@ -1312,6 +1312,13 @@ def load_grading_spec(
     return spec
 
 
+def submit_via_of(course_org: str, entry: schedule.AssignmentEntry) -> str:
+    """How this entry's assignment is handed in (its template's `submit_via`), for a
+    caller with no spec in hand that needs the late cutoff
+    (`schedule.grading_cutoff_datetime`). Off the memoised template read."""
+    return load_grading_spec(course_org, entry.course_source_repo).submit_via
+
+
 # ------------------------------------ what an assignment's definition will not grade as
 #
 # TIME-BOUND, unlike everything else that reaches a digest. `submit_via: emial` is a typo
@@ -1535,8 +1542,11 @@ def grading_config_faults(
         template = entry.course_source_repo
         if not template:
             continue  # the plan itself is faulty; schedule.yml's own digest says so
-        # The window-less cutoff: the spec that holds the window is what is read next.
-        fires = schedule.grading_cutoff_datetime(sched, slug)
+        # The shape is in the file being checked, so a fault is timed off the repo
+        # shapes' cutoff and moved to the due date below once the parse says external.
+        fires = schedule.grading_cutoff_datetime(
+            sched, slug, submit_via=GradingSpec.submit_via
+        )
         text = _grading_text(course_org, template)
         if text is None:
             faults += _undeclared_faults(slug, template, course_org, fires)
@@ -1557,6 +1567,13 @@ def grading_config_faults(
             releases_solution=entry.solution_datetime is not None,
             semester_org=semester_org,
         )
+        if spec is not None and not spec.collects_commits:
+            due = schedule.grading_cutoff_datetime(
+                sched, slug, submit_via=spec.submit_via
+            )
+            for fault in spec_faults:
+                if fault.fires == fires:
+                    fault.fires = due
         faults += spec_faults
         if handed_out and spec is not None and spec.visibility_is_students:
             hands_the_flag_over = True
@@ -1889,7 +1906,9 @@ def team_lock_entries(
         if formation == SELF_SELECT:
             # The same call the semester site's team-formation callout makes, so the page
             # that invites a student in and the form that lets them in shut together.
-            window, closes = schedule.formation_state(sched, key, now)
+            window, closes = schedule.formation_state(
+                sched, key, now, submit_via=spec.submit_via
+            )
             shuts = closes.date().isoformat() if closes is not None else ""
             page = pages.get(key, "")
         entries[key] = (
@@ -2114,6 +2133,7 @@ def sheet_spec(
     `schedule.yml`. Nothing here is written into the sheet as data - it reaches the grader
     as the comment header, which is regenerated on every write."""
     entry = sched.assignments.get(key)
+    cutoff = schedule.grading_cutoff_datetime(sched, key, submit_via=gspec.submit_via)
     return SheetSpec(
         slug=slug,
         title=title or gspec.title or slug,
@@ -2127,12 +2147,9 @@ def sheet_spec(
         autograde=gspec.autograde,
         completion_check=gspec.runs_completion_check,
         due_display=_display_moment(entry.due_datetime if entry else None),
-        cutoff_display=_display_moment(schedule.grading_cutoff_datetime(sched, key)),
+        cutoff_display=_display_moment(cutoff),
         due_long=_display_long(entry.due_datetime if entry else None, sched.timezone),
-        cutoff_long=_display_long(
-            schedule.grading_cutoff_datetime(sched, key),
-            sched.timezone,
-        ),
+        cutoff_long=_display_long(cutoff, sched.timezone),
         due_at=entry.due_datetime if entry else None,
         not_migrated=gspec.not_migrated,
     )

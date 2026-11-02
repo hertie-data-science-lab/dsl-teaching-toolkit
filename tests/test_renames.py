@@ -392,8 +392,13 @@ def test_the_one_cutoff_resolver_adds_the_late_window_to_the_due_date():
     sched = _one_assignment()
     due = sched.assignments["a1"].due_datetime
     # The effective window: the institution's 10 days when nothing nearer says.
-    assert schedule.grading_cutoff_datetime(sched, "a1") == due + timedelta(days=10)
-    assert schedule.grading_cutoff_datetime(sched, "nope") is None
+    assert schedule.grading_cutoff_datetime(
+        sched, "a1", submit_via="assignment_repo"
+    ) == due + timedelta(days=10)
+    assert (
+        schedule.grading_cutoff_datetime(sched, "nope", submit_via="assignment_repo")
+        is None
+    )
 
 
 def test_the_old_resolvers_are_gone():

@@ -1912,7 +1912,9 @@ def provision_all(
             # says who forms the teams, not an error about the empty CSV. Pressed after the
             # late cutoff the window it opens is already shut, so only the teaching team
             # can make teams.
-            cutoff = schedule.grading_cutoff_datetime(sched, key)
+            cutoff = schedule.grading_cutoff_datetime(
+                sched, key, submit_via=gspec.submit_via
+            )
             if cutoff is not None and datetime.now(timezone.utc) >= cutoff:
                 how = (
                     "the team window is already closed, so assign the teams on its "

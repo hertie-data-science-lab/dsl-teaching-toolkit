@@ -1190,7 +1190,9 @@ def _assignment_entry(
     tbc_due = indent(tbc_fm, "    ")
     external = spec.submit_external
     window, shuts = (
-        schedule.formation_state(sched, found[0], now or datetime.now(UTC))
+        schedule.formation_state(
+            sched, found[0], now or datetime.now(UTC), submit_via=spec.submit_via
+        )
         if sched is not None and found is not None
         else ("closed", None)
     )

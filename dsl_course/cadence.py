@@ -61,6 +61,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from itertools import pairwise
@@ -308,6 +309,8 @@ def late_items(
     sched: Schedule,
     prev_at: datetime | None,
     now: datetime,
+    *,
+    submit_vias: Mapping[str, str],
 ) -> list[LateItem]:
     """Every dated moment that fell in `(prev_at, now]` and was already more than GAP_SLO
     old when this tick reached it, due-date order. Pure.
@@ -347,7 +350,7 @@ def late_items(
     for slug, entry in sched.assignments.items():
         # The freeze moment: late here means submissions kept arriving past the deadline the
         # snapshot was supposed to pin. It needs no template repo, so it is always asked.
-        at = grading_cutoff_datetime(sched, slug)
+        at = grading_cutoff_datetime(sched, slug, submit_via=submit_vias[slug])
         if at is not None:
             moments.append((f"assignments.{slug} snapshot", at))
         if (

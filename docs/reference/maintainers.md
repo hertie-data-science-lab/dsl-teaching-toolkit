@@ -641,7 +641,9 @@ states no run setting: one written there refuses the whole file as `NOT_MIGRATED
 `semester_dest_repo` from it and carries its faults (and one per block for a key the plan
 does not name) beside the plan's, so they ride the `schedule.yml` digest and file in
 status.json as `ASSIGNMENTS`. The late cutoff has one resolver,
-`schedule.grading_cutoff_datetime`: due + the effective `late_window_days`. A read of
+`schedule.grading_cutoff_datetime`: due + the effective `late_window_days`, or the due date
+itself for `submit_via: external` (no commits, so no late window). It takes the template's
+`submit_via` as a required argument, since `schedule` cannot read the template. A read of
 `dsl-course.yml` or `assignments.yml` that fails other than with a 404 raises and is not
 cached (an `assignments.yml` that is not YAML raises `Unusable`); a value a reader refuses
 states nothing, and the next layer answers.

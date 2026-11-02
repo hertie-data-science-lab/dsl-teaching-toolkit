@@ -109,6 +109,7 @@ from .course import (
     SOLUTION_BEFORE_CUTOFF,
     SOLUTION_WARNING,
     coerce_date,
+    collects_commits,
     is_repo_root,
     pages_repo,
 )
@@ -1771,7 +1772,7 @@ def solution_before_cutoff(slug: str, solution: datetime, cutoff: datetime) -> s
     )
 
 
-def solution_cutoff(sched: Schedule, slug: str) -> datetime | None:
+def solution_cutoff(sched: Schedule, slug: str, *, submit_via: str) -> datetime | None:
     """The late cutoff a scheduled solution waits for, or None when it cannot be known -
     and then the solution waits too.
 
@@ -1781,18 +1782,20 @@ def solution_cutoff(sched: Schedule, slug: str) -> datetime | None:
     try:
         if sched.org and not settings.course_org_for_semester(sched.org):
             return None
-        return grading_cutoff_datetime(sched, slug)
+        return grading_cutoff_datetime(sched, slug, submit_via=submit_via)
     except Exception:
         return None
 
 
-def solution_held_until(sched: Schedule, slug: str) -> datetime | None:
+def solution_held_until(
+    sched: Schedule, slug: str, *, submit_via: str
+) -> datetime | None:
     """The cutoff this assignment's scheduled solution is held until: set, and before it.
     None when nothing is held, or the cutoff cannot be known."""
     entry = sched.assignments.get(slug)
     if entry is None or entry.solution_datetime is None:
         return None
-    cutoff = solution_cutoff(sched, slug)
+    cutoff = solution_cutoff(sched, slug, submit_via=submit_via)
     return cutoff if cutoff is not None and entry.solution_datetime < cutoff else None
 
 
@@ -2045,11 +2048,19 @@ def resolve_target(
     return found[0][0], semester_name(*found[0])
 
 
-def grading_cutoff_datetime(sched: Schedule, slug: str) -> datetime | None:
+def grading_cutoff_datetime(
+    sched: Schedule, slug: str, *, submit_via: str
+) -> datetime | None:
     """THE late cutoff: when this assignment stops accepting work - the due date plus the
     effective `late_window_days` (`settings`: assignments.yml, then the course, then the
     institution). `late_window_days: 0`, or a late rule that names no window, is the due
     date itself: no late work. None if unscheduled.
+
+    Work handed in outside GitHub (`submit_via: external`) has no late window at all: no
+    commits arrive, so nothing can be late (`course.collects_commits`), and its cutoff IS
+    the due date whatever the run settings say. `submit_via` is the template's
+    (`grading_config.yml`), which this module cannot read: every caller passes it, from
+    the spec it holds or `grades.submit_via_of`, and it is required so none can forget.
 
     Computed, never an input (decisions 0009, 0012), and computed HERE only. Everything
     that has to agree about when the door shuts reads it - the snapshot that freezes and
@@ -2058,12 +2069,14 @@ def grading_cutoff_datetime(sched: Schedule, slug: str) -> datetime | None:
     entry = sched.assignments.get(slug)
     if entry is None:
         return None
+    if not collects_commits(submit_via):
+        return entry.due_datetime
     days, _ = settings.effective(sched.org, slug, "late_window_days")
     return entry.due_datetime + timedelta(days=int(days or 0))
 
 
 def formation_window(
-    sched: Schedule, slug: str
+    sched: Schedule, slug: str, *, submit_via: str
 ) -> tuple[datetime | None, datetime | None]:
     """When a self-selected team may be formed: `(handout, grading pin)`, or `(None, None)`
     if the slug is not in the schedule at all.
@@ -2077,16 +2090,19 @@ def formation_window(
     after it has nothing left to hand in, and would be provisioned a repo against work
     already collected.
 
-    No spec read: the window closes at the late cutoff (`grading_cutoff_datetime`), which
-    reads the run settings and nothing of the template's."""
+    No spec read: the window closes at the late cutoff (`grading_cutoff_datetime`), off the
+    `submit_via` the caller holds."""
     entry = sched.assignments.get(slug)
     if entry is None:
         return (None, None)
-    return (entry.handout_datetime, grading_cutoff_datetime(sched, slug))
+    return (
+        entry.handout_datetime,
+        grading_cutoff_datetime(sched, slug, submit_via=submit_via),
+    )
 
 
 def formation_state(
-    sched: Schedule, slug: str, now: datetime
+    sched: Schedule, slug: str, now: datetime, *, submit_via: str
 ) -> tuple[str, datetime | None]:
     """Where `now` falls in this assignment's team-formation window, and the moment that
     window shuts: `pending` (the handout is still to come), `open` or `closed`.
@@ -2098,13 +2114,13 @@ def formation_state(
     Whether the assignment HAS a window is the caller's question, not this one's: it hangs
     on `team_formation`, a run setting resolved into the assignment's spec
     (`grades.load_grading_spec`), which this module deliberately cannot read. Both callers
-    already hold the spec.
+    already hold the spec, and pass its `submit_via` for the cutoff.
 
     One place, because two things now answer off it minutes apart - the lock file the
     Join-team form refuses on, and the semester site's team-formation callout - and a page
     that invites a student through a door the form has already shut is worse than either
     saying nothing."""
-    opens, closes = formation_window(sched, slug)
+    opens, closes = formation_window(sched, slug, submit_via=submit_via)
     if opens is None or closes is None:
         return "closed", closes
     if now < opens:
