@@ -865,9 +865,13 @@ def test_a_real_run_reaches_every_channel_and_posts_no_comment(tmp_path, monkeyp
     assert set(files) == {"grades.yml", "README.md"}
     assert "student: ada-l" in files["grades.yml"]
     assert "| Assignment 1 · Neural networks | 43 |" in files["README.md"]
-    # the registrar export and the record, in one semester-config commit
+    # the registrar export and the records, in one semester-config commit
     ((_cfg, cfg_files, _d),) = out["config"]
-    assert set(cfg_files) == {grades.SEMESTER_CSV_NAME, grades.DISTRIBUTED_PATH}
+    assert set(cfg_files) == {
+        grades.SEMESTER_CSV_NAME,
+        grades.DISTRIBUTED_PATH,
+        grades.returned_record_path("assignment-1"),
+    }
     assert "ada@uni.edu,Ada,ada-l,43" in cfg_files[grades.SEMESTER_CSV_NAME]
     # and the email
     assert [m[0] for batch in out["outbox"] for m in batch] == ["ada@uni.edu"]
@@ -2980,6 +2984,155 @@ def test_one_refused_address_does_not_hold_back_the_returned_record(
     assert grades.marks_return_record("assignment-1") in cfg_files
     record = cfg_files[grades.DISTRIBUTED_PATH]
     assert "ada-l,,email," in record and "ben-k,,email," not in record
+
+
+def _told(cfg_files: dict, name: str = "assignment-1") -> dict:
+    """The units a run's `returned` record of sheet `name` carries, read back by the
+    sheet's own parser."""
+    return grades.parse_sheet(cfg_files[grades.returned_record_path(name)])
+
+
+def test_the_returned_record_carries_each_told_unit_as_the_sheet_had_it(
+    tmp_path, monkeypatch
+):
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": _TWO_SHEET},
+        roster_rows=_TWO_ROSTER,
+        sent=2,
+    )
+    assert out["rc"] == 0
+    ((_cfg, cfg_files, _d),) = out["config"]
+    text = cfg_files[grades.returned_record_path("assignment-1")]
+    assert text.startswith("# SYSTEM-OWNED")
+    # Block for block what the sheet holds, so the console compares the two with one
+    # parser - the grader's private note included: semester-config is private.
+    told = _told(cfg_files)
+    assert told["submissions"] == grades.parse_sheet(_TWO_SHEET)["submissions"]
+    assert set(told) == {"late_penalty_per_day", "submissions"}
+
+
+def test_the_returned_record_carries_the_late_rate_its_marks_went_out_under(
+    tmp_path, monkeypatch
+):
+    # A changed rate moves every late unit's final grade with no block moving, so the
+    # console must see the rate the told marks were worked out with.
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": _TWO_SHEET},
+        grading=_GRADING_YML.replace("10%", "25%"),
+        roster_rows=_TWO_ROSTER,
+        sent=2,
+    )
+    ((_cfg, cfg_files, _d),) = out["config"]
+    assert _told(cfg_files)["late_penalty_per_day"] == "25%"
+
+
+def test_a_unit_whose_email_failed_is_left_out_of_the_returned_record(
+    tmp_path, monkeypatch
+):
+    # ben's mail is refused: the next Return marks would email him, so the console must
+    # still count him.
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": _TWO_SHEET},
+        roster_rows=_TWO_ROSTER,
+        sent=1,
+    )
+    ((_cfg, cfg_files, _d),) = out["config"]
+    assert set(_told(cfg_files)["submissions"]) == {"ada-l"}
+
+
+def test_a_team_is_told_only_when_every_member_is(tmp_path, monkeypatch):
+    sheet = _TEAM_SHEET + (
+        "  beta:\n"
+        "    score_group: 20\n"
+        "    members:\n"
+        "      ben-k:\n"
+        "        adjustment_individual:\n"
+        "      cy-p:\n"
+        "        adjustment_individual:\n"
+    )
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": sheet},
+        grading=_GRADING_YML + "type: group\n",
+        roster_rows=_TWO_ROSTER + "cy@uni.edu,Cy,enrolled,cy-p,44,dsl-abe\n",
+        # ada and ben are mailed; cy's address is refused
+        sent=2,
+    )
+    ((_cfg, cfg_files, _d),) = out["config"]
+    told = _told(cfg_files)
+    assert set(told["teams"]) == {"alpha"}
+    assert told["teams"]["alpha"] == grades.parse_sheet(sheet)["teams"]["alpha"]
+
+
+def test_no_email_at_all_leaves_every_new_mark_out_of_the_returned_record(
+    tmp_path, monkeypatch
+):
+    out = _distribute(monkeypatch, tmp_path, notify=False)
+    ((_cfg, cfg_files, _d),) = out["config"]
+    assert _told(cfg_files)["submissions"] == {}
+
+
+def test_a_preview_writes_no_returned_record(tmp_path, monkeypatch):
+    out = _distribute(monkeypatch, tmp_path, dry_run=True)
+    assert not any(
+        path.startswith(grades.returned_record_path(""))
+        for _repo, files, _d in out["config"]
+        for path in files
+    )
+
+
+def test_a_scoped_return_rewrites_only_its_own_returned_record(tmp_path, monkeypatch):
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-0": _SHEET, "assignment-1": _SHEET},
+        exported=(
+            "hertie_email,name,github_handle,assignment-0\nada@uni.edu,Ada,ada-l,43\n"
+        ),
+        assignment="assignment-1",
+    )
+    ((_cfg, cfg_files, _d),) = out["config"]
+    assert grades.returned_record_path("assignment-0") not in cfg_files
+    assert set(_told(cfg_files)["submissions"]) == {"ada-l"}
+
+
+def test_the_returned_record_is_rewritten_from_each_runs_state(tmp_path, monkeypatch):
+    # Run 1 tells both students their a0 marks. Run 2 brings a1, with ben's mark held:
+    # nobody's a0 marks moved, so both stay told on a0 though nobody was mailed about
+    # it, and ben - whose email row still matches his book, the held mark being out of
+    # it - is NOT told on a1.
+    first = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-0": _TWO_SHEET},
+        roster_rows=_TWO_ROSTER,
+        sent=2,
+    )
+    ((_cfg, before, _d),) = first["config"]
+    held = _TWO_SHEET.replace(
+        "score_individual: 40\n    adjustment_individual:\n",
+        "score_individual: 40\n    adjustment_individual: −3\n",
+    )
+    again = _distribute(
+        monkeypatch,
+        tmp_path / "again",
+        sheets={"assignment-0": _TWO_SHEET, "assignment-1": held},
+        roster_rows=_TWO_ROSTER,
+        distributed=before[grades.DISTRIBUTED_PATH],
+        exported=before[grades.SEMESTER_CSV_NAME],
+        sent=2,
+    )
+    assert [m[0] for batch in again["outbox"] for m in batch] == ["ada@uni.edu"]
+    ((_cfg, after, _d),) = again["config"]
+    assert set(_told(after, "assignment-0")["submissions"]) == {"ada-l", "ben-k"}
+    assert set(_told(after)["submissions"]) == {"ada-l"}
 
 
 def test_no_email_sent_at_all_leaves_the_assignment_to_be_returned_again(

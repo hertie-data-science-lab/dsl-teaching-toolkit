@@ -18,7 +18,7 @@ import { loadHeartbeat, type Heartbeat } from './model/heartbeat';
 import { StatusStore, type Loaded } from './model/status';
 import { DispatchAdapter, outcomePath } from './ops/adapter';
 import { OpPanel } from './ops/Panel';
-import { OpsSession } from './ops/session';
+import { OpsSession, type OpDef } from './ops/session';
 import { DetailsScreen, MaterialsScreen, WebsiteScreen } from './screens/CourseEdit';
 import { takeInstallReturn } from './wizards/drafts';
 import { COHORT_SCREENS, COURSE_SCREENS, WIZARD_NAV, installReturn, modeOf, movedHash, parseHash, replaceHash, parseSearch, resolveContext, studentContext, studentLanding, studentNavKey, wizardOf } from './router';
@@ -50,7 +50,8 @@ import { DEFAULT_TIMEZONE } from './model/policy';
 import type { SemesterStatus } from './model/types';
 import type { Files } from './model/files';
 import type { Course } from './model/discovery';
-import { CONFIG_REPO, COURSE_REPO, STATUS_PATH } from './model/names';
+import { CONFIG_REPO, COURSE_REPO, RETURNED_DIR, STATUS_PATH } from './model/names';
+import { toldPath } from './model/marks';
 
 /** App-level pages: about no course or semester. */
 const APP_SCREENS = ['home', 'help', 'profile'];
@@ -374,6 +375,25 @@ export function subPages(course: Course, loaded: Loaded, cohortStates: Record<st
 
 export type AppState = ReturnType<typeof createState>;
 
+/**
+ * What a finished run leaves stale, read again: the semester's status and the run's outcome file,
+ * the course's status, and after Return marks the "last told" record(s) it rewrote - its sheet's,
+ * or every one held for an unscoped run - so the Marks tab's count of who it would email is fresh.
+ */
+export function refreshAfterRun(def: OpDef, statuses: Pick<StatusStore, 'reload'>, files: Pick<LiveFiles, 'refresh' | 'refreshUnder'>): void {
+  if (def.cohortOrg) {
+    void statuses.reload(def.cohortOrg, CONFIG_REPO);
+    files.refresh(def.cohortOrg, CONFIG_REPO, outcomePath(def.op));
+    if (def.op === 'grades.return') {
+      const sheet = def.args.assignment;
+      if (typeof sheet === 'string' && sheet) files.refresh(def.cohortOrg, CONFIG_REPO, toldPath(sheet));
+      else files.refreshUnder(def.cohortOrg, CONFIG_REPO, RETURNED_DIR);
+    }
+  }
+  void statuses.reload(def.courseOrg, COURSE_REPO);
+  files.refresh(def.courseOrg, COURSE_REPO, STATUS_PATH);
+}
+
 /** The sign-in screen's line while the saved token waits for GitHub to answer. */
 export const OFFLINE_RETRY = 'Offline: GitHub is not answering, retrying the sign-in';
 
@@ -386,14 +406,7 @@ export function createState({ auth, client }: AppDeps) {
   const left = new Map<string, { sig: ReturnType<typeof signal<Leftover[] | 'failed' | undefined>>; nav: string }>();
   let env: Env | null = null;
   const ops = new OpsSession(new DispatchAdapter(client, () => st.user.value?.login ?? ''), {
-    onFinished: (def) => {
-      if (def.cohortOrg) {
-        void statuses.reload(def.cohortOrg, CONFIG_REPO);
-        files.refresh(def.cohortOrg, CONFIG_REPO, outcomePath(def.op));
-      }
-      void statuses.reload(def.courseOrg, COURSE_REPO);
-      files.refresh(def.courseOrg, COURSE_REPO, STATUS_PATH);
-    },
+    onFinished: (def) => refreshAfterRun(def, statuses, files),
   });
   const estate = signal<Estate | null>(null);
   // Back from installing the console app: drop GitHub's two parameters and reopen the wizard's

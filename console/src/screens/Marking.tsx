@@ -6,12 +6,12 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import { readTable, writeTable } from '../edit/csv';
 import { CONFLICT, saveText, useSave, type SaveState } from '../edit/save';
-import { YamlText, blank, isObj, type Path } from '../edit/yamlText';
+import { YamlText, blank, deepEqual, isObj, type Path } from '../edit/yamlText';
 import { Invalid } from '../forms/Form';
 import { assignmentTitle, fmtDay, fmtShort, fmtTime, fmtWhen, plural, str } from '../model/format';
 import {
   HOLD_WORDS, NOTES_KEY, cellValue, daysLateFault, effectivePenalty, finalGrade, holdReasons, lateRule, num, overrideText, overrideValue, percentOff, questionFile,
-  questionPoints, readSheet, round, rowsChanged, scoreTotal, spread, studentMarks, unitDaysLate, type HoldReason, type HoldUnit, type Penalty, type Person, type Unit,
+  questionPoints, rateApplies, readSheet, readTold, round, rowsChanged, scoreTotal, sheetUnits, singleScore, spread, studentMarks, toldPath, unitDaysLate, untold, type HoldReason, type HoldUnit, type Penalty, type Person, type Unit,
 } from '../model/marks';
 import { SOURCE_WORD, resolve, valueWord } from '../model/cascade';
 import { HandOutNow, assignmentSettings, isExternal, sheetName } from './RunSettings';
@@ -26,12 +26,13 @@ import { assignmentHref, replaceHash, tabHref } from '../router';
 import { CheckLine, Loading } from '../ui/bits';
 import { Modal } from '../ui/Modal';
 import { Hint } from '../ui/Hint';
-import { SaveBar } from '../ui/edit';
+import { SaveBar, SaveLine } from '../ui/edit';
 import { Check } from '../ui/icons';
 import type { TabProps } from './Assignments';
-import { cohortScope, todayOf, tzOf, useGradingConfig, yearOf } from './common';
+import { cohortScope, questionFiles, todayOf, tzOf, useGradingConfigEdit, yearOf, type GradingConfigEdit } from './common';
 import { CONFIG_REPO } from '../model/names';
-import { formatsList } from '../tiers/grading';
+import { formatsList, questionFileError, questionRows, questionsValue, type QuestionRow } from '../tiers/grading';
+import { Questions } from './Course';
 
 /** The late penalty the marks grid applies: the assignment's effective `late_penalty_per_day` as status states it (`status_json.run_settings`). */
 function penaltyOf(a: Assignment): number | null {
@@ -227,6 +228,42 @@ export function PreviewEmails({ org, slug }: { org: string; slug: string }) {
   return said ? <p class="footnote preview-emails">{said}</p> : null;
 }
 
+/**
+ * Points per question from the Marks tab: the same rows as the template's settings, saved into the
+ * template's grading_config.yml on `solution` (so every semester that uses it) through `g`, which
+ * the tab owns so its save line stays up once this closes. `singles`: the sheet already has a
+ * single score somewhere.
+ */
+function PointsPerQuestion({ p, template, g, singles, onClose }: {
+  p: TabProps; template: string; g: GradingConfigEdit; singles: boolean; onClose: () => void;
+}) {
+  const { file, cfg, save, setSave, commit } = g;
+  const org = p.course.org;
+  const tree = p.files.tree(org, template);
+  // The rows it opens with (a blank Q1 where the template has none): Save waits for a change to them.
+  const [seeded] = useState<QuestionRow[]>(() => {
+    const base = questionRows(cfg.questions);
+    return base.length ? base : [{ name: 'Q1', points: '', file: '' }];
+  });
+  const [rows, setRows] = useState(seeded);
+  const files = useMemo(() => questionFiles(tree), [tree]);
+  const fileErr = rows.map((r) => questionFileError(r.file)).find(Boolean);
+  const dirty = !deepEqual(rows, seeded);
+  const doSave = async () => {
+    if (fileErr) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
+    if (await commit((y) => y.assign(['questions'], questionsValue(rows, cfg.questions)), 'template: set the points per question')) onClose();
+  };
+  return (
+    <section class="panel section points-edit" aria-label="Points per question">
+      <Questions rows={rows} set={(r) => { setRows(r); setSave({ kind: 'idle' }); }} files={files} />
+      <p class="footnote">This changes the assignment template, for every semester that uses it.{singles ? ' A row that already has a single score keeps it as its total until you enter points per question.' : ''}</p>
+      <SaveBar state={save} onSave={() => void doSave()} label="Save points" small disabled={!dirty || !!fileErr} file={{ org, repo: template, path: 'grading_config.yml', branch: 'solution', exists: file.kind !== 'absent' }}>
+        <button class="btn small quiet" type="button" onClick={() => { setSave({ kind: 'idle' }); onClose(); }}>Cancel</button>
+      </SaveBar>
+    </section>
+  );
+}
+
 export function MarksTab(p: TabProps) {
   const { a, status, now } = p;
   const tz = tzOf(status), year = yearOf(now, tz);
@@ -267,6 +304,9 @@ export function MarksTab(p: TabProps) {
   const subFolded = foldChoice ?? (!full && narrow);
   const fullBtn = useRef<HTMLButtonElement>(null);
   const [save, , setSave] = useSave(env);
+  // Points per question, edited here into the template: open or not, and its own save.
+  const [pointsOpen, setPointsOpen] = useState(false);
+  const points = useGradingConfigEdit(p, a.template);
   const file = p.files.file(org, CONFIG_REPO, path);
   const sha = file.kind === 'ready' ? file.sha : null;
   // Unsaved marks survive a reload: kept in this browser per sheet, with the sha they were made on,
@@ -315,11 +355,22 @@ export function MarksTab(p: TabProps) {
   const parsed = useMemo(() => {
     if (text === null) return null;
     const y = new YamlText(text);
-    return y.errors.length ? { error: y.errors[0] } : { sheet: readSheet(text, y.toJS()) };
+    if (y.errors.length) return { error: y.errors[0] };
+    const doc = y.toJS();
+    return { sheet: readSheet(text, doc), blocks: sheetUnits(doc) };
   }, [text]);
+  // What each unit was last told (the engine's record): Return marks emails only the units whose saved marks differ.
+  // Still loading: no count is claimed. Unreadable: counted as nobody told, and the footnote says so.
+  const toldFile = p.files.file(org, CONFIG_REPO, toldPath(name));
+  const toldText = toldFile.kind === 'ready' ? toldFile.text : null;
+  const lastTold = useMemo(() => readTold(toldText), [toldText]);
   const roster = p.files.file(org, CONFIG_REPO, 'students.csv');
   const rosterText = roster.kind === 'ready' ? roster.text : null;
-  const students = useMemo(() => (rosterText === null ? [] : parseRoster(rosterText).rows), [rosterText]);
+  const rosterRead = useMemo(() => (rosterText === null ? null : parseRoster(rosterText)), [rosterText]);
+  const students = useMemo(() => rosterRead?.rows ?? [], [rosterRead]);
+  // The handles students.csv knows (folded), for who Return marks can email; null while it cannot
+  // be read, when nobody is left out (as `grades._on_the_roster` filters nothing on an unreadable roster).
+  const known = useMemo(() => (!rosterRead || rosterRead.error ? null : new Set(students.map((s) => fold(s.handle)))), [rosterRead, students]);
   // Real names by handle (folded as `sameHandle` folds it), the first row's where two share one.
   const names = useMemo(() => {
     const m = new Map<string, string>();
@@ -330,7 +381,7 @@ export function MarksTab(p: TabProps) {
   const realName = (h: string) => names.get(fold(h)) ?? '';
   /** A person as the grid names them: the real name, else the handle. */
   const shownName = (h: string) => realName(h) || h;
-  const cfg = useGradingConfig(p, a.template);
+  const { cfg } = points;
   // Handed in outside GitHub (`grades.unit_days_late`): no `info:`, so the grader enters each
   // unit's days late. The status says so from the first render; the template covers an older status.
   const external = a.submit_shape === 'external' || isExternal(cfg);
@@ -356,17 +407,27 @@ export function MarksTab(p: TabProps) {
   // grades. Only a saved sheet moves them, so they are not worked out again per keystroke.
   const saved = useMemo(() => {
     if (!sheetRead) return null;
+    const blocks = parsed?.blocks ?? {};
     const daysOf = (u: Unit) => unitDaysLate(u.info, external, u.daysLate);
     const held = holdReasons(sheetRead.units.map((u) => holdUnit(u, u.score, u.latePenalty, (pr) => pr.adjustment, daysOf(u), external)), questions, rate);
     const isHeld = heldIn(held);
     const heldUnits = sheetRead.units.filter((u) => isHeld(u)).length;
     const skipped = sheetRead.units.filter((u) => !isHeld(u) && noMark(u.score)).length;
+    // Marked and not held, and someone in it on the roster (the engine drops a book nobody on
+    // students.csv owns, `grades._on_the_roster`): those whose saved block differs from what they
+    // were last told get new marks, and so do the late ones under the rule once the rate moved.
+    const marked = sheetRead.units.filter((u) => !isHeld(u) && !noMark(u.score));
+    const offRoster = (u: Unit) => known !== null && u.people.length > 0 && u.people.every((pr) => !known.has(fold(pr.handle)));
+    const ready = marked.filter((u) => !offRoster(u));
+    const rateMoved = lastTold.rate !== undefined && lastTold.rate !== rate;
+    const sending = ready.filter((u) => untold(blocks[u.key], lastTold.units[u.key]) || (rateMoved && rateApplies(daysOf(u), u.latePenalty))).length;
+    const anyMark = sheetRead.units.some((u) => !noMark(u.score));
     const finals = sheetRead.units.flatMap((u) => {
       const pen = effectivePenalty(rate, daysOf(u), u.latePenalty);
       return u.people.filter((pr) => !held[pr.handle]).map((pr) => finalGrade(scoreTotal(u.score, questions), pen, pr.adjustment)).filter((f): f is number => f !== null);
     });
-    return { heldUnits, skipped, sending: sheetRead.units.length - heldUnits - skipped, finals, held: Object.keys(held).length };
-  }, [sheetRead, questions, rate, external]);
+    return { heldUnits, skipped, sending, ready: ready.length, offRoster: marked.length - ready.length, anyMark, finals, held: Object.keys(held).length };
+  }, [sheetRead, lastTold, known, questions, rate, external]);
   const rule = lateRuleOf(a);
   const max = qs.reduce((n, [, m]) => n + (Number(questionPoints(m)) || 0), 0);
   const group = a.teams !== null && a.teams !== undefined;
@@ -413,6 +474,8 @@ export function MarksTab(p: TabProps) {
   const noun = sheet.group ? 'team' : 'student';
   const scoreOf = (u: Unit) => {
     if (qs.length) {
+      // A single score from before the questions stays the total until a question mark is typed over it.
+      if (singleScore(u) && !qs.some(([q]) => key([...u.scorePath, q]) in edits)) return u.score;
       const base = u.score && typeof u.score === 'object' ? (u.score as Record<string, unknown>) : {};
       return Object.fromEntries(qs.map(([q]) => [q, v([...u.scorePath, q], base[q] ?? null)]));
     }
@@ -667,10 +730,10 @@ export function MarksTab(p: TabProps) {
     next.focus();
     next.select?.();
   };
-  const { sending, skipped, heldUnits, finals, held } = saved!;
+  const { sending, ready: readyUnits, offRoster, anyMark, skipped, heldUnits, finals, held } = saved!;
   const facts = [
     ...(changed ? [`${plural(changed, 'unsaved row')} ${changed === 1 ? 'is' : 'are'} not counted until you save`] : []),
-    `${plural(sending, noun)} ${sending === 1 ? 'gets' : 'get'} marks · ${skipped} not marked yet (skipped) · ${heldUnits} held (fix first)`,
+    `${plural(sending, noun)} ${sending === 1 ? 'gets' : 'get'} new marks · ${readyUnits - sending} already told and unchanged · ${skipped} not marked yet (skipped) · ${heldUnits} held (fix first)${offRoster ? ` · ${offRoster} not on the roster` : ''}`,
     spread(finals, held),
   ];
   const people = sheet.units.flatMap((u) => u.people.map((pr) => ({ u, pr })));
@@ -681,10 +744,21 @@ export function MarksTab(p: TabProps) {
     setPending(null);
   };
   const returnDef = returnMarks(scope, asgRef(a, group), sending, name, late, facts, <PreviewEmails org={org} slug={name} />);
+  // Who was last told still loading: the button waits, claiming no count. Nobody to email: it is
+  // greyed out. Either way a line says why; and over a record that could not be read, that the
+  // count (everyone marked) may be high.
+  const toldLoading = toldFile.kind === 'loading';
+  const why = toldLoading ? 'Reading what students were last told'
+    : sending ? (toldFile.kind === 'error' ? 'Who was last told could not be read; the count may be high' : null)
+    : changed ? 'Save marks to return them'
+    : !anyMark ? 'Nothing is marked yet'
+    : !readyUnits ? (heldUnits ? 'Fix the held rows to return them' : 'Nobody marked is on the roster')
+    : 'Everyone marked has been told these marks';
   // Returning is its own block above the grid: the panel it opens holds the figures and Preview.
   const returnBlock = (
     <div class="return-block">
-      <span class="return-main"><OpOpen def={returnDef} cls="btn big" label={returnDef.verb} />{p.open ? <OpenOnArrival slug={a.slug} def={returnDef} start={p.open === 'return-run' ? 'run' : 'preview'} /> : null}</span>
+      <span class="return-main"><OpOpen def={returnDef} cls="btn big" label={toldLoading ? 'Return marks' : returnDef.verb} disabled={toldLoading || !sending} />{p.open && !toldLoading ? <OpenOnArrival slug={a.slug} def={returnDef} start={p.open === 'return-run' ? 'run' : 'preview'} /> : null}</span>
+      {why ? <p class="footnote return-why">{why}</p> : null}
       <button class="btn small quiet" type="button" onClick={() => setViewing('')}>Student view</button>
     </div>
   );
@@ -698,6 +772,7 @@ export function MarksTab(p: TabProps) {
         <button class="icon-btn full-toggle" type="button" ref={fullBtn} aria-label={full ? 'Exit full screen' : 'Full screen'} title={full ? 'Exit full screen (Esc)' : 'Full screen'} onClick={() => (full ? exitFull() : setFull(true))}>{full ? '⤡' : '⤢'}</button>
       </div>
       <div class="marks-tools">
+        {points.file.kind === 'ready' && !pointsOpen ? <button class="btn small quiet points-toggle" type="button" onClick={() => { points.setSave({ kind: 'idle' }); setPointsOpen(true); }}>{qs.length ? 'Edit points per question' : 'Set points per question'}</button> : null}
         <SaveBar state={save} onSave={() => void doSave()} label="Save marks" disabled={!changed} small file={{ org, repo: CONFIG_REPO, path }} note={changed ? `${plural(changed, noun)} changed` : 'No unsaved changes'} />
       </div>
     </div>
@@ -794,6 +869,9 @@ export function MarksTab(p: TabProps) {
       {returnBlock}
       <div class={`marking${full ? ' full' : ''}`} role={full ? 'dialog' : undefined} aria-modal={full ? 'true' : undefined} aria-label={full ? `Marks: ${assignmentTitle(a)}` : undefined}>
         {tools}
+        {pointsOpen ? (
+          <PointsPerQuestion p={p} template={a.template} g={points} singles={sheet.units.some(singleScore)} onClose={() => setPointsOpen(false)} />
+        ) : <SaveLine state={points.save} />}
         {external ? <p class="footnote">Submitted outside GitHub: no dates. {rate !== null ? 'Enter the days late; the late penalty is worked out from them.' : 'No late penalty applies.'}</p> : null}
         <div class="table-wrap marks-wrap">
           <table class="grid marks" ref={table} onKeyDown={onKey} onFocusOut={keepDraft} style={{ minWidth: `${minTable}px` }}>
