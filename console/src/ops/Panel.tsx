@@ -233,8 +233,8 @@ export function OpPanel() {
       </div>
     );
   }
-  const mode = modeOf(d.op);
   const values = d.options ? effective(d.options, c.values) : c.values;
+  const mode = modeOf(d.op) === 'direct' && d.previewWhen?.(values) ? 'preview' : modeOf(d.op);
   const invalid = d.options ? Object.keys(fieldErrors(opSpec(d.op).args_schema, d.options, c.values)).length > 0 : false;
   let body, foot;
   if (d.info) {

@@ -129,6 +129,8 @@ export function handout(s: Scope, a: AsgRef): OpDef {
     // Units count the copies made, so none before the hand out: the verb names no number then.
     verb: a.units ? `Hand out to ${a.units} ${a.group ? 'teams' : 'students'}` : `Hand out to every ${a.group ? 'team' : 'student'}`, running: 'Handing out', cancel: 'Stop after the current repo; repos already made stay',
     args: { course_source_repo: a.template }, options: HANDOUT, target: reposLike(s.cohortOrg ?? s.courseOrg, a.name || a.slug),
+    // The engine runs a hand out with the solution only after its preview (`assign.preview_first`).
+    previewWhen: (v) => v.solution_datetime === 'now',
   };
 }
 

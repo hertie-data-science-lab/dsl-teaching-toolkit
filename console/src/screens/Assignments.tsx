@@ -18,7 +18,7 @@ import { Hint } from '../ui/Hint';
 import { asgSummary } from './Cohort';
 import { courseOf } from './Course';
 import { MarksTab, TeamsTab } from './Marking';
-import { AssignmentRun, HandOutNow, SemesterDefaults, handoutRef, sheetName } from './RunSettings';
+import { AssignmentRun, HandOutNow, ManualWaiting, SemesterDefaults, handoutRef, sheetName, waitsByHand } from './RunSettings';
 import { WithStatus, cohortName, cohortScope, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 import { CONFIG_REPO } from '../model/names';
@@ -114,8 +114,9 @@ function Index(p: ReadyProps) {
                 <td>
                   <span class={`chip ${a.state === 'open' ? 'asg' : ''}`}>{ASSIGNMENT_WORD[a.state]}</span>
                   {a.state === 'late_window' ? <><br /><span class="footnote">late work to {fmtDay(a.grading_cutoff_datetime, tz, year)}</span></> : null}
+                  {waitsByHand(a) ? <><br /><ManualWaiting a={a} /></> : null}
                 </td>
-                <td class="num">{nextDate(a, tz, year)}{a.state === 'declared' && !a.handout ? <div class="actions" style="margin-top:6px"><HandOutNow p={p} a={a} small /></div> : null}</td>
+                <td class="num">{nextDate(a, tz, year)}{waitsByHand(a) ? <div class="actions" style="margin-top:6px"><HandOutNow p={p} a={a} small /></div> : null}</td>
                 <td class="num">{asgSummary(a, tz, year).split('; ').pop()}</td>
                 <td class="num">{isGroup(a) ? <>{a.teams} formed{free !== null ? <><br /><span class="footnote">{free} without a team</span></> : null}</> : <span class="footnote">—</span>}</td>
                 <td class="num">{a.marks.total ? `${a.marks.filled} / ${a.marks.total}` : <span class="footnote">No marks yet</span>}</td>
@@ -290,7 +291,7 @@ function Overview(p: TabProps) {
         <section class="panel section">
           <div class="section-head"><h2>What you can do, by state</h2><span class="meta">Preview never changes anything students see</span></div>
           <ul class="state-actions">
-            {row(cur === 0 ? 'now' : 'past', 'Declared', handedOut ? `Handed out ${fmtWhen(a.handout, tz, year)} to ${a.units} ${group ? 'teams' : 'students'}.` : 'Hands out at its time, or now.',
+            {row(cur === 0 ? 'now' : 'past', 'Declared', handedOut ? `Handed out ${fmtWhen(a.handout, tz, year)} to ${a.units} ${group ? 'teams' : 'students'}.` : a.handout ? 'Hands out at its time, or now.' : 'Hands out when you press Hand out now.',
               handedOut ? null : <div class="sa-op"><span class="opname">Hand out now</span><HandOutNow p={p} a={a} small /></div>)}
             {group ? row(cur === 1 ? 'now' : 'past', 'Teams forming', 'Students form teams on the assignment’s page in the student console; you can assign the rest.', <div class="sa-op"><a class="btn small quiet" href={tabHref(a.slug, 'teams')}>Open teams</a></div>) : null}
             {row(cur === 2 ? 'now' : cur > 2 ? 'past' : 'later', 'Open',

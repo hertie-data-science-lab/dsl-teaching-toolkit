@@ -498,6 +498,8 @@ describe('Hand out now beside a saved entry handed out by hand', () => {
     const gh = github(), f = files({ [`${COHORT_ORG}/semester-config/schedule.yml`]: MANUAL });
     await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'assignment-3', loaded: loaded(waiting) })} />);
     expect(handOutNow()).toBe(1);
+    // Its schedule row is tagged too.
+    expect(q('li[data-entry="assignment-3"]').textContent).toContain('Manual hand-out: not handed out yet');
     // A draft that leaves the manual choice is not what schedule.yml says: no button.
     await click(root!.querySelectorAll('input[name="e-ho"]')[0]);
     expect(handOutNow()).toBe(0);

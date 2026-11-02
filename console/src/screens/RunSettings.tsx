@@ -55,11 +55,19 @@ export function sheetName(p: Pick<ReadyProps, 'files' | 'cohort'>, key: string):
 }
 
 /** The assignment as Hand out now names it, wherever it is offered. */
-export function handoutRef(p: Pick<ReadyProps, 'files' | 'cohort'>, a: Assignment, group: boolean, tz: string, year: number): AsgRef {
+export function handoutRef(p: Pick<ReadyProps, 'files' | 'cohort'>, a: Pick<Assignment, 'slug' | 'title' | 'number' | 'template' | 'units' | 'handout'>, group: boolean, tz: string, year: number): AsgRef {
   return { slug: a.slug, title: assignmentTitle(a), template: a.template, units: a.units, group, when: a.handout ? `Scheduled ${fmtDay(a.handout, tz, year)}` : 'Hand out by hand', name: sheetName(p, a.slug) };
 }
 
-/** Hand out now (its Preview and verb) for an assignment not yet handed out. */
+/** Whether an assignment set to hand out by hand is still waiting for Hand out now. */
+export const waitsByHand = (a: Pick<Assignment, 'state' | 'handout'>) => a.state === 'declared' && !a.handout;
+
+/** The tag on an assignment set to hand out by hand and not handed out yet (Schedule, Assignments). */
+export function ManualWaiting({ a }: { a: Pick<Assignment, 'state' | 'handout'> }) {
+  return waitsByHand(a) ? <span class="chip amber">Manual hand-out: not handed out yet</span> : null;
+}
+
+/** Hand out now for an assignment not yet handed out: one button, its panel the confirmation. */
 export function HandOutNow({ p, a, small }: { p: ReadyProps; a: Assignment; small?: boolean }) {
   const tz = tzOf(p.status), year = yearOf(p.now, tz);
   return <OpButtons def={handout(cohortScope(p), handoutRef(p, a, a.teams !== null && a.teams !== undefined, tz, year))} label="Hand out now" small={small} />;
@@ -80,11 +88,9 @@ export function waitingHandOut(a: Assignment | undefined, saved: Draft | null, d
  */
 export function draftHandout(p: ReadyProps, d: AssignmentDraft): OpDef {
   const cfg = gradingConfig(p, d.template);
-  const number = typeof d.number === 'number' ? d.number : null;
-  return handout(cohortScope(p), {
-    slug: d.id, title: assignmentTitle({ slug: d.id, title: String(cfg.title ?? ''), number }), template: d.template,
-    units: 0, group: cfg.type === 'group', when: 'Hand out by hand', name: sheetName(p, d.id),
-  });
+  const tz = tzOf(p.status), year = yearOf(p.now, tz);
+  const a = { slug: d.id, title: String(cfg.title ?? ''), number: typeof d.number === 'number' ? d.number : null, template: d.template, units: 0, handout: null };
+  return handout(cohortScope(p), handoutRef(p, a, cfg.type === 'group', tz, year));
 }
 
 /**

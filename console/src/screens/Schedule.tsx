@@ -29,7 +29,7 @@ import type { CohortProps, ReadyProps } from './types';
 import { ASSIGNMENTS_FILE, CONFIG_REPO } from '../model/names';
 import { SOURCE_WORD, assignmentsFile, lateWord, resolve, usableBlock, validAssignments, validSchedule, type Layers } from '../model/cascade';
 import { parse } from 'yaml';
-import { HandOutDialog, HandOutNow, RunRows, SolutionNote, draftHandout, waitingHandOut, applicableKeys, assignmentsAfterSchedule, cutoffOf, forcedVisibility, runErrors, semesterLayers } from './RunSettings';
+import { HandOutDialog, HandOutNow, ManualWaiting, RunRows, waitsByHand, SolutionNote, draftHandout, waitingHandOut, applicableKeys, assignmentsAfterSchedule, cutoffOf, forcedVisibility, runErrors, semesterLayers } from './RunSettings';
 import type { Values } from '../tiers/types';
 import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO, DEFAULT_TIMEZONE } from '../model/policy';
 import { CONTENT_KINDS, EMPTY_ENTRY_KIND, MATERIALS_FILE, inferKind, landingSection, readDeclared } from '../model/materialsRules';
@@ -466,6 +466,8 @@ function View(p: ReadyProps) {
   const sched = useMemo(() => (sf && !sf.error ? parseSchedule(sf.text) : null), [sf?.text]);
   const rows = scheduleRows(status, sched, now, tz);
   const assignmentOf = new Map((status.assignments ?? []).map((a) => [a.slug, a]));
+  // An assignment set to hand out by hand that has not gone out: its rows carry the tag.
+  const waiting = (slug: string) => { const a = assignmentOf.get(slug); return a && waitsByHand(a) ? a : undefined; };
   const key = p.entry;
   // A row's sheet key: its id, qualified for an `events:` entry whose id a release also has.
   const rowKey = (r: { block: Block; entry: string }) => (r.entry === 'semester' || r.entry === 'archive' ? r.entry : entryKey(doc, r.block, r.entry));
@@ -604,6 +606,7 @@ function View(p: ReadyProps) {
     ) : m ? <><ReleaseMarks m={m} entry={r.entry} />{m.late ? <a class="textlink" href={`#release-${r.entry}`}>Details</a> : null}</>
       : rel && !ref ? <><span class="st-note">{NOTHING_TO_RELEASE}</span><a class="textlink" href={`#schedule-${rk}`}>Edit</a></>
       : ref && rel?.state === 'planned' ? <><span class="st-chip">planned</span><OpOpen def={releaseEarly(scope, ref)} cls="btn small" label="Release early" /></>
+      : r.block === 'assignments' && waiting(r.entry) ? <ManualWaiting a={waiting(r.entry)!} />
       : <span class="st-chip">{r.state}</span>;
     items.push(
       <li class={`trow ${TYPE_CLASS[r.type] ?? 'evt'}${markClass(m)}${key === rk ? ' current' : ''}${gone ? ' removed' : ''}${r.show ? '' : ' off-site'}`} data-entry={r.entry}>
