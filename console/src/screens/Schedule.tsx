@@ -29,7 +29,7 @@ import type { CohortProps, ReadyProps } from './types';
 import { ASSIGNMENTS_FILE, CONFIG_REPO } from '../model/names';
 import { SOURCE_WORD, assignmentsFile, lateWord, resolve, usableBlock, validAssignments, validSchedule, type Layers } from '../model/cascade';
 import { parse } from 'yaml';
-import { HandOutDialog, HandOutNow, ManualWaiting, RunRows, waitsByHand, SolutionNote, draftHandout, waitingHandOut, applicableKeys, assignmentsAfterSchedule, cutoffOf, forcedVisibility, runErrors, semesterLayers } from './RunSettings';
+import { HandOutDialog, HandOutNow, ManualWaiting, RunRows, waitsByHand, SolutionNote, draftHandout, waitingHandOut, applicableKeys, assignmentsAfterSchedule, canHoldSolution, cutoffOf, forcedVisibility, isExternal, NO_LATE_WINDOW, runErrors, semesterLayers, windowDays } from './RunSettings';
 import type { Values } from '../tiers/types';
 import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO, DEFAULT_TIMEZONE } from '../model/policy';
 import { CONTENT_KINDS, EMPTY_ENTRY_KIND, MATERIALS_FILE, inferKind, landingSection, readDeclared } from '../model/materialsRules';
@@ -313,18 +313,22 @@ function AssignmentForm({ p, d, set, errors, templates, isNew, run, tiered, wait
         <F id="e-due" k="dueDate" d={d} set={set} error={errors.due} t={{ tier: 'ask', label: 'Due', widget: 'date' }} />
         <F id="e-duet" k="dueTime" d={d} set={set} t={{ tier: 'ask', label: 'At', widget: 'time' }} />
       </div>
-      <div class="field">
-        <span class="label">Late cutoff <span class="default">computed</span></span>
-        <div class="readonly">{typeof late.value === 'number' && late.value > 0 ? `Due + ${lateWord(late.value, resolve('late_penalty_per_day', mine).value)}` : 'No late work: the cutoff is the due date'}, {SOURCE_WORD[late.source]}. The title is the assignment template’s.</div>
-      </div>
+      {isExternal(cfg) ? (
+        <div class="field"><span class="label">Late cutoff</span><div class="readonly">{NO_LATE_WINDOW} The title is the assignment template’s.</div></div>
+      ) : (
+        <div class="field">
+          <span class="label">Late cutoff <span class="default">computed</span></span>
+          <div class="readonly">{typeof late.value === 'number' && late.value > 0 ? `Due + ${lateWord(late.value, resolve('late_penalty_per_day', mine).value)}` : 'No late work: the cutoff is the due date'}, {SOURCE_WORD[late.source]}. The title is the assignment template’s.</div>
+        </div>
+      )}
       {isNew ? (
         <div class="field">
           <span class="label">How this semester runs it</span>
           <p class="why">Each has the default shown; change one only for this assignment. Written to {ASSIGNMENTS_FILE} with the entry.</p>
-          <RunRows id="e-run" keys={applicableKeys(cfg, cfg.type === 'group')} layers={layers} draft={run.values} setDraft={run.set} errors={run.errors} defaultsHref="#assignments" forced={forcedVisibility(cfg)} />
+          <RunRows id="e-run" keys={applicableKeys(cfg, cfg.type === 'group')} layers={layers} draft={run.values} setDraft={run.set} errors={run.errors} forced={forcedVisibility(cfg)} />
         </div>
       ) : d.id ? <p class="footnote">Teams, late work, who sees each repo and the repo name: <a class="textlink" href={`#assignment-${d.id}/overview`}>on the assignment’s page</a>.</p> : null}
-      {vis !== 'private' ? (
+      {isExternal(cfg) ? null : !canHoldSolution(cfg, vis) ? (
         <div class="field"><span class="label">Solution shown</span><div class="readonly">Not available: student repos are not private, so the solution cannot be pushed automatically.</div></div>
       ) : d.manual ? (
         <div class="field"><span class="label">Solution shown</span><div class="readonly">Needs a hand out time; the solution must follow it.</div></div>
@@ -512,7 +516,8 @@ function View(p: ReadyProps) {
     const af = assignmentsFile(p.files, p.cohort.org);
     const isNew = !d.id;
     const layers = semesterLayers(p, af && af !== 'loading' ? af.doc : {}, isNew ? '' : d.id);
-    const days = resolve('late_window_days', isNew ? { ...layers, assignment: usableBlock(newRunFor(d)) } : layers).value;
+    const cfg = d.template ? gradingConfig(p, d.template) : {};
+    const days = windowDays(cfg, resolve('late_window_days', isNew ? { ...layers, assignment: usableBlock(newRunFor(d)) } : layers).value);
     return cutoffOf(d.dueDate, d.dueTime, typeof days === 'number' ? days : 0);
   };
   const errorsOf = (d: Draft) => draftErrors(prefill(d), { templateUsers, doc, kind: kindFor(d) }, cutoffFor(d));

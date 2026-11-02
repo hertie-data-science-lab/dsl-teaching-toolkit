@@ -125,28 +125,32 @@ export function defaultsLine(layers: Layers): string {
   return `Defaults: ${[...late, ...(size ? [`teams of ${String(size)}`] : [])].join(', ')}.`;
 }
 
-/** The semester's defaults as one line below the Assignments list; Change opens the form as a modal. */
+/** The Assignments page's Semester defaults button: it opens the semester's defaults, their summary as the lede, in a modal. */
 export function SemesterDefaults({ p }: { p: ReadyProps }) {
   const f = assignmentsFile(p.files, p.cohort.org);
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<Values | null>(null);
   const opener = useRef<HTMLButtonElement>(null);
-  if (f === 'loading') return <Loading what={`Reading ${ASSIGNMENTS_FILE}`} />;
-  if (f === null) return <CheckLine cls="bad">Could not read {ASSIGNMENTS_FILE}.</CheckLine>;
   const close = () => {
     setOpen(false);
     opener.current?.focus();
   };
   return (
     <>
-      <p class="defaults-line" id="semester-defaults">
-        {defaultsLine(semesterLayers(p, f.doc))}{' '}
-        <button class="textlink" type="button" ref={opener} aria-haspopup="dialog" onClick={() => setOpen(true)}>Change</button>
-      </p>
-      {open ? <Modal title="Defaults for this semester’s assignments" onClose={close}><DefaultsForm p={p} f={f} draft={draft} setDraft={setDraft} /></Modal> : null}
+      <button class="btn quiet" type="button" ref={opener} aria-haspopup="dialog" onClick={() => setOpen(true)}>Semester defaults</button>
+      {open ? (
+        <Modal title="Defaults for this semester’s assignments" onClose={close}>
+          {f === 'loading' ? <Loading what={`Reading ${ASSIGNMENTS_FILE}`} />
+            : f === null ? <CheckLine cls="bad">Could not read {ASSIGNMENTS_FILE}.</CheckLine>
+            : <><p class="lede">{defaultsLine(semesterLayers(p, f.doc))}</p><DefaultsForm p={p} f={f} draft={draft} setDraft={setDraft} /></>}
+        </Modal>
+      ) : null}
     </>
   );
 }
+
+/** What a semester default may set: every run setting but the external link, which differs per assignment. */
+const DEFAULT_KEYS = RUN_KEYS.filter((k) => k !== 'submit_url');
 
 function DefaultsForm({ p, f, draft, setDraft }: { p: ReadyProps; f: YamlFile; draft: Values | null; setDraft: (v: Values | null) => void }) {
   // Absent, the form edits the stub, and the edit link goes to GitHub's new-file page.
@@ -155,7 +159,7 @@ function DefaultsForm({ p, f, draft, setDraft }: { p: ReadyProps; f: YamlFile; d
   const [save, runSave, setSave] = useSave(env);
   const layers = semesterLayers(p, f.doc);
   const before = toValues(rawBlock(f.doc, ['defaults']));
-  const tiers = runTiers((k) => resolve(k, layers, 'course'), RUN_KEYS, before);
+  const tiers = runTiers((k) => resolve(k, layers, 'course'), DEFAULT_KEYS, before);
   const cur = draft ?? before;
   const errors = fieldErrors(null, tiers, cur);
   const dirty = draft !== null && !deepEqual(compact(draft), compact(before));
@@ -163,7 +167,7 @@ function DefaultsForm({ p, f, draft, setDraft }: { p: ReadyProps; f: YamlFile; d
     if (f.error) return;
     if (Object.keys(errors).length) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
     const y = new YamlText(f.text);
-    writeBlock(y, ['defaults'], before, cur, RUN_KEYS);
+    writeBlock(y, ['defaults'], before, cur, DEFAULT_KEYS);
     if (!validAssignments(y.toJS() ?? {})) return setSave({ kind: 'bad', text: invalidText(ASSIGNMENTS_FILE, validAssignments) });
     if (await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path: ASSIGNMENTS_FILE }, y.text, f.sha, { message: 'assignments: edit the semester’s defaults, from the DSL Teaching Console', statusRepo: [p.cohort.org, CONFIG_REPO] })) setDraft(null);
   };
@@ -183,17 +187,34 @@ function DefaultsForm({ p, f, draft, setDraft }: { p: ReadyProps; f: YamlFile; d
 
 // ------------------------------------------------------------------ one assignment's run settings
 
-/** Which run settings apply to an assignment of this template: teams only for a team assignment, the link only for one submitted elsewhere. */
+/** Whether the template's work is handed in outside GitHub (`submit_via: external`): no repo, so no late window and no visibility. */
+export const isExternal = (cfg: Record<string, unknown>) => cfg.submit_via === 'external';
+
+/** `course.can_hold_solution`: a unit's own private repo, or the shared drop box (always private). */
+export function canHoldSolution(cfg: Record<string, unknown>, visibility: unknown): boolean {
+  const via = cfg.submit_via ?? 'assignment_repo';
+  return via === 'shared_dropbox_repo' || (via === 'assignment_repo' && visibility === 'private');
+}
+
+/** The late window that sets the cutoff: none for external work, whatever the cascade says. */
+export const windowDays = (cfg: Record<string, unknown>, days: unknown) => (isExternal(cfg) ? 0 : days);
+
+/**
+ * Which run settings apply to an assignment of this template: teams only for a team assignment;
+ * for external work the link, the late penalty without a window, and no visibility (no repo).
+ */
 export function applicableKeys(cfg: Record<string, unknown>, group: boolean): RunKey[] {
-  return RUN_KEYS.filter((k) => (k === 'team_formation' || k === 'max_team_size' ? group : k === 'submit_url' ? cfg.submit_via === 'external' : true));
+  const ext = isExternal(cfg);
+  return RUN_KEYS.filter((k) => (k === 'team_formation' || k === 'max_team_size' ? group : k === 'submit_url' ? ext : k === 'late_window_days' || k === 'visibility' ? !ext : true));
 }
 
 /** Why the template's shape fixes the visibility, or null. */
 export function forcedVisibility(cfg: Record<string, unknown>): string | null {
-  if (cfg.submit_via === 'shared_dropbox_repo') return 'Private: a shared drop box is always private.';
-  if (cfg.submit_via === 'external') return 'Private: the repo holds the brief only.';
-  return null;
+  return cfg.submit_via === 'shared_dropbox_repo' ? 'Private: a shared drop box is always private.' : null;
 }
+
+/** The late line for external work, wherever its cutoff would be. */
+export const NO_LATE_WINDOW = 'No late window: handed in outside GitHub, so the cutoff is the due date.';
 
 export interface RunRowsProps {
   id: string;
@@ -203,13 +224,16 @@ export interface RunRowsProps {
   draft: Values;
   setDraft: (v: Values) => void;
   errors: Record<string, string>;
-  defaultsHref: string;
   teamsHref?: string;
   forced?: string | null;
 }
 
-/** Each run setting as its effective value and source, with "Change for this assignment" opening the field. */
-export function RunRows({ id, keys, layers, draft, setDraft, errors, defaultsHref, teamsHref, forced }: RunRowsProps) {
+/**
+ * Each run setting as its effective value and source, with "Change for this assignment" opening
+ * the field. The external link has no default: its row is the field. The semester's defaults
+ * are changed from the Assignments page, never per row.
+ */
+export function RunRows({ id, keys, layers, draft, setDraft, errors, teamsHref, forced }: RunRowsProps) {
   const [opened, setOpened] = useState<string[]>([]);
   const mine: Layers = { ...layers, assignment: usableBlock(draft) };
   const has = (k: string) => draft[k] !== undefined && draft[k] !== '' && draft[k] !== null;
@@ -221,31 +245,37 @@ export function RunRows({ id, keys, layers, draft, setDraft, errors, defaultsHre
   return (
     <>
       {rows.map((r) => {
+        const field = (k: RunKey) => (
+          <Field id={`${id}-${k}`} k={k} t={runTier(k, resolve(k, layers, below('assignment')), { override: true }) as FieldTier} value={draft[k]} values={draft} error={errors[k]}
+            set={(key, v) => setDraft({ ...draft, [key]: v })} />
+        );
+        if (r.name === 'submit_url') return <div class="run-row">{field('submit_url')}</div>;
         const open = opened.includes(r.name) || r.keys.some(has);
         const late = r.name === 'late';
+        // A penalty with no window: work handed in outside GitHub, its days late entered by the marker.
+        const marked = r.name === 'late_penalty_per_day';
         const eff = resolve(r.keys[0], mine);
         const effText = late ? `${lateWord(eff.value, resolve('late_penalty_per_day', mine).value)}, ${SOURCE_WORD[eff.source]}` : effectiveWord(r.keys[0], eff);
-        const label = late ? 'Late work' : RUN_LABEL[r.keys[0]];
+        const label = late ? 'Late work' : marked ? 'Late penalty' : RUN_LABEL[r.keys[0]];
         if (r.name === 'visibility' && forced)
           return <div class="field"><span class="label">{label}</span><div class="readonly">{forced}</div></div>;
         return (
           <div class="field run-row">
             <span class="label">{label}</span>
             <div class="eff" data-key={r.name}>{effText}</div>
+            {marked ? <p class="why">Applied to the days late you enter on the Marks tab. No late window: work is handed in outside GitHub.</p> : null}
             {open ? (
               <div class="cond">
-                {r.keys.map((k) => (
-                  <Field id={`${id}-${k}`} k={k} t={runTier(k, resolve(k, layers, below('assignment')), { override: true }) as FieldTier} value={draft[k]} values={draft} error={errors[k]}
-                    set={(key, v) => setDraft({ ...draft, [key]: v })} />
-                ))}
+                {r.keys.map(field)}
                 <button class="textlink" type="button" onClick={() => { setOpened(opened.filter((x) => x !== r.name)); setDraft(Object.fromEntries(Object.entries(draft).filter(([k]) => !r.keys.includes(k as RunKey)))); }}>Use the default</button>
               </div>
             ) : null}
-            <p class="run-links">
-              {!open ? <button class="textlink" type="button" onClick={() => setOpened([...opened, r.name])}>Change for this assignment</button> : null}
-              <a class="textlink" href={defaultsHref}>Change the default</a>
-              {r.name === 'team_formation' && teamsHref ? <a class="textlink" href={teamsHref}>Open Teams</a> : null}
-            </p>
+            {!open || (r.name === 'team_formation' && teamsHref) ? (
+              <p class="run-links">
+                {!open ? <button class="textlink" type="button" onClick={() => setOpened([...opened, r.name])}>Change for this assignment</button> : null}
+                {r.name === 'team_formation' && teamsHref ? <a class="textlink" href={teamsHref}>Open Teams</a> : null}
+              </p>
+            ) : null}
             {r.name === 'visibility' ? <p class="why">Applies to copies handed out after this change; existing copies keep theirs.</p> : null}
           </div>
         );
@@ -308,8 +338,8 @@ export function SolutionNote() {
 const T = (label: string, widget: FieldTier['widget'], extra: Partial<FieldTier> = {}): FieldTier => ({ tier: 'default', label, widget, ...extra });
 
 /** Timings as the Overview form edits them: hand out, due, the computed late cutoff, solution shown. */
-function Timings({ d, set, errors, cutoff, days, lateOk, solutionOff, tz, year, handOut }: {
-  d: AssignmentDraft; set: (patch: Partial<AssignmentDraft>) => void; errors: Record<string, string>; cutoff: string | null; days: unknown; lateOk: boolean; solutionOff: string | null; tz: string; year: number; handOut?: preact.ComponentChildren;
+function Timings({ d, set, errors, cutoff, days, lateOk, external, solutionOff, tz, year, handOut }: {
+  d: AssignmentDraft; set: (patch: Partial<AssignmentDraft>) => void; errors: Record<string, string>; cutoff: string | null; days: unknown; lateOk: boolean; external: boolean; solutionOff: string | null; tz: string; year: number; handOut?: preact.ComponentChildren;
 }) {
   const F = (k: keyof AssignmentDraft & string, t: FieldTier, error?: string) => (
     <Field id={`ov-${k}`} k={k} t={t} value={d[k]} values={d as unknown as Values} error={error} set={(key, v) => set({ [key]: v ?? (t.widget === 'checkbox' ? false : '') } as Partial<AssignmentDraft>)} />
@@ -326,12 +356,16 @@ function Timings({ d, set, errors, cutoff, days, lateOk, solutionOff, tz, year, 
       </div>
       {!d.manual ? <div class="cond"><div class="row-2">{F('handoutDate', T('Hand out on', 'date'), errors.handout)}{F('handoutTime', T('At', 'time'))}</div></div> : null}
       <div class="row-2">{F('dueDate', T('Due', 'date', { tier: 'ask' }), errors.due)}{F('dueTime', T('At', 'time', { tier: 'ask' }))}</div>
-      <div class="field">
-        <span class="label">Late cutoff <span class="default">computed</span></span>
-        <div class="readonly">{!lateOk ? 'No late work: the cutoff is the due date.' : cutoff ? `${fmtWhen(cutoff, tz, year)} (due + ${String(days)} day${days === 1 ? '' : 's'})` : 'Set the due date first.'}</div>
-        <p class="why">What is on main at the late cutoff is what is marked. Change it with the late window below.</p>
-      </div>
-      {solutionOff ? (
+      {external ? (
+        <div class="field"><span class="label">Late cutoff</span><div class="readonly">{NO_LATE_WINDOW}</div></div>
+      ) : (
+        <div class="field">
+          <span class="label">Late cutoff <span class="default">computed</span></span>
+          <div class="readonly">{!lateOk ? 'No late work: the cutoff is the due date.' : cutoff ? `${fmtWhen(cutoff, tz, year)} (due + ${String(days)} day${days === 1 ? '' : 's'})` : 'Set the due date first.'}</div>
+          <p class="why">What is on main at the late cutoff is what is marked. Change it with the late window below.</p>
+        </div>
+      )}
+      {external ? null : solutionOff ? (
         <div class="field"><span class="label">Solution shown</span><div class="readonly">{solutionOff}</div></div>
       ) : (
         <>
@@ -374,9 +408,10 @@ export function AssignmentRun({ p, a, group }: { p: ReadyProps; a: Assignment; g
   const r = run ?? beforeRun;
   const layers = semesterLayers(p, doc, a.slug);
   const mine: Layers = { ...layers, assignment: usableBlock(r) };
-  const days = resolve('late_window_days', mine).value;
+  const external = isExternal(cfg);
+  const days = windowDays(cfg, resolve('late_window_days', mine).value);
   const vis = forcedVisibility(cfg) ? 'private' : resolve('visibility', mine).value;
-  const solutionOff = vis !== 'private' ? 'Not available: student repos are not private, so the solution cannot be pushed automatically.' : d.manual ? 'Needs a hand out time; the solution must follow it.' : null;
+  const solutionOff = !canHoldSolution(cfg, vis) ? 'Not available: student repos are not private, so the solution cannot be pushed automatically.' : d.manual ? 'Needs a hand out time; the solution must follow it.' : null;
   const tErr = draftErrors(d, undefined, cutoffOf(d.dueDate, d.dueTime, typeof days === 'number' ? days : 0));
   const rErr = { ...runErrors(keys, layers, r), ...repoNameError(r.semester_dest_repo) };
   const dirtyT = timing !== null && !deepEqual(timing, baseT);
@@ -417,20 +452,22 @@ export function AssignmentRun({ p, a, group }: { p: ReadyProps; a: Assignment; g
       <div class="form">
         <div class="form-section">
           <h3>Dates</h3>
-          <Timings d={d} set={change} errors={tErr} cutoff={cutoffOf(d.dueDate, d.dueTime, days)} days={days} lateOk={typeof days === 'number' && days > 0} solutionOff={solutionOff} tz={tz} year={year}
+          <Timings d={d} set={change} errors={tErr} cutoff={cutoffOf(d.dueDate, d.dueTime, days)} days={days} lateOk={typeof days === 'number' && days > 0} external={external} solutionOff={solutionOff} tz={tz} year={year}
             handOut={waitingHandOut(a, baseT, d) ? <div class="actions"><HandOutNow p={p} a={a} small /></div> : null} />
         </div>
         <div class="form-section">
           <h3>Run settings</h3>
           {af === null ? <CheckLine cls="bad">Could not read {ASSIGNMENTS_FILE}; the defaults below may not be this semester’s.</CheckLine> : af.error ? <CheckLine cls="bad">{ASSIGNMENTS_FILE} does not parse ({af.error}); fix it with Edit the file directly.</CheckLine> : null}
           <RunRows id="ov" keys={keys} layers={layers} draft={r} setDraft={(v) => { setRun(v); setSave({ kind: 'idle' }); }} errors={rErr}
-            defaultsHref="#assignments" teamsHref={group ? `#assignment-${a.slug}/teams` : undefined} forced={forcedVisibility(cfg)} />
+            teamsHref={group ? `#assignment-${a.slug}/teams` : undefined} forced={forcedVisibility(cfg)} />
           <details class="fold" open={!!repoName}>
             <summary>Advanced <span class={`cnt${repoName ? ' changed' : ''}`}>({repoName ? '1 changed' : 'none changed'})</span></summary>
             <div class="fold-body">
               <Field id="ov-repo" k="semester_dest_repo" values={r} value={r.semester_dest_repo} set={(k, v) => { setRun({ ...r, [k]: v }); setSave({ kind: 'idle' }); }}
                 error={rErr.semester_dest_repo}
-                t={{ tier: 'advanced', label: 'Repo name in this semester', placeholder: a.slug, defaultLabel: `default: ${a.slug}`, reason: 'What this semester’s repos are called. Change it before the first hand out.' }} />
+                t={external
+                  ? { tier: 'advanced', label: 'Name in this semester (sheet and site page)', placeholder: a.slug, defaultLabel: `default: ${a.slug}`, reason: 'What this semester’s mark sheet, site page and gradebook entries are called. Change it before the first hand out.' }
+                  : { tier: 'advanced', label: 'Repo name in this semester', placeholder: a.slug, defaultLabel: `default: ${a.slug}`, reason: 'What this semester’s repos are called. Change it before the first hand out.' }} />
             </div>
           </details>
         </div>

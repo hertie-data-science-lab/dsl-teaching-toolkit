@@ -308,12 +308,41 @@ describe('the marking screen', () => {
     expect(q('thead').textContent).not.toContain('Tests');
   });
 
-  it('hides the submission columns for work handed in outside GitHub, and says so', async () => {
+  it('hides the submission columns for work handed in outside GitHub, and asks the days late instead', async () => {
     const external = SHEET.replace(/ {4}info:\n( {6}.*\n)+/g, '');
-    await marks(files(external));
-    expect(root!.textContent).toContain('Submitted outside GitHub: no dates, no late penalty.');
+    await marks(files(external, `submit_via: external\n${CONFIG}`));
+    expect(root!.textContent).toContain('Submitted outside GitHub: no dates. Enter the days late; the late penalty is worked out from them.');
     expect(q('thead').textContent).not.toContain('From the submission');
+    expect(q('thead').textContent).toContain('Days late');
     expect(button('From the submission ▾')).toBeUndefined();
+    // Blank is 0: on time, nothing off.
+    expect(q<HTMLInputElement>('input[aria-label="Days late for ada-l"]').placeholder).toBe('0');
+  });
+
+  it('takes the late penalty off the days late a marker enters, and writes them to the unit', async () => {
+    const external = SHEET.replace(/ {4}info:\n( {6}.*\n)+/g, '');
+    const gh = github();
+    await marks(files(external, `submit_via: external\n${CONFIG}`), gh);
+    const ada = () => [...root!.querySelectorAll('tr.unit-row')].find((r) => r.textContent?.includes('ada-l'))!;
+    expect(ada().querySelector('td.pen')!.textContent).toBe('');
+    await type('input[aria-label="Days late for ada-l"]', '2');
+    expect(ada().querySelector('td.pen .val')!.textContent).toBe('−20%');
+    expect(q('input[aria-label="Apply the late penalty for ada-l"]')).not.toBeNull();
+    await click(button('Save marks'));
+    await settle(() => puts(gh).length > 0);
+    expect(body(puts(gh)[0])).toMatch(/ {2}ada-l:\n(?: {4}.*\n)*? {4}days_late: 2\n/);
+  });
+
+  it('holds a mark whose days late are not a whole number', async () => {
+    const external = SHEET.replace(/ {4}info:\n( {6}.*\n)+/g, '');
+    await marks(files(external, `submit_via: external\n${CONFIG}`));
+    await type('input[aria-label="Days late for ada-l"]', 'two');
+    expect(root!.textContent).toContain('days late that are not a whole number');
+  });
+
+  it('asks no days late of work handed in on GitHub', async () => {
+    await marks();
+    expect(root!.querySelector('input[aria-label="Days late for ada-l"]')).toBeNull();
   });
 
   it('folds the submission columns to one chip per row', async () => {
