@@ -120,6 +120,16 @@ def test_a_row_naming_a_faculty_team_is_a_fault():
     assert "FACULTY team" in fault.what
 
 
+def test_a_team_named_solution_is_refused_and_claims_nobody():
+    # A shared drop box keeps the model answer in `solution/`, beside each team's folder.
+    text = "assignment,team,github_handle\na1,Solution,ada\na1,wizards,ada\n"
+    found: list = []
+    assert teams.parse(text, found) == {"a1": {"wizards": ["ada"]}}
+    (fault,) = found
+    assert fault.lineno == 2 and fault.field == "team" and "reserved" in fault.what
+    assert "ada" not in fault.what
+
+
 def test_a_faculty_team_row_does_not_take_the_students_real_team():
     # Ignored, so it cannot be the "first claim" that drops their project-team row.
     text = "assignment,team,github_handle\ncourse,admin,ada\ncourse,wizards,ada\n"

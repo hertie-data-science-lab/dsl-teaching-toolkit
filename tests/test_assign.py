@@ -3674,6 +3674,44 @@ def test_the_drop_box_solution_touches_no_units_folder(tmp_path, monkeypatch):
     }
 
 
+def test_a_drop_box_solution_is_never_pushed_over_a_unit_named_solution(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks, capsys
+):
+    # The unit's folder IS `solution/`: pushing would write into their work. Counted as a
+    # failed push, so no record is written, and the log names the slug and nobody else.
+    monkeypatch.setattr(assign, "fetch_solution", _boom)
+    monkeypatch.setattr(assign, "push_solution", _boom)
+    monkeypatch.setattr(assign, "record_solution_released", _boom)
+    code, _ = _shared(
+        monkeypatch,
+        tmp_path,
+        rows=("sol@uni.edu,Sol,enrolled,Solution,42,dsl-abc",),
+        solution=True,
+    )
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "assignment-1" in err and "`solution/`" in err and "Sol" not in err
+
+
+def test_a_drop_box_solution_pressed_before_the_late_cutoff_is_refused(
+    tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
+):
+    # One repo every student reads: the answer must not reach it while work still arrives.
+    from tests.plans import citing
+
+    future = datetime(2099, 1, 1, tzinfo=timezone.utc)
+    monkeypatch.setattr(
+        "dsl_course.schedule.load",
+        lambda org: citing("assignment-1-f2026", due=future),
+    )
+    monkeypatch.setattr(assign, "fetch_solution", _boom)
+    monkeypatch.setattr(assign, "record_solution_released", _boom)
+    summary, changed = _shared(monkeypatch, tmp_path, solution=True)
+    assert summary == 1 and not changed
+    assert summary.reasons[0]["code"] == assign.SOLUTION_BEFORE_CUTOFF_CODE
+    assert drop_box["generated"] == [] and sheet_writes == []
+
+
 def test_a_shared_dry_run_writes_nothing_at_all(
     tmp_path, monkeypatch, drop_box, sheet_writes, gradebooks
 ):

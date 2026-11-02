@@ -1365,6 +1365,7 @@ SOLUTION_PREVIEW = records.path("solution_preview")
 PREVIEW_FIRST = "PREVIEW_FIRST"
 NOT_SCHEDULED = "NOT_SCHEDULED"
 NO_TEAMS_FOR_SOLUTION = "NO_TEAMS_FOR_SOLUTION"
+SOLUTION_BEFORE_CUTOFF_CODE = "SOLUTION_BEFORE_CUTOFF"
 
 
 def _actor() -> str:
@@ -1588,7 +1589,15 @@ def _release_shared(
         results["failed-drop-box"] = 1
         return results, changed, [], False
     solution_unavailable = False
-    if solution:
+    if solution and any(unit.casefold() == SOLUTION_DIR for unit, _ in sheet_units):
+        # A unit named `solution` owns the folder the answer would land in: pushing would
+        # write into their work. Named by the slug only - this log is public.
+        log_err(
+            f"  ! {slug}: a unit's folder in the drop box is named `{SOLUTION_DIR}/`, so "
+            "the solution is not pushed"
+        )
+        results["failed-solution"] = 1
+    elif solution:
         with tempfile.TemporaryDirectory() as soldir:
             sol_dir = fetch_solution(course_org, template, Path(soldir) / "t")
             if sol_dir is None:
@@ -1979,6 +1988,27 @@ def provision_all(
         log(f"  ({skipped} not-yet-onboarded row(s) skipped)")
     if auditing:
         log(f"  ({auditing} auditor row(s) skipped - read-only, no assignment repos)")
+
+    # The drop box is ONE repo every student reads, so a solution pushed into it before the
+    # late cutoff hands the answer to anyone still working. The scheduler holds a scheduled
+    # one until then (`schedule.solution_cutoff`); a press of `solution_datetime: now` is
+    # refused here, before anything is created or recorded.
+    if solution and gspec.submit_shared:
+        cutoff = schedule.grading_cutoff_datetime(
+            sched, key, submit_via=gspec.submit_via
+        )
+        if cutoff is not None and datetime.now(timezone.utc) < cutoff:
+            text = (
+                f"Not handed out: {slug}'s solution would go into the drop box every "
+                f"student reads before its late cutoff ({cutoff:%Y-%m-%d %H:%M}). Hand "
+                f"out without the solution, and release it after the cutoff."
+            )
+            log_err(text)
+            return Summary(
+                text,
+                reasons=[{"code": SOLUTION_BEFORE_CUTOFF_CODE, "text": text}],
+                code=1,
+            ), False
 
     # Stage 1, and the one thing BOTH repo-making shapes need: the semester's own frozen
     # copy of the course template. The drop box is generated from it and so is every unit
