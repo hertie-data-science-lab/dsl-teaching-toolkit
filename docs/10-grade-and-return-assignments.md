@@ -179,7 +179,8 @@ repo's, so it would accuse the entire semester of one student's late push), and
    freezes anything. Its `assignment` box names the schedule key only when two entries
    share the template.
 4. **Type the marks.** Anything you write is kept forever - including keys you invent, and
-   rows for students who have left. Delete a key and it stays deleted.
+   rows for students who have left. A blank row for a student who moved to another team
+   is dropped. Delete a key and it stays deleted.
 5. **The late cutoff** (the due date plus the late window) freezes the
    pin and the sheet. Its header then reads `FROZEN`.
    A late rule changed after the due date (the console's Overview says so before you save)

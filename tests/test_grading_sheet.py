@@ -279,6 +279,56 @@ def test_a_member_who_joins_a_team_later_gets_a_blank_row():
     assert members["chen-w"] == dict.fromkeys(PERSON_KEYS)
 
 
+# ben-k moves from team-alpha to team-beta through the Join form after the sheet exists.
+MOVED = [("team-alpha", ["ada-l"]), ("team-beta", ["chen-w", "ben-k"])]
+
+
+def test_a_member_who_moves_team_with_a_blank_entry_leaves_the_old_team():
+    spec = group()
+    merged = merge_sheet(_marked(spec, TEAMS), spec, MOVED, {})["teams"]
+    assert list(merged["team-alpha"]["members"]) == ["ada-l"]
+    assert list(merged["team-beta"]["members"]) == ["chen-w", "ben-k"]
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [None, {}, {"adjustment_individual": None, "feedback_individual": "  "}],
+)
+def test_a_departed_entry_with_nothing_typed_in_it_is_dropped(entry):
+    spec = group()
+    sheet = new_sheet(spec, TEAMS)
+    sheet["teams"]["team-alpha"]["members"]["ben-k"] = entry
+    merged = merge_sheet(sheet, spec, MOVED, {})
+    assert "ben-k" not in merged["teams"]["team-alpha"]["members"]
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("adjustment_individual", "-2"),
+        ("feedback_individual", "Good work on the loss.\n"),
+        (NOTES_KEY, "talked to them"),
+    ],
+)
+def test_a_member_who_moves_team_keeps_anything_the_grader_typed(field, value):
+    # Their marks are not ours to delete, so they stay in both teams - and the duplicate
+    # hold that follows is right: a grader must decide which entry counts.
+    spec = group()
+    sheet = new_sheet(spec, TEAMS)
+    sheet["teams"]["team-alpha"]["members"]["ben-k"][field] = value
+    merged = merge_sheet(sheet, spec, MOVED, {})
+    assert merged["teams"]["team-alpha"]["members"]["ben-k"][field] == value
+    assert sheet_hold_reasons(spec, merged) == {"ben-k": "duplicate"}
+
+
+def test_a_blank_team_move_raises_no_duplicate_fault():
+    spec = group(questions=QUESTIONS)
+    merged = merge_sheet(_marked(spec, TEAMS), spec, MOVED, {})
+    text = dump_sheet(merged, spec, "OPEN")
+    assert sheet_faults("a3", text, spec) == []
+    assert sheet_hold_reasons(spec, parse_sheet(text)) == {}
+
+
 def test_a_unit_seen_for_the_first_time_arrives_with_the_facts_already_derived():
     # A late onboarder, or the very first write of a sheet during the late window. Created
     # blank and filled "next tick", their row would sit empty for fifteen minutes with
