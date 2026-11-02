@@ -3,7 +3,6 @@
 import { Fragment, type ComponentChildren } from 'preact';
 import { useMemo, useState } from 'preact/hooks';
 import { useEnv } from '../env';
-import { invalidText, useSave, type SaveOptions, type SaveState, type Target } from '../edit/save';
 import { YamlText, deepEqual } from '../edit/yamlText';
 import { Invalid, SchemaForm, effective, fieldErrors } from '../forms/Form';
 import { KIND_LABEL, ago, fmtDay, fmtShort, opLabel, templateName } from '../model/format';
@@ -14,7 +13,7 @@ import {
 import { checkNow, derive, publishWebsite } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
 import { FormatPicker } from '../forms/FormatPicker';
-import { courseBlock, institutionLayer, lateWord, resolve, validGrading, valueWord, type Layers } from '../model/cascade';
+import { courseBlock, institutionLayer, lateWord, resolve, valueWord, type Layers } from '../model/cascade';
 import { POLICY } from '../model/policy';
 import { fromConfig, handsOutStarter, questionFileError, questionRows, questionsValue, settingsTiers, toConfig, type QuestionRow } from '../tiers/grading';
 import { pick, type Values } from '../tiers/types';
@@ -34,7 +33,7 @@ import { detailsOf, newestScope, websiteUrl } from './CourseEdit';
 import type { CourseProps } from './types';
 import { CONFIG_REPO, COURSE_REPO, STATUS_PATH } from '../model/names';
 import { useSetAside } from './SetAside';
-import { REFRESH_HINT, courseScope, tzOf, yearOf } from './common';
+import { REFRESH_HINT, courseScope, questionFiles, tzOf, yearOf, useGradingConfigEdit } from './common';
 import { weekWords } from '../model/week';
 
 /** The status that carries the course block: the course's own, else a semester's. */
@@ -631,36 +630,13 @@ export function Questions({ rows, set, files }: { rows: QuestionRow[]; set: (r: 
   );
 }
 
-/**
- * Writes a template's grading_config.yml on its `solution` branch: `edit` changes the file's text,
- * the schema checks the result, then `run` (a `useSave` save) commits it. Template settings and
- * the Marks tab's points per question both save through here.
- */
-export async function saveGradingConfig(
-  run: (t: Target, text: string | null, sha: string | null, opts: SaveOptions) => Promise<boolean>,
-  report: (s: SaveState) => void,
-  org: string,
-  repo: string,
-  file: { text: string; sha: string },
-  edit: (y: YamlText) => void,
-  message: string,
-): Promise<boolean> {
-  const y = new YamlText(file.text);
-  edit(y);
-  if (!validGrading(y.toJS())) {
-    report({ kind: 'bad', text: invalidText('grading_config.yml', validGrading) });
-    return false;
-  }
-  return run({ owner: org, repo, path: 'grading_config.yml', branch: 'solution' }, y.text, file.sha, { message: `${message}, from the DSL Teaching Console`, statusRepo: [org, COURSE_REPO] });
-}
-
 export function TemplateScreen(p: CourseProps) {
   const { course, entry } = p;
-  const env = useEnv();
   // The entry is the template's repo name.
   const repo = entry ?? '';
   const v = useCourseView(p);
-  const file = p.files.file(course.org, repo, 'grading_config.yml', 'solution');
+  // Settings and questions save together, in one commit through `commit`.
+  const { file, save, setSave, commit } = useGradingConfigEdit(p, repo);
   const gradingExists = file.kind !== 'absent';
   const tree = p.files.tree(course.org, repo);
   const problems = v.problems.filter((x) => x.fix?.entry === repo);
@@ -668,7 +644,6 @@ export function TemplateScreen(p: CourseProps) {
   const tplReady = templateReadinessIn(v.course, repo, v.tiered);
   const [values, setValues] = useState<Values | null>(null);
   const [qdraft, setQdraft] = useState<QuestionRow[] | null>(null);
-  const [save, runSave, setSave] = useSave(env);
   let cfg: Record<string, unknown> = {};
   let parseError = '';
   if (file.kind === 'ready') {
@@ -692,7 +667,7 @@ export function TemplateScreen(p: CourseProps) {
   const title = String(cfg.title ?? '');
   const heading = templateName(title);
   const scope = courseScope(p);
-  const files = tree.kind === 'ready' ? tree.paths.filter((x) => !x.dir && !x.path.startsWith('.')).map((x) => x.path) : [];
+  const files = useMemo(() => questionFiles(tree), [tree]);
   const newest = course.cohorts[0];
   const nl = newest ? p.cohortStates[newest.org] : undefined;
   // The newest semester's key for this template, when its schedule has it.
@@ -706,7 +681,7 @@ export function TemplateScreen(p: CourseProps) {
       for (const k of Object.keys({ ...was, ...now })) if (!deepEqual(was[k], now[k])) y.assign([k], now[k]);
       if (qdraft !== null && !deepEqual(qdraft, baseQ)) y.assign(['questions'], questionsValue(qdraft, cfg.questions));
     };
-    if (await saveGradingConfig(runSave, setSave, course.org, repo, file, edit, 'template: edit the settings')) {
+    if (await commit(edit, 'template: edit the settings')) {
       setValues(null);
       setQdraft(null);
     }

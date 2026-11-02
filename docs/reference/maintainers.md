@@ -103,6 +103,8 @@ Things whose *literal spelling* is depended on from outside Python:
   (`_told_units`: their `distributed.csv` email row matches their marks digest, and no mark
   of theirs on that sheet is held). The console compares it with the sheet to count who a
   further Return marks would email, so it keeps the sheet's own dump (`_sheet_yaml`).
+  Which keys count is the console's `TOLD_KEYS` (`model/marks.ts`), the sheet-side
+  mirror of `grades._GRADER_KEYS`: change one, change the other.
 - **An assignment page's URL** - `schedule.AssignmentPage` (`<nn>-<semester name>`, or the
   name alone for an entry with no number; the number from `schedule.assignment_pages`) names the site's `_assignments/` file, and
   `AssignmentPage.url` is every link to the assignment's teams: its page on the semester site

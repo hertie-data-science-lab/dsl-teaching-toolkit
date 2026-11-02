@@ -10,7 +10,7 @@ import { parse } from 'yaml';
 import { EnvCtx, type Env } from '../src/env';
 import { GitHubClient, decodeBase64 } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
-import { holdReasons, lateRule, needsHandDecision, rowsChanged, spread, studentMarks, type HoldUnit } from '../src/model/marks';
+import { holdReasons, lateRule, needsHandDecision, rowsChanged, spread, studentMarks, toldPath, type HoldUnit } from '../src/model/marks';
 import { marksDraft, saveMarksDraft } from '../src/model/prefs';
 import { StatusStore, type Loaded } from '../src/model/status';
 import type { Assignment, Status } from '../src/model/types';
@@ -238,6 +238,15 @@ const puts = (gh: FakeGitHub) => gh.seen.filter((s: Seen) => s.method === 'PUT')
 const body = (s: Seen) => decodeBase64((s.body as { content: string }).content);
 const props = (f: StaticFiles, over: Partial<CohortProps> = {}): CohortProps => ({ course, cohort, loaded: ready, files: f, now: NOW, entry: 'assignment-2', tab: 'marks', ...over });
 const marks = (f = files(), gh = github()) => mount(envOf(gh, f), <AssignmentScreen {...props(f)} />);
+/** Puts a file into a file set the tests already built. */
+const seed = (f: StaticFiles, path: string, text: string) => {
+  (f as unknown as { map: Record<string, string> }).map[path] = text;
+  return f;
+};
+/** The engine's record of what each unit of the sheet was last told. */
+const TOLD_PATH = `${COHORT_ORG}/semester-config/${toldPath('assignment-2')}`;
+/** The Return marks button. */
+const big = () => q<HTMLButtonElement>('.return-block button.btn.big');
 /** The same assignment handed in outside GitHub, as status.json states it: no late window. */
 const external: Assignment = { ...solo, submit_shape: 'external', settings: { ...solo.settings!, late_window_days: { value: null, source: 'institution' } } };
 const EXT_SHEET = () => SHEET.replace(/ {4}info:\n( {6}.*\n)+/g, '');
@@ -534,7 +543,6 @@ describe('Return marks from the marking screen', () => {
 });
 
 describe('who Return marks would email (the engine’s last-told record)', () => {
-  const TOLD_PATH = `${COHORT_ORG}/semester-config/.system/returned/assignment-2.yml`;
   /** A unit's block as the sheet carries it. */
   const block = (sheet: string, key: string) => {
     const at = sheet.indexOf(`  ${key}:\n`);
@@ -542,12 +550,7 @@ describe('who Return marks would email (the engine’s last-told record)', () =>
     return sheet.slice(at, next < 0 ? undefined : at + 1 + next + 1);
   };
   const record = (container: string, ...blocks: string[]) => `# Last told by Return marks; written by the toolkit.\n${container}:\n${blocks.join('')}`;
-  const withTold = (told: string | null, sheet = SHEET) => {
-    const f = files(sheet);
-    if (told !== null) (f as unknown as { map: Record<string, string> }).map[TOLD_PATH] = told;
-    return f;
-  };
-  const big = () => q<HTMLButtonElement>('.return-block button.btn.big');
+  const withTold = (told: string | null, sheet = SHEET) => (told === null ? files(sheet) : seed(files(sheet), TOLD_PATH, told));
   const why = () => root!.querySelector('.return-why')?.textContent ?? null;
   const ADA = block(SHEET, 'ada-l');
 
@@ -577,6 +580,11 @@ describe('who Return marks would email (the engine’s last-told record)', () =>
 
   it('does not count a change only in private notes or in the submission facts', async () => {
     await marks(withTold(record('submissions', ADA.replace('Check the plot.', 'Older note.').replace('2026-09-27T20:00', '2026-09-26T09:00').replace('8/10', '7/10'))));
+    expect(big().textContent).toBe('Return marks to 0 students');
+  });
+
+  it('does not count a key the grader invented', async () => {
+    await marks(withTold(record('submissions', `${ADA}    comment: An old remark.\n`)));
     expect(big().textContent).toBe('Return marks to 0 students');
   });
 
@@ -862,13 +870,7 @@ describe('teams and people on the grid', () => {
   });
 
   it('counts teams for Return marks, a changed member adjustment counting the team', async () => {
-    const TOLD = `${COHORT_ORG}/semester-config/.system/returned/assignment-2.yml`;
-    const told = (sheet: string) => {
-      const f = teamFiles();
-      (f as unknown as { map: Record<string, string> }).map[TOLD] = `# Last told.\n${sheet}`;
-      return f;
-    };
-    const big = () => q<HTMLButtonElement>('.return-block button.btn.big');
+    const told = (sheet: string) => seed(teamFiles(), TOLD_PATH, `# Last told.\n${sheet}`);
     await mountTeams(told(TEAMS));
     expect([big().textContent, big().disabled]).toEqual(['Return marks to 0 teams', true]);
     render(null, root!);
@@ -878,9 +880,7 @@ describe('teams and people on the grid', () => {
   });
 
   it('names an individual student, handle under the name, and keeps Adjustment behind its chip', async () => {
-    const f = files();
-    (f as unknown as { map: Record<string, string> }).map[ROSTER] = roster;
-    await marks(f);
+    await marks(seed(files(), ROSTER, roster));
     const ada = [...root!.querySelectorAll('tr.unit-row')][1];
     expect(ada.querySelector('td')!.textContent).toContain('Ben Okaforben-k');
     expect(root!.querySelector('input[aria-label="Adjustment for ben-k"]')).toBeNull();

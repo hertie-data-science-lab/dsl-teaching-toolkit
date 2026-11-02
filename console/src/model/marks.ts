@@ -6,6 +6,7 @@
 
 import { YamlText, blank, deepEqual, isObj, obj, type Path } from '../edit/yamlText';
 import { plural } from './format';
+import { RETURNED_DIR } from './names';
 import { penaltyRate } from './policy';
 
 export const NOTES_KEY = 'notes_not_shared_with_students';
@@ -97,37 +98,52 @@ export function num(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** How many units (teams or students) differ between two texts of one sheet, added or removed ones included: what someone else changed under a save. */
-export function rowsChanged(before: string, after: string): number {
-  const units = (text: string) => {
-    const y = new YamlText(text);
-    return y.errors.length ? {} : sheetUnits(y.toJS());
-  };
-  const a = units(before), b = units(after);
-  return [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((k) => !deepEqual(a[k], b[k])).length;
-}
-
-/** Where the engine records what each unit was last told (`.system/returned/<sheet name>.yml` in the config repo). */
-export const toldPath = (name: string) => `.system/returned/${name}.yml`;
-
-/**
- * The units of a "last told" record (the sheet's own container and dialect): each unit's block as
- * it stood when its people were last emailed. Absent or unreadable: nobody has been told yet.
- */
-export function readTold(text: string | null): Record<string, unknown> {
+/** A sheet's (or a "last told" record's) units by key; none when the text is absent or does not parse. */
+export function unitsOf(text: string | null): Record<string, unknown> {
   if (text === null) return {};
   const y = new YamlText(text);
   return y.errors.length ? {} : sheetUnits(y.toJS());
 }
 
-/** A unit's block as students are told it: private notes and the submission facts gone (bar `info.days_late`), blank cells as absent. */
-function toldPart(v: unknown, key = ''): unknown {
+/** How many units (teams or students) differ between two texts of one sheet, added or removed ones included: what someone else changed under a save. */
+export function rowsChanged(before: string, after: string): number {
+  const a = unitsOf(before), b = unitsOf(after);
+  return [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((k) => !deepEqual(a[k], b[k])).length;
+}
+
+/** Where the engine records what each unit was last told (`.system/returned/<sheet name>.yml` in the config repo). */
+export const toldPath = (name: string) => `${RETURNED_DIR}/${name}.yml`;
+
+/**
+ * The units of a "last told" record (the sheet's own container and dialect): each unit's block as
+ * it stood when its people were last emailed. Absent or unreadable: nobody has been told yet.
+ */
+export const readTold = unitsOf;
+
+/**
+ * The sheet keys whose change Return marks emails about: what feeds `grades._GRADER_KEYS` (final
+ * grade, score, feedback, feedback per question, team feedback) - the scores, feedback, adjustment
+ * and late penalty, the days late (the grader's beside the marks, the toolkit's under `info:`), and
+ * `members:` read with the same list. Anything else on a block (private notes, the submission
+ * facts, a key a grader invented) never reaches a student, so changing it emails nobody. Keep in
+ * step with grades._GRADER_KEYS.
+ */
+export const TOLD_KEYS = [
+  'score_group', 'score_individual', 'feedback_group', 'feedback_individual', QUESTION_FEEDBACK_KEY,
+  'adjustment_individual', LATE_PENALTY_KEY, DAYS_LATE_KEY, 'info', 'members',
+] as const;
+
+/** Which keys of a mapping `toldPart` keeps: a list, every one (inside a kept value), or each handle of a `members:`. */
+type Keep = readonly string[] | 'all' | 'members';
+
+/** A unit's block as students are told it: the `TOLD_KEYS` only (of `info:`, its `days_late`; of each member, the same list), blank cells as absent. */
+function toldPart(v: unknown, keep: Keep = TOLD_KEYS): unknown {
   if (!isObj(v)) return v;
   const out: Record<string, unknown> = {};
   for (const [k, x] of Object.entries(v)) {
-    if (k === NOTES_KEY || blank(x)) continue;
-    if (key === 'info' && k !== 'days_late') continue;
-    const part = toldPart(x, k);
+    if ((typeof keep !== 'string' && !keep.includes(k)) || blank(x)) continue;
+    const next: Keep = keep === 'members' ? TOLD_KEYS : keep !== TOLD_KEYS ? 'all' : k === 'info' ? ['days_late'] : k === 'members' ? 'members' : 'all';
+    const part = toldPart(x, next);
     if (!(isObj(part) && !Object.keys(part).length)) out[k] = part;
   }
   return out;
@@ -169,6 +185,9 @@ export function questionsFromRows(rows: ([string, string] | [string, string, str
     }),
   );
 }
+
+/** A unit marked with one score rather than per question: a scalar, not blank (it stays the total until per-question marks replace it). */
+export const singleScore = (u: Unit) => !isObj(u.score) && !blank(u.score);
 
 /** What a score cell adds up to; null when there is nothing to add or a value is not a number. */
 export function scoreTotal(score: unknown, questions?: Record<string, unknown> | null): number | null {

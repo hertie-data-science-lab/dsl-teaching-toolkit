@@ -4245,7 +4245,8 @@ def _with_told(
 
 # The view keys a GRADER writes. The rest - `max_points`, `submitted`, `days_late` - are
 # the toolkit's facts about the assignment and fill in on their own, so a book carrying
-# only those has changed without there being anything for a student to read.
+# only those has changed without there being anything for a student to read. The console's
+# `TOLD_KEYS` (console/src/model/marks.ts) is the sheet keys behind these: keep in step.
 _GRADER_KEYS = (
     "final_grade",
     "score",
