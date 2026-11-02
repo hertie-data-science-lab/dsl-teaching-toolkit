@@ -139,7 +139,9 @@ Between the due date and the cutoff the sheet refreshes off committer dates alon
 
 An assignment whose `grading_config.yml` says `submit_via: external` has no `info:` block at all:
 no repo is created for it, so there is no commit to time and nothing waits on the cutoff: mark it
-and run **Distribute grades** whenever you like.
+and run **Distribute grades** whenever you like. Its cutoff is the due date. You enter each unit's
+`days_late` beside its marks (the Marks tab's **Days late**; blank is 0), and the late penalty,
+`late_penalty` waive and override work on it as on any other shape.
 
 For `submit_via: shared_dropbox_repo` the timing is per FOLDER of the one drop box: `submitted` is the
 last commit at or before the cutoff that touches `<handle>/` (or `<team>/`) **and was made

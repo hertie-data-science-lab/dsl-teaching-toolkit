@@ -183,7 +183,7 @@ Each assignment's **dates**, keyed by a key you choose. `course_source_repo` nam
 | `show_on_site` | no | `true` | `false` and the site says nothing about this assignment. It still hands out, snapshots and grades |
 | `tbc` | no | `false` | both rows marked **(TBC)**. **Display only** |
 
-**The late cutoff is computed, never written:** `due_datetime` plus the assignment's `late_window_days` (below). `late_window_days: 0` means no late work.
+**The late cutoff is computed, never written:** `due_datetime` plus the assignment's `late_window_days` (below). `late_window_days: 0` means no late work. `submit_via: external` has no late window: its cutoff is the due date, and the marker enters days late ([10](10-grade-and-return-assignments.md)).
 
 ```yaml
 assignments:
@@ -200,7 +200,7 @@ Beside `schedule.yml` in `semester-config`. Every key is optional; nearest wins:
 
 | Key | Where | Meaning |
 |---|---|---|
-| `late_window_days` | both | days after the due date that work is still accepted; `0` = none |
+| `late_window_days` | both | days after the due date that work is still accepted; `0` = none; not read for `submit_via: external` |
 | `late_penalty_per_day` | both | `10%` or `0.1`, of the earned mark, per day started; `0` = no deduction |
 | `team_formation` | both | `self_select` (the Join team form) or `assigned` (you write teams.csv) |
 | `max_team_size` | both | group assignments only |
