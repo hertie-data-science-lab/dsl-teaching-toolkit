@@ -442,6 +442,52 @@ describe('Save on an assignment entry handed out by hand', () => {
   });
 });
 
+describe('Save on the Overview form, switched to hand out by hand', () => {
+  const asked = () => root!.querySelector('.modal')?.textContent ?? '';
+  async function switchToManual(gh: FakeGitHub, f: StaticFiles) {
+    const env = envOf(gh, f);
+    await mount(env, <AssignmentScreen {...props(f, { entry: 'assignment-2', tab: 'overview' })} />);
+    await click(root!.querySelectorAll('input[name="ov-ho"]')[1]);
+    await click(button('Save'));
+    return env;
+  }
+
+  it('asks the Schedule’s question, and Cancel writes nothing', async () => {
+    const gh = github(), f = files();
+    await switchToManual(gh, f);
+    expect(asked()).toContain('Hand out now?');
+    expect(asked()).toContain('You chose to hand out by hand. Until it is handed out students see no brief and there is no mark sheet.');
+    await click(button('Cancel'));
+    await settle(() => false);
+    expect(gh.seen.filter((x) => x.method === 'PUT')).toEqual([]);
+  });
+
+  it('Save and hand out now drops the date, then opens Hand out on this entry', async () => {
+    const gh = github(), f = files();
+    const env = await switchToManual(gh, f);
+    await click(button('Save and hand out now'));
+    await settle(() => env.ops.current.value !== null);
+    expect(parse(body(puts(gh, 'schedule.yml')[0])).assignments['assignment-2']).not.toHaveProperty('handout_datetime');
+    const cur = env.ops.current.value!;
+    expect([cur.def.op, cur.def.key, cur.def.args, cur.phase]).toEqual(['assignment.handout_now', 'assignment-2', { course_source_repo: 'assignment-2-f2026' }, 'ready']);
+    expect(gh.seen.filter((x) => x.method === 'POST')).toEqual([]);
+  });
+
+  it('Save, hand out later only saves; an edit that keeps a date asks nothing', async () => {
+    const gh = github(), f = files();
+    const env = await switchToManual(gh, f);
+    await click(button('Save, hand out later'));
+    await settle(() => puts(gh, 'schedule.yml').length > 0 && !root!.textContent!.includes('Checking'));
+    expect(env.ops.current.value).toBeNull();
+    render(null, root!);
+    const gh2 = github(), f2 = files();
+    await mount(envOf(gh2, f2), <AssignmentScreen {...props(f2, { entry: 'assignment-2', tab: 'overview' })} />);
+    await type('#ov-dueDate', '2026-09-29');
+    await click(button('Save'));
+    expect(root!.querySelector('.modal')).toBeNull();
+  });
+});
+
 describe('Hand out now beside a saved entry handed out by hand', () => {
   const MANUAL = `${SCHEDULE}  assignment-3:\n    course_source_repo: assignment-4-f2026\n    due_datetime: 2026-10-10T23:59\n`;
   const waiting: Assignment = { ...solo, slug: 'assignment-3', title: 'Quiz', template: 'assignment-4-f2026', state: 'declared', handout: null, teams: null };

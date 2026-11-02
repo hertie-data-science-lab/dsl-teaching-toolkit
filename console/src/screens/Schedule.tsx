@@ -6,20 +6,19 @@ import { compileAll, matchRules } from '../edit/glob';
 import { invalidText, saveSteps, type SaveState, type Step } from '../edit/save';
 import { YamlText, deepEqual } from '../edit/yamlText';
 import { Field, Invalid } from '../forms/Form';
-import { KIND_LABEL, RELEASE_WORD, assignmentTitle, TYPE_CLASS, TYPE_LABEL, siteRowWord, fmtDay, fmtTime, fmtWhen, heldSentence, kindIdent, markWord, releaseIdent, repoWords, sortKey } from '../model/format';
+import { KIND_LABEL, RELEASE_WORD, TYPE_CLASS, TYPE_LABEL, siteRowWord, fmtDay, fmtTime, fmtWhen, heldSentence, kindIdent, markWord, releaseIdent, repoWords, sortKey } from '../model/format';
 import { needsANumber, parseSchedule, scheduleRows, type Block, type Row } from '../model/schedule';
 import {
   assignmentKey, blankDeploy, blankDraft, defaultDeployAt, entryKey, keyEntry, deployAt, draftErrors, freshId, needsNumber, newlyManual, nextNumber, readDraft, sessionBlock, unnumberedId, withNumber, writeDraft,
   type AssignmentDraft, type KindOf, type ArchiveDraft, type DeployDraft, type Draft, type EventDraft, type ReleaseDraft, type SemesterDraft,
 } from '../model/scheduleEdit';
 import type { Assignment, Release } from '../model/types';
-import { archive, handout, keepFuture, releaseAdhoc, releaseAgain, releaseEarly, releaseNow, scheduledPreview } from '../ops/defs';
+import { archive, keepFuture, releaseAdhoc, releaseAgain, releaseEarly, releaseNow, scheduledPreview } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
 import type { FieldTier } from '../tiers/types';
 import { TIMEZONES } from '../tiers/course';
 import { DueSubmit, EditFile, Md, ProblemCards, ReleaseMarks, ghUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
-import { MODAL_TEXT_ID, Modal } from '../ui/Modal';
 import { SaveLine, UnsavedBar, lineOf } from '../ui/edit';
 import { releaseMarks, releaseProblems, templateReadinessIn, tier, type ReleaseMark, type Tiered } from '../model/readiness';
 import { Check } from '../ui/icons';
@@ -30,7 +29,7 @@ import type { CohortProps, ReadyProps } from './types';
 import { ASSIGNMENTS_FILE, CONFIG_REPO } from '../model/names';
 import { SOURCE_WORD, assignmentsFile, lateWord, resolve, usableBlock, validAssignments, validSchedule, type Layers } from '../model/cascade';
 import { parse } from 'yaml';
-import { HandOutNow, RunRows, SolutionNote, sheetName, waitingHandOut, applicableKeys, assignmentsAfterSchedule, cutoffOf, forcedVisibility, runErrors, semesterLayers } from './RunSettings';
+import { HandOutDialog, HandOutNow, RunRows, SolutionNote, draftHandout, waitingHandOut, applicableKeys, assignmentsAfterSchedule, cutoffOf, forcedVisibility, runErrors, semesterLayers } from './RunSettings';
 import type { Values } from '../tiers/types';
 import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO, DEFAULT_TIMEZONE } from '../model/policy';
 import { CONTENT_KINDS, EMPTY_ENTRY_KIND, MATERIALS_FILE, inferKind, landingSection, readDeclared } from '../model/materialsRules';
@@ -523,17 +522,6 @@ function View(p: ReadyProps) {
   };
   const allErrors = dirtyKeys.some((k) => Object.keys(errorsOf(drafts[k])).length || (k === 'new' && Object.keys(newRunErrors(drafts[k])).length));
 
-  // The hand out op for a just-saved entry, from its draft: status.json lags the save, and the
-  // op needs only the template (the engine reads the entry from schedule.yml as committed).
-  const draftHandout = (d: AssignmentDraft) => {
-    const cfg = gradingConfig(p, d.template);
-    const number = typeof d.number === 'number' ? d.number : null;
-    return handout(scope, {
-      slug: d.id, title: assignmentTitle({ slug: d.id, title: String(cfg.title ?? ''), number }), template: d.template,
-      units: 0, group: cfg.type === 'group', when: 'Hand out by hand', name: sheetName(p, d.id),
-    });
-  };
-
   /** Save every change; `handOutKey`, an entry newly handed out by hand, then opens Hand out on it once the save lands. */
   const doSave = async (handOutKey?: string) => {
     if (!sf || sf.error) return;
@@ -580,7 +568,7 @@ function View(p: ReadyProps) {
       if (newId && typeof location !== 'undefined') location.hash = `#schedule-${newId}`;
     });
     // The op's own panel, as Hand out now opens it: its preview and confirmation; it never runs by itself.
-    if (saved && ho?.kind === 'assignments') env?.ops.open(draftHandout(ho));
+    if (saved && ho?.kind === 'assignments') env?.ops.open(draftHandout(p, ho));
   };
 
   // An assignment newly handed out by hand asks first: until Hand out now, nothing reaches students.
@@ -754,17 +742,7 @@ function View(p: ReadyProps) {
       </div>
       {!key ? <SaveLine state={save} /> : null}
       <UnsavedBar count={dirty} busy={save.kind === 'busy'} onDiscard={() => { setDrafts({}); setRemoved({}); setSave({ kind: 'idle' }); }} onSave={requestSave} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml', exists: schedExists }} />
-      {askManual ? (
-        <Modal small title="Hand out now?" onClose={() => setAskManual(false)}>
-          <p id={MODAL_TEXT_ID}>You chose to hand out by hand. Until it is handed out students see no brief and there is no mark sheet.</p>
-          <div class="actions">
-            {/* Several at once: each is handed out from its own page. */}
-            {manualKeys.length === 1 ? <button class="btn" type="button" onClick={() => { setAskManual(false); void doSave(manualKeys[0]); }}>Save and hand out now</button> : null}
-            <button class={manualKeys.length === 1 ? 'btn outline' : 'btn'} type="button" onClick={() => { setAskManual(false); void doSave(); }}>Save, hand out later</button>
-            <button class="btn quiet" type="button" onClick={() => setAskManual(false)}>Cancel</button>
-          </div>
-        </Modal>
-      ) : null}
+      {askManual ? <HandOutDialog one={manualKeys.length === 1} onSave={(h) => void doSave(h ? manualKeys[0] : undefined)} onClose={() => setAskManual(false)} /> : null}
     </>
   );
 }
