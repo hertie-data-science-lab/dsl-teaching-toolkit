@@ -250,8 +250,10 @@ export function cellValue(raw: string): string | number | null {
  * pop-up alike: "<rate> of the total per day started, up to <window> days"; null with no late penalty.
  * `windowDays` is the late window (`late_window_days`), which caps the days counted.
  */
-export function lateRule(rate: number | null, windowDays?: unknown): string | null {
+export function lateRule(rate: number | null, windowDays?: unknown, entered = false): string | null {
   if (rate === null) return null;
+  // Handed in outside GitHub: no window, and the marker says how many days late.
+  if (entered) return `${percent(rate)}% of the total per day late, on the days late you enter`;
   const days = num(windowDays);
   return `${percent(rate)}% of the total per day started${days ? `, up to ${plural(days, 'day')}` : ''}`;
 }

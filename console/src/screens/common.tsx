@@ -31,11 +31,18 @@ const configText = (p: ReadyProps, template: string): string | null => {
   return f.kind === 'ready' ? f.text : null;
 };
 
+/** The legacy `submit_via` spellings the engine still reads (course.LEGACY_SUBMIT_VIA). */
+const LEGACY_SUBMIT_VIA: Record<string, string> = { github: 'assignment_repo' };
+
+/** grading_config.yml parsed, `submit_via` in its current spelling (course.canonical_submit_via), so every shape test reads one word. */
 function parseConfig(text: string | null): Record<string, unknown> {
   if (text === null) return {};
   try {
     const d = parse(text);
-    return d && typeof d === 'object' ? (d as Record<string, unknown>) : {};
+    if (!d || typeof d !== 'object') return {};
+    const cfg = d as Record<string, unknown>;
+    const via = typeof cfg.submit_via === 'string' ? cfg.submit_via.trim().toLowerCase() : null;
+    return via === null ? cfg : { ...cfg, submit_via: LEGACY_SUBMIT_VIA[via] ?? via };
   } catch {
     return {};
   }

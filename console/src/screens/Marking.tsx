@@ -39,7 +39,7 @@ function penaltyOf(a: Assignment): number | null {
 }
 
 /** The assignment's late rule in the one wording the lede, the Penalty `?` and Return marks share. */
-const lateRuleOf = (a: Assignment) => lateRule(penaltyOf(a), a.settings?.late_window_days?.value);
+const lateRuleOf = (a: Assignment) => lateRule(penaltyOf(a), a.settings?.late_window_days?.value, a.submit_shape === 'external');
 
 /** What Return marks says while late work can still arrive: the deadline, the late cutoff and the late rule; null once the cutoff has passed, and always for work handed in outside GitHub (no late window). */
 export function lateReturn(a: Assignment, now: number, tz: string, year: number): LateReturn | null {
@@ -176,7 +176,11 @@ const holdUnit = (u: Unit, score: unknown, latePenalty: unknown, adj: (pr: Perso
   score, daysLate: days, byMarker, latePenalty, people: u.people.map((pr) => ({ handle: pr.handle, adjustment: adj(pr) })),
 });
 
-/** Handed in outside GitHub: the template says so, or no unit has an `info:` (the shape before the template is read). */
+/**
+ * Handed in outside GitHub: the template says so, or no unit has an `info:`. The engine reads
+ * only the template (`grades.unit_days_late`); the `info:` test is the console's stand-in until
+ * the template has loaded.
+ */
 const handedInElsewhere = (cfg: Record<string, unknown>, units: Unit[]) => isExternal(cfg) || (units.length > 0 && units.every((u) => u.info === null));
 
 /** Whether a score cell holds no mark at all (grades.is_blank: a map of blanks too). */

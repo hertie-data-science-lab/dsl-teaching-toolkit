@@ -149,9 +149,6 @@ export function SemesterDefaults({ p }: { p: ReadyProps }) {
   );
 }
 
-/** What a semester default may set: every run setting but the external link, which differs per assignment. */
-const DEFAULT_KEYS = RUN_KEYS.filter((k) => k !== 'submit_url');
-
 function DefaultsForm({ p, f, draft, setDraft }: { p: ReadyProps; f: YamlFile; draft: Values | null; setDraft: (v: Values | null) => void }) {
   // Absent, the form edits the stub, and the edit link goes to GitHub's new-file page.
   const exists = p.files.file(p.cohort.org, CONFIG_REPO, ASSIGNMENTS_FILE).kind !== 'absent';
@@ -159,7 +156,9 @@ function DefaultsForm({ p, f, draft, setDraft }: { p: ReadyProps; f: YamlFile; d
   const [save, runSave, setSave] = useSave(env);
   const layers = semesterLayers(p, f.doc);
   const before = toValues(rawBlock(f.doc, ['defaults']));
-  const tiers = runTiers((k) => resolve(k, layers, 'course'), DEFAULT_KEYS, before);
+  const all = runTiers((k) => resolve(k, layers, 'course'), RUN_KEYS, before);
+  // One submission site for every assignment handed in outside GitHub; each may still set its own.
+  const tiers = { ...all, submit_url: { ...all.submit_url, label: 'Submission link (assignments handed in outside GitHub)' } };
   const cur = draft ?? before;
   const errors = fieldErrors(null, tiers, cur);
   const dirty = draft !== null && !deepEqual(compact(draft), compact(before));
@@ -167,7 +166,7 @@ function DefaultsForm({ p, f, draft, setDraft }: { p: ReadyProps; f: YamlFile; d
     if (f.error) return;
     if (Object.keys(errors).length) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
     const y = new YamlText(f.text);
-    writeBlock(y, ['defaults'], before, cur, DEFAULT_KEYS);
+    writeBlock(y, ['defaults'], before, cur, RUN_KEYS);
     if (!validAssignments(y.toJS() ?? {})) return setSave({ kind: 'bad', text: invalidText(ASSIGNMENTS_FILE, validAssignments) });
     if (await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path: ASSIGNMENTS_FILE }, y.text, f.sha, { message: 'assignments: edit the semester’s defaults, from the DSL Teaching Console', statusRepo: [p.cohort.org, CONFIG_REPO] })) setDraft(null);
   };

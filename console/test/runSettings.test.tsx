@@ -126,6 +126,15 @@ describe('the Overview form: schedule entry and assignments.yml block as one', (
     expect(out).not.toContain('Repo name in this semester');
   });
 
+  it('reads the legacy `submit_via: github` as a repo per student: the solution, visibility and late window all apply', () => {
+    const files = filesWith({ [`${COURSE_ORG}/assignment-2-f2026/grading_config.yml`]: 'type: individual\nsubmit_via: github\nquestions:\n  Q1: 10\n' });
+    const out = html(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'overview', files })} />);
+    expect(out).toContain('Show the solution');
+    expect(out).toContain('Who can see each student’s repo');
+    expect(out).toContain('(due + 5 days)');
+    expect(out).not.toContain('Not available: student repos are not private');
+  });
+
   it('offers the solution for a shared drop box, which is always private', () => {
     const files = filesWith({ [`${COURSE_ORG}/assignment-2-f2026/grading_config.yml`]: 'type: individual\nsubmit_via: shared_dropbox_repo\nquestions:\n  Q1: 10\n' });
     const out = html(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'overview', files })} />);
@@ -208,8 +217,9 @@ describe('the semester’s defaults', () => {
     expect(dialog.getAttribute('aria-modal')).toBe('true');
     expect(dialog.textContent).toContain('Defaults for this semester’s assignments');
     expect(dialog.textContent).toContain('Defaults: 5 days, 5%, teams of 4.');
-    // The external link differs per assignment: no semester default for it.
-    expect(dialog.querySelector('#sd-submit_url')).toBeNull();
+    // One submission site may serve every assignment handed in outside GitHub.
+    expect(dialog.querySelector('#sd-submit_url')).not.toBeNull();
+    expect(dialog.textContent).toContain('Submission link (assignments handed in outside GitHub)');
     expect(dialog.querySelector<HTMLInputElement>('#sd-late_window_days')!.value).toBe('5');
     expect(dialog.textContent).toContain('this course’s default: up to 4');
     expect(dialog.textContent).toContain('institution default: Students form their own');
