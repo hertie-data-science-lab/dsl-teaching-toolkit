@@ -9,7 +9,7 @@ import { Field, Invalid } from '../forms/Form';
 import { KIND_LABEL, RELEASE_WORD, TYPE_CLASS, TYPE_LABEL, siteRowWord, fmtDay, fmtTime, fmtWhen, heldSentence, kindIdent, markWord, releaseIdent, repoWords, sortKey } from '../model/format';
 import { needsANumber, parseSchedule, scheduleRows, type Block, type Row } from '../model/schedule';
 import {
-  assignmentKey, blankDeploy, blankDraft, defaultDeployAt, entryKey, keyEntry, deployAt, draftErrors, freshId, needsNumber, nextNumber, readDraft, sessionBlock, unnumberedId, withNumber, writeDraft,
+  assignmentKey, blankDeploy, blankDraft, defaultDeployAt, entryKey, keyEntry, deployAt, draftErrors, freshId, needsNumber, newlyManual, nextNumber, readDraft, sessionBlock, unnumberedId, withNumber, writeDraft,
   type AssignmentDraft, type KindOf, type ArchiveDraft, type DeployDraft, type Draft, type EventDraft, type ReleaseDraft, type SemesterDraft,
 } from '../model/scheduleEdit';
 import type { Assignment, Release } from '../model/types';
@@ -19,6 +19,7 @@ import type { FieldTier } from '../tiers/types';
 import { TIMEZONES } from '../tiers/course';
 import { DueSubmit, EditFile, Md, ProblemCards, ReleaseMarks, ghUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
+import { MODAL_TEXT_ID, Modal } from '../ui/Modal';
 import { SaveLine, UnsavedBar, lineOf } from '../ui/edit';
 import { releaseMarks, releaseProblems, templateReadinessIn, tier, type ReleaseMark, type Tiered } from '../model/readiness';
 import { Check } from '../ui/icons';
@@ -299,7 +300,7 @@ function AssignmentForm({ p, d, set, errors, templates, isNew, run, tiered }: { 
         <span class="label">Hand out</span>
         <div class="choices">
           <label class="choice"><input type="radio" name="e-ho" checked={!d.manual} onChange={() => set({ manual: false })} /><b>At a time</b><span>Automation hands out then.</span></label>
-          <label class="choice"><input type="radio" name="e-ho" checked={d.manual} onChange={() => set({ manual: true })} /><b>I will hand out manually</b><span>From the assignment page.</span></label>
+          <label class="choice"><input type="radio" name="e-ho" checked={d.manual} onChange={() => set({ manual: true })} /><b>I will hand out manually</b><span>You press Hand out now on its page; no site page or mark sheet until then.</span></label>
         </div>
       </div>
       {!d.manual ? (
@@ -456,6 +457,8 @@ function View(p: ReadyProps) {
   );
   const [removed, setRemoved] = useState<Record<string, Block>>({});
   const [save, setSave] = useState<SaveState>({ kind: 'idle' });
+  // The Save that would leave an assignment with no hand out date waits on this question.
+  const [askManual, setAskManual] = useState(false);
   const file = useSchedFile(p);
   const sf = file && file !== 'loading' ? file : null;
   const schedExists = p.files.file(p.cohort.org, CONFIG_REPO, 'schedule.yml').kind !== 'absent';
@@ -564,6 +567,12 @@ function View(p: ReadyProps) {
     });
   };
 
+  // An assignment newly handed out by hand asks first: until Hand out now, nothing reaches students.
+  const requestSave = () => {
+    if (!allErrors && dirtyKeys.some((k) => newlyManual(drafts[k], baseOf(k)))) setAskManual(true);
+    else void doSave();
+  };
+
   const counts: Record<Block, number> = { releases: 0, assignments: 0, events: 0 };
   const seen = new Set<string>();
   for (const r of rows) if (r.entry !== 'semester' && r.entry !== 'archive' && !seen.has(`${r.block}:${r.entry}`)) { seen.add(`${r.block}:${r.entry}`); counts[r.block]++; }
@@ -666,7 +675,7 @@ function View(p: ReadyProps) {
             {d.kind === 'archive' && !archived ? <div class="savebar"><span class="footnote">{archivePassed ? 'The archive date has passed.' : 'Archiving before the scheduled date asks you to confirm.'}</span><OpButtons def={archive(scope, archiveWhen, archivePassed)} /></div> : null}
             <SaveLine state={save} />
             <div class="savebar">
-              <button class="btn" type="button" disabled={save.kind === 'busy' || !dirty} onClick={() => void doSave()}>Save</button>
+              <button class="btn" type="button" disabled={save.kind === 'busy' || !dirty} onClick={requestSave}>Save</button>
               <EditFile org={p.cohort.org} repo={CONFIG_REPO} path="schedule.yml" exists={schedExists} line={key !== 'new' && key !== 'semester' ? lineOf(sf.text, keyEntry(doc, key)[1], key === 'archive' ? 0 : 2) : undefined} />
               {key !== 'new' && key !== 'semester' && key !== 'archive' && keyEntry(doc, key)[0] && !removed[key] ? (
                 <button class="btn small quiet" type="button" style="margin-left:auto" onClick={() => { setRemoved({ ...removed, [key]: keyEntry(doc, key)[0]! }); if (typeof location !== 'undefined') location.hash = '#schedule'; }}>Remove</button>
@@ -727,7 +736,16 @@ function View(p: ReadyProps) {
         {sheet}
       </div>
       {!key ? <SaveLine state={save} /> : null}
-      <UnsavedBar count={dirty} busy={save.kind === 'busy'} onDiscard={() => { setDrafts({}); setRemoved({}); setSave({ kind: 'idle' }); }} onSave={() => void doSave()} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml', exists: schedExists }} />
+      <UnsavedBar count={dirty} busy={save.kind === 'busy'} onDiscard={() => { setDrafts({}); setRemoved({}); setSave({ kind: 'idle' }); }} onSave={requestSave} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml', exists: schedExists }} />
+      {askManual ? (
+        <Modal small title="Save with no hand out date?" onClose={() => setAskManual(false)}>
+          <p id={MODAL_TEXT_ID}>Nothing goes out, no page on the student site and no mark sheet, until you press Hand out now on the assignment’s page.</p>
+          <div class="actions">
+            <button class="btn" type="button" onClick={() => { setAskManual(false); void doSave(); }}>Save without a date</button>
+            <button class="btn quiet" type="button" onClick={() => setAskManual(false)}>Cancel</button>
+          </div>
+        </Modal>
+      ) : null}
     </>
   );
 }

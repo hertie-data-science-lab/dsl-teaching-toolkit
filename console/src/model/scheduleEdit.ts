@@ -460,6 +460,15 @@ function moment(when: string, endOfDay = false): string {
 }
 
 /**
+ * Whether saving `d` leaves an assignment with no hand out date that had one (`base` is the
+ * saved entry, null for a new one): nothing goes out until someone presses Hand out now, so the
+ * Save asks first. An entry already handed out by hand is not asked about again.
+ */
+export function newlyManual(d: Draft, base: Draft | null): boolean {
+  return d.kind === 'assignments' && d.manual && !(base?.kind === 'assignments' && base.manual);
+}
+
+/**
  * What is wrong with a draft, by field; empty when it can be saved. `cutoff` is an assignment's
  * late cutoff as `cutoffOf` gives it: a solution shown before it is refused, as the engine does.
  */

@@ -9,7 +9,7 @@ import { pastDue, phaseOf, submissionsOf, type Phase } from '../model/assignment
 import { RepoChip } from '../ui/SetupPanel';
 import { templateReadinessIn, tier } from '../model/readiness';
 import { Check } from '../ui/icons';
-import { collect, handout, updateCopies, type AsgRef } from '../ops/defs';
+import { collect, handout, updateCopies } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
 import { useEffect } from 'preact/hooks';
 import { replaceHash, tabHref, type AssignmentTab } from '../router';
@@ -17,7 +17,7 @@ import { ProblemCards } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { asgSummary } from './Cohort';
 import { courseOf } from './Course';
-import { MarksTab, TeamsTab } from './Marking';
+import { MarksTab, TeamsTab, handoutRef } from './Marking';
 import { AssignmentRun, SemesterDefaults, sheetName } from './RunSettings';
 import { WithStatus, cohortName, cohortScope, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
@@ -231,7 +231,7 @@ function Overview(p: TabProps) {
   const big = cur >= 3 ? a.marks.filled : cur <= 1 ? (a.teams ?? 0) : (submissionsOf(a));
   const bigOf = cur >= 3 ? a.marks.total : a.units;
   const scope = cohortScope(p);
-  const ref: AsgRef = { slug: a.slug, title: assignmentTitle(a), template: a.template, units: a.units, group, when: a.handout ? `Scheduled ${fmtDay(a.handout, tz, year)}` : 'Hand out by hand', name: sheetName(p, a.slug) };
+  const ref = handoutRef(p, a, group, tz, year);
   const tree = p.files.tree(p.course.org, a.template);
   const templateFiles = tree.kind === 'ready' ? tree.paths.filter((x) => !x.dir && !x.path.startsWith('.github/')).map((x) => x.path) : [];
   // While students can push: from hand out until the late cutoff.

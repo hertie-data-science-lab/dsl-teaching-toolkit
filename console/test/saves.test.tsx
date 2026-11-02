@@ -350,6 +350,56 @@ describe('Save on the schedule’s new assignment entry', () => {
   });
 });
 
+describe('Save on an assignment entry handed out by hand', () => {
+  const MANUAL = `${SCHEDULE}  assignment-3:\n    course_source_repo: assignment-4-f2026\n    due_datetime: 2026-10-10T23:59\n`;
+  const asked = () => root!.querySelector('.modal')?.textContent ?? '';
+  async function addManual(gh: FakeGitHub, f: StaticFiles) {
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'new', prefill: 'assignment-4-f2026' })} />);
+    await click(root!.querySelectorAll('input[name="e-ho"]')[1]);
+    await type('#e-due', '2026-10-10');
+    await click(buttons('Save')[0]);
+  }
+
+  it('asks before saving a new entry with no hand out date, and Cancel writes nothing', async () => {
+    const gh = github(), f = files();
+    await addManual(gh, f);
+    expect(asked()).toContain('Save with no hand out date?');
+    expect(asked()).toContain('Nothing goes out, no page on the student site and no mark sheet, until you press Hand out now on the assignment’s page.');
+    await click(button('Cancel'));
+    await settle(() => false);
+    expect(root!.querySelector('.modal')).toBeNull();
+    expect(gh.seen.filter((x) => x.method === 'PUT')).toEqual([]);
+  });
+
+  it('writes the entry with no handout_datetime once confirmed', async () => {
+    const gh = github(), f = files();
+    await addManual(gh, f);
+    await click(button('Save without a date'));
+    await settle(() => puts(gh, 'schedule.yml').length > 0);
+    const entry = parse(body(puts(gh, 'schedule.yml')[0])).assignments['assignment-3'];
+    expect(entry.due_datetime).toBe('2026-10-10T23:59');
+    expect(entry).not.toHaveProperty('handout_datetime');
+  });
+
+  it('asks when an edit drops the hand out date', async () => {
+    const gh = github(), f = files();
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'assignment-2' })} />);
+    await click(root!.querySelectorAll('input[name="e-ho"]')[1]);
+    await click(buttons('Save')[0]);
+    expect(asked()).toContain('Save with no hand out date?');
+  });
+
+  it('does not ask again for an entry already handed out by hand', async () => {
+    const gh = github(), f = files({ [`${COHORT_ORG}/semester-config/schedule.yml`]: MANUAL });
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'assignment-3' })} />);
+    await type('#e-due', '2026-10-12');
+    await click(buttons('Save')[0]);
+    expect(root!.querySelector('.modal')).toBeNull();
+    await settle(() => puts(gh, 'schedule.yml').length > 0);
+    expect(parse(body(puts(gh, 'schedule.yml')[0])).assignments['assignment-3'].due_datetime).toBe('2026-10-12T23:59');
+  });
+});
+
 describe('Save on the marks grid', () => {
   it('writes the team’s score and its feedback per question', async () => {
     const gh = github(), f = files();
