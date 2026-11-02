@@ -1703,6 +1703,24 @@ def test_a_pressed_group_handout_with_no_teams_records_it_in_every_shape(
     assert recorded == [("SEMESTER", "project")]
 
 
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_a_pressed_group_handout_with_the_solution_and_no_teams_is_refused(
+    tmp_path, monkeypatch, dry_run
+):
+    # No team means no repo to push the solution into, and the repos teams get later never
+    # receive it: refused red, recording nothing. `main` records a preview and spends one
+    # only on rc 0 (test_renames: a failed hand out keeps its preview), so neither happens.
+    recorded = _press_with_no_teams(monkeypatch, "assignment_repo")
+    rc, changed = _press(tmp_path, solution=True, dry_run=dry_run)
+    assert (rc, changed) == (1, False)
+    assert rc.text == (
+        "No teams yet, so there is no repo to put the solution in: hand out without "
+        "the solution, and release it once teams have formed."
+    )
+    assert rc.reasons == [{"code": "NO_TEAMS_FOR_SOLUTION", "text": rc.text}]
+    assert recorded == []
+
+
 # --------------- a failed solution push outranks every other fault (the marker depends on it)
 
 

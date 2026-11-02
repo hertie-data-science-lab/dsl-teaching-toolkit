@@ -1362,6 +1362,7 @@ def main() -> int:
 SOLUTION_PREVIEW = records.path("solution_preview")
 PREVIEW_FIRST = "PREVIEW_FIRST"
 NOT_SCHEDULED = "NOT_SCHEDULED"
+NO_TEAMS_FOR_SOLUTION = "NO_TEAMS_FOR_SOLUTION"
 
 
 def _actor() -> str:
@@ -1865,6 +1866,21 @@ def provision_all(
             # nothing and team formation never opened. The record is the whole hand-out
             # here: its push to schedule.yml syncs the site (the brief) and the Join-team
             # form, and the sheet follows the first team. Never in a preview.
+            #
+            # Not with the solution: no repo exists to put it in, and the repos teams get
+            # later never receive it. Refused (red) before anything is recorded, so `main`
+            # neither records a preview nor spends one (both only on rc 0).
+            if solution:
+                text = (
+                    "No teams yet, so there is no repo to put the solution in: hand out "
+                    "without the solution, and release it once teams have formed."
+                )
+                log_err(text)
+                return Summary(
+                    text,
+                    reasons=[{"code": NO_TEAMS_FOR_SOLUTION, "text": text}],
+                    code=1,
+                ), False
             if not dry_run:
                 schedule.record_handout(semester_org, key)
             if scheduled:
