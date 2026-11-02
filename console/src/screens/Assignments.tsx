@@ -9,7 +9,7 @@ import { pastDue, phaseOf, submissionsOf, type Phase } from '../model/assignment
 import { RepoChip } from '../ui/SetupPanel';
 import { templateReadinessIn, tier } from '../model/readiness';
 import { Check } from '../ui/icons';
-import { collect, handout, updateCopies } from '../ops/defs';
+import { collect, updateCopies } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
 import { useEffect } from 'preact/hooks';
 import { replaceHash, tabHref, type AssignmentTab } from '../router';
@@ -291,7 +291,7 @@ function Overview(p: TabProps) {
           <div class="section-head"><h2>What you can do, by state</h2><span class="meta">Preview never changes anything students see</span></div>
           <ul class="state-actions">
             {row(cur === 0 ? 'now' : 'past', 'Declared', handedOut ? `Handed out ${fmtWhen(a.handout, tz, year)} to ${a.units} ${group ? 'teams' : 'students'}.` : 'Hands out at its time, or now.',
-              handedOut ? null : <div class="sa-op"><span class="opname">Hand out now</span><OpButtons def={handout(scope, ref)} small /></div>)}
+              handedOut ? null : <div class="sa-op"><span class="opname">Hand out now</span><HandOutNow p={p} a={a} small /></div>)}
             {group ? row(cur === 1 ? 'now' : 'past', 'Teams forming', 'Students form teams on the assignment’s page in the student console; you can assign the rest.', <div class="sa-op"><a class="btn small quiet" href={tabHref(a.slug, 'teams')}>Open teams</a></div>) : null}
             {row(cur === 2 ? 'now' : cur > 2 ? 'past' : 'later', 'Open',
               cur < 2 ? 'Opens after hand out.' : cur > 2 ? `Closed ${fmtDay(a.due, tz, year)}.` : pushWhy,
