@@ -1036,7 +1036,9 @@ def _assignment_entry(
     tbc_due = indent(tbc_fm, "    ")
     external = spec.submit_external
     window, shuts = (
-        schedule.formation_state(sched, found[0], now or datetime.now(UTC))
+        schedule.formation_state(
+            sched, found[0], now or datetime.now(UTC), submit_via=spec.submit_via
+        )
         if sched is not None and found is not None
         else ("closed", None)
     )
@@ -1069,16 +1071,18 @@ def _assignment_entry(
         # `repo_name` is a SHAPE to substitute a handle into (open_in.html), not a real
         # name - the drop box above is named exactly and never gets this flag.
         repo_lines.append("repo_name_is_shape: true")
-    # The page's rule sentences: when the work is read, and what the deadline costs. Only
-    # for a shape that collects commits - `external` pins no commit and counts no day.
+    # The page's rule sentences: when the work is read, and what the deadline costs. The
+    # cutoff sentence only for a shape that collects commits - `external` pins no commit -
+    # and the late rule for `external` only when a penalty applies (`course.late_rule`).
     cutoff_fm = (
         f'cutoff_sentence: "{q(CUTOFF_SENTENCE)}"\n' if spec.collects_commits else ""
     )
-    late_fm = (
-        f'late_rule: "{q(late_rule(spec.late_window_days, spec.late_penalty_per_day))}"\n'
-        if spec.collects_commits
-        else ""
+    rule = late_rule(
+        spec.late_window_days,
+        spec.late_penalty_per_day,
+        collects=spec.collects_commits,
     )
+    late_fm = f'late_rule: "{q(rule)}"\n' if rule else ""
     points = total_points(spec)
     points_fm = f'max_points: "{points}"\n' if points else ""
     # Who can read the repo, under the brief - only once the brief is out.

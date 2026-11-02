@@ -31,9 +31,9 @@ import { PatternTree } from '../ui/PatternTree';
 import { useDraft } from '../wizards/drafts';
 import {
   APP_SLUG, IMPORT_UNTICKED_MAIN, IMPORT_UNTICKED_SOLUTION, ORDINAL_WARNING, assignmentArgs, formatError, installUrl, liveSemesters, openAt, ordinalInName,
-  parseSource, signature, sourceFixed, starterChoice, templateRepo, tickedEntries, type SourceRepo,
+  parseSource, signature, sourceFixed, stamp, starterChoice, templateRepo, tickedEntries, type SourceRepo,
 } from '../wizards/model';
-import { allOk, checkFree, checkTemplate, readSource, useLive, type Check, type SourceBranch, type SourceRead } from '../wizards/verify';
+import { allOk, checkFree, checkTemplate, readSource, useLive, usePoll, type Check, type SourceBranch, type SourceRead } from '../wizards/verify';
 import { Checks, Rail, StepCard, Verified, WizError } from '../wizards/Wizard';
 import { Questions, STARTER_DOC, courseOf } from './Course';
 import { courseScope } from './common';
@@ -212,8 +212,10 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
   const v = d.v;
   const repo = templateRepo(v.name);
   const name = String(v.name ?? '').trim();
-  const runs = env?.ops.runs.value.length ?? 0;
-  const tpl = useLive(env && repo ? async () => ({ repo, r: await checkTemplate(env.client, course.org, repo) }) : null, [repo, runs, asked]);
+  // The newest run this session finished: a run is listed only once it ends, so the check runs again when the create run is done.
+  const finishedRuns = env?.ops.runs.value ?? [];
+  const lastRun = finishedRuns[0]?.run_id ?? 0;
+  const tpl = useLive(env && repo ? async () => ({ repo, r: await checkTemplate(env.client, course.org, repo) }) : null, [repo, lastRun, asked]);
   const tplNow = tpl.value?.repo === repo ? tpl.value.r : null;
   // Ours only when step 1 found the name free: a repo that was already there is a clash, not a creation.
   const created = !!repo && d.verified['1'] === signature(v, S1) && !!tplNow && tplNow.checks[0].ok === true;
@@ -222,7 +224,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
   const [s1, setS1] = useState<{ busy: boolean; list: Check[] | null }>({ busy: false, list: null });
   const [save, runSave, setSave] = useSave(env);
   const [copy, setCopy] = useState<{ busy: boolean; line?: string; results?: CopyResult[] }>({ busy: false });
-  const [semester, setSemester] = useState('');
+  const [semester, setSemester] = useState(p.cohort ?? '');
   const setV = (nv: Values) => set({ v: nv });
   const go = (k: number) => {
     if (typeof location !== 'undefined') location.hash = `#new-assignment-${k}`;
@@ -250,8 +252,12 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
   const attempted = d.imported?.repo === repo;
   const missing = toCopy.filter((c) => !importDone.includes(c.branch)).map((c) => c.branch);
   const checksOk = created && allOk(tplNow?.checks);
+  // GitHub can list a new repo before its branches: once a create run ended, the check repeats until it passes.
+  const createRan = finishedRuns.some((r) => r.op === 'assignment.create' && r.course === course.org && r.conclusion !== 'failed');
+  usePoll(tpl, !!env && step === 6 && !!repo && (created || createRan) && !checksOk);
 
   const w = effective(tiers3, effective(tiers2, v));
+  const extrasPending = created && Object.keys(extrasOf(w)).length > 0 && d.extrasSaved !== repo;
   const writeExtras = async () => {
     if (!tplNow?.config) return;
     const text = withExtras(tplNow.config.text, extrasOf(w));
@@ -285,6 +291,14 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
     autoCopied.current = repo;
     void runCopy();
   }, [copyNow]);
+  // The marking settings are saved by themselves, once, after the checks pass and any copy has run; the button is the retry.
+  const autoSaved = useRef('');
+  const saveNow = checksOk && extrasPending && !!tplNow?.config && !copy.busy && (!importPending || attempted) && save.kind !== 'busy' && autoSaved.current !== repo;
+  useEffect(() => {
+    if (!saveNow) return;
+    autoSaved.current = repo;
+    void writeExtras();
+  }, [saveNow]);
 
   let heading = '', body, foot;
   const createdNote = created && step < 6 ? <p class="note">{repo} is created. Change its settings on the <a href={`#template-${repo}`}>assignment template's settings</a>.</p> : null;
@@ -316,7 +330,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
         const list = [await checkFree(env.client, course.org, repo, repo)];
         setS1({ busy: false, list });
         if (allOk(list)) {
-          set({ verified: { ...d.verified, '1': signature(v, S1) } });
+          set({ verified: stamp(d.verified, 1, signature(v, S1)) });
           go(2);
         }
       }}>Continue</button>
@@ -335,7 +349,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
     );
     foot = (
       <button class="btn" type="button" disabled={Object.keys(errs).length > 0} onClick={() => {
-        set({ verified: { ...d.verified, [String(step)]: signature(v, step === 2 ? S2 : S3) } });
+        set({ verified: stamp(d.verified, step, signature(v, step === 2 ? S2 : S3)) });
         go(step + 1);
       }}>Continue</button>
     );
@@ -351,7 +365,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
     );
     foot = (
       <button class="btn" type="button" onClick={() => {
-        set({ verified: { ...d.verified, '4': signature(v, S4) } });
+        set({ verified: stamp(d.verified, 4, signature(v, S4)) });
         go(5);
       }}>Continue</button>
     );
@@ -361,7 +375,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
     const bad = rows.map((r) => questionFileError(r.file)).find(Boolean);
     const files = toCopy.find((c) => c.branch === 'main')?.entries.map((e) => e.path) ?? [];
     const next = (nv: Values) => {
-      set({ v: nv, verified: { ...d.verified, '5': signature(nv, S5) } });
+      set({ v: nv, verified: stamp(d.verified, 5, signature(nv, S5)) });
       go(6);
     };
     body = (
@@ -383,7 +397,6 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
     const rows = ((v.questions as QuestionRow[] | undefined) ?? []).filter((r) => r.name.trim());
     const total = rows.reduce((n, r) => n + (Number(r.points) || 0), 0);
     const def = createAssignment(courseScope(p), repo, name, assignmentArgs(v), src ? srcKey : undefined);
-    const extrasPending = created && Object.keys(extrasOf(w)).length > 0 && d.extrasSaved !== repo;
     const ready = checksOk && !importPending && !extrasPending;
     heading = ready ? 'Created' : 'Check and create';
     const live = liveSemesters(course.cohorts, (c) => {
@@ -412,9 +425,22 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
         {attempted && missing.length && !said && !copy.busy ? <WizError>Not copied to {missing.join(' or ')} yet. Copy again to try only what is missing.</WizError> : null}
         {checksOk && !importPending && extrasPending ? <p class="footnote">The marking settings the create step does not take are written to grading_config.yml next.</p> : null}
         <SaveLine state={save} />
+        {ready ? <Verified>Course template created.</Verified> : null}
+        {checksOk ? (
+          <>
+            <CheckLine cls="warn">Nothing reaches students until you add it to a semester instance.</CheckLine>
+            <div class="actions">
+              {pick ? (
+                <>
+                  {live.length > 1 ? <select id="na-sem" aria-label="Semester" onChange={(e) => setSemester((e.target as HTMLSelectElement).value)}>{live.map((c) => <option value={c.org} selected={c.org === pick.org}>{c.termLabel}</option>)}</select> : null}
+                  <a class="btn outline" href={`?cohort=${pick.org}&template=${encodeURIComponent(repo)}#schedule-new`}>Add to a semester</a>
+                </>
+              ) : <a class="btn outline" href={`?course=${course.org}#new-semester-1`}>Set up a semester first</a>}
+            </div>
+          </>
+        ) : null}
         {ready ? (
           <>
-            <Verified>Created. Nothing reaches students until you add it to a schedule.</Verified>
             <div class="actions">
               <OpenButton org={course.org} repo={repo} /><a class="btn outline" href={uploadUrl(course.org, repo)} target="_blank" rel="noopener">Upload files on GitHub <Ext /></a>
             </div>
@@ -423,18 +449,10 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
                 <OpButtons def={derive(courseScope(p), repo, repo, name)} small label="Derive the student version now" />
               </div>
             ) : null}
-            <div class="actions">
-              {pick ? (
-                <>
-                  {live.length > 1 ? <select id="na-sem" aria-label="Semester" onChange={(e) => setSemester((e.target as HTMLSelectElement).value)}>{live.map((c) => <option value={c.org} selected={c.org === pick.org}>{c.termLabel}</option>)}</select> : null}
-                  <a class="btn outline" href={`?cohort=${pick.org}&template=${encodeURIComponent(repo)}#schedule-new`}>{live.length > 1 ? 'Add to a schedule' : `Add to the ${pick.termLabel} schedule`}</a>
-                </>
-              ) : <a class="btn outline" href={`?course=${course.org}#new-semester-1`}>Set up a semester first</a>}
-            </div>
-            <div><button class="btn small quiet" type="button" onClick={() => { clear(); go(1); }}>Start another assignment</button></div>
           </>
         ) : created ? null : <p class="footnote">Creating makes an assignment template with a main branch for the brief and a solution branch for marking.{src ? ' The ticked files are copied next with your GitHub account.' : ''}</p>}
-        {tplNow && !tpl.busy && tplNow.checks.some((c) => c.ok === false) && created ? <WizError>The assignment template is not complete yet. Check again in a minute; if it stays like this, open the run from All operations.</WizError> : null}
+        {ready ? <div><button class="btn small quiet" type="button" onClick={() => { clear(); go(1); }}>Start another assignment</button></div> : null}
+        {tplNow && !tpl.busy && tplNow.checks.some((c) => c.ok === false) && created ? <WizError>The assignment template is not complete yet. This page checks again by itself; if it stays like this, open the run from All operations.</WizError> : null}
       </>
     );
     foot = readFailed ? (
@@ -443,8 +461,8 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
       <button class="btn" type="button" disabled={!env || !repo || (!!src && !read)} onClick={() => env?.ops.open(def, 'run')}>Create assignment</button>
     ) : checksOk && importPending && read?.main ? (
       attempted ? <button class="btn" type="button" disabled={copy.busy} onClick={() => void runCopy()}>Copy again</button> : null
-    ) : checksOk && extrasPending ? (
-      <button class="btn" type="button" disabled={save.kind === 'busy' || !tplNow?.config} onClick={() => void writeExtras()}>Save the marking settings</button>
+    ) : checksOk && extrasPending && save.kind === 'bad' ? (
+      <button class="btn" type="button" disabled={!tplNow?.config} onClick={() => void writeExtras()}>Save the marking settings</button>
     ) : (
       <button class="btn small outline" type="button" disabled={tpl.busy} onClick={() => tpl.run()}>Check again</button>
     );

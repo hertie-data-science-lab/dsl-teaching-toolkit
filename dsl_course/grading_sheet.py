@@ -65,6 +65,10 @@ QUESTION_FEEDBACK_KEY = "feedback_per_question"
 # late rule's own arithmetic, and what an absent key means), `waive`, or the whole penalty
 # as a percent or fraction (`10%`, `0.1`). Never seeded: it appears when a grader writes it.
 LATE_PENALTY_KEY = "late_penalty"
+# Work handed in outside GitHub has no `info:` to time it, so the GRADER says how many
+# whole days late each unit was, here, beside its marks; blank (as seeded) counts as 0.
+# Theirs like every key outside `info:`, so a refresh or the freeze never touches it.
+DAYS_LATE_KEY = "days_late"
 _SCORE_COMMENT = "yours: the question names and maxima come from grading_config.yml"
 _SEP = " · "  # what separates the facts on one header line
 # Inline comments line up at one column across the whole sheet, so the maxima read as a
@@ -276,6 +280,8 @@ def _fresh_block(spec: SheetSpec, members: list[str], info: dict | None = None) 
     block: dict = {}
     if spec.collects_commits:
         block[INFO_KEY] = _fresh_info(spec) | (info or {})
+    else:
+        block[DAYS_LATE_KEY] = None
     if spec.is_group:
         block[spec.feedback_key] = None
         block["members"] = {handle: _blank_person() for handle in members}
@@ -287,10 +293,24 @@ def _fresh_block(spec: SheetSpec, members: list[str], info: dict | None = None) 
     return block
 
 
+def _is_blank_entry(entry: object) -> bool:
+    """True when a member's entry holds nothing a grader typed: no entry at all, or a
+    mapping whose every value is blank (`_blank_person()`, or a part of it)."""
+    if entry is None:
+        return True
+    return isinstance(entry, dict) and all(
+        value is None or (isinstance(value, str) and not value.strip())
+        for value in entry.values()
+    )
+
+
 def _merged_people(existing: object, members: list[str]) -> object:
     """A team's `members:` mapping brought up to date: everyone already there is kept
     exactly as found, and a member who joined the team since the last write is appended
-    blank. Left alone entirely if the grader turned it into something else."""
+    blank. A member who left keeps their entry, at the end, if a grader typed anything in
+    it; a blank one is dropped, or a student who moved team would sit in both and hold
+    both teams' marks as a duplicate. Left alone entirely if the grader turned it into
+    something else."""
     if not isinstance(existing, dict):
         return existing
     old = dict(existing)
@@ -298,7 +318,9 @@ def _merged_people(existing: object, members: list[str]) -> object:
         handle: (old.pop(handle) if handle in old else _blank_person())
         for handle in members
     }
-    people.update(old)  # a member who left the team keeps their marks, at the end
+    people.update(
+        {handle: entry for handle, entry in old.items() if not _is_blank_entry(entry)}
+    )
     return people
 
 
@@ -344,7 +366,9 @@ def merge_sheet(
 
     Everything else is the grader's and is kept exactly as found: their marks, their
     feedback, keys they invented, and blocks for units that have since left the semester (a
-    withdrawn student's marks are not ours to delete). Deleted keys are not re-added either
+    withdrawn student's marks are not ours to delete). The one exception is a team member
+    who left with a blank entry: it is dropped, as it holds nothing of the grader's
+    (`_merged_people`). Deleted keys are not re-added either
     - a grader who removed `notes_not_shared_with_students` meant it, and a file that grows
     the key back on every tick is one nobody can tidy.
 
@@ -582,7 +606,10 @@ def _config_facts(spec: SheetSpec) -> list[str]:
     shape.append("autograde on" if spec.autograde else "autograde off")
     timing = [f"due {spec.due_display}"] if spec.due_display else []
     if not spec.collects_commits:
-        timing.append("no late arithmetic")
+        rate = spec.late_penalty_per_day
+        timing.append(
+            "days late entered by the marker" + (f" at {rate}/day" if rate else "")
+        )
     elif spec.late_window_days and spec.cutoff_display:
         rate = spec.late_penalty_per_day
         timing.append(
@@ -599,7 +626,8 @@ def _auto_filled_sentence(spec: SheetSpec) -> str:
     if not spec.collects_commits:
         return (
             "Auto-filled by the toolkit: nothing. This assignment is submitted outside "
-            "GitHub, so there is no `info:` block and no late arithmetic."
+            "GitHub, so there is no `info:` block: you enter each unit's `days_late`, "
+            "and the late penalty is worked out from it."
         )
     clauses = [
         "`submitted` and `days_late` fill at the due date and refresh after each late push"
@@ -629,11 +657,12 @@ def _you_fill_in_sentence(spec: SheetSpec) -> str:
     fields.append(f"{spec.score_key}{qualifier}")
     if spec.questions:
         fields.append(f"{QUESTION_FEEDBACK_KEY} (optional, one per question)")
-    if spec.collects_commits:
-        fields.append(
-            f"{LATE_PENALTY_KEY} (optional, on a late unit: apply, waive, "
-            "or the whole penalty as 10%)"
-        )
+    if not spec.collects_commits:
+        fields.append(f"{DAYS_LATE_KEY} (whole days late, 0 when on time)")
+    fields.append(
+        f"{LATE_PENALTY_KEY} (optional, on a late unit: apply, waive, "
+        "or the whole penalty as 10%)"
+    )
     return (
         f"You fill in: {', '.join(fields)}. Anything you type is never touched. Nothing "
         f"reaches a student until you run Distribute grades. YAML comments you add are "
@@ -741,8 +770,14 @@ def dump_sheet(sheet: dict, spec: SheetSpec, status_line: str) -> str:
 
     Deterministic - the same sheet, spec and status give byte-identical text - because the
     write path compares blob shas, and text that churned would commit on every tick."""
-    body = yaml.dump(
-        sheet,
+    return _sheet_header(spec, status_line) + _annotate(_sheet_yaml(sheet), spec)
+
+
+def _sheet_yaml(data: dict) -> str:
+    """`data` as the sheet's own YAML, with no header or annotations: one dump for the
+    sheet and for every record that carries its blocks, so one parser reads both."""
+    return yaml.dump(
+        data,
         Dumper=_SheetDumper,
         sort_keys=False,
         allow_unicode=True,
@@ -751,7 +786,6 @@ def dump_sheet(sheet: dict, spec: SheetSpec, status_line: str) -> str:
         # that moved with the text would churn the file.
         width=10**6,
     )
-    return _sheet_header(spec, status_line) + _annotate(body, spec)
 
 
 def _plain(number: Decimal) -> str:
@@ -865,7 +899,9 @@ def final_grade(
     late_penalty: object = None,
 ) -> Decimal | None:
     """`total x (1 - penalty) + adjustment`, floored at 0, where the penalty is `rate x
-    days_late` unless the grader waived or set it (`effective_penalty`).
+    days_late` unless the grader waived or set it (`effective_penalty`), capped at the
+    whole total: days late a marker enters have no window to stop them, and a runaway
+    penalty must not eat the adjustment too.
 
     Derived on OUTPUT and never stored: the sheet has no `final_grade` field, so there is
     no stale cell for this to disagree with. A blank adjustment is 0 and a blank rate or
@@ -876,7 +912,8 @@ def final_grade(
     earned = as_decimal(total)
     if earned is None:
         return None
-    earned *= Decimal(1) - effective_penalty(rate, days_late, late_penalty).fraction
+    penalty = min(effective_penalty(rate, days_late, late_penalty).fraction, Decimal(1))
+    earned *= Decimal(1) - penalty
     return max(Decimal(0), earned + (as_decimal(adjustment) or Decimal(0)))
 
 
@@ -943,6 +980,7 @@ HOLD_REASONS = {
     "score": "a non-numeric value in a per-question map",
     "adjustment": "a non-numeric adjustment",
     "late_penalty": "a late penalty that is not apply, waive or a percentage",
+    "days_late": "days late that are not a whole number",
     "question": "a question the assignment does not declare",
     "duplicate": "a handle in more than one submission unit",
     "returned": "another of their marks held, one they have already been sent",
@@ -958,6 +996,26 @@ def _is_typo(value: object) -> bool:
     produces, is exactly the case: it read as no adjustment at all while the grader
     believed a penalty had been waived."""
     return not is_blank(value) and as_decimal(value) is None
+
+
+def unit_days_late(spec: SheetSpec, block: dict) -> object:
+    """How many days late one unit's work was: the toolkit's `info.days_late` where it
+    times commits, the grader's `days_late` (`DAYS_LATE_KEY`) where the work is handed in
+    outside GitHub, blank counting as 0. THE reader, so the penalty, the hold and the
+    gradebook all take the same days."""
+    if spec.collects_commits:
+        return (block.get(INFO_KEY) or {}).get("days_late")
+    value = block.get(DAYS_LATE_KEY)
+    return 0 if is_blank(value) else value
+
+
+def _days_late_fault(spec: SheetSpec, block: dict) -> str:
+    """`days_late` when a grader's days late is not a whole number of days, 0 or more."""
+    if spec.collects_commits:
+        return ""
+    days = as_decimal(unit_days_late(spec, block))
+    ok = days is not None and days >= 0 and days == days.to_integral_value()
+    return "" if ok else "days_late"
 
 
 def _score_fault(spec: SheetSpec, score: object) -> str:
@@ -1025,14 +1083,18 @@ def sheet_hold_reasons(
         # An unreadable `late_penalty` holds only a LATE unit: on an on-time one, or under
         # no late rule, there is nothing for it to apply to (`effective_penalty`), so it
         # holds nobody's mark.
-        days = as_decimal((block.get(INFO_KEY) or {}).get("days_late"))
-        fault = _score_fault(spec, block.get(spec.score_key)) or (
-            "late_penalty"
-            if has_rule
-            and days is not None
-            and days > 0
-            and late_choice(block.get(LATE_PENALTY_KEY)).mode == "invalid"
-            else ""
+        days = as_decimal(unit_days_late(spec, block))
+        fault = (
+            _score_fault(spec, block.get(spec.score_key))
+            or _days_late_fault(spec, block)
+            or (
+                "late_penalty"
+                if has_rule
+                and days is not None
+                and days > 0
+                and late_choice(block.get(LATE_PENALTY_KEY)).mode == "invalid"
+                else ""
+            )
         )
         for handle, person in _people(spec, unit_key, block).items():
             # Folded, as the gradebooks are (`build_gradebooks`): `Alice` in one team and
@@ -1075,6 +1137,13 @@ _HOLD_FAULT = {
         ),
         "write apply, waive or the whole penalty as a percentage (10%) on {at}",
     ),
+    "days_late": (
+        (
+            "the days late on this line are not a whole number, so nothing for this "
+            "unit is sent"
+        ),
+        "write the whole days late on {at} - 0 when it was on time",
+    ),
     "question": (
         (
             "this line marks a question the assignment does not declare, so nothing "
@@ -1101,6 +1170,8 @@ _HOLD_PLAIN = {
     "returned for that student.",
     "late_penalty": "{where} has a late penalty that is not apply, waive or a "
     "percentage, so nothing is returned for that student or team.",
+    "days_late": "{where} has days late that are not a whole number, so nothing is "
+    "returned for that student or team.",
     "question": "{where} marks a question the assignment does not have, so nothing is "
     "returned for that student or team.",
     "duplicate": "{where} lists a student who is also in another team or entry, so "
@@ -1124,6 +1195,8 @@ def _hold_field(spec: SheetSpec, reason: str) -> str:
     typed."""
     if reason == "late_penalty":
         return LATE_PENALTY_KEY
+    if reason == "days_late":
+        return DAYS_LATE_KEY
     return (
         spec.score_key if reason in ("score", "question") else "adjustment_individual"
     )
@@ -1143,6 +1216,8 @@ def _hold_line(
         path = base + (spec.score_key,)
     elif reason == "late_penalty":
         path = base + (LATE_PENALTY_KEY,)
+    elif reason == "days_late":
+        path = base + (DAYS_LATE_KEY,)
     elif reason == "adjustment":
         path = base + (
             ("members", handle, "adjustment_individual")

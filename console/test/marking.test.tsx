@@ -10,7 +10,10 @@ import { parse } from 'yaml';
 import { EnvCtx, type Env } from '../src/env';
 import { GitHubClient, decodeBase64 } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
-import { holdReasons, insertSnippet, lateRule, markerLines, needsHandDecision, readSnippets, rowsChanged, spread, studentMarks, type HoldUnit } from '../src/model/marks';
+import { holdReasons, insertSnippet, lateRule, markerLines, needsHandDecision, readSnippets, rowsChanged, spread, studentMarks, toldPath, untold, type HoldUnit } from '../src/model/marks';
+import { LiveFiles, type FileState } from '../src/model/files';
+import { refreshAfterRun } from '../src/app';
+import { RETURNED_DIR } from '../src/model/names';
 import { marksDraft, saveMarksDraft } from '../src/model/prefs';
 import { StatusStore, type Loaded } from '../src/model/status';
 import type { Assignment, Status } from '../src/model/types';
@@ -263,6 +266,22 @@ const puts = (gh: FakeGitHub) => gh.seen.filter((s: Seen) => s.method === 'PUT')
 const body = (s: Seen) => decodeBase64((s.body as { content: string }).content);
 const props = (f: StaticFiles, over: Partial<CohortProps> = {}): CohortProps => ({ course, cohort, loaded: ready, files: f, now: NOW, entry: 'assignment-2', tab: 'marks', ...over });
 const marks = (f = files(), gh = github()) => mount(envOf(gh, f), <AssignmentScreen {...props(f)} />);
+/** Puts a file into a file set the tests already built. */
+const seed = (f: StaticFiles, path: string, text: string) => {
+  (f as unknown as { map: Record<string, string> }).map[path] = text;
+  return f;
+};
+/** The engine's record of what each unit of the sheet was last told. */
+const TOLD_PATH = `${COHORT_ORG}/semester-config/${toldPath('assignment-2')}`;
+/** The Return marks button. */
+const big = () => q<HTMLButtonElement>('.return-block button.btn.big');
+/** The same assignment handed in outside GitHub, as status.json states it: no late window. */
+const external: Assignment = { ...solo, submit_shape: 'external', settings: { ...solo.settings!, late_window_days: { value: null, source: 'institution' } } };
+const EXT_SHEET = () => SHEET.replace(/ {4}info:\n( {6}.*\n)+/g, '');
+const marksExternal = (gh = github()) => {
+  const f = files(EXT_SHEET(), `submit_via: external\n${CONFIG}`);
+  return mount(envOf(gh, f), <AssignmentScreen {...props(f, { loaded: { ...ready, status: { ...STATUS, assignments: [external] } } })} />);
+};
 const filter = (word: string) => [...root!.querySelectorAll<HTMLButtonElement>('.chip.filter')].find((b) => b.textContent?.startsWith(word))!;
 
 describe('what a template runs at the cutoff (grades.GradingSpec)', () => {
@@ -333,12 +352,41 @@ describe('the marking screen', () => {
     expect(q('thead').textContent).not.toContain('Tests');
   });
 
-  it('hides the submission columns for work handed in outside GitHub, and says so', async () => {
-    const external = SHEET.replace(/ {4}info:\n( {6}.*\n)+/g, '');
-    await marks(files(external));
-    expect(root!.textContent).toContain('Submitted outside GitHub: no dates, no late penalty.');
+  it('hides the submission columns for work handed in outside GitHub, and asks the days late instead', async () => {
+    await marksExternal();
+    expect(root!.textContent).toContain('Submitted outside GitHub: no dates. Enter the days late; the late penalty is worked out from them.');
     expect(q('thead').textContent).not.toContain('From the submission');
+    expect(q('thead').textContent).toContain('Days late');
     expect(button('From the submission ▾')).toBeUndefined();
+    // Blank is 0: on time, nothing off.
+    expect(q<HTMLInputElement>('input[aria-label="Days late for ada-l"]').placeholder).toBe('0');
+    // No window to quote: the rule is per day late, on the days entered.
+    expect(root!.textContent).not.toMatch(/up to \d+ days/);
+    expect(root!.textContent).toContain('late penalties (10% of the total per day late, on the days late you enter) are worked out for you');
+  });
+
+  it('takes the late penalty off the days late a marker enters, and writes them to the unit', async () => {
+    const gh = github();
+    await marksExternal(gh);
+    const ada = () => [...root!.querySelectorAll('tr.unit-row')].find((r) => r.textContent?.includes('ada-l'))!;
+    expect(ada().querySelector('td.pen')!.textContent).toBe('');
+    await type('input[aria-label="Days late for ada-l"]', '2');
+    expect(ada().querySelector('td.pen .val')!.textContent).toBe('−20%');
+    expect(q('input[aria-label="Apply the late penalty for ada-l"]')).not.toBeNull();
+    await click(button('Save marks'));
+    await settle(() => puts(gh).length > 0);
+    expect(body(puts(gh)[0])).toMatch(/ {2}ada-l:\n(?: {4}.*\n)*? {4}days_late: 2\n/);
+  });
+
+  it('holds a mark whose days late are not a whole number', async () => {
+    await marksExternal();
+    await type('input[aria-label="Days late for ada-l"]', 'two');
+    expect(root!.textContent).toContain('days late that are not a whole number');
+  });
+
+  it('asks no days late of work handed in on GitHub', async () => {
+    await marks();
+    expect(root!.querySelector('input[aria-label="Days late for ada-l"]')).toBeNull();
   });
 
   it('folds the submission columns to one chip per row', async () => {
@@ -535,7 +583,7 @@ describe('Return marks from the marking screen', () => {
     expect(button('Return marks to 1 student')).toBeDefined();
     await click(button('Return marks to 1 student'));
     const facts = [...root!.querySelectorAll('.op-facts p')].map((p) => p.textContent);
-    expect(facts).toEqual(['1 student gets marks · 1 not marked yet (skipped) · 1 held (fix first)', 'Final: median 17, range 17–17, 1 held']);
+    expect(facts).toEqual(['1 student gets new marks · 0 already told and unchanged · 1 not marked yet (skipped) · 1 held (fix first)', 'Final: median 17, range 17–17, 1 held']);
   });
 
   it('says unsaved rows are not counted until saved', async () => {
@@ -596,6 +644,240 @@ describe('Return marks from the marking screen', () => {
   it('names who a preview would email, from the private preview issue', () => {
     const def = returnMarks({ courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' }, { slug: 'a', title: 'A', template: 't', units: 1, group: false, when: 'Marking' }, 1, 'a', null, [], 'extra');
     expect(def.dryExtra).toBe('extra');
+  });
+});
+
+describe('who Return marks would email (the engine’s last-told record)', () => {
+  /** A unit's block as the sheet carries it. */
+  const block = (sheet: string, key: string) => {
+    const at = sheet.indexOf(`  ${key}:\n`);
+    const next = sheet.slice(at + 1).search(/\n {2}\S/);
+    return sheet.slice(at, next < 0 ? undefined : at + 1 + next + 1);
+  };
+  const record = (container: string, ...blocks: string[]) => `# Last told by Return marks; written by the toolkit.\n${container}:\n${blocks.join('')}`;
+  const withTold = (told: string | null, sheet = SHEET) => (told === null ? files(sheet) : seed(files(sheet), TOLD_PATH, told));
+  const why = () => root!.querySelector('.return-why')?.textContent ?? null;
+  const ADA = block(SHEET, 'ada-l');
+
+  it('counts every marked, unheld student when nobody has been told yet', async () => {
+    await marks(withTold(null));
+    expect(big().textContent).toBe('Return marks to 1 student');
+    expect(big().disabled).toBe(false);
+    expect(why()).toBeNull();
+  });
+
+  it('greys the button out when everyone marked has been told these marks', async () => {
+    const gh = github(), f = withTold(record('submissions', ADA)), env = envOf(gh, f);
+    await mount(env, <><AssignmentScreen {...props(f)} /><OpPanel /></>);
+    expect(big().textContent).toBe('Return marks to 0 students');
+    expect(big().disabled).toBe(true);
+    expect(big().getAttribute('aria-disabled')).toBe('true');
+    expect(why()).toBe('Everyone marked has been told these marks');
+    await click(big());
+    expect(env.ops.current.value).toBeNull();
+    expect(button('Student view').disabled).toBe(false);
+  });
+
+  it('counts a unit whose score changed since it was told', async () => {
+    await marks(withTold(record('submissions', ADA.replace('Q1: 8', 'Q1: 7'))));
+    expect(big().textContent).toBe('Return marks to 1 student');
+  });
+
+  it('does not count a change only in private notes or in the submission facts', async () => {
+    await marks(withTold(record('submissions', ADA.replace('Check the plot.', 'Older note.').replace('2026-09-27T20:00', '2026-09-26T09:00').replace('8/10', '7/10'))));
+    expect(big().textContent).toBe('Return marks to 0 students');
+  });
+
+  it('does not count a key the grader invented', async () => {
+    await marks(withTold(record('submissions', `${ADA}    comment: An old remark.\n`)));
+    expect(big().textContent).toBe('Return marks to 0 students');
+  });
+
+  it('counts a change in the days late', async () => {
+    await marks(withTold(record('submissions', ADA.replace('days_late: 0', 'days_late: 1'))));
+    expect(big().textContent).toBe('Return marks to 1 student');
+  });
+
+  it('counts a marked unit absent from the record, and says who is already told', async () => {
+    const sheet = SHEET.replace('  cy-d:\n    info:\n      submitted:\n      days_late:\n      autograde:\n    score_individual:\n      Q1:', '  cy-d:\n    info:\n      submitted:\n      days_late:\n      autograde:\n    score_individual:\n      Q1: 5');
+    const gh = github(), f = withTold(record('submissions', ADA), sheet), env = envOf(gh, f);
+    await mount(env, <><AssignmentScreen {...props(f)} /><OpPanel /></>);
+    expect(big().textContent).toBe('Return marks to 1 student');
+    await click(big());
+    expect(q('.op-facts p').textContent).toBe('1 student gets new marks · 1 already told and unchanged · 0 not marked yet (skipped) · 1 held (fix first)');
+  });
+
+  it('does not count unsaved edits, and says to save them', async () => {
+    await marks(withTold(record('submissions', ADA)));
+    await type('input[aria-label="Q1 (out of 10) for cy-d"]', '6');
+    expect(big().textContent).toBe('Return marks to 0 students');
+    expect(big().disabled).toBe(true);
+    expect(why()).toBe('Save marks to return them');
+  });
+
+  it('says nothing is marked yet on a sheet without a mark', async () => {
+    await marks(withTold(null, SHEET.replace('      Q1: 8\n      Q2: 9', '      Q1:\n      Q2:').replace('Q1: pass', 'Q1:')));
+    expect(big().textContent).toBe('Return marks to 0 students');
+    expect(why()).toBe('Nothing is marked yet');
+  });
+
+  it('counts a team whose member was swapped, though both members’ own fields are blank', () => {
+    const team = (who: string) => ({ score_group: { Q1: 8 }, members: { [who]: { adjustment_individual: null, feedback_individual: null } } });
+    expect(untold(team('carol'), team('alice'))).toBe(true);
+    expect(untold(team('alice'), team('alice'))).toBe(false);
+    expect(untold({ score_group: 8, members: { alice: null } }, { score_group: 8, members: { alice: { feedback_individual: '' } } })).toBe(false);
+  });
+
+  describe('once the late rate moved', () => {
+    // ben is marked and two days late, under the rule.
+    const LATE = SHEET.replace('      Q1: pass', '      Q1: 5');
+    const BEN = block(LATE, 'ben-k');
+    const toldAt = (rate: string | null, ben = BEN) => `${rate === null ? '' : `late_penalty_per_day: ${rate}\n`}${record('submissions', ADA, ben)}`;
+
+    it('counts every late unit under the rule, and no on-time one', async () => {
+      await marks(withTold(toldAt('5%'), LATE));
+      expect(big().textContent).toBe('Return marks to 1 student');
+    });
+
+    it('counts nobody when the rate is the one they were told under, or the record predates the rate', async () => {
+      await marks(withTold(toldAt('10%'), LATE));
+      expect(big().textContent).toBe('Return marks to 0 students');
+      render(null, root!);
+      root!.remove();
+      await marks(withTold(toldAt(null), LATE));
+      expect(big().textContent).toBe('Return marks to 0 students');
+    });
+
+    it('counts no unit whose penalty is waived or set by hand', async () => {
+      for (const choice of ['waive', '15%']) {
+        const sheet = LATE.replace('      Q2:\n    adjustment_individual:\n    feedback_individual:\n    notes', `      Q2:\n    late_penalty: ${choice}\n    adjustment_individual:\n    feedback_individual:\n    notes`);
+        await marks(withTold(toldAt('5%', block(sheet, 'ben-k')), sheet));
+        expect(big().textContent).toBe('Return marks to 0 students');
+        render(null, root!);
+        root!.remove();
+      }
+    });
+  });
+
+  describe('while the record cannot be used', () => {
+    const toldIn = (state: FileState) => {
+      const f = files();
+      const read = f.file.bind(f);
+      f.file = (owner, repo, path) => (path === toldPath('assignment-2') ? state : read(owner, repo, path));
+      return f;
+    };
+
+    it('claims no count while it is read', async () => {
+      await marks(toldIn({ kind: 'loading' }));
+      expect(big().textContent).toBe('Return marks');
+      expect(big().disabled).toBe(true);
+      expect(why()).toBe('Reading what students were last told');
+    });
+
+    it('counts everyone marked over a record it could not read, and says the count may be high', async () => {
+      await marks(toldIn({ kind: 'error', message: 'HTTP 502' }));
+      expect(big().textContent).toBe('Return marks to 1 student');
+      expect(big().disabled).toBe(false);
+      expect(why()).toBe('Who was last told could not be read; the count may be high');
+    });
+  });
+
+  it('leaves out a unit nobody on students.csv owns, as the engine does, and says how many', async () => {
+    const sheet = SHEET.replace('    score_individual:\n      Q1:\n      Q2:', '    score_individual:\n      Q1: 5\n      Q2: 5');
+    const roster = rosterFiles(COHORT_ORG, 'email,name,role,github_handle\nada@x.org,Ada,enrolled,ADA-L\nben@x.org,Ben,enrolled,ben-k\n');
+    const f = files(sheet);
+    for (const [path, text] of Object.entries(roster)) seed(f, path, text);
+    const gh = github(), env = envOf(gh, f);
+    await mount(env, <><AssignmentScreen {...props(f)} /><OpPanel /></>);
+    expect(big().textContent).toBe('Return marks to 1 student');
+    await click(big());
+    expect(q('.op-facts p').textContent).toBe('1 student gets new marks · 0 already told and unchanged · 0 not marked yet (skipped) · 1 held (fix first) · 1 not on the roster');
+  });
+});
+
+describe('points per question from the Marks tab', () => {
+  const FLAT = 'type: individual\nautograde: true\nformats: [py]\n';
+  const ONE_SCORE = SHEET.replace('    score_individual:\n      Q1: 8\n      Q2: 9', '    score_individual: 12');
+  const NO_SCORE = SHEET.replace('    score_individual:\n      Q1: 8\n      Q2: 9', '    score_individual:').replace('    score_individual:\n      Q1: pass\n      Q2:', '    score_individual:');
+  const toggle = () => root!.querySelector<HTMLButtonElement>('.marks-tools .points-toggle');
+  const editor = () => root!.querySelector('.points-edit');
+
+  it('offers to set points where the template has none, and to edit them where it has', async () => {
+    await marks(files(SHEET, FLAT));
+    expect(toggle()!.textContent).toBe('Set points per question');
+    render(null, root!);
+    root!.remove();
+    await marks();
+    expect(toggle()!.textContent).toBe('Edit points per question');
+  });
+
+  it('opens the rows editor in place, saying it changes the template for every semester', async () => {
+    await marks();
+    expect(editor()).toBeNull();
+    await click(toggle()!);
+    expect([...editor()!.querySelectorAll<HTMLInputElement>('input[aria-label$=" name"]')].map((x) => x.value)).toEqual(['Q1', 'Q2']);
+    expect(editor()!.textContent).toContain('This changes the assignment template, for every semester that uses it.');
+    expect(editor()!.textContent).not.toContain('single score');
+    await click(button('Cancel'));
+    expect(editor()).toBeNull();
+  });
+
+  it('saves the points into the template’s grading_config.yml on solution, and the grid gains the columns', async () => {
+    const gh = github();
+    await marks(files(NO_SCORE, FLAT), gh);
+    expect(q('thead').textContent).not.toContain('Points per question');
+    await click(toggle()!);
+    await type('input[aria-label="Question 1 points"]', '15');
+    await click(button('Add a question'));
+    await type('input[aria-label="Question 2 points"]', '25');
+    await click(button('Save points'));
+    await settle(() => editor() === null);
+    const put = puts(gh);
+    expect(put).toHaveLength(1);
+    expect(put[0].url).toContain(`/repos/${COURSE_ORG}/assignment-2-f2026/contents/grading_config.yml`);
+    expect((put[0].body as { branch: string }).branch).toBe('solution');
+    expect(parse(body(put[0]))).toEqual({ type: 'individual', autograde: true, formats: ['py'], questions: { Q1: 15, Q2: 25 } });
+    expect(q('thead').textContent).toContain('Points per question');
+    expect(root!.querySelector('input[aria-label="Q1 (out of 15) for ada-l"]')).not.toBeNull();
+    expect(toggle()!.textContent).toBe('Edit points per question');
+  });
+
+  it('says a row with a single score keeps it as its total, only where the sheet has one', async () => {
+    await marks(files(ONE_SCORE, FLAT));
+    await click(toggle()!);
+    expect(editor()!.textContent).toContain('A row that already has a single score keeps it as its total until you enter points per question.');
+  });
+
+  it('shows a single score as the total once questions exist, and a question mark typed over it saves per question', async () => {
+    const gh = github();
+    await marks(files(ONE_SCORE, CONFIG), gh);
+    const ada = () => [...root!.querySelectorAll('tr.unit-row')][0];
+    expect(ada().querySelector<HTMLInputElement>('input[aria-label="Q1 (out of 10) for ada-l"]')!.value).toBe('');
+    expect(ada().querySelector('td.calc')!.textContent).toBe('12');
+    expect(ada().hasAttribute('data-unmarked')).toBe(false);
+    await type('input[aria-label="Q1 (out of 10) for ada-l"]', '7');
+    expect(ada().querySelector('td.calc')!.textContent).toBe('7');
+    await click(button('Save marks'));
+    await settle(() => puts(gh).length > 0);
+    expect(parse(body(puts(gh)[0])).submissions['ada-l'].score_individual).toEqual({ Q1: 7 });
+  });
+
+  it('opens with nothing to save where the template has no questions yet', async () => {
+    await marks(files(SHEET, FLAT));
+    await click(toggle()!);
+    expect(button('Save points').disabled).toBe(true);
+    await type('input[aria-label="Question 1 points"]', '15');
+    expect(button('Save points').disabled).toBe(false);
+  });
+
+  it('will not save a question marked from a file outside the submission', async () => {
+    const gh = github();
+    await marks(files(SHEET, CONFIG), gh);
+    await click(toggle()!);
+    await type('input[aria-label="Question 1 file"]', '../secret.tex');
+    expect(editor()!.textContent).toContain('../secret.tex is not a file inside the submission.');
+    expect(button('Save points').disabled).toBe(true);
+    expect(puts(gh)).toHaveLength(0);
   });
 });
 
@@ -794,6 +1076,16 @@ describe('teams and people on the grid', () => {
     expect(button('Open all teams')).toBeUndefined();
   });
 
+  it('counts teams for Return marks, a changed member adjustment counting the team', async () => {
+    const told = (sheet: string) => seed(teamFiles(), TOLD_PATH, `# Last told.\n${sheet}`);
+    await mountTeams(told(TEAMS));
+    expect([big().textContent, big().disabled]).toEqual(['Return marks to 0 teams', true]);
+    render(null, root!);
+    root!.remove();
+    await mountTeams(told(TEAMS.replace('      ben-k:\n        adjustment_individual:', '      ben-k:\n        adjustment_individual: 2')));
+    expect([big().textContent, big().disabled]).toEqual(['Return marks to 1 team', false]);
+  });
+
   it('names an individual student, handle under the name, and keeps Adjustment behind its chip', async () => {
     const f = files();
     Object.assign((f as unknown as { map: Record<string, string> }).map, roster);
@@ -964,5 +1256,38 @@ describe('moderation', () => {
     await marks();
     expect(root!.querySelector('section.markers')).toBeNull();
     expect(root!.querySelector('select[aria-label="Marked by"]')).toBeNull();
+  });
+});
+
+describe('after a run finishes', () => {
+  const def = (op: string, args: Record<string, unknown>) => ({ ...returnMarks({ courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' }, { slug: 'a', title: 'A', template: 't', units: 1, group: false, when: 'Marking' }, 1, 'a'), op, args });
+  const spy = () => ({ refresh: vi.fn(), refreshUnder: vi.fn() });
+  const statuses = { reload: vi.fn(async () => {}) };
+
+  it('reads again the last-told record Return marks rewrote: its sheet’s, or every one held', () => {
+    const one = spy();
+    refreshAfterRun(def('grades.return', { assignment: 'assignment-2' }), statuses, one);
+    expect(one.refresh).toHaveBeenCalledWith(COHORT_ORG, 'semester-config', toldPath('assignment-2'));
+    expect(one.refreshUnder).not.toHaveBeenCalled();
+    const all = spy();
+    refreshAfterRun(def('grades.return', {}), statuses, all);
+    expect(all.refreshUnder).toHaveBeenCalledWith(COHORT_ORG, 'semester-config', RETURNED_DIR);
+    const other = spy();
+    refreshAfterRun(def('roster.send_codes', {}), statuses, other);
+    expect(other.refreshUnder).not.toHaveBeenCalled();
+    expect(other.refresh.mock.calls.map((c) => c[2])).not.toContain(toldPath('assignment-2'));
+  });
+
+  it('drops every file held under a folder, and no other', async () => {
+    const getContents = vi.fn(async (_o: string, _r: string, path: string) => ({ text: path, sha: 's' }));
+    const live = new LiveFiles({ getContents } as never);
+    const told = toldPath('assignment-2'), sheet = 'grading_sheets/assignment-2.yml';
+    live.file(COHORT_ORG, 'semester-config', told);
+    live.file(COHORT_ORG, 'semester-config', sheet);
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    live.refreshUnder(COHORT_ORG, 'semester-config', RETURNED_DIR);
+    expect(live.file(COHORT_ORG, 'semester-config', told).kind).toBe('loading');
+    expect(live.file(COHORT_ORG, 'semester-config', sheet).kind).toBe('ready');
+    expect(getContents).toHaveBeenCalledTimes(3);
   });
 });

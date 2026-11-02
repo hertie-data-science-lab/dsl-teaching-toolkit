@@ -137,7 +137,7 @@ SUBMIT_VIA = ("assignment_repo", "shared_dropbox_repo", "external")
 # can point here instead of arguing it out again and drifting: a drop box is ONE repo that
 # the whole semester reads, and no student can opt out of being in it. Everything that would
 # otherwise be written per unit therefore has nowhere private to go - no Submission receipts issue
-# at all (`has_receipts_issue`), no model solution (`can_hold_solution`), and no
+# at all (`has_receipts_issue`), and no
 # `visibility:` to choose (v1 keeps it private, because `public` would publish every
 # student's submission on the strength of one instructor's line). It is hand-marked for a
 # different reason: the autograder and the grader's reading copy run per UNIT against the
@@ -302,13 +302,16 @@ def can_hold_solution(submit_via: str, visibility: str) -> bool:
 
     ONE predicate for a question two files ask independently: `assign.provision_all` skips
     the push, and the digest faults a `schedule.yml` `solution_datetime:` that would
-    therefore pass and release nothing. Asked apart, the two came to disagree - a
-    `shared_dropbox_repo` assignment was scheduled a release the handout silently declined.
+    therefore pass and release nothing. Asked apart, the two came to disagree.
 
-    It takes a repo of the unit's OWN (`external` has none, and a shared drop box is one
-    repo the whole semester reads) AND a repo the toolkit can promise is private (`public`
-    publishes the answers to the internet, `student_choice` lets any student publish
-    them). Neither can be taken back, which is why this is a refusal and not a warning."""
+    It takes a repo the toolkit can promise is private: a unit's OWN `private` repo, or
+    the drop box, which is always private and gets the answer once, in a top-level
+    `solution/` folder the whole semester reads after the cutoff (`assign._release_shared`).
+    `external` has no repo at all; `public` publishes the answers to the internet, and
+    `student_choice` lets any student publish them. Neither can be taken back, which is
+    why this is a refusal and not a warning."""
+    if submit_via == "shared_dropbox_repo":
+        return True
     return creates_unit_repos(submit_via) and visibility == "private"
 
 
@@ -543,10 +546,16 @@ def marks_returned_marker(slug: str) -> str:
     return f"<!-- dsl-marks-returned:{slug} -->"
 
 
-def late_rule(window_days: int | None, penalty: str | None) -> str:
+def late_rule(
+    window_days: int | None, penalty: str | None, *, collects: bool = True
+) -> str:
     """The late-work rule an assignment declares, as the half-sentence that follows
     "Late work: " - `10% per day, up to 10 days`, `accepted up to 7 days late`, or `not
     accepted after the deadline`.
+
+    Work handed in outside GitHub (`collects` false: `collects_commits`) has no window and
+    no cutoff; its marker enters the days late, so the rule is the rate alone - `10% of
+    the grade per day late, counted by your marker` - or "" with no penalty to state.
 
     Takes the spec's RESOLVED values (`settings`: the institution's rule for an
     assignment nobody set one for); a window of 0 or None here is a layer that turned late
@@ -559,6 +568,12 @@ def late_rule(window_days: int | None, penalty: str | None) -> str:
     NOT `receipts.late_policy`, which answers a different question: that is this rule against
     a real cutoff DATE (`accepted until Sunday 11 October 2026, 23:59 ...`), which only an
     assignment with a due date on record can be told."""
+    if not collects:
+        return (
+            f"{penalty} of the grade per day late, counted by your marker"
+            if penalty
+            else ""
+        )
     if not window_days:
         return "not accepted after the deadline"
     if penalty:

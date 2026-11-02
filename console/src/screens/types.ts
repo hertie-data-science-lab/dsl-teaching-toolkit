@@ -21,6 +21,8 @@ export interface CohortProps {
   heartbeat?: Heartbeat | null;
   /** A template for the schedule editor's new entry (`?template=`, from New assignment). */
   prefill?: string;
+  /** The course's public status, read for the side nav anyway: its template list is fresher than the semester's copy. Absent in render tests. */
+  courseLoaded?: Loaded;
 }
 
 /** A semester screen whose status is ready. */
@@ -39,6 +41,8 @@ export interface CourseProps {
   folder?: string;
   /** A file open in the viewer on the course materials index (`?file=<repo>/<path>`). */
   file?: string;
+  /** The semester the page was opened from (`?cohort=`): New assignment's choice of schedule. */
+  cohort?: string;
 }
 
 export interface HomeProps {

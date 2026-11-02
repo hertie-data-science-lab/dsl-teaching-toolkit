@@ -37,6 +37,10 @@ RECORDS = {
     # one marker per assignment whose marks automation returned at its
     # `marks_return_datetime` (`distribute.marks_due`)
     "marks_returned": "marks-returned",
+    # one file per grading sheet: each unit's block as it stood when the last real Return
+    # marks left every person in it told (`distribute.returned_record`) - what the console
+    # counts the next Return marks' emails against
+    "returned": "returned",
     "gradebook": "gradebook",
     "distributed": "gradebook/distributed.csv",
     "team_formation": "team-formation",

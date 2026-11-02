@@ -137,9 +137,9 @@ Each assignment's dates and run settings.
 | `number` | **yes** | - | "Assignment 1" on the site |
 | `template` | **yes** | - | the course-org template each student's (or team's) repo is generated from |
 | `repo_name` | no | the key | what this semester's repos are called (`<repo_name>-<handle>`) |
-| `handout_datetime` | no | - | when repos are provisioned. Omit it to hand out by hand |
+| `handout_datetime` | no | - | when repos are provisioned. Omit it to hand out by hand: nothing goes out (the site withholds the brief, no grading sheet) until someone presses **Hand out now** on the assignment's console page |
 | `due_datetime` | no | - | the deadline students see; a bare date closes at **23:59:59**. Absent: dates to be confirmed - its hand-out and due rows show **TBC** at the end of term, with no links, and nothing fires until it has one (a to-do: *Give assignment-2 a due date*) |
-| `solution_datetime` | no | - | when the template's `solution/` is pushed into every repo. **No default**; must be after `handout_datetime` (and needs it) and no earlier than the late cutoff. It cannot be undone |
+| `solution_datetime` | no | - | when the template's `solution/` is pushed into every repo (a shared drop box: once, into its own `solution/` folder; `external`: never). **No default**; must be after `handout_datetime` (and needs it) and no earlier than the late cutoff. It cannot be undone |
 | `marks_return_datetime` | no | - | when marks go back automatically, once every unit is marked. `{event_datetime: ..., show_on_site: true}` also shows a "Marks expected" row |
 | `details`, `show_on_site`, `tbc` | no | - | as for any entry; on both its rows (out and due) |
 | `type` | no | the template's | `individual` or `group`: this semester's override of the template's `grading_config.yml` |
@@ -147,7 +147,7 @@ Each assignment's dates and run settings.
 
 Run settings, each optional, written on the entry: `late_window_days`, `late_penalty_per_day`, `team_formation` (`self_select` or `assigned`), `max_team_size`, `assignment_repo_visibility` (`private`, `public`, `student_choice`; read when each repo is created), `marks_per_question`, `submit_url` (`submit_via: external` only). Nearest wins, per key: the entry, then `semester-config/semester.yml` `defaults:`, then the course's `.github/course.yml` `defaults:`, then `institution.yml`. The console shows each effective value and where it came from. The late window and penalty go together: an entry naming one sets the other to none.
 
-**The late cutoff is computed, never written:** `due_datetime` plus `late_window_days`.
+**The late cutoff is computed, never written:** `due_datetime` plus `late_window_days`. `submit_via: external` has no late window: its cutoff is the due date, and the marker enters days late ([10](10-grade-and-return-assignments.md)).
 
 ```yaml
 assignments:
@@ -347,7 +347,7 @@ Each assignment's **late cutoff** is `due_datetime` plus its `late_window_days`.
 
 ### Releasing the model solution
 
-`solution_datetime` is separate from all of the above, and has no default - a solution released the moment submissions close rewards anyone who pushes late, so you name the moment or it never fires. At that datetime the scheduled run pushes the template's `solution/` folder into every student/team repo, which is exactly what the `assignment.handout_now` op with `solution_datetime: now` does by hand. Both are idempotent, so doing one after the other changes nothing. The push that first adds a `solution_datetime:` gets a notice on its commit saying so; a hand out with `now` (console or CLI) runs only straight after a preview of it by the same person.
+`solution_datetime` is separate from all of the above, and has no default - a solution released the moment submissions close rewards anyone who pushes late, so you name the moment or it never fires. At that datetime the scheduled run pushes the template's `solution/` folder into every student/team repo (a shared drop box gets it once, in its own top-level `solution/` folder; external work, nowhere), which is exactly what the `assignment.handout_now` op with `solution_datetime: now` does by hand. Both are idempotent, so doing one after the other changes nothing. The push that first adds a `solution_datetime:` gets a notice on its commit saying so; a hand out with `now` (console or CLI) runs only straight after a preview of it by the same person.
 
 It must not fall before the late cutoff: students still handing in could read it. The schedule check on a push and the console refuse such a date when it is saved. One in the file anyway (a late window changed afterwards, say) is held by the scheduler and shown at the cutoff, and the digest issue names the line to move. A cutoff that cannot be worked out holds it too. Only the solution waits; hand outs, releases and the freeze run as written.
 

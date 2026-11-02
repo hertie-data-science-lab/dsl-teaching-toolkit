@@ -163,7 +163,9 @@ def test_parse_full_schedule():
     )
     # The late cutoff is computed: the due date plus the institution's 10-day window.
     assert (
-        schedule.grading_cutoff_datetime(sched, "assignment-1")
+        schedule.grading_cutoff_datetime(
+            sched, "assignment-1", submit_via="assignment_repo"
+        )
         .isoformat()
         .startswith("2026-10-23T23:59:59")
     )
@@ -704,7 +706,9 @@ def test_a_run_keeps_an_early_solution_and_holds_it_until_the_cutoff(monkeypatch
         2026, 10, 16, 9, 0, tzinfo=BERLIN
     )
     assert not sched.dropped
-    held = schedule.solution_held_until(sched, "assignment-1")
+    held = schedule.solution_held_until(
+        sched, "assignment-1", submit_via="assignment_repo"
+    )
     assert held == datetime(2026, 10, 18, 23, 59, 59, tzinfo=BERLIN)
     # past a 2-day window, nothing is held
     settings.course_defaults.cache_clear()
@@ -713,7 +717,12 @@ def test_a_run_keeps_an_early_solution_and_holds_it_until_the_cutoff(monkeypatch
         "org_meta",
         lambda org: {"defaults": {"late_window_days": 2}},
     )
-    assert schedule.solution_held_until(sched, "assignment-1") is None
+    assert (
+        schedule.solution_held_until(
+            sched, "assignment-1", submit_via="assignment_repo"
+        )
+        is None
+    )
 
 
 def test_an_unknowable_cutoff_is_never_the_institution_s(monkeypatch):
@@ -722,19 +731,25 @@ def test_an_unknowable_cutoff_is_never_the_institution_s(monkeypatch):
     sched = parse(_with_solution("2026-10-30T09:00"))
     sched.org = "Sem-f2026"
     monkeypatch.setattr(settings, "course_org_for_semester", lambda org: "")
-    assert schedule.solution_cutoff(sched, "assignment-1") is None
+    assert (
+        schedule.solution_cutoff(sched, "assignment-1", submit_via="assignment_repo")
+        is None
+    )
 
     def unreadable(org):
         raise RuntimeError("rate limited")
 
     monkeypatch.setattr(settings, "course_org_for_semester", unreadable)
-    assert schedule.solution_cutoff(sched, "assignment-1") is None
+    assert (
+        schedule.solution_cutoff(sched, "assignment-1", submit_via="assignment_repo")
+        is None
+    )
     monkeypatch.setattr(settings, "course_org_for_semester", lambda org: "Course")
     monkeypatch.setattr(settings, "org_meta", lambda org: {})
     # read: the institution's 10 days is now the course's answer too
-    assert schedule.solution_cutoff(sched, "assignment-1") == datetime(
-        2026, 10, 23, 23, 59, 59, tzinfo=BERLIN
-    )
+    assert schedule.solution_cutoff(
+        sched, "assignment-1", submit_via="assignment_repo"
+    ) == datetime(2026, 10, 23, 23, 59, 59, tzinfo=BERLIN)
 
 
 def test_an_unparseable_solution_datetime_is_flagged_with_what_it_costs():
@@ -1472,16 +1487,40 @@ def test_the_late_cutoff_is_the_due_date_plus_the_effective_window(monkeypatch):
     )
     due = sched.assignments["a1"].due_datetime
     # Nothing declared: the institution's 10 days.
-    assert schedule.grading_cutoff_datetime(sched, "a1") == due + timedelta(days=10)
+    assert schedule.grading_cutoff_datetime(
+        sched, "a1", submit_via="assignment_repo"
+    ) == due + timedelta(days=10)
     # The entry's own setting answers first; 0 is no late work at all.
     sched.org = "Sem"
     monkeypatch.setattr(settings, "course_org_for_semester", lambda org: "C")
     sched.assignments["a1"].settings = {"late_window_days": 0}
-    assert schedule.grading_cutoff_datetime(sched, "a1") == due
+    assert (
+        schedule.grading_cutoff_datetime(sched, "a1", submit_via="assignment_repo")
+        == due
+    )
     # A late rule naming only the penalty names no window: no late work either.
     sched.assignments["a1"].settings = {"late_penalty_per_day": "5%"}
-    assert schedule.grading_cutoff_datetime(sched, "a1") == due
-    assert schedule.grading_cutoff_datetime(sched, "unknown") is None
+    assert (
+        schedule.grading_cutoff_datetime(sched, "a1", submit_via="assignment_repo")
+        == due
+    )
+    assert (
+        schedule.grading_cutoff_datetime(sched, "unknown", submit_via="assignment_repo")
+        is None
+    )
+
+
+def test_work_handed_in_outside_github_has_no_late_window():
+    # Nothing tells the toolkit when external work arrived, so nothing can be late: its
+    # cutoff is the due date whatever the window says. Both repo shapes keep the window.
+    sched = parse(
+        {"assignments": {"a1": {"template": "a", "due_datetime": "2026-10-13"}}}
+    )
+    due = sched.assignments["a1"].due_datetime
+    cutoff = lambda via: schedule.grading_cutoff_datetime(sched, "a1", submit_via=via)
+    assert cutoff("external") == due
+    assert cutoff("assignment_repo") == due + timedelta(days=10)
+    assert cutoff("shared_dropbox_repo") == due + timedelta(days=10)
 
 
 def test_an_unparseable_marks_return_datetime_is_flagged():
@@ -1535,12 +1574,15 @@ def test_the_formation_window_runs_from_the_handout_to_the_grading_pin():
             }
         }
     )
-    assert schedule.formation_window(sched, "a1") == (
+    assert schedule.formation_window(sched, "a1", submit_via="assignment_repo") == (
         sched.assignments["a1"].handout_datetime,
-        schedule.grading_cutoff_datetime(sched, "a1"),
+        schedule.grading_cutoff_datetime(sched, "a1", submit_via="assignment_repo"),
     )
     # A slug this schedule does not carry gets no window at all, rather than half of one.
-    assert schedule.formation_window(sched, "nope") == (None, None)
+    assert schedule.formation_window(sched, "nope", submit_via="assignment_repo") == (
+        None,
+        None,
+    )
 
 
 def test_an_assignment_handed_out_by_hand_has_a_window_that_never_opens():
@@ -1549,7 +1591,7 @@ def test_an_assignment_handed_out_by_hand_has_a_window_that_never_opens():
     sched = parse(
         {"assignments": {"a1": {"template": "a-f2026", "due_datetime": "2026-10-13"}}}
     )
-    opens, closes = schedule.formation_window(sched, "a1")
+    opens, closes = schedule.formation_window(sched, "a1", submit_via="assignment_repo")
     assert opens is None
     assert closes == sched.assignments["a1"].due_datetime + timedelta(days=10)
 

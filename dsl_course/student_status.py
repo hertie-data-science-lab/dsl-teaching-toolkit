@@ -603,7 +603,9 @@ def render_assignments(
         title = identifier(name)
         out_now = handed_out(name, entry, extra.handed_out, now)
         heading, brief = _brief(extra.readmes.get(key, "")) if out_now else ("", "")
-        window, shuts = schedule.formation_state(facts.sched, key, now)
+        window, shuts = schedule.formation_state(
+            facts.sched, key, now, submit_via=spec.submit_via
+        )
         self_select = spec.team_formation_resolved == SELF_SELECT
         forming = window == "open" and self_select and shuts is not None
         cap = extra.caps.get(key)
@@ -627,11 +629,15 @@ def render_assignments(
                 "handout_datetime": _iso(entry.handout_datetime),
                 "due_datetime": _iso(entry.due_datetime),
                 "grading_cutoff_datetime": _iso(
-                    schedule.grading_cutoff_datetime(facts.sched, key)
+                    schedule.grading_cutoff_datetime(
+                        facts.sched, key, submit_via=spec.submit_via
+                    )
                 ),
-                "late_rule": late_rule(spec.late_window_days, spec.late_penalty_per_day)
-                if spec.collects_commits
-                else "",
+                "late_rule": late_rule(
+                    spec.late_window_days,
+                    spec.late_penalty_per_day,
+                    collects=spec.collects_commits,
+                ),
                 "cutoff_sentence": CUTOFF_SENTENCE if spec.collects_commits else "",
                 "submit_via": spec.submit_via,
                 "shape": spec.submit_shape,
@@ -653,7 +659,9 @@ def render_assignments(
                 # When it is actually shown: a date before the late cutoff is held
                 # until the cutoff (`scheduler._solution_due`).
                 "solution_datetime": _iso(
-                    schedule.solution_held_until(facts.sched, key)
+                    schedule.solution_held_until(
+                        facts.sched, key, submit_via=spec.submit_via
+                    )
                     or entry.solution_datetime
                 ),
                 "max_points": _number(grading_spec.total_points(spec)),

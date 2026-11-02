@@ -239,7 +239,8 @@ jobs:
               const NAME_TAKEN =
                 `Thanks @${handle} - that assignment + team combination isn't available. ` +
                 `[Open a new Join team issue](${newIssue('')}) with another team name.`;
-              if (RESERVED.has(slug) || slug.startsWith('instructors-')) return refuse(NAME_TAKEN);
+              // `solution` is the drop box's model-answer folder, beside each team's own (dsl_course.teams.RESERVED_TEAM_NAMES).
+              if (RESERVED.has(slug) || slug.startsWith('instructors-') || team === 'solution') return refuse(NAME_TAKEN);
 
               // Verify the author is an onboarded student: their handle is recorded in the
               // engine's roster file (dsl_course.roster.SYSTEM_FIELDS), which names their email,

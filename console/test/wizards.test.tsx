@@ -23,7 +23,7 @@ import { assignmentMarking, assignmentWork, newMaterials } from '../src/tiers/wi
 import { CENTRAL, bootstrapInputs, runBootstrap } from '../src/wizards/central';
 import {
   assignmentArgs, autogradeBlock, cohortOrgName, cohortTerms, contentTerms, courseOrgName, courseSlugOf, formatBlock, formatError, materialsArgs,
-  IMPORT_UNTICKED_MAIN, IMPORT_UNTICKED_SOLUTION, importFixed, liveSemesters, nextTerm, openAt, termLabel, ordinalInName, parseSource, signature, sourceFixed, templateRepo, tickedEntries, toggleFormat,
+  IMPORT_UNTICKED_MAIN, IMPORT_UNTICKED_SOLUTION, importFixed, liveSemesters, nextTerm, openAt, termLabel, ordinalInName, parseSource, signature, sourceFixed, stamp, templateRepo, tickedEntries, toggleFormat,
 } from '../src/wizards/model';
 import { allOk, checkOrg, checkTemplate, readSource } from '../src/wizards/verify';
 import { saveDraft } from '../src/wizards/drafts';
@@ -120,6 +120,16 @@ describe('which step a wizard opens at', () => {
     const all = { 1: signature(v, S1), 2: signature(v, S2), 3: signature(v, S3), 4: signature(v, S4), 5: signature(v, S5) };
     expect(naDone({ v, verified: all }, v, false)).toEqual([true, true, true, true, true, false]);
     expect(openAt(naDone({ v, verified: {} }, v, true))).toBe(6);
+  });
+
+  it('drops the later stamps when a step continues with changed answers, and keeps them otherwise', () => {
+    const v = { ...initialValues(), name: 'Trees' };
+    const all = { 1: signature(v, S1), 2: signature(v, S2), 3: signature(v, S3), 4: signature(v, S4), 5: signature(v, S5) };
+    expect(stamp(all, 3, signature(v, S3))).toBe(all);
+    const w = { ...v, autograde: 'true' };
+    const after = stamp(all, 3, signature(w, S3));
+    expect(naDone({ v: w, verified: after }, w, false)).toEqual([true, true, true, false, false, false]);
+    expect(openAt(naDone({ v: w, verified: after }, w, false))).toBe(4);
   });
 
   it('trusts live checks over what the draft remembers', () => {
@@ -421,6 +431,28 @@ describe('the wizard screens', () => {
       expect(out).toContain('Skip it if the assignment is not written yet. You can fill it in later');
       expect(out).toContain('The marks page then shows no total.');
       expect(out).toContain('>Skip</button>');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('New assignment’s rail marks the optional points step done only once the person has passed it', () => {
+    const kept = new Map<string, string>();
+    vi.stubGlobal('localStorage', { getItem: (k: string) => kept.get(k) ?? null, setItem: (k: string, v: string) => kept.set(k, v), removeItem: (k: string) => kept.delete(k) });
+    const rail = (step: number) => [...render(<NewAssignmentScreen {...cp()} step={step} />).matchAll(/<li class="(\w+)/g)].map((m) => m[1]);
+    try {
+      // An earlier walk confirmed every step; the person then renamed it on step 1 and continued through step 2.
+      const old = { ...initialValues(), name: 'Trees' };
+      const earlier = { 1: signature(old, S1), 2: signature(old, S2), 3: signature(old, S3), 4: signature(old, S4), 5: signature(old, S5) };
+      const v = { ...old, name: 'Regression' };
+      let verified = stamp(stamp(earlier, 1, signature(v, S1)), 2, signature(v, S2));
+      saveDraft(`new-assignment:${COURSE_ORG}`, { v, verified });
+      expect(rail(3)).toEqual(['done', 'done', 'now', 'todo', 'todo', 'todo']);
+      // Steps 3 and 4 continued, step 5 skipped: back on step 3, step 5 is done.
+      const skipped = { ...v, questions: undefined };
+      verified = stamp(stamp(stamp(verified, 3, signature(v, S3)), 4, signature(v, S4)), 5, signature(skipped, S5));
+      saveDraft(`new-assignment:${COURSE_ORG}`, { v: skipped, verified });
+      expect(rail(3)).toEqual(['done', 'done', 'now', 'done', 'done', 'todo']);
     } finally {
       vi.unstubAllGlobals();
     }

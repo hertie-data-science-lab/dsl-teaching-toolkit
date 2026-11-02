@@ -15,7 +15,7 @@ from tests.conftest import run_settings
 
 
 def grading_datetime_iso(sched: Schedule, slug: str) -> str | None:
-    at = grading_cutoff_datetime(sched, slug)
+    at = grading_cutoff_datetime(sched, slug, submit_via="assignment_repo")
     return at.isoformat() if at is not None else None
 
 
@@ -99,4 +99,7 @@ def test_an_assignment_without_a_due_date_is_tbc_and_fires_nothing():
     sched = parse({"assignments": {"assignment-1": {"number": 1, "template": "a"}}})
     assert sched.assignments["assignment-1"].due_datetime is None
     assert sched.dropped == []
-    assert grading_cutoff_datetime(sched, "assignment-1") is None
+    assert (
+        grading_cutoff_datetime(sched, "assignment-1", submit_via="assignment_repo")
+        is None
+    )

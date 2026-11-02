@@ -9,19 +9,22 @@ import { useEnv } from '../env';
 import { invalidText, useSave } from '../edit/save';
 import { YamlText, compact, deepEqual } from '../edit/yamlText';
 import { Field, SchemaForm, fieldErrors } from '../forms/Form';
-import { Modal } from '../ui/Modal';
+import { MODAL_TEXT_ID, Modal } from '../ui/Modal';
 import {
   LATE_PAIR, REPO_NAME_RE, RUN_KEYS, semesterName, SOURCE_WORD, courseDefaults, effectiveOf, effectiveWord, lateWord, over, scheduleFile, semesterDefaults, semesterFile, usableBlock,
   fileValue, validSchedule, validSemesterBlocks, validSemesterFile, valueWord, type Block, type Effectives, type RunKey, type YamlFile,
 } from '../model/settings';
 import { defaultsOf, semesterInheritance, statedDefaults, withDefaults } from '../model/config';
-import { addDays, fmtWhen } from '../model/format';
+import { addDays, assignmentTitle, fmtDay, fmtWhen } from '../model/format';
 import { CONFIG_REPO, SEMESTER_FILE } from '../model/names';
 import { defaultsTiers } from '../tiers/course';
-import { draftErrors, readDraft, writeDraft, type AssignmentDraft } from '../model/scheduleEdit';
+import { draftErrors, newlyManual, readDraft, writeDraft, type AssignmentDraft, type Draft } from '../model/scheduleEdit';
+import { handout, type AsgRef } from '../ops/defs';
+import type { OpDef } from '../ops/session';
+import { OpButtons } from '../ops/Panel';
 import { SOLUTION_WARNING } from '../model/labels';
 import type { Assignment } from '../model/types';
-import { pastDue } from '../model/assignment';
+import { isGroup, pastDue } from '../model/assignment';
 import { penaltyRate } from '../model/policy';
 import { round } from '../model/marks';
 import { RUN_LABEL, lateError, runTier } from '../tiers/runSettings';
@@ -29,7 +32,7 @@ import type { FieldTier, Values } from '../tiers/types';
 import { CheckLine, EditFile, Loading } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveBar } from '../ui/edit';
-import { gradingConfig, tzOf, yearOf } from './common';
+import { cohortScope, gradingConfig, tzOf, yearOf } from './common';
 import type { ReadyProps } from './types';
 
 
@@ -49,6 +52,63 @@ export function sheetName(p: Pick<ReadyProps, 'files' | 'cohort'>, key: string):
   return f && f !== 'loading' ? semesterName(f.doc, key) : key;
 }
 
+/** The assignment as Hand out now names it, wherever it is offered. */
+export function handoutRef(p: Pick<ReadyProps, 'files' | 'cohort'>, a: Pick<Assignment, 'slug' | 'title' | 'number' | 'template' | 'units' | 'handout'>, group: boolean, tz: string, year: number): AsgRef {
+  return { slug: a.slug, title: assignmentTitle(a), template: a.template, units: a.units, group, when: a.handout ? `Scheduled ${fmtDay(a.handout, tz, year)}` : 'Hand out by hand', name: sheetName(p, a.slug) };
+}
+
+/** Whether an assignment set to hand out by hand is still waiting for Hand out now. */
+export const waitsByHand = (a: Pick<Assignment, 'state' | 'handout'>) => a.state === 'declared' && !a.handout;
+
+/** The tag on an assignment that `waitsByHand` (Schedule, Assignments). */
+export const ManualWaiting = () => <span class="chip amber">Manual hand-out: not handed out yet</span>;
+
+/** Hand out now for an assignment not yet handed out: one button, its panel the confirmation. */
+export function HandOutNow({ p, a, small }: { p: ReadyProps; a: Assignment; small?: boolean }) {
+  const tz = tzOf(p.status), year = yearOf(p.now, tz);
+  return <OpButtons def={handout(cohortScope(p), handoutRef(p, a, isGroup(a), tz, year))} label="Hand out now" small={small} />;
+}
+
+/**
+ * The assignment to offer Hand out now for beside an entry's hand out choice: only a saved entry
+ * handed out by hand, its choice unchanged in the draft, that the engine still reports declared.
+ * Never a draft: the op hands out what schedule.yml says.
+ */
+export function waitingHandOut(a: Assignment | undefined, saved: Draft | null, d: Draft): Assignment | null {
+  return a?.state === 'declared' && saved?.kind === 'assignments' && saved.manual && d.kind === 'assignments' && d.manual ? a : null;
+}
+
+/**
+ * Hand out for an entry just saved, from its draft: status.json lags the save, and the op
+ * needs only the template (the engine reads the entry from schedule.yml as committed).
+ */
+export function draftHandout(p: ReadyProps, d: AssignmentDraft): OpDef {
+  const cfg = gradingConfig(p, d.template);
+  const tz = tzOf(p.status), year = yearOf(p.now, tz);
+  const a = { slug: d.id, title: String(cfg.title ?? ''), number: typeof d.number === 'number' ? d.number : null, template: d.template, units: 0, handout: null };
+  return handout(cohortScope(p), handoutRef(p, a, cfg.type === 'group', tz, year));
+}
+
+/**
+ * The question a Save asks when it newly leaves an entry with no hand out date, on the
+ * Schedule and the Overview alike. `one` (exactly one such entry) offers Save and hand out
+ * now; `onSave(true)` saves, then opens Hand out on it.
+ */
+export function HandOutDialog({ one, onSave, onClose }: { one: boolean; onSave: (handOut: boolean) => void; onClose: () => void }) {
+  const it = one ? 'it is' : 'they are';
+  return (
+    <Modal small title="Hand out now?" onClose={onClose}>
+      <p id={MODAL_TEXT_ID}>You chose to hand out by hand. Until {it} handed out students see no brief and there is no mark sheet.</p>
+      <div class="actions">
+        {/* Several at once: each is handed out from its own page. */}
+        {one ? <button class="btn" type="button" onClick={() => { onClose(); onSave(true); }}>Save and hand out now</button> : null}
+        <button class={one ? 'btn outline' : 'btn'} type="button" onClick={() => { onClose(); onSave(false); }}>Save, hand out later</button>
+        <button class="btn quiet" type="button" onClick={onClose}>Cancel</button>
+      </div>
+    </Modal>
+  );
+}
+
 const toValues = (b: Block): Values => Object.fromEntries(Object.entries(b).map(([k, v]) => [k, v === null ? undefined : v]));
 
 // ------------------------------------------------------------------ the semester's defaults
@@ -63,25 +123,26 @@ export function defaultsLine(defaults: Effectives): string {
   return `Defaults: ${[...late, ...(size ? [`teams of ${String(size)}`] : [])].join(', ')}.`;
 }
 
-/** The semester's defaults as one line below the Assignments list; Change opens the form as a modal. */
+/** The Assignments page's Semester defaults button: it opens the semester's defaults, their summary as the lede, in a modal. */
 export function SemesterDefaults({ p }: { p: ReadyProps }) {
   const f = semesterFile(p.files, p.cohort.org);
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<Values | null>(null);
   const opener = useRef<HTMLButtonElement>(null);
-  if (f === 'loading') return <Loading what={`Reading ${SEMESTER_FILE}`} />;
-  if (f === null) return <CheckLine cls="bad">Could not read {SEMESTER_FILE}.</CheckLine>;
   const close = () => {
     setOpen(false);
     opener.current?.focus();
   };
   return (
     <>
-      <p class="defaults-line" id="semester-defaults">
-        {defaultsLine(entryBelow(p))}{' '}
-        <button class="textlink" type="button" ref={opener} aria-haspopup="dialog" onClick={() => setOpen(true)}>Change</button>
-      </p>
-      {open ? <Modal title="Defaults for this semester" onClose={close}><DefaultsForm p={p} f={f} draft={draft} setDraft={setDraft} /></Modal> : null}
+      <button class="btn quiet" type="button" ref={opener} aria-haspopup="dialog" onClick={() => setOpen(true)}>Semester defaults</button>
+      {open ? (
+        <Modal title="Defaults for this semester" onClose={close}>
+          {f === 'loading' ? <Loading what={`Reading ${SEMESTER_FILE}`} />
+            : f === null ? <CheckLine cls="bad">Could not read {SEMESTER_FILE}.</CheckLine>
+            : <><p class="lede">{defaultsLine(entryBelow(p))}</p><DefaultsForm p={p} f={f} draft={draft} setDraft={setDraft} /></>}
+        </Modal>
+      ) : null}
     </>
   );
 }
@@ -129,16 +190,36 @@ function DefaultsForm({ p, f, draft, setDraft }: { p: ReadyProps; f: YamlFile; d
 
 // ------------------------------------------------------------------ one assignment's run settings
 
-/** Which run settings apply to an assignment of this template: teams only for a team assignment, the link only for one submitted elsewhere. */
-export function applicableKeys(cfg: Record<string, unknown>, group: boolean): RunKey[] {
-  return RUN_KEYS.filter((k) => (k === 'team_formation' || k === 'max_team_size' ? group : k === 'submit_url' ? cfg.submit_via === 'external' : true));
+/** Where the work is handed in: the entry's `submit_via` override, else the template's. */
+const routeOf = (cfg: Record<string, unknown>, submitVia?: string) => submitVia || cfg.submit_via || 'assignment_repo';
+
+/** Whether the work is handed in outside GitHub (`submit_via: external`, `submitVia` the entry's override): no repo, so no late window and no visibility. */
+export const isExternal = (cfg: Record<string, unknown>, submitVia?: string) => routeOf(cfg, submitVia) === 'external';
+
+/** `course.can_hold_solution`: a unit's own private repo, or the shared drop box (always private). */
+export function canHoldSolution(cfg: Record<string, unknown>, visibility: unknown, submitVia?: string): boolean {
+  const via = routeOf(cfg, submitVia);
+  return via === 'shared_dropbox_repo' || (via === 'assignment_repo' && visibility === 'private');
+}
+
+/** The late window that sets the cutoff: none for external work, whatever the cascade says. */
+export const windowDays = (cfg: Record<string, unknown>, days: unknown, submitVia?: string) => (isExternal(cfg, submitVia) ? 0 : days);
+
+/** The late line for external work, wherever its cutoff would be. */
+export const NO_LATE_WINDOW = 'No late window: handed in outside GitHub, so the cutoff is the due date.';
+
+/**
+ * Which run settings apply to an assignment of this template: teams only for a team assignment;
+ * for external work the link, the late penalty without a window, and no visibility (no repo).
+ */
+export function applicableKeys(cfg: Record<string, unknown>, group: boolean, submitVia?: string): RunKey[] {
+  const ext = isExternal(cfg, submitVia);
+  return RUN_KEYS.filter((k) => (k === 'team_formation' || k === 'max_team_size' ? group : k === 'submit_url' ? ext : k === 'late_window_days' || k === 'visibility' ? !ext : true));
 }
 
 /** Why the template's shape fixes the visibility, or null. */
 export function forcedVisibility(cfg: Record<string, unknown>): string | null {
-  if (cfg.submit_via === 'shared_dropbox_repo') return 'Private: a shared drop box is always private.';
-  if (cfg.submit_via === 'external') return 'Private: the repo holds the brief only.';
-  return null;
+  return cfg.submit_via === 'shared_dropbox_repo' ? 'Private: a shared drop box is always private.' : null;
 }
 
 export interface RunRowsProps {
@@ -151,13 +232,16 @@ export interface RunRowsProps {
   draft: Values;
   setDraft: (v: Values) => void;
   errors: Record<string, string>;
-  defaultsHref: string;
   teamsHref?: string;
   forced?: string | null;
 }
 
-/** Each run setting as its effective value and source, with "Change for this assignment" opening the field. */
-export function RunRows({ id, keys, below, current, draft, setDraft, errors, defaultsHref, teamsHref, forced }: RunRowsProps) {
+/**
+ * Each run setting as its effective value and source, with "Change for this assignment" opening
+ * the field. The external link has no default: its row is the field. The semester's defaults
+ * are changed from the Assignments page, never per row.
+ */
+export function RunRows({ id, keys, below, current, draft, setDraft, errors, teamsHref, forced }: RunRowsProps) {
   const [opened, setOpened] = useState<string[]>([]);
   const own = usableBlock(draft);
   const mine = (k: RunKey) => over(k, own, 'entry', current ?? below);
@@ -170,31 +254,38 @@ export function RunRows({ id, keys, below, current, draft, setDraft, errors, def
   return (
     <>
       {rows.map((r) => {
+        const field = (k: RunKey) => (
+          <Field id={`${id}-${k}`} k={k} t={runTier(k, effectiveOf(below, k), { override: true }) as FieldTier} value={draft[k]} values={draft} error={errors[k]}
+            set={(key, v) => setDraft({ ...draft, [key]: v })} />
+        );
+        if (r.name === 'submit_url') return <div class="run-row">{field('submit_url')}</div>;
         const open = opened.includes(r.name) || r.keys.some(has);
         const late = r.name === 'late';
+        // A penalty with no window: work handed in outside GitHub, its days late entered by the marker.
+        const marked = r.name === 'late_penalty_per_day';
         const eff = mine(r.keys[0]);
         const effText = late ? `${lateWord(eff.value, mine('late_penalty_per_day').value)}, ${SOURCE_WORD[eff.source]}` : effectiveWord(r.keys[0], eff);
-        const label = late ? 'Late work' : RUN_LABEL[r.keys[0]];
+        const label = late ? 'Late work' : marked ? 'Late penalty' : RUN_LABEL[r.keys[0]];
+        const teams = r.name === 'team_formation' ? teamsHref : undefined;
         if (r.name === 'visibility' && forced)
           return <div class="field"><span class="label">{label}</span><div class="readonly">{forced}</div></div>;
         return (
           <div class="field run-row">
             <span class="label">{label}</span>
             <div class="eff" data-key={r.name}>{effText}</div>
+            {marked ? <p class="why">Applied to the days late you enter on the Marks tab. No late window: work is handed in outside GitHub.</p> : null}
             {open ? (
               <div class="cond">
-                {r.keys.map((k) => (
-                  <Field id={`${id}-${k}`} k={k} t={runTier(k, effectiveOf(below, k), { override: true }) as FieldTier} value={draft[k]} values={draft} error={errors[k]}
-                    set={(key, v) => setDraft({ ...draft, [key]: v })} />
-                ))}
+                {r.keys.map(field)}
                 <button class="textlink" type="button" onClick={() => { setOpened(opened.filter((x) => x !== r.name)); setDraft(Object.fromEntries(Object.entries(draft).filter(([k]) => !r.keys.includes(k as RunKey)))); }}>Use the default</button>
               </div>
             ) : null}
-            <p class="run-links">
-              {!open ? <button class="textlink" type="button" onClick={() => setOpened([...opened, r.name])}>Change for this assignment</button> : null}
-              <a class="textlink" href={defaultsHref}>Change the default</a>
-              {r.name === 'team_formation' && teamsHref ? <a class="textlink" href={teamsHref}>Open Teams</a> : null}
-            </p>
+            {!open || teams ? (
+              <p class="run-links">
+                {!open ? <button class="textlink" type="button" onClick={() => setOpened([...opened, r.name])}>Change for this assignment</button> : null}
+                {teams ? <a class="textlink" href={teams}>Open Teams</a> : null}
+              </p>
+            ) : null}
             {r.name === 'visibility' ? <p class="why">Applies to copies handed out after this change; existing copies keep theirs.</p> : null}
           </div>
         );
@@ -244,8 +335,8 @@ export function SolutionNote() {
 const T = (label: string, widget: FieldTier['widget'], extra: Partial<FieldTier> = {}): FieldTier => ({ tier: 'default', label, widget, ...extra });
 
 /** Timings as the Overview form edits them: hand out, due, the computed late cutoff, solution shown. */
-function Timings({ d, set, errors, cutoff, days, lateOk, solutionOff, tz, year }: {
-  d: AssignmentDraft; set: (patch: Partial<AssignmentDraft>) => void; errors: Record<string, string>; cutoff: string | null; days: unknown; lateOk: boolean; solutionOff: string | null; tz: string; year: number;
+function Timings({ d, set, errors, cutoff, days, lateOk, external, solutionOff, tz, year, handOut }: {
+  d: AssignmentDraft; set: (patch: Partial<AssignmentDraft>) => void; errors: Record<string, string>; cutoff: string | null; days: unknown; lateOk: boolean; external: boolean; solutionOff: string | null; tz: string; year: number; handOut?: preact.ComponentChildren;
 }) {
   const F = (k: keyof AssignmentDraft & string, t: FieldTier, error?: string) => (
     <Field id={`ov-${k}`} k={k} t={t} value={d[k]} values={d as unknown as Values} error={error} set={(key, v) => set({ [key]: v ?? (t.widget === 'checkbox' ? false : '') } as Partial<AssignmentDraft>)} />
@@ -256,17 +347,22 @@ function Timings({ d, set, errors, cutoff, days, lateOk, solutionOff, tz, year }
         <span class="label">Hand out</span>
         <div class="choices">
           <label class="choice"><input type="radio" name="ov-ho" checked={!d.manual} onChange={() => set({ manual: false })} /><b>At a time</b><span>Automation hands out then.</span></label>
-          <label class="choice"><input type="radio" name="ov-ho" checked={d.manual} onChange={() => set({ manual: true })} /><b>I will hand out manually</b><span>From this page.</span></label>
+          <label class="choice"><input type="radio" name="ov-ho" checked={d.manual} onChange={() => set({ manual: true })} /><b>I will hand out manually</b><span>Hand out now when you save, or later from this page.</span></label>
         </div>
+        {handOut}
       </div>
       {!d.manual ? <div class="cond"><div class="row-2">{F('handoutDate', T('Hand out on', 'date'), errors.handout)}{F('handoutTime', T('At', 'time'))}</div></div> : null}
       <div class="row-2">{F('dueDate', T('Due', 'date', { tier: 'ask' }), errors.due)}{F('dueTime', T('At', 'time', { tier: 'ask' }))}</div>
-      <div class="field">
-        <span class="label">Late cutoff <span class="default">computed</span></span>
-        <div class="readonly">{!lateOk ? 'No late work: the cutoff is the due date.' : cutoff ? `${fmtWhen(cutoff, tz, year)} (due + ${String(days)} day${days === 1 ? '' : 's'})` : 'Set the due date first.'}</div>
-        <p class="why">What is on main at the late cutoff is what is marked. Change it with the late window below.</p>
-      </div>
-      {solutionOff ? (
+      {external ? (
+        <div class="field"><span class="label">Late cutoff</span><div class="readonly">{NO_LATE_WINDOW}</div></div>
+      ) : (
+        <div class="field">
+          <span class="label">Late cutoff <span class="default">computed</span></span>
+          <div class="readonly">{!lateOk ? 'No late work: the cutoff is the due date.' : cutoff ? `${fmtWhen(cutoff, tz, year)} (due + ${String(days)} day${days === 1 ? '' : 's'})` : 'Set the due date first.'}</div>
+          <p class="why">What is on main at the late cutoff is what is marked. Change it with the late window below.</p>
+        </div>
+      )}
+      {external ? null : solutionOff ? (
         <div class="field"><span class="label">Solution shown</span><div class="readonly">{solutionOff}</div></div>
       ) : (
         <>
@@ -316,22 +412,25 @@ export function AssignmentRun({ p, a, group }: { p: ReadyProps; a: Assignment; g
   const [timing, setTiming] = useState<AssignmentDraft | null>(null);
   const [run, setRun] = useState<Values | null>(null);
   const [save, runSave, setSave] = useSave(env);
+  const [askManual, setAskManual] = useState(false);
   const sf = scheduleFile(p.files, p.cohort.org);
   if (sf === 'loading') return <section class="panel section"><h2>How this semester runs it</h2><Loading what="Reading the schedule" /></section>;
   if (!sf || sf.error) return <section class="panel section"><h2>How this semester runs it</h2><CheckLine cls="bad">The schedule could not be read{sf?.error ? ` (${sf.error})` : ''}; fix it with Edit the file directly.</CheckLine></section>;
   const baseT = readDraft(sf.doc, a.slug);
   if (!baseT || baseT.kind !== 'assignments') return <section class="panel section"><h2>How this semester runs it</h2><p class="footnote">{a.slug} is not in the schedule.</p></section>;
   const cfg = gradingConfig(p, a.template);
-  const keys = applicableKeys(cfg, group);
-  const beforeRun = runValues(baseT);
   const d = timing ?? baseT;
+  // The entry's own route as saved: the run settings that apply follow it.
+  const keys = applicableKeys(cfg, group, baseT.submitVia);
+  const beforeRun = runValues(baseT);
   const r = run ?? beforeRun;
   const below = entryBelow(p);
   const current = run === null ? a.settings : null;
   const own = usableBlock(r);
-  const days = over('late_window_days', own, 'entry', current ?? below).value;
-  const vis = forcedVisibility(cfg) ? 'private' : over('visibility', own, 'entry', current ?? below).value;
-  const solutionOff = vis !== 'private' ? 'Not available: student repos are not private, so the solution cannot be pushed automatically.' : d.manual ? 'Needs a hand out time; the solution must follow it.' : null;
+  const external = isExternal(cfg, d.submitVia);
+  const days = windowDays(cfg, over('late_window_days', own, 'entry', current ?? below).value, d.submitVia);
+  const vis = forcedVisibility({ ...cfg, submit_via: d.submitVia || cfg.submit_via }) ? 'private' : over('visibility', own, 'entry', current ?? below).value;
+  const solutionOff = !canHoldSolution(cfg, vis, d.submitVia) ? 'Not available: student repos are not private, so the solution cannot be pushed automatically.' : d.manual ? 'Needs a hand out time; the solution must follow it.' : null;
   const tErr = draftErrors(d, undefined, cutoffOf(d.dueDate, d.dueTime, typeof days === 'number' ? days : 0));
   const rErr = { ...runErrors(keys, below, r), ...repoNameError(r.repo_name) };
   const dirtyT = timing !== null && !deepEqual(timing, baseT);
@@ -339,16 +438,20 @@ export function AssignmentRun({ p, a, group }: { p: ReadyProps; a: Assignment; g
   // Past the due date the engine recomputes the cutoff and every late deduction off a changed late rule.
   const lateMoved = dirtyR && pastDue(a) && LATE_PAIR.some((k) => !deepEqual(compact({ k: r[k] }), compact({ k: beforeRun[k] })));
   const change = (patch: Partial<AssignmentDraft>) => { setTiming({ ...d, ...patch }); setSave({ kind: 'idle' }); };
-  const doSave = async () => {
-    if (Object.keys(tErr).length || Object.keys(rErr).length) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
+  const hasErrors = Object.keys(tErr).length > 0 || Object.keys(rErr).length > 0;
+  /** Save the entry; `handOut` then opens Hand out on it once the save lands. */
+  const doSave = async (handOut = false) => {
+    if (hasErrors) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
     const y = new YamlText(sf.text);
     writeDraft(y, withRun({ ...d, solutionOn: d.solutionOn && !solutionOff }, r), sf.doc);
     if (!validSchedule(y.toJS())) return setSave({ kind: 'bad', text: invalidText('the schedule', validSchedule) });
-    if (await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }, y.text, sf.sha, { message: `schedule: edit ${a.slug}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] })) {
-      setTiming(null);
-      setRun(null);
-    }
+    if (!(await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }, y.text, sf.sha, { message: `schedule: edit ${a.slug}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] }))) return;
+    setTiming(null);
+    setRun(null);
+    if (handOut) env?.ops.open(draftHandout(p, d));
   };
+  // An entry newly handed out by hand asks first, as the Schedule's Save does.
+  const requestSave = () => (dirtyT && !hasErrors && newlyManual(d, baseT, a.state) ? setAskManual(true) : void doSave());
   const repoName = typeof r.repo_name === 'string' ? r.repo_name : '';
   return (
     <section class="panel section" aria-label="How this semester runs it" id="run-settings">
@@ -356,27 +459,33 @@ export function AssignmentRun({ p, a, group }: { p: ReadyProps; a: Assignment; g
       <div class="form">
         <div class="form-section">
           <h3>Dates</h3>
-          <Timings d={d} set={change} errors={tErr} cutoff={cutoffOf(d.dueDate, d.dueTime, days)} days={days} lateOk={typeof days === 'number' && days > 0} solutionOff={solutionOff} tz={tz} year={year} />
+          <Timings d={d} set={change} errors={tErr} cutoff={cutoffOf(d.dueDate, d.dueTime, days)} days={days} lateOk={typeof days === 'number' && days > 0} external={external} solutionOff={solutionOff} tz={tz} year={year}
+            handOut={waitingHandOut(a, baseT, d) ? <div class="actions"><HandOutNow p={p} a={a} small /></div> : null} />
         </div>
         <div class="form-section">
           <h3>Run settings</h3>
           <RunRows id="ov" keys={keys} below={below} current={current} draft={r} setDraft={(v) => { setRun(v); setSave({ kind: 'idle' }); }} errors={rErr}
-            defaultsHref="#assignments" teamsHref={group ? `#assignment-${a.slug}/teams` : undefined} forced={forcedVisibility(cfg)} />
+            teamsHref={group ? `#assignment-${a.slug}/teams` : undefined} forced={forcedVisibility({ ...cfg, submit_via: d.submitVia || cfg.submit_via })} />
           <details class="fold" open={!!repoName}>
             <summary>Advanced <span class={`cnt${repoName ? ' changed' : ''}`}>({repoName ? '1 changed' : 'none changed'})</span></summary>
             <div class="fold-body">
               <Field id="ov-repo" k="repo_name" values={r} value={r.repo_name} set={(k, v) => { setRun({ ...r, [k]: v }); setSave({ kind: 'idle' }); }}
                 error={rErr.repo_name}
-                t={{ tier: 'advanced', label: 'Repo name in this semester', placeholder: a.slug, defaultLabel: `default: ${a.slug}`, reason: 'What this semester’s repos are called. Change it before the first hand out.' }} />
+                t={{
+                  tier: 'advanced', placeholder: a.slug, defaultLabel: `default: ${a.slug}`,
+                  label: external ? 'Name in this semester (sheet and site page)' : 'Repo name in this semester',
+                  reason: `What this semester’s ${external ? 'mark sheet, site page and gradebook entries are' : 'repos are'} called. Change it before the first hand out.`,
+                }} />
             </div>
           </details>
         </div>
         <div class="form-section">
           {lateMoved ? <CheckLine cls="warn">{LATE_MOVES}</CheckLine> : null}
-          <SaveBar state={save} onSave={() => void doSave()} disabled={!dirtyT && !dirtyR} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }} />
+          <SaveBar state={save} onSave={requestSave} disabled={!dirtyT && !dirtyR} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }} />
           <p class="lives">Dates and run settings live in <code>{CONFIG_REPO}/schedule.yml</code>.</p>
         </div>
       </div>
+      {askManual ? <HandOutDialog one onSave={(h) => void doSave(h)} onClose={() => setAskManual(false)} /> : null}
     </section>
   );
 }

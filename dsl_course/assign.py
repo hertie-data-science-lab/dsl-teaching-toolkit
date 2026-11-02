@@ -1288,8 +1288,8 @@ def main() -> int:
         "--assignment",
         default="",
         metavar="KEY",
-        help="Patch mode: the schedule.yml assignments key, needed only when two entries "
-        "hand out from this template.",
+        help="The schedule.yml assignments key, needed only when two entries hand out "
+        "from this template: the entry to hand out, or (patch mode) to patch.",
     )
     # Both modes preview unless told `--no-preview` (decision 0012): handing out creates a
     # repo per student, and patching commits into every one of them.
@@ -1298,11 +1298,6 @@ def main() -> int:
         "List the repos that would be created or patched; change nothing (default).",
     )
     args = parser.parse_args()
-    if args.assignment and not args.patch_path:
-        parser.error(
-            "--assignment picks the entry to patch; a hand out of a template two "
-            "entries share belongs to the schedule"
-        )
     when = args.solution_datetime.strip().lower()
     if when not in ("", SOLUTION_NOW):
         parser.error(
@@ -1338,11 +1333,13 @@ def main() -> int:
                 text, reasons=[{"code": NOT_SCHEDULED, "text": text}], code=1
             )
         # ... and a number (decision 0020 rule 3), refused the same way.
-        refusal = unnumbered_assignment(sched, args.template)
+        refusal = unnumbered_assignment(sched, args.template, args.assignment)
         if refusal:
             return refuse_unnumbered(refusal)
         if when == SOLUTION_NOW and not args.preview:
-            refused = preview_first(args.semester_org, args.template, preview=False)
+            refused = preview_first(
+                args.semester_org, args.template, preview=False, entry=args.assignment
+            )
             if refused is not None:
                 return refused
         rc, _changed = provision_all(
@@ -1352,13 +1349,18 @@ def main() -> int:
             roster_path=args.roster,
             solution=when == SOLUTION_NOW,
             dry_run=args.preview,
+            # The entry the console names (a resit sharing its template); none = the
+            # template's only entry, as before.
+            slug=args.assignment,
             # ONE listing of the semester for this press, taken here because there is no
             # tick above to have taken it: every repo question below is answered off it,
             # and None (it could not be read) falls back to a probe per repo.
             listing=listing_by_name(args.semester_org),
         )
         if when == SOLUTION_NOW and args.preview and rc == 0:
-            refused = preview_first(args.semester_org, args.template, preview=True)
+            refused = preview_first(
+                args.semester_org, args.template, preview=True, entry=args.assignment
+            )
             if refused is not None:
                 return refused
         if when == SOLUTION_NOW and not args.preview and rc == 0:
@@ -1374,6 +1376,8 @@ def main() -> int:
 SOLUTION_PREVIEW = records.path("solution_preview")
 PREVIEW_FIRST = "PREVIEW_FIRST"
 NOT_SCHEDULED = "NOT_SCHEDULED"
+NO_TEAMS_FOR_SOLUTION = "NO_TEAMS_FOR_SOLUTION"
+SOLUTION_BEFORE_CUTOFF_CODE = "SOLUTION_BEFORE_CUTOFF"
 
 
 def _actor() -> str:
@@ -1391,7 +1395,11 @@ def _refusal(text: str) -> Summary:
 
 
 def preview_first(
-    semester_org: str, template: str, preview: bool, now: datetime | None = None
+    semester_org: str,
+    template: str,
+    preview: bool,
+    now: datetime | None = None,
+    entry: str = "",
 ) -> Summary | None:
     """The one gate on a hand out WITH the solution (`--solution-datetime now`): it pushes
     the model answer and rubric into every student's repo, and cannot be undone. A preview
@@ -1404,6 +1412,10 @@ def preview_first(
     now = now or datetime.now(timezone.utc)
     actor = _actor()
     want = {"actor": actor.casefold(), "template": template, "solution": SOLUTION_NOW}
+    if (
+        entry
+    ):  # a named entry's preview licenses that entry, not its template's other one
+        want["assignment"] = entry
     if preview:
         body = json.dumps({**want, "at": now.isoformat()}, indent=2, sort_keys=True)
         if not put_file(
@@ -1492,11 +1504,13 @@ def record_solution_released(semester_org: str, slug: str, repos: int) -> bool:
     )
 
 
-# provision_one statuses that mean the model solution did NOT reach that unit's repo, and
+# Statuses that mean the model solution did NOT reach a unit's repo or the drop box, and
 # so must withhold the fire-once release marker. Every OTHER `failed-*` happens AFTER the
 # push (a dead handle, an unreachable team, a Submission receipts issue that would not open) and is
 # persistent, so withholding the marker for one would re-clone every submission repo every
-# hour for the rest of the term - the exact cost the marker exists to prevent.
+# hour for the rest of the term - the exact cost the marker exists to prevent. A drop box
+# whose grants or ruleset failed is the same: `_release_shared` reports `failed-solution`
+# itself when there was no drop box to push into.
 _SOLUTION_NOT_PUSHED = ("failed-solution", "failed-create")
 
 
@@ -1539,6 +1553,8 @@ def _release_external(
 
 
 def _release_shared(
+    course_org: str,
+    template: str,
     semester_template: str,
     semester_org: str,
     slug: str,
@@ -1552,27 +1568,24 @@ def _release_shared(
     listing: dict[str, dict] | None,
 ) -> _Released | None:
     """The `shared_dropbox_repo` arm: ONE private drop box for the whole semester,
-    generated from the frozen semester template, with push for every unit.
+    generated from the frozen semester template, with push for every unit - and, when
+    asked, the model solution pushed ONCE into its top-level `solution/` folder, beside the
+    units' own folders and touching none of them.
 
-    No units are returned: there is no repo per unit here, so nothing downstream that
-    counts them - the solution record above all - has anything to count."""
+    No units are returned: there is no repo per unit here. A solution that could not be
+    fetched or pushed is reported the way the per-unit arm reports it, so the fire-once
+    record is written only over a push that landed (`provision_all`)."""
     drop_box = shared_repo(slug)
     log_step(
         f"Releasing {slug} to {semester_org}: freeze semester template, then one private "
         f"drop box {semester_org}/{drop_box} with push for {what}"
     )
-    if solution:
-        # Nowhere private to put it - see the `shared_dropbox_repo` note beside
-        # `course.SUBMIT_VIA`.
-        # The fire-once marker is deliberately not written (`can_hold_solution` gates it),
-        # so an instructor who corrects the shape can still release it.
-        log(
-            f"  (no model solution to push - {slug} has one drop box the whole "
-            f"semester can read)"
-        )
     if dry_run:
         _dry_run_semester_template(semester_org, slug)
-        log(f"    PREVIEW  {semester_org}/{drop_box}  <- push for {what}")
+        log(
+            f"    PREVIEW  {semester_org}/{drop_box}  <- push for {what}"
+            f"{' + solution' if solution else ''}"
+        )
         return None
     drop_box_ok, changed = ensure_drop_box(
         semester_template,
@@ -1588,7 +1601,33 @@ def _release_shared(
         # Counted like any other handout failure, through the same `results` the tail
         # reads: the repos (here, the repo) are what this function is judged on.
         results["failed-drop-box"] = 1
-    return results, changed, [], False
+        # A grant or the ruleset failing (a dead handle, say) is persistent and must not
+        # hold the answer back from everyone else; only a drop box that is not there does.
+        if not exists_in(listing, semester_org, drop_box):
+            if solution:
+                results["failed-solution"] = 1
+            return results, changed, [], False
+    solution_unavailable = False
+    if solution and any(unit.casefold() == SOLUTION_DIR for unit, _ in sheet_units):
+        # A unit named `solution` owns the folder the answer would land in: pushing would
+        # write into their work. Named by the slug only - this log is public.
+        log_err(
+            f"  ! {slug}: a unit's folder in the drop box is named `{SOLUTION_DIR}/`, so "
+            "the solution is not pushed"
+        )
+        results["failed-solution"] = 1
+    elif solution:
+        with tempfile.TemporaryDirectory() as soldir:
+            sol_dir = fetch_solution(course_org, template, Path(soldir) / "t")
+            if sol_dir is None:
+                log_err("  ! no usable solution to push into the drop box")
+                solution_unavailable = True
+            elif push_solution(semester_org, drop_box, sol_dir):
+                log(f"  solution -> {semester_org}/{drop_box}/{SOLUTION_DIR}/")
+            else:
+                log_err(f"  ! could not push the solution to {semester_org}/{drop_box}")
+                results["failed-solution"] = 1
+    return results, changed, [], solution_unavailable
 
 
 def _release_units(
@@ -1768,10 +1807,10 @@ def provision_all(
     green wait, not the error a button press gets.
 
     `slug` names WHICH schedule entry is being handed out, and only the scheduler can
-    answer it: it knows which release it is firing. The button asks nobody - a template
-    two entries hand out from is refused below, because they make different repos for
-    different students and keep separate grades, and guessing is a whole semester's work in
-    the wrong place.
+    answer it: the scheduler knows which release it is firing, and the console's Hand out
+    now names the entry it was pressed on. Without it a template two entries hand out from
+    is refused below, because they make different repos for different students and keep
+    separate grades, and guessing is a whole semester's work in the wrong place.
 
     `listing` is the semester's repos keyed by name, off the ONE listing its caller already
     holds - the tick's (`scheduler.run`) or the one the button takes for itself - and BOTH
@@ -1812,10 +1851,11 @@ def provision_all(
     # the semester-side name, exactly as it does everywhere else in this file.
     #
     # Two entries handing out from one template is legitimate - a resit off the same
-    # brief - and `resolve_target` refuses to choose between them. The REMEDY is this
-    # caller's to name: the button cannot answer, because it is one press and the answer
-    # decides which half of the semester gets repos, so it is sent to the schedule, which
-    # fires each entry on its own datetime and therefore knows which one it is.
+    # brief - and `resolve_target` refuses to choose between them unless `slug` names one
+    # (the scheduler, or the console's Hand out now). The REMEDY is for a caller that
+    # named none - the Release assignment workflow, whose one press cannot say which half
+    # of the semester gets repos - so it is sent to the schedule, which fires each entry
+    # on its own datetime and therefore knows which one it is.
     target = schedule.resolve_target(
         sched,
         template,
@@ -1866,15 +1906,33 @@ def provision_all(
             # Without it a HAND-FIRED release of a self-select assignment opened nothing at
             # all: the team-formation window runs from `handout_datetime`, so a press on an
             # entry that carries none left no lock scalar, no Assignment field for a
-            # student to pick, no site callout, no mail and no fault - while the error
-            # below points the teaching team at a form that would refuse every request.
+            # student to pick, no site callout, no mail and no fault - while the error it
+            # ended in pointed the teaching team at a form that would refuse every request.
             # The one thing that would have started the semester off was the thing the press
             # could not do. Write-once, so the scheduled handout - which fired off the very
             # datetime it would write - re-reads the file and changes nothing.
             #
-            # Only where repos are the product: a shape that creates none takes its signal
-            # from the SHEET landing instead (see the tail), and this branch writes none.
-            if gspec.creates_repos:
+            # Every shape: one that creates no repos takes its signal from the SHEET landing
+            # in the tail, which this branch never reaches, so with no team it recorded
+            # nothing and team formation never opened. The record is the whole hand-out
+            # here: its push to schedule.yml syncs the site (the brief) and the Join-team
+            # form, and the sheet follows the first team. Never in a preview.
+            #
+            # Not with the solution: no repo exists to put it in, and the repos teams get
+            # later never receive it. Refused (red) before anything is recorded, so `main`
+            # neither records a preview nor spends one (both only on rc 0).
+            if solution:
+                text = (
+                    "No teams yet, so there is no repo to put the solution in: hand out "
+                    "without the solution, and release it once teams have formed."
+                )
+                log_err(text)
+                return Summary(
+                    text,
+                    reasons=[{"code": NO_TEAMS_FOR_SOLUTION, "text": text}],
+                    code=1,
+                ), False
+            if not dry_run:
                 schedule.record_handout(semester_org, key)
             if scheduled:
                 # Teams appear days after the handout datetime either way - and the cron
@@ -1890,22 +1948,34 @@ def provision_all(
                     f"fires on the tick after {arrives}"
                 )
                 return 0, False
-            how = (
-                "students self-select via the 'Join team' issue, or seed the CSV"
-                if self_select
-                else "no layer sets its `team_formation` (its schedule.yml entry, "
-                "semester.yml or course.yml `defaults:`), so nobody forms teams: set "
-                "`self_select` or `assigned`, or fill the CSV"
-                if undeclared
-                else "this assignment allocates teams (`team_formation: assigned`), so "
-                "the instructors fill the CSV - the Join-team form refuses it"
+            # The press opened team formation, which is what it is for: a green run that
+            # says who forms the teams, not an error about the empty team column. Pressed
+            # after the late cutoff the window it opens is already shut, so only the
+            # teaching team can make teams.
+            cutoff = schedule.grading_cutoff_datetime(
+                sched, key, submit_via=gspec.submit_via
             )
-            log_err(
-                f"no teams for `{key}` in {semester_org}/semester-config/students.csv "
-                f"(column `{roster.team_column(teams.columns(sched).get(key, key))}`) - "
-                f"{how}."
-            )
-            return 1, False
+            if cutoff is not None and datetime.now(timezone.utc) >= cutoff:
+                how = (
+                    "the team window is already closed, so assign the teams on its "
+                    "Teams tab (students.csv)"
+                )
+            elif self_select:
+                how = "students form teams from now"
+            elif undeclared:
+                how = (
+                    "no layer sets its `team_formation` (its schedule.yml entry, "
+                    "semester.yml or course.yml `defaults:`), so nobody forms teams: set "
+                    "`self_select` or `assigned`, or fill the team column"
+                )
+            else:
+                how = "you assign the teams from now"
+            if dry_run:
+                return Summary(
+                    f"Preview: {slug} would be handed out; no teams yet; {how}."
+                ), False
+            log(f"  no teams for `{key}` yet - handed out; {how}")
+            return Summary(f"Handed out {slug}: no teams yet; {how}."), False
         # the team cells are student-writable (the "Join team" issue writes them), so its
         # handles must pass the SAME roster allowlist sync_teams applies: only enrolled,
         # onboarded roster handles - never a typo or a stranger's login that would be INVITED
@@ -1943,6 +2013,27 @@ def provision_all(
         log(f"  ({skipped} not-yet-onboarded row(s) skipped)")
     if auditing:
         log(f"  ({auditing} auditor row(s) skipped - read-only, no assignment repos)")
+
+    # The drop box is ONE repo every student reads, so a solution pushed into it before the
+    # late cutoff hands the answer to anyone still working. The scheduler holds a scheduled
+    # one until then (`schedule.solution_cutoff`); a press of `solution_datetime: now` is
+    # refused here, before anything is created or recorded.
+    if solution and gspec.submit_shared:
+        cutoff = schedule.grading_cutoff_datetime(
+            sched, key, submit_via=gspec.submit_via
+        )
+        if cutoff is not None and datetime.now(timezone.utc) < cutoff:
+            text = (
+                f"Not handed out: {slug}'s solution would go into the drop box every "
+                f"student reads before its late cutoff ({cutoff:%Y-%m-%d %H:%M}). Hand "
+                f"out without the solution, and release it after the cutoff."
+            )
+            log_err(text)
+            return Summary(
+                text,
+                reasons=[{"code": SOLUTION_BEFORE_CUTOFF_CODE, "text": text}],
+                code=1,
+            ), False
 
     # Stage 1, and the one thing BOTH repo-making shapes need: the semester's own frozen
     # copy of the course template. The drop box is generated from it and so is every unit
@@ -1991,6 +2082,8 @@ def provision_all(
         released = _release_external(semester_org, slug, what, solution, dry_run)
     elif gspec.submit_shared:
         released = _release_shared(
+            course_org,
+            template,
             semester_template,
             semester_org,
             slug,
@@ -2149,10 +2242,12 @@ def provision_all(
         # never pushed one, so its fire-once marker must not be written over the absence.
         and gspec.can_hold_solution
         and not solution_unavailable
-        and bool(units)
+        # The drop box is there whoever has onboarded; a repo per unit is not.
+        and (bool(units) or gspec.submit_shared)
         and not any(results.get(s) for s in _SOLUTION_NOT_PUSHED)
     )
-    if solution_pushed and not record_solution_released(semester_org, slug, len(units)):
+    repos = 1 if gspec.submit_shared else len(units)
+    if solution_pushed and not record_solution_released(semester_org, slug, repos):
         log_err(
             f"the solution for {slug} shipped, but its fire-once record could not be "
             f"written to {semester_org}/semester-config - until it is, every hourly tick "

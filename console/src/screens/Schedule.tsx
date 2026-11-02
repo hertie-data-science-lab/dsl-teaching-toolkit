@@ -9,7 +9,7 @@ import { Invalid } from '../forms/Form';
 import { RELEASE_WORD, TYPE_CLASS, siteRowWord, fmtDay, fmtTime, fmtWhen, heldSentence, markWord, releaseIdent, repoWords, sortKey } from '../model/format';
 import { needsANumber, parseSchedule, scheduleRows, type Block, type Row } from '../model/schedule';
 import {
-  READINGS_KIND, SESSION_KINDS, applyChanges, blockOf, changesOf, defaultReleaseAt, draftErrors, emptyTwin, hiddenKind, newDraft, nextNumber, nextSession, numberedField, readDraft, releaseAt, writeDraft,
+  READINGS_KIND, SESSION_KINDS, applyChanges, blockOf, changesOf, defaultReleaseAt, draftErrors, emptyTwin, hiddenKind, newDraft, newlyManual, nextNumber, nextSession, numberedField, readDraft, releaseAt, writeDraft,
   type AssignmentDraft, type Draft, type EntryDraft, type FileDraft, type SemesterDraft, type SemesterEntryDraft, type SemesterType, type Slot,
 } from '../model/scheduleEdit';
 import type { Assignment, Release } from '../model/types';
@@ -28,7 +28,7 @@ import { CheckNow, WithStatus, cohortScope, gradingConfig, todayOf, tzOf, yearOf
 import type { CohortProps, ReadyProps } from './types';
 import { CONFIG_REPO } from '../model/names';
 import { RUN_KEYS, TEAM_FORMATION, TEAM_FORMATIONS, VISIBILITIES, VISIBILITY, effectiveOf, validSchedule } from '../model/settings';
-import { SolutionNote, cutoffOf, entryBelow, forcedVisibility } from './RunSettings';
+import { HandOutDialog, HandOutNow, ManualWaiting, NO_LATE_WINDOW, SolutionNote, canHoldSolution, cutoffOf, draftHandout, entryBelow, forcedVisibility, waitingHandOut, waitsByHand, windowDays } from './RunSettings';
 import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO, DEFAULT_TIMEZONE, KINDS, SUBMIT_VIA_DEFAULT, penaltyError, pluralOf } from '../model/policy';
 import { otherRepos } from './CourseIndex';
 
@@ -463,7 +463,7 @@ function runShown(d: AssignmentDraft, inherited: Record<string, unknown>, k: str
   return d.run && k in d.run ? d.run[k] : inherited[k];
 }
 
-function AssignmentForm({ p, d, set, errors, consoleOn, templates, tiered, handedOut, baseNumber }: FormProps<AssignmentDraft> & { templates: { repo: string }[]; tiered: Tiered[]; handedOut: boolean; baseNumber: number | '' | undefined }) {
+function AssignmentForm({ p, d, set, errors, consoleOn, templates, tiered, handedOut, baseNumber, waiting }: FormProps<AssignmentDraft> & { templates: { repo: string }[]; tiered: Tiered[]; handedOut: boolean; baseNumber: number | '' | undefined; waiting: Assignment | null }) {
   const cfg = d.template ? gradingConfig(p, d.template) : {};
   const tplGroup = cfg.type === 'group' ? 'group' : 'individual';
   const tplRoute = typeof cfg.submit_via === 'string' && cfg.submit_via in ROUTE_LABEL ? cfg.submit_via : SUBMIT_VIA_DEFAULT;
@@ -479,11 +479,15 @@ function AssignmentForm({ p, d, set, errors, consoleOn, templates, tiered, hande
     else run[k] = v;
     set({ run });
   };
-  const forced = route === 'shared_dropbox_repo' || route === 'external';
+  // Handed in outside GitHub: no repo, so no late window, no visibility and no solution to push.
+  const external = route === 'external';
+  const forced = route === 'shared_dropbox_repo';
   const vis = forced ? 'private' : String(runShown(d, inherited, 'visibility') ?? 'private');
   const pct = String(runShown(d, inherited, 'late_penalty_per_day') ?? '').replace(/%$/, '');
   const n = d.number || 'N';
-  const solutionOff = vis !== 'private' ? 'Not available: student repos are not private, so the solution cannot be pushed automatically.' : d.manual ? 'Needs a hand-out time; the solution must follow it.' : null;
+  const solutionOff = external ? 'Not available: work is handed in outside GitHub, so there is no repo to push the solution into.'
+    : !canHoldSolution(cfg, vis, d.submitVia) ? 'Not available: student repos are not private, so the solution cannot be pushed automatically.'
+    : d.manual ? 'Needs a hand-out time; the solution must follow it.' : null;
   // The template's own value is the option written as no override (''); any other is the override.
   const opt = (value: string, label: string, tpl: string, override: string) => <option value={value === tpl ? '' : value} selected={value === (override || tpl)}>{label}{value === tpl ? ' (from template)' : ''}</option>;
   return (
@@ -524,6 +528,8 @@ function AssignmentForm({ p, d, set, errors, consoleOn, templates, tiered, hande
         <div class="field"><Lbl for="e-hod">on</Lbl><input id="e-hod" type="date" value={d.handoutDate} disabled={d.manual || d.datesTbc} onInput={(e) => set({ handoutDate: val(e) })} /><Err e={errors.handout} /></div>
         <div class="field"><Lbl for="e-hot">at</Lbl><input id="e-hot" type="time" value={d.handoutTime} disabled={d.manual || d.datesTbc} onInput={(e) => set({ handoutTime: val(e) })} /></div>
       </div>
+      {d.manual ? <p class="hint">Hand out now when you save, or later from its page; until then students see no brief and there is no mark sheet.</p> : null}
+      {waiting ? <div class="actions"><HandOutNow p={p} a={waiting} small /></div> : null}
       <div class="row-4">
         <div class="field"><Lbl for="e-due" strong>Due</Lbl><input id="e-due" type="date" value={d.dueDate} disabled={d.datesTbc} onInput={(e) => set({ dueDate: val(e) })} /><Err e={errors.due} /></div>
         <div class="field"><Lbl for="e-duet">at</Lbl><input id="e-duet" type="time" value={d.dueTime} disabled={d.datesTbc} onInput={(e) => set({ dueTime: val(e) })} /></div>
@@ -541,13 +547,14 @@ function AssignmentForm({ p, d, set, errors, consoleOn, templates, tiered, hande
       </Fold>
       <Fold summary={<>How this semester runs it <span class="hint">{FORM_TEXT.runHeading}</span></>} open={Object.keys(d.run ?? {}).some((k) => k !== 'marks_per_question')}>
         <div class="row-3">
-          <div class="field"><Lbl for="e-lw">Late window (days)</Lbl><input id="e-lw" type="number" min="0" value={String(runShown(d, inherited, 'late_window_days') ?? '')} onInput={(e) => setRun('late_window_days', intOf(val(e)))} /><Err e={errors.late_window_days} /></div>
+          {external ? null : <div class="field"><Lbl for="e-lw">Late window (days)</Lbl><input id="e-lw" type="number" min="0" value={String(runShown(d, inherited, 'late_window_days') ?? '')} onInput={(e) => setRun('late_window_days', intOf(val(e)))} /><Err e={errors.late_window_days} /></div>}
           <div class="field"><Lbl for="e-lp">Late penalty per day</Lbl><span class="pct"><input id="e-lp" type="text" inputMode="decimal" value={pct} onInput={(e) => setRun('late_penalty_per_day', val(e).trim() === '' ? '' : `${val(e).trim()}%`)} /><span>%</span></span><Err e={errors.late_penalty_per_day} /></div>
           {group ? <div class="field"><Lbl for="e-tf">Team formation</Lbl><select id="e-tf" onChange={(e) => setRun('team_formation', val(e))}>{TEAM_FORMATIONS.map((t) => <option value={t} selected={t === runShown(d, inherited, 'team_formation')}>{TEAM_FORMATION[t] ?? t}</option>)}</select></div> : null}
           {group ? <div class="field"><Lbl for="e-ts">Max team size</Lbl><input id="e-ts" type="number" min="1" value={String(runShown(d, inherited, 'max_team_size') ?? '')} onInput={(e) => setRun('max_team_size', intOf(val(e)))} /></div> : null}
-          <div class="field"><Lbl for="e-vis" hint={forced ? (forcedVisibility({ submit_via: route }) ?? undefined) : undefined}>Repo visibility</Lbl><select id="e-vis" disabled={forced} onChange={(e) => setRun('visibility', val(e))}>{VISIBILITIES.map((v) => <option value={v} selected={v === vis}>{VISIBILITY[v] ?? v}</option>)}</select></div>
+          {external ? null : <div class="field"><Lbl for="e-vis" hint={forced ? (forcedVisibility({ submit_via: route }) ?? undefined) : undefined}>Repo visibility</Lbl><select id="e-vis" disabled={forced} onChange={(e) => setRun('visibility', val(e))}>{VISIBILITIES.map((v) => <option value={v} selected={v === vis}>{VISIBILITY[v] ?? v}</option>)}</select></div>}
           <div class="field"><Lbl for="e-url">Submission URL <span class="hint">{FORM_TEXT.submitUrl}</span></Lbl><input id="e-url" type="url" disabled={route !== 'external'} value={route === 'external' ? String(runShown(d, inherited, 'submit_url') ?? '') : ''} onInput={(e) => setRun('submit_url', val(e))} /><Err e={errors.submit_url} /></div>
         </div>
+        {external ? <p class="hint">{NO_LATE_WINDOW} The late penalty applies to the days late the marker enters.</p> : null}
         <p class="hint">{FORM_TEXT.run}</p>
       </Fold>
       <Fold summary="Advanced" open={!!d.repoName}>
@@ -661,6 +668,8 @@ function View(p: ReadyProps) {
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [removed, setRemoved] = useState<string[]>([]);
   const [save, setSave] = useState<SaveState>({ kind: 'idle' });
+  // The Save that would leave an assignment with no hand out date waits on this question.
+  const [askManual, setAskManual] = useState(false);
   const file = useSchedFile(p);
   const sf = file && file !== 'loading' ? file : null;
   const schedExists = p.files.file(p.cohort.org, CONFIG_REPO, 'schedule.yml').kind !== 'absent';
@@ -668,6 +677,8 @@ function View(p: ReadyProps) {
   const sched = useMemo(() => (sf && !sf.error ? parseSchedule(sf.text) : null), [sf?.text]);
   const rows = scheduleRows(status, sched, now, tz);
   const assignmentOf = new Map((status.assignments ?? []).map((a) => [a.slug, a]));
+  // An assignment set to hand out by hand that has not gone out: its rows carry the tag.
+  const waiting = (slug: string) => { const a = assignmentOf.get(slug); return a !== undefined && waitsByHand(a); };
   const key = p.entry;
   const current = key && key !== 'new' && key !== 'semester' ? rows.find((r) => r.entry === key) : undefined;
   const repos = (status.course?.materials ?? []).map((m) => m.repo);
@@ -690,7 +701,8 @@ function View(p: ReadyProps) {
   const cutoffFor = (d: Draft): string | null => {
     if (d.kind !== 'assignments') return null;
     const own = d.run && 'late_window_days' in d.run ? d.run.late_window_days : effectiveOf(entryBelow(p), 'late_window_days').value;
-    return cutoffOf(d.dueDate, d.dueTime, typeof own === 'number' ? own : 0);
+    const days = windowDays(d.template ? gradingConfig(p, d.template) : {}, own, d.submitVia);
+    return cutoffOf(d.dueDate, d.dueTime, typeof days === 'number' ? days : 0);
   };
   const runErrorsOf = (d: Draft): Record<string, string> => {
     if (d.kind !== 'assignments' || !d.run) return {};
@@ -705,7 +717,8 @@ function View(p: ReadyProps) {
   };
   const errorsOf = (d: Draft) => ({ ...draftErrors(d, { doc, removed }, cutoffFor(d)), ...runErrorsOf(d) });
 
-  const doSave = async () => {
+  /** Save every change; `handOutKey`, an entry newly handed out by hand, then opens Hand out on it once the save lands. */
+  const doSave = async (handOutKey?: string) => {
     if (!sf || sf.error) return;
     const firstBad = dirtyKeys.map((k) => Object.values(errorsOf(drafts[k]))[0]).find(Boolean);
     if (firstBad) return setSave({ kind: 'bad', text: firstBad });
@@ -716,14 +729,27 @@ function View(p: ReadyProps) {
     const entryKeys = dirtyKeys.filter((k) => drafts[k].kind !== 'semester');
     const out = applyChanges(y.text, (y.toJS() ?? {}) as Record<string, unknown>, changesOf(entryKeys.map((k) => drafts[k]), entryKeys.map((k) => baseOf(k))), removed, { handedOut });
     if (!validSchedule(parse(out.text) ?? {})) return setSave({ kind: 'bad', text: invalidText('the schedule', validSchedule) });
-    const newId = entryKeys.includes('new') ? out.keys[changesOf(entryKeys.slice(0, entryKeys.indexOf('new')).map((k) => drafts[k]), entryKeys.slice(0, entryKeys.indexOf('new')).map((k) => baseOf(k))).length] : null;
+    // The key a draft was written under: a new entry's is generated, a renumbered one's renamed.
+    const writtenKey = (k: string) => out.keys[changesOf(entryKeys.slice(0, entryKeys.indexOf(k)).map((x) => drafts[x]), entryKeys.slice(0, entryKeys.indexOf(k)).map((x) => baseOf(x))).length];
+    const newId = entryKeys.includes('new') ? writtenKey('new') : null;
     const what = dirty === 1 && dirtyKeys.length === 1 ? (dirtyKeys[0] === 'new' ? `add ${newId}` : `edit ${dirtyKeys[0]}`) : dirtyKeys.length === 0 ? `remove ${removed.join(', ')}` : `${dirty} changes`;
     const first: Step = { target: { owner: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }, text: out.text, sha: sf.sha, opts: { message: `schedule: ${what}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] } };
-    await saveSteps(env, setSave, first, null, '', () => {
+    const hoDraft = handOutKey && entryKeys.includes(handOutKey) ? drafts[handOutKey] : undefined;
+    const ho = hoDraft?.kind === 'assignments' ? { ...hoDraft, id: writtenKey(handOutKey!) } : undefined;
+    const saved = await saveSteps(env, setSave, first, null, '', () => {
       setDrafts({});
       setRemoved([]);
       if (newId && typeof location !== 'undefined') location.hash = `#schedule-${newId}`;
     });
+    // The op's own panel, as Hand out now opens it: its preview and confirmation; it never runs by itself.
+    if (saved && ho) env?.ops.open(draftHandout(p, ho));
+  };
+
+  // An assignment newly handed out by hand asks first: until Hand out now, nothing reaches students.
+  const manualKeys = dirtyKeys.filter((k) => newlyManual(drafts[k], baseOf(k), assignmentOf.get(k)?.state));
+  const requestSave = () => {
+    if (manualKeys.length && !dirtyKeys.some((k) => Object.keys(errorsOf(drafts[k])).length)) setAskManual(true);
+    else void doSave();
   };
 
   const counts: Record<Block, number> = { releases: 0, assignments: 0, events: 0 };
@@ -752,6 +778,7 @@ function View(p: ReadyProps) {
     ) : m ? <><ReleaseMarks m={m} entry={r.entry} />{m.late ? <a class="textlink" href={`#release-${r.entry}`}>Details</a> : null}</>
       : rel && !ref && r.block === 'releases' ? <><span class="st-note">{NOTHING_TO_RELEASE}</span><a class="textlink" href={`#schedule-${rk}`}>Edit</a></>
       : ref && rel?.state === 'planned' ? <><span class="st-chip">planned</span><OpOpen def={releaseEarly(scope, ref)} cls="btn small" label="Release early" /></>
+      : r.block === 'assignments' && waiting(r.entry) ? <ManualWaiting />
       : <span class="st-chip">{r.state}</span>;
     items.push(
       <li class={`trow ${TYPE_CLASS[r.type] ?? 'evt'}${markClass(m)}${key === rk ? ' current' : ''}${gone ? ' removed' : ''}${r.show ? '' : ' off-site'}`} data-entry={r.entry}>
@@ -806,7 +833,7 @@ function View(p: ReadyProps) {
                 : d.kind === 'entry' && d.type === READINGS_KIND ? <ReadingsForm {...fp} d={d} set={set} doc={doc} />
                 : d.kind === 'entry' && hiddenKind(d.type) ? <AssetsForm {...fp} d={d} set={set} />
                 : d.kind === 'entry' ? <EventForm {...fp} d={d} set={set} />
-                : d.kind === 'assignments' ? <AssignmentForm {...fp} d={d} set={set} templates={templates} tiered={tiered} handedOut={!isNew && handedOut(key)} baseNumber={base?.kind === 'assignments' ? base.number : undefined} />
+                : d.kind === 'assignments' ? <AssignmentForm {...fp} d={d} set={set} templates={templates} tiered={tiered} handedOut={!isNew && handedOut(key)} baseNumber={base?.kind === 'assignments' ? base.number : undefined} waiting={isNew ? null : waitingHandOut(assignmentOf.get(key), base, d)} />
                 : d.kind === 'semesterEntry' ? <SemesterEntryForm {...fp} d={d} set={set} />
                 : <SemesterForm d={d} set={set} errors={errors} />}
             </div>
@@ -826,7 +853,7 @@ function View(p: ReadyProps) {
               ) : null}
               <span style="margin-left:auto" />
               <a class="btn" href="#schedule" onClick={() => { const n = { ...drafts }; delete n[key]; setDrafts(n); }}>Cancel</a>
-              <button class="btn primary" type="button" disabled={save.kind === 'busy' || !dirty || !!firstProblem} onClick={() => void doSave()}>{firstProblem ?? (isNew ? addWord(d) : 'Save')}</button>
+              <button class="btn primary" type="button" disabled={save.kind === 'busy' || !dirty || !!firstProblem} onClick={requestSave}>{firstProblem ?? (isNew ? addWord(d) : 'Save')}</button>
             </div>
             <EditFile org={p.cohort.org} repo={CONFIG_REPO} path="schedule.yml" exists={schedExists} line={!isNew && key !== 'semester' ? lineOf(sf.text, key, 2) : undefined} />
           </div>
@@ -885,7 +912,8 @@ function View(p: ReadyProps) {
         {sheet}
       </div>
       {!key ? <SaveLine state={save} /> : null}
-      <UnsavedBar count={dirty} busy={save.kind === 'busy'} onDiscard={() => { setDrafts({}); setRemoved([]); setSave({ kind: 'idle' }); }} onSave={() => void doSave()} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml', exists: schedExists }} />
+      <UnsavedBar count={dirty} busy={save.kind === 'busy'} onDiscard={() => { setDrafts({}); setRemoved([]); setSave({ kind: 'idle' }); }} onSave={requestSave} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml', exists: schedExists }} />
+      {askManual ? <HandOutDialog one={manualKeys.length === 1} onSave={(h) => void doSave(h ? manualKeys[0] : undefined)} onClose={() => setAskManual(false)} /> : null}
     </>
   );
 }

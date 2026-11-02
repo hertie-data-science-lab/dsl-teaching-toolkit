@@ -36,6 +36,7 @@ from .gh_contents import (
 )
 from .grading_sheet import (
     _SEP,
+    DAYS_LATE_KEY,
     INFO_KEY,
     LATE_PENALTY_KEY,
     QUESTION_FEEDBACK_KEY,
@@ -48,6 +49,7 @@ from .grading_sheet import (
     is_blank,
     penalty_rate,
     score_total,
+    unit_days_late,
 )
 from .grading_spec import (
     total_points,
@@ -337,7 +339,7 @@ def student_view(
     person = _people(spec, unit_key, block).get(handle) if spec.is_group else block
     person = person if isinstance(person, dict) else {}
     score = block.get(spec.score_key)
-    days_late = info.get("days_late")
+    days_late = unit_days_late(spec, block)
     rate = penalty_rate(spec.late_penalty_per_day)
     late_penalty = block.get(LATE_PENALTY_KEY)
     adjustment = person.get("adjustment_individual")
@@ -363,7 +365,10 @@ def student_view(
             "submitted": _submitted_display(
                 info.get("submitted"), not spec.collects_commits
             ),
-            "days_late": days_late,
+            # As recorded: a grader's blank is not a claim that the work was on time.
+            "days_late": days_late
+            if spec.collects_commits
+            else block.get(DAYS_LATE_KEY),
             "penalty": _penalty_display(rate, days_late, late_penalty),
             "team": unit_key if spec.is_group else None,
             "team_feedback": block.get("feedback_group") if spec.is_group else None,
@@ -385,10 +390,9 @@ def needs_hand_decision(spec: SheetSpec, block: dict) -> bool:
     score = block.get(spec.score_key)
     if score_total(score, spec.questions) is not None or not _verbatim(score):
         return False
-    info = block.get(INFO_KEY) or {}
     penalty = effective_penalty(
         penalty_rate(spec.late_penalty_per_day),
-        info.get("days_late"),
+        unit_days_late(spec, block),
         block.get(LATE_PENALTY_KEY),
     )
     return penalty.fraction > 0
@@ -534,9 +538,9 @@ def _readme_grade_line(view: dict, grade: str) -> str:
 
     The late part is written whenever something timed the unit, with or without a score to
     take it from (a `pass` two days late still says so). Where nothing timed it and there is
-    no adjustment - an `external` assignment, a hand-marked one - the final grade is the
-    whole of what there is to say, and `**Score:** 40 · **Final grade:** 40` would be
-    arithmetic theatre. The helpers are the display ones the table already uses, so a row
+    no adjustment - an `external` unit with no days entered, a hand-marked one - the final
+    grade is the whole of what there is to say, and `**Score:** 40 · **Final grade:**
+    40` would be arithmetic theatre. The helpers are the display ones the table already uses, so a row
     and its section cannot word the same fact differently."""
     total = score_total(view.get("score"))
     late = _late_display(view.get("days_late"))

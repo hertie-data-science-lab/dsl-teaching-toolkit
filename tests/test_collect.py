@@ -6431,16 +6431,21 @@ def test_a_scheduled_solution_for_repos_that_are_not_private_is_a_fault(monkeypa
     assert "schedule.yml" in fault.fix_text
 
 
-def test_a_scheduled_solution_for_a_shared_drop_box_is_a_fault(monkeypatch):
+@pytest.mark.parametrize(
+    ("via", "faulted"), [("shared_dropbox_repo", False), ("external", True)]
+)
+def test_a_scheduled_solution_is_a_fault_only_where_there_is_no_repo(
+    monkeypatch, via, faulted
+):
     # The same predicate, and the reason `course.can_hold_solution` is one and not two:
-    # a drop box is private, so a rule written as "is it private?" let this one through -
-    # and the model answer would have been published to the whole semester if it had not.
+    # the private drop box takes the model answer in its own `solution/` folder, and
+    # external work has no repo to put it in at all.
     from dsl_course.schedule import AssignmentEntry
 
     monkeypatch.setattr(
         grading_spec,
         "_grading_text",
-        lambda course, template: "submit_via: shared_dropbox_repo\n",
+        lambda course, template: f"submit_via: {via}\n",
     )
     monkeypatch.setattr(grading_spec, "get_file_content", lambda *a, **k: None)
     sched = Schedule(
@@ -6454,9 +6459,8 @@ def test_a_scheduled_solution_for_a_shared_drop_box_is_a_fault(monkeypatch):
     )
     found: list = []
     grading_spec.grading_config_faults("Course-Org", "Semester-Org", sched, found, None)
-    (fault,) = found
-    assert fault.field == "visibility"
-    assert "solution_datetime" in fault.what and "shared" in fault.what
+    faults = [f for f in found if "solution_datetime" in f.what]
+    assert bool(faults) is faulted
 
 
 def test_a_private_assignment_may_schedule_its_solution(monkeypatch):

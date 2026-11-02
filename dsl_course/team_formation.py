@@ -257,8 +257,14 @@ def open_windows(
     found: list[Window] = []
     for key in keys:
         entry = sched.assignments[key]
-        opens, closes = schedule.formation_window(sched, key)
-        state, _ = schedule.formation_state(sched, key, now)
+        # The template's own definition, asked once for the cutoff and the two facts below:
+        # memoised per template per process, and read already by `self_select_keys` above.
+        spec = declared_grading_spec(
+            course_org, entry.course_source_repo, semester_org=semester_org, slug=key
+        )
+        via = (spec or GradingSpec()).submit_via
+        opens, closes = schedule.formation_window(sched, key, submit_via=via)
+        state, _ = schedule.formation_state(sched, key, now, submit_via=via)
         if closes is None or state == "pending":
             continue
         # `closed` is two different things: a door that never opens - an assignment handed
@@ -280,11 +286,6 @@ def open_windows(
         # mail to send, and nothing any surface would show off it.
         if shut and not waiting:
             continue
-        # The template's own definition, asked once for the two facts below: memoised per
-        # template per process, and read already by `self_select_keys` above.
-        spec = declared_grading_spec(
-            course_org, entry.course_source_repo, semester_org=semester_org, slug=key
-        )
         name = schedule.semester_name(key, entry)
         found.append(
             Window(
@@ -1334,7 +1335,9 @@ def team_lock_entries(
         if formation == SELF_SELECT:
             # The same call the semester site's team-formation callout makes, so the page
             # that invites a student in and the form that lets them in shut together.
-            window, closes = schedule.formation_state(sched, key, now)
+            window, closes = schedule.formation_state(
+                sched, key, now, submit_via=spec.submit_via
+            )
             shuts = closes.date().isoformat() if closes is not None else ""
             page = pages.get(key, "")
         entries[key] = (

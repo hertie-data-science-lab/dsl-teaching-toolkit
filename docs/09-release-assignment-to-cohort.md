@@ -60,8 +60,10 @@ Education upgrade lands, so until then the drop box is left unprotected and the 
 says so. Each unit pushes into its own `<handle>/` or `<team>/` folder and can read
 everyone else's.
 
-There is no Submission receipts issue and no model solution push - one repo the whole semester reads
-is not a place for either. The handout re-fires every quarter of an hour
+There is no Submission receipts issue - one repo the whole semester reads is not a place for
+one. The model solution goes in **once**, into the drop box's own top-level `solution/`
+folder, and touches no unit's folder; `now` before the late cutoff is refused, and no team
+may be named `solution`. The handout re-fires every quarter of an hour
 like any other, and a student who onboards later is granted push on the next tick.
 
 ### An assignment whose repos are public
@@ -141,7 +143,7 @@ Which of the two an assignment uses is the semester's - `team_formation` on its 
 
 **The form** asks three things: which assignment, whether they are **joining or switching to an existing team** or **creating a new one**, and the team's name. A student already in a team who joins or creates another is moved, while the window is open. The choice is explicit because it used to be implied by the name - a name that existed joined, a name that did not created - so one typo opened a second, half-empty team that nobody noticed until the release provisioned it. Creating onto a name that is taken is refused; joining a name that does not exist is refused with the nearest real team named. A refusal the student can fix is closed (`team-refused`) with what to do next; only what you must act on stays open as `needs-review` - see [06](06-enrol-students-to-cohort.md). Its header links the assignment's page, which has the team list. It reads all of this out of `semester-config/.system/assignments.lock.yml`, which the toolkit generates from each assignment's `grading_config.yml` and the semester's schedule, and nobody edits - change either and the mirror catches up on the next quarter-hourly **Scheduled release** tick, which is also what opens and shuts the window below on time.
 
-**The window** runs from the assignment's `handout_datetime` to its late cutoff (the due date plus `late_window_days`): a team minted after the snapshot has nothing left to hand in. Before the hand-out the form says formation is not open yet and when it will run; after the cutoff it says the day it closed. Move either date and the window moves. An assignment with no `handout_datetime` on record has no window at all - but **Release assignment** writes that moment into `schedule.yml` itself, so a hand-fired hand-out opens one too. While it is open, the form's Assignment field is a drop-down of exactly the assignments a student may act on - and it moves with the window: the same tick that opens or shuts one rewrites the form, as does a push to `schedule.yml`.
+**The window** runs from the assignment's `handout_datetime` to its late cutoff (the due date plus `late_window_days`): a team minted after the snapshot has nothing left to hand in. Before the hand-out the form says formation is not open yet and when it will run; after the cutoff it says the day it closed. Move either date and the window moves. An assignment with no `handout_datetime` on record has no window at all - but **Release assignment** writes that moment into `schedule.yml` itself, so a hand-fired hand-out opens one too, in every shape and with no team yet (the run ends green and says who forms the teams from then; one with the solution is refused, since no repo exists to put it in). While it is open, the form's Assignment field is a drop-down of exactly the assignments a student may act on - and it moves with the window: the same tick that opens or shuts one rewrites the form, as does a push to `schedule.yml`.
 
 **The team list is on the assignment's page** on the semester site. `students.csv` is private, so a student cannot see what to join. While the window is open, the page lists the teams that exist with the places each has left (**names and counts only**) and links the request form; the site's schedule row carries a **Form your team** prompt with the closing day. The mail and the form's refusals link that page; the form's header links it too, or the Assignments list when several windows are open. A push to `students.csv` fires a site sync, so the list follows each join within minutes. When the window shuts the invitation, the form and the places left go; the list itself stays on the page for the rest of the semester, read-only (names and headcounts).
 
@@ -175,6 +177,9 @@ assignments:
 - **The late window** is the assignment's `late_window_days` on its `schedule.yml` entry (with
   `late_penalty_per_day`, a percentage of the earned grade per day started). Between the due
   date and the cutoff the grading sheet keeps refreshing and each late push earns a receipt.
+  `submit_via: external` has no late window: its cutoff is the due date, and the marker enters each
+  unit's days late on the sheet (the Marks tab), charged at `late_penalty_per_day`; students
+  see that rate, with no window or cutoff.
   Where neither the semester nor the course states them, the Hertie standard applies:
   10% per day started, collected for up to 10 days. `late_window_days: 0` accepts nothing
   after the deadline.

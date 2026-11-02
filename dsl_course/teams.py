@@ -20,7 +20,7 @@ authoritative, so it cannot drift the way a Classroom-managed team does.
 from __future__ import annotations
 
 from . import roster, schedule
-from .course import INSTRUCTORS_TEAM, ROLE_TEAMS
+from .course import INSTRUCTORS_TEAM, ROLE_TEAMS, SOLUTION_DIR
 from .faults import ConfigFault
 
 # Team slugs students may never materialise. A team cell is STUDENT-written (the public
@@ -29,6 +29,9 @@ from .faults import ConfigFault
 # student to it and prune the real admins. The workflow refuses these at the form; this is
 # the backstop for a cell that reached the file any other way.
 RESERVED_TEAM_SLUGS = ROLE_TEAMS
+# Team NAMES no team may take, whatever the assignment: a shared drop box gives each team a
+# `<team>/` folder beside the model answer's `solution/` (`assign._release_shared`).
+RESERVED_TEAM_NAMES = (SOLUTION_DIR,)
 
 
 def team_slug(assignment: str, team: str) -> str:
@@ -88,6 +91,19 @@ def parse(
                             "ignored",
                             file=roster.STUDENTS_PATH,
                             field=roster.team_column(suffix),
+                        )
+                    )
+                continue
+            if team.casefold() in RESERVED_TEAM_NAMES:
+                if faults is not None:
+                    faults.append(
+                        ConfigFault(
+                            roster.team_column(suffix),
+                            f"`{SOLUTION_DIR}` is reserved (a shared drop box keeps the model "
+                            f"answer in a folder of that name), so the cell is ignored",
+                            file=roster.STUDENTS_PATH,
+                            field=roster.team_column(suffix),
+                            fix_text="give the team another name",
                         )
                     )
                 continue

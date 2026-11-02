@@ -123,7 +123,7 @@ export function AssignmentBody({ org, a, mine, now, tz, studentView, unknownRole
             <>
               <SubmitSentence a={a} repo={repo} folder={a.group ? (u?.team ?? '<your-team>') : handle} />
               {a.cutoffSentence && a.submitVia !== 'external' ? <p>{a.cutoffSentence}</p> : null}
-              {a.lateRule && a.submitVia !== 'external' ? <p>Late work: {a.lateRule}{a.lateCutoff && a.lateCutoff !== a.due ? ` (until ${fmtWhen(a.lateCutoff, tz, year)})` : ''}.</p> : null}
+              {a.lateRule ? <p>Late work: {a.lateRule}{a.lateCutoff && a.lateCutoff !== a.due ? ` (until ${fmtWhen(a.lateCutoff, tz, year)})` : ''}.</p> : null}
               {patch ? <div class="note" role="note"><b>Pull before you continue.</b> <span class="footnote">{fmtWhen(patch.when, tz, year)}</span><Md src={patch.text} /></div> : null}
               {studentView ? <p class="footnote">A student’s repo, team and receipts show here.</p>
                 : <dl class="kv"><MyUnitRows org={org} a={a} mine={mine} receipts={rc} loading={u?.repo ? receipts === undefined : false} tz={tz} year={year} /></dl>}

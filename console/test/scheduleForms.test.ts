@@ -16,7 +16,7 @@ import G_SEMESTER from './fixtures/schedule-forms/semester.yml?raw';
 import { YamlText } from '../src/edit/yamlText';
 import { cutoffOf } from '../src/screens/RunSettings';
 import {
-  applyChanges, changesOf, defaultReleaseAt, draftErrors, emptyTwin, newDraft, nextNumber, nextSession, readDraft, releaseAt, writeDraft,
+  applyChanges, changesOf, defaultReleaseAt, draftErrors, emptyTwin, newDraft, newlyManual, nextNumber, nextSession, readDraft, releaseAt, writeDraft,
   type AssignmentDraft, type EntryDraft, type SemesterDraft, type SemesterEntryDraft,
 } from '../src/model/scheduleEdit';
 
@@ -321,6 +321,19 @@ describe('keys follow numbers', () => {
 });
 
 describe('validation as you type', () => {
+  it('asks about a hand out by hand only when the entry newly has no hand out date', () => {
+    const d = newDraft('assignment', {}) as AssignmentDraft;
+    const manual = { ...d, manual: true };
+    expect(newlyManual(manual, null)).toBe(true);
+    expect(newlyManual(manual, d)).toBe(true);
+    expect(newlyManual(manual, manual)).toBe(false);
+    expect(newlyManual(d, null)).toBe(false);
+    expect(newlyManual(newDraft('lecture', {}), null)).toBe(false);
+    // The engine reports it out: its copies exist, nothing to ask.
+    expect(newlyManual(manual, d, 'declared')).toBe(true);
+    expect(newlyManual(manual, d, 'open')).toBe(false);
+  });
+
   it('flags a duplicate session or number live, and lets a removed one go', () => {
     const d = { ...(newDraft('lecture', doc(NUMBERED)) as EntryDraft), session: 4 as const, slots: [{ date: '2026-10-06', time: '', location: '', details: '' }] };
     expect(draftErrors(d, { doc: doc(NUMBERED) }).number).toBe('Lecture 4 is already in the schedule (lecture-4).');

@@ -1045,12 +1045,16 @@ ScheduledMoment = tuple[
 ]
 
 
-def schedule_moments(sched: schedule.Schedule) -> list[ScheduledMoment]:
+def schedule_moments(
+    sched: schedule.Schedule, *, specs: Mapping[str, grading_spec.GradingSpec]
+) -> list[ScheduledMoment]:
     """Every dated moment of the schedule, in plan order, as `(when, what, key, entry)`: a
     release (`release`, and `deploy` for each copy's own moment), an assignment's
     `hand_out`, `due` and late `cutoff`, an `exam` or `event`, and the `archive`. A
     content entry has a `release` moment per slot (decision 0038 rule 3). A `tbc` entry
-    has none. `this_week` lists some of them; the empty-week check counts them all."""
+    has none. `this_week` lists some of them; the empty-week check counts them all.
+    `specs` (by schedule key) says how each assignment is handed in, which its cutoff
+    hangs on."""
     out: list = []
     for r in sched.releases:
         out += [(slot.when, "release", r.label, r) for slot in r.row_slots]
@@ -1059,7 +1063,16 @@ def schedule_moments(sched: schedule.Schedule) -> list[ScheduledMoment]:
         out += [
             (a.handout_datetime, "hand_out", slug, a),
             (a.due_datetime, "due", slug, a),
-            (schedule.grading_cutoff_datetime(sched, slug), "cutoff", slug, a),
+            (
+                schedule.grading_cutoff_datetime(
+                    sched,
+                    slug,
+                    submit_via=specs.get(slug, grading_spec.GradingSpec()).submit_via,
+                ),
+                "cutoff",
+                slug,
+                a,
+            ),
         ]
     for e in sched.events:
         out.append((e.when, "exam" if e.kind == "exam" else "event", e.label, e))
@@ -1092,7 +1105,9 @@ def empty_week_problems(
         return []
     tz = ZoneInfo(sched.timezone)
     today = now.astimezone(tz).date()
-    days = {_local_day(when, tz) for when, *_ in schedule_moments(sched)}
+    days = {
+        _local_day(when, tz) for when, *_ in schedule_moments(sched, specs=facts.specs)
+    }
     # Every slot of an entry counts for its week, files or none.
     kinds = [(slot.when, r.kind) for r in sched.releases for slot in r.row_slots]
     kind_days = {
@@ -1733,12 +1748,14 @@ def assignment_state(
     spec: grading_spec.GradingSpec,
     units: int,
     returned: bool,
-    out: bool = False,
+    out: bool,
 ) -> str:
     """`declared | teams_forming | blocked | open | late_window | marking | returned`
     (lifecycle, per assignment), by the assignment's own clock:
 
-    returned once marks have gone back for every unit; marking from the cutoff;
+    returned once marks have gone back for every unit; declared, whatever the dates say,
+    while nothing is out (no unit's copy and not `out`: a hand-out by hand nobody has
+    pressed yet still waits for it past its due date); marking from the cutoff;
     late_window between the due date and the cutoff; before the due date, open once the
     work is out: any unit's copy handed out, or, for a shape with no repo per unit
     (`external`, `shared_dropbox_repo`), the assignment `handed_out` (`out`). A group
@@ -1748,6 +1765,8 @@ def assignment_state(
     cascade's, `self_select` unless somebody declared `assigned`)."""
     if returned:
         return "returned"
+    if units == 0 and not out:
+        return "declared"
     if cutoff is not None and now >= cutoff:
         return "marking"
     if entry.due_datetime is not None and now >= entry.due_datetime:
@@ -1799,15 +1818,21 @@ def _problem_entries(problems: list[dict]) -> set[str]:
 def run_settings(spec: grading_spec.GradingSpec) -> dict[str, dict]:
     """Each run setting's effective value and the layer it came from (`settings`), keyed
     as the files spell them, so the console shows "5 days, this course's default" without
-    a cascade of its own."""
+    a cascade of its own.
+
+    No late window for work handed in outside GitHub (`collects_commits`, as every other
+    late gate asks it): its cutoff is the due date, so the console never quotes one."""
     sources = dict(spec.sources)
-    return {
+    out = {
         settings.FILE_NAMES.get(key, key): {
             "value": getattr(spec, key),
             "source": sources.get(key, "institution"),
         }
         for key in settings.RUN_KEYS
     }
+    if not spec.collects_commits:
+        out["late_window_days"]["value"] = None
+    return out
 
 
 def effective_defaults(
@@ -1829,12 +1854,9 @@ def effective_defaults(
     return out
 
 
-def render_assignments(
-    facts: SemesterFacts, problems: list[dict], now: datetime
-) -> list[dict]:
-    """One row per assignment the schedule declares. `problem`: a `now` or `soon` problem
-    names it or its template (a `later` one is coming up, not wrong yet)."""
-    flagged = _problem_entries(_biting(problems))
+def render_assignments(facts: SemesterFacts, now: datetime) -> list[dict]:
+    """One row per assignment the schedule declares; `problem` is set by
+    `flag_assignments` once the semester's problems are tiered."""
     templates = handed_out_assignments(list(facts.listing.values()))
     sheet_specs = {}
     for k, e in facts.sched.assignments.items():
@@ -1847,7 +1869,9 @@ def render_assignments(
     for slug, entry in facts.sched.assignments.items():
         spec = facts.specs.get(slug, grading_spec.GradingSpec())
         name = schedule.semester_name(slug, entry)
-        cutoff = schedule.grading_cutoff_datetime(facts.sched, slug)
+        cutoff = schedule.grading_cutoff_datetime(
+            facts.sched, slug, submit_via=spec.submit_via
+        )
         units = len(assignment_rows(facts.listing, name)) if facts.listing else 0
         sheet, sspec = facts.sheets.get(name), sheet_specs.get(name)
         filled, on_sheet, submitted = sheet_counts(sheet, sspec)
@@ -1883,7 +1907,10 @@ def render_assignments(
                     spec,
                     units,
                     returned,
-                    handed_out(name, entry, templates, now),
+                    # A sheet with rows is out too: a shape with no repos whose sheet
+                    # landed but whose hand-out record did not would otherwise wait for a
+                    # second Hand out now forever.
+                    handed_out(name, entry, templates, now) or on_sheet > 0,
                 ),
                 "handout": _iso(entry.handout_datetime),
                 "due": _iso(entry.due_datetime),
@@ -1891,7 +1918,9 @@ def render_assignments(
                 "solution_shown": _iso(solution),
                 # Set before the late cutoff: the scheduler holds it until then.
                 "solution_held_until": _iso(
-                    schedule.solution_held_until(facts.sched, slug)
+                    schedule.solution_held_until(
+                        facts.sched, slug, submit_via=spec.submit_via
+                    )
                 ),
                 "units": units,
                 "submissions": submitted,
@@ -1900,7 +1929,7 @@ def render_assignments(
                 else None,
                 "marks": {"filled": filled, "total": total},
                 "returned": returned,
-                "problem": slug in flagged or entry.course_source_repo in flagged,
+                "problem": False,
                 "settings": run_settings(spec),
                 # The site's due-row word (`course.submit_shape`), so the console's
                 # schedule says where to submit exactly as the site does.
@@ -1908,6 +1937,64 @@ def render_assignments(
             }
         )
     return rows
+
+
+NOT_HANDED_OUT = "NOT_HANDED_OUT"
+
+
+def flag_assignments(rows: list[dict], problems: list[dict]) -> list[dict]:
+    """Set each row's `problem`: a `now` or `soon` problem names it or its template (a
+    `later` one is coming up, not wrong yet). `NOT_HANDED_OUT` is left out: the row's
+    state (`declared`, no hand-out date) already says it, and the console tags it."""
+    flagged = _problem_entries(
+        [p for p in _biting(problems) if p.get("kind") != NOT_HANDED_OUT]
+    )
+    for row in rows:
+        row["problem"] = row["slug"] in flagged or row["template"] in flagged
+    return rows
+
+
+def not_handed_out_problems(
+    facts: SemesterFacts, rows: list[dict], now: datetime
+) -> list[dict]:
+    """`NOT_HANDED_OUT`: an assignment set to hand out by hand (no `handout_datetime`) that
+    is still `declared`. Dated at its due date, so `_tier` escalates it like every dated
+    problem: `later`, then `soon` inside the horizon, `now` once the due date has passed.
+    A scheduled hand-out never is: its own date counts it out (`handed_out`), so one whose
+    run failed is not told apart here. One with no due date yet is `later`: its own
+    `schedule:due` to-do asks for the date first."""
+    out = []
+    declared = {r["slug"] for r in rows if r["state"] == "declared"}
+    for key, entry in facts.sched.assignments.items():
+        due = entry.due_datetime
+        if key not in declared or entry.handout_datetime is not None:
+            continue
+        manual = f"{key} is set to hand out manually (no scheduled hand-out) and"
+        text = (
+            f"{manual} has not been handed out yet."
+            if due is None
+            else f"{manual} was never handed out; its due date, {_day(due)}, has passed."
+            if due <= now
+            else f"{manual} has not been handed out yet. Due {_day(due)}."
+        )
+        out.append(
+            {
+                "id": f"assignment:{_slugify(key)}:{NOT_HANDED_OUT}",
+                "scope": "semester",
+                "stage": "K4",
+                "kind": NOT_HANDED_OUT,
+                "text": text,
+                "stops": "Students have no brief and there is no mark sheet; press "
+                "Hand out now.",
+                "fix": {
+                    **_schedule_fix(facts.org, key, line_of(entry.lines, "")),
+                    "screen": "assignment",
+                },
+                "when": _iso(due),
+                **({UNDATED_LATER: True} if due is None else {}),
+            }
+        )
+    return out
 
 
 def render_releases(
@@ -1960,6 +2047,8 @@ def this_week(
     assignments: list[dict],
     now: datetime,
     planned: list[PlannedRow],
+    *,
+    specs: Mapping[str, grading_spec.GradingSpec],
 ) -> list[dict]:
     """What happens from the start of today to the same moment seven days on, in the
     semester's zone: releases (each slot of an entry), hand-outs, due dates and events.
@@ -1991,7 +2080,7 @@ def this_week(
 
     by_id = {r["id"]: r for r in releases}
     by_slug = {a["slug"]: a for a in assignments}
-    for when, what, key, entry in schedule_moments(sched):
+    for when, what, key, entry in schedule_moments(sched, specs=specs):
         if what == "release":
             state = by_id.get(key, {}).get("state", "planned")
             title = entry.title or policy.numbered_title(entry.kind, entry.number)
@@ -2331,6 +2420,8 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
     # A late release another problem already holds back is not told twice.
     held = {p["release"] for p in problems if "release" in p}
     problems += late_problems(facts, releases, held, now)
+    assignments = render_assignments(facts, now)
+    problems += not_handed_out_problems(facts, assignments, now)
     problems = _unique_ids(_tier(problems, now))
     course_block, _ = render_course(
         course, now, [p for p in problems if p["scope"] == "course"], moments
@@ -2348,7 +2439,7 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
     todo += no_due_date_todo(facts, set_aside_ids(course.meta))
     week, weeks = semester_weeks(sched.semester_start, sched.semester_end, today)
     tag = semester_of(facts.org)
-    assignments = render_assignments(facts, problems, now)
+    assignments = flag_assignments(assignments, problems)
     stale = facts.site_last_update is None or (
         facts.config_last_update is not None
         and facts.site_last_update < facts.config_last_update
@@ -2385,7 +2476,9 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
             "template_moments": {repo: _iso(m.when) for repo, m in moments.items()},
         },
         "problems": problems,
-        "this_week": this_week(sched, releases, assignments, now, planned),
+        "this_week": this_week(
+            sched, releases, assignments, now, planned, specs=facts.specs
+        ),
         "releases": releases,
         "assignments": assignments,
         "students": {

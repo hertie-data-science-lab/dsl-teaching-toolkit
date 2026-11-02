@@ -32,9 +32,12 @@ export const PREVIEW_ONLY = new Set(['semester.preview_automation']);
  * path checks refuse the real run just the same, before it copies anything); Keep for
  * future semesters proposes changes you accept on GitHub anyway;
  * the team-window email and instructor access report a count; Collect now's preview only
- * starts another workflow the panel does not follow.
+ * starts another workflow the panel does not follow. Hand out now: its page button and its
+ * panel's verb are the confirmation (`confirmInPanel`); the preview returns in the panel only
+ * where the engine requires one, a hand out with the solution (`previewWhen`).
  */
 export const PREVIEW_NOT_OFFERED = new Set([
+  'assignment.handout_now',
   'assignment.derive_starter',
   'release.entry',
   'release.adhoc',

@@ -112,7 +112,9 @@ def test_an_externally_submitted_assignment_has_no_info_block_at_all():
     # the override is the grader's, not the machine's.
     block = new_sheet(individual(submit_via="external"), SOLO)["submissions"]["ada-l"]
     assert "info" not in block
-    assert list(block) == [*PERSON_KEYS, "score_individual"]
+    # In its place, the grader's own days late, blank (on time) until they say otherwise.
+    assert list(block) == ["days_late", *PERSON_KEYS, "score_individual"]
+    assert block["days_late"] is None
 
 
 def test_declared_questions_become_a_blank_skeleton_and_nothing_else_does():
@@ -298,6 +300,56 @@ def test_a_member_who_joins_a_team_later_gets_a_blank_row():
     assert members["chen-w"] == dict.fromkeys(PERSON_KEYS)
 
 
+# ben-k moves from team-alpha to team-beta through the Join form after the sheet exists.
+MOVED = [("team-alpha", ["ada-l"]), ("team-beta", ["chen-w", "ben-k"])]
+
+
+def test_a_member_who_moves_team_with_a_blank_entry_leaves_the_old_team():
+    spec = group()
+    merged = merge_sheet(_marked(spec, TEAMS), spec, MOVED, {})["teams"]
+    assert list(merged["team-alpha"]["members"]) == ["ada-l"]
+    assert list(merged["team-beta"]["members"]) == ["chen-w", "ben-k"]
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [None, {}, {"adjustment_individual": None, "feedback_individual": "  "}],
+)
+def test_a_departed_entry_with_nothing_typed_in_it_is_dropped(entry):
+    spec = group()
+    sheet = new_sheet(spec, TEAMS)
+    sheet["teams"]["team-alpha"]["members"]["ben-k"] = entry
+    merged = merge_sheet(sheet, spec, MOVED, {})
+    assert "ben-k" not in merged["teams"]["team-alpha"]["members"]
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("adjustment_individual", "-2"),
+        ("feedback_individual", "Good work on the loss.\n"),
+        (NOTES_KEY, "talked to them"),
+    ],
+)
+def test_a_member_who_moves_team_keeps_anything_the_grader_typed(field, value):
+    # Their marks are not ours to delete, so they stay in both teams - and the duplicate
+    # hold that follows is right: a grader must decide which entry counts.
+    spec = group()
+    sheet = new_sheet(spec, TEAMS)
+    sheet["teams"]["team-alpha"]["members"]["ben-k"][field] = value
+    merged = merge_sheet(sheet, spec, MOVED, {})
+    assert merged["teams"]["team-alpha"]["members"]["ben-k"][field] == value
+    assert sheet_hold_reasons(spec, merged) == {"ben-k": "duplicate"}
+
+
+def test_a_blank_team_move_raises_no_duplicate_fault():
+    spec = group(questions=QUESTIONS)
+    merged = merge_sheet(_marked(spec, TEAMS), spec, MOVED, {})
+    text = dump_sheet(merged, spec, "OPEN")
+    assert sheet_faults("a3", text, spec) == []
+    assert sheet_hold_reasons(spec, parse_sheet(text)) == {}
+
+
 def test_a_unit_seen_for_the_first_time_arrives_with_the_facts_already_derived():
     # A late onboarder, or the very first write of a sheet during the late window. Created
     # blank and filled "next tick", their row would sit empty for fifteen minutes with
@@ -387,6 +439,7 @@ def test_an_external_sheet_says_the_toolkit_fills_nothing():
     text = dump_sheet(new_sheet(spec, SOLO), spec, "FROZEN 20 Sep 2026 23:59")
     assert "Auto-filled by the toolkit: nothing." in text
     assert "submitted outside GitHub" in text
+    assert "you enter each unit's `days_late`" in text
 
 
 def test_the_maxima_and_the_info_notice_are_re_emitted_beside_the_fields():
@@ -609,6 +662,12 @@ def test_final_grade_applies_the_penalty_then_the_adjustment():
 def test_final_grade_is_floored_at_zero():
     assert final_grade(20, penalty_rate("10%"), 20, None) == Decimal(0)
     assert final_grade(5, None, None, "-40") == Decimal(0)
+
+
+def test_final_grade_caps_the_penalty_at_the_whole_total():
+    # Days late a marker enters have no window: 15 days at 10% is 150%, which takes the
+    # total to nothing and no further, so the adjustment still counts.
+    assert final_grade(40, penalty_rate("10%"), 15, "+5") == Decimal(5)
 
 
 def test_final_grade_needs_no_late_policy():
@@ -1059,3 +1118,56 @@ def test_a_set_penalty_of_nothing_reads_as_waived():
     assert gradebook._penalty_display(rate, 2, "0%") == "waived"
     assert gradebook._penalty_display(rate, 2, "waive") == "waived"
     assert final_grade(20, rate, 2, None, "0%") == Decimal(20)
+
+
+# ------------------------------------------- external work: the grader's days late
+
+
+def _external(**kw) -> SheetSpec:
+    return individual(submit_via="external", late_penalty_per_day="10%", **kw)
+
+
+def test_external_days_late_are_the_graders_and_cost_the_late_rule():
+    spec = _external()
+    block = {"days_late": 2, "score_individual": 80}
+    view = gradebook.student_view(spec, "ada-l", block, "ada-l")
+    assert (view["final_grade"], view["days_late"], view["penalty"]) == (
+        "64",
+        2,
+        "-20%",
+    )
+    # Blank, or a sheet written before the key existed, is on time.
+    for on_time in ({"days_late": None}, {}):
+        view = gradebook.student_view(
+            spec, "ada-l", on_time | {"score_individual": 80}, "ada-l"
+        )
+        assert (view["final_grade"], view.get("penalty")) == ("80", None)
+    # The grader's waive works as on a repo shape.
+    waived = block | {"late_penalty": "waive"}
+    assert gradebook.student_view(spec, "ada-l", waived, "ada-l")["final_grade"] == "80"
+
+
+def test_external_days_late_survive_a_refresh_and_the_freeze():
+    spec = _external()
+    sheet = new_sheet(spec, SOLO)
+    sheet["submissions"]["ada-l"]["days_late"] = 3
+    for frozen in (False, True):
+        merged = merge_sheet(sheet, spec, SOLO, {}, frozen=frozen)
+        assert merged["submissions"]["ada-l"]["days_late"] == 3
+        assert "info" not in merged["submissions"]["ada-l"]
+        assert merged["submissions"]["ben-k"]["days_late"] is None
+    text = dump_sheet(merge_sheet(sheet, spec, SOLO, {}), spec, "OPEN")
+    assert parse_sheet(text)["submissions"]["ada-l"]["days_late"] == "3"
+
+
+@pytest.mark.parametrize("bad", ["two", -1, 1.5, "1.5"])
+def test_external_days_late_that_are_not_a_whole_number_hold_the_mark(bad):
+    spec = _external()
+    sheet = new_sheet(spec, SOLO)
+    sheet["submissions"]["ada-l"].update(days_late=bad, score_individual=80)
+    text = dump_sheet(sheet, spec, "OPEN")
+    faults: list = []
+    held = sheet_hold_reasons(spec, sheet, faults, text, "assignment-1")
+    assert held == {"ada-l": "days_late"}
+    (fault,) = faults
+    assert fault.field == "days_late" and "ada-l" not in fault.plain

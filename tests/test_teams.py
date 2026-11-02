@@ -82,3 +82,18 @@ def test_a_clean_roster_has_no_team_faults():
     faults = []
     _parse(faults=faults)
     assert faults == []
+
+
+def test_a_team_named_solution_is_refused_and_claims_nobody():
+    # A shared drop box keeps the model answer in `solution/`, beside each team's folder.
+    faults = []
+    students = (
+        "email,name,role,team:4\nana@x.org,Ana,,Solution\nben@x.org,Ben,,wizards\n"
+    )
+    keys = {"assignment-4": "4"}
+    assert _parse(students, SYSTEM, keys, faults) == {
+        "assignment-4": {"wizards": ["ben-o"]}
+    }
+    (fault,) = faults
+    assert fault.field == "team:4" and "reserved" in fault.what
+    assert "ana" not in fault.what

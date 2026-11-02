@@ -233,8 +233,9 @@ export function OpPanel() {
       </div>
     );
   }
-  const mode = modeOf(d.op);
   const values = d.options ? effective(d.options, c.values) : c.values;
+  const opMode = modeOf(d.op);
+  const mode = opMode === 'direct' && d.previewWhen?.(values) ? 'preview' : opMode;
   const invalid = d.options ? Object.keys(fieldErrors(opSpec(d.op).args_schema, d.options, c.values)).length > 0 : false;
   let body, foot;
   if (d.info) {
@@ -325,9 +326,9 @@ export function OpButtons({ def, small, label, previewLabel = def.previewLabel ?
   );
 }
 
-/** A single button that opens the panel on `def` (no preview shortcut). */
-export function OpOpen({ def, cls = 'btn', label }: { def: OpDef; cls?: string; label?: string }) {
+/** A single button that opens the panel on `def` (no preview shortcut); `disabled` greys it out. */
+export function OpOpen({ def, cls = 'btn', label, disabled = false }: { def: OpDef; cls?: string; label?: string; disabled?: boolean }) {
   const env = useEnv();
-  return <><button class={cls} type="button" onClick={() => env?.ops.open(def)}>{label ?? def.name}</button><VerbHint def={def} /></>;
+  return <><button class={cls} type="button" disabled={disabled} aria-disabled={disabled ? 'true' : undefined} onClick={() => env?.ops.open(def)}>{label ?? def.name}</button><VerbHint def={def} /></>;
 }
 

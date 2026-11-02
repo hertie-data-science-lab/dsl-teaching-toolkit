@@ -78,6 +78,8 @@ export const ORG_NAME_RE = pattern('course_org');
 /** Where a template's students submit when it says nothing: the toolkit's shape default
  * (`setting_readers.READERS['submit_via']`), not a policy value, which policy.json does not export. */
 export const SUBMIT_VIA_DEFAULT = 'assignment_repo';
+/** The legacy `submit_via` spellings the engine still reads (course.LEGACY_SUBMIT_VIA). */
+export const LEGACY_SUBMIT_VIA: Record<string, string> = { github: SUBMIT_VIA_DEFAULT };
 /** Every place students may submit, in the schema's order. */
 export const SUBMIT_VIA_KEYS: string[] = gradingSchema.properties.submit_via.enum;
 

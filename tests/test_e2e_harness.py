@@ -888,7 +888,10 @@ def test_the_due_date_the_harness_writes_gives_the_cutoff_it_means(monkeypatch, 
     wanted = cutoff.replace(second=0, microsecond=0)
     for shape in shapes.SHAPES:
         slug = shapes.slug(RUN, shape)
-        assert schedule.grading_cutoff_datetime(sched, slug) == wanted, shape.name
+        assert (
+            schedule.grading_cutoff_datetime(sched, slug, submit_via="assignment_repo")
+            == wanted
+        ), shape.name
         assert sched.assignments[slug].due_datetime == due
     assert module.cutoff_for_due(due) == wanted
 

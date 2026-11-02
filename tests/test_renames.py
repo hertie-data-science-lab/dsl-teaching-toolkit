@@ -213,8 +213,13 @@ def test_the_one_cutoff_resolver_adds_the_late_window_to_the_due_date():
     sched = _one_assignment()
     due = sched.assignments["a1"].due_datetime
     # The effective window: the institution's 10 days when nothing nearer says.
-    assert schedule.grading_cutoff_datetime(sched, "a1") == due + timedelta(days=10)
-    assert schedule.grading_cutoff_datetime(sched, "nope") is None
+    assert schedule.grading_cutoff_datetime(
+        sched, "a1", submit_via="assignment_repo"
+    ) == due + timedelta(days=10)
+    assert (
+        schedule.grading_cutoff_datetime(sched, "nope", submit_via="assignment_repo")
+        is None
+    )
 
 
 def test_the_old_resolvers_are_gone():
@@ -354,6 +359,20 @@ def test_the_hand_out_op_passes_solution_datetime_now():
     assert REGISTRY["assignment.handout_now"].argv(req)[-2:] == [
         "--solution-datetime",
         "now",
+    ]
+
+
+def test_the_hand_out_op_names_the_schedule_entry():
+    req = parse_request(
+        _request(
+            op="assignment.handout_now",
+            semester_org="S",
+            args={"course_source_repo": "a1", "assignment": "a1-resit"},
+        )
+    )
+    assert REGISTRY["assignment.handout_now"].argv(req)[-2:] == [
+        "--assignment",
+        "a1-resit",
     ]
 
 
@@ -758,6 +777,16 @@ def test_a_preview_of_one_template_does_not_license_another(monkeypatch):
     assert assign.preview_first("S", "assignment-1-f2026", preview=True) is None
     refused = assign.preview_first("S", "assignment-2-f2026", preview=False)
     assert refused is not None and refused.reasons[0]["code"] == assign.PREVIEW_FIRST
+
+
+def test_a_preview_of_one_entry_does_not_license_the_other_on_its_template(monkeypatch):
+    # A resit shares its template: the preview names the entry it was for.
+    _gate_store(monkeypatch)
+    t = "assignment-2-f2026"
+    assert assign.preview_first("S", t, preview=True, entry="a2-resit") is None
+    assert assign.preview_first("S", t, preview=False, entry="a2") is not None
+    assert assign.preview_first("S", t, preview=False) is not None
+    assert assign.preview_first("S", t, preview=False, entry="a2-resit") is None
 
 
 def test_a_preview_older_than_a_day_no_longer_counts(monkeypatch):

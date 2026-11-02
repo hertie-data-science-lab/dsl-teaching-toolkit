@@ -158,6 +158,37 @@ describe('the assignment hub', () => {
     expect(alone).toContain('The mark sheet appears at hand out');
   });
 
+  it('offers Hand out now on the Marks tab of an assignment not yet handed out', () => {
+    const marks = (a: Assignment) => render(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'marks', loaded: { kind: 'ready', status: { ...status, assignments: [a, team] }, sha: 's', stale: [] } })} />);
+    const byHand = marks({ ...solo, state: 'declared', handout: null });
+    expect(byHand).toContain('Not handed out yet, so nothing has reached students. The mark sheet appears when you press Hand out now');
+    expect(byHand).toContain('>Hand out now</button>');
+    const later = marks({ ...solo, state: 'declared', handout: '2026-10-01T10:00:00+02:00' });
+    expect(later).toContain('Hands out Thu 1 Oct');
+    expect(later).toContain('the mark sheet appears then.');
+    expect(later).toContain('>Hand out now</button>');
+    expect(render(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'marks' })} />)).not.toContain('>Hand out now</button>');
+  });
+
+  it('offers Hand out now on an index row handed out by hand, and on no other', () => {
+    const byHand = { ...solo, slug: 'assignment-5', state: 'declared' as const, handout: null };
+    const dated = { ...solo, slug: 'assignment-6', state: 'declared' as const, handout: '2026-10-01T10:00:00+02:00' };
+    const out = render(<AssignmentsScreen {...props({ loaded: { kind: 'ready', status: { ...status, assignments: [solo, byHand, dated] }, sha: 's', stale: [] } })} />);
+    expect(out.match(/>Hand out now<\/button>/g)).toHaveLength(1);
+    expect(out.match(/Manual hand-out: not handed out yet/g)).toHaveLength(1);
+    expect(out.indexOf('>Hand out now</button>')).toBeGreaterThan(out.indexOf('#assignment-assignment-5'));
+  });
+
+  it('tells a declared assignment set to hand out by hand when it goes out, on the Overview and the Teams tab', () => {
+    const byHand = { ...team, state: 'declared' as const, handout: null, teams: 0 };
+    const at = (tab: 'overview' | 'teams') => render(<AssignmentScreen {...props({ entry: 'assignment-3', tab, loaded: { kind: 'ready', status: { ...status, assignments: [solo, byHand] }, sha: 's', stale: [] } })} />);
+    expect(at('overview')).toContain('Hands out when you press Hand out now.');
+    const teams = at('teams');
+    expect(teams).toContain('Opens when you press Hand out now. Until then you can assign teams here.');
+    expect(teams).toContain('>Hand out now</button>');
+    expect(teams).not.toContain('students cannot form teams');
+  });
+
   it('renders the named tab over the default one', () => {
     const out = render(<AssignmentScreen {...props({ entry: 'assignment-3', tab: 'overview' })} />);
     expect(current(out)).toBe('Overview');
@@ -194,6 +225,25 @@ describe('the Assignments index', () => {
     expect(out).toContain('<span class="chip ">marking</span><br/><span class="footnote">late work to Wed 7 Oct</span>');
     expect(out).toContain('One this semester. One is being marked.');
     expect(out).not.toContain('late window');
+  });
+  it('lists the course templates the schedule does not use, each with a link to add it', () => {
+    const own: Loaded = { kind: 'ready', status: { ...status, course: { ...status.course!, templates: [...status.course!.templates, { repo: 'assignment-quiz-1', state: 'ready' }] } }, sha: 'c', stale: [] };
+    const out = render(<AssignmentsScreen {...props({ courseLoaded: own })} />);
+    expect(out).toContain('<h2>Not in this semester yet</h2>');
+    expect(out).toContain(`href="?cohort=${COHORT_ORG}&amp;template=assignment-quiz-1#schedule-new">Add to the schedule</a>`);
+    expect(out).toContain(`href="?course=${COURSE_ORG}#template-assignment-quiz-1">assignment-quiz-1</a>`);
+    expect(out).not.toContain('template=assignment-3-f2026'); // in the schedule
+    // No course status read (a render test): the semester's copy of the course block.
+    const copy = render(<AssignmentsScreen {...props({ loaded: { kind: 'ready', status: { ...status, assignments: [solo] }, sha: 's', stale: [] } })} />);
+    expect(copy).toContain('template=assignment-3-f2026#schedule-new');
+  });
+  it('shows no such list when every template is scheduled, or while the course status is read', () => {
+    expect(render(<AssignmentsScreen {...props()} />)).not.toContain('Not in this semester yet');
+    const one = { kind: 'ready' as const, status: { ...status, assignments: [solo] }, sha: 's', stale: [] };
+    expect(render(<AssignmentsScreen {...props({ loaded: one, courseLoaded: { kind: 'loading' } })} />)).not.toContain('Not in this semester yet');
+  });
+  it('opens New assignment from this semester, so its last step offers this semester first', () => {
+    expect(render(<AssignmentsScreen {...props()} />)).toContain(`href="?cohort=${COHORT_ORG}#new-assignment-1">New assignment</a>`);
   });
 });
 

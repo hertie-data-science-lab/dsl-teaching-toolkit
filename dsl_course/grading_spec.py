@@ -495,8 +495,8 @@ def grading_spec_faults(
                 f"`solution_datetime:`, but `submit_via: {spec.submit_via}` with "
                 f"`visibility: {spec.visibility}` gives it no private repo of its own to "
                 f"push the model solution into - it is never pushed where the world can "
-                f"read it, where the students can publish it, or where the whole semester "
-                f"shares one repo, so that moment passes and nothing is released",
+                f"read it or where the students can publish it, so that moment passes and "
+                f"nothing is released",
                 field="visibility",
                 lineno=lines.get(("visibility",)),
                 fix="remove `solution_datetime:` from this assignment's entry in "
@@ -564,8 +564,12 @@ def grading_config_faults(
         template = entry.course_source_repo
         if not template:
             continue  # the plan itself is faulty; schedule.yml's own digest says so
-        # The window-less cutoff: the spec that holds the window is what is read next.
-        fires = schedule.grading_cutoff_datetime(sched, slug)
+        # The shape is in the file being checked, so a fault is timed off a repo shape's
+        # cutoff (the window's end) and moved to the due date below once the parse says
+        # external.
+        fires = schedule.grading_cutoff_datetime(
+            sched, slug, submit_via="assignment_repo"
+        )
         text = _grading_text(course_org, template)
         if text is None:
             continue  # declares nothing: graded as an individual, hand-marked one
@@ -585,6 +589,13 @@ def grading_config_faults(
             releases_solution=entry.solution_datetime is not None,
             semester_org=semester_org,
         )
+        if spec is not None and not spec.collects_commits:
+            due = schedule.grading_cutoff_datetime(
+                sched, slug, submit_via=spec.submit_via
+            )
+            for fault in spec_faults:
+                if fault.fires == fires:
+                    fault.fires = due
         faults += spec_faults
         if handed_out and spec is not None and spec.visibility_is_students:
             hands_the_flag_over = True
@@ -785,6 +796,7 @@ def sheet_spec(
     `schedule.yml`. Nothing here is written into the sheet as data - it reaches the grader
     as the comment header, which is regenerated on every write."""
     entry = sched.assignments.get(key)
+    cutoff = schedule.grading_cutoff_datetime(sched, key, submit_via=gspec.submit_via)
     return SheetSpec(
         slug=slug,
         title=title or gspec.title or slug,
@@ -799,12 +811,9 @@ def sheet_spec(
         autograde=gspec.autograde,
         completion_check=gspec.runs_completion_check,
         due_display=_display_moment(entry.due_datetime if entry else None),
-        cutoff_display=_display_moment(schedule.grading_cutoff_datetime(sched, key)),
+        cutoff_display=_display_moment(cutoff),
         due_long=_display_long(entry.due_datetime if entry else None, sched.timezone),
-        cutoff_long=_display_long(
-            schedule.grading_cutoff_datetime(sched, key),
-            sched.timezone,
-        ),
+        cutoff_long=_display_long(cutoff, sched.timezone),
         due_at=entry.due_datetime if entry else None,
         not_migrated=gspec.not_migrated,
     )

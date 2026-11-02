@@ -66,6 +66,7 @@ from .grading_sheet import (
     SheetUnreadable,
     _misshapen,
     _people,
+    _sheet_yaml,
     _spec_from_sheet,
     _units,
     is_blank,
@@ -371,7 +372,8 @@ def _with_told(
 
 # The view keys a GRADER writes. The rest - `max_points`, `submitted`, `days_late` - are
 # the toolkit's facts about the assignment and fill in on their own, so a book carrying
-# only those has changed without there being anything for a student to read.
+# only those has changed without there being anything for a student to read. The console's
+# `TOLD_KEYS` (console/src/model/marks.ts) is the sheet keys behind these: keep in step.
 _GRADER_KEYS = (
     "final_grade",
     "score",
@@ -569,13 +571,16 @@ def _final_record(
     counts: dict[str, int],
     delete: list[str],
     retired: list[str],
+    returned: dict[str, bytes],
 ) -> bool:
     """The semester grades file and the record of what went out, in ONE commit - together
     with the retired files this semester is migrating off, so the old and the new can
     never both be present for a reader to choose between - and, for a scoped return,
     `marker`'s returned record. `retired` (the semester grades file's old name, where the
-    clone had it) goes only in a commit that writes the file under its new one."""
-    writes = {DISTRIBUTED_PATH: dump_distributed(record).encode()}
+    clone had it) goes only in a commit that writes the file under its new one. `returned`
+    is each covered sheet's `returned_record`, in the same commit so it can never claim a
+    unit told that `distributed.csv` does not."""
+    writes = {DISTRIBUTED_PATH: dump_distributed(record).encode(), **returned}
     if registrar is None:
         # `roster.load` answers None for a roster it could not READ and [] for one with no
         # rows, and the export is one row per ENROLLED student - so regenerating it from
@@ -606,6 +611,58 @@ def _final_record(
             f"emails were recorded before they went, so the next run re-sends none"
         )
     return recorded
+
+
+def returned_record_path(name: str) -> str:
+    """Where `returned_record` of sheet `name` lives in semester-config."""
+    return records.path("returned", f"{name}.yml")
+
+
+_RETURNED_HEADER = """\
+# SYSTEM-OWNED - do not edit, edits here are overwritten. Written by Return marks: what
+# each unit was last told. A unit absent here has not been told its current marks.
+"""
+
+
+def _told_units(
+    spec: SheetSpec,
+    sheet: dict,
+    told: dict[str, str],
+    marks: dict[str, str],
+    held: dict[str, dict[str, tuple[str, str]]],
+) -> dict[str, dict]:
+    """The sheet's units of which EVERY person would not be emailed by another run: their
+    email row (`told`, casefolded handle -> digest) carries their live marks digest
+    (`marks`, the same keys), and none of their marks for this sheet is held. Anyone else
+    - mail failed, no roster address, `notify` off for a mark that moved, no gradebook
+    written, a held mark - leaves the whole unit out, so the console keeps counting it.
+    Read off the run's final state, so a unit told by an earlier run whose marks have not
+    moved since is in."""
+    holding = {str(handle).casefold() for handle in held.get(spec.slug) or {}}
+    out: dict[str, dict] = {}
+    for unit, block in _units(spec, sheet):
+        members = [str(m).casefold() for m in _people(spec, unit, block)]
+        if members and all(
+            m not in holding and m in marks and told.get(m) == marks[m] for m in members
+        ):
+            out[unit] = block
+    return out
+
+
+def returned_record(spec: SheetSpec, told_units: dict[str, dict]) -> str:
+    """The `.system/returned/<name>.yml` text: each told unit's block exactly as the sheet
+    carried it, under the sheet's own container key and in its own dump, so the console
+    compares the two with one parser and counts a unit whose block has moved since.
+
+    Beside the container, the `late_penalty_per_day` those marks went out under (blank for
+    none): a changed rate moves every late unit's final grade - so the engine would email
+    them - while their blocks stay identical, and only this tells the console so."""
+    return _RETURNED_HEADER + _sheet_yaml(
+        {
+            "late_penalty_per_day": spec.late_penalty_per_day,
+            spec.container_key: told_units,
+        }
+    )
 
 
 def _returned_units(
@@ -1005,6 +1062,13 @@ def distribute(
         for handle in told:
             record[(handle, "", CHANNEL_EMAIL)] = (live[handle], now, "")
         counts["emails"] = len(told)
+        # Every sheet's told units read off these two, so they are built once a run.
+        emailed = {
+            target.casefold(): digest
+            for (target, slug, channel), (digest, _at, _issue) in record.items()
+            if not slug and channel == CHANNEL_EMAIL
+        }
+        current = {handle.casefold(): digest for handle, digest in live.items()}
         return _final_record(
             semester_org,
             record,
@@ -1026,6 +1090,15 @@ def distribute(
             counts=counts,
             delete=retired,
             retired=retired_grades,
+            # The sheets this run covered: a scoped run renders the ones already
+            # returned too, but their records stay as their own runs wrote them.
+            returned={
+                returned_record_path(slug): returned_record(
+                    specs[slug],
+                    _told_units(specs[slug], sheets[slug], emailed, current, held),
+                ).encode()
+                for slug in ([assignment] if assignment else sorted(sheets))
+            },
         )
 
     failed_mail, told = 0, []

@@ -43,7 +43,7 @@ solution rides on that same release once `assignments.<slug>.solution_datetime` 
 passed - Release assignment's `solution_datetime: now`, on a clock.
 
 Every tick also drives each assignment's late cutoff (`schedule.grading_cutoff_datetime`:
-due + `late_window_days`), whether or not the semester uses `releases` at all:
+due + `late_window_days`, the due date itself for `external`), whether or not the semester uses `releases` at all:
 
 1. FREEZE (release phase). For every assignment whose grading deadline has gone by and that
    has no snapshot yet, record the commit each submission repo is graded at into
@@ -183,7 +183,9 @@ def due_snapshots(
     two passes that collect, and is applied there."""
     passed = []
     for slug in sched.assignments:
-        at = grading_cutoff_datetime(sched, slug)
+        at = grading_cutoff_datetime(
+            sched, slug, submit_via=_submit_via(course_org, sched, slug)
+        )
         if at is not None and at <= now:
             passed.append((slug, at))
     return [(slug, at.isoformat()) for slug, at in sorted(passed, key=lambda p: p[1])]
@@ -451,6 +453,18 @@ def _collects(course_org: str, entry: schedule.AssignmentEntry) -> bool:
     return load_grading_spec(course_org, entry.course_source_repo).collects_commits
 
 
+def _submit_via(course_org: str, sched: schedule.Schedule, slug: str) -> str:
+    """How assignment `slug` is handed in, which its late cutoff hangs on
+    (`schedule.grading_cutoff_datetime`): the template's, or this semester's override of it
+    on the entry (`schedule.shape_of`)."""
+    return load_grading_spec(
+        course_org,
+        sched.assignments[slug].course_source_repo,
+        semester_org=sched.org,
+        slug=slug,
+    ).submit_via
+
+
 def _snapshot_passed_deadlines(
     course_org: str,
     semester_org: str,
@@ -684,7 +698,9 @@ def _solution_due(
     entry = sched.assignments[slug]
     if entry.solution_datetime is None or entry.solution_datetime > now:
         return False
-    cutoff = schedule.solution_cutoff(sched, slug)
+    cutoff = schedule.solution_cutoff(
+        sched, slug, submit_via=_submit_via(course_org, sched, slug)
+    )
     if cutoff is None or cutoff > now:
         reason = (
             schedule.solution_before_cutoff(slug, entry.solution_datetime, cutoff)
@@ -710,14 +726,18 @@ def _solution_due(
     return not solution_released(semester_org, name, confirm_absent=True)
 
 
-def _held_solution_faults(sched: schedule.Schedule, now: datetime) -> list[ConfigFault]:
+def _held_solution_faults(
+    course_org: str, sched: schedule.Schedule, now: datetime
+) -> list[ConfigFault]:
     """A WARNING on each `solution_datetime` the scheduler is holding, or will hold: set
     before its late cutoff. It goes into the schedule.yml digest at the line to move, so
     the date gets fixed rather than quietly running late. Nothing once the cutoff has
     passed: the solution has then gone out."""
     out = []
     for slug, entry in sched.assignments.items():
-        cutoff = schedule.solution_held_until(sched, slug)
+        cutoff = schedule.solution_held_until(
+            sched, slug, submit_via=_submit_via(course_org, sched, slug)
+        )
         if cutoff is None or cutoff <= now:
             continue
         out.append(
@@ -1546,7 +1566,7 @@ def _reprivatise_student_repos(
         )
         if not gspec.visibility_is_students:
             continue
-        at = grading_cutoff_datetime(sched, slug)
+        at = grading_cutoff_datetime(sched, slug, submit_via=gspec.submit_via)
         if at is None or at <= now:
             continue
         # Sorting the org's repos into the assignments they came out of is not free, and
@@ -1721,7 +1741,14 @@ def _release_phase(
                 semester_org,
                 verdict,
                 cadence.late_items(
-                    releases, sched, verdict.prev_executed_at, verdict.now
+                    releases,
+                    sched,
+                    verdict.prev_executed_at,
+                    verdict.now,
+                    submit_vias={
+                        slug: _submit_via(course_org, sched, slug)
+                        for slug in sched.assignments
+                    },
                 ),
                 dry_run,
             )
@@ -1774,7 +1801,7 @@ def _release_phase(
         else [
             *window_faults,
             *marks_faults,
-            *_held_solution_faults(sched, now),
+            *_held_solution_faults(course_org, sched, now),
             *number_faults,
         ],
     )
