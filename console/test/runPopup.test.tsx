@@ -345,6 +345,11 @@ describe('Hand out now', () => {
     await act(() => ops.setValues({ ...ops.current.value!.values, solution_datetime: 'now' }));
     expect(texts()).toContain('Preview');
   });
+
+  it('names the schedule key, not the semester-side name, so a template two entries share can be handed out', () => {
+    const def = defs.handout(scope, { slug: 'resit-5', title: 'Assignment 5 (resit)', template: 'assignment-5-f2026', units: 0, group: false, when: 'Hand out by hand', name: 'assignment-5-resit' });
+    expect(def.args).toEqual({ course_source_repo: 'assignment-5-f2026', assignment: 'resit-5' });
+  });
 });
 
 describe('the drawer', () => {

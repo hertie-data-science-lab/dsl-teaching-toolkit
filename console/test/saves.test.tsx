@@ -397,7 +397,7 @@ describe('Save on an assignment entry handed out by hand', () => {
     await settle(() => env.ops.current.value !== null);
     expect(puts(gh, 'schedule.yml')).toHaveLength(1);
     const cur = env.ops.current.value!;
-    expect([cur.def.op, cur.def.key, cur.def.args, cur.phase]).toEqual(['assignment.handout_now', 'assignment-3', { course_source_repo: 'assignment-4-f2026' }, 'ready']);
+    expect([cur.def.op, cur.def.key, cur.def.args, cur.phase]).toEqual(['assignment.handout_now', 'assignment-3', { course_source_repo: 'assignment-4-f2026', assignment: 'assignment-3' }, 'ready']);
     expect(cur.def.verb).toBe('Hand out to every student');
     expect(dispatched(gh)).toEqual([]);
   });
@@ -480,7 +480,7 @@ describe('Save on the Overview form, switched to hand out by hand', () => {
     await settle(() => env.ops.current.value !== null);
     expect(parse(body(puts(gh, 'schedule.yml')[0])).assignments['assignment-2']).not.toHaveProperty('handout_datetime');
     const cur = env.ops.current.value!;
-    expect([cur.def.op, cur.def.key, cur.def.args, cur.phase]).toEqual(['assignment.handout_now', 'assignment-2', { course_source_repo: 'assignment-2-f2026' }, 'ready']);
+    expect([cur.def.op, cur.def.key, cur.def.args, cur.phase]).toEqual(['assignment.handout_now', 'assignment-2', { course_source_repo: 'assignment-2-f2026', assignment: 'assignment-2' }, 'ready']);
     expect(gh.seen.filter((x) => x.method === 'POST')).toEqual([]);
   });
 

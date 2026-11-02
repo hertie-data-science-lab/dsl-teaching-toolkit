@@ -1276,8 +1276,8 @@ def main() -> int:
         "--assignment",
         default="",
         metavar="KEY",
-        help="Patch mode: the schedule.yml assignments key, needed only when two entries "
-        "hand out from this template.",
+        help="The schedule.yml assignments key, needed only when two entries hand out "
+        "from this template: the entry to hand out, or (patch mode) to patch.",
     )
     # Both modes preview unless told `--no-preview` (decision 0012): handing out creates a
     # repo per student, and patching commits into every one of them.
@@ -1286,11 +1286,6 @@ def main() -> int:
         "List the repos that would be created or patched; change nothing (default).",
     )
     args = parser.parse_args()
-    if args.assignment and not args.patch_path:
-        parser.error(
-            "--assignment picks the entry to patch; a hand out of a template two "
-            "entries share belongs to the schedule"
-        )
     when = args.solution_datetime.strip().lower()
     if when not in ("", SOLUTION_NOW):
         parser.error(
@@ -1326,11 +1321,13 @@ def main() -> int:
                 text, reasons=[{"code": NOT_SCHEDULED, "text": text}], code=1
             )
         # ... and a number (decision 0020 rule 3), refused the same way.
-        refusal = unnumbered_assignment(sched, args.template)
+        refusal = unnumbered_assignment(sched, args.template, args.assignment)
         if refusal:
             return refuse_unnumbered(refusal)
         if when == SOLUTION_NOW and not args.preview:
-            refused = preview_first(args.semester_org, args.template, preview=False)
+            refused = preview_first(
+                args.semester_org, args.template, preview=False, entry=args.assignment
+            )
             if refused is not None:
                 return refused
         rc, _changed = provision_all(
@@ -1340,13 +1337,18 @@ def main() -> int:
             roster_path=args.roster,
             solution=when == SOLUTION_NOW,
             dry_run=args.preview,
+            # The entry the console names (a resit sharing its template); none = the
+            # template's only entry, as before.
+            slug=args.assignment,
             # ONE listing of the semester for this press, taken here because there is no
             # tick above to have taken it: every repo question below is answered off it,
             # and None (it could not be read) falls back to a probe per repo.
             listing=listing_by_name(args.semester_org),
         )
         if when == SOLUTION_NOW and args.preview and rc == 0:
-            refused = preview_first(args.semester_org, args.template, preview=True)
+            refused = preview_first(
+                args.semester_org, args.template, preview=True, entry=args.assignment
+            )
             if refused is not None:
                 return refused
         if when == SOLUTION_NOW and not args.preview and rc == 0:
@@ -1380,7 +1382,11 @@ def _refusal(text: str) -> Summary:
 
 
 def preview_first(
-    semester_org: str, template: str, preview: bool, now: datetime | None = None
+    semester_org: str,
+    template: str,
+    preview: bool,
+    now: datetime | None = None,
+    entry: str = "",
 ) -> Summary | None:
     """The one gate on a hand out WITH the solution (`--solution-datetime now`): it pushes
     the model answer and rubric into every student's repo, and cannot be undone. A preview
@@ -1393,6 +1399,10 @@ def preview_first(
     now = now or datetime.now(timezone.utc)
     actor = _actor()
     want = {"actor": actor.casefold(), "template": template, "solution": SOLUTION_NOW}
+    if (
+        entry
+    ):  # a named entry's preview licenses that entry, not its template's other one
+        want["assignment"] = entry
     if preview:
         body = json.dumps({**want, "at": now.isoformat()}, indent=2, sort_keys=True)
         if not put_file(
@@ -1757,10 +1767,10 @@ def provision_all(
     green wait, not the error a button press gets.
 
     `slug` names WHICH schedule entry is being handed out, and only the scheduler can
-    answer it: it knows which release it is firing. The button asks nobody - a template
-    two entries hand out from is refused below, because they make different repos for
-    different students and keep separate grades, and guessing is a whole semester's work in
-    the wrong place.
+    answer it: the scheduler knows which release it is firing, and the console's Hand out
+    now names the entry it was pressed on. Without it a template two entries hand out from
+    is refused below, because they make different repos for different students and keep
+    separate grades, and guessing is a whole semester's work in the wrong place.
 
     `listing` is the semester's repos keyed by name, off the ONE listing its caller already
     holds - the tick's (`scheduler.run`) or the one the button takes for itself - and BOTH
@@ -1801,10 +1811,11 @@ def provision_all(
     # the semester-side name, exactly as it does everywhere else in this file.
     #
     # Two entries handing out from one template is legitimate - a resit off the same
-    # brief - and `resolve_target` refuses to choose between them. The REMEDY is this
-    # caller's to name: the button cannot answer, because it is one press and the answer
-    # decides which half of the semester gets repos, so it is sent to the schedule, which
-    # fires each entry on its own datetime and therefore knows which one it is.
+    # brief - and `resolve_target` refuses to choose between them unless `slug` names one
+    # (the scheduler, or the console's Hand out now). The REMEDY is for a caller that
+    # named none - the Release assignment workflow, whose one press cannot say which half
+    # of the semester gets repos - so it is sent to the schedule, which fires each entry
+    # on its own datetime and therefore knows which one it is.
     target = schedule.resolve_target(
         sched,
         template,

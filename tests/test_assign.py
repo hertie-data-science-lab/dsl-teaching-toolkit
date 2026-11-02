@@ -1391,25 +1391,27 @@ def _scheduled(monkeypatch, key: str, dest: str, source: str):
     )
 
 
-def _two_on_one_template(monkeypatch):
-    """A plan where two entries hand out from one template, each naming its own repos."""
+def _two_on_one_template(monkeypatch, numbered: bool = False):
+    """A plan where two entries hand out from one template, each naming its own repos
+    (`numbered`: each with a number, as a manual run requires)."""
     from datetime import datetime, timezone
 
     from dsl_course.schedule import AssignmentEntry
 
-    def entry(dest):
+    def entry(dest, number):
         return AssignmentEntry(
             due_datetime=datetime(2026, 11, 1, tzinfo=timezone.utc),
             course_source_repo="assignment-2-f2026",
             semester_dest_repo=dest,
+            number=number if numbered else None,
         )
 
     monkeypatch.setattr(
         "dsl_course.schedule.load",
         lambda org: Schedule(
             assignments={
-                "assignment-2": entry("assignment-2"),
-                "assignment-2-resit": entry("assignment-2-resit"),
+                "assignment-2": entry("assignment-2", 2),
+                "assignment-2-resit": entry("assignment-2-resit", 3),
             }
         ),
     )
@@ -2664,10 +2666,43 @@ def test_the_assignment_flag_picks_the_entry_to_patch(monkeypatch):
     assert _cli(monkeypatch, "--patch-path", "starter.py")["slug"] == ""
 
 
-def test_the_assignment_flag_is_refused_on_a_hand_out(monkeypatch):
-    # Which of two entries hands out is the schedule's answer, not the button's.
-    with pytest.raises(SystemExit):
-        _cli(monkeypatch, "--assignment", "a2-resit")
+def test_the_assignment_flag_names_the_entry_to_hand_out(monkeypatch):
+    # The console's Hand out now names the schedule key it was pressed on, so a manual
+    # entry sharing its template (a resit) can be handed out; none = as before.
+    _two_on_one_template(monkeypatch, numbered=True)
+    seen: dict = {}
+    monkeypatch.setattr(assign, "listing_by_name", lambda org: None)
+    monkeypatch.setattr(
+        assign, "provision_all", lambda *a, **kw: (seen.update(kw), (0, True))[1]
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["assign", "--course-org", "COURSE", "--course-source-repo",
+         "assignment-2-f2026", "--semester-org", "SEMESTER",
+         "--assignment", "assignment-2-resit"],
+    )  # fmt: skip
+    assert assign.main() == 0
+    assert seen["slug"] == "assignment-2-resit"
+
+
+def test_a_hand_out_naming_one_of_two_entries_records_only_that_one(
+    tmp_path, monkeypatch
+):
+    # Two entries on one template, the resit handed out by hand: only its record is
+    # written, and the other entry stays as it was.
+    recorded = _press_with_no_teams(monkeypatch, "assignment_repo")
+    _two_on_one_template(monkeypatch)
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
+    rc, _ = assign.provision_all(
+        "COURSE",
+        "assignment-2-f2026",
+        "SEMESTER",
+        roster_path=path,
+        slug="assignment-2-resit",
+    )
+    assert rc == 0 and "Handed out assignment-2-resit" in rc.text
+    assert recorded == [("SEMESTER", "assignment-2-resit")]
 
 
 def test_the_public_log_never_names_a_submission_repo(monkeypatch, capsys):
