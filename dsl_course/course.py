@@ -566,10 +566,16 @@ def marks_returned_marker(slug: str) -> str:
     return f"<!-- dsl-marks-returned:{slug} -->"
 
 
-def late_rule(window_days: int | None, penalty: str | None) -> str:
+def late_rule(
+    window_days: int | None, penalty: str | None, *, collects: bool = True
+) -> str:
     """The late-work rule an assignment declares, as the half-sentence that follows
     "Late work: " - `10% per day, up to 10 days`, `accepted up to 7 days late`, or `not
     accepted after the deadline`.
+
+    Work handed in outside GitHub (`collects` false: `collects_commits`) has no window and
+    no cutoff; its marker enters the days late, so the rule is the rate alone - `10% of
+    the grade per day late, counted by your marker` - or "" with no penalty to state.
 
     Takes the spec's RESOLVED values (`settings`: the institution's rule for an
     assignment nobody set one for); a window of 0 or None here is a layer that turned late
@@ -582,6 +588,12 @@ def late_rule(window_days: int | None, penalty: str | None) -> str:
     NOT `grades.late_policy`, which answers a different question: that is this rule against
     a real cutoff DATE (`accepted until Sunday 11 October 2026, 23:59 ...`), which only an
     assignment with a due date on record can be told."""
+    if not collects:
+        return (
+            f"{penalty} of the grade per day late, counted by your marker"
+            if penalty
+            else ""
+        )
     if not window_days:
         return "not accepted after the deadline"
     if penalty:

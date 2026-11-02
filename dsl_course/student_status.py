@@ -601,9 +601,11 @@ def render_assignments(
                         facts.sched, key, submit_via=spec.submit_via
                     )
                 ),
-                "late_rule": late_rule(spec.late_window_days, spec.late_penalty_per_day)
-                if spec.collects_commits
-                else "",
+                "late_rule": late_rule(
+                    spec.late_window_days,
+                    spec.late_penalty_per_day,
+                    collects=spec.collects_commits,
+                ),
                 "cutoff_sentence": CUTOFF_SENTENCE if spec.collects_commits else "",
                 "submit_via": spec.submit_via,
                 "shape": spec.submit_shape,

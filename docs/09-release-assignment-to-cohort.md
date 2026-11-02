@@ -179,7 +179,8 @@ assignments:
   `late_penalty_per_day`, a percentage of the earned grade per day started). Between the due
   date and the cutoff the grading sheet keeps refreshing and each late push earns a receipt.
   `submit_via: external` has no late window: its cutoff is the due date, and the marker enters each
-  unit's days late on the sheet (the Marks tab), charged at `late_penalty_per_day`.
+  unit's days late on the sheet (the Marks tab), charged at `late_penalty_per_day`; students
+  see that rate, with no window or cutoff.
   Where neither the semester nor the course states them, the Hertie standard applies:
   10% per day started, collected for up to 10 days. `late_window_days: 0` accepts nothing
   after the deadline.

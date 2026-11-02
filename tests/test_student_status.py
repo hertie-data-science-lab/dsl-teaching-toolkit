@@ -346,6 +346,24 @@ def test_the_brief_its_name_and_the_shape_note_wait_for_the_hand_out():
     assert "Secret heading" not in student_status.dumps(_render()).decode()
 
 
+def test_work_handed_in_off_github_states_the_rate_the_marker_counts_against():
+    # No commit is timed, so no window and no cutoff - but the marker enters the days late
+    # and the rate comes off, so the student reads the rule (`course.late_rule`).
+    facts = _facts()
+    facts.specs["assignment-1"] = dataclasses.replace(
+        grades.GradingSpec(), submit_via="external", late_penalty_per_day="10%"
+    )
+    by = {
+        a["slug"]: a
+        for a in student_status.render(_course(), facts, _extra(facts), NOW)[
+            "assignments"
+        ]
+    }
+    ext = by["assignment-1"]
+    assert ext["late_rule"] == "10% of the grade per day late, counted by your marker"
+    assert ext["cutoff_sentence"] == ""
+
+
 @pytest.mark.parametrize(
     ("declared", "readme", "subtitle"),
     [

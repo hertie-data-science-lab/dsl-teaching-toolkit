@@ -1009,15 +1009,23 @@ def test_the_page_carries_the_late_rule_the_assignment_declares(
     assert f'late_rule: "{rule}"' in out
 
 
-def test_an_assignment_handed_in_off_github_carries_no_late_rule(monkeypatch):
-    # Nothing is TIMED there: no repo is created, so no commit is pinned, no day is
-    # counted and no penalty is ever applied (`course.collects_commits`).
+def test_an_assignment_handed_in_off_github_states_its_rate_and_no_window(monkeypatch):
+    # No commit is timed there, so there is no window or cutoff to quote - but the marker
+    # enters the days late and the rate comes off, so the student is told that much.
     out = _entry_for(
         monkeypatch,
         "submit_via: external\nlate_window_days: 7\nlate_penalty_per_day: 10%\n",
         handed_out=frozenset({"assignment-1"}),
     )
-    assert "late_rule" not in out
+    assert 'late_rule: "10% of the grade per day late, counted by your marker"' in out
+    assert "7 days" not in out
+
+
+def test_the_late_rule_for_work_handed_in_off_github_needs_a_rate():
+    assert course.late_rule(7, None, collects=False) == ""
+    assert course.late_rule(0, "5%", collects=False) == (
+        "5% of the grade per day late, counted by your marker"
+    )
 
 
 def test_the_late_rule_is_the_pages_alone_and_not_the_due_rows(monkeypatch):
