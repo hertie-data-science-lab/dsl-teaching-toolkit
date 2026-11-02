@@ -4478,32 +4478,21 @@ _RETURNED_HEADER = """\
 def _told_units(
     spec: SheetSpec,
     sheet: dict,
-    record: Distributed,
-    live: dict[str, str],
+    told: dict[str, str],
+    marks: dict[str, str],
     held: dict[str, dict[str, tuple[str, str]]],
 ) -> dict[str, dict]:
     """The sheet's units of which EVERY person would not be emailed by another run: their
-    email row carries their live marks digest, and none of their marks for this sheet is
-    held. Anyone else - mail failed, no roster address, `notify` off for a mark that moved,
-    no gradebook written, a held mark - leaves the whole unit out, so the console keeps
-    counting it. Read off the run's final state, so a unit told by an earlier run whose
-    marks have not moved since is in."""
-    told = {
-        target.casefold(): digest
-        for (target, slug, channel), (digest, _at, _issue) in record.items()
-        if not slug and channel == CHANNEL_EMAIL
-    }
-    marks = {handle.casefold(): digest for handle, digest in live.items()}
+    email row (`told`, casefolded handle -> digest) carries their live marks digest
+    (`marks`, the same keys), and none of their marks for this sheet is held. Anyone else
+    - mail failed, no roster address, `notify` off for a mark that moved, no gradebook
+    written, a held mark - leaves the whole unit out, so the console keeps counting it.
+    Read off the run's final state, so a unit told by an earlier run whose marks have not
+    moved since is in."""
     holding = {str(handle).casefold() for handle in held.get(spec.slug) or {}}
     out: dict[str, dict] = {}
-    for unit, block in ((sheet or {}).get(spec.container_key) or {}).items():
-        if not isinstance(block, dict):
-            continue
-        members = (
-            [str(m).casefold() for m in block.get("members") or {}]
-            if spec.is_group
-            else [str(unit).casefold()]
-        )
+    for unit, block in _units(spec, sheet):
+        members = [str(m).casefold() for m in _people(spec, unit, block)]
         if members and all(
             m not in holding and m in marks and told.get(m) == marks[m] for m in members
         ):
@@ -4900,6 +4889,13 @@ def distribute(
         for handle in told:
             record[(handle, "", CHANNEL_EMAIL)] = (live[handle], now, "")
         counts["emails"] = len(told)
+        # Every sheet's told units read off these two, so they are built once a run.
+        emailed = {
+            target.casefold(): digest
+            for (target, slug, channel), (digest, _at, _issue) in record.items()
+            if not slug and channel == CHANNEL_EMAIL
+        }
+        current = {handle.casefold(): digest for handle, digest in live.items()}
         return _final_record(
             semester_org,
             record,
@@ -4925,7 +4921,7 @@ def distribute(
             returned={
                 returned_record_path(slug): returned_record(
                     specs[slug],
-                    _told_units(specs[slug], sheets[slug], record, live, held),
+                    _told_units(specs[slug], sheets[slug], emailed, current, held),
                 ).encode()
                 for slug in ([assignment] if assignment else sorted(sheets))
             },

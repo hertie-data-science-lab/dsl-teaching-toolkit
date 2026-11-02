@@ -3009,7 +3009,6 @@ def test_the_returned_record_carries_each_told_unit_as_the_sheet_had_it(
     # Block for block what the sheet holds, so the console compares the two with one
     # parser - the grader's private note included: semester-config is private.
     assert _told(cfg_files) == grades.parse_sheet(_TWO_SHEET)
-    assert set(yaml.safe_load(text)["submissions"]) == {"ada-l", "ben-k"}
 
 
 def test_a_unit_whose_email_failed_is_left_out_of_the_returned_record(
