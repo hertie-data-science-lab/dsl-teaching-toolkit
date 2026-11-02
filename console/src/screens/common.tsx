@@ -5,7 +5,7 @@ import { useEnv } from '../env';
 import { cohortName } from '../model/discovery';
 import { dayKey, zoned } from '../model/format';
 import { CONFIG_REPO } from '../model/names';
-import { DEFAULT_TIMEZONE } from '../model/policy';
+import { DEFAULT_TIMEZONE, LEGACY_SUBMIT_VIA } from '../model/policy';
 import type { Operation, Status } from '../model/types';
 import { checkNow, keepFuture, previewNext, type Scope } from '../ops/defs';
 import { OpButtons } from '../ops/Panel';
@@ -30,9 +30,6 @@ const configText = (p: ReadyProps, template: string): string | null => {
   const f = p.files.file(p.course.org, template, 'grading_config.yml', 'solution');
   return f.kind === 'ready' ? f.text : null;
 };
-
-/** The legacy `submit_via` spellings the engine still reads (course.LEGACY_SUBMIT_VIA). */
-const LEGACY_SUBMIT_VIA: Record<string, string> = { github: 'assignment_repo' };
 
 /** grading_config.yml parsed, `submit_via` in its current spelling (course.canonical_submit_via), so every shape test reads one word. */
 function parseConfig(text: string | null): Record<string, unknown> {

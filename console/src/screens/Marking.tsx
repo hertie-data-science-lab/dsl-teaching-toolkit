@@ -176,13 +176,6 @@ const holdUnit = (u: Unit, score: unknown, latePenalty: unknown, adj: (pr: Perso
   score, daysLate: days, byMarker, latePenalty, people: u.people.map((pr) => ({ handle: pr.handle, adjustment: adj(pr) })),
 });
 
-/**
- * Handed in outside GitHub: the template says so, or no unit has an `info:`. The engine reads
- * only the template (`grades.unit_days_late`); the `info:` test is the console's stand-in until
- * the template has loaded.
- */
-const handedInElsewhere = (cfg: Record<string, unknown>, units: Unit[]) => isExternal(cfg) || (units.length > 0 && units.every((u) => u.info === null));
-
 /** Whether a score cell holds no mark at all (grades.is_blank: a map of blanks too). */
 const noMark = (score: unknown) => (isObj(score) ? Object.values(score).every(blank) : blank(score));
 
@@ -338,6 +331,9 @@ export function MarksTab(p: TabProps) {
   /** A person as the grid names them: the real name, else the handle. */
   const shownName = (h: string) => realName(h) || h;
   const cfg = useGradingConfig(p, a.template);
+  // Handed in outside GitHub (`grades.unit_days_late`): no `info:`, so the grader enters each
+  // unit's days late. The status says so from the first render; the template covers an older status.
+  const external = a.submit_shape === 'external' || isExternal(cfg);
   const questions = useMemo(() => (cfg.questions && typeof cfg.questions === 'object' ? (cfg.questions as Record<string, unknown>) : null), [cfg]);
   const qs = questions ? Object.entries(questions) : [];
   const rate = penaltyOf(a);
@@ -360,9 +356,8 @@ export function MarksTab(p: TabProps) {
   // grades. Only a saved sheet moves them, so they are not worked out again per keystroke.
   const saved = useMemo(() => {
     if (!sheetRead) return null;
-    const ext = handedInElsewhere(cfg, sheetRead.units);
-    const daysOf = (u: Unit) => unitDaysLate(u.info, ext, u.daysLate);
-    const held = holdReasons(sheetRead.units.map((u) => holdUnit(u, u.score, u.latePenalty, (pr) => pr.adjustment, daysOf(u), ext)), questions, rate);
+    const daysOf = (u: Unit) => unitDaysLate(u.info, external, u.daysLate);
+    const held = holdReasons(sheetRead.units.map((u) => holdUnit(u, u.score, u.latePenalty, (pr) => pr.adjustment, daysOf(u), external)), questions, rate);
     const isHeld = heldIn(held);
     const heldUnits = sheetRead.units.filter((u) => isHeld(u)).length;
     const skipped = sheetRead.units.filter((u) => !isHeld(u) && noMark(u.score)).length;
@@ -371,7 +366,7 @@ export function MarksTab(p: TabProps) {
       return u.people.filter((pr) => !held[pr.handle]).map((pr) => finalGrade(scoreTotal(u.score, questions), pen, pr.adjustment)).filter((f): f is number => f !== null);
     });
     return { heldUnits, skipped, sending: sheetRead.units.length - heldUnits - skipped, finals, held: Object.keys(held).length };
-  }, [sheetRead, questions, rate, cfg]);
+  }, [sheetRead, questions, rate, external]);
   const rule = lateRuleOf(a);
   const max = qs.reduce((n, [, m]) => n + (Number(questionPoints(m)) || 0), 0);
   const group = a.teams !== null && a.teams !== undefined;
@@ -435,8 +430,6 @@ export function MarksTab(p: TabProps) {
     const { [key(u.latePenaltyPath)]: _drop, ...rest } = edits;
     setEdits(rest);
   };
-  // Handed in outside GitHub: no `info:`, so the grader enters each unit's days late.
-  const external = handedInElsewhere(cfg, sheet.units);
   const daysOf = (u: Unit) => unitDaysLate(u.info, external, v(u.daysLatePath, u.daysLate));
   // What the unit loses for lateness, worked out once for its late cell and its final grades.
   const lateFor = (u: Unit) => effectivePenalty(rate, daysOf(u), lateOf(u));
@@ -507,10 +500,11 @@ export function MarksTab(p: TabProps) {
   const fact = (u: Unit, k: 'autograde' | 'completion') => (!(k === 'autograde' ? runs.tests : runs.completion) || (u.info !== null && !(k in u.info)) ? '—' : str(u.info?.[k]));
   const info = (u: Unit) => {
     if (external) {
-      const bad = daysLateFault(v(u.daysLatePath, u.daysLate));
+      const days = v(u.daysLatePath, u.daysLate);
+      const bad = daysLateFault(days);
       return [
         <td class="num">
-          <input class={`days${bad ? ' bad' : ''}`} type="text" inputMode="numeric" placeholder="0" value={str(v(u.daysLatePath, u.daysLate))} aria-label={`Days late for ${u.key}`} aria-invalid={bad ? 'true' : undefined} data-col="days"
+          <input class={`days${bad ? ' bad' : ''}`} type="text" inputMode="numeric" placeholder="0" value={str(days)} aria-label={`Days late for ${u.key}`} aria-invalid={bad ? 'true' : undefined} data-col="days"
             onInput={(e) => set(u.daysLatePath, (e.target as HTMLInputElement).value, true)} />
         </td>,
       ];

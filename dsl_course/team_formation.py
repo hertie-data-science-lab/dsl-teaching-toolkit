@@ -230,7 +230,7 @@ def open_windows(
     found: list[Window] = []
     for key in keys:
         entry = sched.assignments[key]
-        via = grades.submit_via_of(course_org, entry)
+        via = grades.load_grading_spec(course_org, entry.course_source_repo).submit_via
         opens, closes = schedule.formation_window(sched, key, submit_via=via)
         state, _ = schedule.formation_state(sched, key, now, submit_via=via)
         if closes is None or state == "pending":

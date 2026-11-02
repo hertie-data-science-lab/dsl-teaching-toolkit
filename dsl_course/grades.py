@@ -1323,13 +1323,6 @@ def load_grading_spec(
     return spec
 
 
-def submit_via_of(course_org: str, entry: schedule.AssignmentEntry) -> str:
-    """How this entry's assignment is handed in (its template's `submit_via`), for a
-    caller with no spec in hand that needs the late cutoff
-    (`schedule.grading_cutoff_datetime`). Off the memoised template read."""
-    return load_grading_spec(course_org, entry.course_source_repo).submit_via
-
-
 # ------------------------------------ what an assignment's definition will not grade as
 #
 # TIME-BOUND, unlike everything else that reaches a digest. `submit_via: emial` is a typo
@@ -3343,10 +3336,10 @@ def _readme_grade_line(view: dict, grade: str) -> str:
     it is written now.
 
     Written only where there is a separate score AND something timed it. A hand-marked unit
-    has a final grade and no score behind it, an `external` assignment counts no days, and
-    a team's score is not in a member's view at all (`student_view`) - in each of those the
-    final grade is the whole of what there is to say, and `**Score:** 40 · **Final grade:**
-    40` would be arithmetic theatre. The helpers are the display ones the table already
+    has a final grade and no score behind it, an `external` unit with no days entered has
+    nothing timed, and a team's score is not in a member's view at all (`student_view`) -
+    in each of those the final grade is the whole of what there is to say, and `**Score:**
+    40 · **Final grade:** 40` would be arithmetic theatre. The helpers are the display ones the table already
     uses, so a row and its section cannot word the same fact differently."""
     total = score_total(view.get("score"))
     late = _late_display(view.get("days_late"))

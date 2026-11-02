@@ -2056,11 +2056,9 @@ def grading_cutoff_datetime(
     institution). `late_window_days: 0`, or a late rule that names no window, is the due
     date itself: no late work. None if unscheduled.
 
-    Work handed in outside GitHub (`submit_via: external`) has no late window at all: no
-    commits arrive, so nothing can be late (`course.collects_commits`), and its cutoff IS
-    the due date whatever the run settings say. `submit_via` is the template's
-    (`grading_config.yml`), which this module cannot read: every caller passes it, from
-    the spec it holds or `grades.submit_via_of`, and it is required so none can forget.
+    `submit_via` is the template's, which this module cannot read: work handed in outside
+    GitHub (`course.collects_commits` false) has no late window, so its cutoff is the due
+    date whatever the run settings say.
 
     Computed, never an input (decisions 0009, 0012), and computed HERE only. Everything
     that has to agree about when the door shuts reads it - the snapshot that freezes and

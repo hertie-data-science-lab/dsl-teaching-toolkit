@@ -256,6 +256,7 @@ export function RunRows({ id, keys, layers, draft, setDraft, errors, teamsHref, 
         const eff = resolve(r.keys[0], mine);
         const effText = late ? `${lateWord(eff.value, resolve('late_penalty_per_day', mine).value)}, ${SOURCE_WORD[eff.source]}` : effectiveWord(r.keys[0], eff);
         const label = late ? 'Late work' : marked ? 'Late penalty' : RUN_LABEL[r.keys[0]];
+        const teams = r.name === 'team_formation' ? teamsHref : undefined;
         if (r.name === 'visibility' && forced)
           return <div class="field"><span class="label">{label}</span><div class="readonly">{forced}</div></div>;
         return (
@@ -269,10 +270,10 @@ export function RunRows({ id, keys, layers, draft, setDraft, errors, teamsHref, 
                 <button class="textlink" type="button" onClick={() => { setOpened(opened.filter((x) => x !== r.name)); setDraft(Object.fromEntries(Object.entries(draft).filter(([k]) => !r.keys.includes(k as RunKey)))); }}>Use the default</button>
               </div>
             ) : null}
-            {!open || (r.name === 'team_formation' && teamsHref) ? (
+            {!open || teams ? (
               <p class="run-links">
                 {!open ? <button class="textlink" type="button" onClick={() => setOpened([...opened, r.name])}>Change for this assignment</button> : null}
-                {r.name === 'team_formation' && teamsHref ? <a class="textlink" href={teamsHref}>Open Teams</a> : null}
+                {teams ? <a class="textlink" href={teams}>Open Teams</a> : null}
               </p>
             ) : null}
             {r.name === 'visibility' ? <p class="why">Applies to copies handed out after this change; existing copies keep theirs.</p> : null}
@@ -464,9 +465,11 @@ export function AssignmentRun({ p, a, group }: { p: ReadyProps; a: Assignment; g
             <div class="fold-body">
               <Field id="ov-repo" k="semester_dest_repo" values={r} value={r.semester_dest_repo} set={(k, v) => { setRun({ ...r, [k]: v }); setSave({ kind: 'idle' }); }}
                 error={rErr.semester_dest_repo}
-                t={external
-                  ? { tier: 'advanced', label: 'Name in this semester (sheet and site page)', placeholder: a.slug, defaultLabel: `default: ${a.slug}`, reason: 'What this semester’s mark sheet, site page and gradebook entries are called. Change it before the first hand out.' }
-                  : { tier: 'advanced', label: 'Repo name in this semester', placeholder: a.slug, defaultLabel: `default: ${a.slug}`, reason: 'What this semester’s repos are called. Change it before the first hand out.' }} />
+                t={{
+                  tier: 'advanced', placeholder: a.slug, defaultLabel: `default: ${a.slug}`,
+                  label: external ? 'Name in this semester (sheet and site page)' : 'Repo name in this semester',
+                  reason: `What this semester’s ${external ? 'mark sheet, site page and gradebook entries are' : 'repos are'} called. Change it before the first hand out.`,
+                }} />
             </div>
           </details>
         </div>
