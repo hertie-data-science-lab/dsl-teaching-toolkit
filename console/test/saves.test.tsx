@@ -364,7 +364,7 @@ describe('Save on an assignment entry handed out by hand', () => {
     const gh = github(), f = files();
     await addManual(gh, f);
     expect(asked()).toContain('Save with no hand out date?');
-    expect(asked()).toContain('Nothing goes out, no page on the student site and no mark sheet, until you press Hand out now on the assignment’s page.');
+    expect(asked()).toContain('Nothing goes out until you press Hand out now on the assignment’s page: students see no brief and there is no mark sheet.');
     await click(button('Cancel'));
     await settle(() => false);
     expect(root!.querySelector('.modal')).toBeNull();

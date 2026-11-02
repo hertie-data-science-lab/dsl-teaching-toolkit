@@ -300,7 +300,7 @@ function AssignmentForm({ p, d, set, errors, templates, isNew, run, tiered }: { 
         <span class="label">Hand out</span>
         <div class="choices">
           <label class="choice"><input type="radio" name="e-ho" checked={!d.manual} onChange={() => set({ manual: false })} /><b>At a time</b><span>Automation hands out then.</span></label>
-          <label class="choice"><input type="radio" name="e-ho" checked={d.manual} onChange={() => set({ manual: true })} /><b>I will hand out manually</b><span>You press Hand out now on its page; no site page or mark sheet until then.</span></label>
+          <label class="choice"><input type="radio" name="e-ho" checked={d.manual} onChange={() => set({ manual: true })} /><b>I will hand out manually</b><span>You press Hand out now on its page; until then students see no brief and there is no mark sheet.</span></label>
         </div>
       </div>
       {!d.manual ? (
@@ -739,7 +739,7 @@ function View(p: ReadyProps) {
       <UnsavedBar count={dirty} busy={save.kind === 'busy'} onDiscard={() => { setDrafts({}); setRemoved({}); setSave({ kind: 'idle' }); }} onSave={requestSave} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml', exists: schedExists }} />
       {askManual ? (
         <Modal small title="Save with no hand out date?" onClose={() => setAskManual(false)}>
-          <p id={MODAL_TEXT_ID}>Nothing goes out, no page on the student site and no mark sheet, until you press Hand out now on the assignment’s page.</p>
+          <p id={MODAL_TEXT_ID}>Nothing goes out until you press Hand out now on the assignment’s page: students see no brief and there is no mark sheet.</p>
           <div class="actions">
             <button class="btn" type="button" onClick={() => { setAskManual(false); void doSave(); }}>Save without a date</button>
             <button class="btn quiet" type="button" onClick={() => setAskManual(false)}>Cancel</button>
