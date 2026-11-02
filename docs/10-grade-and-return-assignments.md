@@ -90,10 +90,11 @@ Enter moves down a column of numbers; in a text box Ctrl+Enter (⌘+Enter) does.
 shows what one student's marks page will hold. Unsaved marks stay in this browser until saved, and
 are offered back (Restore or Discard) on the next visit; a save that meets someone else's keeps
 both and says how many rows they changed. **Return marks to N** counts the students (teams) it
-would email now: marked, not held, and new or changed since they were last told (private notes and
-the submission facts other than days late do not count). At 0 it is greyed out and says why. Its
-panel counts who gets new marks, who was already told, who is skipped and who is held (and how
-many unsaved rows it leaves out), gives the final grades in one line, and after a
+would email now: marked, not held, on `students.csv`, and new or changed since they were last told
+(private notes and the submission facts other than days late do not count; a changed late rate
+counts every late one it applies to). At 0 it is greyed out and says why. Its
+panel counts who gets new marks, who was already told, who is skipped, who is held and who is not
+on the roster (and how many unsaved rows it leaves out), gives the final grades in one line, and after a
 preview names who would be emailed. The Overview's Return marks opens this same panel on the Marks tab.
 **Set points per question** (or **Edit**) above the grid writes `questions:` into the template's
 `grading_config.yml`, as its settings page does, so it applies to every semester that uses the

@@ -114,11 +114,25 @@ export function rowsChanged(before: string, after: string): number {
 /** Where the engine records what each unit was last told (`.system/returned/<sheet name>.yml` in the config repo). */
 export const toldPath = (name: string) => `${RETURNED_DIR}/${name}.yml`;
 
+/** A "last told" record: each unit's block, and the late rate those marks were worked out under. */
+export interface Told {
+  units: Record<string, unknown>;
+  /** `late_penalty_per_day` as `penaltyRate` reads it (null: none); undefined for a record from before the engine wrote it. */
+  rate?: number | null;
+}
+
 /**
- * The units of a "last told" record (the sheet's own container and dialect): each unit's block as
- * it stood when its people were last emailed. Absent or unreadable: nobody has been told yet.
+ * A "last told" record (the sheet's own container and dialect): each unit's block as it stood when
+ * its people were last emailed, beside the late rate they went out under (`grades.returned_record`).
+ * Absent or unreadable: nobody has been told yet.
  */
-export const readTold = unitsOf;
+export function readTold(text: string | null): Told {
+  if (text === null) return { units: {} };
+  const y = new YamlText(text);
+  if (y.errors.length) return { units: {} };
+  const doc = obj(y.toJS());
+  return { units: sheetUnits(doc), ...('late_penalty_per_day' in doc ? { rate: penaltyRate(doc.late_penalty_per_day) } : {}) };
+}
 
 /**
  * The sheet keys whose change Return marks emails about: what feeds `grades._GRADER_KEYS` (final
@@ -136,13 +150,21 @@ export const TOLD_KEYS = [
 /** Which keys of a mapping `toldPart` keeps: a list, every one (inside a kept value), or each handle of a `members:`. */
 type Keep = readonly string[] | 'all' | 'members';
 
-/** A unit's block as students are told it: the `TOLD_KEYS` only (of `info:`, its `days_late`; of each member, the same list), blank cells as absent. */
+/**
+ * A unit's block as students are told it: the `TOLD_KEYS` only (of `info:`, its `days_late`; of
+ * each member, the same list), blank cells as absent. Every member's handle stays, even one whose
+ * fields are all blank: who is in the team is told too, so a member swapped for another counts.
+ */
 function toldPart(v: unknown, keep: Keep = TOLD_KEYS): unknown {
   if (!isObj(v)) return v;
   const out: Record<string, unknown> = {};
   for (const [k, x] of Object.entries(v)) {
+    if (keep === 'members') {
+      out[k] = blank(x) ? {} : toldPart(x, TOLD_KEYS);
+      continue;
+    }
     if ((typeof keep !== 'string' && !keep.includes(k)) || blank(x)) continue;
-    const next: Keep = keep === 'members' ? TOLD_KEYS : keep !== TOLD_KEYS ? 'all' : k === 'info' ? ['days_late'] : k === 'members' ? 'members' : 'all';
+    const next: Keep = keep !== TOLD_KEYS ? 'all' : k === 'info' ? ['days_late'] : k === 'members' ? 'members' : 'all';
     const part = toldPart(x, next);
     if (!(isObj(part) && !Object.keys(part).length)) out[k] = part;
   }
@@ -152,6 +174,16 @@ function toldPart(v: unknown, keep: Keep = TOLD_KEYS): unknown {
 /** Whether a saved unit block differs from what its people were last told (`told` undefined: never told). */
 export function untold(block: unknown, told: unknown): boolean {
   return told === undefined || !deepEqual(toldPart(block), toldPart(told));
+}
+
+/**
+ * Whether a unit's final grade moves with the assignment's late rate: late, and its penalty left to
+ * the rule (not waived or set by hand). Such a unit's block stays the same when the rate changes,
+ * but the engine's digest of its final grade does not, so Return marks emails it again.
+ */
+export function rateApplies(daysLate: unknown, latePenalty: unknown): boolean {
+  const days = num(daysLate);
+  return days !== null && days > 0 && lateChoice(latePenalty).mode === 'apply';
 }
 
 /** One `questions:` entry's maximum: `Q1: 15`, or `Q1: {points: 15, file: report.tex}`. */

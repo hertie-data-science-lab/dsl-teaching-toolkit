@@ -11,7 +11,7 @@ import { Invalid } from '../forms/Form';
 import { assignmentTitle, fmtDay, fmtShort, fmtTime, fmtWhen, plural, str } from '../model/format';
 import {
   HOLD_WORDS, NOTES_KEY, cellValue, daysLateFault, effectivePenalty, finalGrade, holdReasons, lateRule, num, overrideText, overrideValue, percentOff, questionFile,
-  questionPoints, readSheet, readTold, round, rowsChanged, scoreTotal, sheetUnits, singleScore, spread, studentMarks, toldPath, unitDaysLate, untold, type HoldReason, type HoldUnit, type Penalty, type Person, type Unit,
+  questionPoints, rateApplies, readSheet, readTold, round, rowsChanged, scoreTotal, sheetUnits, singleScore, spread, studentMarks, toldPath, unitDaysLate, untold, type HoldReason, type HoldUnit, type Penalty, type Person, type Unit,
 } from '../model/marks';
 import { SOURCE_WORD, resolve, valueWord } from '../model/cascade';
 import { HandOutNow, assignmentSettings, isExternal, sheetName } from './RunSettings';
@@ -240,11 +240,15 @@ function PointsPerQuestion({ p, template, g, singles, onClose }: {
   const { file, cfg, save, setSave, commit } = g;
   const org = p.course.org;
   const tree = p.files.tree(org, template);
-  const baseQ = useMemo(() => questionRows(cfg.questions), [cfg]);
-  const [rows, setRows] = useState<QuestionRow[]>(() => (baseQ.length ? baseQ : [{ name: 'Q1', points: '', file: '' }]));
+  // The rows it opens with (a blank Q1 where the template has none): Save waits for a change to them.
+  const [seeded] = useState<QuestionRow[]>(() => {
+    const base = questionRows(cfg.questions);
+    return base.length ? base : [{ name: 'Q1', points: '', file: '' }];
+  });
+  const [rows, setRows] = useState(seeded);
   const files = useMemo(() => questionFiles(tree), [tree]);
   const fileErr = rows.map((r) => questionFileError(r.file)).find(Boolean);
-  const dirty = !deepEqual(rows, baseQ);
+  const dirty = !deepEqual(rows, seeded);
   const doSave = async () => {
     if (fileErr) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
     if (await commit((y) => y.assign(['questions'], questionsValue(rows, cfg.questions)), 'template: set the points per question')) onClose();
@@ -356,12 +360,17 @@ export function MarksTab(p: TabProps) {
     return { sheet: readSheet(text, doc), blocks: sheetUnits(doc) };
   }, [text]);
   // What each unit was last told (the engine's record): Return marks emails only the units whose saved marks differ.
+  // Still loading: no count is claimed. Unreadable: counted as nobody told, and the footnote says so.
   const toldFile = p.files.file(org, CONFIG_REPO, toldPath(name));
   const toldText = toldFile.kind === 'ready' ? toldFile.text : null;
   const lastTold = useMemo(() => readTold(toldText), [toldText]);
   const roster = p.files.file(org, CONFIG_REPO, 'students.csv');
   const rosterText = roster.kind === 'ready' ? roster.text : null;
-  const students = useMemo(() => (rosterText === null ? [] : parseRoster(rosterText).rows), [rosterText]);
+  const rosterRead = useMemo(() => (rosterText === null ? null : parseRoster(rosterText)), [rosterText]);
+  const students = useMemo(() => rosterRead?.rows ?? [], [rosterRead]);
+  // The handles students.csv knows (folded), for who Return marks can email; null while it cannot
+  // be read, when nobody is left out (as `grades._on_the_roster` filters nothing on an unreadable roster).
+  const known = useMemo(() => (!rosterRead || rosterRead.error ? null : new Set(students.map((s) => fold(s.handle)))), [rosterRead, students]);
   // Real names by handle (folded as `sameHandle` folds it), the first row's where two share one.
   const names = useMemo(() => {
     const m = new Map<string, string>();
@@ -404,16 +413,21 @@ export function MarksTab(p: TabProps) {
     const isHeld = heldIn(held);
     const heldUnits = sheetRead.units.filter((u) => isHeld(u)).length;
     const skipped = sheetRead.units.filter((u) => !isHeld(u) && noMark(u.score)).length;
-    // Marked and not held: those whose saved block differs from what they were last told get new marks.
-    const ready = sheetRead.units.filter((u) => !isHeld(u) && !noMark(u.score));
-    const sending = ready.filter((u) => untold(blocks[u.key], lastTold[u.key])).length;
+    // Marked and not held, and someone in it on the roster (the engine drops a book nobody on
+    // students.csv owns, `grades._on_the_roster`): those whose saved block differs from what they
+    // were last told get new marks, and so do the late ones under the rule once the rate moved.
+    const marked = sheetRead.units.filter((u) => !isHeld(u) && !noMark(u.score));
+    const offRoster = (u: Unit) => known !== null && u.people.length > 0 && u.people.every((pr) => !known.has(fold(pr.handle)));
+    const ready = marked.filter((u) => !offRoster(u));
+    const rateMoved = lastTold.rate !== undefined && lastTold.rate !== rate;
+    const sending = ready.filter((u) => untold(blocks[u.key], lastTold.units[u.key]) || (rateMoved && rateApplies(daysOf(u), u.latePenalty))).length;
     const anyMark = sheetRead.units.some((u) => !noMark(u.score));
     const finals = sheetRead.units.flatMap((u) => {
       const pen = effectivePenalty(rate, daysOf(u), u.latePenalty);
       return u.people.filter((pr) => !held[pr.handle]).map((pr) => finalGrade(scoreTotal(u.score, questions), pen, pr.adjustment)).filter((f): f is number => f !== null);
     });
-    return { heldUnits, skipped, sending, ready: ready.length, anyMark, finals, held: Object.keys(held).length };
-  }, [sheetRead, lastTold, questions, rate, external]);
+    return { heldUnits, skipped, sending, ready: ready.length, offRoster: marked.length - ready.length, anyMark, finals, held: Object.keys(held).length };
+  }, [sheetRead, lastTold, known, questions, rate, external]);
   const rule = lateRuleOf(a);
   const max = qs.reduce((n, [, m]) => n + (Number(questionPoints(m)) || 0), 0);
   const group = a.teams !== null && a.teams !== undefined;
@@ -716,10 +730,10 @@ export function MarksTab(p: TabProps) {
     next.focus();
     next.select?.();
   };
-  const { sending, ready: readyUnits, anyMark, skipped, heldUnits, finals, held } = saved!;
+  const { sending, ready: readyUnits, offRoster, anyMark, skipped, heldUnits, finals, held } = saved!;
   const facts = [
     ...(changed ? [`${plural(changed, 'unsaved row')} ${changed === 1 ? 'is' : 'are'} not counted until you save`] : []),
-    `${plural(sending, noun)} ${sending === 1 ? 'gets' : 'get'} new marks · ${readyUnits - sending} already told and unchanged · ${skipped} not marked yet (skipped) · ${heldUnits} held (fix first)`,
+    `${plural(sending, noun)} ${sending === 1 ? 'gets' : 'get'} new marks · ${readyUnits - sending} already told and unchanged · ${skipped} not marked yet (skipped) · ${heldUnits} held (fix first)${offRoster ? ` · ${offRoster} not on the roster` : ''}`,
     spread(finals, held),
   ];
   const people = sheet.units.flatMap((u) => u.people.map((pr) => ({ u, pr })));
@@ -730,16 +744,20 @@ export function MarksTab(p: TabProps) {
     setPending(null);
   };
   const returnDef = returnMarks(scope, asgRef(a, group), sending, name, late, facts, <PreviewEmails org={org} slug={name} />);
-  // Nobody to email: the button is greyed out, and a line says why.
-  const why = sending ? null
+  // Who was last told still loading: the button waits, claiming no count. Nobody to email: it is
+  // greyed out. Either way a line says why; and over a record that could not be read, that the
+  // count (everyone marked) may be high.
+  const toldLoading = toldFile.kind === 'loading';
+  const why = toldLoading ? 'Reading what students were last told'
+    : sending ? (toldFile.kind === 'error' ? 'Who was last told could not be read; the count may be high' : null)
     : changed ? 'Save marks to return them'
     : !anyMark ? 'Nothing is marked yet'
-    : !readyUnits ? 'Fix the held rows to return them'
+    : !readyUnits ? (heldUnits ? 'Fix the held rows to return them' : 'Nobody marked is on the roster')
     : 'Everyone marked has been told these marks';
   // Returning is its own block above the grid: the panel it opens holds the figures and Preview.
   const returnBlock = (
     <div class="return-block">
-      <span class="return-main"><OpOpen def={returnDef} cls="btn big" label={returnDef.verb} disabled={!sending} />{p.open ? <OpenOnArrival slug={a.slug} def={returnDef} start={p.open === 'return-run' ? 'run' : 'preview'} /> : null}</span>
+      <span class="return-main"><OpOpen def={returnDef} cls="btn big" label={toldLoading ? 'Return marks' : returnDef.verb} disabled={toldLoading || !sending} />{p.open && !toldLoading ? <OpenOnArrival slug={a.slug} def={returnDef} start={p.open === 'return-run' ? 'run' : 'preview'} /> : null}</span>
       {why ? <p class="footnote return-why">{why}</p> : null}
       <button class="btn small quiet" type="button" onClick={() => setViewing('')}>Student view</button>
     </div>
