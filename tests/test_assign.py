@@ -1518,12 +1518,13 @@ def test_the_granted_team_slug_matches_the_one_sync_teams_reconciles(
     }
 
 
-def test_a_group_handout_with_no_teams_yet_waits_on_the_cron_and_fails_on_the_button(
+def test_a_group_handout_with_no_teams_yet_waits_on_the_cron_and_opens_on_the_button(
     tmp_path, monkeypatch, capsys
 ):
     # Teams form when students click 'Join team', days after the handout datetime. The
     # hourly cron counted the empty CSV as a failure and went red every tick until the
-    # first team formed; an operator pressing the button still needs to be told.
+    # first team formed. The button's press is what opens formation, so it is green too,
+    # and says who forms the teams.
     monkeypatch.setattr(assign.teams, "load", lambda semester_org: {})
     monkeypatch.setattr(assign.teams, "teams_for", lambda rows, slug: {})
 
@@ -1547,9 +1548,9 @@ def test_a_group_handout_with_no_teams_yet_waits_on_the_cron_and_fails_on_the_bu
     assert run(scheduled=True) == (0, False)
     out = capsys.readouterr().out
     assert "[wait] no teams" in out and "the first team forms" in out
-    assert run() == (1, False)
-    err = capsys.readouterr().err
-    assert "no teams for" in err and "students self-select" in err
+    rc, changed = run()
+    assert (rc, changed) == (0, False)
+    assert rc.text == "Handed out project: no teams yet; students form teams from now."
 
 
 def test_a_group_handout_with_no_teams_records_the_moment_it_went_out(
@@ -1601,9 +1602,8 @@ def test_a_group_assignment_nobody_declared_a_formation_for_waits_on_students(
 
     assert run(scheduled=True) == (0, False)
     assert "the first team forms" in capsys.readouterr().out
-    assert run() == (1, False)
-    err = capsys.readouterr().err
-    assert "students self-select" in err and "team_formation: assigned" not in err
+    rc, _ = run()
+    assert rc == 0 and "students form teams from now" in rc.text
 
 
 def test_an_allocated_assignment_with_no_teams_names_the_teaching_team(
@@ -1631,9 +1631,43 @@ def test_an_allocated_assignment_with_no_teams_names_the_teaching_team(
 
     assert run(scheduled=True) == (0, False)
     assert "the instructors write them into teams.csv" in capsys.readouterr().out
-    assert run() == (1, False)
-    err = capsys.readouterr().err
-    assert "team_formation: assigned" in err and "self-select" not in err
+    rc, _ = run()
+    assert rc == 0
+    assert rc.text == "Handed out project: no teams yet; you assign the teams from now."
+
+
+@pytest.mark.parametrize("via", ["assignment_repo", "external", "shared_dropbox_repo"])
+def test_a_pressed_group_handout_with_no_teams_records_it_in_every_shape(
+    tmp_path, monkeypatch, via
+):
+    # A shape with no repos took its record from the sheet landing in the tail, which a
+    # press with no team never reaches: nothing was recorded, so team formation (which
+    # runs from `handout_datetime`) never opened and every press failed.
+    monkeypatch.setattr(assign.teams, "load", lambda semester_org: {})
+    monkeypatch.setattr(assign.teams, "teams_for", lambda rows, slug: {})
+    monkeypatch.setattr(
+        assign,
+        "load_grading_spec",
+        lambda org, template, **_: grades.GradingSpec(type="group", submit_via=via),
+    )
+    recorded: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "dsl_course.schedule.record_handout",
+        lambda semester_org, slug, stamp=None: recorded.append((semester_org, slug)),
+    )
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
+
+    def run(**kw):
+        return assign.provision_all(
+            "COURSE", "project-f2026", "SEMESTER", roster_path=path, **kw
+        )
+
+    rc, _ = run(dry_run=True)
+    assert rc == 0 and rc.text.startswith("Preview: project would be handed out")
+    assert recorded == [], "a preview records nothing"
+    rc, changed = run()
+    assert (rc, changed) == (0, False)
+    assert recorded == [("SEMESTER", "project")]
 
 
 # --------------- a failed solution push outranks every other fault (the marker depends on it)

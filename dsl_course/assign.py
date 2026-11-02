@@ -1854,15 +1854,18 @@ def provision_all(
             # Without it a HAND-FIRED release of a self-select assignment opened nothing at
             # all: the team-formation window runs from `handout_datetime`, so a press on an
             # entry that carries none left no lock scalar, no Assignment field for a
-            # student to pick, no site callout, no mail and no fault - while the error
-            # below points the teaching team at a form that would refuse every request.
+            # student to pick, no site callout, no mail and no fault - while the error it
+            # ended in pointed the teaching team at a form that would refuse every request.
             # The one thing that would have started the semester off was the thing the press
             # could not do. Write-once, so the scheduled handout - which fired off the very
             # datetime it would write - re-reads the file and changes nothing.
             #
-            # Only where repos are the product: a shape that creates none takes its signal
-            # from the SHEET landing instead (see the tail), and this branch writes none.
-            if gspec.creates_repos:
+            # Every shape: one that creates no repos takes its signal from the SHEET landing
+            # in the tail, which this branch never reaches, so with no team it recorded
+            # nothing and team formation never opened. The record is the whole hand-out
+            # here: its push to schedule.yml syncs the site (the brief) and the Join-team
+            # form, and the sheet follows the first team. Never in a preview.
+            if not dry_run:
                 schedule.record_handout(semester_org, key)
             if scheduled:
                 # Teams appear days after the handout datetime either way - and the cron
@@ -1878,16 +1881,19 @@ def provision_all(
                     f"fires on the tick after {arrives}"
                 )
                 return 0, False
+            # The press opened team formation, which is what it is for: a green run that
+            # says who forms the teams, not an error about the empty CSV.
             how = (
-                "students self-select via the 'Join team' issue, or seed the CSV"
+                "students form teams from now"
                 if self_select
-                else "this assignment allocates teams (`team_formation: assigned`), so "
-                "the instructors fill the CSV - the Join-team form refuses it"
+                else "you assign the teams from now"
             )
-            log_err(
-                f"no teams for `{key}` in {semester_org}/semester-config/teams.csv - {how}."
-            )
-            return 1, False
+            if dry_run:
+                return Summary(
+                    f"Preview: {slug} would be handed out; no teams yet, so {how}."
+                ), False
+            log(f"  no teams for `{key}` yet - handed out; {how}")
+            return Summary(f"Handed out {slug}: no teams yet; {how}."), False
         # teams.csv is student-writable (the "Join team" issue appends rows), so its
         # handles must pass the SAME roster allowlist sync_teams applies: only enrolled,
         # onboarded roster handles - never a typo or a stranger's login that would be INVITED
