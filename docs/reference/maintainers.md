@@ -97,6 +97,12 @@ Things whose *literal spelling* is depended on from outside Python:
   predates the window keeps forming teams.
   `tests/test_join_templates.py` runs the SHIPPED scanner over the writer's real output;
   keep that pairing.
+- **`grades.returned_record`'s SHAPE.** `semester-config/.system/returned/<sheet>.yml` is
+  each unit's block, under the sheet's own `submissions:` / `teams:`, exactly as the sheet
+  held it when the last real Return marks left every person in the unit told
+  (`_told_units`: their `distributed.csv` email row matches their marks digest, and no mark
+  of theirs on that sheet is held). The console compares it with the sheet to count who a
+  further Return marks would email, so it keeps the sheet's own dump (`_sheet_yaml`).
 - **An assignment page's URL** - `schedule.AssignmentPage` (`<nn>-<semester name>`, or the
   name alone for an entry with no number; the number from `schedule.assignment_pages`) names the site's `_assignments/` file, and
   `AssignmentPage.url` is every link to the assignment's teams: its page on the semester site
