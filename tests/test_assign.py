@@ -1518,6 +1518,14 @@ def test_the_granted_team_slug_matches_the_one_sync_teams_reconciles(
     }
 
 
+def _due_ahead(monkeypatch):
+    """A plan whose late cutoff is still ahead, so a press opens a window that is open."""
+    ahead = datetime(2099, 1, 5, 23, 59, tzinfo=timezone.utc)
+    monkeypatch.setattr(
+        "dsl_course.schedule.load", lambda org: citing(*TEMPLATES, due=ahead)
+    )
+
+
 def test_a_group_handout_with_no_teams_yet_waits_on_the_cron_and_opens_on_the_button(
     tmp_path, monkeypatch, capsys
 ):
@@ -1525,6 +1533,7 @@ def test_a_group_handout_with_no_teams_yet_waits_on_the_cron_and_opens_on_the_bu
     # hourly cron counted the empty CSV as a failure and went red every tick until the
     # first team formed. The button's press is what opens formation, so it is green too,
     # and says who forms the teams.
+    _due_ahead(monkeypatch)
     monkeypatch.setattr(assign.teams, "load", lambda semester_org: {})
     monkeypatch.setattr(assign.teams, "teams_for", lambda rows, slug: {})
 
@@ -1587,6 +1596,7 @@ def test_a_group_assignment_nobody_declared_a_formation_for_waits_on_students(
     # answers, so the wait names the students and not the teaching team. The REAL read,
     # not the file's autouse stub, off a template that says only `type: group`.
     monkeypatch.setattr(assign, "load_grading_spec", grades.load_grading_spec)
+    _due_ahead(monkeypatch)
     monkeypatch.setattr(assign.teams, "load", lambda semester_org: {})
     monkeypatch.setattr(assign.teams, "teams_for", lambda rows, slug: {})
     monkeypatch.setattr(grades, "_grading_text", lambda org, template: "type: group\n")
@@ -1612,6 +1622,7 @@ def test_an_allocated_assignment_with_no_teams_names_the_teaching_team(
     # `team_formation: assigned` means the Join-team form refuses every request, so
     # telling this course to wait for students to self-select points them at a door that
     # is shut. Who fills teams.csv is the assignment's own declaration.
+    _due_ahead(monkeypatch)
     monkeypatch.setattr(assign.teams, "load", lambda semester_org: {})
     monkeypatch.setattr(assign.teams, "teams_for", lambda rows, slug: {})
     monkeypatch.setattr(
@@ -1634,6 +1645,38 @@ def test_an_allocated_assignment_with_no_teams_names_the_teaching_team(
     rc, _ = run()
     assert rc == 0
     assert rc.text == "Handed out project: no teams yet; you assign the teams from now."
+
+
+def test_a_group_handout_pressed_after_the_cutoff_says_the_window_is_shut(
+    tmp_path, monkeypatch
+):
+    # The plan's due date is long past (tests.plans.DUE): the window the press opens is
+    # already shut, so "students form teams from now" would send them to a closed form.
+    # Not refused: the hand-out is still recorded, and the teaching team assigns teams.
+    monkeypatch.setattr(assign.teams, "load", lambda semester_org: {})
+    monkeypatch.setattr(assign.teams, "teams_for", lambda rows, slug: {})
+    monkeypatch.setattr(
+        assign,
+        "load_grading_spec",
+        lambda org, template, **_: grades.GradingSpec(
+            type="group", submit_via="external"
+        ),
+    )
+    recorded: list[str] = []
+    monkeypatch.setattr(
+        "dsl_course.schedule.record_handout",
+        lambda semester_org, slug, stamp=None: recorded.append(slug),
+    )
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
+    rc, _ = assign.provision_all(
+        "COURSE", "project-f2026", "SEMESTER", roster_path=path
+    )
+    assert rc == 0
+    assert rc.text == (
+        "Handed out project: no teams yet; the team window is already closed, so "
+        "assign the teams on its Teams tab (teams.csv)."
+    )
+    assert recorded == ["project"]
 
 
 @pytest.mark.parametrize("via", ["assignment_repo", "external", "shared_dropbox_repo"])

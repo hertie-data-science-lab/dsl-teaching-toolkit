@@ -1882,15 +1882,22 @@ def provision_all(
                 )
                 return 0, False
             # The press opened team formation, which is what it is for: a green run that
-            # says who forms the teams, not an error about the empty CSV.
-            how = (
-                "students form teams from now"
-                if self_select
-                else "you assign the teams from now"
-            )
+            # says who forms the teams, not an error about the empty CSV. Pressed after the
+            # late cutoff the window it opens is already shut, so only the teaching team
+            # can make teams.
+            cutoff = schedule.grading_cutoff_datetime(sched, key)
+            if cutoff is not None and datetime.now(timezone.utc) >= cutoff:
+                how = (
+                    "the team window is already closed, so assign the teams on its "
+                    "Teams tab (teams.csv)"
+                )
+            elif self_select:
+                how = "students form teams from now"
+            else:
+                how = "you assign the teams from now"
             if dry_run:
                 return Summary(
-                    f"Preview: {slug} would be handed out; no teams yet, so {how}."
+                    f"Preview: {slug} would be handed out; no teams yet; {how}."
                 ), False
             log(f"  no teams for `{key}` yet - handed out; {how}")
             return Summary(f"Handed out {slug}: no teams yet; {how}."), False
