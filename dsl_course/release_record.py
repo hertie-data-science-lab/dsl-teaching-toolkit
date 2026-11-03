@@ -105,7 +105,7 @@ def parse(text: str) -> dict[Key, dict]:
     """The record's copies by key. Raises `ValueError` on a file that is not the record."""
     doc = json.loads(text)
     if not isinstance(doc, dict) or not isinstance(doc.get("copies"), list):
-        raise ValueError(f"{PATH} is not a release record")
+        raise ValueError(f"{PATH} is not a release record")  # noqa: TRY004
     try:
         return {_key_of_entry(e): e for e in doc["copies"]}
     except (KeyError, TypeError) as exc:
