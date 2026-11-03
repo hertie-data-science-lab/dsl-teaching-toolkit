@@ -1,4 +1,4 @@
-// The console's one modal dialog: the set-aside question, Hand out now, the file picker, Student view.
+// The console's one modal dialog: Semester defaults, the set-aside question, Hand out now, the file picker, Student view.
 
 import type { ComponentChildren, RefObject } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';

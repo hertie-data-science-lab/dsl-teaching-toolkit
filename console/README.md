@@ -222,7 +222,7 @@ meter plus every state, each line opening the Students tab: on the roster with n
 yet, codes sent but not joined yet, and joined (`status.json` does not say who has an org
 invitation still to accept, so that step is not counted); it is hidden once every row has joined.
 **Semester defaults** (decision 0043; `#defaults`, in the semester nav between Site and
-Operations) is the one editor for the semester's settings: three open folds, each heading
+Operations) edits the semester's settings: three open folds, each heading
 carrying its line with the effective value and source from `status.json`: Assignments
 (semester.yml `defaults:`, the run defaults as `defaultsLine` words them), Releases
 (`autosync_released_edits`, "Send fixes to released files automatically") and Semester dates
@@ -231,9 +231,12 @@ late penalty each carry a `?` saying they are defaults a marker can waive or ove
 unit on the Marks tab (a per-key `hint` added to the tiers). The timezone is asked once, the
 `defaults:` one in Assignments; schedule.yml's own `timezone` stays on the Schedule screen. A
 save is at most one commit per file (`saveSteps`). `#defaults-<fold>` focuses that fold on
-arrival: the Assignments page's Semester defaults link and New semester's card open
-`#defaults-assignments`, the Site page's dates link `#defaults-dates`; the old `#settings` route
-is rewritten to `#defaults-assignments`. Unsaved edits are lost on leaving the page. A released `event_datetime: tbc` entry's Release page offers "Session date: TBC ->
+arrival: New semester's card and the old `#settings` route (rewritten to it) open
+`#defaults-assignments`. The same form also opens in a modal (`useDefaultsModal`), at the fold
+that fits where it is opened, the other two folded, with an Open the full page link: the
+Assignments page's Semester defaults button at Assignments, the Schedule page's at Releases (the
+Schedule edits the dates itself), the Site page's dates line at Semester dates. The opener holds
+the draft, so an unsaved edit survives closing and reopening the modal, but not leaving the page. A released `event_datetime: tbc` entry's Release page offers "Session date: TBC ->
 [date] [time]" (Set date writes the entry; Leave as TBC hides it), as does the result panel of
 a console Release early, now or again of such an entry; the Dashboard's suggested to-do
 `schedule:released_tbc:<entry>` opens that page.

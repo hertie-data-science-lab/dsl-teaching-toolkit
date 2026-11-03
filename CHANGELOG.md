@@ -9,7 +9,8 @@
   and is a suggested to-do until dated. A new Semester defaults page in the semester nav (between
   Site and Operations) edits the run defaults (with the `defaults:` timezone),
   `autosync_released_edits` and the semester dates; the old `#settings` link lands there. The
-  Site page links to it for the dates.
+  same form opens as a modal from the Assignments, Schedule and Site pages, at the section that
+  fits each.
 - `schedule.yml` names no `timezone:` (decision 0039 rule 2): a semester's times are read in its
   `semester.yml` `defaults: timezone`, cascaded. The migration's config layers step moves a
   schedule's `timezone:` there; left in the file it is NOT_MIGRATED and ignored. The Schedule
