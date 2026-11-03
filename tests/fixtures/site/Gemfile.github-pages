@@ -1,0 +1,13 @@
+# The gem set most live semester sites build with (.github/workflows/ci.yml, jekyll-contract).
+#
+# Their Gemfile is instructor-owned and predates the Jekyll 4 seed (templates/site-seed/
+# Gemfile): it bundles the github-pages gem, which pins Jekyll 3.10 and Liquid 4.0.4. So
+# the templates must compile there too - Liquid 4.0.4's `where_exp` cannot parse `or`,
+# which Jekyll 4 accepts. Kept to that Gemfile's own gems.
+source "https://rubygems.org"
+
+gem "github-pages", group: :jekyll_plugins
+group :jekyll_plugins do
+  gem "jekyll-feed", "~> 0.12"
+  gem "jekyll-remote-theme"
+end
