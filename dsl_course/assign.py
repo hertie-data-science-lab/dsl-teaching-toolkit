@@ -1868,7 +1868,7 @@ def provision_all(
         return 1, False
     key, slug = target
     # The assignment's own definition with this semester's run settings for this entry
-    # (visibility, the late pair, the team rules), read ONCE: it answers the shape, the
+    # (visibility, the late rule, the team rules), read ONCE: it answers the shape, the
     # grading sheet's header and the Submission receipts issue's body, so there is one
     # place for the answer to be spelt.
     gspec = load_grading_spec(course_org, template, semester_org=semester_org, slug=key)

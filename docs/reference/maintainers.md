@@ -739,8 +739,12 @@ repo) have no entry layer - the zone a semester's schedule is read in (`Schedule
 is its effective `timezone`, and `schedule.yml` states none - and neither has `autosync_released_edits` (decision 0043;
 institution `false`): whether an edit to an already-released course folder re-ships on the
 next scheduler tick. Its reader takes only what YAML loads as a boolean, and the release engine
-reads it with `settings.effective(semester_org, "autosync_released_edits", course_org=...)`. The late pair is one rule: a layer stating either half answers both,
-the other half none. Seeds write every key, commented, with the inherited value and its source
+reads it with `settings.effective(semester_org, "autosync_released_edits", course_org=...)`. The late window and penalty resolve each on its own, like every key
+(`late_window_days: 0` is no late work); the 0.11.0 migration writes a 0.10 layer that named
+one half with the other as none, `0` / `0%` (`migrate.old_late_pair`), since 0.10 read them as
+one pair. A plain number typed into a console penalty field is a percentage
+(`policy.typedPenalty`, saved with `%`); the engine reads a file's bare number below 1 as a
+fraction and refuses one of 1 or more (`setting_readers.read_penalty`). Seeds write every key, commented, with the inherited value and its source
 (`settings.defaults_skeleton`). A template's `grading_config.yml` states no run setting: one
 written there refuses the whole file as `RUN_SETTING_IN_TEMPLATE` (`grading_spec.TEMPLATE_KEYS`
 is what it reads). `settings.parse_instance` is the one parser of `semester.yml` `defaults:`;

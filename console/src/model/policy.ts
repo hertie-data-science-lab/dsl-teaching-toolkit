@@ -97,8 +97,17 @@ export function penaltyRate(text: unknown): number | null {
   return rate < 0 || rate > 1 ? null : rate;
 }
 
-/** Why a typed penalty cannot be used, or null. */
+/** A penalty as typed into a form, as the file writes it: a plain number is a percentage, so
+ * `20` is `20%` and `12.5` is `12.5%`. Anything else (`5%`, a typo) is kept as typed. Only text
+ * is a typed value: a number is a file's own YAML value, which the engine reads as written. */
+export function typedPenalty(v: unknown): unknown {
+  if (typeof v !== 'string') return v;
+  const t = v.trim();
+  return /^(\d+\.?\d*|\.\d+)$/.test(t) ? `${t}%` : t;
+}
+
+/** Why a typed penalty cannot be used, or null. A plain number is a percentage (`typedPenalty`). */
 export function penaltyError(text: unknown): string | null {
   if (text === undefined || text === null || String(text).trim() === '') return null;
-  return penaltyRate(text) === null ? `Write a percentage (${DEFAULTS.late_penalty_per_day}) or a fraction of the mark per day.` : null;
+  return penaltyRate(typedPenalty(text)) === null ? `Write a percentage of the mark per day, from 0 to 100, such as ${DEFAULTS.late_penalty_per_day}.` : null;
 }

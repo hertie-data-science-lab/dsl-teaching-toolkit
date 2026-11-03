@@ -2,6 +2,12 @@
 
 ## 0.11.0 (unreleased)
 
+- The late window and the late penalty inherit each on its own, like every other default
+  (they were one pair: a layer naming one half set the other to none). Setting only the
+  window keeps the inherited penalty, and vice versa; `late_window_days: 0` is still no late
+  work. The migration writes a 0.10 layer that named one half with the other as none
+  (`0` / `0%`). In the console's penalty fields a plain number is a percentage: `20` is
+  saved as `20%`.
 - The Updates box dates a released row by the release record (decision 0043): a released
   `tbc` row is announced at the moment it first shipped (the site's `date:` and `released_at:`,
   the student status's `rows[].released_at`), where before every dateless row was dropped. A

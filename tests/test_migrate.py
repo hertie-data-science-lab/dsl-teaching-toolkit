@@ -1995,6 +1995,47 @@ def test_a_cutoff_that_is_not_whole_days_after_the_due_date_is_named():
     assert "2026-10-15 20:00" in note and "2026-10-15 12:00" in note
 
 
+def test_a_template_stating_one_late_half_keeps_its_0_10_meaning():
+    # 0.10 read the late rule as one pair: a template naming the window alone had no
+    # penalty. 0.11.0 inherits each half on its own, so the fold writes the none out.
+    meta = yaml.safe_load(
+        "assignments:\n  a1:\n    course_source_repo: t\n    due_datetime: 2026-10-13\n"
+    )
+    want, _ = migrate.instance_additions(
+        meta, {"t": {"late_window_days": 3}}, INSTITUTION, migrate.settings.Instance()
+    )
+    assert want["a1"] == {"late_window_days": 3, "late_penalty_per_day": "0%"}
+    want, _ = migrate.instance_additions(
+        meta,
+        {"t": {"late_penalty_per_day": "5%"}},
+        INSTITUTION,
+        migrate.settings.Instance(),
+    )
+    assert want["a1"] == {"late_window_days": 0, "late_penalty_per_day": "5%"}
+
+
+def test_old_late_pair_completes_only_a_layer_that_names_one_half():
+    assert migrate.old_late_pair({"max_team_size": 3}) == {"max_team_size": 3}
+    both = {"late_window_days": 2, "late_penalty_per_day": "5%"}
+    assert migrate.old_late_pair(both) == both
+    assert migrate.old_late_pair({"late_window_days": 2}) == {
+        "late_window_days": 2,
+        "late_penalty_per_day": "0%",
+    }
+
+
+def test_a_0_10_block_stating_one_late_half_moves_inline_whole():
+    sched = (
+        "assignments:\n  a1:\n    number: 1\n    course_source_repo: t\n"
+        "    due_datetime: 2026-10-13\n"
+    )
+    instance = "assignments:\n  a1:\n    late_window_days: 4\n"
+    new, _after, _notes, stops = migrate.schedule_shape(sched, instance)
+    assert stops == [], stops
+    entry = yaml.safe_load(new)["assignments"]["a1"]
+    assert (entry["late_window_days"], entry["late_penalty_per_day"]) == (4, "0%")
+
+
 # The old seeded skeleton filled in by hand: a line left commented out, and a blank
 # line, inside the retired `enrolment:` block, which comes straight after `events:`.
 INTERIOR_SCHEDULE = """assignments:

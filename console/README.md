@@ -228,7 +228,9 @@ carrying its line with the effective value and source from `status.json`: Assign
 (`autosync_released_edits`, "Send fixes to released files automatically") and Semester dates
 (schedule.yml's `semester:` block). The heading's `?` explains the cascade; the late window and
 late penalty each carry a `?` saying they are defaults a marker can waive or override per late
-unit on the Marks tab (a per-key `hint` added to the tiers). The timezone is asked once, the
+unit on the Marks tab (a per-key `hint` added to the tiers). Each inherits on its own: a window
+set without a penalty keeps the inherited penalty. Every penalty field reads a plain number as a
+percentage and saves it with `%` (`policy.typedPenalty`). The timezone is asked once, the
 `defaults:` one in Assignments; schedule.yml's own `timezone` stays on the Schedule screen. A
 save is at most one commit per file (`saveSteps`). `#defaults-<fold>` focuses that fold on
 arrival: the Assignments page's Semester defaults link and New semester's card open
