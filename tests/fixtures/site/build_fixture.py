@@ -18,7 +18,7 @@ drop-in whose one copy is a single file, a silent syllabus copy that raises no r
 handed-out assignment with a declared `details:`, a pending one, one handed in off GitHub, one handed in off GitHub
 that is not out yet, one whose repos are public, one handed into a shared drop box, one
 group assignment inside its team-formation window, a dated exam and a TBC
-one, a special event, the two term boundaries, the archive row inside its notice window,
+one, a TBC lab not released and one released (announced when its files landed), a special event, the two term boundaries, the archive row inside its notice window,
 the banner to the student console (the course opts in), two formed teams (one with room, one full), an All
 Materials index nested three directories deep, and - within the released lecture - a
 published file linked to the site's own hosted copy beside an unpublished one linked to
@@ -110,7 +110,13 @@ TREE = (
     "exams/mock.pdf",
     # Released outside the plan (no entry copies it): an undated row on the Labs tab.
     "labs/02_week-2/Lab_Session_2.ipynb",
+    # A TBC lab released by hand (`event_datetime: tbc`, its files landed).
+    "labs/04_week-4/Lab_Session_4.ipynb",
 )
+
+# When the released TBC lab's folder first landed (`gh_commits.first_landed`): after
+# lecture 2, so it is the newest bullet in the Updates box.
+LAB_4_LANDED = datetime(2026, 9, 15, 8, 30, tzinfo=ZoneInfo("UTC"))
 
 # What this course's `publish.yml` declares, through the real parser: rendered decks and
 # nothing else - the shape a Quarto course takes. Lecture 1 therefore carries BOTH link
@@ -318,8 +324,10 @@ SCHEDULE = schedule.Schedule(
             details="Why weight sharing works.\n\nAnd where it does not.",
         ),
         # `event_datetime: tbc`: a "TBC" row after lab 1 on the schedule and the Labs tab,
-        # never in the Updates box.
+        # not in the Updates box while nothing of it has landed...
         _release("lab-3", None, "labs/03_week-3", title="Attention lab"),
+        # ...and in it, at the moment its files first landed, once they have.
+        _release("lab-4", None, "labs/04_week-4", title="Transformer lab"),
     ],
     # A second lab group with nothing to ship: a "Lab 1" row of its own (the release's
     # title), no files, never in the Updates box.
@@ -394,12 +402,14 @@ def _assignments() -> dict[str, str]:
             handout=datetime(2026, 9, 30, 9, 0, tzinfo=BERLIN),
             now=NOW,
         ),
+        # Before the first lecture too, for the reason 06 and 07 are (below): the released
+        # TBC lab's bullet is dated after it.
         "04-assignment-4.md": site._assignment_entry(
             COURSE_ORG,
             SEMESTER_ORG,
             PUBLIC,
             datetime(2026, 12, 15, 23, 59, tzinfo=BERLIN),
-            handout=datetime(2026, 9, 29, 9, 0, tzinfo=BERLIN),
+            handout=datetime(2026, 9, 3, 9, 0, tzinfo=BERLIN),
             handed_out=frozenset({"assignment-4"}),
             now=NOW,
         ),
@@ -535,7 +545,11 @@ def generated(
     real_tree, real_content = site._repo_tree, site.get_file_content
     real_spec, real_materials = site.load_grading_spec, site.read_materials
     real_clone, real_teams = site.clone, site._formed_teams
+    real_landed = site.first_landed
     site._repo_tree, site.get_file_content = _repo_tree, _get_file_content
+    site.first_landed = lambda _org, _repo, path: (
+        LAB_4_LANDED if path == "labs/04_week-4" else None
+    )
     site.load_grading_spec = _grading_spec
     site.read_materials = lambda _org, _repo: materials.Declared()
     site.clone, site._formed_teams = _clone, _formed_teams
@@ -555,6 +569,8 @@ def generated(
         site._repo_tree, site.get_file_content = real_tree, real_content
         site.load_grading_spec, site.read_materials = real_spec, real_materials
         site.clone, site._formed_teams = real_clone, real_teams
+        site.first_landed = real_landed
+        site._first_landed.cache_clear()
 
 
 # The overlay the offline build layers on top of the generated `_config.yml`. The primary
