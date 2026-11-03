@@ -2072,14 +2072,11 @@ def zone_move(
     if str(schedule._tz(name)) != name:
         return None, None, [f"{where} is not a known zone - correct or delete it"]
     if stated and stated != name:
-        return (
-            None,
-            None,
-            [
-                f"{where} differs from {SEMESTER_FILE} `{DEFAULTS_BLOCK}: timezone: "
-                f"{stated}` - keep one by hand, then run again"
-            ],
+        differs = (
+            f"{where} differs from {SEMESTER_FILE} `{DEFAULTS_BLOCK}: timezone: "
+            f"{stated}` - keep one by hand, then run again"
         )
+        return None, None, [differs]
     return (None if stated else name), new, []
 
 
