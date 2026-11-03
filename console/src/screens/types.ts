@@ -23,6 +23,10 @@ export interface CohortProps {
   prefill?: string;
   /** The course's public status, read for the side nav anyway: its template list is fresher than the semester's copy. Absent in render tests. */
   courseLoaded?: Loaded;
+  /** A folder to open on Released materials (`?folder=<repo>/<path>`). */
+  folder?: string;
+  /** A file open in the viewer on Released materials (`?file=<repo>/<path>`). */
+  file?: string;
 }
 
 /** A semester screen whose status is ready. */

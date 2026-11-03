@@ -271,9 +271,9 @@ export function cohortFlags(l: Loaded | undefined): { problems: number | null; a
   return { problems: problemCount(l.status), archived: l.status.semester?.live === false };
 }
 
-/** The eight semester pages, in nav order (decision 0037: no top-level Marks). */
+/** The nine semester pages, in nav order (decision 0037: no top-level Marks; Materials after the Schedule that releases it). */
 const SEMESTER_PAGES: [string, string][] = [
-  ['dashboard', 'Dashboard'], ['schedule', 'Schedule'], ['assignments', 'Assignments'], ['students', 'Students'],
+  ['dashboard', 'Dashboard'], ['schedule', 'Schedule'], ['materials', 'Materials'], ['assignments', 'Assignments'], ['students', 'Students'],
   ['instructors', 'Instructors'], ['site', 'Site'],
   ['defaults', 'Semester defaults'], ['operations', 'Operations'],
 ];
@@ -333,11 +333,12 @@ export function Sidenav({ courses, course, cohort, site, cohortStates, current, 
   const inside = (k: keyof SubWanted) => current === k && !!entry;
   const shownGroup = (k: keyof SubWanted) => open[k] ?? inside(k);
   const pages = course.write ? sub?.({ materials: shownGroup('materials'), templates: shownGroup('templates') }) : undefined;
+  // `materials` is also a semester page's key (`?cohort=<org>#materials`, Released materials): on a semester page the course group is never current.
   const group = (k: keyof SubWanted, href: string, t: string, what: string) => {
     const list = pages?.[k] ?? [];
     const onPage = inside(k) && list.some((x) => !x.ext && x.repo === entry);
     const node: NavNode = { id: k, label: t, href, what, pages: list.map((x) => ({ href: x.href, t: x.label, ext: x.ext, current: onPage && x.repo === entry })) };
-    return <TreeNode node={node} open={shownGroup(k)} current={current === k && !onPage} onToggle={() => setOpen({ ...open, [k]: !shownGroup(k) })} />;
+    return <TreeNode node={node} open={shownGroup(k)} current={current === k && !onPage && !cohort} onToggle={() => setOpen({ ...open, [k]: !shownGroup(k) })} />;
   };
   const leaf = (key: string, href: string, t: ComponentChildren) => <Leaf l={{ href, t, current: key === current }} />;
   // Semesters: live is neither archived nor past its end (the status's, else the key's).
@@ -376,7 +377,7 @@ export function Sidenav({ courses, course, cohort, site, cohortStates, current, 
           <ul class="tree">
             {leaf('course', `?course=${course.org}#course`, 'Dashboard')}
             {leaf('details', '#details', 'Course details')}
-            {group('materials', '#materials', 'Course materials', 'the course materials repos')}
+            {group('materials', `?course=${course.org}#materials`, 'Course materials', 'the course materials repos')}
             {group('templates', '#templates', 'Assignment templates', 'the assignment templates')}
             {leaf('website', '#website', <>Public OpenCourse website <span class="chip">Beta</span></>)}
           </ul>

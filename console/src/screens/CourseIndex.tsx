@@ -42,7 +42,7 @@ export function otherRepos(org: string, repos: GhRepo[], known: string[]): GhRep
 /** The org's repo list on GitHub, filtered to one topic. */
 export const topicUrl = (org: string, topic: string) => `https://github.com/orgs/${org}/repositories?q=${encodeURIComponent(`topic:${topic}`)}`;
 
-function repoOf(files: Files, org: string, name: string): GhRepo | undefined {
+export function repoOf(files: Files, org: string, name: string): GhRepo | undefined {
   const r = files.repos(org);
   return r.kind === 'ready' ? r.repos.find((x) => x.name === name) : undefined;
 }
@@ -88,15 +88,16 @@ export function OtherRepoRow({ org, repo, write }: { org: string; repo: GhRepo; 
 /** The folder `?folder=<repo>/<path>` names inside `repo`, if it is that repo's. */
 export const focusIn = (folder: string | undefined, repo: string) => (folder?.startsWith(`${repo}/`) ? folder.slice(repo.length + 1).replace(/\/+$/, '') || undefined : undefined);
 
-/** A materials repo's files under its row, as a folder tree; `current`, a file open beside it. */
-function RepoFiles({ files, org, repo, focus, current }: { files: Files; org: string; repo: string; focus?: string; current?: string }) {
+/** A materials repo's files under its row, as a folder tree; `current`, a file open beside it; `at` and `folderSide` as `MaterialsTree` takes them. */
+export function RepoFiles({ files, org, repo, focus, current, at, folderSide }: { files: Files; org: string; repo: string; focus?: string; current?: string } & Pick<Parameters<typeof MaterialsTree>[0], 'at' | 'folderSide'>) {
   const t = files.tree(org, repo);
   if (t.kind === 'loading') return <div class="r-files"><Loading what="Reading the repo" /></div>;
+  if (t.kind === 'absent' && at === 'cohort') return <p class="footnote">No such repo in the semester yet: the first release into it creates it.</p>;
   if (t.kind !== 'ready') return <p class="r-sub">Could not read the repo’s files.</p>;
   return (
     <div class="r-files">
       {t.truncated ? <p class="footnote">GitHub returned only part of this repo’s file list.</p> : null}
-      <MaterialsTree org={org} repo={repo} paths={t.paths} focus={focus} current={current} />
+      <MaterialsTree org={org} repo={repo} paths={t.paths} focus={focus} current={current} at={at} folderSide={folderSide} />
     </div>
   );
 }

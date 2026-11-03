@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // Decision 0043 rule 5, clicked through against a fake GitHub: the Semester defaults
-// screen (three open folds, each heading carrying its line; one commit per file), the session date a
+// screen and its modal (three folds, each heading carrying its line; one commit per file), the session date a
 // released TBC entry offers on its release page, and the to-do that points there.
 
 import { render } from 'preact';
@@ -18,7 +18,8 @@ import { DispatchAdapter } from '../src/ops/adapter';
 import { OpsSession } from '../src/ops/session';
 import { movedHash, parseHash } from '../src/router';
 import { CohortScreen, semesterItems } from '../src/screens/Cohort';
-import { ReleaseScreen, SemesterForm } from '../src/screens/Schedule';
+import { AssignmentsScreen } from '../src/screens/Assignments';
+import { ReleaseScreen, ScheduleScreen, SemesterForm } from '../src/screens/Schedule';
 import { SemesterDefaultsScreen, settingsLines } from '../src/screens/SemesterSettings';
 import { withSessionDate } from '../src/screens/SessionDate';
 import { StaticFiles } from './staticFiles';
@@ -165,6 +166,52 @@ describe('Semester defaults', () => {
     const sched = puts(gh, 'schedule.yml');
     expect(sched).toHaveLength(1);
     expect(parse(body(sched[0])).semester.end).toEqual({ type: 'end', event_datetime: '2026-12-20' });
+  });
+});
+
+describe('the Semester defaults modal: the page’s form, opened in context', () => {
+  const sections = (within: Element) => [...within.querySelectorAll<HTMLDetailsElement>('details.settings-fold')].map((d) => [d.querySelector('summary span')!.textContent, d.open]);
+  const fields = (within: Element) => [...within.querySelectorAll('input, select, textarea')].map((e) => e.id).filter(Boolean);
+  const dialog = () => q('[role="dialog"]');
+
+  it('renders the same sections and fields as the full page, only the one it opened at open', async () => {
+    await mount((f) => <SemesterDefaultsScreen {...props(f)} />);
+    const page = fields(root!);
+    render(null, root!);
+    await mount((f) => <ScheduleScreen {...props(f)} />);
+    await act(() => button('Semester defaults').click());
+    expect(q('#modal-title').textContent).toBe('Semester defaults');
+    expect(fields(dialog())).toEqual(page);
+    expect(sections(dialog())).toEqual([['Assignments', false], ['Releases', true], ['Semester dates', false]]);
+    expect(document.activeElement).toBe(dialog().querySelectorAll('details.settings-fold summary')[1]);
+    expect(dialog().querySelector('a[href="#defaults-releases"]')!.textContent).toBe('Open the full page');
+  });
+
+  it('opens at Assignments from the Assignments page, the other two folded but openable', async () => {
+    await mount((f) => <AssignmentsScreen {...props(f)} />);
+    await act(() => button('Semester defaults').click());
+    expect(sections(dialog())).toEqual([['Assignments', true], ['Releases', false], ['Semester dates', false]]);
+    const dates = dialog().querySelectorAll<HTMLDetailsElement>('details.settings-fold')[2];
+    await act(() => { dates.open = true; });
+    expect(dates.open).toBe(true);
+    expect(dates.querySelector('#e-te')).not.toBeNull();
+    expect(dialog().querySelector('a[href="#defaults-assignments"]')).not.toBeNull();
+  });
+
+  it('keeps an unsaved edit across closing and reopening, and saves one commit per file', async () => {
+    const gh = await mount((f) => <ScheduleScreen {...props(f)} />);
+    await act(() => button('Semester defaults').click());
+    await type('#sd-late_window_days', '7');
+    await act(() => dialog().querySelector<HTMLButtonElement>('button[aria-label="Close"]')!.click());
+    expect(root!.querySelector('[role="dialog"]')).toBeNull();
+    await act(() => button('Semester defaults').click());
+    expect(q<HTMLInputElement>('#sd-late_window_days').value).toBe('7');
+    await type('#e-te', '2026-12-20');
+    await act(() => button('Save', dialog()).click());
+    await settle(() => puts(gh, 'schedule.yml').length > 0);
+    expect(puts(gh, 'semester.yml')).toHaveLength(1);
+    expect(parse(body(puts(gh, 'semester.yml')[0])).defaults.late_window_days).toBe(7);
+    expect(puts(gh, 'schedule.yml')).toHaveLength(1);
   });
 });
 

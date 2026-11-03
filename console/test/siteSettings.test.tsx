@@ -109,12 +109,17 @@ describe('Site settings', () => {
     expect(body(w)).toContain('student_site:\n  syllabus: Course.md\n');
   });
 
-  it('shows the semester dates and links to where they are edited, the Semester defaults screen (decision 0043)', async () => {
+  it('shows the semester dates and opens where they are edited, Semester defaults at its dates (decision 0043)', async () => {
     await mount();
     const sem = section('Semester dates');
     expect(sem.textContent).toContain('Edited in Semester defaults; the site updates at the next sync.');
-    expect(sem.querySelector('a')!.getAttribute('href')).toBe('#defaults-dates');
     expect(sem.querySelector('input')).toBeNull();
+    await act(() => sem.querySelector<HTMLButtonElement>('button[aria-haspopup="dialog"]')!.click());
+    const folds = [...document.querySelectorAll<HTMLDetailsElement>('[role="dialog"] details.settings-fold')];
+    expect(folds.map((d) => [d.querySelector('summary span')!.textContent, d.open])).toEqual([['Assignments', false], ['Releases', false], ['Semester dates', true]]);
+    expect(document.activeElement).toBe(folds[2].querySelector('summary'));
+    // Rendered beside the footnote, not inside it: the footnote's type does not cascade in.
+    expect(sem.querySelector('.footnote [role="dialog"]')).toBeNull();
   });
 
   it('shows the semester label and org as what they are, not as fields', async () => {
