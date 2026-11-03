@@ -72,6 +72,14 @@
       "where": "schedule.yml top level"
     },
     {
+      "cost": "its times are read in the semester's `defaults:` timezone",
+      "fault_code": "NOT_MIGRATED",
+      "new": "semester.yml defaults.timezone",
+      "old": "timezone",
+      "since": "0.11.0",
+      "where": "schedule.yml top level"
+    },
+    {
       "cost": "the row shows no reading guide",
       "fault_code": "NOT_MIGRATED",
       "new": "reading_guide",

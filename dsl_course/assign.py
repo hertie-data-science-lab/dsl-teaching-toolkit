@@ -1933,7 +1933,7 @@ def provision_all(
                     code=1,
                 ), False
             if not dry_run:
-                schedule.record_handout(semester_org, key)
+                schedule.record_handout(semester_org, key, tz_name=sched.timezone)
             if scheduled:
                 # Teams appear days after the handout datetime either way - and the cron
                 # re-fires every hour until they do. Wait, exactly as an individual
@@ -2180,7 +2180,7 @@ def provision_all(
     # published off that record, so it never appeared. `record_handout` never moves a
     # handout later, so repeating it on every later tick costs one read and changes nothing.
     if gspec.creates_repos or sheet_written:
-        schedule.record_handout(semester_org, key)
+        schedule.record_handout(semester_org, key, tz_name=sched.timezone)
 
     # ...and refresh the Join-team form's mirror while this run holds the schedule and the
     # spec. A REAL handout is the moment the two can most recently have moved, and the form

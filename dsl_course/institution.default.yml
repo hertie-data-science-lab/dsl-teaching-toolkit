@@ -25,7 +25,7 @@ institution:
 # The bottom of the cascade: entry > semester.yml > course.yml > this, per key. A course
 # and a semester write the same keys in their own `defaults:`.
 defaults:
-  timezone: Europe/Berlin       # a semester's schedule.yml `timezone:` when it names none
+  timezone: Europe/Berlin       # what a semester's times are read in
   late_window_days: 10          # 0 = nothing after the due date is accepted
   late_penalty_per_day: 10%     # of the earned grade, per day started
   max_team_size: 5

@@ -16,7 +16,6 @@ import type { Assignment, Release } from '../model/types';
 import { archive, keepFuture, releaseAdhoc, releaseAgain, releaseEarly, releaseNow, scheduledPreview } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
 import type { OpDef } from '../ops/session';
-import { TIMEZONES } from '../tiers/course';
 import { RUN_REASON } from '../tiers/runSettings';
 import { CheckLine, DueSubmit, EditFile, Md, ProblemCards, ReleaseMarks, ghUrl } from '../ui/bits';
 import { FilePicker, pathVerdict } from '../ui/FilePicker';
@@ -30,7 +29,7 @@ import type { CohortProps, ReadyProps } from './types';
 import { CONFIG_REPO } from '../model/names';
 import { RUN_KEYS, TEAM_FORMATION, TEAM_FORMATIONS, VISIBILITIES, VISIBILITY, effectiveOf, validSchedule, yamlBoolean } from '../model/settings';
 import { HandOutDialog, HandOutNow, ManualWaiting, NO_LATE_WINDOW, SolutionNote, canHoldSolution, cutoffOf, draftHandout, entryBelow, forcedVisibility, waitingHandOut, waitsByHand, windowDays } from './RunSettings';
-import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO, DEFAULT_TIMEZONE, KINDS, SUBMIT_VIA_DEFAULT, penaltyError, pluralOf } from '../model/policy';
+import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO, KINDS, SUBMIT_VIA_DEFAULT, penaltyError, pluralOf } from '../model/policy';
 import { otherRepos } from './CourseIndex';
 import { DivergencePanel, releaseAgainDrift } from './Divergence';
 import { useSetAside } from './SetAside';
@@ -572,22 +571,14 @@ function AssignmentForm({ p, d, set, errors, consoleOn, templates, tiered, hande
   );
 }
 
-/** The semester dates sheet. `tz: false` leaves out schedule.yml's `timezone` (the Semester settings modal, whose Assignments fold carries the `defaults:` one, decision 0039). */
-export function SemesterForm({ d, set, errors, tz = true }: { d: SemesterDraft; set: Set_<SemesterDraft>; errors: Record<string, string>; tz?: boolean }) {
+/** The semester dates sheet. The timezone is the `defaults:` one (decision 0039), set in Semester settings. */
+export function SemesterForm({ d, set, errors }: { d: SemesterDraft; set: Set_<SemesterDraft>; errors: Record<string, string> }) {
   return (
     <>
       <div class="row-2">
         <div class="field"><Lbl for="e-ts" hint="Everything on the site’s calendar hangs off these.">Semester starts</Lbl><input id="e-ts" type="date" value={d.start} onInput={(e) => set({ start: val(e) })} /></div>
         <div class="field"><Lbl for="e-te">Semester ends</Lbl><input id="e-te" type="date" value={d.end} onInput={(e) => set({ end: val(e) })} /><Err e={errors.end} /></div>
       </div>
-      {tz ? <Fold summary="Advanced" open={!!d.tz && d.tz !== DEFAULT_TIMEZONE}>
-        <div class="field"><Lbl for="e-tz" hint="Every date in this schedule is in this timezone.">Timezone</Lbl>
-          <select id="e-tz" onChange={(e) => set({ tz: val(e) })}>
-            <option value="" selected={!d.tz}>{DEFAULT_TIMEZONE} (default)</option>
-            {[...new Set([...TIMEZONES, d.tz].filter(Boolean))].map((t) => <option value={t} selected={t === d.tz}>{t}</option>)}
-          </select>
-        </div>
-      </Fold> : null}
     </>
   );
 }
@@ -883,7 +874,7 @@ function View(p: ReadyProps) {
       </div>
       <div class="term-meta">
         {sched?.start && sched?.end ? <span>Semester <b>{fmtDay(sched.start, tz, year)} to {fmtDay(sched.end, tz)}</b></span> : null}
-        <span>Timezone <b>{sched?.timezone ?? tz}</b></span>
+        <span>Timezone <b>{tz}</b></span>
         <span>Archive <b>{archived ? 'done: every repo is read-only' : archiveWhen ?? 'never'}</b> <ArchiveHelp org={p.cohort.org} /></span>
         <a class="textlink" href="#schedule-semester">Edit semester dates</a>
         <a class="textlink" href={archiveKey ? `#schedule-${archiveKey}` : '#schedule-new'} onClick={() => { if (!archiveKey) setDraft('new', { ...(newDraft('semester', doc) as SemesterEntryDraft), type: 'archive' }); }}>Archive settings</a>

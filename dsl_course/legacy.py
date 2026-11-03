@@ -17,7 +17,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 
 from . import records
-from .course import CONFIG_REPO, JOIN_REPO, SEMESTER_FILE
+from .course import CONFIG_REPO, DEFAULTS_BLOCK, JOIN_REPO, SEMESTER_FILE
 from .course import COURSE_CONFIG as COURSE_FILE
 from .faults import NOT_MIGRATED
 
@@ -69,6 +69,8 @@ ROSTER_FILES = "semester-config students.csv / teams.csv"
 OPEN_SITE_KEYS = "course.yml open_course_site"
 MATERIALS_REPO = "course materials repo"
 
+# Where the semester's zone is stated (decision 0039 rule 2).
+SEMESTER_TIMEZONE = f"{SEMESTER_FILE} {DEFAULTS_BLOCK}.timezone"
 _BLOCKS = "a block per kind (`lectures:`, `labs:`, `readings:`, `exams:`, `events:`, `assets:`)"
 _MIGRATE = "run the 0.11.0 migration (`python3 -m dsl_course.migrate`)"
 
@@ -125,6 +127,16 @@ ROWS: tuple[Old, ...] = (
         "0.11.0",
         NOT_MIGRATED,
         "nothing archives this semester",
+    ),
+    # The semester's zone before the 0.11.0 ruling on decision 0039 rule 2: a top-level
+    # schedule.yml key, now the `defaults:` one. Moved by `migrate`'s config layers step.
+    Old(
+        "timezone",
+        SEMESTER_TIMEZONE,
+        SCHEDULE_TOP,
+        "0.11.0",
+        NOT_MIGRATED,
+        "its times are read in the semester's `defaults:` timezone",
     ),
     Old(
         "reading_list",

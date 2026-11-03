@@ -37,7 +37,6 @@ SEMESTER = "hertie-dsl-demo-f2026"
 NOW = datetime(2026, 9, 23, 9, 0, tzinfo=UTC)
 
 SCHEDULE = """\
-timezone: Europe/Berlin
 semester:
   start: {type: start, event_datetime: 2026-09-07}
   end: {type: end, event_datetime: 2026-12-18}

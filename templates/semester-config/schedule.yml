@@ -6,8 +6,9 @@
 # - worked example: https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/__CENTRAL_REF__/example-course/semester-org/schedule.yml
 # - see deployed end-product: https://hertie-dsl-demo-f2026.github.io/schedule/
 #
-# Times are {timezone} unless you set `timezone:`. Scheduled release ticks about every
-# 15 minutes, so a time is honoured to roughly that, not to the minute.
+# Times are in the semester's timezone (semester.yml `defaults: timezone`). Scheduled
+# release ticks about every 15 minutes, so a time is honoured to roughly that, not to the
+# minute.
 #
 # One block per kind (lectures, labs, readings, exams, events, assets) and assignments.
 # Each block is a map whose KEY names what the toolkit creates for the entry (its site row,
@@ -32,8 +33,6 @@
 #
 # What follows is a SKELETON: uncomment and fill what you want. For a full worked semester
 # see the worked example above.
-
-# timezone: {timezone}           # OPTIONAL - default: {timezone}
 
 # lectures:
 #   lecture-1:

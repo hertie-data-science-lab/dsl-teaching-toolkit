@@ -826,14 +826,14 @@ def _record(
     copies: list[Copied],
 ) -> int:
     """Record every copy that landed (`release_record`): each copy of `entry`, or - for a
-    release of paths - each schedule copy those paths made (`covered_copies`) whose time
-    has come or is TBC; a path the schedule does not copy, and a copy still due later,
-    stay unrecorded (the scheduler ships that one at its time, with what is current
-    then). A deliberate release, so each recorded copy's manifest and `last_shipped_at`
-    are refreshed. A copy recorded here for the first time that beat its plan, or had
-    none, has its ship time written into schedule.yml (`schedule.record_release_times`);
-    one the record already had is a Release again and writes nothing. Returns the error
-    count."""
+    release of paths - each schedule copy those paths made (`covered_copies`), whatever
+    its planned moment: a hand release ahead of schedule IS that copy's release (decision
+    0043 rule 1), so the scheduler does not copy it again at its time. A path the
+    schedule does not copy stays unrecorded. A deliberate release, so each recorded
+    copy's manifest and `last_shipped_at` are refreshed. A copy recorded here for the
+    first time that beat its plan, or had none, has its ship time written into
+    schedule.yml (`schedule.record_release_times`); one the record already had is a
+    Release again and writes nothing. Returns the error count."""
     landed = [c for c in copies if c.landed]
     if not landed:
         return 0
@@ -849,13 +849,11 @@ def _record(
         if entry is not None:
             made = [(entry, c.deploy, c.files)]
         else:
-            made = []
-            for release, planned, sub in covered_copies(sched, c.deploy):
-                moment = planned.deploy_datetime or release.when
-                if moment is not None and moment > at:
-                    continue  # its own time still to come: the schedule ships it then
-                if files := release_record.inside(c.files, sub):
-                    made.append((release, planned, files))
+            made = [
+                (release, planned, files)
+                for release, planned, sub in covered_copies(sched, c.deploy)
+                if (files := release_record.inside(c.files, sub))
+            ]
         for release, d, files in made:
             if (k := release_record.key_of(d)) not in before:
                 first.setdefault(k, (release, d, at))

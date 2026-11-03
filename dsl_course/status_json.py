@@ -1887,22 +1887,16 @@ def run_settings(spec: grading_spec.GradingSpec) -> dict[str, dict]:
     return out
 
 
-def effective_defaults(
-    course_org: str, semester_org: str = "", zone: str | None = None
-) -> dict[str, dict]:
+def effective_defaults(course_org: str, semester_org: str = "") -> dict[str, dict]:
     """Every `defaults:` key's effective value and its source (`settings.effective_defaults`)
     at the semester level, or the course level with no semester: what each settings input
-    shows as its placeholder (decision 0039 rule 2). `zone` is the zone the semester's
-    schedule is read in: one other than the cascade's is its schedule.yml's own
-    `timezone:`, the semester's word written where the dates are. `{}` when a layer
-    cannot be read: its own fault says so."""
+    shows as its placeholder (decision 0039 rule 2). `{}` when a layer cannot be read: its
+    own fault says so."""
     try:
         out = settings.effective_defaults(course_org, semester_org)
     except (Unusable, yaml.YAMLError) as exc:
         log_err(f"  ! the effective defaults could not be worked out: {exc}")
         return {}
-    if zone and zone != out["timezone"]["value"]:
-        out["timezone"] = {"value": zone, "source": "semester"}
     return out
 
 
@@ -2650,7 +2644,7 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
     # A late release another problem already holds back is not told twice.
     held = {p["release"] for p in problems if "release" in p}
     problems += late_problems(facts, releases, held, now)
-    defaults = effective_defaults(course.org, facts.org, sched.timezone)
+    defaults = effective_defaults(course.org, facts.org)
     autosync = (defaults.get(AUTOSYNC) or {}).get("value") is True
     problems += divergence_problems(facts, autosync, aside)
     assignments = render_assignments(facts, now)
