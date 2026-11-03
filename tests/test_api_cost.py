@@ -479,7 +479,7 @@ _REAL = [
     (settings, "_semester_text", settings._semester_text),
     (settings, "course_org_for_semester", settings.course_org_for_semester),
     (release_record, "get_file_with_sha", gh_contents.get_file_with_sha),
-    (release_record, "repo_blob_shas", gh_contents.repo_blob_shas),
+    (scheduler, "repo_blob_shas", gh_contents.repo_blob_shas),
     (release_record, "put_file_as_read", gh_contents.put_file_as_read),
 ]
 

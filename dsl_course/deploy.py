@@ -481,7 +481,9 @@ class Copied(NamedTuple):
 
     @property
     def landed(self) -> bool:
-        return self.outcome in LANDED
+        """Students have it: its dest merged (or already held it), and it copied
+        something - a copy everything in it was excluded from has not shipped."""
+        return bool(self.files) and self.outcome in LANDED
 
 
 class Batch(NamedTuple):

@@ -30,8 +30,8 @@ from datetime import UTC, datetime
 
 from . import records, schedule
 from .course import is_repo_root
-from .gh_contents import get_file_with_sha, put_file_as_read, repo_blob_shas
-from .schedule_plan import deploy_dest
+from .gh_contents import get_file_with_sha, put_file_as_read
+from .schedule_plan import deploy_dest, within
 
 PATH = records.path("releases")
 CONFIG_REPO = schedule.CONFIG_REPO
@@ -61,17 +61,12 @@ def inside(files: dict[str, str], sub: str) -> dict[str, str]:
     of it for the root. Empty when nothing is there."""
     if is_repo_root(sub):
         return dict(files)
-    sub = sub.strip("/")
-    if sub in files:
-        return {sub.rsplit("/", 1)[-1]: files[sub]}
-    prefix = f"{sub}/"
-    return {p[len(prefix) :]: sha for p, sha in files.items() if p.startswith(prefix)}
-
-
-def dest_tree(org: str, repo: str, branch: str) -> dict[str, str]:
-    """`{path: blob sha}` of the branch students read in a destination repo. Raises when
-    it cannot be read."""
-    return repo_blob_shas(org, repo, branch)
+    out = {}
+    for path, sha in files.items():
+        rel = within(sub, path)
+        if rel is not None:
+            out[rel or path.rsplit("/", 1)[-1]] = sha
+    return out
 
 
 def _entry(
@@ -118,6 +113,20 @@ def dump(copies: dict[Key, dict]) -> str:
     return json.dumps(doc, indent=2, ensure_ascii=False) + "\n"
 
 
+def _apply(copies: dict[Key, dict], seeded: bool, k: Key, e: dict) -> None:
+    """One change to `copies`: a seed never replaces an entry; a ship keeps the entry's
+    first label and first ship time."""
+    old = copies.get(k)
+    if old is None:
+        copies[k] = e
+    elif not seeded:
+        copies[k] = {
+            **e,
+            "entry": old.get("entry", e["entry"]),
+            "first_shipped_at": old.get("first_shipped_at"),
+        }
+
+
 @dataclass
 class Record:
     """One semester's record as read, plus this run's changes to it. `sha` is the blob
@@ -125,26 +134,22 @@ class Record:
 
     copies: dict[Key, dict] = field(default_factory=dict)
     sha: str = ""
-    # This run's changes, re-applied on a fresh read if the write is refused.
-    _seeded: dict[Key, dict] = field(default_factory=dict)
-    _shipped: dict[Key, dict] = field(default_factory=dict)
+    # This run's changes, `(seeded?, key, entry)`, replayed over a fresh read if the
+    # write is refused (`_apply`).
+    _changes: list[tuple[bool, Key, dict]] = field(default_factory=list)
 
     def has(self, d: schedule.Deploy) -> bool:
         return key_of(d) in self.copies
 
-    def keys(self) -> frozenset[Key]:
-        return frozenset(self.copies)
-
-    @property
-    def changed(self) -> bool:
-        return bool(self._seeded or self._shipped)
+    def _change(self, seeded: bool, k: Key, e: dict) -> None:
+        self._changes.append((seeded, k, e))
+        _apply(self.copies, seeded, k, e)
 
     def seed(self, label: str, d: schedule.Deploy, files: dict[str, str]) -> None:
         """Record a copy found already at its destination, without shipping it."""
         k = key_of(d)
-        if k in self.copies:
-            return
-        self._seeded[k] = self.copies[k] = _entry(label, k, None, None, None, files)
+        if k not in self.copies:
+            self._change(True, k, _entry(label, k, None, None, None, files))
 
     def ship(
         self,
@@ -162,11 +167,7 @@ class Record:
         old = self.copies.get(k)
         if old is not None and not refresh and old.get("files") == files:
             return
-        first = stamp(at) if old is None else old.get("first_shipped_at")
-        label = label if old is None else old.get("entry", label)
-        self._shipped[k] = self.copies[k] = _entry(
-            label, k, commit, first, stamp(at), files
-        )
+        self._change(False, k, _entry(label, k, commit, stamp(at), stamp(at), files))
 
     def _rebuild(self, text: str | None) -> str | None:
         """This run's changes over a fresh read of the file (`put_file_as_read`)."""
@@ -174,26 +175,18 @@ class Record:
             fresh = {} if text is None else parse(text)
         except ValueError:
             return None
-        for k, e in self._seeded.items():
-            fresh.setdefault(k, e)
-        for k, e in self._shipped.items():
-            old = fresh.get(k)
-            if old is not None:
-                e = {
-                    **e,
-                    "entry": old.get("entry"),
-                    "first_shipped_at": old.get("first_shipped_at"),
-                }
-            fresh[k] = e
+        for change in self._changes:
+            _apply(fresh, *change)
         self.copies = fresh
         return dump(fresh)
 
     def save(self, semester_org: str) -> bool:
         """Write this run's changes, if any. False when the write was not accepted."""
-        if not self.changed:
+        if not self._changes:
             return True
+        seeded = sum(1 for s, _k, _e in self._changes if s)
         message = (
-            f"release record: {len(self._shipped)} shipped, {len(self._seeded)} seeded"
+            f"release record: {len(self._changes) - seeded} shipped, {seeded} seeded"
         )
         return (
             put_file_as_read(

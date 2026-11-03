@@ -62,7 +62,7 @@ class Store:
             self.tree_reads.append(repo)
             return self.trees.get(repo, {})
 
-        monkeypatch.setattr(release_record, "repo_blob_shas", tree)
+        monkeypatch.setattr(scheduler, "repo_blob_shas", tree)
 
         def write(org, repo, path, body, sha, rebuild, message):
             assert (repo, path) == ("semester-config", ".system/releases.json")
@@ -432,3 +432,16 @@ def test_within_is_the_unnumbered_refusals_own_test():
     assert schedule_plan.within("labs/08", "labs/08") == ""
     assert schedule_plan.within("", "labs/08") == "labs/08"
     assert schedule_plan.within("labs/0", "labs/08") is None
+
+
+def test_a_copy_that_copied_nothing_has_not_landed():
+    # Everything in it excluded: recorded, it would never ship once files are added.
+    assert not Copied(LAB, "c1", {}, RELEASED).landed
+    assert Copied(LAB, "c1", FILES, UNCHANGED).landed
+
+
+def test_the_preview_seeds_nothing_and_says_nothing_about_seeding(monkeypatch, capsys):
+    tree = {"labs/08_session-8/slides.pdf": "s1"}
+    Store(None, {"materials": tree}).install(monkeypatch)
+    scheduler._release_decisions("Course-Org", "Semester-Org", [_release(LAB)], NOW)
+    assert "[seed]" not in capsys.readouterr().out

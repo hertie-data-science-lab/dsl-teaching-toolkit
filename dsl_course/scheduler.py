@@ -121,7 +121,7 @@ from .course import COURSE_ADMIN_TEAM, shared_repo, submission_repo
 from .deploy import deploy_many
 from .distribute import marks_due
 from .faults import ConfigFault, FaultKind, Severity, Unusable
-from .gh_contents import WITHHELD_ROOT_STUBS, root_stub_unwritten
+from .gh_contents import WITHHELD_ROOT_STUBS, repo_blob_shas, root_stub_unwritten
 from .ghcli import gh, start_budget
 from .grading_sheet import sheet_path
 from .grading_spec import (
@@ -394,7 +394,7 @@ def _release_decisions(
     pairs = [(r, d) for r in due for d in r.due_deploys(now)]
     if not pairs:
         return []
-    ship = _copies_to_ship(
+    ship, _seeds = _sort_copies(
         course_org, semester_org, pairs, release_record.load(semester_org)
     )
     going = {r.label for r, _d in ship}
@@ -662,18 +662,21 @@ def _autosync(course_org: str, semester_org: str) -> bool:
     return value is True
 
 
-def _copies_to_ship(
+def _sort_copies(
     course_org: str,
     semester_org: str,
     pairs: list[tuple[Release, schedule.Deploy]],
     record: release_record.Record,
-) -> list[tuple[Release, schedule.Deploy]]:
-    """The due copies this tick ships, of `pairs` (each due copy with its entry): one the
-    record does not have, or every one when the semester autosyncs. A copy with no record
-    whose destination already holds it is SEEDED into `record` instead (decision 0043
-    rule 1) - what upgrades a semester released into before the record existed, with
-    nothing re-shipped. Each destination tree is read once, and only for an unrecorded
-    copy; one that cannot be read raises."""
+) -> tuple[
+    list[tuple[Release, schedule.Deploy]],
+    list[tuple[Release, schedule.Deploy, dict[str, str]]],
+]:
+    """`(ship, seed)` of `pairs` (each due copy with its entry), once each. Ship: a copy
+    the record does not have, or every one when the semester autosyncs. Seed, with what
+    its destination holds: a copy with no record whose destination is already there
+    (decision 0043 rule 1) - what upgrades a semester released into before the record
+    existed, with nothing re-shipped. Each destination tree is read once, and only for an
+    unrecorded copy; one that cannot be read raises."""
     autosync = _autosync(course_org, semester_org)
     listing = {
         name.casefold(): row for name, row in (_listing(semester_org) or {}).items()
@@ -687,10 +690,10 @@ def _copies_to_ship(
                 trees[repo] = {}  # not created yet: nothing has landed in it
             else:
                 branch = (row or {}).get("default_branch") or "main"
-                trees[repo] = release_record.dest_tree(semester_org, repo, branch)
+                trees[repo] = repo_blob_shas(semester_org, repo, branch)
         return trees[repo]
 
-    ship, seen = [], set()
+    ship, seed, seen = [], [], set()
     for release, d in pairs:
         key = release_record.key_of(d)
         if key in seen:
@@ -702,11 +705,10 @@ def _copies_to_ship(
             continue
         landed = release_record.inside(tree(d.semester_dest_repo), deploy_dest(d))
         if landed:
-            record.seed(release.label, d, landed)
-            log(f"  [seed] {release.label}: already released - recorded, not copied")
+            seed.append((release, d, landed))
         else:
             ship.append((release, d))
-    return ship
+    return ship, seed
 
 
 def _release_copies(
@@ -715,7 +717,7 @@ def _release_copies(
     pairs: list[tuple[Release, schedule.Deploy]],
     now: datetime,
 ) -> tuple[int, bool]:
-    """Ship this tick's due copies (`_copies_to_ship`) through ONE `deploy_many` - each
+    """Seed and ship this tick's due copies (`_sort_copies`) through ONE `deploy_many` - each
     unique source and dest repo cloned once for the whole run - and record every one
     that landed. A copy held at a conflict pull request is not recorded: students do not
     have it, so it stays late and the next tick offers it again. Returns `(errors,
@@ -726,14 +728,17 @@ def _release_copies(
     known, and the next tick asks again."""
     try:
         record = release_record.load(semester_org)
-        ship = _copies_to_ship(course_org, semester_org, pairs, record)
+        ship, seed = _sort_copies(course_org, semester_org, pairs, record)
     except (RuntimeError, ValueError) as exc:
         log_err(
             f"could not read what {semester_org} has released ({exc}) - "
             f"no copy is released this tick"
         )
         return 1, False
-    done = len({release_record.key_of(d) for _r, d in pairs}) - len(ship)
+    for release, d, landed in seed:
+        record.seed(release.label, d, landed)
+        log(f"  [seed] {release.label}: already released - recorded, not copied")
+    done = len({release_record.key_of(d) for _r, d in pairs}) - len(ship) - len(seed)
     if done:
         log(f"  {plural(done, 'due copy', 'due copies')} already released")
     errors, changed = 0, False

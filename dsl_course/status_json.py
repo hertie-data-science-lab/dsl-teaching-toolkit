@@ -277,7 +277,7 @@ class SemesterFacts:
     dest_paths: dict[str, set[str]] = field(default_factory=dict)  # release dest trees
     # The copies the release record holds (`release_record.key_of`): shipped, whatever
     # their destination holds now.
-    recorded: frozenset[tuple[str, str, str, str]] = frozenset()
+    recorded: frozenset[release_record.Key] = frozenset()
     dest_branches: dict[str, str] = field(default_factory=dict)  # and their branches
     # `{(source repo, root stub path): still the placeholder}` for every copy the plan
     # makes of a root SYLLABUS.md / README.md: the release leaves such a copy out.
@@ -2742,8 +2742,13 @@ def gather_semester(course_org: str, semester_org: str, now: datetime) -> Semest
             facts.dest_branches[repo] = branch
             facts.dest_paths[repo] = set(repo_tree(semester_org, repo, branch))
     # The release record, off the tree already read: no read at all before the first one.
+    # A record that is not the record leaves every copy to its destination tree: the
+    # status still renders, and the scheduler's own read refuses to release on it.
     if release_record.PATH in facts.config_paths:
-        facts.recorded = release_record.load(semester_org).keys()
+        try:
+            facts.recorded = frozenset(release_record.load(semester_org).copies)
+        except ValueError as exc:
+            log_err(f"  ! {semester_org}'s release record is unreadable ({exc})")
     # The root stubs the plan copies, each read once: a placeholder is left out.
     for repo, path in sorted(
         {
