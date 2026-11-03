@@ -1587,6 +1587,132 @@ def test_an_undated_release_is_a_tbc_row(monkeypatch, tmp_path):
     assert "dateless" not in plan.collections["_lectures"]["lecture-8.md"]
 
 
+def _tbc_lecture(*paths: str) -> Schedule:
+    """One `event_datetime: tbc` lecture copying `paths` into `materials`."""
+    return Schedule(
+        releases=[
+            Release(
+                "lecture-9",
+                None,
+                [_copy(p) for p in paths],
+                kind="lecture",
+                number=9,
+                session="9",
+            )
+        ]
+    )
+
+
+def test_a_released_tbc_row_is_announced_when_its_files_first_landed(
+    monkeypatch, tmp_path
+):
+    # Released by hand: its files are in the semester repo, so the Updates box announces
+    # it - dated at the earliest first landing over its copies, in the semester's clock.
+    # It still prints "TBC" everywhere else (`dateless`), and sorts where it did.
+    landed = {
+        "lectures/09_week-9": datetime(2026, 11, 6, 8, 0, tzinfo=ZoneInfo("UTC")),
+        "labs/09_week-9": datetime(2026, 11, 5, 8, 0, tzinfo=ZoneInfo("UTC")),
+    }
+    asked: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(
+        site,
+        "first_landed",
+        lambda org, repo, path: asked.append((org, repo, path)) or landed[path],
+    )
+    plan = _plan(
+        monkeypatch,
+        tmp_path,
+        _tbc_lecture("lectures/09_week-9", "labs/09_week-9"),
+        trees={
+            "materials": (
+                "lectures/09_week-9/slides.pdf",
+                "labs/09_week-9/lab.ipynb",
+            )
+        },
+    )
+    row = plan.collections["_lectures"]["lecture-9.md"]
+    assert "date: 2026-11-05T09:00:00\n" in row
+    assert "dateless: true\n" in row and "announce: true\n" in row
+    assert "unreleased" not in row
+    assert sorted(asked) == [
+        ("Semester-f2026", "materials", "labs/09_week-9"),
+        ("Semester-f2026", "materials", "lectures/09_week-9"),
+    ]
+
+
+def test_an_unreleased_tbc_row_asks_no_history_and_is_not_announced(
+    monkeypatch, tmp_path
+):
+    def never(*_a):
+        raise AssertionError("an unreleased row has no landing to ask about")
+
+    monkeypatch.setattr(site, "first_landed", never)
+    plan = _plan(monkeypatch, tmp_path, _tbc_lecture("lectures/09_week-9"))
+    row = plan.collections["_lectures"]["lecture-9.md"]
+    assert "unreleased: true\n" in row and "dateless: true\n" in row
+    assert "\ndate:" not in row and "announce" not in row
+
+
+@pytest.mark.parametrize(
+    "error",
+    [RuntimeError("could not read the history: HTTP 502"), ValueError("bad date")],
+)
+def test_a_released_tbc_row_github_cannot_date_stays_out_of_the_box(
+    monkeypatch, tmp_path, capsys, error
+):
+    # Best effort: the history read failing costs the row its bullet, never the sync.
+    def fails(org, repo, path):
+        raise error
+
+    monkeypatch.setattr(site, "first_landed", fails)
+    plan = _plan(
+        monkeypatch,
+        tmp_path,
+        _tbc_lecture("lectures/09_week-9"),
+        trees={"materials": ("lectures/09_week-9/slides.pdf",)},
+    )
+    row = plan.collections["_lectures"]["lecture-9.md"]
+    assert "dateless: true\n" in row and "unreleased" not in row
+    assert "\ndate:" not in row and "announce" not in row
+    assert "materials/lectures/09_week-9 first landed" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("tree", "date_line"),
+    [
+        # Its readings landed weeks before its slides: dated by the slides, its own copy.
+        (
+            ("lectures/09_week-9/slides.pdf", "readings/09_week-9/paper.pdf"),
+            "date: 2026-10-26T10:00:00\n",
+        ),
+        # Nothing of its own has landed, only the readings: dated by those.
+        (("readings/09_week-9/paper.pdf",), "date: 2026-10-04T10:00:00\n"),
+    ],
+)
+def test_a_released_tbc_row_is_dated_by_its_own_copies_before_its_readings(
+    monkeypatch, tmp_path, tree, date_line
+):
+    landed = {
+        "lectures/09_week-9": datetime(2026, 10, 26, 9, 0, tzinfo=ZoneInfo("UTC")),
+        "readings/09_week-9": datetime(2026, 10, 4, 8, 0, tzinfo=ZoneInfo("UTC")),
+    }
+    monkeypatch.setattr(site, "first_landed", lambda org, repo, path: landed[path])
+    sched = _tbc_lecture("lectures/09_week-9")
+    sched.releases.append(
+        Release(
+            "readings-9",
+            datetime(2026, 10, 1, 9, 0),
+            [_copy("readings/09_week-9")],
+            kind="readings",
+            session="9",
+        )
+    )
+    plan = _plan(monkeypatch, tmp_path, sched, trees={"materials": tree})
+    row = plan.collections["_lectures"]["lecture-9.md"]
+    assert "announce: true\n" in row and "dateless: true\n" in row
+    assert date_line in row
+
+
 def test_events_render_as_their_declared_types(monkeypatch, tmp_path):
     plan = _plan(
         monkeypatch,

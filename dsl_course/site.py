@@ -36,6 +36,7 @@ from datetime import UTC, date, datetime, timedelta
 from functools import cache
 from pathlib import Path
 from textwrap import indent
+from zoneinfo import ZoneInfo
 
 import yaml
 
@@ -71,6 +72,7 @@ from .discovery import (
     semester_is_live,
 )
 from .faults import Unusable
+from .gh_commits import first_landed
 from .gh_contents import get_file_content, repo_tree
 from .ghcli import clone
 from .gradebook import spoken_day
@@ -393,6 +395,8 @@ class _Landed:
     # A single file at the repo's root - a course document (the syllabus, a README),
     # which is what the home page shows rather than a row.
     root_file: bool = False
+    # Where the copy landed in `repo` ("" for the repo's root).
+    path: str = ""
 
 
 def _landed(
@@ -412,7 +416,7 @@ def _landed(
         return None
     links, _ = found
     root_file = bool(path) and path in blobs and "/" not in path
-    return _Landed(repo, dest_section(deploy), links, root_file)
+    return _Landed(repo, dest_section(deploy), links, root_file, path)
 
 
 def _row_landed(
@@ -691,7 +695,7 @@ class _Row:
     sort_at: date | datetime | None = None
     number: int | None = None
     tbc: bool = False
-    dateless: bool = False  # `event_datetime: tbc`: no `date:`, only `sort_at`
+    dateless: bool = False  # `event_datetime: tbc`: printed TBC, sorts on `sort_at`
     off_schedule: bool = False
     landed: list[_Landed] = field(default_factory=list)
     readings: list[_Landed] = field(default_factory=list)
@@ -717,6 +721,40 @@ class _Row:
         return not (self.landed or self.readings or self.readings_pending or self.dests)
 
 
+@run.per_run(lambda org, repo, path: run.scope(org, repo, path))
+def _first_landed(org: str, repo: str, path: str) -> datetime | None:
+    """When `path` first landed in `org/repo` (`gh_commits.first_landed`), memoised for
+    the run; None when nothing touches it or GitHub cannot say - logged, naming the path
+    only, since that leaves a released TBC row out of the Updates box."""
+    try:
+        when = first_landed(org, repo, path)
+    except (RuntimeError, ValueError) as e:  # ValueError: a date that does not parse
+        log(f"  could not tell when {repo}/{path} first landed ({e})")
+        return None
+    if when is None:
+        log(f"  no commit in {repo} touches {path}")
+    return when
+
+
+def _released_at(semester_org: str, row: _Row) -> datetime | None:
+    """When a released `dateless` row first reached students: the earliest first-landing
+    commit over the paths its OWN copies landed - its attached readings only when none of
+    its copies has landed (a readings-only row), since readings often land weeks before
+    the session they belong to - in the timezone the row sorts in. None when no path can
+    say. A copy into the repo's root is skipped: the oldest commit of the whole repo is
+    not when this row landed."""
+    found = [
+        when
+        for item in row.landed or row.readings
+        if item.path
+        and (when := _first_landed(semester_org, item.repo, item.path)) is not None
+    ]
+    if not found:
+        return None
+    tz = getattr(row.sort_at, "tzinfo", None) or ZoneInfo(schedule.DEFAULT_TZ)
+    return min(found).astimezone(tz)
+
+
 def _row_entry(
     semester_org: str, row: _Row, live_repos: frozenset[str] = frozenset()
 ) -> str:
@@ -733,8 +771,10 @@ def _row_entry(
     readings attached to it that have not landed yet. `readings_chip`: its unit has
     readings. `repeat`: an entry's later slot, never in the Updates box (its files
     shipped once). `off_schedule`: a `show_on_site: false` row, left off the schedule
-    and the Updates box. `dateless`: a `tbc` row - on the schedule and its tab, with no `date:`
-    ("TBC" is printed instead), and never in the Updates box. `no_materials`: a row that
+    and the Updates box. `dateless`: a `tbc` row - on the schedule and its tab, printed
+    "TBC". Unreleased, it has no `date:`; released, its `date:` is when its files first
+    landed (`_released_at`) and `announce: true` puts it in the Updates box at that
+    moment - no `date:` and no flag when GitHub cannot say. `no_materials`: a row that
     ships nothing (`_Row.no_materials`) - never "not yet released", never in the Updates
     box. `hide_time`: a whole-day row (its date has no time), so the site prints no
     placeholder 09:00. `sort_at` is where every row sorts
@@ -751,7 +791,7 @@ def _row_entry(
         [(policy.plural_of(row.kind), item.links) for item in row.landed]
         + [(READINGS_LINKS, item.links) for item in row.readings]
     )
-    flags, body = "", ""
+    flags, body, when = "", "", row.when
     if row.no_materials:
         flags = "no_materials: true\n"
     elif not row.landed and not row.readings:
@@ -770,6 +810,11 @@ def _row_entry(
         flags += "tbc: true\n"
     if row.dateless:
         flags += "dateless: true\n"
+        # Released (something of it landed): announced at the moment it first landed.
+        if row.landed or row.readings:
+            when = _released_at(semester_org, row)
+            if when is not None:
+                flags += "announce: true\n"
     if row.off_schedule:
         flags += "off_schedule: true\n"
     if row.readings_pending:
@@ -786,7 +831,7 @@ def _row_entry(
         f"---\n"
         f"kind: {row.kind}\n"
         + (f"number: {row.number}\n" if row.number is not None else "")
-        + (f"date: {iso_when(row.when)}\n" if row.when is not None else "")
+        + (f"date: {iso_when(when)}\n" if when is not None else "")
         + (f"sort_at: {iso_when(row.sort_at)}\n" if row.sort_at is not None else "")
         + f'title: "{q(title)}"\n'
         + (f'subtitle: "{q(subtitle)}"\n' if subtitle else "")

@@ -19,7 +19,7 @@ drop-in whose one copy is a single file, a supporting-files syllabus copy that r
 row, a handed-out assignment with a declared `details:`, a pending one, one handed in off GitHub, one handed in off GitHub
 that is not out yet, one whose repos are public, one handed into a shared drop box, one
 group assignment inside its team-formation window, a dated exam and a TBC
-one, a special event, the two term boundaries, the archive row inside its notice window,
+one, a TBC lab not released and one released (announced when its files landed), a special event, the two term boundaries, the archive row inside its notice window,
 the banner to the student console (the course opts in), two formed teams (one with room, one full), an All
 Materials index nested three directories deep, and - within the released lecture - a
 published file linked to the site's own hosted copy beside an unpublished one linked to
@@ -118,7 +118,13 @@ TREE = (
     # Released outside the plan (no entry copies it): All Materials only, no row
     # (decision 0038).
     "labs/02_week-2/Lab_Session_2.ipynb",
+    # A TBC lab released by hand (`event_datetime: tbc`, its files landed).
+    "labs/05_week-5/Lab_Session_5.ipynb",
 )
+
+# When the released TBC lab's folder first landed (`gh_commits.first_landed`): after
+# lecture 2, so it is the newest bullet in the Updates box.
+LAB_5_LANDED = datetime(2026, 9, 15, 8, 30, tzinfo=ZoneInfo("UTC"))
 
 # What this semester's `student_site.host` says (decision 0040): the default kinds, as
 # rendered decks only - the shape a Quarto course takes. Lecture 1 therefore carries BOTH
@@ -356,7 +362,7 @@ SCHEDULE = schedule.Schedule(
             details="Why weight sharing works.\n\nAnd where it does not.",
         ),
         # `event_datetime: tbc`: a "TBC" row after lab 1 on the schedule and the Labs tab,
-        # never in the Updates box.
+        # not in the Updates box while nothing of it has landed...
         _release(
             "lab-3",
             None,
@@ -365,6 +371,16 @@ SCHEDULE = schedule.Schedule(
             number=3,
             session="3",
             title="Attention lab",
+        ),
+        # ...and in it, at the moment its files first landed, once they have.
+        _release(
+            "lab-5",
+            None,
+            "labs/05_week-5",
+            kind="lab",
+            number=5,
+            session="5",
+            title="Transformer lab",
         ),
         # A session with nothing to ship: a row, no files, never in the Updates box.
         schedule.Release(
@@ -436,12 +452,14 @@ def _assignments() -> dict[str, str]:
             handout=datetime(2026, 9, 30, 9, 0, tzinfo=BERLIN),
             now=NOW,
         ),
+        # Before the first lecture too, for the reason 06 and 07 are (below): the released
+        # TBC lab's bullet is dated after it.
         "04-assignment-4.md": site._assignment_entry(
             COURSE_ORG,
             SEMESTER_ORG,
             PUBLIC,
             datetime(2026, 12, 15, 23, 59, tzinfo=BERLIN),
-            handout=datetime(2026, 9, 29, 9, 0, tzinfo=BERLIN),
+            handout=datetime(2026, 9, 3, 9, 0, tzinfo=BERLIN),
             handed_out=frozenset({"assignment-4"}),
             now=NOW,
         ),
@@ -584,7 +602,11 @@ def generated(
     real_tree, real_content = site._repo_tree, site.get_file_content
     real_spec = site.load_grading_spec
     real_clone, real_teams = site.clone, site._formed_teams
+    real_landed = site.first_landed
     site._repo_tree, site.get_file_content = _repo_tree, _get_file_content
+    site.first_landed = lambda _org, _repo, path: (
+        LAB_5_LANDED if path == "labs/05_week-5" else None
+    )
     site.load_grading_spec = _grading_spec
     site.clone, site._formed_teams = _clone, _formed_teams
     try:
@@ -607,6 +629,8 @@ def generated(
         site._repo_tree, site.get_file_content = real_tree, real_content
         site.load_grading_spec = real_spec
         site.clone, site._formed_teams = real_clone, real_teams
+        site.first_landed = real_landed
+        site._first_landed.cache_clear()
 
 
 # The overlay the offline build layers on top of the generated `_config.yml`. The primary
@@ -619,10 +643,11 @@ OFFLINE_CONFIG = """# Fixture-only overlay - see build_fixture.py.
 #
 # The theme is NOT fetched: `_layouts/default.html`, `page.html` and `post.html` are
 # stubbed in the fixture, so the build exercises the course templates in templates/site/
-# and nothing else. jekyll-remote-theme is not installed either (see the Gemfile), so the
-# plugin list has to go with it.
+# and nothing else. jekyll-remote-theme is not loaded either, so the plugin list has to go
+# with it. `remote_theme` is null, not "": the github-pages build (Gemfile.github-pages)
+# loads the plugin whenever the key exists, and it crashes parsing an empty theme name.
 plugins: []
-remote_theme: ""
+remote_theme: null
 """
 
 
