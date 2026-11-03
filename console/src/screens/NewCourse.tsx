@@ -11,6 +11,7 @@ import { SchemaForm, fieldErrors } from '../forms/Form';
 import type { Files } from '../model/files';
 import { ABOUT, defaultsTiers } from '../tiers/course';
 import { courseBlock } from '../model/discovery';
+import { plural } from '../model/format';
 import { institutionDefaults } from '../model/settings';
 import type { Values } from '../tiers/types';
 import { COURSE_ORG } from '../tiers/wizard';
@@ -195,7 +196,7 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
     const admins = Array.isArray(people.course_admins) ? people.course_admins.length : 0;
     const c = courseBlock(meta);
     const summary: Check[] = [
-      { text: `Name${c.name ? ` (${String(c.name)})` : ''}, code${c.code ? ` (${String(c.code)})` : ''} and ${admins} admin${admins === 1 ? '' : 's'} set`, ok: !!c.name && !!c.code && admins > 0 },
+      { text: `Name${c.name ? ` (${String(c.name)})` : ''}, code${c.code ? ` (${String(c.code)})` : ''} and ${plural(admins, 'admin')} set`, ok: !!c.name && !!c.code && admins > 0 },
       { text: 'Defaults saved', ok: d.defaultsSaved === org },
     ];
     body = (

@@ -7,7 +7,7 @@
 
 import { YamlText, deepEqual, isObj, obj, type Path } from '../edit/yamlText';
 import type { FileState, Files } from './files';
-import { CONFIG_REPO, COURSE_FILE, COURSE_REPO, SEMESTER_FILE } from './names';
+import { CONFIG_REPO, SEMESTER_FILE } from './names';
 import courseFileSchema from '../../schemas/course.schema.json';
 import gradingSchema from '../../schemas/grading_config.schema.json';
 import scheduleSchema from '../../schemas/schedule.schema.json';
@@ -67,6 +67,9 @@ export function hostOf(url: string): string {
   }
 }
 
+/** `setting_readers._boolean`: true, yes, on or 1 is on; anything else is off. */
+export const yamlBoolean = (v: unknown): boolean => (typeof v === 'boolean' ? v : ['true', 'yes', 'on', '1'].includes(String(v ?? '').trim().toLowerCase()));
+
 /**
  * The value the engine's reader for `key` reads from `v` (`setting_readers.READERS`), or
  * undefined for a value it refuses or a blank one: either states nothing, and the next layer
@@ -95,8 +98,7 @@ export function readSetting(key: string, v: unknown): unknown {
       return t.toLowerCase().startsWith('https://') && hostOf(t) && !t.includes(SETTING_PLACEHOLDER) ? t : undefined;
     }
     case 'marks_per_question':
-      // `setting_readers._boolean`: true, yes, on or 1 is on; anything else is off.
-      return typeof v === 'boolean' ? v : ['true', 'yes', 'on', '1'].includes(String(v).trim().toLowerCase());
+      return yamlBoolean(v);
     case 'autosync_released_edits': {
       // `settings._autosync`: what PyYAML (YAML 1.1) loads as a boolean, which takes the bare words this parser leaves as text.
       if (typeof v === 'boolean') return v;
@@ -226,11 +228,6 @@ export function yamlFile(f: FileState, stub: string | null): YamlFile | 'loading
   const text = f.kind === 'ready' ? f.text : (stub ?? '');
   const y = new YamlText(text);
   return { text, sha: f.kind === 'ready' ? f.sha : null, doc: y.errors.length ? {} : obj(y.toJS()), error: y.errors[0] ?? null };
-}
-
-/** The course's `.github/course.yml`: there is no course without one, so a missing file is unreadable. */
-export function courseFile(files: Files, courseOrg: string): YamlFile | 'loading' | null {
-  return yamlFile(files.file(courseOrg, COURSE_REPO, COURSE_FILE), null);
 }
 
 /** The semester's `semester.yml`; a missing one reads as the stub, so the first save creates it. */

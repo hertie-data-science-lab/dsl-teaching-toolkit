@@ -39,11 +39,6 @@ import type { ReadyProps } from './types';
 /** What an assignment's own settings fall back to: the semester's effective defaults (status.json). */
 export const entryBelow = (p: Pick<ReadyProps, 'status'>): Effectives => semesterDefaults(p.status);
 
-/** An assignment's effective run settings, each with its source, as the engine resolved them (status.json). */
-export function assignmentSettings(p: Pick<ReadyProps, 'status'>, key: string): Effectives | null {
-  return p.status.assignments?.find((a) => a.slug === key)?.settings ?? null;
-}
-
 /** The semester-side name of the assignment with schedule key `key` (`schedule.semester_name`): what its mark
  *  sheet and Return marks key on. The schedule entry's `repo_name`, else the key while the schedule is read. */
 export function sheetName(p: Pick<ReadyProps, 'files' | 'cohort'>, key: string): string {
