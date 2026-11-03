@@ -2871,6 +2871,15 @@ def _earlier(stamp: str, planned: str, tz: ZoneInfo) -> bool:
     return at is not None and then is not None and at < then
 
 
+def _unplanned(value: str) -> bool:
+    """Whether a `handout_datetime:` value as written plans nothing: blank, or `tbc`."""
+    try:
+        loaded = yaml.safe_load(value)
+    except yaml.YAMLError:
+        return False
+    return loaded is None or str(loaded).strip().casefold() == "tbc"
+
+
 def _insert_handout(
     text: str, slug: str, stamp: str, tz: ZoneInfo | None = None
 ) -> str | _Declined | None:
@@ -2955,8 +2964,11 @@ def _insert_handout(
                 # Handed out EARLIER than planned (decision 0043 rule 3): the actual
                 # moment replaces the plan, once - the next run's moment is at or after
                 # it, so it never moves again. A later hand-out leaves the plan alone.
+                # A blank or `tbc` value is no plan: it fills (rule 3, "blank fills").
                 planned = stripped.split(":", 1)[1]
-                if not _earlier(stamp, planned, tz or _tz(None)):
+                if not _unplanned(planned) and not _earlier(
+                    stamp, planned, tz or _tz(None)
+                ):
                     return None
                 eol = _eol(lines[j])
                 lines[j] = (
