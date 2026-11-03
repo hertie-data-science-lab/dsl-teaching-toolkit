@@ -517,11 +517,11 @@ Decision 0034 (need, time, verdict), all computed by the engine so the console h
   per recorded copy the plan makes, against its `files`, `schedule:<entry>:DIVERGED_COURSE`
   (a course blob differs or a course file was added; not raised under
   `autosync_released_edits`), `:DIVERGED_DELETED` (a file the course no longer carries,
-  still at the destination) and `:DIVERGED_RELEASED` (a destination blob differs or a file
-  was added there), each with `:<fp8>` = 8 hex of sha1 over the changed side's sorted
+  still at the destination) and `:DIVERGED_RELEASED` (a destination blob differs, a file
+  was added there, or a manifest file still in the course is gone from it: `removed`), each with `:<fp8>` = 8 hex of sha1 over the changed side's sorted
   `(path, blob)` pairs so a set-aside id (0032) returns when that side changes again.
   `later`, undated, `aside: true`, `fix.screen: release`, and `diverged[]` (per copy:
-  source, dest, `added` / `changed` / `deleted`) in the private semester file only. The
+  source, dest, `added` / `changed` / `deleted` / `removed`) in the private semester file only. The
   course side is filtered as a copy is; another copy's destination inside it is left out;
   a copy sharing its destination gets no released-side kind; a root destination's own `.github/`, denylisted paths and uncarried root stubs are not released files; a copy whose source path has gone is its source problem; an orphan record (no plan
   copy) is logged once and not checked. The trees are the ones the status reads anyway

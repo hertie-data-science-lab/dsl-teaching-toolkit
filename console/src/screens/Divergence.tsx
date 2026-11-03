@@ -22,6 +22,7 @@ function Files({ p }: { p: DivergedProblem }) {
           {c.added.map((f) => <span class="plus" key={`+${f}`}>+ {f}</span>)}
           {c.changed.map((f) => <span class="chg" key={`~${f}`}>~ {f}</span>)}
           {c.deleted.map((f) => <span class="chg" key={`-${f}`}>− {f}</span>)}
+          {(c.removed ?? []).map((f) => <span class="chg" key={`r${f}`}>− {f} (removed from the released copy)</span>)}
         </div>
       ))}
     </>

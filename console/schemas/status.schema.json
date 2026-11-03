@@ -943,6 +943,12 @@
                   ],
                   "type": "object"
                 },
+                "removed": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
                 "source": {
                   "properties": {
                     "branch": {

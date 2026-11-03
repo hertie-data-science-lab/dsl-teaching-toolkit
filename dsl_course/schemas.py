@@ -441,6 +441,8 @@ def status_schema(*, closed: bool = True) -> dict:
             "added": paths,
             "changed": paths,
             "deleted": paths,
+            # Released-side only: manifest files gone from the released copy.
+            "removed": paths,
         },
         ("source", "dest", "added", "changed", "deleted"),
     )

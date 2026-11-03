@@ -374,3 +374,29 @@ def test_the_flag_is_spelt_with_paths_too_so_the_cli_refuses_it():
         "release.entry", "prof", "C", "S", {**args, "remove_deleted": True}, False
     )
     assert op.argv(request)[-1] == "--remove-deleted"
+
+
+def test_a_file_gone_from_the_released_copy_is_the_released_kind():
+    dest = {"slides.pdf": "s1", "notes.md": "n1"}  # data/a.csv removed by the semester
+    drifts = divergence.compare(MANIFEST, dict(MANIFEST), dest)
+    assert set(drifts) == {divergence.RELEASED}
+    assert drifts[divergence.RELEASED].removed == ("data/a.csv",)
+    # In the fingerprint: removing another file moves the id.
+    other = divergence.compare(MANIFEST, dict(MANIFEST), {"slides.pdf": "s1"})
+    assert divergence.fingerprint(other[divergence.RELEASED].side) != (
+        divergence.fingerprint(drifts[divergence.RELEASED].side)
+    )
+    # A path another copy covers is that copy's.
+    assert divergence.compare(MANIFEST, dict(MANIFEST), dest, ["data"]) == {}
+
+
+def test_the_removed_files_are_listed_and_worded():
+    facts = _facts(dest={"slides.pdf": "s1", "notes.md": "n1"})
+    (p,) = status_json.divergence_problems(facts, autosync=False)
+    assert p["kind"] == "DIVERGED_RELEASED"
+    assert p["diverged"][0]["removed"] == ["data/a.csv"]
+    assert p["text"].endswith("was edited in the semester: 1 file removed.")
+    assert p["stops"].startswith(
+        "Students lack a file they were given; release it again"
+    )
+    assert status_json._files_word(1, 2, 1) == "1 file changed, 2 added and 1 removed"

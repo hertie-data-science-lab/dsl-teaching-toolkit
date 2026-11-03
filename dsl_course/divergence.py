@@ -9,7 +9,8 @@ can have happened since, each a different remedy:
 - deleted in course: a manifest file the course no longer carries, still in the released
   copy (Release again, removing it on request);
 - the released copy was edited: a manifest file's blob differs in the branch students
-  read, or a file was added under it there (Keep for future terms).
+  read, a file was added under it there (Keep for future terms), or a manifest file is
+  gone from it - students lack a file they were given (Release again puts it back).
 
 The course side is filtered exactly as a copy would be (`source_files`): the institution
 denylist below the copy's own path, `.releaseignore`, and for a whole-repo copy the root
@@ -40,15 +41,17 @@ KINDS = (COURSE, DELETED, RELEASED)
 
 class Drift(NamedTuple):
     """One kind of drift in one copy: the files, relative to the copy, and the changed
-    side's `(path, blob sha)` pairs the problem's fingerprint is taken over."""
+    side's `(path, blob sha)` pairs the problem's fingerprint is taken over. `removed`
+    (the released side only): manifest files gone from the released copy."""
 
     added: tuple[str, ...] = ()
     changed: tuple[str, ...] = ()
     deleted: tuple[str, ...] = ()
     side: tuple[tuple[str, str], ...] = ()
+    removed: tuple[str, ...] = ()
 
     def __bool__(self) -> bool:
-        return bool(self.added or self.changed or self.deleted)
+        return bool(self.added or self.changed or self.deleted or self.removed)
 
 
 def blobs_of(shas: Mapping[str, str]) -> dict[str, str]:
@@ -145,7 +148,15 @@ def compare(
             gone = tuple(sorted(p for p in m if p not in s and p in dest))
             out[DELETED] = Drift(deleted=gone, side=tuple((p, "") for p in gone))
     if dest is not None:
-        out[RELEASED] = _edits(m, _outside(dest, nested))
+        d = _outside(dest, nested)
+        edits = _edits(m, d)
+        # Gone from the released copy, and still in the course (when that side is read):
+        # a file gone from both leaves nothing for Release again to put back.
+        kept = m if source is None else _outside(source, nested)
+        removed = tuple(sorted(p for p in m if p not in d and p in kept))
+        out[RELEASED] = edits._replace(
+            removed=removed, side=edits.side + tuple((p, "") for p in removed)
+        )
     return {kind: drift for kind, drift in out.items() if drift}
 
 

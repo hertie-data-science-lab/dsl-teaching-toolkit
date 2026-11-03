@@ -110,3 +110,11 @@ describe('review follow-ups', () => {
     expect(releaseAgain(scope, ref, releaseAgainDrift(divergenceOf(only.status, 's5'))).confirm).toContain('waits in a pull request');
   });
 });
+
+describe('a file removed from the released copy', () => {
+  it('lists it as removed from the released copy', () => {
+    const gone = problem('DIVERGED_RELEASED', 'dddddddd', 'removed.', { ...copy({}), removed: ['data/a.csv'] } as ReturnType<typeof copy>);
+    const one: Loaded = { kind: 'ready', sha: 's', stale: [], status: { ...released, problems: [gone] } };
+    expect(html(<ReleaseScreen {...props({ loaded: one })} />)).toContain('<span class="chg">− data/a.csv (removed from the released copy)</span>');
+  });
+});

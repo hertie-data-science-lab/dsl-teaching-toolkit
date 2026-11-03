@@ -15,6 +15,8 @@ export interface DivergedCopy {
   added: string[];
   changed: string[];
   deleted: string[];
+  /** Released side only: files students were given that are gone from the released copy. */
+  removed?: string[];
 }
 
 export type DivergedProblem = Problem & { kind: DivergedKind; diverged?: DivergedCopy[] };
@@ -28,7 +30,7 @@ export function divergenceOf(status: Status, releaseId: string): DivergedProblem
 }
 
 /** A copy's files, every kind. */
-export const fileCount = (c: DivergedCopy) => c.added.length + c.changed.length + c.deleted.length;
+export const fileCount = (c: DivergedCopy) => c.added.length + c.changed.length + c.deleted.length + (c.removed?.length ?? 0);
 
 /** How many released files the course copy no longer has: what Release again can remove. */
 export const deletedCount = (list: DivergedProblem[]) =>

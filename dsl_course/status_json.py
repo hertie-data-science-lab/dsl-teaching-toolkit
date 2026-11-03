@@ -2364,23 +2364,23 @@ _DIVERGED_LABEL = {
 }
 
 
-def _files_word(n_changed: int, n_added: int) -> str:
-    """ "2 files changed and 1 added", "1 file added"."""
+def _files_word(n_changed: int, n_added: int, n_removed: int = 0) -> str:
+    """ "2 files changed and 1 added", "1 file added", "1 file changed, 2 added and 1
+    removed"."""
     parts = []
-    if n_changed:
-        parts.append(f"{plural(n_changed, 'file')} changed")
-    if n_added:
-        parts.append(
-            f"{n_added} added" if parts else f"{plural(n_added, 'file')} added"
-        )
-    return " and ".join(parts)
+    for n, verb in ((n_changed, "changed"), (n_added, "added"), (n_removed, "removed")):
+        if n:
+            parts.append(f"{n} {verb}" if parts else f"{plural(n, 'file')} {verb}")
+    if not parts:
+        return ""
+    return ", ".join(parts[:-1]) + (" and " if len(parts) > 1 else "") + parts[-1]
 
 
 def _diverged_words(
-    kind: str, label: str, changed: int, added: int, deleted: int
+    kind: str, label: str, changed: int, added: int, deleted: int, removed: int = 0
 ) -> tuple[str, str]:
     """`(text, stops)` of one divergence problem."""
-    files = _files_word(changed, added)
+    files = _files_word(changed, added, removed)
     if kind == divergence.COURSE:
         text = f"{label} has changed in the course since it was released: {files}."
         stops = (
@@ -2405,6 +2405,12 @@ def _diverged_words(
         "Future semesters will not get these edits unless you keep them for future "
         "semesters."
     )
+    if removed:
+        stops = (
+            f"Students lack {'a file' if removed == 1 else f'{removed} files'} they "
+            f"were given; release it again to put "
+            f"{'it' if removed == 1 else 'them'} back. {stops}"
+        )
     return text, stops
 
 
@@ -2480,7 +2486,8 @@ def divergence_problems(
             changed = sum(len(x.changed) for _d, x in copies)
             added = sum(len(x.added) for _d, x in copies)
             deleted = sum(len(x.deleted) for _d, x in copies)
-            text, stops = _diverged_words(kind, label, changed, added, deleted)
+            removed = sum(len(x.removed) for _d, x in copies)
+            text, stops = _diverged_words(kind, label, changed, added, deleted, removed)
             out.append(
                 {
                     "id": pid,
@@ -2515,6 +2522,7 @@ def divergence_problems(
                             "added": list(drift.added),
                             "changed": list(drift.changed),
                             "deleted": list(drift.deleted),
+                            "removed": list(drift.removed),
                         }
                         for d, drift in copies
                     ],
