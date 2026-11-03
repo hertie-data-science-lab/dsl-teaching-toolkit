@@ -2027,11 +2027,6 @@ def carried_defaults(course: Mapping, semester: Mapping) -> dict:
     return {}
 
 
-def without_timezone(text: str) -> str:
-    """`schedule.yml` without its top-level `timezone:` line."""
-    return re.sub(rf"(?m)^{OLD_TIMEZONE}:.*(\n|$)", "", text)
-
-
 def with_default(text: str, key: str, value: object) -> str:
     """`semester.yml` (`text`) with `defaults: <key>: value` live: the key's commented
     skeleton line replaced, else the key added first under `defaults:`, else a `defaults:`
@@ -2079,7 +2074,7 @@ def zone_move(
                 f"{stated}` - keep one by hand, then run again"
             ],
         )
-    new = without_timezone(schedule_text or "")
+    new = _without_block(schedule_text, OLD_TIMEZONE) or ""
     if _yaml(new) != {k: v for k, v in old.items() if k != OLD_TIMEZONE}:
         return None, None, [f"{where} cannot be removed safely - move it by hand"]
     return (None if stated else name), new, []
@@ -3796,14 +3791,27 @@ class Semester:
             old[INSTRUCTORS_FILE] = laid[INSTRUCTORS_FILE].decode()
         if OLD_SEMESTER_POINTER in laid:
             old[OLD_SEMESTER_POINTER] = laid[OLD_SEMESTER_POINTER].decode()
+        shape = self.shape_work()
         if not self.layers_landed():
-            after = self._assignments_after()
+            after = self._assignments_after(shape)
             if after is not None:
                 old[ASSIGNMENTS_FILE] = after
+        folding = INSTRUCTORS_FILE in old or ASSIGNMENTS_FILE in old
+        folded = settings.parse_legacy_assignments(old.get(ASSIGNMENTS_FILE))
+        current = None
+        if folding:
+            stated = folded.defaults.get("timezone")
+        elif SEMESTER_FILE in live:
+            current = get_file_content(self.org, repo, SEMESTER_FILE) or ""
+            stated = settings.parse_instance(current).defaults.get("timezone")
+        else:
+            stated = None
         # schedule.yml as the schedule shape step leaves it: its `timezone:` moves here.
-        text, shaped, *_ = self.shape_work()
-        shaped = text if shaped is None else shaped
-        if INSTRUCTORS_FILE in old or ASSIGNMENTS_FILE in old:
+        zone, shaped, more = zone_move(
+            shape[0] if shape[1] is None else shape[1], stated
+        )
+        stops += more
+        if folding:
             if SEMESTER_FILE in live:
                 stops.append(
                     f"{SEMESTER_FILE} is already there beside the files it replaces - "
@@ -3814,15 +3822,12 @@ class Semester:
             inherited = settings.layers(self.course)[2:]
             host, more = publish_host(self.publish_texts())
             stops += more
-            folded = settings.parse_legacy_assignments(old.get(ASSIGNMENTS_FILE))
             carried = carried_defaults(inherited[0][1], folded.defaults)
             notes += [
                 f"{SEMESTER_FILE} `{DEFAULTS_BLOCK}:` states `{key}: {value}`: the 0.10 "
                 f"institution default this semester ran on (decision 0039 rule 2)"
                 for key, value in carried.items()
             ]
-            zone, shaped, more = zone_move(shaped, folded.defaults.get("timezone"))
-            stops += more
             if zone:
                 carried = {**carried, "timezone": zone}
             text, more = semester_layer(
@@ -3846,28 +3851,20 @@ class Semester:
             )
             stops += [f"{SEMESTER_FILE} would lose {what}" for what in lost]
             files[SEMESTER_FILE] = text.encode()
-        elif SEMESTER_FILE in live:
-            current = get_file_content(self.org, repo, SEMESTER_FILE) or ""
-            stated = settings.parse_instance(current).defaults.get("timezone")
-            zone, shaped, more = zone_move(shaped, stated)
-            stops += more
-            if zone:
-                text = with_default(current, "timezone", zone)
-                if settings.parse_instance(text).defaults.get("timezone") != zone:
-                    stops.append(
-                        f"{SEMESTER_FILE}: `{DEFAULTS_BLOCK}: timezone: {zone}` cannot "
-                        f"be written safely - add it by hand"
-                    )
-                old[SEMESTER_FILE] = current
-                files[SEMESTER_FILE] = text.encode()
-        else:
-            _, shaped, more = zone_move(shaped, None)
-            stops += more
-            if shaped is not None:
+        elif zone and current is not None:
+            text = with_default(current, "timezone", zone)
+            if settings.parse_instance(text).defaults.get("timezone") != zone:
                 stops.append(
-                    f"{schedule.SCHEDULE_PATH} states a `{OLD_TIMEZONE}:` and there is "
-                    f"no {SEMESTER_FILE} to move it into - add one by hand"
+                    f"{SEMESTER_FILE}: `{DEFAULTS_BLOCK}: timezone: {zone}` cannot "
+                    f"be written safely - add it by hand"
                 )
+            old[SEMESTER_FILE] = current
+            files[SEMESTER_FILE] = text.encode()
+        elif zone:
+            stops.append(
+                f"{schedule.SCHEDULE_PATH} states a `{OLD_TIMEZONE}:` and there is "
+                f"no {SEMESTER_FILE} to move it into - add one by hand"
+            )
         if shaped is not None:
             files[schedule.SCHEDULE_PATH] = shaped.encode()
             notes.append(
@@ -3938,9 +3935,10 @@ class Semester:
             for repo in sorted(repos)
         }
 
-    def _assignments_after(self) -> str | None:
-        """`assignments.yml` as the keys and schedule-shape steps leave it."""
-        after = self.shape_work()[2]
+    def _assignments_after(self, shape: tuple) -> str | None:
+        """`assignments.yml` as the keys and schedule-shape steps leave it (`shape`: the
+        `shape_work` the caller holds)."""
+        after = shape[2]
         if after is not None:
             return after
         if not self.keys_done():
