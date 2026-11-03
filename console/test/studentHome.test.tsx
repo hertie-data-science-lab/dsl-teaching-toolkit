@@ -34,6 +34,20 @@ describe('the Updates box', () => {
     expect(JSON.stringify(u)).not.toContain('assignment-3');
   });
 
+  it('places a session at the moment it reached students, and announces a released TBC one (decision 0043)', () => {
+    const d = doc({ archive_datetime: '2027-01-31' });
+    const rows = d.rows as Record<string, unknown>[];
+    // Lecture 1 (8 Sep) shipped on 7 Oct: the newest bullet, ahead of everything dated later.
+    rows.find((r) => r.id === 'lecture_01')!.released_at = '2026-10-07T09:00:00+02:00';
+    // Lecture 3 is TBC (no `when`): released, it is news at its ship time; unreleased, not at all.
+    const tbc = rows.find((r) => r.id === 'lecture_03')!;
+    Object.assign(tbc, { released: true, released_at: '2026-09-26T09:00:00+02:00' });
+    const ids = homeUpdates(factsFromStatus(d), NOW).map((x) => ('row' in x ? x.row.id : null)).filter(Boolean);
+    expect(ids).toEqual(['lecture_01', 'readings_02', 'lecture_03']);
+    tbc.released_at = null;
+    expect(homeUpdates(factsFromStatus(d), NOW).some((x) => 'row' in x && x.row.id === 'lecture_03')).toBe(false);
+  });
+
   it('keeps seven', () => {
     const d = doc({ archive_datetime: '2027-01-31' });
     d.announcements = Array.from({ length: 9 }, (_, i) => ({ when: `2026-10-0${i + 1}`, title: `News ${i + 1}`, details: '' }));

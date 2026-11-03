@@ -164,7 +164,7 @@ export function NewCohortScreen({ course, files, now, step: asked }: Pick<Course
           {card('Instructors', 'instructors', c.staff, 'Who gets the instructor buttons and the problem emails.', 'At least one person listed.')}
           {card('Schedule', 'schedule-semester', c.schedule, 'Semester dates, releases, assignments, events.', 'Releases or assignments scheduled.')}
           {card('Students', 'students', c.students, 'The roster; adding a row sends a code.', 'Roster started.')}
-          {card('Assignment defaults', 'assignments', c.defaults, 'Optional. Late work, teams and who sees each repo for this semester’s assignments; left alone, the course’s defaults apply.', 'This semester’s defaults set.')}
+          {card('Semester defaults', 'settings', c.defaults, 'Optional. Late work, teams, who sees each repo, automatic fixes; left alone, the course’s defaults apply.', 'This semester’s defaults set.')}
         </div>
         {n === 3 ? <Verified>{label} is live. Automation takes it from here.</Verified> : <p class="footnote">{n} of 3 done. The semester goes live when instructors, schedule and students are done.</p>}
       </>

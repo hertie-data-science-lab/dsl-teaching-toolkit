@@ -216,7 +216,7 @@ describe('the Overview form: the schedule entry, its run settings inline', () =>
 });
 
 describe('the semester’s defaults', () => {
-  it('open from the Semester defaults button beside New assignment, as a modal with their summary; Escape closes it', async () => {
+  it('open from the Semester defaults button beside New assignment, as the Semester settings modal on Assignments; Escape closes it', async () => {
     const out = html(<AssignmentsScreen {...props()} />);
     expect(out).not.toContain('Defaults: 5 days');
     expect(out).toMatch(/<div class="actions"><button class="btn quiet" type="button" aria-haspopup="dialog">Semester defaults<\/button><a class="btn"[^>]*>New assignment<\/a>/);
@@ -230,7 +230,10 @@ describe('the semester’s defaults', () => {
     await act(() => change.click());
     const dialog = root.querySelector('[role="dialog"]')!;
     expect(dialog.getAttribute('aria-modal')).toBe('true');
-    expect(dialog.textContent).toContain('Defaults for this semester');
+    expect(dialog.textContent).toContain('Semester settings');
+    // Opened from here: the Assignments fold open and focused, the other two folded.
+    const folds = [...dialog.querySelectorAll<HTMLDetailsElement>('details.settings-fold')];
+    expect(folds.map((d) => [d.querySelector('summary span')!.textContent, d.open])).toEqual([['Assignments', true], ['Releases', false], ['Semester dates', false]]);
     expect(dialog.textContent).toContain('Timezone');
     expect(dialog.textContent).toContain('Defaults: 5 days, 5%, teams of 4.');
     // The submit link is each assignment's own (`settings.DEFAULT_KEYS`): no semester default.
@@ -239,7 +242,7 @@ describe('the semester’s defaults', () => {
     expect(dialog.textContent).toContain('this course’s default: up to 4');
     expect(dialog.textContent).toContain('institution default: Students form their own');
     expect(dialog.textContent).toContain('Change the course’s defaults');
-    expect(document.activeElement).toBe(dialog);
+    expect(document.activeElement).toBe(folds[0].querySelector('summary'));
 
     await act(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); });
     expect(root.querySelector('[role="dialog"]')).toBeNull();

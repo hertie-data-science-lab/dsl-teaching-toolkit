@@ -282,6 +282,7 @@ export function App({ state: s }: { state: AppState }) {
     };
     const screens: Record<string, () => preact.JSX.Element> = {
       dashboard: () => <CohortScreen {...cp} />,
+      settings: () => <CohortScreen {...cp} settings />,
       schedule: () => <ScheduleScreen {...cp} />,
       release: () => <ReleaseScreen {...cp} />,
       assignments: () => <AssignmentsScreen {...cp} />,
