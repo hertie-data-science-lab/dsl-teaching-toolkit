@@ -268,6 +268,8 @@ TODO_CHECKS = (
     "due",
     # Plan 0.11.0 9b ruling 5: an entry written with `files: []`.
     "files",
+    # Decision 0043 rule 5: a released entry whose session date is still TBC.
+    status_json.RELEASED_STILL_TBC,
 )
 
 

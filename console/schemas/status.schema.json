@@ -738,7 +738,8 @@
                   "archive_date",
                   "email",
                   "due",
-                  "files"
+                  "files",
+                  "released_tbc"
                 ],
                 "type": "string"
               },
@@ -1511,7 +1512,8 @@
                   "archive_date",
                   "email",
                   "due",
-                  "files"
+                  "files",
+                  "released_tbc"
                 ],
                 "type": "string"
               },
