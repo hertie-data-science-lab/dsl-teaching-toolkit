@@ -217,6 +217,18 @@ templates the semester's schedule does not use, each with Add to the schedule. I
 meter plus every state, each line opening the Students tab: on the roster with no code sent
 yet, codes sent but not joined yet, and joined (`status.json` does not say who has an org
 invitation still to accept, so that step is not counted); it is hidden once every row has joined.
+At the bottom, below Automation, **Semester settings** (decision 0043) lists one line per setting,
+each with its effective value and source from `status.json`: the run defaults as `defaultsLine`
+words them, "Send fixes to released files automatically", the semester dates. Edit opens one
+modal of three folds, each heading carrying its line: Assignments (semester.yml `defaults:`),
+Releases (`autosync_released_edits`) and Semester dates (schedule.yml's `semester:` block).
+A save is at most one commit per file (`saveSteps`). From the Dashboard all three are folded;
+the Assignments page's Semester defaults button opens it with Assignments open and focused; the
+`#settings` route (the Site page's link, New semester's Semester defaults card) opens it on
+arrival. A released `event_datetime: tbc` entry's Release page offers "Session date: TBC ->
+[date] [time]" (Set date writes the entry; Leave as TBC hides it), as does the result panel of
+a console Release early, now or again of such an entry; the Dashboard's suggested to-do
+`schedule:released_tbc:<entry>` opens that page.
 
 The semester Dashboard's week strip filters its agenda only: This week on load, any set of
 weeks picked, none picked for all of them; the agenda panel's heading names the selection
@@ -236,7 +248,7 @@ Each screen reads with the student's own account:
 
 | Screen | Shared facts (`StudentData`) | The student's own (GitHub, directly) |
 |---|---|---|
-| Home (the site's landing page; its head is "<course> / <semester>") | the Updates box as the site picks it (sessions whose files shipped, assignments handed out, the archive row's text in the fortnight before it, announcements; newest first, seven); the syllabus pinned; the course description; the instructors' home text; previous offerings; instructors and teaching assistants in two columns | none |
+| Home (the site's landing page; its head is "<course> / <semester>") | the Updates box as the site picks it (sessions whose files shipped, placed at the moment they reached students - the row's `released_at`, else its date - so a released TBC session is news too; assignments handed out, the archive row's text in the fortnight before it, announcements; newest first, seven); the syllabus pinned; the course description; the instructors' home text; previous offerings; instructors and teaching assistants in two columns | none |
 | This week (in the semester's timezone; "Updated <age>" from the file's `generated_at`) | rows due, handed out, released or on in the next 7 days; releases and announcements of the last 7; open team formation | gradebook's last change (marks returned); whether they have a team; a patch note on their Submission receipts newer than their last visit |
 | Schedule | rows by semester week (week 1 from `semester_start`, as the Dashboard counts; one group each for before and after the semester), coloured by kind; TBC dates; row details; file chips that open each file; readings (files, reading list, "to come") | their state on hand-out and due rows; rows for their repos marked |
 | A kind tab (`#kind-<kind>`) | the rows the kind's tab names (the engine's `tabs`, so a lecture whose readings shipped is on Readings too, with only its reading files), dated by date then undated, off-schedule ones included; heading, details, reading list, files, "not released yet", the pending readings note; the kind's own event (an exam) last; a file opens in the tab, the list beside it as All materials keeps its tree, the open file marked | none |

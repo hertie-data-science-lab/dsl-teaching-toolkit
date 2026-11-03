@@ -116,7 +116,12 @@ Things whose *literal spelling* is depended on from outside Python:
   copy of `--entry` (Release again refreshes `files` and `last_shipped_at`) and each
   schedule copy a release of paths made (`schedule_plan.covered_copies`) whose time has
   come or is TBC - one dated later is left for the scheduler. `status_json._shipped` reads it first, the
-  destination tree second; the site still reads the destination. Repo, path and sha only.
+  destination tree second; the site still reads the destination for links. Readers of
+  `first_shipped_at`: the site and `student_status` date a released row by it
+  (`release_record.released_at`: the earliest over the row's own landed copies, its readings'
+  only when none landed); a copy it does not date falls back to its destination's first
+  commit (`release_record.landed_at`) on a TBC row only - a dated row then has no
+  `released_at`. Repo, path and sha only.
 - **The engine's writes to `schedule.yml`** (faculty-owned; line surgery, never a re-dump, at
   the sha a fresh read gave). Two writers, both in `schedule.py`: `record_handout` fills a
   blank `handout_datetime` and moves one only to an EARLIER actual hand-out (once: a later
@@ -538,7 +543,9 @@ level (`console/schemas/student-status.schema.json`, `tests/test_student_status.
 reads the file loosely and validates nothing against it): no roster,
 marks, handles, enrol codes or team membership (a team is its name, headcount and cap), an
 email only where `show_email: true`, a brief and shape note only once handed out, and no
-assignment with `show_on_site: false`. A key added to it is added to the allow-list first.
+assignment with `show_on_site: false`. A key added to it is added to the allow-list first
+(`rows[].released_at`, decision 0043: when a released row first reached students, the same
+moment the site writes as `released_at:`, null when nothing can say).
 Unlike `status.json` it carries one moment, `generated_at`, for the student's "Updated <age>":
 `student_status.settle` keeps the published file's moment when nothing else changed, so an
 unchanged semester still makes no commit. The console reads `/1` files too (no dates, no age).
