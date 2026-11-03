@@ -36,7 +36,7 @@ export interface ScheduleRow {
   assignment?: string;
   /** False for a session whose materials are not out yet. */
   released: boolean;
-  /** When a released session first reached students (the release record's ship time), as `when` is written; absent when the source does not say. The Updates box sorts by it, else by `when`. */
+  /** When a released session first reached students (the release record's ship time), as `when` is written; absent when the source does not say. The Updates box places a row with no `when` (a released TBC session) at it. */
   releasedAt?: string;
   /** A session with nothing to ship (an `events:` lab, the site's `no_materials`): no files, never pending, never news. Absent from older engines: false. */
   noMaterials?: boolean;

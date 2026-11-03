@@ -4,7 +4,7 @@
 
 - The Updates box dates a released row by the release record (decision 0043): the site's
   `released_at:` and the student status's `rows[].released_at` carry when it reached students,
-  which the student console's Home sorts by. A released TBC entry offers its session date on its
+  which places a released TBC row in both Updates boxes. A released TBC entry offers its session date on its
   console release page and is a suggested to-do until dated. The semester Dashboard gains a
   Semester settings panel and one modal for the run defaults, `autosync_released_edits` and the
   semester dates; the Site page links to it for the dates.
