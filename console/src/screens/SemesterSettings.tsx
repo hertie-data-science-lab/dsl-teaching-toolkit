@@ -14,14 +14,14 @@ import { defaultsOf } from '../model/config';
 import { fmtDate } from '../model/format';
 import { CONFIG_REPO, SEMESTER_FILE } from '../model/names';
 import { draftErrors, readDraft, type SemesterDraft } from '../model/scheduleEdit';
-import { SOURCE_WORD, effectiveOf, semesterDefaults, semesterFile, valueWord, type Block } from '../model/settings';
+import { SOURCE_WORD, effectiveOf, semesterDefaults, semesterFile, valueWord } from '../model/settings';
 import type { Status } from '../model/types';
 import { defaultsTiers } from '../tiers/course';
 import type { Tiers, Values } from '../tiers/types';
 import { CheckLine, EditFile, Loading } from '../ui/bits';
 import { SaveBar } from '../ui/edit';
 import { Modal } from '../ui/Modal';
-import { defaultsLine, semesterDefaultsAfter, semesterInherited } from './RunSettings';
+import { defaultsLine, semesterDefaultsAfter, semesterInherited, toValues } from './RunSettings';
 import { SemesterForm, scheduleAfter, useSchedFile } from './Schedule';
 import type { ReadyProps } from './types';
 
@@ -81,7 +81,6 @@ export function SemesterDefaults({ p }: { p: ReadyProps }) {
   );
 }
 
-const toValues = (b: Block): Values => Object.fromEntries(Object.entries(b).map(([k, v]) => [k, v === null ? undefined : v]));
 const pick = (t: Tiers, keep: (k: string) => boolean): Tiers => Object.fromEntries(Object.entries(t).filter(([k]) => keep(k)));
 
 /** The modal's unsaved edits, held by what opens it so an edit survives closing it: semester.yml's `defaults:` and the dates. null: unchanged. */
@@ -121,43 +120,43 @@ export function SemesterSettings({ p, draft, expand, onClose }: { p: ReadyProps;
 
   const doSave = async () => {
     if (Object.keys(fieldErrors(null, tiers, cur)).length || Object.keys(dateErrors).length) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
-    const steps: [keyof Draft, Step][] = [];
+    let defaultsStep: Step | null = null, datesStep: Step | null = null;
     if (defaultsDirty && yaml) {
       const out = semesterDefaultsAfter(yaml, cur, inherited);
       if ('error' in out) return setSave({ kind: 'bad', text: out.error });
-      steps.push(['defaults', { target: { owner: org, repo: CONFIG_REPO, path: SEMESTER_FILE }, text: out.text, sha: yaml.sha, opts: { message: 'semester: edit the semester’s defaults, from the DSL Teaching Console', statusRepo: [org, CONFIG_REPO] } }]);
+      defaultsStep = { target: { owner: org, repo: CONFIG_REPO, path: SEMESTER_FILE }, text: out.text, sha: yaml.sha, opts: { message: 'semester: edit the semester’s defaults, from the DSL Teaching Console', statusRepo: [org, CONFIG_REPO] } };
     }
     if (datesDirty && ready && dates) {
       const out = scheduleAfter(ready, [dates]);
       if ('error' in out) return setSave({ kind: 'bad', text: out.error });
-      steps.push(['dates', { target: { owner: org, repo: CONFIG_REPO, path: 'schedule.yml' }, text: out.text, sha: ready.sha, opts: { message: 'schedule: edit the semester dates, from the DSL Teaching Console', statusRepo: [org, CONFIG_REPO] } }]);
+      datesStep = { target: { owner: org, repo: CONFIG_REPO, path: 'schedule.yml' }, text: out.text, sha: ready.sha, opts: { message: 'schedule: edit the semester dates, from the DSL Teaching Console', statusRepo: [org, CONFIG_REPO] } };
     }
     // One commit per file: semester.yml (Assignments and Releases together), then schedule.yml.
-    // What a commit saved leaves the draft as soon as it lands, so a retry never writes it twice.
-    let left = kept;
-    const saved = (k: keyof Draft) => keep((left = { ...left, [k]: null }));
-    const [first, second] = steps;
-    if (await saveSteps(env, setSave, first?.[1] ?? null, second?.[1] ?? null, 'Defaults saved; the semester dates are not', () => saved(first[0])) && second) saved(second[0]);
+    // The defaults leave the draft as soon as their commit lands, so a retry never writes them twice.
+    const afterDefaults = { ...kept, defaults: null };
+    const first = defaultsStep ?? datesStep, second = defaultsStep ? datesStep : null;
+    if (await saveSteps(env, setSave, first, second, 'Defaults saved; the semester dates are not', () => keep(defaultsStep ? afterDefaults : NO_DRAFT))) keep(NO_DRAFT);
   };
 
-  const defaultsBody = (keys: Tiers, id: string) =>
-    f === 'loading' ? <Loading what={`Reading ${SEMESTER_FILE}`} />
-      : f === null ? <CheckLine cls="bad">Could not read {SEMESTER_FILE}.</CheckLine>
-      : f.error ? <><CheckLine cls="bad">{SEMESTER_FILE} does not parse ({f.error}); fix it with Edit the file directly.</CheckLine><EditFile org={org} repo={CONFIG_REPO} path={SEMESTER_FILE} exists={semExists} /></>
-      : <SchemaForm id={id} schema={null} tiers={keys} values={cur} onChange={(v) => setKept({ ...kept, defaults: v })} />;
+  const defaultsForm = (keys: Tiers, id: string) => (yaml ? <SchemaForm id={id} schema={null} tiers={keys} values={cur} onChange={(v) => setKept({ ...kept, defaults: v })} /> : null);
 
   return (
     <Modal title="Semester settings" onClose={onClose} initial={expand ? focus : undefined}>
+      {/* semester.yml holds both the Assignments and the Releases fields: said once, above them. */}
+      {f === 'loading' ? <Loading what={`Reading ${SEMESTER_FILE}`} />
+        : f === null ? <CheckLine cls="bad">Could not read {SEMESTER_FILE}.</CheckLine>
+        : f.error ? <CheckLine cls="bad">{SEMESTER_FILE} does not parse ({f.error}); fix it with Edit the file directly.</CheckLine>
+        : null}
       <details class="fold settings-fold" open={expand === 'assignments'}>
         <summary ref={focus}><span>Assignments</span><span class="fold-line">{lines.assignments}</span></summary>
         <div class="fold-body">
           <p class="footnote">Every assignment this semester runs on these unless its own page says otherwise. Left empty, the value in grey applies: the course’s default, else the institution’s. <a class="textlink" href={`?course=${p.course.org}#details`}>Change the course’s defaults</a></p>
-          {defaultsBody(pick(tiers, (k) => k !== RELEASE_KEY), 'sd')}
+          {defaultsForm(pick(tiers, (k) => k !== RELEASE_KEY), 'sd')}
         </div>
       </details>
       <details class="fold settings-fold">
         <summary><span>Releases</span><span class="fold-line">{lines.releases}</span></summary>
-        <div class="fold-body">{defaultsBody(pick(tiers, (k) => k === RELEASE_KEY), 'sr')}</div>
+        <div class="fold-body">{defaultsForm(pick(tiers, (k) => k === RELEASE_KEY), 'sr')}</div>
       </details>
       <details class="fold settings-fold">
         <summary><span>Semester dates</span><span class="fold-line">{lines.dates}</span></summary>

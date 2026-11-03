@@ -391,13 +391,13 @@ class _Landed:
     repo: str
     section: str
     links: list[Link]
+    # The copy, as the release record keys it (`release_record.key_of`).
+    key: release_record.Key
     # A single file at the repo's root - a course document (the syllabus, a README),
     # which is what the home page shows rather than a row.
     root_file: bool = False
     # Where the copy landed in `repo` ("" for the repo's root).
     path: str = ""
-    # The copy, as the release record keys it (`release_record.key_of`).
-    key: release_record.Key | None = None
 
 
 def _landed(
@@ -421,9 +421,9 @@ def _landed(
         repo,
         dest_section(deploy),
         links,
+        release_record.key_of(deploy),
         root_file,
         path,
-        release_record.key_of(deploy),
     )
 
 
@@ -750,7 +750,7 @@ def _released_at(semester_org: str, row: _Row) -> datetime | None:
     to - in the timezone the row sorts in. None when nothing can say."""
     when = release_record.released_at(
         _release_copies(semester_org),
-        [item.key for item in row.landed or row.readings if item.key is not None],
+        [item.key for item in row.landed or row.readings],
         row.dateless,
         lambda k: release_record.landed_at(semester_org, k[2], k[3]),
     )
@@ -799,8 +799,7 @@ def _row_entry(
         + [(READINGS_LINKS, item.links) for item in row.readings]
     )
     flags, body, when = "", "", row.when
-    released = bool(row.landed or row.readings)
-    shipped = _released_at(semester_org, row) if released else None
+    shipped = _released_at(semester_org, row)
     if row.no_materials:
         flags = "no_materials: true\n"
     elif not row.landed and not row.readings:

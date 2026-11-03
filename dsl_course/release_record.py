@@ -35,6 +35,7 @@ from datetime import UTC, datetime
 
 from . import records, run, schedule
 from .course import is_repo_root
+from .faults import parse_moment
 from .gh_commits import first_landed
 from .gh_contents import get_file_with_sha, put_file_as_read
 from .log import log
@@ -235,11 +236,7 @@ def load(semester_org: str) -> Record:
 def first_shipped(copies: dict[Key, dict], k: Key) -> datetime | None:
     """When copy `k` first shipped, as the record says; None when it holds no entry for
     it, or a seeded one (`first_shipped_at: null`: found already there, time unknown)."""
-    at = (copies.get(k) or {}).get("first_shipped_at")
-    try:
-        return datetime.fromisoformat(at) if isinstance(at, str) else None
-    except ValueError:
-        return None
+    return parse_moment((copies.get(k) or {}).get("first_shipped_at"))
 
 
 @run.per_run(lambda org, repo, path: run.scope(org, repo, path))

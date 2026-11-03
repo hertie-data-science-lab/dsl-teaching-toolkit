@@ -108,7 +108,8 @@ export function HandOutDialog({ one, onSave, onClose }: { one: boolean; onSave: 
   );
 }
 
-const toValues = (b: Block): Values => Object.fromEntries(Object.entries(b).map(([k, v]) => [k, v === null ? undefined : v]));
+/** A `defaults:` block as form values: a null (stated empty) is unset. */
+export const toValues = (b: Block): Values => Object.fromEntries(Object.entries(b).map(([k, v]) => [k, v === null ? undefined : v]));
 
 // ------------------------------------------------------------------ the semester's defaults
 
