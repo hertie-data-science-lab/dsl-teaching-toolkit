@@ -14,6 +14,7 @@ from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from . import policy, schedule
+from .course import is_repo_root
 from .faults import ConfigFault
 from .gh_contents import line_of
 from .log import Summary, log_err
@@ -384,25 +385,54 @@ def unnumbered_assignment(
     return None
 
 
+def within(wanted: str, path: str) -> str | None:
+    """Where `path` sits inside a release of `wanted` (both source paths): "" for the path
+    itself, its relative path when it is inside the folder (the whole repo holds
+    everything), None when the release does not copy it."""
+    wanted, path = wanted.strip("/"), path.strip("/")
+    if is_repo_root(wanted):
+        return "" if is_repo_root(path) else path
+    if path == wanted:
+        return ""
+    return path[len(wanted) + 1 :] if path.startswith(f"{wanted}/") else None
+
+
 def unnumbered_release(
     sched: schedule.Schedule, repo: str, paths: Iterable[str]
 ) -> str | None:
     """The refusal for a manual release of `paths` from `repo` that a lecture or lab with
     no session copies, itself or inside a requested folder; None otherwise."""
-    wanted = {p.strip("/") for p in paths}
+    wanted = list(paths)
     held = {m.key for m in unnumbered(sched) if m.block == "releases"}
-
-    def asked(path: str) -> bool:
-        path = path.strip("/")
-        return any(not w or path == w or path.startswith(f"{w}/") for w in wanted)
-
     for r in sched.releases:
         if r.label in held and any(
-            d.course_source_repo == repo and asked(d.course_source_path)
+            d.course_source_repo == repo
+            and any(within(w, d.course_source_path) is not None for w in wanted)
             for d in r.deploy
         ):
             return give_a_session(r.label)
     return None
+
+
+def covered_copies(
+    sched: schedule.Schedule, made: schedule.Deploy
+) -> list[tuple[schedule.Release, schedule.Deploy, str]]:
+    """The schedule copies a hand release `made` (a path pair, off the plan) has made:
+    `(entry, the copy, where it sits inside made)` for each copy of the same source repo
+    whose source is `made`'s or inside it, and which lands where `made` put it - a folder
+    released to somewhere else is not that copy."""
+    out = []
+    for r in sched.releases:
+        for d in r.deploy:
+            if (d.course_source_repo, d.semester_dest_repo) != (
+                made.course_source_repo,
+                made.semester_dest_repo,
+            ):
+                continue
+            sub = within(made.course_source_path, d.course_source_path)
+            if sub is not None and within(deploy_dest(made), deploy_dest(d)) == sub:
+                out.append((r, d, sub))
+    return out
 
 
 def declared_syllabus(

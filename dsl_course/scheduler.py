@@ -6,9 +6,16 @@ semester's own `semester-config/schedule.yml` `releases:` plan (see
 actions - `deploy` (copy a source path from a COURSE-org repo into a SEMESTER-org repo) and
 `assignment` (provision one student repo per enrolled student from a template). Grading is
 NOT one of them: it is driven off each assignment's own deadline, below, not off a
-`releases:` entry. A tick fires every release whose `when` has arrived. Because every
-release is idempotent, re-runs are no-ops and there is no "already released" state to
-track. Grading is the exception - see AUTOGRADE below.
+`releases:` entry. A tick fires every release whose `when` has arrived.
+
+A content copy is FIRE-ONCE (decision 0043): it ships at its time and is recorded in
+`semester-config/.system/releases.json` (`release_record`), and a later tick passes a
+recorded copy by - an edit to the course copy reaches students only when somebody
+releases it again (Release again), or on every tick for a semester whose
+`autosync_released_edits` resolves true. A due copy with no record whose destination is
+already there is recorded from the destination, not copied (the record's self-seed). A
+hand-out stays cumulative - it re-fires every tick so a student who onboards late still
+gets a repo - and grading has its own markers: see AUTOGRADE below.
 
 TWO DRIVERS deliver those ticks (see `workflows_render.render_scheduler`): GitHub's own
 cron, which is best-effort and in practice delivers a small fraction of its fires, and an
@@ -85,9 +92,11 @@ from . import (
     invitations,
     issues,
     notify,
+    release_record,
     roster,
     schedule,
     schedule_plan,
+    settings,
     site,
     source_digest,
     status,
@@ -112,7 +121,7 @@ from .course import COURSE_ADMIN_TEAM, shared_repo, submission_repo
 from .deploy import deploy_many
 from .distribute import marks_due
 from .faults import ConfigFault, FaultKind, Severity, Unusable
-from .gh_contents import WITHHELD_ROOT_STUBS, root_stub_unwritten
+from .gh_contents import WITHHELD_ROOT_STUBS, repo_blob_shas, root_stub_unwritten
 from .ghcli import gh, start_budget
 from .grading_sheet import sheet_path
 from .grading_spec import (
@@ -377,6 +386,25 @@ def _handout_decisions(
     return out
 
 
+def _release_decisions(
+    course_org: str, semester_org: str, due: list[Release], now: datetime
+) -> list[Decision]:
+    """`ALREADY_DONE` for a due entry none of whose due copies would ship: each is in the
+    release record, or already at its destination (the tick would record it)."""
+    pairs = [(r, d) for r in due for d in r.due_deploys(now)]
+    if not pairs:
+        return []
+    ship, _seeds = _sort_copies(
+        course_org, semester_org, pairs, release_record.load(semester_org)
+    )
+    going = {r.label for r, _d in ship}
+    return [
+        Decision(label, "ALREADY_DONE", "Every copy has already been released.")
+        for label in dict.fromkeys(r.label for r, _d in pairs)
+        if label not in going
+    ]
+
+
 def dry_run_decisions(
     course_org: str,
     semester_org: str,
@@ -391,6 +419,7 @@ def dry_run_decisions(
         lambda: source_decisions(schedule.source_faults(sched, course_org), now),
         lambda: _stub_decisions(course_org, due, now),
         lambda: _handout_decisions(course_org, semester_org, sched, due),
+        lambda: _release_decisions(course_org, semester_org, due, now),
     ):
         try:
             out += decide()
@@ -414,8 +443,8 @@ def _execute_nondeploy(
     `solution_datetime` has passed, the model solution with it). Deploys are batched
     across the whole run (see `run`) so their source/dest repos clone once. Returns
     `(error count, whether anything was actually provisioned)` - the same shape
-    `deploy_many` answers in, and for the same reason: `due_releases` is cumulative, so
-    a handed-out release re-fires on every tick and almost all of them change nothing."""
+    `_release_copies` answers in. A hand-out is cumulative: a handed-out release re-fires
+    on every tick, and almost all of them change nothing."""
     errors = 0
     changed = False
     if release.assignment:
@@ -624,6 +653,128 @@ def _autograde_passed_deadlines(
     return errors
 
 
+def _autosync(course_org: str, semester_org: str) -> bool:
+    """Whether this semester re-ships edits to an already-released copy on every tick
+    (`autosync_released_edits`, decision 0043 rule 2; off unless a layer says true)."""
+    value, _source = settings.effective(
+        semester_org, "autosync_released_edits", course_org=course_org
+    )
+    return value is True
+
+
+def _sort_copies(
+    course_org: str,
+    semester_org: str,
+    pairs: list[tuple[Release, schedule.Deploy]],
+    record: release_record.Record,
+) -> tuple[
+    list[tuple[Release, schedule.Deploy]],
+    list[tuple[Release, schedule.Deploy, dict[str, str]]],
+]:
+    """`(ship, seed)` of `pairs` (each due copy with its entry), once each. Ship: a copy
+    the record does not have, or every one when the semester autosyncs. Seed, with what
+    its destination holds: a copy with no record whose destination is already there
+    (decision 0043 rule 1) - what upgrades a semester released into before the record
+    existed, with nothing re-shipped. Each destination tree is read once, and only for an
+    unrecorded copy; one that cannot be read raises.
+
+    A destination counts as this copy's only when nothing else explains it: no other due
+    copy and no recorded one lands at, inside or above it (`release_record.overlaps`) - a
+    folder two entries copy into, a root copy, a parent of a released child, a copy whose
+    source was re-pointed. Such a copy ships, as it did before the record."""
+    autosync = _autosync(course_org, semester_org)
+    listing = {
+        name.casefold(): row for name, row in (_listing(semester_org) or {}).items()
+    }
+    trees: dict[str, dict[str, str]] = {}
+
+    def tree(repo: str) -> dict[str, str]:
+        if repo not in trees:
+            row = listing.get(repo.casefold())
+            if listing and row is None:
+                trees[repo] = {}  # not created yet: nothing has landed in it
+            else:
+                branch = (row or {}).get("default_branch") or "main"
+                trees[repo] = repo_blob_shas(semester_org, repo, branch)
+        return trees[repo]
+
+    keys = {release_record.key_of(d) for _r, d in pairs} | set(record.copies)
+
+    def explained(key: release_record.Key) -> bool:
+        return any(o != key and release_record.overlaps(key, o) for o in keys)
+
+    ship, seed, seen = [], [], set()
+    for release, d in pairs:
+        key = release_record.key_of(d)
+        if key in seen:
+            continue  # two entries citing one copy: it ships once
+        seen.add(key)
+        if record.has(d):
+            if autosync:
+                ship.append((release, d))
+            continue
+        landed = (
+            {}
+            if explained(key)
+            else release_record.inside(tree(d.semester_dest_repo), deploy_dest(d))
+        )
+        if landed:
+            seed.append((release, d, landed))
+        else:
+            ship.append((release, d))
+    return ship, seed
+
+
+def _release_copies(
+    course_org: str,
+    semester_org: str,
+    pairs: list[tuple[Release, schedule.Deploy]],
+    now: datetime,
+) -> tuple[int, bool]:
+    """Seed and ship this tick's due copies (`_sort_copies`) through ONE `deploy_many` - each
+    unique source and dest repo cloned once for the whole run - and record every one
+    that landed. A copy held at a conflict pull request is not recorded: students do not
+    have it, so it stays late and the next tick offers it again. Returns `(errors,
+    site_changed)`.
+
+    The record is read once and written at most once, only when something changed. One
+    that cannot be read releases nothing this tick: whether a copy has shipped is not
+    known, and the next tick asks again."""
+    try:
+        record = release_record.load(semester_org)
+        ship, seed = _sort_copies(course_org, semester_org, pairs, record)
+    except (RuntimeError, ValueError) as exc:
+        log_err(
+            f"could not read what {semester_org} has released ({exc}) - "
+            f"no copy is released this tick"
+        )
+        return 1, False
+    for release, d, landed in seed:
+        record.seed(release.label, d, landed)
+        log(f"  [seed] {release.label}: already released - recorded, not copied")
+    done = len({release_record.key_of(d) for _r, d in pairs}) - len(ship) - len(seed)
+    if done:
+        log(f"  {plural(done, 'due copy', 'due copies')} already released")
+    errors, changed = 0, False
+    if ship:
+        entry = {release_record.key_of(d): r.label for r, d in ship}
+        try:
+            errors, changed, copies = deploy_many(
+                course_org, semester_org, [d for _r, d in ship], sync=False
+            )
+        except RuntimeError as exc:
+            log_err(f"the release stopped ({exc})")
+            errors, copies = 1, []
+        for c in copies:
+            if c.landed:
+                key = release_record.key_of(c.deploy)
+                record.ship(entry[key], c.deploy, c.commit, c.files, now, refresh=False)
+    if not record.save(semester_org):
+        log_err(f"could not write {release_record.PATH} in {semester_org}")
+        errors += 1
+    return errors, changed
+
+
 def _run_releases(
     course_org: str,
     semester_org: str,
@@ -633,21 +784,16 @@ def _run_releases(
     """Fire every due release's due actions. Returns `(errors, site_changed)`. `now` gates
     each action individually: a deploy with its own deploy_datetime fires on its own clock,
     an entry's handout at its event_datetime - an entry can be due for one and not (yet)
-    the other.
+    the other. A due copy ships once (`_release_copies`).
 
     `site_changed` is "this pass moved something the semester website shows". The sync itself
     is `_release_phase`'s, so a tick that opens a team-formation window and fires a release
     still renders once - and a tick that moves only the window renders at all."""
     errors = 0
-    # Batch EVERY due release's due deploys through one deploy_many: each unique source
-    # and dest repo is cloned once for the whole run, not once per copy.
-    all_deploys = [d for release in due for d in release.due_deploys(now)]
-    deploy_errors, changed = 0, False
-    if all_deploys:
-        deploy_errors, changed = deploy_many(
-            course_org, semester_org, all_deploys, sync=False
-        )
-        errors += deploy_errors
+    pairs = [(release, d) for release in due for d in release.due_deploys(now)]
+    changed = False
+    if pairs:
+        errors, changed = _release_copies(course_org, semester_org, pairs, now)
 
     # Assignment handouts run per release (they aren't file copies).
     did_assign = False

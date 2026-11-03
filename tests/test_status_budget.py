@@ -20,7 +20,14 @@ from datetime import UTC, datetime
 
 import pytest
 
-from dsl_course import discovery, gh_contents, ghcli, settings, status_json
+from dsl_course import (
+    discovery,
+    gh_contents,
+    ghcli,
+    release_record,
+    settings,
+    status_json,
+)
 
 # The real reads, captured before conftest's autouse stubs replace them.
 _REAL = {
@@ -29,6 +36,7 @@ _REAL = {
     (settings, "_semester_text"): settings._semester_text,
     (discovery, "repo_is_archived"): discovery.repo_is_archived,
     (discovery, "repo_missing"): discovery.repo_missing,
+    (release_record, "get_file_with_sha"): gh_contents.get_file_with_sha,
 }
 NOW = datetime(2026, 9, 23, 9, 0, tzinfo=UTC)
 
@@ -353,6 +361,30 @@ def test_the_semester_tick_costs_what_it_did(counted):
     assert doc["semester"]["template_moments"]["assignment-a2"] == (
         "2026-10-20T10:00:00+02:00"
     )
+
+
+def test_a_semester_with_a_release_record_reads_it_once(counted):
+    # Decision 0043: the record is read when the semester-config tree (read anyway) holds
+    # it - one call, and none before the first release has written it.
+    gh = counted
+    gh.files[(f"{LIVE}/semester-config", "main")][release_record.PATH] = (
+        '{"copies": []}\n'
+    )
+    status_json.collect_semester(COURSE, LIVE, NOW)
+    assert len(gh.calls) == 40 + 1
+    assert (
+        _reads_of(gh, LIVE).count(
+            f"repos/{LIVE}/semester-config/contents/{release_record.PATH}"
+        )
+        == 1
+    )
+
+
+def test_a_malformed_release_record_leaves_the_status_to_the_destinations(counted):
+    gh = counted
+    gh.files[(f"{LIVE}/semester-config", "main")][release_record.PATH] = "[]\n"
+    facts = status_json.gather_semester(COURSE, LIVE, NOW)
+    assert facts.recorded == frozenset()
 
 
 def test_the_course_tick_reads_one_file_per_semester(counted):

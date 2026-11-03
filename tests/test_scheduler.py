@@ -390,7 +390,8 @@ def test_run_batches_all_deploys_through_deploy_many(monkeypatch):
     monkeypatch.setattr(
         "dsl_course.scheduler.deploy_many",
         lambda course_org, semester_org, deploys, sync=True: (
-            calls.append((course_org, semester_org, list(deploys), sync)) or (0, True)
+            calls.append((course_org, semester_org, list(deploys), sync))
+            or deploy.Batch(0, True, [])
         ),
     )
     monkeypatch.setattr(
@@ -1109,7 +1110,7 @@ def test_deploy_many_clones_each_repo_once(monkeypatch):
         Deploy("cm", "labs/00_y", "labs", None),
         Deploy("cm", "lectures/01_z", "lectures", None),
     ]
-    errors, changed = deploy.deploy_many(
+    errors, changed, _copies = deploy.deploy_many(
         "Course-Org", "Semester-Org", deploys, sync=False
     )
     assert (errors, changed) == (0, True)
@@ -1137,7 +1138,7 @@ def test_deploy_many_missing_course_source_path_is_an_error_not_silent(monkeypat
     monkeypatch.setattr(deploy, "repo_team_permissions", lambda *a: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
-    errors, changed = deploy.deploy_many(
+    errors, changed, _copies = deploy.deploy_many(
         "Course-Org",
         "Semester-Org",
         [Deploy("cm", "lectures/does-not-exist", "materials", None)],
@@ -1224,7 +1225,7 @@ def test_a_dest_that_could_not_be_made_forkable_still_releases(monkeypatch):
         "Semester-Org",
         [Deploy("cm", "lectures/00_x", "materials", None)],
         sync=False,
-    ) == (0, True)
+    )[:2] == (0, True)
 
 
 def test_an_archived_dest_is_skipped_rather_than_failed(monkeypatch, capsys):
@@ -1255,7 +1256,7 @@ def test_an_archived_dest_is_skipped_rather_than_failed(monkeypatch, capsys):
         "Semester-Org",
         [Deploy("cm", "lectures/00_x", "materials", None)],
         sync=False,
-    ) == (0, False)
+    )[:2] == (0, False)
     assert "[skip]" in capsys.readouterr().out
 
 
@@ -1282,7 +1283,7 @@ def test_a_live_dest_beside_an_archived_one_still_releases(monkeypatch):
             Deploy("cm", "lectures/00_x", "materials", None),
         ],
         sync=False,
-    ) == (0, True)
+    )[:2] == (0, True)
 
 
 def test_a_dest_whose_archived_flag_cannot_be_read_is_released_anyway(monkeypatch):
@@ -1304,14 +1305,14 @@ def test_a_dest_whose_archived_flag_cannot_be_read_is_released_anyway(monkeypatc
         "Semester-Org",
         [Deploy("cm", "lectures/00_x", "materials", None)],
         sync=False,
-    ) == (0, True)
+    )[:2] == (0, True)
 
 
 def test_deploy_many_counts_a_doomed_deploy_once(monkeypatch):
     # Source AND dest clone both fail: that is ONE copy lost, not two errors (a
     # double-count made `deploy` report 2 failures for a single deploy).
     _no_io(monkeypatch, _clone_failing("Course-Org/cm", "Semester-Org/materials"))
-    errors, changed = deploy.deploy_many(
+    errors, changed, _copies = deploy.deploy_many(
         "Course-Org",
         "Semester-Org",
         [Deploy("cm", "lectures/00_x", "materials", None)],
@@ -1328,7 +1329,9 @@ def test_deploy_many_counts_each_unrunnable_deploy_once(monkeypatch):
         Deploy("cm", "labs/00_y", "labs", None),
         Deploy("cm", "lectures/01_z", "lectures", None),
     ]
-    assert deploy.deploy_many("Course-Org", "Semester-Org", deploys, sync=False) == (
+    assert deploy.deploy_many("Course-Org", "Semester-Org", deploys, sync=False)[
+        :2
+    ] == (
         3,
         False,
     )
@@ -1391,7 +1394,7 @@ def test_deploy_many_releases_the_whole_repo_from_a_root_source_path(monkeypatch
     )
     monkeypatch.setattr(deploy, "git", _git_spying_staged(staged))
 
-    errors, changed = deploy.deploy_many(
+    errors, changed, _copies = deploy.deploy_many(
         "Course-Org",
         "Semester-Org",
         [Deploy("cm", "/", "materials", None)],
@@ -1420,7 +1423,7 @@ def test_a_copied_in_gitignore_cannot_swallow_released_files(monkeypatch):
 
     monkeypatch.setattr(deploy, "git", recording_git)
 
-    errors, changed = deploy.deploy_many(
+    errors, changed, _copies = deploy.deploy_many(
         "Course-Org", "Semester-Org", [Deploy("cm", "/", "materials", None)], sync=False
     )
     assert (errors, changed) == (0, True)
@@ -1430,7 +1433,7 @@ def test_a_copied_in_gitignore_cannot_swallow_released_files(monkeypatch):
 
 def test_deploy_many_rejects_a_dotdot_escaping_source_path(monkeypatch):
     _no_io(monkeypatch, _clone_with_tree({"lectures/00_x/f.txt": "x"}))
-    errors, changed = deploy.deploy_many(
+    errors, changed, _copies = deploy.deploy_many(
         "Course-Org",
         "Semester-Org",
         [Deploy("cm", "../../etc/passwd", "materials", None)],
@@ -1460,7 +1463,7 @@ def test_deploy_many_never_copies_a_dot_git_directory(monkeypatch):
     monkeypatch.setattr(deploy, "repo_team_permissions", lambda *a: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
-    errors, changed = deploy.deploy_many(
+    errors, changed, _copies = deploy.deploy_many(
         "Course-Org",
         "Semester-Org",
         [Deploy("cm", "lectures/00_x", "materials", None)],
@@ -1482,7 +1485,7 @@ def _release(monkeypatch, tree: dict[str, str], deploys, staged: list[str]):
     """One deploy_many run over `tree`, recording what reached the dest at `git add`."""
     _no_io(monkeypatch, _clone_with_tree(tree))
     monkeypatch.setattr(deploy, "git", _git_spying_staged(staged))
-    return deploy.deploy_many("Course-Org", "Semester-Org", deploys, sync=False)
+    return deploy.deploy_many("Course-Org", "Semester-Org", deploys, sync=False)[:2]
 
 
 def test_a_whole_repo_release_honours_a_releaseignore(monkeypatch):
@@ -1582,7 +1585,7 @@ def test_deploy_many_counts_a_real_commit_failure(monkeypatch, capsys):
     monkeypatch.setattr(deploy, "repo_team_permissions", lambda *a: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
-    errors, changed = deploy.deploy_many(
+    errors, changed, _copies = deploy.deploy_many(
         "Course-Org",
         "Semester-Org",
         [Deploy("cm", "lectures/00_x", "materials", None)],
@@ -1609,7 +1612,7 @@ def test_deploy_many_reports_nothing_new_when_index_is_empty(monkeypatch, capsys
     monkeypatch.setattr(deploy, "repo_team_permissions", lambda *a: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
-    errors, changed = deploy.deploy_many(
+    errors, changed, _copies = deploy.deploy_many(
         "Course-Org",
         "Semester-Org",
         [Deploy("cm", "lectures/00_x", "materials", None)],
@@ -1636,7 +1639,7 @@ def test_deploy_many_counts_a_raised_site_sync(monkeypatch):
         raise RuntimeError("tree read failed")
 
     monkeypatch.setattr("dsl_course.site.sync_site", boom)
-    errors, changed = deploy.deploy_many(
+    errors, changed, _copies = deploy.deploy_many(
         "Course-Org",
         "Semester-Org",
         [Deploy("cm", "lectures/00_x", "materials", None)],
@@ -2741,7 +2744,7 @@ def test_the_release_phase_counts_a_raised_site_sync(monkeypatch):
     # the tick (and, under --all-semesters, every semester scheduled after it).
     monkeypatch.setattr(
         "dsl_course.scheduler.deploy_many",
-        lambda *a, **k: (0, True),  # something changed
+        lambda *a, **k: deploy.Batch(0, True, []),  # something changed
     )
 
     def boom(course, semester, **_kw):
@@ -3467,7 +3470,7 @@ def _run_release(monkeypatch, seed_source, deploys) -> tuple[int, set[str]]:
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
     monkeypatch.setattr(deploy, "repo_team_permissions", lambda *a: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
-    errors, _changed = deploy.deploy_many(
+    errors, _changed, _copies = deploy.deploy_many(
         "Course-Org", "Semester-Org", deploys, sync=False
     )
     return errors, landed
@@ -3576,7 +3579,7 @@ def test_withholding_the_stub_never_deletes_the_semesters_own_readme(monkeypatch
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
     monkeypatch.setattr(deploy, "repo_team_permissions", lambda *a: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
-    errors, _changed = deploy.deploy_many(
+    errors, _changed, _copies = deploy.deploy_many(
         "Course-Org", "Semester-Org", [Deploy("cm", "/", "materials", None)], sync=False
     )
     assert errors == 0  # reported, not failed

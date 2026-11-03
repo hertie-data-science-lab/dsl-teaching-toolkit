@@ -21,6 +21,7 @@ import hashlib
 import json
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -29,12 +30,14 @@ from conftest import clear_process_memos
 
 from dsl_course import (
     central,
+    collect,
     discovery,
     gh_contents,
     ghcli,
     issues,
     log,
     migrate,
+    release_record,
     repos,
     scheduler,
     settings,
@@ -477,6 +480,9 @@ _REAL = [
     (settings, "org_meta", settings.org_meta),
     (settings, "_semester_text", settings._semester_text),
     (settings, "course_org_for_semester", settings.course_org_for_semester),
+    (release_record, "get_file_with_sha", gh_contents.get_file_with_sha),
+    (scheduler, "repo_blob_shas", gh_contents.repo_blob_shas),
+    (release_record, "put_file_as_read", gh_contents.put_file_as_read),
 ]
 
 
@@ -553,7 +559,9 @@ def test_the_memos_change_what_a_tick_costs_and_nothing_it_says(
 def test_a_preview_tick_stays_under_its_ceiling(github, monkeypatch):
     # Measured 2026-09-26: 51 here before the read-once memos, 32 after them, 31 once the
     # grading leg reads its markers off one tree. The same preview tick against the
-    # demo's f2026 semester: 115, 59 (54 with `--skip-autograde`), then 54.
+    # demo's f2026 semester: 115, 59 (54 with `--skip-autograde`), then 54. 2026-11-03:
+    # 33 - a semester with no release record yet reads for it, and the dest tree its due
+    # copies would be seeded from (decision 0043).
     _tick(monkeypatch)
     assert len(github.calls) <= 40
     assert _reads_twice(github.calls) == []
@@ -628,8 +636,12 @@ OPERATIONS = {
     "tick: list the semesters": (("scheduler", *_C, "--list-semesters"), 3, 0),
     # Re-measured 2026-09-30 at 42 (was 36): one call is the bot's pending-invitation
     # read, the other five are fixture drift since the 2026-09-26 measurement.
-    "tick: release (real)": ((*_TICK, "--no-preview"), 42, 0),
-    "tick: release (preview)": ((*_TICK, "--preview"), 31, 0),
+    # Re-measured 2026-11-03 at 37 (40 before decision 0043): the release record is read
+    # once (+1), and every due copy is in it, so nothing is cloned or converged (-4). The
+    # tick that first writes the record pays its read, one dest tree read and the write.
+    "tick: release (real)": ((*_TICK, "--no-preview"), 37, 0),
+    # 2026-11-03: 32 (31 before decision 0043), the release record read.
+    "tick: release (preview)": ((*_TICK, "--preview"), 32, 0),
     "tick: autograde leg": (
         ("scheduler", *_C, *_S, "--autograde-only", "--now", NOW, "--preview"),
         12,
@@ -734,7 +746,19 @@ def test_every_operation_stays_under_its_ceiling(
         assert _reads_twice(fake.calls) == []
 
 
+class _StoppedClock(datetime):
+    """`collect`'s wall clock, stopped: a sheet's `info.checked` is stamped to the minute,
+    so two ticks either side of a minute's turn differ by a sheet write that has nothing
+    to do with the term being compared (CI, 2026-11-03: 43 - 37)."""
+
+    @classmethod
+    def now(cls, tz=None):
+        at = datetime(2026, 9, 26, 12, 0, tzinfo=timezone.utc)
+        return at.astimezone(tz) if tz else at
+
+
 def _cost_in_a_term(monkeypatch, argv, **term) -> int:
+    monkeypatch.setattr(collect, "datetime", _StoppedClock)
     fake = FakeGitHub(**term)
     monkeypatch.setattr(subprocess, "run", fake.run)
     _drive(monkeypatch, (*_TICK, "--no-preview"))

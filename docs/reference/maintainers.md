@@ -100,6 +100,23 @@ Things whose *literal spelling* is depended on from outside Python:
   predates the window keeps forming teams.
   `tests/test_join_templates.py` runs the SHIPPED scanner over the writer's real output;
   keep that pairing.
+- **`release_record`'s SHAPE** (decision 0043). `semester-config/.system/releases.json` is
+  `{"copies": [...]}`, one entry per copy, keyed by `source.repo` + `source.path` +
+  `dest.repo` + `dest.path` (root = `""`): `entry` (the schedule key), `source.commit`,
+  `first_shipped_at` / `last_shipped_at` (UTC `Z`; `null` on a copy SEEDED from its
+  destination), and `files` - each copied file's path relative to the copy (a single-file
+  copy by its own name) and its blob sha, after `.releaseignore`, the denylist and a
+  withheld stub. A copy is recorded when its dest's merge moved the branch students read
+  or found it already there; never when it is held at a conflict pull request. The
+  scheduler ships a recorded copy again only under `autosync_released_edits: true`, and
+  seeds (does not ship) a due copy with no entry whose destination is present and is its
+  alone - no other due or recorded copy lands at, inside or above it
+  (`release_record.overlaps`); an overlapping one ships, a no-op merge where nothing
+  changed. That is the one upgrade path, no migration. Release materials records every
+  copy of `--entry` (Release again refreshes `files` and `last_shipped_at`) and each
+  schedule copy a release of paths made (`schedule_plan.covered_copies`) whose time has
+  come or is TBC - one dated later is left for the scheduler. `status_json._shipped` reads it first, the
+  destination tree second; the site still reads the destination. Repo, path and sha only.
 - **`distribute.returned_record`'s SHAPE.** `semester-config/.system/returned/<sheet>.yml` is
   each unit's block, under the sheet's own `submissions:` / `teams:`, exactly as the sheet
   held it when the last real Return marks left every person in the unit told
@@ -538,7 +555,7 @@ layers above its own:
 | 2 | `central` (which ref an org runs), `repos` (existence, creation, topics, descriptions), `gh_teams` (an org's settings and its teams), `issues` (one self-updating issue, found by its EXACT title), `pulls` (one pull request per HEAD BRANCH, created or adopted), `invitations` (the bot accepts its own org invitations, from registered course orgs only) |
 | 3 | `gh_contents` (file reads and writes, seeded stubs), `workflows_render` |
 | 4 | `selection` (the one Selection rule, above `releaseignore` and `policy`), `config` (one reader per hand-edited config file: `read_course`, `read_semester`), `discovery`, `roster`/`teams`/`schedule`, `workflows_place` |
-| 5 and up | `access` (team permissions and the faculty floor), `materials` (the semester's `student_site.syllabus`, a folder's kind in the institution's kinds; the old aliases only for `migrate`), `opencourse` (the public website's `open_course_site:` block), `schedule_plan` (the rows a plan declares: one per slot of each entry, readings attached to their session's first row), `cadence` (the scheduler's driver-health and late-delivery alarms, read off its own run history), `join`, `profile_readme`, `scaffold`, `site_repo` (the Jekyll site repo both websites publish into), `site`, then the CLIs |
+| 5 and up | `access` (team permissions and the faculty floor), `materials` (the semester's `student_site.syllabus`, a folder's kind in the institution's kinds; the old aliases only for `migrate`), `opencourse` (the public website's `open_course_site:` block), `schedule_plan` (the rows a plan declares: one per slot of each entry, readings attached to their session's first row), `release_record` (the semester's record of every copy released), `cadence` (the scheduler's driver-health and late-delivery alarms, read off its own run history), `join`, `profile_readme`, `scaffold`, `site_repo` (the Jekyll site repo both websites publish into), `site`, then the CLIs |
 | grading, each above the one before | `grading_sheet` (the sheet file: shape, load and dump, merge, mark arithmetic, what holds a mark), `grading_spec` (`grading_config.yml`, its faults, the `SheetSpec` it gives), `gradebook` (the `grades-<handle>` repos, what a student is shown, the semester grades file, `distributed.csv`), `receipts` (the Submission receipts issue), `distribute` (sending marks); `team_formation` (and its lock file) sits above `grading_spec` and `gradebook`, and `grades` is only the CLI over `distribute` |
 
 `legacy` is the one module that knows old names: every parser and `migrate` reads them from
@@ -1354,7 +1371,10 @@ live semesters; in semester `s`, `A` assignments and `R` repos (about `(A + 1) x
   is what a real release adds to its preview per semester (the dest, its grants, digests,
   re-reads after writes): 40 measured before WP-H5 (an isolated tick, 149 for a preview of
   66); the fake puts it at 5 after, an extrapolation not yet measured live. Each student who
-  pushed to an assignment whose sheet is still open adds 2.
+  pushed to an assignment whose sheet is still open adds 2. A semester with due copies
+  reads its release record once (decision 0043); a copy not in it costs one tree read of
+  its destination repo, and a tick that ships or seeds writes the record once. A tick
+  whose due copies are all recorded clones nothing.
 - A Sync membership run: `12 + sum_s (20 + stale + 2 ceil(R / 100))`, `stale` being the
   repos of students who left the roster (their invitations are read per repo).
 - A status write (a config push, a Console run, the nightly refresh): 48.

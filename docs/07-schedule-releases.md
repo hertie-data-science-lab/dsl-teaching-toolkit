@@ -236,7 +236,9 @@ Just commit the edit to `semester-config/schedule.yml` on `main` - the **GitHub 
 
 The one caveat: already-fired **one-shot** actions don't rewind. A deadline snapshot, an autograde and a model-solution push each happen once, and re-doing one means deleting its marker - `.system/snapshots/<slug>.csv`, `.system/solutions/<slug>.json`, or the `_graded.json` / `_skipped.json` record in `.system/autograde/<slug>/` (deleting the whole folder works too). A `handout_datetime` the scheduler recorded is likewise never rewritten.
 
-Everything else is **cumulative**: material deploys, assignment handouts, the site sync and the source digest are re-applied at every tick, so a late or lost tick heals itself. A release already shipped stays shipped, because unshipping it would mean rewriting the semester repo's git history.
+A material release is **fire-once**: each `files:` item is copied once, at its time, and recorded in `semester-config/.system/releases.json`. An edit to the course copy afterwards does not reach students by itself - release the entry again (**Release again** in the console, or `release.entry`). A semester whose `autosync_released_edits` is `true` re-ships such edits on every tick instead. A release already shipped stays shipped, even if its folder is later deleted from the semester repo: releasing it again is your call.
+
+Everything else is **cumulative**: assignment handouts, the site sync and the source digest are re-applied at every tick, so a late or lost tick heals itself.
 
 ## Verifying your schedule
 

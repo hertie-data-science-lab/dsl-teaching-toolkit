@@ -22,6 +22,7 @@ from dsl_course import (
     ghcli,
     grading_sheet,
     grading_spec,
+    release_record,
     releaseignore,
     roster,
     scaffold,
@@ -574,6 +575,41 @@ def test_release_states_follow_the_destination():
         "lecture",
         {"repo": "materials", "path": "lectures/03_trees"},
     )
+
+
+def _recorded(label: str) -> frozenset:
+    """The release record holding every copy of entry `label` (decision 0043)."""
+    release = next(r for r in _sched().releases if r.label == label)
+    return frozenset(release_record.key_of(d) for d in release.deploy)
+
+
+def test_a_recorded_copy_has_shipped_whatever_its_destination_holds_now():
+    # Fire-once: a copy the record holds was released, even if its folder was deleted from
+    # the semester repo since. Releasing it again is somebody's choice (Release again).
+    after_s5 = datetime(2026, 10, 9, 9, 0, tzinfo=UTC)
+    doc = _render(
+        semester=_semester(dest_paths={"materials": set()}, recorded=_recorded("s3")),
+        now=after_s5,
+    )
+    states = {r["id"]: r["state"] for r in doc["releases"]}
+    assert states == {"s3": "released", "s5": "late"}
+    late = [p["release"] for p in doc["problems"] if p["kind"] == "LATE"]
+    assert late == ["s5"]
+
+
+def test_a_copy_with_no_record_has_shipped_when_its_destination_is_there():
+    doc = _render(now=datetime(2026, 9, 25, 9, 0, tzinfo=UTC))
+    assert next(r for r in doc["releases"] if r["id"] == "s3")["state"] == "released"
+
+
+def test_an_entry_with_no_session_whose_copy_is_recorded_holds_nothing_back():
+    sched = _sched(SCHEDULE.replace("    session: 3\n", ""))
+    facts = _semester(sched=sched, dest_paths={}, recorded=_recorded("s3"))
+    (problem,) = [
+        p for p in status_json.number_problems(facts, NOW) if p["kind"] == "NO_SESSION"
+    ]
+    assert "release" not in problem
+    assert problem["stops"] == "Its rows show no number until then."
 
 
 def test_a_release_with_one_copy_landed_and_one_to_come_is_not_late():
