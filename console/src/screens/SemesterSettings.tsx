@@ -1,12 +1,14 @@
-// A semester's settings (decision 0043 rule 5): the Dashboard's summary panel, one line per
-// setting with its effective value and source (status.json), and ONE modal with three folds -
-// Assignments (the semester's run defaults), Releases (`autosync_released_edits`) and Semester
-// dates - each heading carrying its line. Assignments and Releases are both `defaults:` keys of
-// semester.yml and the dates are schedule.yml's, so a save is at most one commit per file
-// (`saveSteps`). The timezone is the `defaults:` one (decision 0039), in the Assignments fold.
-// The Assignments page's Semester defaults button opens it on Assignments.
+// A semester's defaults (decision 0043 rule 5): the Semester defaults screen (`#defaults`), one
+// form of three folds, all open - Assignments (the semester's run defaults), Releases
+// (`autosync_released_edits`) and Semester dates - each heading carrying its one-line summary
+// with its effective value and source (status.json). Assignments and Releases are both
+// `defaults:` keys of semester.yml and the dates are schedule.yml's, so a save is at most one
+// commit per file (`saveSteps`). The timezone is the `defaults:` one (decision 0039), in the
+// Assignments fold. `#defaults-<fold>` focuses that fold's heading on arrival (the Assignments
+// page's Semester defaults button, the Site page's dates link); the old `#settings` route lands here.
 
 import { useEffect, useRef, useState } from 'preact/hooks';
+import { Hint } from '../ui/Hint';
 import { useEnv } from '../env';
 import { saveSteps, useSave, type Step } from '../edit/save';
 import { compact, deepEqual } from '../edit/yamlText';
@@ -21,16 +23,18 @@ import { defaultsTiers } from '../tiers/course';
 import type { Tiers, Values } from '../tiers/types';
 import { CheckLine, EditFile, Loading } from '../ui/bits';
 import { SaveBar } from '../ui/edit';
-import { Modal } from '../ui/Modal';
 import { defaultsLine, semesterDefaultsAfter, semesterInherited, toValues } from './RunSettings';
 import { SemesterForm, scheduleAfter, useSchedFile } from './Schedule';
-import type { ReadyProps } from './types';
+import { WithStatus } from './common';
+import type { CohortProps, ReadyProps } from './types';
 
 const RELEASE_KEY = 'autosync_released_edits';
-/** Where the Site page and the New semester wizard open the modal (`#settings`). */
-export const SETTINGS_HASH = '#settings';
+type Fold = 'assignments' | 'releases' | 'dates';
+const FOLDS: Fold[] = ['assignments', 'releases', 'dates'];
+/** The link to the Semester defaults screen, with one fold's heading focused on arrival. */
+export const defaultsHref = (fold?: Fold) => `#defaults${fold ? `-${fold}` : ''}`;
 
-/** The panel's lines, which are also the modal's fold headings: the run defaults, the release setting, the semester's dates. */
+/** The fold headings' one-line summaries: the run defaults, the release setting, the semester's dates. */
 export function settingsLines(status: Status): { assignments: string; releases: string; dates: string } {
   const sync = effectiveOf(semesterDefaults(status), RELEASE_KEY);
   const sem = status.semester;
@@ -42,75 +46,66 @@ export function settingsLines(status: Status): { assignments: string; releases: 
   };
 }
 
-/** The Dashboard's Semester settings panel: its lines and Edit. `open` (the `#settings` route) opens the modal on arrival. */
-export function SemesterSettingsPanel({ p, open = false }: { p: ReadyProps; open?: boolean }) {
-  const [shown, setShown] = useState(open);
-  const draft = useState<Draft>(NO_DRAFT);
-  useEffect(() => {
-    if (open) setShown(true);
-  }, [open]);
-  const lines = settingsLines(p.status);
-  const close = () => {
-    setShown(false);
-    if (open && typeof location !== 'undefined') location.hash = '#dashboard';
-  };
-  return (
-    <section class="panel section">
-      <div class="section-head">
-        <h2>Semester settings</h2>
-        <button class="btn small quiet" type="button" aria-haspopup="dialog" onClick={() => setShown(true)}>Edit</button>
-      </div>
-      <ul class="settings-lines">
-        <li>{lines.assignments}</li>
-        <li>{lines.releases}</li>
-        <li>{lines.dates}</li>
-      </ul>
-      {shown ? <SemesterSettings p={p} draft={draft} onClose={close} /> : null}
-    </section>
-  );
-}
-
-/** The Assignments page's Semester defaults button: the modal, opened on Assignments. */
-export function SemesterDefaults({ p }: { p: ReadyProps }) {
-  const [open, setOpen] = useState(false);
-  const draft = useState<Draft>(NO_DRAFT);
-  return (
-    <>
-      <button class="btn quiet" type="button" aria-haspopup="dialog" onClick={() => setOpen(true)}>Semester defaults</button>
-      {open ? <SemesterSettings p={p} draft={draft} expand="assignments" onClose={() => setOpen(false)} /> : null}
-    </>
-  );
-}
-
 const pick = (t: Tiers, keep: (k: string) => boolean): Tiers => Object.fromEntries(Object.entries(t).filter(([k]) => keep(k)));
 
-/** The modal's unsaved edits, held by what opens it so an edit survives closing it: semester.yml's `defaults:` and the dates. null: unchanged. */
+/** The edits not saved yet: semester.yml's `defaults:` and the dates. null: unchanged. */
 interface Draft {
   defaults: Values | null;
   dates: SemesterDraft | null;
 }
 const NO_DRAFT: Draft = { defaults: null, dates: null };
 
-/** The modal: Assignments, Releases and Semester dates, each a fold; `expand` opens and focuses one. */
-export function SemesterSettings({ p, draft, expand, onClose }: { p: ReadyProps; draft: [Draft, (d: Draft) => void]; expand?: 'assignments'; onClose: () => void }) {
+/** The late keys' `?`: what marking still lets an instructor do with each late unit. */
+const LATE_HINT = 'A default. When marking, each late submission’s penalty can be switched off or replaced with your own percentage.';
+const withHints = (t: Tiers): Tiers => Object.fromEntries(Object.entries(t).map(([k, v]) => [k, k === 'late_penalty_per_day' || k === 'late_window_days' ? { ...v, hint: { text: LATE_HINT } } : v]));
+
+/** The Semester defaults screen. `entry` (`#defaults-assignments`) names the fold to focus on arrival. */
+function DefaultsPage({ p }: { p: ReadyProps }) {
+  return (
+    <>
+      <div class="page-head">
+        <div>
+          <h2 class="h1">Semester defaults <Hint doc="04-new-cohort-org.md">Each value comes from the institution, then the course, then this semester; the semester’s wins. An empty field shows the inherited value in grey and where it comes from. Most can be changed again where they are used, such as on an assignment’s own page.</Hint></h2>
+          <p class="lede">What every assignment this semester runs on, how fixes to released files are sent, and the semester’s dates.</p>
+        </div>
+      </div>
+      <section class="panel section">
+        <DefaultsForm p={p} focusFold={FOLDS.find((f) => f === p.entry)} />
+      </section>
+    </>
+  );
+}
+
+export function SemesterDefaultsScreen(p: CohortProps) {
+  return <WithStatus props={p} title="Semester defaults">{(r) => <DefaultsPage p={r} />}</WithStatus>;
+}
+
+/** Assignments, Releases and Semester dates, each an open fold, and their SaveBar; `focusFold`'s heading takes the focus on arrival. */
+function DefaultsForm({ p, focusFold }: { p: ReadyProps; focusFold?: Fold }) {
   const env = useEnv();
   const org = p.cohort.org;
   const f = semesterFile(p.files, org);
   const sf = useSchedFile(p);
   const ready = sf && sf !== 'loading' && !sf.error ? sf : null;
-  const [kept, keep] = draft;
+  const [kept, keep] = useState<Draft>(NO_DRAFT);
   const [save, , setSave] = useSave(env);
   const setKept = (v: Draft) => {
     keep(v);
     setSave({ kind: 'idle' });
   };
-  const focus = useRef<HTMLElement>(null);
   const lines = settingsLines(p.status);
+  const heads = { assignments: useRef<HTMLElement>(null), releases: useRef<HTMLElement>(null), dates: useRef<HTMLElement>(null) };
+  useEffect(() => {
+    const at = focusFold && heads[focusFold].current;
+    if (!at) return;
+    at.focus();
+    at.scrollIntoView?.({ block: 'start' });
+  }, [focusFold]);
 
   const yaml = f && f !== 'loading' && !f.error ? f : null;
   const before = yaml ? toValues(defaultsOf(yaml.doc)) : {};
   const inherited = semesterInherited(p);
-  const tiers = defaultsTiers(inherited, before);
+  const tiers = withHints(defaultsTiers(inherited, before));
   const cur = kept.defaults ?? before;
   const defaultsDirty = kept.defaults !== null && !deepEqual(compact(kept.defaults), compact(before));
   const datesBefore = ready ? (readDraft(ready.doc, 'semester') as SemesterDraft) : null;
@@ -143,25 +138,25 @@ export function SemesterSettings({ p, draft, expand, onClose }: { p: ReadyProps;
   const defaultsForm = (keys: Tiers, id: string) => (yaml ? <SchemaForm id={id} schema={null} tiers={keys} values={cur} onChange={(v) => setKept({ ...kept, defaults: v })} /> : null);
 
   return (
-    <Modal title="Semester settings" onClose={onClose} initial={expand ? focus : undefined}>
+    <>
       {/* semester.yml holds both the Assignments and the Releases fields: said once, above them. */}
       {f === 'loading' ? <Loading what={`Reading ${SEMESTER_FILE}`} />
         : f === null ? <CheckLine cls="bad">Could not read {SEMESTER_FILE}.</CheckLine>
         : f.error ? <CheckLine cls="bad">{SEMESTER_FILE} does not parse ({f.error}); fix it with Edit the file directly.</CheckLine>
         : null}
-      <details class="fold settings-fold" open={expand === 'assignments'}>
-        <summary ref={focus}><span>Assignments</span><span class="fold-line">{lines.assignments}</span></summary>
+      <details class="fold settings-fold" open>
+        <summary ref={heads.assignments}><span>Assignments</span><span class="fold-line">{lines.assignments}</span></summary>
         <div class="fold-body">
           <p class="footnote">Every assignment this semester runs on these unless its own page says otherwise. Left empty, the value in grey applies: the course’s default, else the institution’s. <a class="textlink" href={`?course=${p.course.org}#details`}>Change the course’s defaults</a></p>
           {defaultsForm(pick(tiers, (k) => k !== RELEASE_KEY), 'sd')}
         </div>
       </details>
-      <details class="fold settings-fold">
-        <summary><span>Releases</span><span class="fold-line">{lines.releases}</span></summary>
+      <details class="fold settings-fold" open>
+        <summary ref={heads.releases}><span>Releases</span><span class="fold-line">{lines.releases}</span></summary>
         <div class="fold-body">{defaultsForm(pick(tiers, (k) => k === RELEASE_KEY), 'sr')}</div>
       </details>
-      <details class="fold settings-fold">
-        <summary><span>Semester dates</span><span class="fold-line">{lines.dates}</span></summary>
+      <details class="fold settings-fold" open>
+        <summary ref={heads.dates}><span>Semester dates</span><span class="fold-line">{lines.dates}</span></summary>
         <div class="fold-body">
           {sf === 'loading' ? <Loading what="Reading the schedule" /> : sf === null ? <p class="footnote">No schedule.yml yet.</p> : sf.error ? <CheckLine cls="bad">schedule.yml does not parse ({sf.error}); fix it with Edit the file directly.</CheckLine> : null}
           {dates ? <SemesterForm d={dates} set={(patch) => setKept({ ...kept, dates: { ...dates, ...patch } })} errors={dateErrors} /> : null}
@@ -170,6 +165,6 @@ export function SemesterSettings({ p, draft, expand, onClose }: { p: ReadyProps;
       <SaveBar state={save} onSave={() => void doSave()} disabled={!defaultsDirty && !datesDirty} file={{ org, repo: CONFIG_REPO, path: SEMESTER_FILE, exists: semExists }}>
         <EditFile org={org} repo={CONFIG_REPO} path="schedule.yml" exists={sf !== null} />
       </SaveBar>
-    </Modal>
+    </>
   );
 }

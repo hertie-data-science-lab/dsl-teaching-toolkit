@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
-// Decision 0043 rule 5, clicked through against a fake GitHub: the Dashboard's Semester settings
-// (one line per setting, one modal of three folds, one commit per file), the session date a
+// Decision 0043 rule 5, clicked through against a fake GitHub: the Semester defaults
+// screen (three open folds, each heading carrying its line; one commit per file), the session date a
 // released TBC entry offers on its release page, and the to-do that points there.
 
 import { render } from 'preact';
@@ -16,9 +16,10 @@ import { tier } from '../src/model/readiness';
 import type { Release, Status } from '../src/model/types';
 import { DispatchAdapter } from '../src/ops/adapter';
 import { OpsSession } from '../src/ops/session';
+import { movedHash, parseHash } from '../src/router';
 import { CohortScreen, semesterItems } from '../src/screens/Cohort';
 import { ReleaseScreen, SemesterForm } from '../src/screens/Schedule';
-import { settingsLines } from '../src/screens/SemesterSettings';
+import { SemesterDefaultsScreen, settingsLines } from '../src/screens/SemesterSettings';
 import { withSessionDate } from '../src/screens/SessionDate';
 import { StaticFiles } from './staticFiles';
 import example from './fixtures/status.example.json';
@@ -89,7 +90,7 @@ async function settle(until: () => boolean) {
 const puts = (gh: FakeGitHub, path: string) => gh.seen.filter((s) => s.method === 'PUT' && s.url.includes(`/contents/${path}`));
 const body = (s: Seen) => decodeBase64((s.body as { content: string }).content);
 
-describe('Semester settings', () => {
+describe('Semester defaults', () => {
   it('words one line per setting, its value and where it comes from', () => {
     expect(settingsLines(status)).toEqual({
       assignments: expect.stringMatching(/^Defaults: /),
@@ -98,28 +99,41 @@ describe('Semester settings', () => {
     });
   });
 
-  it('sits at the bottom of the Dashboard; Edit opens the modal with every fold closed', async () => {
-    await mount((f) => <CohortScreen {...props(f)} />);
-    const panels = [...root!.querySelectorAll('.stack > section.panel')];
-    const panel = panels[panels.length - 1];
-    expect(panel.querySelector('h2')!.textContent).toBe('Semester settings');
-    expect(panel.textContent).toContain('Send fixes to released files automatically: off (institution default).');
-    await act(() => button('Edit', panel).click());
-    const folds = [...q('[role="dialog"]').querySelectorAll<HTMLDetailsElement>('details.settings-fold')];
-    expect(folds.map((d) => d.open)).toEqual([false, false, false]);
+  it('is a full screen: a page heading with its hint, the three sections open, each heading carrying its line', async () => {
+    await mount((f) => <SemesterDefaultsScreen {...props(f)} />);
+    expect(root!.querySelector('[role="dialog"]')).toBeNull();
+    const h = q('.page-head h2');
+    expect(h.textContent).toMatch(/^Semester defaults/);
+    expect(h.textContent).toContain('the semester’s wins');
+    const folds = [...root!.querySelectorAll<HTMLDetailsElement>('details.settings-fold')];
+    expect(folds.map((d) => [d.querySelector('summary span')!.textContent, d.open])).toEqual([['Assignments', true], ['Releases', true], ['Semester dates', true]]);
     expect(folds[1].querySelector('summary')!.textContent).toContain('off (institution default)');
   });
 
-  it('opens on arrival from the #settings route (the Site page’s and New semester’s link)', async () => {
-    await mount((f) => <CohortScreen {...props(f)} settings />);
-    expect(q('[role="dialog"]').textContent).toContain('Semester settings');
+  it('puts a ? on the late window and the late penalty: defaults, waived or overridden when marking', async () => {
+    await mount((f) => <SemesterDefaultsScreen {...props(f)} />);
+    const hints = [...root!.querySelectorAll('[aria-label^="About "]')].map((b) => b.getAttribute('aria-label'));
+    expect(hints).toEqual(expect.arrayContaining(['About Late window, days', 'About Late penalty per day']));
+    expect(root!.textContent!.split('each late submission’s penalty can be switched off or replaced with your own percentage')).toHaveLength(3);
+  });
+
+  it('the Dashboard no longer carries the panel', async () => {
+    await mount((f) => <CohortScreen {...props(f)} />);
+    expect(root!.textContent).not.toContain('Semester defaults');
+    expect(root!.textContent).not.toContain('Semester settings');
+  });
+
+  it('the old #settings route lands on the screen with Assignments focused', async () => {
+    expect(parseHash('#settings')).toEqual({ screen: 'defaults', entry: 'assignments' });
+    expect(movedHash('#settings')).toBe('#defaults-assignments');
+    await mount((f) => <SemesterDefaultsScreen {...props(f, { entry: 'assignments' })} />);
+    expect(document.activeElement).toBe(q('details.settings-fold summary'));
   });
 
   it('asks for the timezone once: the defaults one (schedule.yml names none, decision 0039)', async () => {
-    await mount((f) => <CohortScreen {...props(f)} settings />);
-    const dialog = q('[role="dialog"]');
-    expect(dialog.querySelector('#sd-timezone')).not.toBeNull();
-    expect(dialog.querySelector('#e-tz')).toBeNull();
+    await mount((f) => <SemesterDefaultsScreen {...props(f)} />);
+    expect(root!.querySelector('#sd-timezone')).not.toBeNull();
+    expect(root!.querySelector('#e-tz')).toBeNull();
   });
 
   it('the Schedule screen’s dates sheet asks for no timezone', () => {
@@ -130,20 +144,20 @@ describe('Semester settings', () => {
 
   it('checks only what was edited: a fault in a fold left alone never blocks the save', async () => {
     // The file's window has no penalty (a fault), but only the dates are edited.
-    const gh = await mount((f) => <CohortScreen {...props(f)} settings />, '# INSTRUCTOR-OWNED\ndefaults:\n  late_window_days: 5\n');
+    const gh = await mount((f) => <SemesterDefaultsScreen {...props(f)} />, '# INSTRUCTOR-OWNED\ndefaults:\n  late_window_days: 5\n');
     await type('#e-te', '2026-12-20');
-    await act(() => button('Save', q('[role="dialog"]')).click());
+    await act(() => button('Save').click());
     await settle(() => puts(gh, 'schedule.yml').length > 0);
     expect(puts(gh, 'schedule.yml')).toHaveLength(1);
     expect(puts(gh, 'semester.yml')).toHaveLength(0);
   });
 
   it('saves Assignments and Releases in one commit to semester.yml, and the dates in one to schedule.yml', async () => {
-    const gh = await mount((f) => <CohortScreen {...props(f)} settings />);
+    const gh = await mount((f) => <SemesterDefaultsScreen {...props(f)} />);
     await type('#sd-late_window_days', '7');
     await type('#sr-autosync_released_edits', 'true', 'change');
     await type('#e-te', '2026-12-20');
-    await act(() => button('Save', q('[role="dialog"]')).click());
+    await act(() => button('Save').click());
     await settle(() => puts(gh, 'schedule.yml').length > 0);
     const sem = puts(gh, 'semester.yml');
     expect(sem).toHaveLength(1);
@@ -152,7 +166,6 @@ describe('Semester settings', () => {
     expect(sched).toHaveLength(1);
     expect(parse(body(sched[0])).semester.end).toEqual({ type: 'end', event_datetime: '2026-12-20' });
   });
-
 });
 
 describe('the session date after a TBC release', () => {

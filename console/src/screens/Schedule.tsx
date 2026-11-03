@@ -571,7 +571,7 @@ function AssignmentForm({ p, d, set, errors, consoleOn, templates, tiered, hande
   );
 }
 
-/** The semester dates sheet. The timezone is the `defaults:` one (decision 0039), set in Semester settings. */
+/** The semester dates sheet. The timezone is the `defaults:` one (decision 0039), set in Semester defaults. */
 export function SemesterForm({ d, set, errors }: { d: SemesterDraft; set: Set_<SemesterDraft>; errors: Record<string, string> }) {
   return (
     <>

@@ -28,12 +28,14 @@ const TABS: AssignmentTab[] = ['overview', 'teams', 'marks'];
 export type AssignmentOpen = 'return-preview' | 'return-run';
 const OPENS: AssignmentOpen[] = ['return-preview', 'return-run'];
 
-const ENTRY_SCREENS = ['schedule', 'assignment', 'release', 'template', 'materials'];
+const ENTRY_SCREENS = ['schedule', 'assignment', 'release', 'template', 'materials', 'defaults'];
 
 /** The route a hash names. */
 export function parseHash(hash: string): Route {
   const r = decodeURIComponent(hash.replace(/^#/, ''));
   if (!r) return { screen: '' };
+  // `#settings` (the Dashboard's old settings modal) is now the Semester defaults screen: old links land there.
+  if (r === 'settings') return { screen: 'defaults', entry: 'assignments' };
   const kind = /^(kind-[\w-]+)\/(.+)$/.exec(r);
   if (kind) return { screen: kind[1], entry: kind[2] };
   for (const s of ENTRY_SCREENS) {
@@ -125,8 +127,8 @@ export function parseSearch(search: string): Selection {
 
 /** Screens that need a semester, and the nav key each lights up. */
 export const COHORT_SCREENS: Record<string, string> = {
-  dashboard: 'dashboard', settings: 'dashboard', schedule: 'schedule', release: 'schedule', assignments: 'assignments', assignment: 'assignments',
-  students: 'students', roster: 'students', instructors: 'instructors', site: 'site', operations: 'operations',
+  dashboard: 'dashboard', schedule: 'schedule', release: 'schedule', assignments: 'assignments', assignment: 'assignments',
+  students: 'students', roster: 'students', instructors: 'instructors', site: 'site', defaults: 'defaults', operations: 'operations',
 };
 /** Screens about the course. */
 export const COURSE_SCREENS: Record<string, string> = {
