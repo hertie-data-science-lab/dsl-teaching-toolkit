@@ -117,6 +117,12 @@ Things whose *literal spelling* is depended on from outside Python:
   schedule copy a release of paths made (`schedule_plan.covered_copies`) whose time has
   come or is TBC - one dated later is left for the scheduler. `status_json._shipped` reads it first, the
   destination tree second; the site still reads the destination. Repo, path and sha only.
+  A copy only adds, so a re-copy KEEPS in `files` each earlier file it did not carry (it is
+  still at the destination) unless it removed it: `deploy_many(remove={key: [paths]})`
+  (paths relative to the copy; `deploy --entry X --remove-deleted`, the console's
+  `release.entry` `remove_deleted`) deletes, before the merge, only a path the copy's fresh
+  manifest lacks - never one the course still releases - and the record drops it
+  (`Copied.removed`).
 - **The engine's writes to `schedule.yml`** (faculty-owned; line surgery, never a re-dump, at
   the sha a fresh read gave). Two writers, both in `schedule.py`: `record_handout` fills a
   blank `handout_datetime` and moves one only to an EARLIER actual hand-out (once: a later
@@ -506,8 +512,22 @@ Decision 0034 (need, time, verdict), all computed by the engine so the console h
   an assignment set to hand out by hand and still `declared` is
   `assignment:<key>:NOT_HANDED_OUT` at its due date (fix: the assignment's page; it
   leaves the row's `problem` flag alone, since the row's state already says it);
-  `open_course_site:` that does not parse is a `now` problem while the website is on. The
-  digest's mail ladder is a separate clock and unchanged.
+  `open_course_site:` that does not parse is a `now` problem while the website is on.
+  Decision 0043 rule 6, the divergence check (`divergence.compare`, `status_json.divergence_problems`):
+  per recorded copy the plan makes, against its `files`, `schedule:<entry>:DIVERGED_COURSE`
+  (a course blob differs or a course file was added; not raised under
+  `autosync_released_edits`), `:DIVERGED_DELETED` (a file the course no longer carries,
+  still at the destination) and `:DIVERGED_RELEASED` (a destination blob differs or a file
+  was added there), each with `:<fp8>` = 8 hex of sha1 over the changed side's sorted
+  `(path, blob)` pairs so a set-aside id (0032) returns when that side changes again.
+  `later`, undated, `aside: true`, `fix.screen: release`, and `diverged[]` (per copy:
+  source, dest, `added` / `changed` / `deleted`) in the private semester file only. The
+  course side is filtered as a copy is; another copy's destination inside it is left out;
+  a copy sharing its destination gets no released-side kind; an orphan record (no plan
+  copy) is logged once and not checked. The trees are the ones the status reads anyway
+  (`schedule._repo_shas`, shared with the source check; each destination's
+  `repo_path_shas`): no read of its own. The digest's mail ladder is a separate clock and
+  unchanged.
 - **Verdict.** `course.verdict` / `semester.verdict`: `fixing` (a `now`/`soon` problem;
   `problems` counts them), else `not_ready` (a needed stage open; `missing` is its
   sentence), else `ready`; `suggestions` counts open suggested items not set aside. The

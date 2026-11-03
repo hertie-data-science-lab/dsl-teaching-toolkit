@@ -171,7 +171,11 @@ consumer: the strip's counts, the panel's rows, the Problems and Coming up tabs 
 marks. Only now and soon are red and counted (`problemCount`): the nav, Home's cards, the
 course's Semesters rows and the Dashboards all show that one number. Screens join problems on
 their structured fields, never on `id`: `kind` (the code) and `release` (the schedule entry a
-problem holds back). Rows mark their state: a tick, a red `!` with Fix, a hollow circle
+problem holds back). A released folder that differs from its course copy (`DIVERGED_*`, decision
+0043) is a `later` suggestion: it shows in Coming up and, on the release's page, as the
+"Differs from the course copy" panel (`screens/Divergence.tsx`, `model/divergence.ts`) with its
+files, links to both copies, Release again (with "Also remove the N files deleted from the
+course copy", unticked) and Keep for future semesters. Rows mark their state: a tick, a red `!` with Fix, a hollow circle
 (needed), a dotted circle and "optional" (a suggestion), a dash and the engine's "Waiting for
 <step>". No colour bar and no legend. The words (verdicts, chips, time words) live in
 `model/format.ts`.
