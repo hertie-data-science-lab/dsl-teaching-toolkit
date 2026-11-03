@@ -28,7 +28,6 @@ from typing import NamedTuple
 
 from .course import is_repo_root
 from .gh_contents import WITHHELD_ROOT_STUBS
-from .release_record import inside
 from .schedule_plan import within
 from .selection import ROOT_RELEASE_EXCLUDED, denied
 
@@ -110,41 +109,35 @@ def compare(
     out: dict[str, Drift] = {}
     if source is not None:
         s = _outside(source, nested)
-        changed = tuple(sorted(p for p in m if p in s and s[p] != m[p]))
-        added = tuple(sorted(p for p in s if p not in m))
-        out[COURSE] = Drift(
-            added, changed, (), tuple((p, s[p]) for p in sorted(added + changed))
-        )
+        out[COURSE] = _edits(m, s)
         if dest is not None:
             gone = tuple(sorted(p for p in m if p not in s and p in dest))
             out[DELETED] = Drift(deleted=gone, side=tuple((p, "") for p in gone))
     if dest is not None:
-        d = _outside(dest, nested)
-        changed = tuple(sorted(p for p in m if p in d and d[p] != m[p]))
-        added = tuple(sorted(p for p in d if p not in m))
-        out[RELEASED] = Drift(
-            added, changed, (), tuple((p, d[p]) for p in sorted(added + changed))
-        )
+        out[RELEASED] = _edits(m, _outside(dest, nested))
     return {kind: drift for kind, drift in out.items() if drift}
+
+
+def _edits(manifest: Mapping[str, str], side: Mapping[str, str]) -> Drift:
+    """What one side changed and added against the manifest, with that side's blobs."""
+    changed = tuple(sorted(p for p in manifest if p in side and side[p] != manifest[p]))
+    added = tuple(sorted(p for p in side if p not in manifest))
+    return Drift(
+        added, changed, (), tuple((p, side[p]) for p in sorted(added + changed))
+    )
 
 
 def nested_in(dest: tuple[str, str], others: Collection[tuple[str, str]]) -> list[str]:
     """The sub-paths, relative to the copy landing at `dest` (repo, path), where another
     copy lands strictly inside it."""
     repo, path = dest
-    out = []
-    for o_repo, o_path in others:
-        if o_repo != repo or o_path == path:
-            continue
-        rel = within(path, o_path)
-        if rel:
-            out.append(rel)
-    return sorted(set(out))
-
-
-def dest_files(dest_blobs: Mapping[str, str], dest_path: str) -> dict[str, str]:
-    """The files under a copy's destination, keyed as its manifest is."""
-    return inside(dict(dest_blobs), dest_path)
+    return sorted(
+        {
+            rel
+            for o_repo, o_path in others
+            if o_repo == repo and o_path != path and (rel := within(path, o_path))
+        }
+    )
 
 
 def fingerprint(sides: Collection[tuple[str, str]]) -> str:

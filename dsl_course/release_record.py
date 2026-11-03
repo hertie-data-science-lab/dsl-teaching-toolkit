@@ -185,9 +185,8 @@ class Record:
         k = key_of(d)
         old = self.copies.get(k)
         if old is not None:
-            kept = {
-                p: s for p, s in (old.get("files") or {}).items() if p not in removed
-            }
+            gone = set(removed)
+            kept = {p: s for p, s in (old.get("files") or {}).items() if p not in gone}
             files = {**kept, **files}
         if old is not None and not refresh and old.get("files") == files:
             return

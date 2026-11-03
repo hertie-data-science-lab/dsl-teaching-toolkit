@@ -2426,6 +2426,7 @@ def divergence_problems(
     plan = [(r, d) for r in facts.sched.releases for d in r.deploy]
     keys = {release_record.key_of(d) for _r, d in plan} | set(facts.manifests)
     dests = [(k[2], k[3]) for k in keys]
+    shared = {dest for dest, n in Counter(dests).items() if n > 1}
     found: dict[str, dict[str, list[tuple[schedule.Deploy, divergence.Drift]]]] = {}
     seen: set[release_record.Key] = set()
     for r, d in plan:
@@ -2448,13 +2449,13 @@ def divergence_problems(
             or None
         )
         dest_blobs = facts.dest_blobs.get(k[2])
-        dest = None if dest_blobs is None else divergence.dest_files(dest_blobs, k[3])
+        dest = None if dest_blobs is None else release_record.inside(dest_blobs, k[3])
         drifts = divergence.compare(
             facts.manifests[k], source, dest, divergence.nested_in((k[2], k[3]), dests)
         )
         if autosync:
             drifts.pop(divergence.COURSE, None)
-        if dests.count((k[2], k[3])) > 1:
+        if (k[2], k[3]) in shared:
             drifts.pop(divergence.RELEASED, None)
         for kind, drift in drifts.items():
             found.setdefault(r.label, {}).setdefault(kind, []).append((d, drift))

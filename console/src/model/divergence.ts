@@ -24,14 +24,17 @@ export const isDiverged = (p: Problem): p is DivergedProblem => (DIVERGED_KINDS 
 /** The divergence problems of one release, in kind order. */
 export function divergenceOf(status: Status, releaseId: string): DivergedProblem[] {
   const own = (status.problems ?? []).filter((p): p is DivergedProblem => isDiverged(p) && p.release === releaseId);
-  return DIVERGED_KINDS.flatMap((k) => own.filter((p) => p.kind === k));
+  return own.sort((a, b) => DIVERGED_KINDS.indexOf(a.kind) - DIVERGED_KINDS.indexOf(b.kind));
 }
+
+/** A copy's files, every kind. */
+export const fileCount = (c: DivergedCopy) => c.added.length + c.changed.length + c.deleted.length;
 
 /** How many released files the course copy no longer has: what Release again can remove. */
 export const deletedCount = (list: DivergedProblem[]) =>
   list.filter((p) => p.kind === 'DIVERGED_DELETED').reduce((n, p) => n + (p.diverged ?? []).reduce((m, c) => m + c.deleted.length, 0), 0);
 
-const ID = /^schedule:(.+):(DIVERGED_(?:COURSE|DELETED|RELEASED)):[0-9a-f]{8}$/;
+const ID = new RegExp(`^schedule:(.+):(${DIVERGED_KINDS.join('|')}):[0-9a-f]{8}$`);
 const KIND_WORD: Record<DivergedKind, string> = {
   DIVERGED_COURSE: 'Course copy changed',
   DIVERGED_DELETED: 'Deleted in course',
