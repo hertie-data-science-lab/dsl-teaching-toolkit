@@ -53,39 +53,32 @@ def as_decimal(value: object) -> Decimal | None:
 
 
 # Every way `late_penalty_per_day` can be written wrong, and what to say about it. One
-# multiplies every late mark in the semester, so none of them may pass quietly: a bare `10`
-# meant no penalty at all while the header still advertised one, and `-10%` ADDED marks for
-# being late.
+# multiplies every late mark in the semester, so none of them may pass quietly: `-10%`
+# ADDED marks for being late.
 _PENALTY_FAULTS = {
-    "unwritten": "is not a number - write `10%` or `0.1`",
-    "bare": "is neither a percentage nor a fraction - write `10%` or `0.1`",
+    "unwritten": "is not a number - write a percentage, `10%` or `10`",
     "negative": "is negative - that would ADD marks for lateness",
     "over": "is more than 100% a day",
 }
 
 
 def read_penalty(text: object) -> tuple[Decimal | None, str]:
-    """`late_penalty_per_day` as `(fraction, fault)`: `10%` and `0.1` both give 0.10 and
-    no fault. The ONE reader of the key - the setting's parse, the grade arithmetic and
+    """`late_penalty_per_day` as `(fraction, fault)`: a percentage, with or without its
+    `%` - `10%` and `10` both give 0.10 and no fault, `0.5` is 0.5%. The ONE reader of the key - the setting's parse, the grade arithmetic and
     the fault text all go through it, so an edge case is fixed once.
 
     The fault is a `_PENALTY_FAULTS` key, with the rate None. Blank and absent are
     `(None, "")`, not faults - plenty of assignments accept no late work at all, or accept
-    it without a deduction. A bare `0` is a rate somebody wrote (no deduction)."""
+    it without a deduction. A bare `0` is a rate somebody wrote (no deduction). A bare
+    number is ALWAYS a percentage (the maintainer's rule, as the console's fields read it):
+    never a fraction, so `0.1` is 0.1%, not 10%."""
     raw = "" if text is None else str(text).strip()
     if not raw:
         return None, ""
-    percent = raw.endswith("%")
-    rate = as_decimal(raw[:-1] if percent else raw)
+    rate = as_decimal(raw.removesuffix("%"))
     if rate is None:
         return None, "unwritten"
-    if percent:
-        rate /= 100
-    elif rate >= 1:
-        # A BARE `10` is read neither as 1000% nor, silently, as 10%. The two spellings a
-        # course actually writes are the percentage and the fraction; guessing between
-        # them on a number that multiplies every late mark is not a guess worth making.
-        return None, "bare"
+    rate /= 100
     if rate < 0:
         return None, "negative"
     return (None, "over") if rate > 1 else (rate, "")

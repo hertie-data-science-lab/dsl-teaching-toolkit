@@ -2,13 +2,28 @@
 
 ## 0.11.0 (unreleased)
 
+- The late window and the late penalty inherit each on its own, like every other default
+  (they were one pair: a layer naming one half set the other to none). Setting only the
+  window keeps the inherited penalty, and vice versa; `late_window_days: 0` is still no late
+  work. The migration writes a 0.10 layer that named one half with the other as none
+  (`0` / `0%`). A bare number in a penalty is always a percentage, in the files and the
+  console alike: `10` is 10% and `0.5` is 0.5% (a bare number below 1 was a fraction, and
+  one of 1 or more was refused). This covers `late_penalty_per_day` and a unit's
+  `late_penalty`. The console's penalty fields save a plain number with its `%`.
+- The console's semester nav has **Materials** after Schedule: Released materials
+  (`?cohort=<org>#materials`), the semester's materials repos as students have them, each
+  file opening in the viewer, each released folder linked to its Release page and a released
+  copy edited in the semester said in the Dashboard's words. The course nav's Course
+  materials link now names the course (`?course=<org>#materials`).
 - The Updates box dates a released row by the release record (decision 0043): a released
   `tbc` row is announced at the moment it first shipped (the site's `date:` and `released_at:`,
   the student status's `rows[].released_at`), where before every dateless row was dropped. A
   released `tbc` entry offers its session date (`tbc -> [date]`) on its console Release page
-  and is a suggested to-do until dated. The semester Dashboard gains a Semester settings panel
-  and one modal of three folds: the run defaults (with the `defaults:` timezone),
-  `autosync_released_edits` and the semester dates. The Site page links to it for the dates.
+  and is a suggested to-do until dated. A new Semester defaults page in the semester nav (between
+  Site and Operations) edits the run defaults (with the `defaults:` timezone),
+  `autosync_released_edits` and the semester dates; the old `#settings` link lands there. The
+  same form opens as a modal from the Assignments, Schedule and Site pages, at the section that
+  fits each.
 - `schedule.yml` names no `timezone:` (decision 0039 rule 2): a semester's times are read in its
   `semester.yml` `defaults: timezone`, cascaded. The migration's config layers step moves a
   schedule's `timezone:` there; left in the file it is NOT_MIGRATED and ignored. The Schedule

@@ -2162,9 +2162,9 @@ def grading_cutoff_datetime(
     sched: Schedule, slug: str, *, submit_via: str
 ) -> datetime | None:
     """THE late cutoff: when this assignment stops accepting work - the due date plus the
-    effective `late_window_days` (`settings`: assignments.yml, then the course, then the
-    institution). `late_window_days: 0`, or a late rule that names no window, is the due
-    date itself: no late work. None if unscheduled.
+    effective `late_window_days` (`settings`: the entry, the semester, the course, then the
+    institution). `late_window_days: 0` is the due date itself: no late work. None if
+    unscheduled.
 
     `submit_via` is the template's, which this module cannot read: work handed in outside
     GitHub (`course.collects_commits` false) has no late window, so its cutoff is the due

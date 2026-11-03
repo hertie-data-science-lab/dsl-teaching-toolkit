@@ -28,12 +28,14 @@ const TABS: AssignmentTab[] = ['overview', 'teams', 'marks'];
 export type AssignmentOpen = 'return-preview' | 'return-run';
 const OPENS: AssignmentOpen[] = ['return-preview', 'return-run'];
 
-const ENTRY_SCREENS = ['schedule', 'assignment', 'release', 'template', 'materials'];
+const ENTRY_SCREENS = ['schedule', 'assignment', 'release', 'template', 'materials', 'defaults'];
 
 /** The route a hash names. */
 export function parseHash(hash: string): Route {
   const r = decodeURIComponent(hash.replace(/^#/, ''));
   if (!r) return { screen: '' };
+  // `#settings` (the Dashboard's old settings modal) is now the Semester defaults screen: old links land there.
+  if (r === 'settings') return { screen: 'defaults', entry: 'assignments' };
   const kind = /^(kind-[\w-]+)\/(.+)$/.exec(r);
   if (kind) return { screen: kind[1], entry: kind[2] };
   for (const s of ENTRY_SCREENS) {
@@ -102,11 +104,14 @@ export interface Selection {
   wizard?: string;
   /** A template to prefill a new schedule entry with (New assignment's last step). */
   template?: string;
-  /** A folder to open on the course materials index, `<repo>/<path>`. */
+  /** A folder to open on the course materials index or a semester's Released materials, `<repo>/<path>`. */
   folder?: string;
-  /** A file to open in the viewer on the course materials index, `<repo>/<path>`. */
+  /** A file to open in the viewer on the course materials index or a semester's Released materials, `<repo>/<path>`. */
   file?: string;
 }
+
+/** The semester's Released materials, the screen `?cohort=<org>#materials` shows (`screenOf`). */
+export const RELEASED_MATERIALS = 'released-materials';
 
 export function parseSearch(search: string): Selection {
   const q = new URLSearchParams(search);
@@ -125,9 +130,19 @@ export function parseSearch(search: string): Selection {
 
 /** Screens that need a semester, and the nav key each lights up. */
 export const COHORT_SCREENS: Record<string, string> = {
-  dashboard: 'dashboard', settings: 'dashboard', schedule: 'schedule', release: 'schedule', assignments: 'assignments', assignment: 'assignments',
-  students: 'students', roster: 'students', instructors: 'instructors', site: 'site', operations: 'operations',
+  dashboard: 'dashboard', schedule: 'schedule', release: 'schedule', [RELEASED_MATERIALS]: 'materials', assignments: 'assignments', assignment: 'assignments',
+  students: 'students', roster: 'students', instructors: 'instructors', site: 'site', defaults: 'defaults', operations: 'operations',
 };
+/**
+ * The screen a route shows. `#materials` is two pages: under `?cohort=<org>` the semester's
+ * Released materials (the screen `released-materials`; a hash naming that is read as `#materials`), anywhere else the
+ * course materials index. `#materials-<repo>` is always the course repo's page.
+ */
+export function screenOf(sel: Selection, route: Route): string {
+  const s = route.screen === RELEASED_MATERIALS ? 'materials' : route.screen;
+  return s === 'materials' && !route.entry && sel.cohort ? RELEASED_MATERIALS : s;
+}
+
 /** Screens about the course. */
 export const COURSE_SCREENS: Record<string, string> = {
   course: 'course', materials: 'materials', templates: 'templates', template: 'templates', details: 'details', website: 'website',

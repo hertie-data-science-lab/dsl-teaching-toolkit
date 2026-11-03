@@ -1,5 +1,5 @@
 """The run-settings cascade: institution -> course -> semester -> assignment, nearest wins,
-the late pair paired at whichever layer states it, and every source named."""
+the late window and penalty each on its own, and every source named."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from dsl_course import course as course_mod
 from dsl_course import (
     faults,
     gh_contents,
@@ -108,20 +109,29 @@ def test_assignments_yml_is_the_semester_and_assignment_layers(course, semester)
     assert a2["visibility"] == ("public", "course")
 
 
-def test_the_late_pair_stays_paired_at_the_layer_that_states_it(course, semester):
-    # The semester defaults state the window alone: that IS its rule, penalty none - the
-    # course's 20% is not borrowed for the missing half.
+def test_the_late_window_and_penalty_each_inherit_on_their_own(course, semester):
+    # The semester defaults state the window alone: the course's 20% still stands.
     a1 = settings.effective_all(
         "Sem", inline=schedule.run_settings_of("Sem", "a1"), course_org="C"
     )
     assert a1["late_window_days"] == (5, "semester")
-    assert a1["late_penalty_per_day"] == (None, "semester")
-    # a2's own block states the penalty alone.
+    assert a1["late_penalty_per_day"] == ("20%", "course")
+    # a2's own block states the penalty alone: the semester's window still stands.
     a2 = settings.effective_all(
         "Sem", inline=schedule.run_settings_of("Sem", "a2"), course_org="C"
     )
     assert a2["late_penalty_per_day"] == ("5%", "entry")
-    assert a2["late_window_days"] == (None, "entry")
+    assert a2["late_window_days"] == (5, "semester")
+
+
+def test_a_window_of_0_is_still_no_late_work_whatever_the_penalty_below():
+    stack = [
+        ("entry", {"late_window_days": 0}),
+        ("institution", settings.institution_defaults()),
+    ]
+    assert settings.resolve("late_window_days", stack) == (0, "entry")
+    assert settings.resolve("late_penalty_per_day", stack)[1] == "institution"
+    assert course_mod.late_rule(0, "10%") == "not accepted after the deadline"
 
 
 def test_no_assignments_yml_means_both_of_its_layers_are_empty(course):
@@ -219,7 +229,7 @@ def test_load_grading_spec_carries_effective_values_and_their_sources(
     sources = dict(spec.sources)
     assert spec.max_team_size == 2 and sources["max_team_size"] == "entry"
     assert spec.visibility == "public" and sources["visibility"] == "course"
-    assert (spec.late_window_days, spec.late_penalty_per_day) == (None, "5%")
+    assert (spec.late_window_days, spec.late_penalty_per_day) == (5, "5%")
 
 
 def test_a_course_visibility_says_nothing_about_an_assignment_with_no_repo(
@@ -518,8 +528,12 @@ def test_the_skeleton_shows_every_key_with_what_it_inherits():
         line.startswith("  # max_team_size: 3") and line.endswith("(course)")
         for line in lines
     )
-    # The late pair: a level stating one half states both.
-    assert any("late_penalty_per_day" in line and "late pair" in line for line in lines)
+    # Each late key inherits on its own: the window set here leaves the penalty inherited.
+    assert any(
+        line.startswith("  # late_penalty_per_day: 10%")
+        and line.endswith("(institution)")
+        for line in lines
+    )
 
 
 @pytest.mark.parametrize("value", [True, False])

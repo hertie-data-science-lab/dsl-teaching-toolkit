@@ -28,6 +28,7 @@ from dsl_course import (
     issues,
     receipts,
     records,
+    settings,
     status_json,
 )
 from dsl_course.schedule import AssignmentEntry, Schedule
@@ -1034,11 +1035,14 @@ def test_the_preview_says_a_late_penalty_without_a_late_policy_is_ignored(
         "    score_individual: 43\n",
         "    late_penalty: 15%\n    score_individual: 43\n",
     )
+    # An institution that states no penalty, and no layer above it that does: no late rule.
+    no_penalty = settings.institution_defaults()
+    no_penalty.pop("late_penalty_per_day")
+    monkeypatch.setattr(settings, "institution_defaults", lambda: no_penalty)
     out = _distribute(
         monkeypatch,
         tmp_path,
         sheets={"assignment-1": late},
-        # A late window with no penalty: the pair is set together, so no late rule.
         grading="title: Neural networks\nlate_window_days: 7\n",
         dry_run=True,
     )

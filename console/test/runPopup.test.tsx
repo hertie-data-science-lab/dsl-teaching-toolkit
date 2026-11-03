@@ -3,6 +3,7 @@
 // says so, each real step shows once, the drawer resizes, "See on GitHub" opens the op's
 // target, the previews nobody acts on are gone, and "Marked from" carries its `?`.
 
+import { readFileSync } from 'node:fs';
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -390,6 +391,36 @@ describe('the drawer', () => {
     expect(drawer.style.width).toBe('464px');
     await act(() => void grip.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })));
     expect(drawer.style.height).toBe('324px');
+  });
+
+  // The demo (0.11.0): ticking an option focused it and showed its reason; pressing the verb
+  // moved focus, hid the reason and lifted the verb from under the pointer, so the first
+  // click never landed. In the drawer a reason stays put whatever has focus.
+  it('runs on the first click after an option is ticked: the verb does not move when the option loses focus', async () => {
+    const style = document.createElement('style');
+    style.textContent = readFileSync(`${__dirname}/../src/styles/console.css`, 'utf8');
+    document.head.appendChild(style);
+    try {
+      const sent: Record<string, unknown>[] = [];
+      const a = new Scripted();
+      const submit = a.submit.bind(a);
+      a.submit = (i) => (sent.push((i as unknown as { args: Record<string, unknown> }).args), submit(i));
+      const ops = session(a);
+      await mount(envOf(ops), <OpPanel />);
+      await act(() => ops.open(defs.releaseAgain(scope, rel, { facts: ['2 files of s5 were deleted.'], deleted: 2 })));
+      const box = root!.querySelector('input[type=checkbox]') as HTMLInputElement;
+      const why = root!.querySelector('.why') as HTMLElement;
+      expect(why.textContent).toBe('Off: they stay in the released copy, as a release only ever adds.');
+      await act(() => (box.focus(), box.click()));
+      expect(getComputedStyle(why).display).toBe('block');
+      const verb = button('Release Session 5 again')!;
+      await act(() => verb.focus()); // a pointer press moves focus before the click lands
+      expect(getComputedStyle(why).display).toBe('block');
+      await act(() => verb.click());
+      expect(sent).toEqual([{ entry: 's5', remove_deleted: true }]);
+    } finally {
+      style.remove();
+    }
   });
 });
 
