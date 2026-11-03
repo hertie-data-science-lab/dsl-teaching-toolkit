@@ -733,10 +733,16 @@ def _first_shipped(
     record, was seeded, or the record cannot be read (lateness is then judged as before
     the record; the releases say the read failed)."""
 
+    unreadable = False
+
     def first(d: schedule.Deploy) -> datetime | None:
+        nonlocal unreadable
+        if unreadable:
+            return None  # asked once: not again for every late moment
         try:
             copy = read_record().copies.get(release_record.key_of(d))
         except (RuntimeError, ValueError):
+            unreadable = True
             return None
         return parse_moment((copy or {}).get("first_shipped_at"))
 

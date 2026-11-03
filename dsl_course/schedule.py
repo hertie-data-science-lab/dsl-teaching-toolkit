@@ -2827,6 +2827,11 @@ class _Declined:
 DECLINED = _Declined()
 
 
+def _eol(line: str) -> str:
+    """The line ending `line` uses, for a line written beside it."""
+    return "\r\n" if line.endswith("\r\n") else "\n"
+
+
 def _earlier(stamp: str, planned: str, tz: ZoneInfo) -> bool:
     """Whether the moment `stamp` (naive, the semester's wall clock) is before `planned`,
     a value as written in schedule.yml (a datetime, a bare date: its start). False when
@@ -2926,7 +2931,7 @@ def _insert_handout(
                 planned = stripped.split(":", 1)[1]
                 if not _earlier(stamp, planned, tz or _tz(None)):
                     return None
-                eol = "\r\n" if lines[j].endswith("\r\n") else "\n"
+                eol = _eol(lines[j])
                 lines[j] = (
                     f"{' ' * indent_of(lines[j])}handout_datetime: {stamp}"
                     f"{_HANDOUT_COMMENT}{eol}"
@@ -3155,7 +3160,7 @@ def _stamp_release_times(
         if (n := keyed.get("release_datetime")) is not None:
             old = lines[n - 1]
             lead = _KEY_LEAD.match(old).group(1)
-            eol = "\r\n" if old.endswith("\r\n") else "\n"
+            eol = _eol(old)
             edits.append((n - 1, True, f"{lead}{line}{eol}"))
             done.append((want, old.split(":", 1)[1].split("#")[0].strip()))
             continue
@@ -3168,7 +3173,7 @@ def _stamp_release_times(
             if len(lines[j]) - len(lines[j].lstrip()) <= col:
                 break
             last = j
-        eol = "\r\n" if lines[last].endswith("\r\n") else "\n"
+        eol = _eol(lines[last])
         if not lines[last].endswith("\n"):
             lines[last] += eol
         edits.append((last + 1, False, f"{' ' * col}{line}{eol}"))
