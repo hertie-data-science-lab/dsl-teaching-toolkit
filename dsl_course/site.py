@@ -842,12 +842,14 @@ def _first_landed(org: str, repo: str, path: str) -> datetime | None:
 
 def _released_at(semester_org: str, row: _Row) -> datetime | None:
     """When a released `dateless` row first reached students: the earliest first-landing
-    commit over the paths its copies (and attached readings) landed, in the timezone the
-    row sorts in. None when no path can say. A copy into the repo's root is skipped: the
-    oldest commit of the whole repo is not when this row landed."""
+    commit over the paths its OWN copies landed - its attached readings only when none of
+    its copies has landed (a readings-only row), since readings often land weeks before
+    the session they belong to - in the timezone the row sorts in. None when no path can
+    say. A copy into the repo's root is skipped: the oldest commit of the whole repo is
+    not when this row landed."""
     found = [
         when
-        for item in [*row.landed, *row.readings]
+        for item in row.landed or row.readings
         if item.path
         and (when := _first_landed(semester_org, item.repo, item.path)) is not None
     ]
