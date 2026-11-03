@@ -121,7 +121,7 @@ TREE = (
     "labs/02_week-2/Lab_Session_2.ipynb",
     # A TBC lab released by hand (`event_datetime: tbc`, its files landed).
     "labs/05_week-5/Lab_Session_5.ipynb",
-    # Another, released through the record (`.system/releases.json` dates it).
+    # Its second copy, released through the record (`.system/releases.json` dates it).
     "labs/06_week-6/Lab_Session_6.ipynb",
 )
 
@@ -129,9 +129,10 @@ TREE = (
 # lecture 2, so it is the newest bullet in the Updates box.
 LAB_5_LANDED = datetime(2026, 9, 15, 8, 30, tzinfo=ZoneInfo("UTC"))
 
-# The semester's release record (`semester-config/.system/releases.json`): lab 6's copy
-# with its ship time, so the record - not the history - dates its row; lab 5's copy
-# SEEDED (`first_shipped_at: null`: it was there before the record), so the history does.
+# The semester's release record (`semester-config/.system/releases.json`) for lab 5's two
+# copies: `labs/06_week-6` with its ship time (the record dates it), `labs/05_week-5`
+# SEEDED (`first_shipped_at: null`: it was there before the record), so its history does.
+# The row is dated by the earlier, the recorded one: one row keeps the box at seven.
 RECORD = release_record.dump(
     {
         k: {
@@ -144,7 +145,7 @@ RECORD = release_record.dump(
         }
         for label, path, name, at in (
             ("lab-5", "labs/05_week-5", "Lab_Session_5.ipynb", None),
-            ("lab-6", "labs/06_week-6", "Lab_Session_6.ipynb", "2026-09-16T07:00:00Z"),
+            ("lab-5", "labs/06_week-6", "Lab_Session_6.ipynb", "2026-09-15T07:00:00Z"),
         )
         for k in [(MATERIALS, path, MATERIALS, path)]
     }
@@ -401,20 +402,11 @@ SCHEDULE = schedule.Schedule(
             "lab-5",
             None,
             "labs/05_week-5",
+            "labs/06_week-6",
             kind="lab",
             number=5,
             session="5",
             title="Transformer lab",
-        ),
-        # ...and dated by the record when it holds the ship time.
-        _release(
-            "lab-6",
-            None,
-            "labs/06_week-6",
-            kind="lab",
-            number=6,
-            session="6",
-            title="Diffusion lab",
         ),
         # A session with nothing to ship: a row, no files, never in the Updates box.
         schedule.Release(
