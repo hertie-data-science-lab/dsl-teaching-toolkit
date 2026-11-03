@@ -2288,12 +2288,13 @@ def _unreadable_fault(what: str, lineno: int | None = None) -> ConfigFault:
 
 def run_settings_of(semester_org: str, slug: str) -> dict:
     """The run settings written on assignment `slug`'s schedule.yml entry
-    (`AssignmentEntry.settings`), off the plan `load` parses once per run; `{}` with no
+    (`AssignmentEntry.settings`), off the plan parsed once per run (`_parsed`, never a
+    copy, and without `load`'s parse lines again); `{}` with no
     semester or no such entry. The one way a caller holding only a semester and a key
     reaches the cascade's assignment layer - schedule.yml is never read a second time."""
     if not semester_org or not slug:
         return {}
-    entry = load(semester_org).assignments.get(slug)
+    entry = _parsed(semester_org)[0].assignments.get(slug)  # read only: no copy
     return dict(entry.settings) if entry else {}
 
 
@@ -2303,7 +2304,7 @@ def shape_of(semester_org: str, slug: str) -> dict:
     `load` parses once per run; `{}` with no semester, no entry or no override."""
     if not semester_org or not slug:
         return {}
-    entry = load(semester_org).assignments.get(slug)
+    entry = _parsed(semester_org)[0].assignments.get(slug)  # read only: no copy
     if entry is None:
         return {}
     return {
