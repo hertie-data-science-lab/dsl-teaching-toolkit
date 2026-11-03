@@ -19,6 +19,7 @@ import tempfile
 import threading
 import time
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -419,22 +420,20 @@ def test_the_course_defaults_block_is_validated_like_the_file_it_is_stamped_into
     assert "title" in capsys.readouterr().err
 
 
-def test_a_bare_late_penalty_number_is_refused_out_loud():
-    # `penalty_rate` refuses a bare 10 - neither 1000% nor, silently, 10%. Refusing it
-    # without a word meant every late mark in that semester lost its deduction and every
-    # receipt showed no percentage, on a green run.
-    read = settings.parse_instance("defaults:\n  late_penalty_per_day: 10\n")
-    assert read.defaults["late_penalty_per_day"] is None
-    (said,) = [f.what for f in read.faults]
-    assert "late_penalty_per_day: 10" in said
-    assert "`10%` or `0.1`" in said
+def test_a_bare_late_penalty_number_is_a_percentage():
+    # A bare number is always a percentage, as the console's fields read it: `10` is 10%,
+    # and `0.5` is 0.5%, never a fraction.
+    for text, rate in (("10", "0.1"), ("0.5", "0.005"), ("0", "0")):
+        read = settings.parse_instance(f"defaults:\n  late_penalty_per_day: {text}\n")
+        assert read.faults == ()
+        got = grading_sheet.penalty_rate(read.defaults["late_penalty_per_day"])
+        assert got == Decimal(rate)
 
 
 @pytest.mark.parametrize(
     "typed,says",
     [
-        ("10", "neither a percentage nor a fraction"),
-        ("1", "neither a percentage nor a fraction"),
+        ("150", "more than 100% a day"),
         ("ten percent", "is not a number"),
         ("-10%", "would ADD marks for lateness"),
         ("-0.1", "would ADD marks for lateness"),

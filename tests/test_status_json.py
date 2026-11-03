@@ -613,6 +613,8 @@ def test_a_released_tbc_entry_is_a_suggested_todo_on_its_release_screen():
         "s3",
         "suggested",
     )
+    # The console reads the status file through the exported schema.
+    assert validate(doc, schemas.status_schema()) == []
     # A TBC entry not released yet, or a dated one released, is no such to-do.
     plain = _render(semester=_semester(sched=sched, dest_paths={"materials": set()}))
     assert not [

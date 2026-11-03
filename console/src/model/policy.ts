@@ -81,24 +81,32 @@ export const SUBMIT_VIA_KEYS: string[] = gradingSchema.properties.submit_via.enu
 /** Every format a template may list, in the schema's order. */
 export const FORMAT_KEYS: string[] = (gradingSchema.properties.formats.oneOf[0] as { items: { enum: string[] } }).items.enum;
 
-/** `late_penalty_per_day` as a fraction (a percentage and a fraction alike), or null for a value the
- * engine refuses (`setting_readers.penalty_fault`): not a number, a bare number of 1 or more,
- * negative, or more than 100% a day. Blank is null too: no penalty. */
+/** `late_penalty_per_day` as a fraction, or null for a value the engine refuses
+ * (`setting_readers.penalty_fault`): not a number, negative, or more than 100% a day. A number
+ * is always a percentage, its `%` optional: `5%` and `5` are 0.05, `0.5` is 0.005. Blank is
+ * null too: no penalty. */
 export function penaltyRate(text: unknown): number | null {
   if (text === null || text === undefined || typeof text === 'boolean') return null;
   const raw = String(text).trim();
   if (!raw) return null;
-  const pct = raw.endsWith('%');
-  const body = (pct ? raw.slice(0, -1) : raw).trim();
+  const body = raw.replace(/%$/, '').trim();
   if (!/^[+-]?(\d+\.?\d*|\.\d+)$/.test(body)) return null;
-  let rate = Number(body);
-  if (pct) rate /= 100;
-  else if (rate >= 1) return null;
+  const rate = Number(body) / 100;
   return rate < 0 || rate > 1 ? null : rate;
 }
 
-/** Why a typed penalty cannot be used, or null. */
+/** A penalty as typed into a form, as the file writes it: a plain number is a percentage (as the
+ * engine reads it too), written with its `%` so the file says so - `20` is `20%`, `12.5` is
+ * `12.5%`. Anything else (`5%`, a typo) is kept as typed. Only text is typed: a number is the
+ * file's own YAML value, left as written. */
+export function typedPenalty(v: unknown): unknown {
+  if (typeof v !== 'string') return v;
+  const t = v.trim();
+  return /^(\d+\.?\d*|\.\d+)$/.test(t) ? `${t}%` : t;
+}
+
+/** Why a typed penalty cannot be used, or null. A plain number is a percentage (`typedPenalty`). */
 export function penaltyError(text: unknown): string | null {
   if (text === undefined || text === null || String(text).trim() === '') return null;
-  return penaltyRate(text) === null ? `Write a percentage (${DEFAULTS.late_penalty_per_day}) or a fraction of the mark per day.` : null;
+  return penaltyRate(typedPenalty(text)) === null ? `Write a percentage of the mark per day, from 0 to 100, such as ${DEFAULTS.late_penalty_per_day}.` : null;
 }

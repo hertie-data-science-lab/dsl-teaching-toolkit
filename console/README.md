@@ -141,7 +141,7 @@ goes, as a semester's Dashboard is where its name goes; a read-only course shows
 then its semesters as nodes: being set up
 first, every live one (a green dot), then past ones ("ended" or "archived") newest first to
 three rows, the rest under "Older semesters (n)". A semester node carries its problem count
-(now or soon only, `problemCount`); its Dashboard leaf does not repeat it. The open semester is expanded to its eight
+(now or soon only, `problemCount`); its Dashboard leaf does not repeat it. The open semester is expanded to its nine
 pages, else on a course page the newest live one; one at a time. Other courses are reached
 through All courses, and so are the person's own student semesters. A student's tree is
 inverted, since a student takes each course once: the open semester's term is the anchor, its
@@ -221,17 +221,34 @@ templates the semester's schedule does not use, each with Add to the schedule. I
 meter plus every state, each line opening the Students tab: on the roster with no code sent
 yet, codes sent but not joined yet, and joined (`status.json` does not say who has an org
 invitation still to accept, so that step is not counted); it is hidden once every row has joined.
-At the bottom, below Automation, **Semester settings** (decision 0043) lists one line per setting,
-each with its effective value and source from `status.json`: the run defaults as `defaultsLine`
-words them, "Send fixes to released files automatically", the semester dates. Edit opens one
-modal of three folds, each heading carrying its line: Assignments (semester.yml `defaults:`),
-Releases (`autosync_released_edits`) and Semester dates (schedule.yml's `semester:` block).
-The timezone is asked once, the `defaults:` one in Assignments; schedule.yml's own `timezone`
-stays on the Schedule screen.
-A save is at most one commit per file (`saveSteps`). From the Dashboard all three are folded;
-the Assignments page's Semester defaults button opens it with Assignments open and focused; the
-`#settings` route (the Site page's link, New semester's Semester defaults card) opens it on
-arrival. A released `event_datetime: tbc` entry's Release page offers "Session date: TBC ->
+**Released materials** (`?cohort=<org>#materials`, nav label Materials, after Schedule) is the
+course materials index's mirror for the semester's copies, what students have received: one row
+per materials repo (`materials`, then any other repo a released entry of `status.json`
+`releases` wrote to), with its count of releases, last change, Open, and the index's tree
+(`RepoFiles`, `MaterialsTree` with `at="cohort"`), each file opening in the viewer beside it
+(`?file=`, `?folder=` as on the index). Each released folder's row links its Release page; a
+`DIVERGED_RELEASED` problem shows as one line in the Dashboard's words. `?cohort=` with
+`#materials` is this page (`screenOf`); `?course=` with `#materials`, and `#materials-<repo>`
+under either, are the course's, so the course nav's Course materials link names the course.
+
+**Semester defaults** (decision 0043; `#defaults`, "Defaults" in the semester nav between Site and
+Operations) edits the semester's settings: three open folds, each heading
+carrying its line with the effective value and source from `status.json`: Assignments
+(semester.yml `defaults:`, the run defaults as `defaultsLine` words them), Releases
+(`autosync_released_edits`, "Send fixes to released files automatically") and Semester dates
+(schedule.yml's `semester:` block). The heading's `?` explains the cascade; the late window and
+late penalty each carry a `?` saying they are defaults a marker can waive or override per late
+unit on the Marks tab (a per-key `hint` added to the tiers). Each inherits on its own: a window
+set without a penalty keeps the inherited penalty. Every penalty field reads a plain number as a
+percentage and saves it with `%` (`policy.typedPenalty`). The timezone is asked once, the
+`defaults:` one in Assignments; schedule.yml's own `timezone` stays on the Schedule screen. A
+save is at most one commit per file (`saveSteps`). `#defaults-<fold>` focuses that fold on
+arrival: New semester's card and the old `#settings` route (rewritten to it) open
+`#defaults-assignments`. The same form also opens in a modal (`useDefaultsModal`), at the fold
+that fits where it is opened, the other two folded, with an Open the full page link: the
+Assignments page's Semester defaults button at Assignments, the Schedule page's at Releases (the
+Schedule edits the dates itself), the Site page's dates line at Semester dates. The opener holds
+the draft, so an unsaved edit survives closing and reopening the modal, but not leaving the page. A released `event_datetime: tbc` entry's Release page offers "Session date: TBC ->
 [date] [time]" (Set date writes the entry; Leave as TBC hides it), as does the result panel of
 a console Release early, now or again of such an entry; the Dashboard's suggested to-do
 `schedule:released_tbc:<entry>` opens that page.

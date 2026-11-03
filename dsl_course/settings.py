@@ -13,13 +13,13 @@ per key never per block, through four layers -
     institution  institution.yml                defaults.<key>
 
 and `effective` says which layer answered. A RUN setting (`RUN_KEYS`: how teams form, the
-team cap, the late pair, the repo visibility, the external submit link, whether returned
+team cap, the late window and penalty, the repo visibility, the external submit link, whether returned
 marks show each question) has all four; a SEMESTER-WIDE one (`SEMESTER_KEYS`: timezone,
 archive grace, the default materials repo; and `autosync_released_edits`, which the release
 engine reads through `effective`) has no entry layer. `team_formation` has no
-institution layer (decision 0039 rule 2). The late pair is ONE rule: whichever layer
-states either half states both, the other half absent meaning none (`_late_pair`). The
-files spell `visibility` as `assignment_repo_visibility` (`FILE_NAMES`). A template's
+institution layer (decision 0039 rule 2). The late window and the penalty resolve each on
+its own, like every other key: a layer stating the window alone keeps the penalty below
+(`late_window_days: 0` is no late work). The files spell `visibility` as `assignment_repo_visibility` (`FILE_NAMES`). A template's
 `grading_config.yml` states no run setting (a run key there is RUN_SETTING_IN_TEMPLATE).
 
 This is the ONE module that reads a `defaults:` block, the one parser of the settings
@@ -72,7 +72,6 @@ RUN_KEYS = (
     # Return marks shows the marks and feedback per question (`gradebook.student_view`).
     "marks_per_question",
 )
-LATE_PAIR = ("late_window_days", "late_penalty_per_day")
 # The defaults that hold for a whole semester, which the semester's plan is read with: no
 # entry states them.
 SEMESTER_KEYS = ("timezone", "archive_grace_days", "materials_repo")
@@ -608,17 +607,13 @@ def _usable(block: Mapping) -> dict:
 
 
 def _states(block: Mapping, key: str) -> bool:
-    """Whether a layer answers `key`. A late key is answered by a layer that states
-    EITHER half of the pair; any other key by a value that is not blank (a reader's
-    None is a value it refused, and the next layer answers)."""
-    if key in LATE_PAIR:
-        return any(k in block for k in LATE_PAIR)
+    """Whether a layer answers `key`: a value that is not blank (a reader's None is a
+    value it refused, and the next layer answers)."""
     return block.get(key) not in (None, "")
 
 
 def resolve(key: str, stack: Sequence[Layer]) -> tuple[object, str]:
-    """`(value, source)` for `key`: the nearest layer that states it. A layer stating
-    one half of the late pair answers the other half with None (no such rule)."""
+    """`(value, source)` for `key`: the nearest layer that states it."""
     for source, block in stack:
         if _states(block, key):
             return block.get(key), source
@@ -688,11 +683,6 @@ def defaults_skeleton(inherited: Sequence[Layer], stated: Mapping | None = None)
         name = FILE_NAMES.get(key, key)
         if key in stated and stated[key] is not None:
             lines.append(f"  {name}: {_yaml_scalar(stated[key])}")
-            continue
-        if key in LATE_PAIR and any(stated.get(k) is not None for k in LATE_PAIR):
-            lines.append(
-                f"  # {name}:".ljust(44) + "(none: the late pair is set above)"
-            )
             continue
         value, source = resolve(key, inherited)
         if key == "team_formation" and source == "institution":

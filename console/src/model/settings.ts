@@ -3,7 +3,7 @@
 // that gave it (`settings.effective_defaults`, `status_json.run_settings`), and the console
 // reads it there; `over` lays a form's unsaved values over that answer for a live preview.
 // A value the engine refuses (a typo, a negative team size) states nothing, and the next
-// layer answers. The late pair is one rule: a layer stating either half states both.
+// layer answers. The late window and the penalty resolve each on its own, like every key.
 
 import { YamlText, deepEqual, isObj, obj, type Path } from '../edit/yamlText';
 import type { FileState, Files } from './files';
@@ -13,7 +13,7 @@ import gradingSchema from '../../schemas/grading_config.schema.json';
 import scheduleSchema from '../../schemas/schedule.schema.json';
 import semesterFileSchema from '../../schemas/semester.schema.json';
 import { labelMap, labelOf } from './labels';
-import { DEFAULTS, penaltyRate } from './policy';
+import { DEFAULTS, penaltyRate, typedPenalty } from './policy';
 import type { Status } from './types';
 import { validator } from './validate';
 
@@ -21,7 +21,6 @@ export const RUN_KEYS = ['team_formation', 'max_team_size', 'late_window_days', 
 export type RunKey = (typeof RUN_KEYS)[number];
 /** The `defaults:` keys with no entry layer (`settings.SEMESTER_KEYS`, and `autosync_released_edits`). */
 export type SemesterWideKey = 'timezone' | 'archive_grace_days' | 'materials_repo' | 'autosync_released_edits';
-export const LATE_PAIR: RunKey[] = ['late_window_days', 'late_penalty_per_day'];
 
 /** Where an effective value comes from (`settings.SOURCES`). */
 export type Source = 'entry' | 'semester' | 'course' | 'institution';
@@ -91,8 +90,11 @@ export function readSetting(key: string, v: unknown): unknown {
       const n = pyInt(v);
       return n === null ? undefined : Math.max(0, n);
     }
-    case 'late_penalty_per_day':
-      return penaltyRate(v) === null ? undefined : String(v).trim();
+    case 'late_penalty_per_day': {
+      // A form's plain number is a percentage (`typedPenalty`); a file's YAML value as the engine reads it.
+      const t = typedPenalty(v);
+      return penaltyRate(t) === null ? undefined : String(t).trim();
+    }
     case 'submit_url': {
       const t = String(v).trim();
       return t.toLowerCase().startsWith('https://') && hostOf(t) && !t.includes(SETTING_PLACEHOLDER) ? t : undefined;
@@ -110,10 +112,12 @@ export function readSetting(key: string, v: unknown): unknown {
   }
 }
 
-/** A form's value as the file writes it: a yes/no setting chosen from a select is a boolean, not text. */
+/** A form's value as the file writes it: a yes/no setting chosen from a select is a boolean, not
+ * text, and a plain-number penalty is a percentage (`typedPenalty`). */
 export function fileValue(key: string, v: unknown): unknown {
   if (typeof v !== 'string' || v === '') return v;
   if (key === 'marks_per_question') return readSetting(key, v);
+  if (key === 'late_penalty_per_day') return typedPenalty(v);
   // A select's 'true' / 'false'; any other text (a hand-written `yes`) is kept as written.
   return key === 'autosync_released_edits' && (v === 'true' || v === 'false') ? v === 'true' : v;
 }
@@ -159,11 +163,10 @@ export const courseDefaults = (s: Status | null | undefined): Effectives => s?.c
 
 /**
  * `key` for a level being edited: `own` (its unsaved values, as `usableBlock` reads them) when
- * it states the key - a layer naming either half of the late pair states both - else what
- * `below` says. A live preview only: the saved answer is status.json's.
+ * it states the key, else what `below` says. A live preview only: the saved answer is status.json's.
  */
 export function over(key: RunKey, own: Block, source: Source, below: Effectives | undefined): Effective {
-  if (LATE_PAIR.includes(key) ? LATE_PAIR.some((k) => k in own) : own[key] !== undefined && own[key] !== null && own[key] !== '') return { value: own[key] ?? null, source };
+  if (own[key] !== undefined && own[key] !== null && own[key] !== '') return { value: own[key], source };
   return effectiveOf(below, key);
 }
 

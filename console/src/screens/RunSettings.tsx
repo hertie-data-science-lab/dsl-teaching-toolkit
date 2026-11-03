@@ -11,7 +11,7 @@ import { YamlText, compact, deepEqual } from '../edit/yamlText';
 import { Field } from '../forms/Form';
 import { MODAL_TEXT_ID, Modal } from '../ui/Modal';
 import {
-  LATE_PAIR, REPO_NAME_RE, RUN_KEYS, semesterName, SOURCE_WORD, courseDefaults, effectiveOf, effectiveWord, lateWord, over, scheduleFile, semesterDefaults, usableBlock,
+  REPO_NAME_RE, RUN_KEYS, semesterName, SOURCE_WORD, courseDefaults, effectiveOf, effectiveWord, lateWord, over, scheduleFile, semesterDefaults, usableBlock,
   fileValue, validSchedule, validSemesterBlocks, validSemesterFile, valueWord, type Block, type Effectives, type RunKey, type YamlFile,
 } from '../model/settings';
 import { semesterInheritance, statedDefaults, withDefaults } from '../model/config';
@@ -26,7 +26,7 @@ import type { Assignment } from '../model/types';
 import { isGroup, pastDue } from '../model/assignment';
 import { penaltyRate } from '../model/policy';
 import { round } from '../model/marks';
-import { RUN_LABEL, lateError, runTier } from '../tiers/runSettings';
+import { RUN_LABEL, runTier } from '../tiers/runSettings';
 import type { FieldTier, Values } from '../tiers/types';
 import { CheckLine, Loading } from '../ui/bits';
 import { Hint } from '../ui/Hint';
@@ -203,7 +203,10 @@ export function RunRows({ id, keys, below, current, draft, setDraft, errors, tea
         // A penalty with no window: work handed in outside GitHub, its days late entered by the marker.
         const marked = r.name === 'late_penalty_per_day';
         const eff = mine(r.keys[0]);
-        const effText = late ? `${lateWord(eff.value, mine('late_penalty_per_day').value)}, ${SOURCE_WORD[eff.source]}` : effectiveWord(r.keys[0], eff);
+        // The window and the penalty inherit each on its own: a penalty from another layer says so.
+        const pen = mine('late_penalty_per_day');
+        const penFrom = pen.value && pen.source !== eff.source && lateWord(eff.value, pen.value) !== 'no late work' ? ` (penalty: ${SOURCE_WORD[pen.source]})` : '';
+        const effText = late ? `${lateWord(eff.value, pen.value)}, ${SOURCE_WORD[eff.source]}${penFrom}` : effectiveWord(r.keys[0], eff);
         const label = late ? 'Late work' : marked ? 'Late penalty' : RUN_LABEL[r.keys[0]];
         const teams = r.name === 'team_formation' ? teamsHref : undefined;
         if (r.name === 'visibility' && forced)
@@ -239,7 +242,7 @@ export function runErrors(keys: RunKey[], below: Effectives, draft: Values): Rec
   for (const k of keys) {
     const t = runTier(k, effectiveOf(below, k));
     const msg = t.check?.(draft[k], draft);
-    if (msg && (draft[k] !== undefined || (k === 'late_window_days' && lateError(draft)))) out[k] = msg;
+    if (msg && draft[k] !== undefined) out[k] = msg;
   }
   return out;
 }
@@ -375,7 +378,7 @@ export function AssignmentRun({ p, a, group }: { p: ReadyProps; a: Assignment; g
   const dirtyT = timing !== null && !deepEqual(timing, baseT);
   const dirtyR = run !== null && !deepEqual(compact(run), compact(beforeRun));
   // Past the due date the engine recomputes the cutoff and every late deduction off a changed late rule.
-  const lateMoved = dirtyR && pastDue(a) && LATE_PAIR.some((k) => !deepEqual(compact({ k: r[k] }), compact({ k: beforeRun[k] })));
+  const lateMoved = dirtyR && pastDue(a) && (['late_window_days', 'late_penalty_per_day'] as const).some((k) => !deepEqual(compact({ [k]: r[k] }), compact({ [k]: beforeRun[k] })));
   const change = (patch: Partial<AssignmentDraft>) => { setTiming({ ...d, ...patch }); setSave({ kind: 'idle' }); };
   const hasErrors = Object.keys(tErr).length > 0 || Object.keys(rErr).length > 0;
   /** Save the entry; `handOut` then opens Hand out on it once the save lands. */

@@ -18,7 +18,7 @@ import { asgSummary } from './Cohort';
 import { courseOf } from './Course';
 import { MarksTab, TeamsTab } from './Marking';
 import { AssignmentRun, HandOutNow, ManualWaiting, handoutRef, waitsByHand } from './RunSettings';
-import { SemesterDefaults } from './SemesterSettings';
+import { SemesterDefaultsButton } from './SemesterSettings';
 import { WithStatus, cohortName, cohortScope, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 import { CONFIG_REPO, ROSTER_PATH, STUDENTS_FILE } from '../model/names';
@@ -92,7 +92,7 @@ function Index(p: ReadyProps) {
             {list.length === 1 ? 'One' : list.length} this semester.{open ? ` ${open === 1 ? 'One is' : `${open} are`} open.` : ''}{marking ? ` ${marking === 1 ? 'One is' : `${marking} are`} being marked.` : ''}
           </p>
         </div>
-        <div class="actions"><SemesterDefaults p={p} /><a class="btn" href={`?cohort=${p.cohort.org}#new-assignment-1`}>New assignment</a></div>
+        <div class="actions"><SemesterDefaultsButton p={p} at="assignments" /><a class="btn" href={`?cohort=${p.cohort.org}#new-assignment-1`}>New assignment</a></div>
       </div>
       <div class="table-wrap">
         <table class="grid" style="min-width:960px">
