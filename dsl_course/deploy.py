@@ -834,7 +834,10 @@ def _record(
     has come or is TBC; a path the schedule does not copy, and a copy still due later,
     stay unrecorded (the scheduler ships that one at its time, with what is current
     then). A deliberate release, so each recorded copy's manifest and `last_shipped_at`
-    are refreshed. Returns the error count."""
+    are refreshed. A copy recorded here for the first time that beat its plan, or had
+    none, has its ship time written into schedule.yml (`schedule.record_release_times`);
+    one the record already had is a Release again and writes nothing. Returns the error
+    count."""
     landed = [c for c in copies if c.landed]
     if not landed:
         return 0
@@ -843,22 +846,34 @@ def _record(
     except (RuntimeError, ValueError) as exc:
         log_err(f"could not read {release_record.PATH} ({exc}) - not recorded")
         return 1
+    before = set(record.copies)
+    first: list[tuple[schedule.Release, Deploy, datetime]] = []
     at = datetime.now(UTC)
+    found = next((r for r in sched.releases if r.label == entry), None)
     for c in landed:
         if entry:
+            made = [(found, c.deploy, c.files)]
+        else:
+            made = []
+            for release, planned, sub in covered_copies(sched, c.deploy):
+                moment = planned.deploy_datetime or release.when
+                if moment is not None and moment > at:
+                    continue  # its own time still to come: the schedule ships it then
+                if files := release_record.inside(c.files, sub):
+                    made.append((release, planned, files))
+        for release, d, files in made:
+            if release_record.key_of(d) not in before and not any(
+                (r, c) == (release, d) for r, c, _at in first
+            ):
+                first.append((release, d, at))
+            # Only Release again's "also remove" removes anything (`deploy_many`).
             record.ship(
-                entry, c.deploy, c.commit, c.files, at, refresh=True, removed=c.removed
+                release.label, d, c.commit, files, at, refresh=True, removed=c.removed
             )
-            continue
-        for release, planned, sub in covered_copies(sched, c.deploy):
-            moment = planned.deploy_datetime or release.when
-            if moment is not None and moment > at:
-                continue  # its own time still to come: the schedule ships it then
-            if files := release_record.inside(c.files, sub):
-                record.ship(release.label, planned, c.commit, files, at, refresh=True)
     if not record.save(semester_org):
         log_err(f"could not write {release_record.PATH} - this release is not recorded")
         return 1
+    schedule.record_release_times(semester_org, sched.timezone, first)
     return 0
 
 

@@ -273,6 +273,45 @@ def test_late_items_only_reports_moments_that_fell_in_this_gap():
     ]
 
 
+@pytest.mark.parametrize(
+    ("shipped_after", "reported"),
+    [
+        (timedelta(hours=-2), False),  # released by hand before its moment
+        (cadence.GAP_SLO, False),  # by hand, inside the SLO
+        (cadence.GAP_SLO + timedelta(minutes=1), True),  # by hand, but late
+        (None, True),  # not in the record, or seeded: judged as before
+    ],
+)
+def test_a_copy_released_by_hand_in_time_is_never_late(shipped_after, reported):
+    # Decision 0043: the record's `first_shipped_at` says the copy went out; a hand
+    # release at or before its moment (plus GAP_SLO) was never a late delivery.
+    releases, sched = _plan()
+    early = releases[0].deploy[1]  # 09:00 Berlin
+    asked = []
+
+    def first_shipped(dep):
+        asked.append(dep)
+        if dep is not early or shipped_after is None:
+            return None
+        return early.deploy_datetime + shipped_after
+
+    labels = [
+        i.label
+        for i in cadence.late_items(
+            releases,
+            sched,
+            datetime(2026, 9, 4, 6, 0, tzinfo=timezone.utc),
+            NOW,
+            submit_vias=REPO_SHAPES,
+            first_shipped=first_shipped,
+        )
+    ]
+    assert ("lectures.2 -> files[1]" in labels) is reported
+    assert "lectures.2 -> files[0]" in labels
+    # Asked only about the two copies' moments, never a handout or snapshot.
+    assert all(isinstance(d, Deploy) for d in asked) and len(asked) == 2
+
+
 def test_a_term_written_entirely_in_the_past_is_not_late():
     # The post-summer false alarm: a plan whose whole term has gone by is late by months,
     # but nothing in it fell in THIS gap, so nothing here shipped late.

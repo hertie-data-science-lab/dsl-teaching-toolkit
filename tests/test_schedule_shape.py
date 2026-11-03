@@ -65,6 +65,9 @@ def _render(monkeypatch, tmp_path, sched) -> dict:
         lambda org: test_site.Selection(kinds=(), include=()),
     )
     monkeypatch.setattr(test_site.site_repo, "acting_login", lambda: None)
+    # The goldens predate dating a released TBC row by when its files landed: no history
+    # to read, so such a row renders as it did then (no `date:`, no `announce:`).
+    monkeypatch.setattr(test_site.site, "first_landed", lambda *a: None)
     plan = _plan(monkeypatch, tmp_path, sched, trees={"materials": _TREE})
     return {
         "lectures": plan.collections["_lectures"],

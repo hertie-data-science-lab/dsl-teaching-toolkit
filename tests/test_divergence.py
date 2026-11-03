@@ -17,12 +17,14 @@ from dsl_course import deploy, divergence, release_record, status_json
 from dsl_course.ops.registry import REGISTRY, Request
 from dsl_course.schedule import Deploy, Release, Schedule
 from dsl_course.status_json import SemesterFacts
-from tests.test_release_merge import world  # noqa: F401 - the bare-repo fixture
+from tests import test_release_merge
 
 NOW = datetime(2026, 11, 3, 9, 0, tzinfo=UTC)
 LAB = Deploy("cm", "labs/08", "materials", None)
 SOLUTIONS = Deploy("cm", "solutions/08", "materials", "labs/08/solutions")
 KEY = release_record.key_of(LAB)
+# The bare-repo world `deploy_many` runs against (`test_release_merge`).
+world = test_release_merge.world
 MANIFEST = {"slides.pdf": "s1", "notes.md": "n1", "data/a.csv": "a1"}
 
 

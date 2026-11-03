@@ -61,7 +61,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from itertools import pairwise
@@ -74,6 +74,7 @@ from .log import log, log_err, log_step, log_withheld
 from .schedule import (
     CONFIG_REPO,
     HANDOUT_SUFFIX,
+    Deploy,
     Release,
     Schedule,
     grading_cutoff_datetime,
@@ -311,6 +312,7 @@ def late_items(
     now: datetime,
     *,
     submit_vias: Mapping[str, str],
+    first_shipped: Callable[[Deploy], datetime | None] | None = None,
 ) -> list[LateItem]:
     """Every dated moment that fell in `(prev_at, now]` and was already more than GAP_SLO
     old when this tick reached it, due-date order. Pure.
@@ -331,39 +333,51 @@ def late_items(
     more - the body's state marker is what stops it emailing anyone twice. `now` is this
     run's own `created_at` for the same reason: both ends of the window are then on GitHub's
     clock, and a moment that falls between it and the release itself is carried by the next
-    tick's window rather than lost."""
+    tick's window rather than lost.
+
+    `first_shipped` answers when the release record says a copy first went out (None: not
+    recorded, or seeded). A copy that went out by hand no later than GAP_SLO after its
+    moment was never "late delivery" (decision 0043), so its moment is skipped; it is
+    asked only about a moment that would otherwise be reported."""
     if prev_at is None:
         return []
     # The handouts the scheduler actually synthesised. An assignment with no template repo
     # in the course org gets none, and its SOLUTION rides on that same release
     # (`_handout_releases`), so without one neither could have shipped.
     synthesised = {r.label for r in releases if r.label.endswith(HANDOUT_SUFFIX)}
-    moments: list[tuple[str, datetime]] = []
+    moments: list[tuple[str, datetime, Deploy | None]] = []
     for release in releases:
         label = _entry_label(release, sched)
         for i, dep in enumerate(release.deploy):
             at = dep.deploy_datetime or release.when
             if at is not None:
-                moments.append((f"{label} -> files[{i}]", at))
+                moments.append((f"{label} -> files[{i}]", at, dep))
         if release.assignment and release.when is not None:
-            moments.append((label, release.when))
+            moments.append((label, release.when, None))
     for slug, entry in sched.assignments.items():
         # The freeze moment: late here means submissions kept arriving past the deadline the
         # snapshot was supposed to pin. Asked for every assignment; its cutoff hangs on how
         # the work is handed in, which the caller read off each template (`submit_vias`).
         at = grading_cutoff_datetime(sched, slug, submit_via=submit_vias[slug])
         if at is not None:
-            moments.append((f"assignments.{slug} snapshot", at))
+            moments.append((f"assignments.{slug} snapshot", at, None))
         if (
             entry.solution_datetime is not None
             and f"{slug}{HANDOUT_SUFFIX}" in synthesised
         ):
-            moments.append((f"assignments.{slug} solution", entry.solution_datetime))
+            moments.append(
+                (f"assignments.{slug} solution", entry.solution_datetime, None)
+            )
+
+    def by_hand(dep: Deploy | None, at: datetime) -> bool:
+        shipped = first_shipped(dep) if dep and first_shipped else None
+        return shipped is not None and shipped <= at + GAP_SLO
+
     return sorted(
         (
             LateItem(label, at, now - at)
-            for label, at in moments
-            if prev_at < at <= now and now - at > GAP_SLO
+            for label, at, dep in moments
+            if prev_at < at <= now and now - at > GAP_SLO and not by_hand(dep, at)
         ),
         key=lambda item: (item.due, item.label),
     )
