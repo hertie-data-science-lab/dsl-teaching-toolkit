@@ -38,7 +38,7 @@ people:
 defaults:   # every key present; uncomment to override. The comment shows the inherited value and its source.
   # timezone: Europe/Berlin                 (institution)
   late_window_days: 5
-  # late_penalty_per_day:                   (none: the late pair is set above)
+  # late_penalty_per_day: 10%               (institution)
   # max_team_size: 3                        (course)
   # assignment_repo_visibility: private     (institution)
   # archive_grace_days: 60                  (institution)

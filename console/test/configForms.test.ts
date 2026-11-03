@@ -59,9 +59,10 @@ describe('the defaults: block, as the engine seeds it', () => {
     expect(withDefaults(set, {}, institutionDefaults())).toBe(COURSE_SEED);
   });
 
-  it('says the other half of the late pair is none once one half is set, as the engine does', () => {
+  it('leaves the penalty inheriting when only the window is set, as the engine does', () => {
     const out = withDefaults(COURSE_SEED, { late_window_days: 5 }, institutionDefaults());
-    expect(out).toContain(`  late_window_days: 5\n${'  # late_penalty_per_day:'.padEnd(44)}(none: the late pair is set above)\n`);
+    expect(changed(COURSE_SEED, out).added).toEqual(['  late_window_days: 5']);
+    expect(out).toContain(`  late_window_days: 5\n${'  # late_penalty_per_day: 10%'.padEnd(44)}(institution)\n`);
     expect(withDefaults(out, {}, institutionDefaults())).toBe(COURSE_SEED);
   });
 
@@ -130,7 +131,7 @@ describe('the semester’s settings: semester.yml (mock-up semester.yml)', () =>
     const y = new YamlText(placeBlock(SEMESTER_SEED, 'people', render({ people: [entryOf(first, {})] })));
     rest.forEach((p, i) => y.set(['people', i + 1], entryOf(p, {})));
     const withPeople = y.text;
-    // The mock-up states the late window alone: the engine reads the penalty as none then.
+    // The mock-up states the late window alone: the penalty stays inherited.
     const out = semesterDefaultsAfter(yamlFile(withPeople), { late_window_days: 5 }, inherited);
     const text = 'text' in out ? out.text : '';
     const site = withSyllabus(text, 'Syllabus.md');

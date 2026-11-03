@@ -598,11 +598,33 @@ def template_run_keys(text: str | None) -> dict:
     return {key: data[key] for key in RUN_KEYS if key in data}
 
 
+# The late window and penalty as the 0.10 engine read them: ONE rule, so a layer stating
+# either half answered both, the unstated half none. 0.11.0 resolves each on its own, so
+# the fold writes that none out (`_LATE_NONE`: no late work, no deduction).
+OLD_LATE_PAIR = ("late_window_days", "late_penalty_per_day")
+_LATE_NONE = {"late_window_days": 0, "late_penalty_per_day": "0%"}
+
+
+def old_late_pair(values: Mapping) -> dict:
+    """One 0.10 layer's settings (keyed by setting) as 0.11.0 must state them to mean
+    what 0.10 read: a layer naming either late half names both, the other as none."""
+    if not any(k in values for k in OLD_LATE_PAIR):
+        return dict(values)
+    return {
+        **values,
+        **{
+            k: _LATE_NONE[k] if values.get(k) is None else values[k]
+            for k in OLD_LATE_PAIR
+        },
+    }
+
+
 def _read_run_keys(raw: dict) -> dict:
     """`raw` through the settings readers, refused values dropped (the migration keeps
-    what the engine could use, and nothing it would refuse)."""
+    what the engine could use, and nothing it would refuse) - a late half kept even
+    refused, since naming it answered the 0.10 pair (`old_late_pair`)."""
     values = read_settings(raw, RUN_KEYS, "migrate", [])
-    return {k: v for k, v in values.items() if v is not None or k in settings.LATE_PAIR}
+    return {k: v for k, v in values.items() if v is not None or k in OLD_LATE_PAIR}
 
 
 # The one run setting the old engine read from the course's `assignment_defaults` (its
@@ -625,7 +647,9 @@ def instance_additions(
       `OLD_COURSE_RUN_KEYS`) - wherever the layers below (`lower`: the semester's
       defaults, the course, the institution) would give another;
     - `late_window_days` (with the penalty beside it) where `grading_datetime` was not the
-      due date plus the window: the cutoff is computed now, rounded to whole days;
+      due date plus the window: the cutoff is computed now, rounded to whole days. The
+      late rule is written whole wherever either half changes, so the file means the
+      same to the 0.10 engine (one pair) and to this one (each half on its own);
     - `semester_dest_repo`, moved out of the schedule.
     A setting the file already states is left as written."""
     tz = schedule._tz(meta.get(OLD_TIMEZONE))
@@ -642,16 +666,18 @@ def instance_additions(
         if not isinstance(entry, dict):
             continue
         slug = str(slug)
-        own = _read_run_keys(templates.get(str(entry.get("course_source_repo")), {}))
+        own = old_late_pair(
+            _read_run_keys(templates.get(str(entry.get("course_source_repo")), {}))
+        )
         old = [("template", own), ("toolkit", toolkit)]
         want: dict = {}
         for key in settings.RUN_KEYS:
-            if key in settings.LATE_PAIR:
+            if key in OLD_LATE_PAIR:
                 continue
             value, _ = settings.resolve(key, old)
             if value is not None and value != settings.resolve(key, lower)[0]:
                 want[key] = value
-        pair = {k: settings.resolve(k, old)[0] for k in settings.LATE_PAIR}
+        pair = {k: settings.resolve(k, old)[0] for k in OLD_LATE_PAIR}
         due = schedule._coerce_datetime(entry.get("due_datetime"), tz, end_of_day=True)
         pin = schedule._coerce_datetime(
             entry.get("grading_datetime"), tz, end_of_day=True
@@ -666,7 +692,7 @@ def instance_additions(
                     f"the due date)"
                 )
             pair["late_window_days"] = days
-        if pair != {k: settings.resolve(k, lower)[0] for k in settings.LATE_PAIR}:
+        if pair != {k: settings.resolve(k, lower)[0] for k in OLD_LATE_PAIR}:
             want |= {k: v for k, v in pair.items() if v is not None}
         dest = str(
             entry.get("semester_dest_repo") or entry.get("cohort_dest_repo") or ""
@@ -676,8 +702,8 @@ def instance_additions(
         stated = existing.blocks.get(slug, {}).keys() | (
             {"semester_dest_repo"} if slug in existing.dests else set()
         )
-        if settings.LATE_PAIR[0] in stated or settings.LATE_PAIR[1] in stated:
-            stated |= set(settings.LATE_PAIR)
+        if OLD_LATE_PAIR[0] in stated or OLD_LATE_PAIR[1] in stated:
+            stated |= set(OLD_LATE_PAIR)
         want = {k: v for k, v in want.items() if k not in stated}
         if want:
             out[slug] = want
@@ -1658,11 +1684,10 @@ def schedule_shape(
             }
         )
         block = raw_blocks.get(key) if isinstance(raw_blocks.get(key), dict) else {}
-        new |= {
-            settings.FILE_NAMES.get(k, k): v
-            for k, v in block.items()
-            if k in settings.RUN_KEYS and v is not None
-        }
+        run = old_late_pair(
+            {k: v for k, v in block.items() if k in settings.RUN_KEYS and v is not None}
+        )
+        new |= {settings.FILE_NAMES.get(k, k): v for k, v in run.items()}
         assignments[key] = new
     for key in sorted(set(map(str, raw_blocks)) - set(assignments)):
         stops.append(
@@ -1896,6 +1921,7 @@ def course_layer(
         {k: v for k, v in defaults.items() if k not in homeless},
         f"{COURSE_CONFIG} {ASSIGNMENT_DEFAULTS_KEY}",
     )
+    stated = old_late_pair(stated)
     stops += [f"{COURSE_CONFIG}: {line} - fix it first" for line in refused]
     try:
         oc = (
@@ -1952,7 +1978,9 @@ def course_layer_kept(
             out.append(f"`{key}` -> `{place}`")
     if course_admins(now) != course_admins(old):
         out.append("`people.course_admins`")
-    before = _stated(_old_defaults(old.get(ASSIGNMENT_DEFAULTS_KEY))[0], "")[0]
+    before = old_late_pair(
+        _stated(_old_defaults(old.get(ASSIGNMENT_DEFAULTS_KEY))[0], "")[0]
+    )
     if settings.parse_course_defaults(now.get(DEFAULTS_BLOCK)) != before:
         out.append(f"`{ASSIGNMENT_DEFAULTS_KEY}` -> `{DEFAULTS_BLOCK}`")
     site = (
@@ -2119,7 +2147,7 @@ def semester_layer(
         year=year,
         year_next=year + 1,
         defaults=settings.defaults_skeleton(
-            inherited, {**old.defaults, **(carried or {})}
+            inherited, {**old_late_pair(old.defaults), **(carried or {})}
         ),
     )
     people = _top_block(instructors or "", "instructors") if instructors else None
@@ -2195,7 +2223,7 @@ def semester_layer_kept(
     if (now.get(PEOPLE_BLOCK) or []) != (_yaml(instructors).get("instructors") or []):
         out.append(f"{INSTRUCTORS_FILE} -> `{PEOPLE_BLOCK}`")
     if settings.parse_instance(new).defaults != {
-        **settings.parse_legacy_assignments(assignments).defaults,
+        **old_late_pair(settings.parse_legacy_assignments(assignments).defaults),
         **(carried or {}),
     }:
         out.append(f"{ASSIGNMENTS_FILE} `defaults:` -> `{DEFAULTS_BLOCK}`")
@@ -3535,8 +3563,8 @@ class Semester:
         meta = _yaml(text)
         existing = settings.parse_legacy_assignments(current)
         lower = [
-            ("semester", existing.defaults),
-            ("course", settings.course_defaults(self.course)),
+            ("semester", old_late_pair(existing.defaults)),
+            ("course", old_late_pair(settings.course_defaults(self.course))),
             ("institution", settings.institution_defaults()),
         ]
         additions, notes = instance_additions(

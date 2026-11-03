@@ -101,8 +101,8 @@ describe('marks arithmetic, as grades.py does it', () => {
     expect(scoreTotal({ Q1: 14, Q9: 10 }, { Q1: 15 })).toBe(14);
     expect(scoreTotal({ Q1: 'pass' })).toBeNull();
     expect(penaltyRate('10%')).toBe(0.1);
-    expect(penaltyRate('0.1')).toBe(0.1);
-    expect(penaltyRate('10')).toBeNull();
+    expect(penaltyRate('10')).toBeCloseTo(0.1);
+    expect(penaltyRate('0.1')).toBeCloseTo(0.001);
     expect(finalGrade(50, effectivePenalty(0.1, 2), 4)).toBeCloseTo(44);
     expect(finalGrade(10, effectivePenalty(0.5, 3), -2)).toBe(0);
     expect(finalGrade(null, effectivePenalty(0.1, 1), 5)).toBeNull();
@@ -115,13 +115,14 @@ describe('marks arithmetic, as grades.py does it', () => {
     expect(effectivePenalty(0.1, 2, 'apply').fraction).toBeCloseTo(0.2);
     expect(effectivePenalty(0.1, 2, 'waive').fraction).toBe(0);
     expect(effectivePenalty(0.1, 2, '15%').fraction).toBeCloseTo(0.15);
-    expect(effectivePenalty(0.1, 2, 0.15).fraction).toBeCloseTo(0.15);
+    expect(effectivePenalty(0.1, 2, 15).fraction).toBeCloseTo(0.15);
+    expect(effectivePenalty(0.1, 2, '15').fraction).toBeCloseTo(0.15);
     expect(effectivePenalty(0.1, 0, '15%').fraction).toBe(0);
     // No late rule: the engine ignores late_penalty, so nothing comes off whatever it says.
     expect(effectivePenalty(null, 2, '15%').fraction).toBe(0);
     // Nobody can apply these: the late rule's arithmetic, and the engine holds the unit.
     expect(effectivePenalty(0.1, 2, 'half')).toMatchObject({ mode: 'bad', fraction: 0.2 });
-    expect(effectivePenalty(0.1, 2, '15').mode).toBe('bad');
+    expect(effectivePenalty(0.1, 2, '150').mode).toBe('bad');
     expect(lateChoice(' Waive ')).toEqual({ mode: 'waive' });
     expect(lateChoice('15%')).toEqual({ mode: 'set', set: 0.15 });
     expect(lateChoice(null)).toEqual({ mode: 'apply' });
@@ -147,7 +148,7 @@ describe('marks arithmetic, as grades.py does it', () => {
     expect(penaltyText(effectivePenalty(0.1, 2, '0%'), 0.1)).toBe('waived');
     expect(overrideText('0%')).toBe('');
     expect(overrideText('15%')).toBe('15');
-    expect(overrideText(0.15)).toBe('15');
+    expect(overrideText(15)).toBe('15');
     expect(overrideText('apply')).toBe('');
     expect(overrideText('waive')).toBe('');
     expect(overrideText(' half ')).toBe('half');

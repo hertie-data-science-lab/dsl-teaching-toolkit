@@ -2,6 +2,14 @@
 
 ## 0.11.0 (unreleased)
 
+- The late window and the late penalty inherit each on its own, like every other default
+  (they were one pair: a layer naming one half set the other to none). Setting only the
+  window keeps the inherited penalty, and vice versa; `late_window_days: 0` is still no late
+  work. The migration writes a 0.10 layer that named one half with the other as none
+  (`0` / `0%`). A bare number in a penalty is always a percentage, in the files and the
+  console alike: `10` is 10% and `0.5` is 0.5% (a bare number below 1 was a fraction, and
+  one of 1 or more was refused). This covers `late_penalty_per_day` and a unit's
+  `late_penalty`. The console's penalty fields save a plain number with its `%`.
 - The console's semester nav has **Materials** after Schedule: Released materials
   (`?cohort=<org>#materials`), the semester's materials repos as students have them, each
   file opening in the viewer, each released folder linked to its Release page and a released
