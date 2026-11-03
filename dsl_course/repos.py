@@ -6,11 +6,9 @@ from __future__ import annotations
 
 import json
 import time
-from fnmatch import fnmatch
 from typing import NamedTuple
 
-from .course import RETIRED_REPO_NAMES
-from .faults import NOT_MIGRATED
+from . import run
 from .ghcli import (
     ALL,
     FILES,
@@ -33,7 +31,7 @@ class _RepoReadFailed(RuntimeError):
 
 
 # Keyed by the casefolded `org/name`: GitHub's names are not case-sensitive, and callers do
-# not agree on the spelling. Cleared between tests (tests/conftest.py).
+# not agree on the spelling. Cleared by `run.reset`.
 _repos: dict[str, dict] = {}
 
 
@@ -77,6 +75,7 @@ def _forget_repo(kind: str, targets: frozenset[str]) -> None:
 
 
 on_write(_forget_repo)
+run.on_reset(_repos.clear)
 
 
 def repo_missing(org: str, name: str) -> bool:
@@ -482,67 +481,22 @@ def default_branch(org: str, name: str, *, fallback: str | None = None) -> str:
     raise RuntimeError(f"could not read {org}/{name}'s default branch: {detail}")
 
 
-SUPERSEDED_DESCRIPTIONS = {
-    # Claimed "enrolled students only", but grant_read_teams gives the `auditors` team read
-    # on every released repo too - so the repo table students land on carried a false claim
-    # about who can see the materials.
-    "Released course materials (enrolled students only)": (
-        "Released lectures, labs, readings, & other materials"
-    ),
-    # The wording that replaced the one above, superseded in its turn. A chain, not a
-    # rewrite: an org still on the oldest string has to reach the newest in one pass, so
-    # every link keeps pointing at the CURRENT text rather than at its immediate successor.
-    "Released lectures, labs, readings, and other materials": (
-        "Released lectures, labs, readings, & other materials"
-    ),
-    "Course materials (lectures/readings by session)": (
-        "Course materials (lectures/labs/readings/datasets/other) by session"
-    ),
-    # The site repo is generated and rewritten on every sync (site.py stamps that inside the
-    # repo itself), so its description says so where faculty see it: on the org's landing
-    # page, beside the repos they SHOULD open. "on push" went with it - true but about the
-    # mechanism, and the reader wants to know whether to touch it.
-    "Course website (auto-deployed on push)": (
-        "[do not touch]: Course website (auto-deployed)"
-    ),
-    # The wording before that one. Found on a semester scaffolded early enough to predate the
-    # rename, which is the whole reason this table is a mapping and not a single pair: a
-    # description set at creation stays until something converges it, so every wording we
-    # have ever written needs a row here or that org keeps it forever.
-    "Cohort course website (auto-deployed on push)": (
-        "[do not touch]: Course website (auto-deployed)"
-    ),
-}
+# Repo descriptions we have since reworded, old -> the CURRENT wording (never the next link:
+# an org on the oldest string must reach the newest in one pass). A description is set only
+# at creation, so a rewording reaches an existing repo through this table or not at all.
+# Emptied once every live org had converged (one Refresh after 14 Oct 2026).
+SUPERSEDED_DESCRIPTIONS: dict[str, str] = {}
 
 # Per TIER, because one old wording wants two different new ones. A semester org's `.github`
 # is machine-owned scaffolding faculty never open; a COURSE org's is where they actually
-# work - it holds dsl-course.yml and every workflow they run. A flat old -> new mapping
+# work - it holds course.yml and every workflow they run. A flat old -> new mapping
 # cannot tell those apart, so the tier picks the table. Same forcing function as above: a
 # reworded literal must be added here or convergence silently stops.
-# The semester config repo's description, as bootstrap_course creates it.
-_CONFIG_REPO_DESCRIPTION = (
-    "[visible to instructors only]: Everything you configure for this semester is here - "
-    "student roster, teams, schedule, and marking. Students never see it, and no PII "
-    "leaves this repo."
-)
-SUPERSEDED_SEMESTER_DESCRIPTIONS = {
-    "Org profile and configuration": "[do not touch]: Org profile and configuration",
-    "PRIVATE cohort config - roster (students.csv). No PII leaves here.": (
-        _CONFIG_REPO_DESCRIPTION
-    ),
-    # The wording before "cohort" and "term" became "semester" (decision 0012).
-    "[visible to instructors only]: Everything you configure for this cohort is here - "
-    "student roster, teams, term schedule, and marking. Students never see it, and no "
-    "PII leaves this repo.": _CONFIG_REPO_DESCRIPTION,
-}
+SUPERSEDED_SEMESTER_DESCRIPTIONS: dict[str, str] = {}
 # Descriptions that carry the repo's own name, so no one literal can key them: the old
 # ENDING -> the new one. `assign` names each semester-side template `<slug> - ...`.
-SUPERSEDED_DESCRIPTION_ENDINGS = {
-    " - cohort assignment template": " - semester assignment template",
-}
-SUPERSEDED_COURSE_DESCRIPTIONS = {
-    "Org profile and configuration": "[control panel]: Org profile & configuration",
-}
+SUPERSEDED_DESCRIPTION_ENDINGS: dict[str, str] = {}
+SUPERSEDED_COURSE_DESCRIPTIONS: dict[str, str] = {}
 
 
 class Converged(NamedTuple):
@@ -640,16 +594,7 @@ def create_repo(
 
     Sets `description` only on creation. Bringing an EXISTING repo's description up to a
     reworded one is converge_descriptions' job, off the listing the refresh already
-    holds - not this function's, which would have to pay a read per call to find out.
-
-    Refuses a RETIRED name (`course.RETIRED_REPO_NAMES`): a repo created there would end
-    the redirect GitHub keeps from the renamed one, and with it every link already sent."""
-    if name in RETIRED_REPO_NAMES:
-        log_err(
-            f"refused to create {org}/{name}: that name was retired and redirects to "
-            f"its renamed repo - {NOT_MIGRATED}: run the migration"
-        )
-        return False
+    holds - not this function's, which would have to pay a read per call to find out."""
     if f"{org}/{name}".casefold() in _repos:
         # This run has already read the repo object, so it is there: the POST would only
         # be refused. A release asks this of its dest on every tick.
@@ -678,98 +623,6 @@ def create_repo(
         return True
     log_err(f"failed to create repo {org}/{name}: {out[:200]}")
     return False
-
-
-# Path components a PUBLISHED course page must never carry - matched by NAME, at every
-# depth, case-insensitively, and as glob patterns so `.env.local` is caught alongside
-# `.env`. The public site copies whole discovered session folders wholesale, so anything a
-# faculty member happens to keep beside their teaching material is published with it: a
-# `solution/` next to the lab it answers, the `grading_config.yml` that says how it is
-# marked, the
-# hidden `tests/`, a `.env` with a live key. None of those is a release decision anyone
-# made; they are what "copy the folder" means.
-#
-# NOT a release policy for the semester path - `deploy` deliberately releases what faculty
-# name, including a solution, because a semester repo is private and marking sometimes needs
-# one. This is the PUBLIC site, where there is no such case.
-PUBLICATION_DENYLIST = (
-    "solution",
-    "solutions",
-    "grading_config.yml",
-    "grading.yml",  # the pre-rename name; the engine stopped reading it, this list has not
-    "tests",
-    ".env",
-    ".env.*",
-    ".git",
-)
-
-
-def is_denied_publication(name: str) -> bool:
-    """Whether one path COMPONENT is on PUBLICATION_DENYLIST."""
-    lowered = name.casefold()
-    return any(fnmatch(lowered, pattern) for pattern in PUBLICATION_DENYLIST)
-
-
-def has_denied_component(path: str) -> bool:
-    """Whether any component of `path` is on PUBLICATION_DENYLIST."""
-    return any(is_denied_publication(part) for part in path.split("/") if part)
-
-
-# Artefacts that are never course material, in any course, on any page - matched by NAME,
-# at every depth, case-insensitively. What a file manager drops in a folder it opened
-# (`.DS_Store`, `Thumbs.db`, `desktop.ini`), the empty placeholder that holds an empty
-# folder open in git (`.gitkeep`), and the caches an interpreter and a notebook leave
-# behind (`__pycache__/`, `.ipynb_checkpoints/`). A semester's public site listed four of
-# these as its course materials and counted them into its sessions - "6 files" over a
-# session holding five, one of which was a `.gitkeep`.
-#
-# Kept apart from PUBLICATION_DENYLIST deliberately, and it is not an oversight that
-# neither list mentions the other. That one is a SECURITY boundary: a `solution/`, a
-# `grading_config.yml`, a `.env` must not leak, and every entry earns its place by what it
-# would
-# cost to publish. Nothing here leaks anything - it is clutter. Folding the two together
-# would let an edit meant for a list of nuisances widen the list that keeps answers away
-# from a class.
-#
-# NOT a rule about dots, which cannot be written honestly: `.Rprofile`, `.env.example` and
-# a `.devcontainer/` are real course material a dot rule would hide, while `__pycache__/`
-# and `node_modules/` are clutter and are not dotted. A closed list of NAMES is the only
-# form of this rule that is true, which is also why it is short and stays short.
-#
-# The rule is "never copied out to students, never listed on a page" - NOT "never
-# committed". `.gitkeep` still does its job wherever this toolkit writes one (the scaffold's
-# empty `lectures/01_session-1/`, the site repo's own collections) and in a course's SOURCE
-# repo, where it is what holds an unwritten future session open until someone writes it.
-NEVER_MATERIAL = frozenset(
-    {
-        ".DS_Store",
-        ".gitkeep",
-        "Thumbs.db",
-        "desktop.ini",
-        "__pycache__",
-        ".ipynb_checkpoints",
-    }
-)
-
-_NEVER_MATERIAL_FOLDED = frozenset(n.casefold() for n in NEVER_MATERIAL)
-
-
-def is_never_material(name: str) -> bool:
-    """Whether one path COMPONENT is on NEVER_MATERIAL.
-
-    Case-insensitive: `.DS_Store`, `.ds_store`, `Thumbs.db` and `desktop.ini` all appear in
-    the wild, and which spelling a machine wrote is not a decision about course content."""
-    return name.casefold() in _NEVER_MATERIAL_FOLDED
-
-
-def has_never_material_component(path: str) -> bool:
-    """Whether any component of `path` is on NEVER_MATERIAL.
-
-    Component-wise, because two entries are DIRECTORY names: a copytree filter skipping
-    `__pycache__` skips the subtree with it, but a listing path holds `/`-joined strings,
-    where `__pycache__/lab.cpython-312.pyc` is one entry and only its parent gives it
-    away."""
-    return any(is_never_material(part) for part in path.split("/") if part)
 
 
 def _failed_on(person: bool, public: str, detail: str) -> None:

@@ -9,8 +9,8 @@ import json
 import re
 import time
 from collections.abc import Iterable
-from functools import cache, lru_cache
 
+from . import run
 from .ghcli import (
     UNKNOWN_LOGIN,
     gh,
@@ -337,14 +337,14 @@ def set_org_membership(org: str, login: str, role: str = "member") -> bool:
     return False
 
 
-def add_team_member(org: str, team_slug: str, login: str, role: str = "member") -> bool:
+def add_team_member(org: str, team_slug: str, login: str) -> bool:
     code, out = gh(
         "api",
         "--method",
         "PUT",
         f"orgs/{org}/teams/{team_slug}/memberships/{login}",
         "--field",
-        f"role={role}",
+        "role=member",
     )
     if code == 0:
         return True
@@ -359,7 +359,7 @@ def add_team_member(org: str, team_slug: str, login: str, role: str = "member") 
 #
 # The run that CREATES a team never reads it (see `reconcile_team_members(just_created=)`).
 # The waiting is for the run that finds it already there - a later run, or the other of two
-# workflows fired by the same teams.csv push - and is bounded by a PER-PROCESS budget. Once
+# workflows fired by the same students.csv push - and is bounded by a PER-PROCESS budget. Once
 # one ladder's worth of waiting is spent, every later 404 in the same run answers at once -
 # so a sync over many teams, or one that meets a team that really is gone, adds at most
 # `_LAG_BUDGET` seconds in total, never that much per team. Five minutes sits well inside the
@@ -457,7 +457,7 @@ def remove_team_member(org: str, team_slug: str, login: str) -> bool:
     return code == 0
 
 
-@lru_cache(maxsize=1)
+@run.per_run()
 def acting_login() -> str | None:
     """Login of the token `gh` is currently authenticated as (the bot, in CI) - off the
     budget line's `GET /user` when this is a CLI run, which has already asked."""
@@ -503,7 +503,7 @@ def remove_org_membership(org: str, login: str) -> bool:
     return code == 0 or is_missing_resource(out)
 
 
-@cache
+@run.per_run()
 def get_org_owners(org: str) -> frozenset[str] | None:
     """Active Owners of `org` - see reconcile_team_members for why these are never
     pruned from any team.

@@ -48,14 +48,16 @@ teams:
 | Field | Owner | Student sees |
 | --- | --- | --- |
 | `info.submitted`, `info.days_late`, `info.contributions`, `info.autograde`, `info.completion`, `info.submitted_note` | toolkit, refreshed until frozen | `submitted`, `days_late` |
-| `score_individual` (per question, or one value) | you | the total, and the breakdown behind it |
+| `score_individual` (per question, or one value) | you | the score, and its marks per question |
 | `feedback_group`, `feedback_individual` | you | yes (own + team) |
-| `feedback_per_question` (where questions are declared; the team's on a group sheet) | you, optional | yes: a list after the overall feedback, inside the team's quote on a group sheet; a blank cell is not sent |
-| `score_group` | you | never shown as-is; each member's gradebook shows only the final grade it derives - the score itself too, but only for a team with no repo of its own (`shared_dropbox_repo`, `external`) |
-| `adjustment_individual` | you - the ONLY override of the mark, in both shapes | **no** - only the final grade it produced |
+| `feedback_per_question` (where questions are declared; the team's on a group sheet) | you, optional | yes (unless marks per question are withheld): a list after the overall feedback, inside the team's quote on a group sheet; a blank cell is not sent |
+| `score_group` | you | yes: every member's gradebook shows the team's score and its marks per question, beside their own final grade |
+| `adjustment_individual` | you - one person's change to their final grade, in both shapes (the late penalty has its own override, `late_penalty`) | yes, their own only, as its own line (`adjustment +4`); never a team-mate's |
 | `days_late` (per student or team, top level; `submit_via: external` only, which has no `info:`) | you: whole days late, blank is 0 | as `days_late`, with the penalty it costs |
 | `late_penalty` (per student or team, beside `info:`; optional) | you: `apply` (the default), `waive`, or the whole penalty as `15%` / `0.15` | with their marks (Distribute grades), the penalty that applied: `-20%`, `waived` or `-15% (set by hand)`; a submission receipt quotes the late rule's own figure only |
 | `notes_not_shared_with_students` (each person's; on a group sheet the team's own too, beside `feedback_group`) | you | **never** |
+| `marked_by` (per student or team) | the console, on each unit whose marks a save changes: the signed-in login | **never** |
+| `snippets` (top level, beside `submissions:` / `teams:`) | you: reusable feedback comments for this assignment, edited in the console | **never** |
 | final grade | derived on output, never stored: score less the late penalty (at most the whole score), plus the adjustment, floored at 0 | yes |
 
 The final mark is `total × (1 − rate × days_late) + adjustment`, floored at 0. A late
@@ -84,9 +86,19 @@ per student or team. On a team assignment a team's ▸ shows its members, each w
 team with any of those set opens by itself. On an individual one the Adjustment column sits
 behind the **Adjustments** chip. Every column header has a `?`; the **From the submission** heading
 folds its columns into one (folded to begin with in a window narrower than 1400px; your choice is kept). Drag a column's edge to resize it (double-click puts it back; widths are kept
-in this browser), and open any text box's corner ⤢ for a large editor. The filters (All, Unmarked, Late,
+in this browser). The grid holds marks and numbers: Feedback and Private notes show one line each
+(✎ counts the questions with their own feedback), and clicking one opens the row's **side panel**
+with the overall feedback, the feedback per question, the private notes, links to the submission,
+the per-test results (with automatic tests) and the executed notebook (with the completion check), the assignment's **snippets** (reusable comments:
+one click puts one into the feedback box you were last in; **Edit snippets** changes the list, saved
+with Save marks) and that student's Student view. While it is open it follows the row you work in;
+Escape or × closes it. The filters (All, Unmarked, Late,
 Held) count from the sheet as typed, and a held row says why, by the same rules as Return marks.
-Enter moves down a column of numbers; in a text box Ctrl+Enter (⌘+Enter) does. **Student view**
+Enter moves down a column of numbers; in the side panel Ctrl+Enter (⌘+Enter) moves to the same box
+on the next row. Saving records `marked_by` on each row whose marks you changed; once any row has
+one, a **Markers** table under the grid gives each marker's count, mean and median score (before
+penalty and adjustment), and **Marked by** in the filter bar narrows the grid to one marker's rows
+for a second pass. **Student view**
 shows what one student's marks page will hold. Unsaved marks stay in this browser until saved, and
 are offered back (Restore or Discard) on the next visit; a save that meets someone else's keeps
 both and says how many rows they changed. **Return marks to N** counts the students (teams) it
@@ -198,9 +210,12 @@ posted into a repo: a student has one address for a mark, and a repo whose `visi
 could change is not it.
 
 - **The private gradebook** `grades-<handle>`: `grades.yml` and a rendered `README.md`, in
-  one commit. The student sees their final grade, never the sum behind it. Each member of
-  a team reads the team's shared feedback here, in their own repo, beside their own grade.
-- **`.system/semester-gradebook.csv`** in `semester-config` - the semester grades file, one row per
+  one commit. The student sees the whole breakdown, so the numbers add up: the marks per
+  question, the score (the team's, on a group assignment), how late it was and the penalty
+  (whenever the submission was timed), their own adjustment where there is one, and the
+  final grade. Each member of a team reads the team's shared feedback here, in their own
+  repo, beside their own grade.
+- **`.system/semester-grades.csv`** in `semester-config` - the semester grades file, one row per
   enrolled student including the ungraded. Private, never logged.
 - **An email** with a link and no marks in it.
 
@@ -210,9 +225,19 @@ run that fails afterwards never mails anyone twice. If some emails fail, they ar
 only when you press Return marks again; if every one fails, `marks_return_datetime` tries
 again on its own. It also keeps trying while any mark is held, and sends only what has not
 gone out. What each student or team was last told is kept in
-`.system/returned/<assignment>.yml`; one missing from it still has news to hear. A
-`grading_config.yml` refused as `NOT_MIGRATED` stops its sheet refresh and Return marks
-until the migration runs. Untick `notify` to skip the email.
+`.system/returned/<assignment>.yml`; one missing from it still has news to hear. A refused
+`grading_config.yml` (`RUN_SETTING_IN_TEMPLATE`) stops
+its sheet refresh and Return marks until it is fixed. Untick `notify` to skip the email.
+
+The marks per question and the feedback per question go to the page unless the
+assignment's run setting `marks_per_question` is `false` (its `schedule.yml` entry, see
+[the run settings](07-schedule-releases.md#assignments)).
+Set it on the assignment's **How this semester runs it**, or with Return marks' **Include
+marks per question** box: the box starts at the setting, a preview follows the box, and the
+real run saves a changed box for the assignment before it goes, so the automatic return does
+the same. For one run only, the workflow's `per_question` input (`true` / `false`) or the
+CLI's `--per-question` / `--no-per-question` overrides it. The score, late penalty,
+adjustment and final grade go either way.
 
 Two options, both off by default. `include_feedback` puts the markers' feedback text into
 the email: the overall feedback, then each question's. `receipt_note` posts one line,
@@ -235,7 +260,8 @@ A preview waits for nothing.
 Off unless you ask for it. `autograde: true` in the template's `grading_config.yml` runs the
 hidden tests from its `solution` branch at the late cutoff, against the frozen pin, in a sandbox with the token stripped. The
 count lands in `info.autograde` (`7/9`) for your information only - it is never a mark by
-itself and a student never sees it. Per-test detail goes to `semester-config/.system/autograde/`.
+itself and a student never sees it. Per-test detail goes to `semester-config/.system/autograde/<slug>/<unit>.json`;
+the Marks tab's Tests cell links to it, and its Completion cell to the executed notebook beside it.
 To regrade, delete `.system/autograde/<slug>/`.
 
 **Writing the tests.** One test function per behaviour, named for it: the per-test detail lists
@@ -352,18 +378,20 @@ freeze carries on.
 
 ## Archiving the semester
 
-**Ask for it once and it happens on its own.** Write an `archive:` block in `schedule.yml`
-and the scheduler archives the whole semester org on its date. You do not have to remember
+**Ask for it once and it happens on its own.** Write a `type: archive` entry in the
+`semester:` block of `schedule.yml` and the scheduler archives the whole semester org on its date. You do not have to remember
 it, and nobody has to be around for it.
 
 ```yaml
-archive:
-  event_datetime: 2027-02-16   # optional - default: semester_end + 60 days
-  show_on_site: true     # optional - default: true. A "Semester archived" row on the site
+semester:
+  archive:
+    type: archive
+    event_datetime: 2027-02-16   # optional - default: the end + 60 days
+    show_on_site: true           # optional - default: true. A "Semester archived" row on the site
 ```
 
-The block is the switch: `archive:` on its own is enough, and means sixty days after your
-`semester_end`. **Without the block, nothing is ever archived** - the semester stays live and
+The entry is the switch: `type: archive` on its own is enough, and means sixty days after
+the semester's `type: end` date. **Without it, nothing is ever archived** - the semester stays live and
 writable, and its digest issue says so, semester after semester.
 
 **A fortnight before**, the semester gets one issue in `semester-config` and one email to
@@ -392,14 +420,14 @@ project teams are untouched.
 To reopen anything - a grade appeal, a late submission - un-archive that repo from its own
 Settings page. It comes back exactly as it was, write access included.
 
-**Archive semester** is the button for archiving a semester early, or at all. `preview` is on
-by default and prints the counts; the real run **refuses** until the archive date has
-arrived, and `force` overrides that - which is how a semester with no `archive:` block, and
+**Archive** (the Console, or `python -m dsl_course semester.archive`) archives a semester
+early, or at all. A preview prints the counts; the real run **refuses** until the archive date has
+arrived, and `force` overrides that - which is how a semester with no `type: archive` entry, and
 so no date, is archived. Run it again if it fails part-way - it picks up where it stopped,
 and only the last step seals the record.
 
 `semester-config` is now the semester's whole record of assessment - roster, teams, schedule,
-grading sheets, autograde detail, what was sent to whom, and `.system/semester-gradebook.csv`. Delete
+grading sheets, autograde detail, what was sent to whom, and `.system/semester-grades.csv`. Delete
 the repository, and the archived student repos with it, when your institution's retention
 period for that record expires.
 

@@ -1,0 +1,10 @@
+# INSTRUCTOR-OWNED - yours to edit freely; edits here are not overwritten.
+#
+# The public website: an open version of one materials repo, for anyone.
+# Edit it on the console's Public website tab, or here.
+enabled: true   # false: nothing is published
+source_repo: course-materials-f2026   # the materials repo it is built from
+readings_mode: reading-list   # reading-list, actual-readings or none
+include_lectures: true   # publish the repo's files
+# Paths kept off the website, as in .releaseignore:
+withhold: []

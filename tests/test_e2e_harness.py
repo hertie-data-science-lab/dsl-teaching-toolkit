@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import dataclasses
 import importlib
+import json
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -23,13 +24,18 @@ from dsl_course import (
     collect,
     course,
     ghcli,
-    grades,
+    gradebook,
+    grading_sheet,
+    grading_spec,
     repos,
     roster,
     scaffold,
     schedule,
     settings,
+    team_formation,
 )
+from dsl_course.gh_contents import load_yaml_lines
+from dsl_course.ops.request import parse_request
 from tests.e2e import (
     allowlist,
     cleanup,
@@ -310,7 +316,7 @@ def test_the_harness_waits_on_the_group_the_renderer_declares():
 
 
 def test_a_schedule_push_that_drives_no_tick_is_not_an_error(monkeypatch):
-    # `dispatch-scheduled-release.yml` is only in semesters that have refreshed since it
+    # `dispatch.yml` is only in semesters that have refreshed since it
     # shipped. Where it is not, the edit starts nothing and the harness carries on to its
     # own dispatch rather than timing out.
     monkeypatch.setattr(drive, "_runs", lambda repo, workflow, limit=30: [{"id": 1}])
@@ -348,11 +354,10 @@ def test_only_unfinished_runs_count_as_busy():
 # ----------------------------------------------------------- the fenced schedule edit
 
 SCHEDULE = """\
-timezone: Europe/Berlin
-
 assignments:
   assignment-1:
-    course_source_repo: assignment-1-f2026
+    number: 1
+    template: assignment-1-f2026
     due_datetime: 2026-10-13
 
 events:
@@ -362,7 +367,8 @@ events:
 
 BLOCK = """\
   assignment-90-e2eab12cd:
-    course_source_repo: assignment-90-e2eab12cd
+    number: 90
+    template: assignment-90-e2eab12cd
     due_datetime: 2026-09-04T23:59
 """
 
@@ -415,7 +421,7 @@ def test_the_round_trip_leaves_the_file_byte_for_byte_as_it_was(schedule):
 
 def test_a_schedule_with_no_assignments_key_is_refused():
     with pytest.raises(ValueError, match="assignments:"):
-        schedule_edit.insert_block("timezone: Europe/Berlin\n", "e2eab12cd", BLOCK)
+        schedule_edit.insert_block("semester: {}\n", "e2eab12cd", BLOCK)
 
 
 # ------------------------------------------------------------- what cleanup may delete
@@ -622,7 +628,7 @@ def test_cleanup_refuses_without_the_transport_fence(monkeypatch):
 
 # ------------------------------------------------- putting the shared files back exactly
 
-# `csv.writer` writes CRLF, so this is the shape `.system/semester-gradebook.csv` really has on
+# `csv.writer` writes CRLF, so this is the shape `.system/semester-grades.csv` really has on
 # disk - trailing newline and all. Every byte of it has to survive the round trip.
 CRLF_CSV = b"hertie_email,name\r\nada@x,Ada\r\n"
 
@@ -648,9 +654,9 @@ def test_a_recorded_file_keeps_every_byte_it_had(monkeypatch):
     # a different blob, and the estate check at teardown - which compares blob shas -
     # called it drift on every single run.
     encoded = base64.b64encode(CRLF_CSV).decode()
-    _reads(monkeypatch, {".system/semester-gradebook.csv": (0, encoded)})
+    _reads(monkeypatch, {".system/semester-grades.csv": (0, encoded)})
     assert cleanup.file_bytes(
-        SEMESTER, "semester-config", ".system/semester-gradebook.csv"
+        SEMESTER, "semester-config", ".system/semester-grades.csv"
     ) == (CRLF_CSV)
 
 
@@ -667,12 +673,10 @@ def test_a_read_that_failed_is_not_read_as_absent(monkeypatch):
     # real file out of a real org.
     _reads(
         monkeypatch,
-        {".system/semester-gradebook.csv": (1, "gh: API rate limit exceeded")},
+        {".system/semester-grades.csv": (1, "gh: API rate limit exceeded")},
     )
     with pytest.raises(RuntimeError, match="could not read"):
-        cleanup.file_bytes(
-            SEMESTER, "semester-config", ".system/semester-gradebook.csv"
-        )
+        cleanup.file_bytes(SEMESTER, "semester-config", ".system/semester-grades.csv")
 
 
 def test_the_restore_writes_back_exactly_what_was_recorded(monkeypatch):
@@ -689,7 +693,7 @@ def test_the_restore_writes_back_exactly_what_was_recorded(monkeypatch):
             SEMESTER,
             "semester-config",
             {
-                ".system/semester-gradebook.csv": CRLF_CSV,
+                ".system/semester-grades.csv": CRLF_CSV,
                 ".system/gradebook/distributed.csv": None,
             },
         )
@@ -697,7 +701,7 @@ def test_the_restore_writes_back_exactly_what_was_recorded(monkeypatch):
     )
     ((org, repo, files, delete),) = written
     assert (org, repo) == (SEMESTER, "semester-config")
-    assert files == {".system/semester-gradebook.csv": CRLF_CSV}
+    assert files == {".system/semester-grades.csv": CRLF_CSV}
     assert delete == (".system/gradebook/distributed.csv",)
 
 
@@ -707,10 +711,10 @@ def test_what_was_read_is_what_is_written_back(monkeypatch):
     # file makes no commit at all.
     _reads(
         monkeypatch,
-        {".system/semester-gradebook.csv": (0, base64.b64encode(CRLF_CSV).decode())},
+        {".system/semester-grades.csv": (0, base64.b64encode(CRLF_CSV).decode())},
     )
     recorded = cleanup.file_bytes(
-        SEMESTER, "semester-config", ".system/semester-gradebook.csv"
+        SEMESTER, "semester-config", ".system/semester-grades.csv"
     )
     written: list[dict] = []
     monkeypatch.setattr(
@@ -721,9 +725,9 @@ def test_what_was_read_is_what_is_written_back(monkeypatch):
         ),
     )
     cleanup.restore_files(
-        SEMESTER, "semester-config", {".system/semester-gradebook.csv": recorded}
+        SEMESTER, "semester-config", {".system/semester-grades.csv": recorded}
     )
-    assert written == [{".system/semester-gradebook.csv": CRLF_CSV}]
+    assert written == [{".system/semester-grades.csv": CRLF_CSV}]
 
 
 def _pipeline_module(monkeypatch):
@@ -749,7 +753,7 @@ def test_the_lock_file_goes_back_even_when_the_walk_died_before_distribute(monke
     # back: cleanup sweeps by run id, and this file carries none.
     module = _pipeline_module(monkeypatch)
     assert module._config_restore(b"assignments: {}\n", None) == {
-        grades.TEAM_LOCK_PATH: b"assignments: {}\n"
+        team_formation.TEAM_LOCK_PATH: b"assignments: {}\n"
     }
 
 
@@ -768,9 +772,9 @@ def test_a_lock_file_that_was_not_there_is_restored_by_deleting_it(monkeypatch):
         },
     )
     assert module._config_restore(None, recorded) == {
-        grades.TEAM_LOCK_PATH: None,
-        grades.SEMESTER_CSV_NAME: CRLF_CSV,
-        grades.DISTRIBUTED_PATH: b"target,channel\n",
+        team_formation.TEAM_LOCK_PATH: None,
+        gradebook.SEMESTER_CSV_NAME: CRLF_CSV,
+        gradebook.DISTRIBUTED_PATH: b"target,channel\n",
     }
 
 
@@ -792,26 +796,23 @@ def test_the_block_the_harness_really_inserts_is_valid_yaml(monkeypatch):
     indentation slip here would not fail the harness, it would fail the semester."""
     module = _pipeline_module(monkeypatch)
     when = datetime(2026, 9, 4, 14, 0)
-    block = module._schedule_block("assignment-90-e2eab12cd", when, when)
-    doc = yaml.safe_load(schedule_edit.insert_block(SCHEDULE, "e2eab12cd", block))
-    assert set(doc) == {"timezone", "assignments", "events"}
+    shape = shapes.BY_NAME["private"]
+    block = module._schedule_block("assignment-90-e2eab12cd", when, when, shape, 90)
+    text = schedule_edit.insert_block(SCHEDULE, "e2eab12cd", block)
+    doc = yaml.safe_load(text)
+    assert set(doc) == {"assignments", "events"}
     entry = doc["assignments"]["assignment-90-e2eab12cd"]
-    assert entry["course_source_repo"] == "assignment-90-e2eab12cd"
+    assert entry["template"] == "assignment-90-e2eab12cd" and "repo_name" not in entry
     assert set(entry) <= schedule.KNOWN_ASSIGNMENT
     # The due date and the cutoff are separate instants: collapsing them would skip the
     # refresh pass entirely, which is most of what the live run is there to exercise. And
     # both halves of the late rule, or the penalty reads as "no such rule".
-    shape = shapes.BY_NAME["private"]
-    run = module._instance_block("assignment-90-e2eab12cd", shape)
-    instance = settings.parse_instance(
-        schedule_edit.insert_block(
-            schedule_edit.with_assignments_key(""), "e2eab12cd", run
-        )
-    )
-    assert not instance.faults
-    block = instance.blocks["assignment-90-e2eab12cd"]
-    assert block["late_window_days"] == module.LATE_WINDOW_DAYS == 1
-    assert block["late_penalty_per_day"] == module.LATE_PENALTY
+    sched = schedule.parse(load_yaml_lines(text))
+    assert sched.faults == []
+    run = sched.assignments["assignment-90-e2eab12cd"].settings
+    assert run["late_window_days"] == module.LATE_WINDOW_DAYS == 1
+    assert run["late_penalty_per_day"] == module.LATE_PENALTY
+    assert run["visibility"] == "private"
 
 
 # ------------------------------------------------- the timeline, against the engine
@@ -857,14 +858,10 @@ def test_the_preflight_itself_refuses_a_start_near_midnight(monkeypatch):
 def _engine_reads(monkeypatch, module, handout, due) -> schedule.Schedule:
     """What the ENGINE makes of the two fenced blocks the harness writes for `due`: the
     schedule text through `schedule.parse`, the run settings through the real cascade."""
-    blocks = schedule_edit.insert_block(
-        schedule_edit.with_assignments_key(""), RUN, module._instance_blocks(RUN)
-    )
-    settings.semester_blocks.cache_clear()
-    monkeypatch.setattr(settings, "_assignments_text", lambda org: blocks)
     text = schedule_edit.insert_block(
         SCHEDULE, RUN, module._schedule_blocks(RUN, handout, due)
     )
+    settings.semester_defaults.cache_clear()
     sched = schedule.parse(yaml.safe_load(text))
     sched.org = SEMESTER
     return sched
@@ -1185,11 +1182,11 @@ def test_the_config_the_harness_writes_parses_to_the_shape_it_meant(shape):
     # The whole run rests on these two files: the template's `submit_via` and the
     # semester's run settings, and a value the parser drops hands out the DEFAULT shape
     # under another name.
-    template = grades.parse_grading_spec(shapes.configure(_seeded(shape), shape))
-    block = yaml.safe_dump({"assignments": {"a": shapes.run_settings(shape)}})
-    (fault,) = settings.parse_instance(block).faults or (None,)
-    assert fault is None
-    spec = dataclasses.replace(template, **settings.parse_instance(block).blocks["a"])
+    template = grading_spec.parse_grading_spec(shapes.configure(_seeded(shape), shape))
+    dropped: list = []
+    run = settings.inline_settings(shapes.run_settings(shape), "assignments.a", dropped)
+    assert dropped == []
+    spec = dataclasses.replace(template, **run)
     assert spec.submit_via == shape.submit_via
     assert spec.submit_shape == shape.key
     assert spec.submit_url == shape.submit_url
@@ -1248,7 +1245,12 @@ def test_the_definition_is_read_off_the_solution_branch(monkeypatch):
     )
     assert shapes.read_config("course-org", "assignment-90-x") == ("title: x\n", "sha1")
     assert seen == [
-        ("course-org", "assignment-90-x", grades.GRADING_FILE, course.SOLUTION_BRANCH)
+        (
+            "course-org",
+            "assignment-90-x",
+            grading_spec.GRADING_FILE,
+            course.SOLUTION_BRANCH,
+        )
     ]
 
 
@@ -1270,7 +1272,9 @@ def test_the_definition_is_written_back_on_the_solution_branch(monkeypatch):
     )
     shapes.write_config("course-org", "assignment-90-x", "title: x\n", "sha1")
     args, kw = calls[0]
-    assert f"repos/course-org/assignment-90-x/contents/{grades.GRADING_FILE}" in args
+    assert (
+        f"repos/course-org/assignment-90-x/contents/{grading_spec.GRADING_FILE}" in args
+    )
     assert f"branch={course.SOLUTION_BRANCH}" in args
     # The sha the text was READ at, so a commit that landed in between is refused rather
     # than silently reverted.
@@ -1366,26 +1370,24 @@ def test_the_run_puts_one_schedule_entry_per_shape_in_one_fence(monkeypatch):
     due = datetime(2026, 9, 4, 15, 0)
     blocks = module._schedule_blocks("e2eab12cd", when, due)
     doc = yaml.safe_load(schedule_edit.insert_block(SCHEDULE, "e2eab12cd", blocks))
-    assert set(doc) == {"timezone", "assignments", "events"}
+    assert set(doc) == {"assignments", "events"}
     mine = set(doc["assignments"]) - {"assignment-1"}
     assert mine == {shapes.slug("e2eab12cd", s) for s in shapes.SHAPES}
     for slug in mine:
         entry = doc["assignments"][slug]
-        assert entry["course_source_repo"] == slug
+        assert entry["template"] == slug and "repo_name" not in entry
         assert set(entry) <= schedule.KNOWN_ASSIGNMENT
-    # The run settings of all five, in one fence of the semester's assignments.yml, each
-    # with a late window so the due date and the cutoff stay separate instants.
-    instance = settings.parse_instance(
-        schedule_edit.insert_block(
-            schedule_edit.with_assignments_key(""),
-            "e2eab12cd",
-            module._instance_blocks("e2eab12cd"),
-        )
+    # Each with its own number and a late window, so the due date and the cutoff stay
+    # separate instants.
+    sched = schedule.parse(
+        load_yaml_lines(schedule_edit.insert_block(SCHEDULE, "e2eab12cd", blocks))
     )
-    assert not instance.faults and set(instance.blocks) == mine
-    for block in instance.blocks.values():
-        assert block["late_window_days"] == module.LATE_WINDOW_DAYS
-        assert block["late_penalty_per_day"] == module.LATE_PENALTY
+    assert sched.faults == []
+    assert len({sched.assignments[slug].number for slug in mine}) == len(mine)
+    for slug in mine:
+        run = sched.assignments[slug].settings
+        assert run["late_window_days"] == module.LATE_WINDOW_DAYS
+        assert run["late_penalty_per_day"] == module.LATE_PENALTY
     # And removing the one fence takes all five out again.
     fenced = schedule_edit.insert_block(SCHEDULE, "e2eab12cd", blocks)
     assert schedule_edit.remove_block(fenced, "e2eab12cd") == SCHEDULE
@@ -1428,7 +1430,7 @@ def test_every_comment_the_press_left_is_scanned(monkeypatch):
 
 def _student_row(handle: str, role: str = "enrolled"):
     return roster.Student(
-        hertie_email=f"{handle}@example.org",
+        email=f"{handle}@example.org",
         name=handle,
         github_handle=handle,
         github_id="1",
@@ -1475,18 +1477,19 @@ submissions:
     info:
     score_individual:
     feedback_individual:
-    {grades.NOTES_KEY}:
+    {grading_sheet.NOTES_KEY}:
 """
 
 
 def _stub_estate(monkeypatch, module) -> list[tuple[str, dict]]:
     """Answer every live call the walk makes. Returns the dispatch log."""
     dispatched: list[tuple[str, dict]] = []
+    monkeypatch.setattr(module, "acting_login", lambda: "e2e-bot")
 
     def content(org, repo, path, ref=""):
         if path.endswith("schedule.yml"):
             return SCHEDULE
-        if path.startswith(f"{grades.SHEETS_DIR}/"):
+        if path.startswith(f"{grading_sheet.SHEETS_DIR}/"):
             return SHEET_TEXT
         if path.startswith("_assignments/"):
             return '---\nsubmit_shape: "assignment-repo-private"\n---\n'
@@ -1502,7 +1505,7 @@ def _stub_estate(monkeypatch, module) -> list[tuple[str, dict]]:
     monkeypatch.setattr(module.schedule_edit, "put_schedule", lambda *a, **k: True)
     monkeypatch.setattr(module.schedule_edit, "put_instance", lambda *a, **k: True)
     monkeypatch.setattr(module.discovery, "list_org_repos", lambda org: [])
-    monkeypatch.setattr(module.grades, "find_receipts_issue", lambda org, repo: None)
+    monkeypatch.setattr(module.receipts, "find_receipts_issue", lambda org, repo: None)
     monkeypatch.setattr(
         module.repos,
         "direct_collaborators",
@@ -1598,14 +1601,21 @@ def test_the_walk_presses_new_assignment_once_per_shape_with_its_own_answers(
     module = _pipeline_module(monkeypatch)
     dispatched = _stub_estate(monkeypatch, module)
     module._walk(RUN, {})
-    presses = [i for w, i in dispatched if w == module.NEW_ASSIGNMENT]
+    presses = [json.loads(i["request"]) for w, i in dispatched if w == module.CONSOLE]
     assert len(presses) == len(shapes.SHAPES)
-    for shape, inputs in zip(shapes.SHAPES, presses, strict=True):
-        assert inputs["semester"] == f"{RUN}-{shape.name}"
-        assert inputs["submit_via"] == shape.submit_via
-        assert "visibility" not in inputs  # the semester's, in assignments.yml
-        assert inputs["autograde"] is shape.autograde
-        assert inputs["assignment_number"] == cleanup.ASSIGNMENT_NUMBER
+    for shape, request in zip(shapes.SHAPES, presses, strict=True):
+        # The request the Console sends (decision 0041), and one it would accept.
+        parse_request(json.dumps(request))
+        assert (request["op"], request["actor"], request["preview"]) == (
+            "assignment.create",
+            "e2e-bot",
+            False,
+        )
+        args = request["args"]
+        assert args["name"] == shapes.title(RUN, shape)
+        assert args["submit_via"] == shape.submit_via
+        assert "visibility" not in args  # the semester's, in assignments.yml
+        assert args["autograde"] is shape.autograde
 
 
 def test_the_walk_drives_the_ticks_in_the_order_the_passes_need(monkeypatch):

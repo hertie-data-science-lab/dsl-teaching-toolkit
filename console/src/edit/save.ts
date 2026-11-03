@@ -5,9 +5,10 @@
 
 import type { ValidateFunction } from 'ajv/dist/2020';
 import { useState } from 'preact/hooks';
-import type { Env } from '../env';
+import { useEnv, type Env } from '../env';
 import { ConflictError, authorOf, wait, type GitHubClient } from '../github/client';
 import type { Problem } from '../model/types';
+import { deepEqual } from './yamlText';
 
 export interface Target {
   owner: string;
@@ -138,7 +139,7 @@ export interface Step {
 }
 
 /**
- * Commit one file, then a second that depends on it (the schedule, then assignments.yml).
+ * Commit one file, then a second that depends on it (students.csv, then the engine's roster).
  * `afterFirst` runs as soon as the first commit lands, whatever happens next, so a retry
  * never writes it twice. A second commit that fails is reported as `partial: <why>`: the
  * first file is saved and the message says so.
@@ -174,4 +175,25 @@ export function useSave(env: Env | null): [SaveState, (t: Target, text: string |
     return saveText(env, t, text, sha, opts, setState);
   };
   return [state, run, setState];
+}
+
+/**
+ * A settings group's draft over `base`, and its save: `set` replaces the draft and clears a
+ * finished save line, `run` saves and drops the draft once written.
+ */
+export function useDraftSave<T>(base: T) {
+  const env = useEnv();
+  const [draft, setDraft] = useState<T | null>(null);
+  const [save, runSave, setSave] = useSave(env);
+  const cur = draft ?? base;
+  const set = (v: T) => {
+    setDraft(v);
+    if (save.kind !== 'busy') setSave({ kind: 'idle' });
+  };
+  const run: typeof runSave = async (...a) => {
+    const ok = await runSave(...a);
+    if (ok) setDraft(null);
+    return ok;
+  };
+  return { env, cur, set, save, setSave, run, unchanged: deepEqual(cur, base) };
 }

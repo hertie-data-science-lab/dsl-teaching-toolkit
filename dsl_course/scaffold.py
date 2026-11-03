@@ -6,13 +6,12 @@ code, so a new repo is always laid out the way the Release actions expect.
     scaffold materials   --org X --semester f2026                 -> course-materials-f2026
     scaffold assignment  --org X --name "Neural networks"         -> assignment-neural-networks
 
-Materials repos get `lectures/`, `readings/` and `labs/` `01_session-1/` skeletons (any
-top-level directory with an ordinal-prefixed subdirectory is a releasable section - add
-more, e.g. `datasets/`, freely; delete `labs/` if unused) and the run-from-repo Release
-workflows. Assignment repos get a starter on `main` for each format asked for (no tests -
-grading is faculty-side) and a `solution` branch carrying the model solution,
-`grading_config.yml`, and the HIDDEN tests, so generate never ships any of them to
-students.
+Materials repos get empty `lectures/`, `labs/` and `readings/` folders (names that mean
+nothing to the toolkit - the schedule says what each release is, decision 0038; add, rename
+or delete folders freely) and the run-from-repo Release workflows. Assignment repos get a
+starter on `main` for each format asked for (no tests - grading is faculty-side) and a
+`solution` branch carrying the model solution, `grading_config.yml`, and the HIDDEN tests,
+so generate never ships any of them to students.
 
 A materials repo can start from last year's instead of from the stubs: `--copy-from
 <repo>` copies every branch of it, history and all, and rewrites only the SYSTEM-owned
@@ -35,6 +34,7 @@ from .central import CENTRAL
 from .course import (
     ASSIGNMENT_TYPES,
     COURSE_DEFAULT_CHOICE,
+    DEFAULT_FORMATS,
     FACULTY_ONLY_HEADING,
     FORMATS,
     MAINTAINING_FILE,
@@ -48,7 +48,6 @@ from .course import (
     SUBMIT_VIA,
     SYLLABUS_SAMPLE_FILE,
     UPSTREAM_BRANCH,
-    canonical_submit_via,
     pages_repo,
 )
 from .derive import (
@@ -65,12 +64,19 @@ from .discovery import (
     discover_assignments,
     discover_semesters,
 )
-from .gh_contents import put_files
+from .gh_contents import get_file_with_sha, put_file, put_files
 from .ghcli import GIT_ENV, clone, gh, git, is_already_exists
-from .log import CLIParser, log, log_err, log_ok, log_skip, log_step
+from .log import (
+    CLIParser,
+    Summary,
+    log,
+    log_err,
+    log_ok,
+    log_skip,
+    log_step,
+)
 from .materials import MATERIALS_TOPIC
-from .readings import READING_OVERLAY_FILE
-from .releaseignore import RELEASEIGNORE
+from .releaseignore import RELEASEIGNORE, confirmed, reviewed
 from .repos import (
     create_repo,
     default_branch,
@@ -164,50 +170,20 @@ def _syllabus_sample() -> str:
     return f"{title}\n{_SYLLABUS_SAMPLE_NOTICE}{body}"
 
 
-# The seeded reading list, shaped like a Hertie syllabus's readings block so a course
-# team can paste theirs straight in: `Required Readings` / `Optional Readings` as
-# sub-headings, and any further category (some syllabi add `Application Readings`)
-# works the same way - the site renders whatever headings this file has, nested under
-# the session's own. A stub rather than a `.gitkeep`: the folder's files are listed
-# automatically, but nothing about an empty folder said so, nor that this file is where
-# an online reading goes - the tab read blank with nothing to explain why.
-_READINGS_STUB = (
-    b"# Session 1 readings\n\n"
-    b"<!-- dsl-stub: this comment marks the reading list as still the scaffold's.\n"
-    b"     Write over it and it is yours - the toolkit never rewrites this file\n"
-    b"     either way. It is OPTIONAL: delete it and the files you put in this\n"
-    b"     folder are still listed. -->\n\n"
-    b"Drop the readings themselves into this folder - PDFs, slides, URLs as text\n"
-    b"files, notebooks - anything. Every file here is listed and linked for enrolled\n"
-    b"students and auditors automatically; you do not have to name them here as\n"
-    b"well.\n\n"
-    b"This file is for what a file cannot represent: explanations & directions,\n"
-    b"chapters & references, a link to read online, a proper citation format.\n\n"
-    b"## Required Readings\n\n"
-    b"- Author, *Title*, ch. 1.\n"
-    b"- https://example.org/an-online-reading\n\n"
-    b"## Optional Readings\n\n"
-    b"- Author, *Title*, ch. 2.\n\n"
-    b"What you write here is PUBLIC (it is a citation list). The files beside it\n"
-    b"stay behind the enrolled-student/auditor gate (unless the course runs a\n"
-    b"public open-courseware site in `actual-readings` mode, which serves them\n"
-    b"too). The session's learning objectives come from `details:` in\n"
-    b"schedule.yml.\n"
-)
-
 # The assignment's own definition, written from what New assignment was asked for.
 # INSTRUCTOR-OWNED from the moment it lands: nothing ever rewrites it, and every setting in
 # it is meant to be edited here afterwards. What the assignment IS, and nothing about how
-# one semester runs it: the run settings (`settings.RUN_KEYS`) live in each semester's
-# `assignments.yml`, and one written here is NOT_MIGRATED.
+# one semester runs it: the run settings (`settings.RUN_KEYS`) live on each semester's
+# schedule.yml entry (else its semester.yml `defaults:`), and one written here is
+# RUN_SETTING_IN_TEMPLATE.
 _GRADING_STAMP = (
     "# INSTRUCTOR-OWNED - defines the assignment. "
     "Dates live in the semester's schedule.yml."
 )
 _RUN_SETTINGS_NOTE = (
     "# How each semester runs it - how teams form, the max team size, the late rule, who "
-    "can\n# read the repos, an external submit link - is set per semester in "
-    "semester-config/assignments.yml."
+    "can\n# read the repos, an external submit link - is set per semester on its "
+    "semester-config/schedule.yml entry."
 )
 _QUESTIONS_STUB = """\
 # questions:                  # OPTIONAL - the score skeleton, and the maximum shown beside
@@ -244,18 +220,15 @@ class _Flow(list):
     """A list `_setting` writes inline, `[a, b]`."""
 
 
-def _setting(key: str, value: object, comment: str, live: bool = True) -> str:
+def _setting(key: str, value: object, comment: str) -> str:
     """One line of grading_config.yml: `key: value` padded to a common column, then its
-    explanation. `live=False` comments the whole line out - the setting is documented and
-    inert until an instructor uncomments it."""
+    explanation."""
     shown = (
         f"[{', '.join(_yaml_scalar(v) for v in value)}]"
         if isinstance(value, _Flow)
         else _yaml_scalar(value)
     )
     line = f"{key}: {shown}"
-    if not live:
-        line = f"# {line}"
     return f"{line:<29} # {comment}".rstrip()
 
 
@@ -276,7 +249,7 @@ def _grading_config(
     """`grading_config.yml` as New assignment writes it. An empty `starter` takes decision
     0028 rule 1's default, derived when tests are on."""
     # A drop box is hand-marked, and the parse says so: all three per-unit stages are
-    # refused for `submit_via: shared_dropbox_repo` (`grades._cross_check`), because each
+    # refused for `submit_via: shared_dropbox_repo` (`grading_spec._cross_check`), because each
     # of fifty students would have the whole semester's work cloned, run and archived under
     # their own key. Seeded true, the file the button had just written reported a
     # `Dropped` line on every quarter-hourly tick and stood as an advisory in the semester's
@@ -617,8 +590,8 @@ def _brief_stub(
         + "".join(f"{sentence}\n\n" for sentence in artefacts)
         + (
             "_Say where and how students hand in - nothing is collected from this repo. "
-            "`submit_url:` in the semester's `assignments.yml` puts that address on the "
-            "semester site as a button._\n"
+            "`submit_url:` on the assignment's entry in the semester's `schedule.yml` puts "
+            "that address on the semester site as a button._\n"
             if external
             else "_Say which files you expect back, and in what shape._\n"
         )
@@ -741,7 +714,7 @@ def _actions_table(org: str) -> str:
         "workflows come bootstrapped with it. |\n"
         "| **Refresh actions** | Re-seed the workflows and repopulate dropdowns after you "
         "add sessions/sections/repos. |\n"
-        "| **Check semester setup** | Read-only per-semester checklist of what's configured - it "
+        "| **Check** (Instructor Console) | Per-semester checklist of what's configured - it "
         "says what still needs doing. |\n\n"
         "(**Release materials** and **Release assignment** also appear in this repo's own "
         "Actions tab.)\n"
@@ -775,26 +748,16 @@ def _maintaining(org: str, repo: str) -> str:
         "Rule of thumb: edit the content folders and the two root files; leave `MAINTAINING.md` "
         "and `.github/workflows/` alone.\n\n"
         "## Structure\n\n"
-        "Any top-level directory containing at least one ordinal-prefixed subdirectory "
-        "(`01_`, `02_`, `03_`, ...) is a releasable section:\n\n"
-        "- `lectures/01_session-1/` - one folder per session's lecture files\n"
-        "- `labs/01_session-1/` - one folder per session's lab (delete the `labs/` folder "
-        "if your course has none)\n"
-        "- `readings/01_session-1/` - one folder per session's readings. Just drop the "
-        "readings in and every file is listed and linked for enrolled students "
-        "automatically. An additional `READINGS.md` (or `.txt`/`.bib`) is OPTIONAL prose - "
-        "a link to read online, or a citation; it is published publicly, while the files "
-        "stay behind the enrolled-student gate (unless a public site toggles on "
-        "`actual-readings`)\n"
-        "- root files - your syllabus under any name (`SYLLABUS.md`, `SYLLABUS.pdf`, ...) "
-        "and `README.md`: released by naming the file as the release path (the runner is "
-        "case sensitive)\n\n"
-        "Add more sessions by creating `lectures/02_session-2/`, `readings/02_session-2/`, ... "
-        "(only the ordinal prefix matters - name the rest whatever you like), or add a whole "
-        "new section (e.g. `datasets/01_intro/`). Nothing needs refreshing afterwards: the "
-        "Release workflows take the path as free text (`course_source_path`), so a new "
-        "session or section is releasable the moment you push it. **Refresh actions** "
-        "repopulates the repo/semester dropdowns, and runs itself nightly.\n\n"
+        "Any layout you like: folder names mean nothing to the toolkit. The semester's "
+        "`schedule.yml` says what each release is - a lecture, a lab, readings - and which "
+        "files it ships (`files:`, any path in this repo). The scaffold starts you with "
+        "empty `lectures/`, `labs/` and `readings/` folders; rename, add or delete them "
+        "freely. A reading list is written in the schedule (`reading_list:` on a "
+        "`readings:` entry), not in a file here.\n\n"
+        "A root file - your syllabus under any name (`SYLLABUS.md`, `SYLLABUS.pdf`, ...) "
+        "or `README.md` - is released by naming it as a file's `path` (the runner is case "
+        "sensitive). Nothing needs refreshing after you add a folder: a path is free text, "
+        "so new material is releasable the moment you push it.\n\n"
         "## Available actions\n\n" + actions_table + "\n"
         "## Public course website (optional) **[DEFERRED]**\n\n"
         "The **Publish course website** action can share this repo's materials on a public "
@@ -1046,12 +1009,11 @@ def scaffold_materials(
         user_files = {
             "README.md": materials_readme(org).encode(),
             "SYLLABUS.md": _SYLLABUS_STUB.format(tag=tag).encode(),
-            "lectures/01_session-1/.gitkeep": b"",
-            # A stub, not a .gitkeep: a text file here IS the published reading list (its
-            # contents are inlined on the site's Materials tab), and an empty folder gave
-            # no sign of that - the tab then reads blank with nothing to explain why.
-            f"readings/01_session-1/{READING_OVERLAY_FILE}": _READINGS_STUB,
-            "labs/01_session-1/.gitkeep": b"",
+            # Empty folders, named for nothing the toolkit reads (decision 0038): the
+            # schedule's entries say what each release is.
+            "lectures/.gitkeep": b"",
+            "labs/.gitkeep": b"",
+            "readings/.gitkeep": b"",
             RELEASEIGNORE: _RELEASEIGNORE_STUB.encode(),
         }
         # One commit for the skeleton: they all carried the same subject anyway, so
@@ -1061,9 +1023,9 @@ def scaffold_materials(
             org, repo, user_files, "init: materials skeleton", create_only=True
         ):
             failures += 1
-    # Equip the run-from-repo Release workflows (same as Refresh does for content repos).
-    # push_content_workflows lands both in one commit, logs its own failure, and returns
-    # 1 - a materials repo with no Release workflows must not report success.
+    # Converge the run-from-repo workflows, as Refresh does for content repos: none is
+    # hosted now (decision 0041), so this deletes the retired Release buttons a repo copied
+    # forward from an older one still carries. Logs its own failure and returns 1.
     semesters = discover_semesters(org)
     failures += push_content_workflows(
         org,
@@ -1080,22 +1042,10 @@ def scaffold_materials(
 
 
 def _seed_template_workflows(org: str, repo: str) -> int:
-    """Equip the hand-out button, as scaffold_materials equips the release ones: faculty
-    run Release assignment from this repo's own Actions tab, and it opens on THIS
-    template. Which buttons a template hosts, and why, is `TEMPLATE_WORKFLOWS`;
-    `assign.withhold_from_template` is what strips them off the semester copy, so no student
-    repo generated from this template inherits one.
-
-    Every path that makes a template calls it, the copied one included: a copy arrives
-    carrying the SOURCE template's button, pre-selected on last year's assignment, and
-    until something re-renders it the new template's own button hands out the wrong
-    assignment by default.
-
-    Which is also why THIS repo is named into the dropdown rather than looked for in the
-    org listing: a default that is not among the options is dropped (`_assignment_input`),
-    and the listing GitHub answers a moment after `create_repo` need not carry the repo it
-    has only just made - or its `is_template` flag. Left to the listing, the one button
-    whose whole point is this template opened on the newest OTHER assignment instead."""
+    """Converge the template's run-from-repo workflows (`TEMPLATE_WORKFLOWS`, none since
+    decision 0041). Every path that makes a template calls it, the copied one included:
+    a copy arrives carrying the SOURCE template's retired hand-out button, and this is
+    what deletes it."""
     return push_content_workflows(
         org,
         repo,
@@ -1166,19 +1116,22 @@ def _collision(named: list[str], autograde: bool) -> str:
     return ""
 
 
-# `submit_via` is the template's shape, not a policy default: the box left at
-# `COURSE_DEFAULT_CHOICE` with no course answer gets the ordinary repo per unit.
-_SHAPE_ANSWERS = {"submit_via": "assignment_repo"}
+# What a box left at `COURSE_DEFAULT_CHOICE` gets when the course does not answer it:
+# `submit_via` is the template's shape (the ordinary repo per unit), `formats` the
+# wizard's own default - neither is an institution default (decision 0039 rule 2).
+_SHAPE_ANSWERS = {"submit_via": "assignment_repo", "formats": DEFAULT_FORMATS}
 
 
 def resolve_answers(answers: dict[str, str], defaults: dict) -> dict[str, str]:
     """The New assignment answers with every box left at `COURSE_DEFAULT_CHOICE` replaced
-    through the cascade's course and institution layers (`settings.resolve`): the course's
-    `assignment_defaults:` value when it declares one, else the policy's. An answer
-    somebody chose is kept as given."""
+    through the course's `defaults:` for a key of the fixed set (`formats` and
+    `submit_via` are not: the wizard asks, decision 0039) else the toolkit's
+    (`_SHAPE_ANSWERS`, the institution's defaults). An answer somebody chose is kept as
+    given."""
+    course = {k: v for k, v in defaults.items() if k in settings.DEFAULT_KEYS}
     stack = [
-        ("course", defaults),
-        ("institution", {**_SHAPE_ANSWERS, **settings.institution_defaults()}),
+        ("course", course),
+        ("institution", {**settings.institution_defaults(), **_SHAPE_ANSWERS}),
     ]
     out = {}
     for key, value in answers.items():
@@ -1234,7 +1187,7 @@ def scaffold_assignment(
     `grading_config.yml`, which is what the handout, the grading sheet and the Join-team
     form all read - so the answers given on the button are the ones the rest of the term
     obeys, and nothing has to be hand-edited in afterwards. How a semester runs it (the
-    run settings) is that semester's `assignments.yml`, never this file.
+    run settings) is that semester's schedule.yml entry, never this file.
 
     `formats` is the exception: it picks which starter stubs are seeded on `main`, one
     each with its model answer on `solution`, and nothing else. The grader reads whatever
@@ -1570,6 +1523,32 @@ def scaffold_site(org: str) -> int:
     return 0
 
 
+CONFIRM_COMMIT = "chore: confirm the withheld patterns reviewed"
+
+
+def confirm_withheld(org: str, repo: str) -> Summary:
+    """The Confirm of a materials repo's "Withheld patterns reviewed" (plan 0.11.0 9b
+    ruling 6): `.releaseignore` gains `releaseignore.REVIEWED_MARK`, and nothing else in
+    it changes, so a course that withholds nothing can say so without an edit. A list
+    already reviewed (a pattern, or the mark) is left alone."""
+    # Absent, the file is written as the mark alone: a spurious 404 would replace every
+    # withheld pattern with it, so it is confirmed.
+    found = get_file_with_sha(org, repo, RELEASEIGNORE, confirm_absent=True)
+    text, sha = found if found else (None, None)
+    where = f"{repo}/{RELEASEIGNORE}"
+    if reviewed(text):
+        log_ok(f"{where} is already reviewed")
+        return Summary(f"{where} is already reviewed; nothing to confirm.")
+    if not put_file(
+        org, repo, RELEASEIGNORE, confirmed(text).encode(), CONFIRM_COMMIT, sha
+    ):
+        text = f"{where} could not be written."
+        log_err(text)
+        return Summary(text, reasons=[{"code": "WRITE_FAILED", "text": text}], code=1)
+    log_ok(f"{where} marked reviewed")
+    return Summary(f"Marked {where} reviewed.")
+
+
 def main() -> int:
     parser = CLIParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -1592,8 +1571,8 @@ def main() -> int:
         help="The assignment's name, e.g. 'Neural networks from scratch': the repo is "
         "assignment-<name>, and the name is its `title:` in grading_config.yml.",
     )
-    # Two boxes default to COURSE_DEFAULT_CHOICE: the course's `assignment_defaults:`
-    # answers them, else the toolkit does (`resolve_answers`).
+    # Two boxes default to COURSE_DEFAULT_CHOICE: the course's `defaults:` answers
+    # `submit_via`, else the toolkit does (`resolve_answers`).
     pa.add_argument(
         "--formats",
         dest="formats",
@@ -1601,23 +1580,19 @@ def main() -> int:
         help="Which starter stubs to seed on main, and nothing else: a comma-separated "
         f"list of {', '.join(FORMATS)}, with `none` on its own for no starter at all; "
         "the first is the runnable one (the completion check and the autograder run "
-        "it). Default: the course's `assignment_defaults: formats`, else the "
-        "institution's (policy.yml)",
+        "it). Default: ipynb",
     )
     pa.add_argument(
         "--type",
         dest="kind",
         choices=list(ASSIGNMENT_TYPES),
         default="individual",
-        help="individual = one repo per student; group = one repo per team (teams.csv)",
+        help="individual = one repo per student; group = one repo per team (students.csv)",
     )
     pa.add_argument(
         "--submit-via",
         dest="submit_via",
-        # `github` stays an accepted choice - not a documented one - for an org whose
-        # rendered New assignment workflow has not refreshed yet and so still sends the
-        # legacy word; `canonical_submit_via` below normalises it before use.
-        choices=[*SUBMIT_VIA, "github", COURSE_DEFAULT_CHOICE],
+        choices=[*SUBMIT_VIA, COURSE_DEFAULT_CHOICE],
         default=COURSE_DEFAULT_CHOICE,
         help="external = handed in off GitHub (Moodle, Kaggle, in class): no repo is "
         "created, and nothing is ever collected",
@@ -1638,7 +1613,12 @@ def main() -> int:
     )
     ps = sub.add_parser("site")
     ps.add_argument("--org", required=True)
+    pc = sub.add_parser("confirm-withheld")
+    pc.add_argument("--org", required=True)
+    pc.add_argument("--repo", required=True, help="The materials repo")
     args = parser.parse_args()
+    if args.cmd == "confirm-withheld":
+        return confirm_withheld(args.org, args.repo)
     if args.cmd == "assignment":
         answers = resolve_answers(
             {"formats": args.formats, "submit_via": args.submit_via},
@@ -1646,11 +1626,6 @@ def main() -> int:
         )
         args.formats = answers["formats"]
         args.submit_via = answers["submit_via"]
-    if args.cmd == "assignment":
-        # Normalised once, here, so an un-refreshed org's workflow sending the legacy
-        # `github` still scaffolds an `assignment_repo` shape and never re-writes the old
-        # word into the file.
-        args.submit_via = canonical_submit_via(args.submit_via)
     # The `--format` box, refused here - before the repo exists, so a mistyped answer
     # costs a re-run and nothing else. Caught on its OWN, the way `deploy.main` catches
     # `parse_path_pairs`: a ValueError from anywhere deeper is a bug and still earns its

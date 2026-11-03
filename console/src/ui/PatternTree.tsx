@@ -6,7 +6,7 @@
 // file tree (decision 0026 rule 5): indent guides, folder and file icons, withheld rows greyed with
 // the name struck through (`ft-out`), the kind chip on kind folders. A folder with something
 // withheld inside says how much. `control` swaps the
-// per-row control for the caller's own (Folder kinds' kind picker): one tree, two settings.
+// per-row control for the caller's own. `SelectionEditor` wraps it for every "which files" setting.
 
 import type { ComponentChildren } from 'preact';
 import { useState } from 'preact/hooks';
@@ -38,7 +38,7 @@ interface Ctx extends Required<Pick<PatternTreeProps, 'patterns' | 'onChange' | 
   setNote: (n: { path: string; text: string } | null) => void;
 }
 
-/** What no list can release (`materials.publishable`): solutions, tests, grading files, system files. */
+/** What no list can release (`selection.publishable`): solutions, tests, grading files, system files. */
 const defaultFixed = (path: string) => (neverMaterial(path) || denylisted(path) ? 'never copied' : null);
 
 /** How many files under a folder are withheld, fixed or by a line. */
@@ -87,7 +87,7 @@ function Node({ n, depth, c }: { n: TreeNode; depth: number; c: Ctx }) {
       <li class={`ft-file${fixed || out ? ' ft-out' : ''}`}>
         {c.mode === 'select' ? control : null}
         <FileHead name={n.name} />
-        <span class={`chip ${fixed || out ? 'amber' : ''}`}>{word}</span>
+        {word ? <span class={`chip ${fixed || out ? 'amber' : ''}`}>{word}</span> : null}
         <Why s={s} word={c.withheldWord} />
         {c.mode === 'exclude' ? control : null}
         {note}

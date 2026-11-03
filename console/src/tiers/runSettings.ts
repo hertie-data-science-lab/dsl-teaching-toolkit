@@ -1,9 +1,9 @@
-// The run settings as form fields, at one layer of the cascade (model/cascade.ts): the
-// course's `assignment_defaults`, a semester's `defaults:`, or one assignment's block. Each
+// The run settings as form fields, at one layer of the cascade (the engine resolves it; status.json carries each answer, model/settings.ts): the
+// course's or a semester's `defaults:`, or one assignment's schedule entry. Each
 // field shows, in grey, what applies when it is left empty: the value the next layer down
 // gives and where that comes from.
 
-import { RUN_KEYS, SOURCE_WORD, TEAM_FORMATION, VISIBILITY, valueWord, type Effective, type RunKey } from '../model/cascade';
+import { RUN_KEYS, SOURCE_WORD, TEAM_FORMATION, VISIBILITY, valueWord, type Effective, type RunKey } from '../model/settings';
 import { blank } from '../edit/yamlText';
 import { penaltyError } from '../model/policy';
 import { defaultFirst, opt, type FieldTier, type Tiers, type Values } from './types';
@@ -15,16 +15,20 @@ export const RUN_LABEL: Record<RunKey, string> = {
   late_penalty_per_day: 'Late penalty per day',
   visibility: 'Who can see each student’s repo',
   submit_url: 'Link to where they submit',
+  marks_per_question: 'Marks per question on the student’s page',
 };
 
-const REASON: Record<RunKey, string> = {
+export const RUN_REASON: Record<RunKey, string> = {
   team_formation: 'For team assignments. Students form their own on the assignment’s page in the student console unless you choose to assign them, on the assignment’s Teams tab.',
   max_team_size: 'For team assignments: students cannot join a team that is full.',
   late_window_days: 'Late work is accepted for this many days after the due date; 0 means none. The late cutoff is the due date plus these days.',
   late_penalty_per_day: 'Taken off the earned mark for each day started after the due date.',
   visibility: 'Applies to copies handed out after this change; existing copies keep theirs.',
   submit_url: 'For assignments submitted elsewhere: shown on the student site beside the due date.',
+  marks_per_question: 'On: the student’s page lists the mark per question and the per-question feedback. Off: the score, late line, adjustment and final only. Return marks and the automatic return both follow it.',
 };
+
+const MARKS_PER_QUESTION: Record<string, string> = { true: 'On: each question’s mark and feedback', false: 'Off: the score, late line, adjustment and final only' };
 
 /** Why the late pair as typed would not do what it says, or null. A layer naming one half sets the other to none. */
 export function lateError(v: Values): string | null {
@@ -44,7 +48,7 @@ const CHOOSE = { value: '', label: 'Choose…', off: 'Choose a value, or Use the
  */
 export function runTier(key: RunKey, fallback: Effective, { saved, override }: { saved?: unknown; override?: boolean } = {}): FieldTier {
   const grey = `${SOURCE_WORD[fallback.source]}: ${valueWord(key, fallback.value)}`;
-  const base = { tier: 'default' as const, label: RUN_LABEL[key], reason: REASON[key], defaultLabel: grey };
+  const base = { tier: 'default' as const, label: RUN_LABEL[key], reason: RUN_REASON[key], defaultLabel: grey };
   const choose = (labels: Record<string, string>) => {
     const all = Object.entries(labels).map(([v, l]) => opt(v, l));
     return override ? [CHOOSE, ...all] : defaultFirst(fallback.value, valueWord(key, fallback.value), all, saved);
@@ -62,6 +66,8 @@ export function runTier(key: RunKey, fallback: Effective, { saved, override }: {
       return { ...base, placeholder: String(fallback.value ?? ''), check: (x) => penaltyError(x) };
     case 'submit_url':
       return { ...base, widget: 'url', placeholder: 'https://', check: (x) => (blank(x) || /^https:\/\/\S+$/.test(String(x)) ? null : 'The link must start with https://.') };
+    case 'marks_per_question':
+      return { ...base, widget: 'select', options: choose(MARKS_PER_QUESTION) };
   }
 }
 

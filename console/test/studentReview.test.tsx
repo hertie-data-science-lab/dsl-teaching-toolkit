@@ -65,10 +65,10 @@ describe('the renamed site', () => {
     const f = new FakeGitHub()
       .on('GET', `/repos/${ORG}/${ORG}.github.io/contents/_events`, [{ name: 'semester-archived.md', path: '_events/semester-archived.md', sha: 'a', type: 'file' }, { name: 'term-start.md', path: '_events/term-start.md', sha: 'b', type: 'file' }])
       .on('GET', `/repos/${ORG}/${ORG}.github.io/contents/_events/semester-archived.md`, fileBody('x', '---\nkind: special_event\ntype: special_event\ndate: 2027-01-12T09:00:00\ntitle: "Semester archived"\n---\n'))
-      .on('GET', `/repos/${ORG}/${ORG}.github.io/contents/_events/term-start.md`, fileBody('x', '---\nkind: term_date\ntype: special_event\ndate: 2026-08-04T09:00:00\ntitle: "Semester starts"\n---\n'));
+      .on('GET', `/repos/${ORG}/${ORG}.github.io/contents/_events/term-start.md`, fileBody('x', '---\nkind: semester\ntype: special_event\ndate: 2026-08-04T09:00:00\ntitle: "Semester starts"\n---\n'));
     const facts = (await new SiteSource(client(f)).facts(ORG))!;
     expect(facts.archive).toBe('2027-01-12T09:00:00');
-    expect(facts.rows.find((r) => r.id === 'term-start')?.kind).toBe('term_date');
+    expect(facts.rows.find((r) => r.id === 'term-start')?.kind).toBe('semester');
   });
 });
 

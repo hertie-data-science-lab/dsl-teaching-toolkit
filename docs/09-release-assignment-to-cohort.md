@@ -14,28 +14,27 @@ Hand out one **private repo per student** from a course org assignment template.
 
 A `handout_datetime:` datetime under `assignments.<slug>` in the semester's `schedule.yml` hands out the same repos automatically - the assignment's whole lifecycle (handout, due date, grading deadline) sits in one block: [Schedule releases](07-schedule-releases.md). One setup cost, and the entry appears on the deployed `<course>.github.io` site so students see the plan in advance.
 
-> NB: a manual release stays compatible with the schedule: on success the workflow **records the release moment into `schedule.yml`** (`assignments.<slug>.handout_datetime`, write-once - a scheduled value is never touched), so the schedule remains the one record of when every assignment went out - and late onboarders get their repo on the next tick.
+> NB: a manual release stays compatible with the schedule: on success the hand-out **records the release moment into `schedule.yml`** (`assignments.<slug>.handout_datetime`, write-once - a scheduled value is never touched), so the schedule remains the one record of when every assignment went out - and late onboarders get their repo on the next tick.
 
-## Release assignment via manual dispatch
+## Hand out an assignment now
 
-The `release assignment` workflow can be found in the course org's: 
-  1. `.github` → **Actions** tab → **Release assignment** - e.g. [this demo repo](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/release-assignment.yml) 
-  2. within any assignment template (any repo created using the **New assignment** workflow) → **Actions** tab → **Release assignment** - e.g. [the demo's templates](https://github.com/orgs/hertie-dsl-demo-course-e1234/repositories?q=topic%3Adsl-assignment)
-
+Hand an assignment out now (op `assignment.handout_now`):
+  1. in the Instructor Console, the assignment's **Hand out**;
+  2. or from a laptop: `python -m dsl_course assignment.handout_now --course-org <course-org> --semester-org <semester-org> --arg course_source_repo=<template>` (previews; add `--no-preview` to hand out).
 
 Pick the `course_source_repo` - the same field a scheduled handout names in `schedule.yml`.
 The template must be in the semester's schedule; one that is not is refused: add it to the
 schedule first.
-- It freezes a semester-level copy `<name>` of the chosen template (the schedule entry's `semester_dest_repo`, else its key)
+- It freezes a semester-level copy `<name>` of the chosen template (the schedule entry's `repo_name`, else its key)
 - then it creates one **private** `<name>-<handle>` repo per onboarded student/group, with that student as
 collaborator.
 
-Four boxes, in the order you answer them: `course_source_repo`, `semester_org`, then
+Besides the template and the semester:
 - `solution_datetime` (empty by default; `now` also pushes the template's `solution`
 branch into each student repo - the model answer and rubric, which is not returning marks
 and cannot be undone: think twice if the template is reused in a later semester). Schedulable instead, as `solution_datetime:` on the
 assignment - see [07](07-schedule-releases.md#releasing-the-model-solution)
-- `preview` (**on** by default; list the repos that *would* be created - untick it to hand out).
+- a preview (the default) lists the repos that *would* be created; a real run hands out.
 
 It asks nothing about the assignment itself: individual or group is the template's own
 `grading_config.yml` - see [Group or individual?](#group-or-individual).
@@ -69,7 +68,7 @@ like any other, and a student who onboards later is granted push on the next tic
 
 ### An assignment whose repos are public
 
-`visibility: public` in the semester's `assignments.yml` hands out the same repos
+`assignment_repo_visibility: public` on the assignment's `schedule.yml` entry hands out the same repos
 world-readable - portfolio work such as a hackathon. There is then **no Submission receipts issue**
 (a hand-in time is a fact about a student, and it does not go where the internet can read
 it; the marks were never going here anyway), and the
@@ -89,7 +88,7 @@ credential rather than bypass the block.
 
 ### An assignment the students may publish themselves
 
-`visibility: student_choice` in the semester's `assignments.yml` hands out the same
+`assignment_repo_visibility: student_choice` on the assignment's `schedule.yml` entry hands out the same
 **private** repos, but makes the student - or every member of a team - **admin** of their
 own, which is the only permission that carries GitHub's visibility switch. There is no
 Submission receipts issue (the repo may be public tomorrow).
@@ -124,7 +123,7 @@ Nothing overrides it: the teams, the grading sheet and the Join-team form are al
 on that declaration, so a handout free to disagree with it would put a semester's work in
 repos nothing else is looking for. To change the shape, edit `grading_config.yml`.
 
-- `group` = one shared repo per team from `teams.csv` (repo `<slug>-<team>`, every member a collaborator), marked per team in the grading sheet's `teams:` block, with one `adjustment_individual` per member.
+- `group` = one shared repo per team from the assignment's `team:` column in `students.csv` (repo `<slug>-<team>`, every member a collaborator), marked per team in the grading sheet's `teams:` block, with one `adjustment_individual` per member.
 - `individual` = one private repo per onboarded, enrolled student (`<slug>-<handle>`), marked in the sheet's `submissions:` block.
 
 The sheet written at hand-out nests as the marking grid does: each team's own cells, then
@@ -133,26 +132,26 @@ each, the team's on a group sheet). See [10](10-grade-and-return-assignments.md)
 
 ## Group assignments: creating the teams
 
-Live example: [`example-course/semester-org/teams.csv`](../example-course/semester-org/teams.csv).
+Live example: the `team:4` column of [`example-course/semester-org/students.csv`](../example-course/semester-org/students.csv).
 
-Teams are formed in one of two ways - both end up in `semester-config/teams.csv` (`assignment, team, github_handle`), and **Sync membership** turns each into a secret GitHub team on push (visible only to its members and org owners; the assignment's page is the list). A team need not exist before the hand-out: the release provisions one shared repo per team that exists, and a scheduled hand-out re-fires every tick, so a team formed on day three gets its repo then.
+Teams are formed in one of two ways - both end up in the assignment's `team:<number>` column of `semester-config/students.csv` (a team = the rows sharing a value), and **Sync membership** turns each into a secret GitHub team on push (visible only to its members and org owners; the assignment's page is the list). A team need not exist before the hand-out: the release provisions one shared repo per team that exists, and a scheduled hand-out re-fires every tick, so a team formed on day three gets its repo then.
 
-Which of the two an assignment uses is the semester's - `team_formation` in `semester-config/assignments.yml`:
+Which of the two an assignment uses is the semester's - `team_formation` on its `schedule.yml` entry:
 
-- **`assigned`** - you edit `teams.csv` directly, one row per member. The **Join team** form refuses every request for this assignment and says so.
-- **`self_select`** - students open a **Join team** issue in the semester's `join` repo. Team size is capped by that assignment's `max_team_size` (the semester's `assignments.yml`, else the course's `assignment_defaults`, else 5).
+- **`assigned`** - you type each student's team into their `team:<number>` cell. The **Join team** form refuses every request for this assignment and says so.
+- **`self_select`** - students open a **Join team** issue in the semester's `join` repo. Team size is capped by that assignment's `max_team_size` (its `schedule.yml` entry, else the semester's `semester.yml` `defaults:`, else the course's `course.yml` `defaults:`, else the institution's).
 
-**The form** asks three things: which assignment, whether they are **joining or switching to an existing team** or **creating a new one**, and the team's name. A student already in a team who joins or creates another is moved, while the window is open. The choice is explicit because it used to be implied by the name - a name that existed joined, a name that did not created - so one typo opened a second, half-empty team that nobody noticed until the release provisioned it. Creating onto a name that is taken is refused; joining a name that does not exist is refused with the nearest real team named. A refusal the student can fix is closed (`team-refused`) with what to do next; only what you must act on stays open as `needs-review` - see [06](06-enrol-students-to-cohort.md). Its header links the assignment's page, which has the team list. It reads all of this out of `semester-config/.system/assignments.lock.yml`, which the toolkit generates from each assignment's `grading_config.yml`, the semester's `assignments.yml` and its schedule, and nobody edits - change either and the mirror catches up on the next quarter-hourly **Scheduled release** tick, which is also what opens and shuts the window below on time.
+**The form** asks three things: which assignment, whether they are **joining or switching to an existing team** or **creating a new one**, and the team's name. A student already in a team who joins or creates another is moved, while the window is open. The choice is explicit because it used to be implied by the name - a name that existed joined, a name that did not created - so one typo opened a second, half-empty team that nobody noticed until the release provisioned it. Creating onto a name that is taken is refused; joining a name that does not exist is refused with the nearest real team named. A refusal the student can fix is closed (`team-refused`) with what to do next; only what you must act on stays open as `needs-review` - see [06](06-enrol-students-to-cohort.md). Its header links the assignment's page, which has the team list. It reads all of this out of `semester-config/.system/assignments.lock.yml`, which the toolkit generates from each assignment's `grading_config.yml` and the semester's schedule, and nobody edits - change either and the mirror catches up on the next quarter-hourly **Scheduled release** tick, which is also what opens and shuts the window below on time.
 
 **The window** runs from the assignment's `handout_datetime` to its late cutoff (the due date plus `late_window_days`): a team minted after the snapshot has nothing left to hand in. Before the hand-out the form says formation is not open yet and when it will run; after the cutoff it says the day it closed. Move either date and the window moves. An assignment with no `handout_datetime` on record has no window at all - but **Release assignment** writes that moment into `schedule.yml` itself, so a hand-fired hand-out opens one too, in every shape and with no team yet (the run ends green and says who forms the teams from then; one with the solution is refused, since no repo exists to put it in). While it is open, the form's Assignment field is a drop-down of exactly the assignments a student may act on - and it moves with the window: the same tick that opens or shuts one rewrites the form, as does a push to `schedule.yml`.
 
-**The team list is on the assignment's page** - on the semester site, or in the student console for a course with `student_console: true` in `dsl-course.yml`. `teams.csv` is private, so a student cannot see what to join. While the window is open, the page lists the teams that exist with the places each has left (**names and counts only**) and links the request form (in the student console, **Join or create a team** unfolds it in place, where a Pick fills in the team); the site's schedule row carries a **Form your team** prompt with the closing day. The mail and the form's refusals link that page; the form's header links it too, or the Assignments list when several windows are open. A push to `teams.csv` fires a site sync, so the list follows each join within minutes. When the window shuts the invitation, the form and the places left go; the list itself stays on the page for the rest of the semester, read-only (names and headcounts).
+**The team list is on the assignment's page** on the semester site. `students.csv` is private, so a student cannot see what to join. While the window is open, the page lists the teams that exist with the places each has left (**names and counts only**) and links the request form; the site's schedule row carries a **Form your team** prompt with the closing day. The mail and the form's refusals link that page; the form's header links it too, or the Assignments list when several windows are open. A push to `students.csv` fires a site sync, so the list follows each join within minutes. When the window shuts the invitation, the form and the places left go; the list itself stays on the page for the rest of the semester, read-only (names and headcounts).
 
 **The students are emailed** - the only mail the toolkit sends off a clock rather than off something you did. When the window opens, every enrolled, onboarded student with no team for that assignment gets one plain message, addressed to them by name and naming the assignment as the site does (`Assignment 3: Project`): the cap, the day formation closes, the link to the form and the link to the assignment's page. Anyone still without a team 48 hours before it shuts gets one more, and a student who onboards mid-window is asked on the next tick. Nothing goes out between 23:00 and 07:00 in the semester's timezone - the message waits for the morning, while the lock, the form and the site still turn at the window's own minute - nothing is said twice (`.system/team-formation/mailed.csv` in `semester-config` is the record), and a semester whose course org has no `GRAPH_*` mail secrets is sent nothing and has nothing recorded against it. It does not say whether working alone is allowed - that is yours to tell them.
 
-**Open team formation** (the course org's Actions tab) sends that same message on your own say-so - useful right after you announce the assignment in class, or once a semester's `GRAPH_*` secrets are finally set. Pick a semester, and optionally one `schedule.yml` assignment key; left empty it asks about every window open right now, and a key with no open window is an error rather than a quiet no-op. Same message on the same record, so a second press reaches only the students the first could not, and the overnight hold applies to a press exactly as it does to the clock. Preview first.
+**Email students without a team** (the Console, or `python -m dsl_course teams.open_window --arg assignment=<key>`) sends that same message on your own say-so - useful right after you announce the assignment in class, or once a semester's `GRAPH_*` secrets are finally set. It takes one `schedule.yml` assignment key; a key with no open window is an error rather than a quiet no-op. Same message on the same record, so a second run reaches only the students the first could not, and the overnight hold applies to it exactly as it does to the clock. Preview first.
 
-**You hear about it too.** While anybody is still without a team, the semester's *schedule.yml* [digest issue](07-schedule-releases.md#the-digest-issue) carries a line on that assignment - counts only, never a name - and it gets louder as the window runs out, exactly like a source nobody has staged. A window that has stood open for a week with anybody still waiting is at least a warning, so you hear about it well before the last day. It does **not** go away when the window shuts: that is the moment the problem becomes permanent, so the line stays at its loudest rung until you fill the gaps in `teams.csv`, move the closing date to give the semester longer, or take the entry out of the plan. Standing there it says nothing new - no further comment, no further email - it simply does not report itself as fixed while those students still have no repo to hand into. The console's Problems shows it only once the window has shut: while it is open, joining a team is the students' step.
+**You hear about it too.** While anybody is still without a team, the semester's *schedule.yml* [digest issue](07-schedule-releases.md#the-digest-issue) carries a line on that assignment - counts only, never a name - and it gets louder as the window runs out, exactly like a source nobody has staged. A window that has stood open for a week with anybody still waiting is at least a warning, so you hear about it well before the last day. It does **not** go away when the window shuts: that is the moment the problem becomes permanent, so the line stays at its loudest rung until you fill the gaps in `students.csv`, move the closing date to give the semester longer, or take the entry out of the plan. Standing there it says nothing new - no further comment, no further email - it simply does not report itself as fixed while those students still have no repo to hand into. The console's Problems shows it only once the window has shut: while it is open, joining a team is the students' step.
 
 Full flow:
 [Enrol students → groups](06-enrol-students-to-cohort.md#group-assignments-rolling-basis).
@@ -175,7 +174,7 @@ assignments:
 
 - **The date students see** (semester site + the brief's "due" event) is `assignments[slug].due_datetime`
   (23:59 that day). Edit → commit to `main` - **Sync site** fires automatically on the push.
-- **The late window** is the assignment's `late_window_days` in the semester's `assignments.yml` (with
+- **The late window** is the assignment's `late_window_days` on its `schedule.yml` entry (with
   `late_penalty_per_day`, a percentage of the earned grade per day started). Between the due
   date and the cutoff the grading sheet keeps refreshing and each late push earns a receipt.
   `submit_via: external` has no late window: its cutoff is the due date, and the marker enters each
@@ -194,16 +193,17 @@ assignments:
 ## Fixing a file after the assignment has gone out
 
 A broken cell, a wrong path, a dataset that moved. The repos are in students' hands
-already, so editing the template changes nothing for them - **Patch released assignment**
-is what distributes the fix.
+already, so editing the template changes nothing for them - **Update every copy**
+(`assignment.update_copies`) is what distributes the fix.
 
 1. Commit the correction to the **template's default branch** (`main`) as you normally
-   would. This button only distributes what is already there.
-2. Course org → `.github` → **Actions** → **Patch released assignment**. Inputs:
-   `semester_org`, `course_source_repo` (the template), `path` (a file, or a folder to push
-   whole), `overwrite` (default **off**), `assignment` and `preview` (default **on**). Leave
-   `assignment` empty unless two schedule entries hand out from the template: then give
-   the key of the one to patch (left empty, the run is refused, naming both).
+   would. This only distributes what is already there.
+2. In the Console, the assignment's **Update every copy**; or
+   `python -m dsl_course assignment.update_copies --course-org <org> --semester-org <semester>
+   --arg course_source_repo=<template> --arg path=<file or folder>`, plus `--arg
+   overwrite=true` to replace a file the student changed (default **off**), and `--arg
+   assignment=<key>` only when two schedule entries hand out from the template (left out,
+   the run is refused, naming both).
 3. Preview first: it counts the repos it would touch and writes nothing.
 
 What a real run does:

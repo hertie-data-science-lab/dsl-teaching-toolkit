@@ -2,7 +2,7 @@
 
 Every file faculty edit by hand can be wrong in a way the toolkit can detect and a human
 must fix: a source the release plan names and nobody staged, a `;`-delimited students.csv,
-a instructors.yml handle with a typo in it, a schedule entry the parser had to drop. Each of
+a semester.yml handle with a typo in it, a schedule entry the parser had to drop. Each of
 those used to reach people its own way - a rung ladder here, a `log_err` line in a public
 run log there, a red X on an unattended cron somewhere else - and three of the four
 reached nobody.
@@ -151,16 +151,15 @@ _FIX: dict[tuple[FaultKind, bool, bool], str] = {
 # leads with it ("Until they are fixed: ...") because "students.csv has 1 entry the
 # toolkit cannot use" says nothing about whether anybody's term is affected, and the
 # answer differs sharply per file: a bad roster header stops every enrolment, a bad
-# teams.csv row stops one.
+# a team cell stops one.
 CONSEQUENCE = {
     "schedule.yml": (
         "that entry is not scheduled: nothing releases, hands out or grades from it"
     ),
-    "instructors.yml": "this person has no access and is not notified",
+    "semester.yml": "this person has no access and is not notified",
     "students.csv": (
         "the whole roster is skipped: nobody new is enrolled or sent a code"
     ),
-    "teams.csv": "that row is ignored: the team is not created or the member not added",
     # Keyed on the DIGEST's label for the folder, not on one sheet's path: every grading
     # sheet in the semester is carried by one issue and one letter.
     "grading_sheets/": "that sheet is not refreshed, and nothing on it is sent",
@@ -169,7 +168,7 @@ CONSEQUENCE = {
     # the file that names the issue. Both cost the same thing, which is why they can: a
     # course whose identity file or whose registry cannot be read is a course the sync
     # walks past entirely.
-    "dsl-course.yml": (
+    "course.yml": (
         "the sync skips this course: admins and semesters are not reconciled"
     ),
 }
@@ -190,10 +189,9 @@ FIX = {
         "correct the value on the line above; the run summary lists what the parser "
         "expected"
     ),
-    "instructors.yml": "fix the handle/email on the line above",
+    "semester.yml": "fix the handle/email on the line above",
     "students.csv": CSV_HEADER_FIX,
-    "teams.csv": CSV_HEADER_FIX,
-    "dsl-course.yml": "correct the line above",
+    "course.yml": "correct the line above",
     "semesters.yml": "correct the line above",
 }
 
@@ -207,7 +205,7 @@ class ConfigFault:
     Part II added has a default, and an immediate fault leaves the source-only three
     (`kind`, `repo`, `path`) alone."""
 
-    where: str  # the YAML path or row, e.g. "releases.lecture-2", "row 4"
+    where: str  # the YAML path or row, e.g. "lectures.week-2", "row 4"
     what: str  # what is wrong, e.g. "`cm/lectures/02_b` does not exist yet"
     # What makes a source fault actionable, and the line between the two clocks - see the
     # module docstring. None = nothing pins this to a moment.
@@ -476,18 +474,15 @@ def not_migrated_fault(
     *,
     where: str,
     file: str,
-    field: str = "",
     in_repo: str = CONFIG_REPO,
-    lineno: int | None = None,
 ) -> ConfigFault:
     """The ConfigFault for an old spelling in a hand-edited file."""
     return ConfigFault(
         where,
         not_migrated_text(old, new),
-        field=field or old,
+        field=old,
         file=file,
         in_repo=in_repo,
-        lineno=lineno,
         fix_text="run the migration, which rewrites it to the new name",
         code=NOT_MIGRATED,
     )
@@ -505,6 +500,28 @@ class Unusable(RuntimeError):
     carry it, while a read that failed is the toolkit's own problem and earns the red X."""
 
 
+# A run setting (`settings.RUN_KEYS`) written in a template's `grading_config.yml`: how one
+# semester runs the assignment, never what the assignment is. Refused whole, as an old
+# spelling is: read without it, the assignment would run on the defaults and say nothing.
+RUN_SETTING_IN_TEMPLATE = "RUN_SETTING_IN_TEMPLATE"
+
+
+def run_setting_text(key: str) -> str:
+    return (
+        f"`{key}` is a run setting: set it on the assignment entry in schedule.yml, "
+        f"not in grading_config.yml"
+    )
+
+
+class RunSettingInTemplate(Unusable):
+    """A run setting in a template's `grading_config.yml` (`RUN_SETTING_IN_TEMPLATE`)."""
+
+    def __init__(self, key: str, where: str = "") -> None:
+        text = run_setting_text(key)
+        super().__init__(f"{where}: {text}" if where else text)
+        self.old, self.code = key, RUN_SETTING_IN_TEMPLATE
+
+
 class NotMigrated(Unusable):
     """An old spelling where only the new one is read (see NOT_MIGRATED). `Unusable`, so
     every consumer stops for it exactly as for a file it cannot read, and an unattended
@@ -520,7 +537,7 @@ def header_fault(file: str, missing: list[str]) -> ConfigFault:
     """The fault a CSV whose header cannot be read produces - one per file, not per row,
     because a header nobody can read costs the whole file.
 
-    Built here rather than in each reader so students.csv, teams.csv and the sheets say the
+    Built here rather than in each reader so students.csv and the sheets say the
     same thing. It names the columns that are MISSING (a constant of the toolkit's) and not
     the ones it found: a file whose header row was deleted has cell values there, and this
     text travels to an email and an issue - see the privacy rule in CLAUDE.md."""
@@ -547,11 +564,11 @@ def csv_row(lineno: int | None) -> str:
 def csv_row_fault(
     file: str, lineno: int, field: str, what: str, fix: str = ""
 ) -> ConfigFault:
-    """One row of a hand-edited CSV (students.csv, teams.csv) the toolkit cannot use as
+    """One row of a hand-edited CSV (students.csv) the toolkit cannot use as
     written.
 
     ROW AND COLUMN ONLY. Never the cell: a roster cell is a name, an address, a handle or
-    an enrolment code, a teams.csv cell is a handle or a team name a student typed into a
+    an enrolment code, a team cell is a handle or a team name a student typed into a
     public form, and this text travels to an email, to a digest issue and to a run log.
     The row number is enough to open the file at the line. `fix` adds to the remedy."""
     return ConfigFault(

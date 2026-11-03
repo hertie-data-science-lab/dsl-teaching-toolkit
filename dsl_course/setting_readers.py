@@ -1,6 +1,6 @@
 """setting_readers - how every assignment setting's value is read: one reader per key,
-shared by an assignment's `grading_config.yml`, the course's `assignment_defaults:`, the
-semester's `assignments.yml` and the institution's `policy.yml` defaults, so one value is
+shared by an assignment's `grading_config.yml` and schedule.yml entry, and the `defaults:`
+of `semester.yml`, `course.yml` and `institution.yml`, so one value is
 validated one way whichever file it is written in.
 
 A reader returns the usable value, or records a `Dropped` line and returns what the
@@ -24,9 +24,7 @@ from .course import (
     SUBMIT_VIA,
     TEAM_FORMATIONS,
     VISIBILITIES,
-    canonical_submit_via,
 )
-from .faults import NOT_MIGRATED, not_migrated_text
 
 
 def as_decimal(value: object) -> Decimal | None:
@@ -183,23 +181,6 @@ def read_formats(
         )
     )
     return None
-
-
-# Settings RENAMED (decision 0012), old -> new. The old key is never read: it is dropped
-# as NOT_MIGRATED, which names the new one, and the setting takes its default meanwhile.
-RENAMED_SETTINGS = {"format": "formats"}
-
-
-def refuse_renamed(data: dict, where: str, dropped: list[str]) -> dict:
-    """`data` without its old keys, each one noted in `dropped` as NOT_MIGRATED."""
-    out = dict(data)
-    for old, new in RENAMED_SETTINGS.items():
-        if old in out:
-            del out[old]
-            dropped.append(
-                Dropped(where, old, not_migrated_text(old, new), code=NOT_MIGRATED)
-            )
-    return out
 
 
 def _boolean(value: object, field: str, where: str, dropped: list[str]) -> bool:
@@ -410,7 +391,7 @@ def _submit_url(value: object, where: str, dropped: list[str]) -> str:
 
 
 # One reader per key, so the per-assignment file, the course-wide defaults block, the
-# semester's `assignments.yml` and the institution's policy validate the same value the same way and cannot drift into two vocabularies.
+# semester's `semester.yml` and the institution's file validate the same value the same way and cannot drift into two vocabularies.
 READERS = {
     "title": lambda v, w, d: str(v or "").strip(),
     "type": lambda v, w, d: _one_of(v, ASSIGNMENT_TYPES, "type", "individual", w, d),
@@ -418,11 +399,8 @@ READERS = {
         v, TEAM_FORMATIONS, "team_formation", None, w, d
     ),
     "max_team_size": _team_cap,
-    # `canonical_submit_via` first, so the legacy `github` spelling reads as
-    # `assignment_repo` and never earns a Dropped warning; `shared` (renamed before it
-    # ever shipped) has no alias and is Dropped like any other unrecognised word.
     "submit_via": lambda v, w, d: _one_of(
-        canonical_submit_via(v), SUBMIT_VIA, "submit_via", "assignment_repo", w, d
+        v, SUBMIT_VIA, "submit_via", "assignment_repo", w, d
     ),
     "visibility": lambda v, w, d: _one_of(v, VISIBILITIES, "visibility", None, w, d),
     "submit_url": _submit_url,
@@ -430,6 +408,7 @@ READERS = {
     "questions": _questions,
     "late_window_days": _whole_days,
     "late_penalty_per_day": _penalty,
+    "marks_per_question": lambda v, w, d: _boolean(v, "marks_per_question", w, d),
     "autograde": lambda v, w, d: _boolean(v, "autograde", w, d),
     "completion_check": lambda v, w, d: _boolean(v, "completion_check", w, d),
     "tests": lambda v, w, d: str(v or "tests").strip() or "tests",

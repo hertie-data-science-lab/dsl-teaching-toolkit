@@ -28,6 +28,7 @@
         "assignment.update_copies",
         "course.publish_website",
         "grades.return",
+        "materials.confirm_withheld",
         "materials.create",
         "release.adhoc",
         "release.entry",

@@ -1,23 +1,21 @@
 {
-  "contact": "datasciencelab@hertie-school.org",
   "defaults": {
-    "archive": {
-      "grace_days": 60
-    },
-    "formats": [
-      "ipynb"
-    ],
+    "archive_grace_days": 60,
+    "assignment_repo_visibility": "private",
+    "autosync_released_edits": false,
     "late_penalty_per_day": "10%",
     "late_window_days": 10,
+    "marks_per_question": true,
+    "materials_repo": "materials",
     "max_team_size": 5,
-    "semester_dest_repo": "materials",
-    "team_formation": "self_select",
-    "timezone": "Europe/Berlin",
-    "visibility": "private"
+    "timezone": "Europe/Berlin"
   },
   "institution": {
     "address": "Data Science Lab\nHertie School\nFriedrichstra\u00dfe 180\n10117 Berlin, Germany\n",
     "console_url": "https://hertie-data-science-lab.github.io/dsl-teaching-toolkit/",
+    "contacts": [
+      "h.baker@hertie-school.org"
+    ],
     "dsl_org_url": "https://github.com/hertie-data-science-lab",
     "name": "Hertie School",
     "url": "https://hertie-school.org/en/datasciencelab"
@@ -28,6 +26,9 @@
       "colour": "#a94442",
       "key": "lecture",
       "label": "Lecture",
+      "numbered": true,
+      "plural": "lectures",
+      "shown": true,
       "system": false
     },
     {
@@ -35,6 +36,9 @@
       "colour": "#3c763d",
       "key": "lab",
       "label": "Lab",
+      "numbered": true,
+      "plural": "labs",
+      "shown": true,
       "system": false
     },
     {
@@ -42,6 +46,9 @@
       "colour": "#2b6a60",
       "key": "readings",
       "label": "Readings",
+      "numbered": false,
+      "plural": "readings",
+      "shown": true,
       "system": false
     },
     {
@@ -49,6 +56,9 @@
       "colour": "#2b2f36",
       "key": "exam",
       "label": "Exam",
+      "numbered": false,
+      "plural": "exams",
+      "shown": true,
       "system": false
     },
     {
@@ -56,13 +66,19 @@
       "colour": "#1f5fa8",
       "key": "assignment",
       "label": "Assignment",
+      "numbered": true,
+      "plural": "assignments",
+      "shown": true,
       "system": true
     },
     {
       "background": "#ead9f6",
       "colour": "#7b3fb8",
-      "key": "term",
+      "key": "semester",
       "label": "Semester",
+      "numbered": false,
+      "plural": "semesters",
+      "shown": true,
       "system": true
     },
     {
@@ -70,6 +86,9 @@
       "colour": "#7d6230",
       "key": "archive",
       "label": "Archive",
+      "numbered": false,
+      "plural": "archives",
+      "shown": true,
       "system": true
     },
     {
@@ -77,6 +96,9 @@
       "colour": "#8f4a1c",
       "key": "drop-in",
       "label": "Drop-in",
+      "numbered": true,
+      "plural": "drop-ins",
+      "shown": true,
       "system": false
     },
     {
@@ -84,6 +106,9 @@
       "colour": "#4a5560",
       "key": "assets",
       "label": "Supporting files",
+      "numbered": false,
+      "plural": "assets",
+      "shown": false,
       "system": false
     },
     {
@@ -91,6 +116,9 @@
       "colour": "#7d6230",
       "key": "other",
       "label": "Event",
+      "numbered": false,
+      "plural": "events",
+      "shown": true,
       "system": false
     }
   ],
@@ -111,5 +139,6 @@
       "name": "All rights reserved",
       "url": ""
     }
-  ]
+  ],
+  "selection_floor": {}
 }

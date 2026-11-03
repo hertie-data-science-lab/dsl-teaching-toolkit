@@ -183,7 +183,7 @@ def wait_for_push_driven_tick(
 ) -> int | None:
     """Wait out the Scheduled release a semester's own schedule.yml push starts.
 
-    A semester's seeded `dispatch-scheduled-release.yml` fires the course org's Scheduled
+    A semester's seeded `dispatch.yml` fires the course org's Scheduled
     release from every push to its schedule.yml, so this harness's schedule edits now
     drive the scheduler themselves. That run does exactly the work the pass dispatched
     next does, and it is idempotent - what it must not do is arrive in the middle of the

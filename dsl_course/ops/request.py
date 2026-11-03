@@ -11,7 +11,6 @@ import json
 
 from ..course import COURSE_ADMIN_TEAM, INSTRUCTORS_TEAM
 from ..discovery import being_set_up, discover_semesters
-from ..faults import NOT_MIGRATED, not_migrated_text
 from ..gh_teams import get_team_members, list_teams
 from ..schema_check import validate
 from .registry import (
@@ -42,26 +41,6 @@ REQUEST_JSON_SCHEMA = {
     "additionalProperties": False,
 }
 
-# Old request spellings (decision 0012), old -> new. Nothing reads them: a request that
-# carries one is refused as NOT_MIGRATED before anything else is checked, naming the new
-# spelling, so a console that has not caught up says so instead of failing as a typo.
-RENAMED_REQUEST_FIELDS = {"cohort_org": "semester_org"}
-RENAMED_REQUEST_ARGS = {
-    "cohort_dest_repo": "semester_dest_repo",
-    "cohort_dest_path": "semester_dest_path",
-    "tag": "semester",
-    "format": "formats",
-    "include_solution": "solution_datetime",
-}
-
-
-def _refuse_old_spellings(fields: object, renames: dict[str, str], where: str) -> None:
-    for old, new in renames.items():
-        if isinstance(fields, dict) and old in fields:
-            raise RequestError(
-                NOT_MIGRATED, f"{where}.{old}: {not_migrated_text(old, new)}."
-            )
-
 
 class RequestError(ValueError):
     """A request the engine refuses before running anything. `code` is the outcome's
@@ -79,12 +58,6 @@ def parse_request(text: str) -> Request:
         raw = json.loads(text)
     except (json.JSONDecodeError, TypeError):
         raise RequestError("BAD_REQUEST", "The request is not valid JSON.") from None
-    _refuse_old_spellings(raw, RENAMED_REQUEST_FIELDS, "$")
-    _refuse_old_spellings(
-        raw.get("args") if isinstance(raw, dict) else None,
-        RENAMED_REQUEST_ARGS,
-        "$.args",
-    )
     problems = validate(raw, REQUEST_JSON_SCHEMA)
     if problems:
         code = (

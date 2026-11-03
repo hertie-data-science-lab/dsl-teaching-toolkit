@@ -146,13 +146,13 @@ jobs:
             "Open this semester in the student console" \
             "table-row-lecture" "table-row-lab" "table-row-assignment" \
             "table-row-due" "table-row-exam" "table-row-special_event" \
-            "table-row-term_date" "table-row-drop-in"; do
+            "table-row-semester" "table-row-drop-in" "table-row-break"; do
             grep -rq -- "$needle" . || { echo "::error::$needle is nowhere in the build"; missing=1; }
           done
           # A tab per kind the fixture has rows of, each listing its own: lecture 1 is on
-          # the Readings tab too (its readings attach to it), the exam events on Exams, and
-          # the lab folder released outside the plan on Labs.
-          for tab in lectures:"Lecture 1" labs:"Lab 1" labs:"Week 2" labs:"Attention lab" readings:"Lecture 1" \
+          # the Readings tab too (its readings attach to it) and the exam events on Exams.
+          # A folder released outside the plan has no row (decision 0038).
+          for tab in lectures:"Lecture 1" labs:"Lab 1" labs:"Attention lab" readings:"Lecture 1" \
             readings:"Attention, further" drop-ins:"Drop-in 1" exams:"MidTerm Exam"; do
             grep -qF -- "${tab#*:}" "${tab%%:*}/index.html" || {
               echo "::error::${tab%%:*}/ does not list ${tab#*:}"; missing=1; }
@@ -331,14 +331,15 @@ jobs:
         # one announces the last week of term as "New Lab is up" before week one has
         # happened - which is what two live semester sites showed all term. The fixture holds
         # a released lecture 2 beside an unreleased lecture 3, a silent readings row, an
-        # undated off-plan lab, a TBC lab not released beside a released one (lab 4,
-        # announced when its files first landed), and a handed-out assignment 1 beside a
+        # undated off-plan lab, a TBC lab not released beside a released one (lab 5: one
+        # copy the release record dates, one seeded and dated by when it first landed;
+        # announced at the earlier), and a handed-out assignment 1 beside a
         # pending assignment 2, so the box is checked in both directions.
         run: |
           box=$(sed -n '/<h2>Updates<\/h2>/,/<\/ul>/p' "$RUNNER_TEMP/build/index.html")
           printf '%s\n' "$box"
           missing=0
-          for needle in "Lecture 1" "Lecture 2" "Lab 1" "Lab 4" "Assignment 1"; do
+          for needle in "Lecture 1" "Lecture 2" "Lab 1" "Lab 5" "Assignment 1"; do
             if ! printf '%s' "$box" | grep -qF -- "$needle"; then
               echo "::error::the Updates box does not announce $needle, which released"
               missing=1

@@ -91,7 +91,7 @@ describe('student-status.json', () => {
     const { course_description: _d, previous_offerings: _p, ...rest } = DOC;
     const f = factsFromStatus({ ...rest, kinds, rows });
     expect(f.rows.find((r) => r.id === 'lecture_01')!.tabs).toEqual(['lecture']);
-    expect(f.kinds?.readings.tab).toBe(true);
+    expect(f.kinds?.readings.tab).toBe(false);
     expect(f.kinds?.exam.tab).toBe(false);
     expect(f.courseDescription).toBe('');
     expect(f.previousOfferings).toEqual([]);

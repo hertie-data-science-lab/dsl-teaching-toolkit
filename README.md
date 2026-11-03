@@ -2,7 +2,7 @@
 
 Central registry of the workflows that deliver courses at the Hertie Data Science Lab. 
 
-A course lives once in a persistent **course** org and is delivered each year into a per-year **semester** org; everything faculty-facing is a **GitHub Actions workflow**, and can be scheduled in advance at the start of the semester.
+A course lives once in a persistent **course** org and is delivered each year into a per-year **semester** org; everything faculty do is an operation in the **Instructor Console** (or `python -m dsl_course <op>` from a laptop) run by GitHub Actions, and can be scheduled in advance at the start of the semester.
 
 ## Start here
 
@@ -107,7 +107,7 @@ A course can optionally also publish a **public** `<course-org>.github.io` open-
 | Chronological index of the e2e workflow | [the workflows](docs/README.md#the-workflows) |
 | An example course setup | [`example course`](example-course/README.md) |
 | Template artefacts | [`templates`](templates/semester-config/README.md) |
-| All available `.github` Actions tab workflows (course org) | [`actions reference`](docs/reference/actions-reference.md) |
+| Every operation (Console and `python -m dsl_course`) and `.github` workflow (course org) | [`actions reference`](docs/reference/actions-reference.md) |
 | Who may run those workflows, and which team grants it | [`access reference`](docs/reference/access-reference.md) |
 | **Deployment checklist** | [`DEPLOYMENT-CHECKLIST.md`](docs/DEPLOYMENT-CHECKLIST.md) |
 | Live inventory of every bootstrapped org | [Refresh Course Orgs Inventory](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/actions/workflows/refresh-inventory.yml) - weekly job summary |

@@ -1,13 +1,14 @@
 // @vitest-environment happy-dom
 // The course materials index's folder tree: collapsed by default with a count, opened folders
-// kept per repo for the session, a `?folder=` deep link opening its folder, and GitHub links.
+// kept per repo for the session, a `?folder=` deep link opening its folder, folders' GitHub links
+// and files opening in the console's viewer.
 
 import { render as mount } from 'preact';
 import { act } from 'preact/test-utils';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { focusIn } from '../src/screens/CourseIndex';
 import { parseSearch } from '../src/router';
-import { MaterialsTree, folderHref } from '../src/ui/MaterialsTree';
+import { MaterialsTree, fileViewHref, folderHref } from '../src/ui/MaterialsTree';
 
 const ORG = 'demo-course';
 const REPO = 'course-materials-f2026';
@@ -73,11 +74,11 @@ describe('the materials folder tree', () => {
     expect(details('labs').open).toBe(false);
   });
 
-  it('links files to their blob page and folders to their tree page on GitHub', async () => {
+  it('opens files in the console’s viewer and links folders to their tree page on GitHub', async () => {
     const { root, folder } = await mounted();
-    const file = root.querySelector<HTMLAnchorElement>('.materials-tree > li.ft-file a')!;
-    expect(file.getAttribute('href')).toBe(`https://github.com/${ORG}/${REPO}/blob/HEAD/SYLLABUS.md`);
-    expect(file.getAttribute('target')).toBe('_blank');
+    const file = root.querySelector<HTMLAnchorElement>('.materials-tree > li.ft-file a.ft-name')!;
+    expect(file.getAttribute('href')).toBe(fileViewHref(ORG, REPO, 'SYLLABUS.md'));
+    expect(file.getAttribute('target')).toBeNull();
     expect(folder('lectures').querySelector('a.ft-gh')!.getAttribute('href')).toBe(`https://github.com/${ORG}/${REPO}/tree/HEAD/lectures`);
   });
 });

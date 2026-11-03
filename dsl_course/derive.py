@@ -75,7 +75,7 @@ from .gh_contents import (
     put_files,
     repo_path_shas,
 )
-from .grades import GRADING_FILE
+from .grading_spec import GRADING_FILE
 from .log import (
     CLIParser,
     Summary,

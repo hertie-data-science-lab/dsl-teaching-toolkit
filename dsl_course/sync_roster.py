@@ -4,7 +4,7 @@ The enrolment "access" half: a single idempotent reconcile that ensures every on
 row in the semester's students.csv is (a) a member of the semester org and (b) in the role
 team its `role` column names - `students` for enrolled rows, `auditors` for auditors.
 Both teams carry semester-private read on released materials; only `students` rows get
-assignment repos and gradebooks (see dsl_course.assign / dsl_course.grades).
+assignment repos and gradebooks (see dsl_course.assign / dsl_course.gradebook).
 
 Students normally grant themselves on Join (templates/join/onboard.yml); this is the
 faculty & instructors true-up - edit students.csv, then re-run to reconcile the whole team to the roster.
@@ -160,7 +160,7 @@ def revoke_offboarded_access(
     repo's suffix is a team name, faculty and the bot hold their access through teams, and
     a repo name is not a reason to take anyone's access away. `on_roster` is casefolded, because GitHub logins
     are case-insensitive and a case-only difference is the same account."""
-    # teams.csv already says which repos are the GROUP ones, so asking GitHub whether a
+    # The team cells already say which repos are the GROUP ones, so asking GitHub whether a
     # team is a collaborator on its own repo is a paginated read per team repo per night,
     # for an answer that is always "no". Matched on the whole repo NAME rather than the
     # bare suffix: a team name and a student's handle live in the same namespace, and only
@@ -226,6 +226,17 @@ def sync(
             f"students.csv digest issue in {roster.CONFIG_REPO})"
         )
         return 0
+    # Rows, but nobody onboarded: `.system/roster.csv` read as absent. A prune off that
+    # takes everyone's access away, so the 404 is confirmed first - here, where it would
+    # act, since the file is absent on every run until the first codes go out.
+    if (
+        prune
+        and not dry_run
+        and students
+        and not any(s.onboarded for s in students)
+        and roster.confirm_system_text(semester_org)
+    ):
+        students = roster.load(semester_org) or []
     # An empty roster (header only - a freshly bootstrapped semester) is a valid state,
     # not an error: reconcile both role teams to empty like any other edit.
     wanted = desired_members(students)

@@ -54,7 +54,7 @@ def test_is_repo_root_knows_every_whole_repo_spelling():
 
 
 def test_active_today_accepts_date_objects_as_bounds():
-    # An unquoted `start: 2026-09-01` in instructors.yml parses to a datetime.date, not a
+    # An unquoted `start: 2026-09-01` in semester.yml parses to a datetime.date, not a
     # string; `today < start` used to raise TypeError: str < date.
     from datetime import date, datetime
 
@@ -102,7 +102,7 @@ def test_the_late_rule_reads_as_one_sentence_for_every_way_it_can_be_declared():
     assert course.late_rule(None, "10%") == "not accepted after the deadline"
     assert course.late_rule(0, None) == "not accepted after the deadline"
     # The sentence a semester reads when nobody has declared anything: the toolkit's own
-    # default is the Hertie syllabus rule, not silence (`grades.parse_grading_spec`).
+    # default is the Hertie syllabus rule, not silence (`grading_spec.parse_grading_spec`).
     assert (
         course.late_rule(
             policy.defaults()["late_window_days"],

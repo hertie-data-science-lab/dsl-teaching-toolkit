@@ -14,8 +14,10 @@ template is reused every semester; its number comes from each semester's schedul
 Live example: [`example-course/course-org/assignment-linear-regression/`](../example-course/course-org/assignment-linear-regression).
 
 1. **Scaffold the template.** 
-   - In the course org → `.github` → **Actions tab** → [New assignment](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/new-assignment.yml). Inputs:
-      - `assignment_name` = the assignment's name, e.g. `Neural networks from scratch`
+   - In the Instructor Console: **New assignment** (op `assignment.create`); or from a
+     laptop: `python -m dsl_course assignment.create --course-org <course-org> --arg
+     name=<name> [--arg formats=py ...] --no-preview`. Inputs:
+      - `name` = the assignment's name, e.g. `Neural networks from scratch`
       - `formats` = which starter file(s) to seed, comma-separated (the first is the
         runnable one): `ipynb`, `py`, `rmd`,
         `qmd`, `latex` - or `none` on its own for the brief and nothing else. Picks the
@@ -31,17 +33,19 @@ Live example: [`example-course/course-org/assignment-linear-regression/`](../exa
       - `autograde` (off by default; on seeds a `tests/` stub on `solution` for you to
         fill, and each submission's pass count appears on the grading sheet as a first
         pass for graders - never shown to students)
-   - The console's New assignment also asks how students get the starter: `derived`
-     from your marked solution, or `handwritten` on `main`. The workflow writes
-     `derived` when `autograde` is on, else `handwritten`; change `starter:` in
+   - `starter` = how students get the starter: `derived` from your marked solution, or
+     `handwritten` on `main`. Left out, it is `derived` when `autograde` is on, else
+     `handwritten`; change `starter:` in
      `grading_config.yml` later. See [derived or by hand](assignment-starter.md).
    - How each semester RUNS it - how teams form, the max team size, the late window and
      penalty, who may read the repos, an external submit link - is not asked here and
-     never written into `grading_config.yml` (a run setting there is `NOT_MIGRATED`). It
-     is that semester's `semester-config/assignments.yml`, else the course's
-     `assignment_defaults:` in `.github/dsl-course.yml`, else the institution's (Hertie:
+     never written into `grading_config.yml` (a run setting there refuses the whole file as
+     `RUN_SETTING_IN_TEMPLATE`). It
+     is the assignment's entry in that semester's `schedule.yml` (else its `semester.yml`
+     `defaults:`), else the course's
+     `defaults:` in `.github/course.yml`, else the institution's (Hertie:
      teams of 5, `late_penalty_per_day: 10%` per day started, `late_window_days: 10`).
-     See [07](07-schedule-releases.md#assignmentsyml---how-this-semester-runs-each-assignment).
+     See [07](07-schedule-releases.md#assignments).
    - this creates **`assignment-neural-networks-from-scratch`**, marked with the
      `dsl-assignment` topic, with two branches of stubs for you to replace:
 
@@ -141,8 +145,9 @@ reads that file, so the assignment grades as if it declared nothing at all.
 
 ### Where the work goes, and who sees it
 
-`submit_via` in `grading_config.yml`, and `submit_url` and `visibility` in each semester's
-`assignments.yml`; everything else follows from them.
+`submit_via` in `grading_config.yml`, and `submit_url` and `visibility` (written
+`assignment_repo_visibility` on a `schedule.yml` entry) in each semester; everything else
+follows from them.
 
 | Setting | Values | What it does |
 |---|---|---|
@@ -169,9 +174,8 @@ a `private` assignment publish a copy under their own account (the gradebook REA
 them how); the org's copy stays private.
 
 `visibility` is read when each repo is **created**: change it before the first hand out.
-Editing it afterwards changes nothing on GitHub, so the semester's *assignments.yml*
-digest reports the disagreement until `assignments.yml` and the repos say the same thing
-again. `student_choice` is
+Editing it afterwards changes nothing on GitHub, so the semester's digest reports the
+disagreement until the setting and the repos say the same thing again. `student_choice` is
 exempt from that check - a mixture is what it is for - and is checked against the ORG
 instead: it needs **Allow members to change repository visibilities** ON and **Allow
 members to delete or transfer repositories** OFF (semester org → Settings → Member
@@ -187,7 +191,7 @@ and gives every onboarded student (or every team) `push` on it. Each unit works 
 point - peer-visible presentations, referee reports, a gallery of submissions.
 
 The folder name is the student's GitHub handle (or the team name) spelt **exactly** as
-*students.csv* or *teams.csv* has it, including its capitals: GitHub matches a path
+*.system/roster.csv* or the *students.csv* team cell has it, including its capitals: GitHub matches a path
 case-sensitively, so work pushed to `Anna-Adams/` is not in `anna-adams/` and is not found.
 Say so in the brief, and check the spelling of a handle whose folder the sheet says is empty.
 
@@ -228,20 +232,23 @@ feedback go to the private `grades-<handle>` gradebook for every shape alike, wh
 > The shape is set in ONE place: `type: individual | group` in the assignment's own
 > `grading_config.yml`, on the template's `solution` branch. **New assignment** writes it
 > from the button, and you edit it there afterwards. How teams form and how big they may
-> be are each semester's, in its `assignments.yml`:
+> be are each semester's, on the assignment's `schedule.yml` entry:
 >
 >```yaml
-># semester-config/assignments.yml
+># semester-config/schedule.yml
 >assignments:
->  assignment-4-project:
->    team_formation: self_select   # or `assigned`, and you write teams.csv
+>  project:
+>    number: 4
+>    template: assignment-project
+>    due_datetime: 2026-11-27
+>    team_formation: self_select   # or `assigned`, and you type the teams into students.csv
 >    max_team_size: 4
 >```
 >
 > Those two are what the **Join team** form in each semester's `join` repo answers on. The
 > form runs in a public repo and cannot read either file, so the toolkit mirrors them into
 > `semester-config/.system/assignments.lock.yml` and the form reads that. The mirror
-> catches up on the next **Sync membership**, **Release assignment** or nightly **Refresh
+> catches up on the next **Sync membership**, a hand-out or nightly **Refresh
 > actions**. Until this template exists, its schedule entry is locked to "no teams".
 
 > **Deadlines aren't set here.** The due date students see is *per semester*, in that semester's `schedule.yml` - see [Release assignment → Deadlines](09-release-assignment-to-cohort.md#deadlines).

@@ -246,7 +246,13 @@ export function OpPanel() {
     foot = <div class="actions"><button class="btn small quiet" type="button" disabled={c.stopping} onClick={() => void ops.cancel()}>{c.stopping ? 'Stopping…' : d.cancel}</button></div>;
   } else if (c.phase === 'done' && c.result) {
     const target = targetOf(d, values);
-    body = <><OutcomeView result={c.result} def={d} url={c.progress?.htmlUrl} stopped={c.stopped} /><p class="footnote">Written to <a href="#operations">All operations</a>.</p></>;
+    body = (
+      <>
+        <OutcomeView result={c.result} def={d} url={c.progress?.htmlUrl} stopped={c.stopped} />
+        {d.doneExtra && c.result.outcome?.conclusion !== 'failed' ? d.doneExtra : null}
+        <p class="footnote">Written to <a href="#operations">All operations</a>.</p>
+      </>
+    );
     foot = (
       <div class="actions">
         {target ? <a class="btn outline" href={target} target="_blank" rel="noopener">See on GitHub</a> : null}

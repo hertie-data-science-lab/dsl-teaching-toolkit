@@ -2,8 +2,8 @@
 
 import { useMemo, useState } from 'preact/hooks';
 import { useEnv } from '../env';
-import { useSave } from '../edit/save';
-import { YamlText, deepEqual, obj, render } from '../edit/yamlText';
+import { invalidText, useDraftSave, useSave } from '../edit/save';
+import { YamlText, obj, render } from '../edit/yamlText';
 import { Field, SchemaForm, fieldErrors } from '../forms/Form';
 import { ago, fmtWhen, kebab, str } from '../model/format';
 import type { FileState } from '../model/files';
@@ -20,12 +20,18 @@ import { SaveBar, SaveLine } from '../ui/edit';
 import { Ext } from '../ui/icons';
 import { WithStatus, cohortScope, todayOf, tzOf, useOperations, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
-import { COURSE_REPO, CONFIG_REPO, INSTRUCTORS_FILE, SITE_CONFIG } from '../model/names';
-import { draftErrors, readDraft, type SemesterDraft } from '../model/scheduleEdit';
+import { COURSE_FILE, COURSE_REPO, CONFIG_REPO, DEFAULT_SYLLABUS, SEMESTER_FILE, SITE_CONFIG } from '../model/names';
+import { semesterFile } from '../model/settings';
+import semesterSchema from '../../schemas/semester.schema.json';
+import { DEFAULT_DEST_REPO } from '../model/policy';
+import { FLOORS, HOST_DEFAULT, kindOfLanded, landings, readSel, withPublic, type Sel } from '../model/selection';
+import { validator } from '../model/validate';
+import { SelectionEditor } from '../ui/SelectionEditor';
+import { useSchedFile } from './Schedule';
 import { ABOUT } from '../tiers/course';
 import type { FieldTier, Tiers, Values } from '../tiers/types';
-import { detailsOf, saveCourseFile } from './CourseEdit';
-import { SemesterForm, scheduleAfter, useSchedFile } from './Schedule';
+import { detailsOf, saveCourseFile, withSyllabus } from './CourseEdit';
+import { SETTINGS_HASH, settingsLines } from './SemesterSettings';
 
 /** A hand-written announcement's title, date and text, from its front matter (or its body). */
 export function readAnnouncement(text: string): { title?: string; date: string; text: string } {
@@ -72,27 +78,6 @@ export function syncedValues(course: ReadyProps['course'], cohort: ReadyProps['c
   return Object.fromEntries(SITE_CONFIG.synced.map((k) => [k, from[k] ?? '']));
 }
 
-/**
- * A settings group's draft over `base`, and its save: `set` replaces the draft and clears a
- * finished save line, `run` saves and drops the draft once written.
- */
-function useDraftSave<T>(base: T) {
-  const env = useEnv();
-  const [draft, setDraft] = useState<T | null>(null);
-  const [save, runSave, setSave] = useSave(env);
-  const cur = draft ?? base;
-  const set = (v: T) => {
-    setDraft(v);
-    if (save.kind !== 'busy') setSave({ kind: 'idle' });
-  };
-  const run: typeof runSave = async (...a) => {
-    const ok = await runSave(...a);
-    if (ok) setDraft(null);
-    return ok;
-  };
-  return { env, cur, set, save, setSave, run, unchanged: deepEqual(cur, base) };
-}
-
 function Site(p: ReadyProps) {
   const { status, now } = p;
   const env = useEnv();
@@ -101,7 +86,7 @@ function Site(p: ReadyProps) {
   const url = status.site?.url ?? `https://${repo}`;
   const home = p.files.file(p.cohort.org, repo, 'index.md');
   const ann = p.files.dir(p.cohort.org, repo, '_announcements');
-  const peopleFile = p.files.file(p.cohort.org, CONFIG_REPO, INSTRUCTORS_FILE);
+  const peopleFile = p.files.file(p.cohort.org, CONFIG_REPO, SEMESTER_FILE);
   const people = peopleFile.kind === 'ready' ? parseInstructors(peopleFile.text) : [];
   const site = status.site;
   const [body, setBody] = useState<string | null>(null);
@@ -188,9 +173,65 @@ function Site(p: ReadyProps) {
             ))}
           </ul>
         </section>
+        <HostedPanel p={p} />
         <SiteSettings p={p} repo={repo} cfgFile={cfgFile} cfg={cfg} />
       </div>
     </>
+  );
+}
+
+const validSemester = validator(semesterSchema);
+
+/** `semester.yml` with `student_site.host` written (an empty selection removes the key), or why it would not be valid. */
+export function hostFileAfter(text: string, host: Sel): { text: string } | { error: string } {
+  const y = new YamlText(text);
+  if (y.errors.length) return { error: `${SEMESTER_FILE} does not parse; fix it with Edit the file directly.` };
+  y.assign(['student_site', 'host'], Object.keys(host).length ? host : undefined);
+  return validSemester(y.toJS() ?? {}) ? { text: y.text } : { error: invalidText(SEMESTER_FILE, validSemester) };
+}
+
+/**
+ * What the PUBLIC semester site hosts a viewable copy of (`student_site.host`, decision 0040): the
+ * selection editor over a repo the schedule releases into, each file's kind the schedule entry
+ * that landed it. A readings file marked public is hosted whatever the kinds say.
+ */
+function HostedPanel({ p }: { p: ReadyProps }) {
+  const sf = useSchedFile(p);
+  const doc = sf && sf !== 'loading' && !sf.error ? sf.doc : null;
+  const repos = useMemo(() => {
+    const found = new Set<string>();
+    for (const b of Object.values(doc ?? {})) for (const e of Object.values(obj(b))) {
+      const files = obj(e).files;
+      for (const f of Array.isArray(files) ? files : []) if (obj(f).from_course_repo) found.add(String(obj(f).to_semester_repo || DEFAULT_DEST_REPO));
+    }
+    return [...found].sort();
+  }, [doc]);
+  const [picked, setPicked] = useState<string | null>(null);
+  const target = picked ?? repos[0] ?? DEFAULT_DEST_REPO;
+  const file = p.files.file(p.cohort.org, CONFIG_REPO, SEMESTER_FILE);
+  const parsed = useYaml(file);
+  const base = useMemo(() => readSel(obj(parsed?.doc?.student_site).host), [parsed]);
+  const { cur, set, save, setSave, run, unchanged } = useDraftSave<Sel>(base);
+  const ls = useMemo(() => (doc ? landings(doc, target) : []), [doc, target]);
+  const tree = p.files.tree(p.cohort.org, target);
+  const files = tree.kind === 'ready' ? tree.paths.filter((x) => !x.dir).map((x) => x.path) : [];
+  const doSave = async () => {
+    if (file.kind !== 'ready') return;
+    const out = hostFileAfter(file.text, cur);
+    if ('error' in out) return setSave({ kind: 'bad', text: out.error });
+    await run({ owner: p.cohort.org, repo: CONFIG_REPO, path: SEMESTER_FILE }, out.text, file.sha, { message: 'semester: edit what the student site hosts, from the DSL Teaching Console', statusRepo: [p.cohort.org, CONFIG_REPO] });
+  };
+  return (
+    <section class="panel section">
+      <h2>Hosted on this site <Hint label="About hosted copies">The student site is public. It hosts a viewable copy of the files picked here, so a deck or a pdf opens in the browser; the rest link to GitHub, where only the class can open them. Readings are copyrighted: their chip turns red when they are hosted. A readings file marked public in the schedule is hosted anyway.</Hint></h2>
+      {repos.length > 1 ? (
+        <div class="field"><label for="host-repo">Repo</label><select id="host-repo" onChange={(e) => setPicked((e.target as HTMLSelectElement).value)}>{repos.map((r) => <option value={r} selected={r === target}>{r}</option>)}</select><p class="hint">One selection for every repo the schedule releases into; this shows it on one.</p></div>
+      ) : null}
+      {file.kind === 'loading' || tree.kind === 'loading' ? <Loading what="Reading the released files" /> : tree.kind !== 'ready' ? <p class="footnote">Nothing released into {target} yet.</p> : (
+        <SelectionEditor files={files} value={cur} onChange={set} defaults={HOST_DEFAULT} kindOf={kindOfLanded(ls)} floor={FLOORS.student_site_host} rendered also={withPublic({}, ls).include} inWord="hosted" outWord="not hosted" />
+      )}
+      <SaveBar state={save} onSave={() => void doSave()} small disabled={file.kind !== 'ready' || unchanged} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: SEMESTER_FILE, exists: file.kind !== 'absent' }} />
+    </section>
   );
 }
 
@@ -203,14 +244,13 @@ const INSTITUTION_FIELDS: Record<string, FieldTier> = {
 };
 const INSTITUTION: Tiers = Object.fromEntries(SITE_CONFIG.institution.map((k) => [k, INSTITUTION_FIELDS[k] ?? { tier: 'ask', label: k }]));
 const COURSE_KEYS = ['course_name', 'course_code', 'course_description'];
-const COURSE_FILE = 'dsl-course.yml';
 
 /** Where a derived group is saved, and that the site follows at the next sync. */
 function SavedTo({ href, screen }: { href: string; screen: string }) {
   return <p class="footnote">Saved to <a class="textlink" href={href}>{screen}</a>; the site updates at the next sync.</p>;
 }
 
-/** Course name, code and description: the sync copies them from dsl-course.yml, so they are saved there. */
+/** Course name, code and description: the sync copies them from course.yml, so they are saved there. */
 function CourseGroup({ p }: { p: ReadyProps }) {
   const { course } = p;
   const file = p.files.file(course.org, COURSE_REPO, COURSE_FILE);
@@ -221,7 +261,7 @@ function CourseGroup({ p }: { p: ReadyProps }) {
   const { env, cur, set, save, setSave, run, unchanged } = useDraftSave(base);
   const doSave = async () => {
     if (!before || !meta || file.kind !== 'ready') return;
-    await saveCourseFile(env, [run, setSave], { org: course.org, migrated: p.courseMigrated, file, meta, before, after: { ...before, about: { ...before.about, ...cur } }, errs: fieldErrors(null, ABOUT, cur) });
+    await saveCourseFile(env, [run, setSave], { org: course.org, file, meta, before, after: { ...before, about: { ...before.about, ...cur } }, errs: fieldErrors(null, ABOUT, cur) });
   };
   return (
     <div class="form-section">
@@ -235,27 +275,40 @@ function CourseGroup({ p }: { p: ReadyProps }) {
   );
 }
 
-/** The semester's dates and timezone: the sync reads them from schedule.yml, so they are saved there. */
+/** The semester's dates: the sync reads them from schedule.yml; they are edited in the Dashboard's Semester settings. */
 function SemesterGroup({ p }: { p: ReadyProps }) {
-  const sf = useSchedFile(p);
-  const ready = sf && sf !== 'loading' && !sf.error ? sf : null;
-  const before = useMemo(() => (ready ? (readDraft(ready.doc, 'semester') as SemesterDraft) : null), [ready?.doc]);
-  const { cur: d, set, save, setSave, run, unchanged } = useDraftSave(before);
-  const errors = d ? draftErrors(d) : {};
-  const doSave = async () => {
-    if (!ready || !d) return;
-    if (Object.keys(errors).length) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
-    const out = scheduleAfter(ready, [d]);
-    if ('error' in out) return setSave({ kind: 'bad', text: out.error });
-    await run({ owner: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }, out.text, ready.sha, { message: 'schedule: edit the semester dates, from the DSL Teaching Console', statusRepo: [p.cohort.org, CONFIG_REPO] });
-  };
   return (
     <div class="form-section">
       <h3>Semester dates</h3>
-      {sf === 'loading' ? <Loading what="Reading the schedule" /> : sf === null ? <p class="footnote">No schedule.yml yet.</p> : sf.error ? <CheckLine cls="bad">schedule.yml does not parse ({sf.error}); fix it with Edit the file directly.</CheckLine> : null}
-      {d ? <SemesterForm d={d} set={(patch) => set({ ...d, ...patch })} errors={errors} /> : null}
-      <SavedTo href="#schedule-semester" screen="Schedule" />
-      <SaveBar state={save} onSave={() => void doSave()} small disabled={!d || unchanged} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml', exists: sf !== null }} />
+      <p>{settingsLines(p.status).dates}</p>
+      <p class="footnote">Edited in <a class="textlink" href={SETTINGS_HASH}>Semester settings</a> on the Dashboard; the site updates at the next sync.</p>
+    </div>
+  );
+}
+
+const SYLLABUS: Tiers = {
+  syllabus: { tier: 'default', label: 'Syllabus file', placeholder: DEFAULT_SYLLABUS, defaultLabel: `default: ${DEFAULT_SYLLABUS}`, reason: 'The released file the home page pins as the syllabus, as a path in the materials repo.' },
+};
+
+/** The semester's own student site settings (`semester.yml student_site:`, decision 0039): the syllabus it pins. */
+function StudentSiteGroup({ p }: { p: ReadyProps }) {
+  const f = semesterFile(p.files, p.cohort.org);
+  const ready = f && f !== 'loading' && !f.error ? f : null;
+  const saved = String(obj(ready?.doc.student_site).syllabus ?? '').trim();
+  const base: Values = useMemo(() => ({ syllabus: saved || undefined }), [saved]);
+  const { cur, set, save, setSave, run, unchanged } = useDraftSave(base);
+  const doSave = async () => {
+    if (!ready) return;
+    const out = withSyllabus(ready.text, String(cur.syllabus ?? '').trim() || DEFAULT_SYLLABUS);
+    if ('error' in out) return setSave({ kind: 'bad', text: out.error });
+    await run({ owner: p.cohort.org, repo: CONFIG_REPO, path: SEMESTER_FILE }, out.text, ready.sha, { message: 'semester: choose the syllabus file, from the DSL Teaching Console', statusRepo: [p.cohort.org, CONFIG_REPO] });
+  };
+  return (
+    <div class="form-section">
+      <h3>Student site</h3>
+      {f === 'loading' ? <Loading what={`Reading ${SEMESTER_FILE}`} /> : f === null ? <CheckLine cls="bad">Could not read {SEMESTER_FILE}.</CheckLine> : f.error ? <CheckLine cls="bad">{SEMESTER_FILE} does not parse ({f.error}); fix it with Edit the file directly.</CheckLine> : null}
+      {ready ? <SchemaForm id="ss-site" schema={null} tiers={SYLLABUS} values={cur} onChange={set} /> : null}
+      <SaveBar state={save} onSave={() => void doSave()} small disabled={!ready || unchanged} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: SEMESTER_FILE, exists: p.files.file(p.cohort.org, CONFIG_REPO, SEMESTER_FILE).kind !== 'absent' }} />
     </div>
   );
 }
@@ -296,6 +349,7 @@ function SiteSettings({ p, repo, cfgFile, cfg }: { p: ReadyProps; repo: string; 
       <div class="form">
         <CourseGroup p={p} />
         <SemesterGroup p={p} />
+        <StudentSiteGroup p={p} />
         <div class="form-section">
           <h3>Semester and org</h3>
           <dl class="kv">

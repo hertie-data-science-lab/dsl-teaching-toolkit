@@ -8,7 +8,8 @@ import { plural } from '../model/format';
 import { COURSE_REPO } from '../model/names';
 import { ghUrl } from '../ui/bits';
 import { DEFAULT_DEST_REPO } from '../model/policy';
-import { HANDOUT, RETURN_MARKS, RETURN_MARKS_ABOUT, RETURN_MARKS_ALWAYS, SEND_CODES_ABOUT, releaseAdhoc as adhocTiers, updateCopies as copiesTiers } from '../tiers/ops';
+import { HANDOUT, RETURN_MARKS, RETURN_MARKS_ABOUT, RETURN_MARKS_ALWAYS, SEND_CODES_ABOUT, releaseAdhoc as adhocTiers, returnMarksTiers, updateCopies as copiesTiers } from '../tiers/ops';
+import type { Source } from '../model/settings';
 import type { ComponentChildren } from 'preact';
 import type { OpDef } from './session';
 
@@ -83,11 +84,29 @@ export function releaseEarly(s: Scope, r: ReleaseRef): OpDef {
   });
 }
 
-export function releaseAgain(s: Scope, r: ReleaseRef): OpDef {
-  return releaseDef(s, r, {
+/**
+ * Release again, with what differs from the course copy (decision 0043 rule 6): one line per
+ * kind in `facts`, and - when files were deleted from the course copy - the unticked choice to
+ * remove them from the released copy too (`remove_deleted`).
+ */
+export function releaseAgain(s: Scope, r: ReleaseRef, drift: { facts: string[]; deleted: number; edited?: boolean } = { facts: [], deleted: 0 }): OpDef {
+  const def = releaseDef(s, r, {
     name: 'Release again', where: `Released ${r.when}`, intro: `Copies the course’s current version of ${r.ident} to students again, for a fixed file.`,
     verb: `Release ${r.ident} again`, running: `Releasing ${r.ident} again`, cancel: 'Stop before copying',
   });
+  if (drift.facts.length) def.facts = drift.facts;
+  // A release merges into the released copy: a file both sides changed waits as a pull request, never overwritten blind.
+  if (drift.edited) def.confirm = 'The released copy has its own edits: they stay, and a file the course also changed waits in a pull request for you to resolve. Keep them for future semesters first if they should last.';
+  if (drift.deleted) {
+    def.options = {
+      remove_deleted: {
+        tier: 'ask', widget: 'checkbox', default: false,
+        label: `Also remove the ${plural(drift.deleted, 'file')} deleted from the course copy`,
+        reason: 'Off: they stay in the released copy, as a release only ever adds.',
+      },
+    };
+  }
+  return def;
 }
 
 export function releaseNow(s: Scope, r: ReleaseRef): OpDef {
@@ -118,7 +137,7 @@ export interface AsgRef {
   units: number;
   group: boolean;
   when: string; // for the eyebrow
-  /** The semester-side name its repos are called after (`semester_dest_repo`, else the key: cascade `semesterName`). */
+  /** The semester-side name its repos are called after (the entry's `repo_name`, else the key: `semesterName`). */
   name?: string;
 }
 
@@ -164,13 +183,22 @@ export interface LateReturn {
   rule: string | null;
 }
 
+/** The assignment's effective `marks_per_question` and its source, and how to save a change to it. */
+export interface PerQuestion {
+  value: boolean;
+  source: Source;
+  save: (on: boolean) => Promise<void>;
+}
+
 /**
- * `name`: the assignment's semester-side name (`semester_dest_repo`, else its key), what the engine returns by.
+ * `name`: the assignment's semester-side name (the entry's `repo_name`, else its key), what the engine returns by.
  * `late`: while the late cutoff has not passed, the dialog says late work can still change marks (decision 0037).
  * `facts`: the Marks tab's lines from the mark sheet: who gets marks, who is skipped or held, and the final grades (`marks.spread`).
  * `dryExtra`: shown under a preview, who would be emailed (the Marks tab reads the preview issue).
+ * `perQuestion`: prefills "Include marks per question"; a run whose box says otherwise saves the
+ * assignment's run setting before it is dispatched, so the scheduler's automatic returns follow it.
  */
-export function returnMarks(s: Scope, a: AsgRef, marked: number, name: string, late?: LateReturn | null, facts?: string[], dryExtra?: ComponentChildren): OpDef {
+export function returnMarks(s: Scope, a: AsgRef, marked: number, name: string, late?: LateReturn | null, facts?: string[], dryExtra?: ComponentChildren, perQuestion?: PerQuestion): OpDef {
   const unit = a.group ? 'team' : 'student';
   const units = plural(a.units, unit);
   return {
@@ -181,7 +209,14 @@ export function returnMarks(s: Scope, a: AsgRef, marked: number, name: string, l
       : undefined,
     facts, dryExtra,
     verb: `Return marks to ${plural(marked, unit)}`, verbHint: RETURN_MARKS_ABOUT, running: 'Returning marks', cancel: 'Stop; marks already returned stay returned',
-    args: { assignment: name }, options: RETURN_MARKS, fixed: RETURN_MARKS_ALWAYS,
+    args: { assignment: name, ...(perQuestion ? { per_question: perQuestion.value } : {}) },
+    options: perQuestion ? returnMarksTiers(perQuestion) : RETURN_MARKS, fixed: RETURN_MARKS_ALWAYS,
+    beforeRun: perQuestion
+      ? async (args) => {
+          const on = args.per_question !== false;
+          if (on !== perQuestion.value) await perQuestion.save(on);
+        }
+      : undefined,
     target: reposLike(s.cohortOrg ?? s.courseOrg, 'grades-'),
   };
 }
@@ -265,6 +300,15 @@ export function generateSyllabus(s: Scope, repo: string, syllabus: string): OpDe
     intro: `Every session with its date and readings, from the semester’s schedule. Write puts it into ${syllabus} between the weekly-plan markers; nothing else in the file changes.`,
     verb: 'Write the weekly plan', running: 'Writing the weekly plan', cancel: 'Stop', args: { course_source_repo: repo, syllabus },
     target: file, previewLabel: 'Copy',
+  };
+}
+
+/** "Withheld patterns reviewed" (decision 0040 rule 7): marks the repo's `.releaseignore` reviewed, changing no pattern. */
+export function confirmWithheld(s: Scope, repo: string): OpDef {
+  return {
+    ...base(s, 'materials.confirm_withheld', repo), name: 'Withheld patterns reviewed', title: repo, where: s.where,
+    intro: `Marks ${repo}’s withheld patterns as reviewed without changing any: everything not withheld keeps reaching students.`,
+    verb: 'Confirm', running: 'Confirming', cancel: 'Stop', args: { repo }, target: ghUrl(s.courseOrg, repo, '.releaseignore'),
   };
 }
 

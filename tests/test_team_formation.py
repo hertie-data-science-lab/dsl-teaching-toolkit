@@ -15,11 +15,11 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
-from conftest import ROSTER_HEADER
+from conftest import ROSTER_HEADER, roster_files
 
-from dsl_course import discovery, gh_contents, settings, team_formation
+from dsl_course import discovery, gh_contents, roster, settings, team_formation
 from dsl_course.faults import Severity
-from dsl_course.grades import GradingSpec
+from dsl_course.grading_spec import GradingSpec
 from dsl_course.mailer import send_bulk as _SEND_BULK
 from dsl_course.schedule import AssignmentEntry, Schedule
 
@@ -46,6 +46,7 @@ TEAMS_HEADER = "assignment,team,github_handle"
 
 
 def _entry(**kw) -> AssignmentEntry:
+    kw.setdefault("number", 2)
     return AssignmentEntry(
         course_source_repo="a2-f2026",
         due_datetime=SHUTS,
@@ -76,22 +77,29 @@ def semester(monkeypatch):
     ones the toolkit actually applies."""
 
     def _wire(roster_csv: str = ROSTER, teams_csv: str = "", spec=GROUP):
-        monkeypatch.setattr(
-            team_formation.roster, "_roster_text", lambda org: roster_csv
+        files = (
+            {}
+            if roster_csv is None
+            else roster_files(roster_csv, teams_csv or None, _numbers(teams_csv))
         )
         monkeypatch.setattr(
-            team_formation.teams,
-            "_teams_text",
-            lambda org: teams_csv or None,
+            team_formation.roster,
+            "_students_text",
+            lambda org: files.get(roster.STUDENTS_PATH),
         )
         monkeypatch.setattr(
-            team_formation.grades,
+            team_formation.roster,
+            "_system_text",
+            lambda org: files.get(roster.SYSTEM_PATH),
+        )
+        monkeypatch.setattr(
+            team_formation,
             "declared_grading_spec",
             lambda org, template, **_: spec,
         )
-        # The cap the window carries and the mail prints: `grades.team_cap` falls back to
+        # The cap the window carries and the mail prints: `team_formation.team_cap` falls back to
         # the COURSE org's assignment_defaults when the template names no size, and that
-        # is a live read of its dsl-course.yml.
+        # is a live read of its course.yml.
         monkeypatch.setattr(
             settings,
             "course_defaults",
@@ -99,6 +107,12 @@ def semester(monkeypatch):
         )
 
     return _wire
+
+
+def _numbers(teams_csv: str) -> dict[str, int]:
+    """Each schedule key a teams fixture names -> its number (`assignment-2` -> 2)."""
+    keys = {line.split(",")[0] for line in teams_csv.splitlines()[1:] if line}
+    return {k: int(k.rsplit("-", 1)[1]) for k in keys if k.rsplit("-", 1)[-1].isdigit()}
 
 
 def _rows(*pairs: tuple[str, str], key: str = "assignment-2") -> str:
@@ -195,7 +209,7 @@ def test_an_assignment_handed_out_by_hand_has_no_window_to_be_waiting_at(
     sched = _sched(
         **{
             "assignment-2": AssignmentEntry(
-                due_datetime=SHUTS, course_source_repo="a2-f2026"
+                number=2, due_datetime=SHUTS, course_source_repo="a2-f2026"
             )
         }
     )
@@ -241,7 +255,7 @@ def test_an_auditor_sharing_a_handle_with_a_student_is_still_not_counted(semeste
     semester(roster_csv=shared)
     (window,) = team_formation.open_windows(COURSE, SEMESTER, _sched(), INSIDE)
     assert window.enrolled == 4
-    assert [s.hertie_email for s in window.waiting].count("fred@x.edu") == 0
+    assert [s.email for s in window.waiting].count("fred@x.edu") == 0
 
 
 def test_rows_for_another_assignment_do_not_team_anybody_up(semester):
@@ -264,7 +278,7 @@ def test_a_teams_csv_that_could_not_be_read_reports_no_windows_at_all(
     def boom(org):
         raise RuntimeError("API rate limit exceeded")
 
-    monkeypatch.setattr(team_formation.teams, "_teams_text", boom)
+    monkeypatch.setattr(team_formation.roster, "_system_text", boom)
     windows = team_formation.open_windows(COURSE, SEMESTER, _sched(), INSIDE)
     assert windows is None
     assert "rate limit" in capsys.readouterr().err
@@ -286,8 +300,8 @@ def test_a_semester_with_no_self_select_assignment_reads_neither_csv(
             "the semester was read for a plan with no self-select window"
         )
 
-    monkeypatch.setattr(team_formation.roster, "_roster_text", refuse)
-    monkeypatch.setattr(team_formation.teams, "_teams_text", refuse)
+    monkeypatch.setattr(team_formation.roster, "_students_text", refuse)
+    monkeypatch.setattr(team_formation.roster, "_system_text", refuse)
     assert team_formation.open_windows(COURSE, SEMESTER, _sched(), INSIDE) == []
 
 
@@ -395,7 +409,8 @@ def test_the_fault_carries_its_own_consequence_and_fix(semester):
         "team cannot hand anything in"
     )
     assert fault.fix() == (
-        "write the missing rows into semester-config/teams.csv yourself, or move the "
+        "write the missing team cells into semester-config/students.csv yourself, or "
+        "move the "
         "date on the line above to keep team formation open for longer."
     )
 
@@ -664,9 +679,9 @@ def post(monkeypatch):
         monkeypatch.setattr(team_formation.mailer, "send_indexed", sender.send_indexed)
         monkeypatch.setattr(team_formation.mailer, "preflight", sender.preflight)
         monkeypatch.setattr(discovery, "course_name_of", lambda org: "Deep Learning")
-        # The course's dsl-course.yml, as `student_console_for` reads it.
+        # The course's course.yml, as `student_console_for` reads it.
         monkeypatch.setattr(
-            discovery, "org_meta", lambda org: {"student_console": console}
+            discovery, "org_meta", lambda org: {"course": {"student_console": console}}
         )
         return rec, sender
 
@@ -867,6 +882,7 @@ def test_a_window_shorter_than_the_reminder_lead_sends_one_message_for_both_phas
     short = _sched(
         **{
             "assignment-2": AssignmentEntry(
+                number=2,
                 course_source_repo="a2-f2026",
                 due_datetime=INSIDE + timedelta(hours=6),
                 handout_datetime=INSIDE - timedelta(hours=1),
@@ -883,7 +899,7 @@ def test_a_window_shorter_than_the_reminder_lead_sends_one_message_for_both_phas
 def test_two_open_windows_are_one_batch_of_one_message_each(semester, post):
     semester()
     _rec, sender = post()
-    assert _tick(sched=_sched(**{"a-1": _entry(), "a-2": _entry()})) == 0
+    assert _tick(sched=_sched(**{"a-1": _entry(number=1), "a-2": _entry()})) == 0
     assert len(sender.batches) == 1, (
         "one send_bulk a tick - one token, one rate limiter"
     )
@@ -957,7 +973,7 @@ def test_the_first_claim_of_a_term_does_not_overwrite_a_racing_writer(semester, 
     # An absent file read as "no sha" must be sent to GitHub as NO SHA - which it refuses if
     # the file has appeared since - and never as "fetch the sha yourself and overwrite",
     # which is what `put_file` does with None and which would discard the other writer's
-    # rows and mail every unteamed student twice. `grades.sync_team_lock` passes "" for the
+    # rows and mail every unteamed student twice. `team_formation.sync_team_lock` passes "" for the
     # same absence and for the same reason.
     semester()
     mine = "2026-09-25T07:00"
