@@ -2376,30 +2376,36 @@ def _files_word(n_changed: int, n_added: int) -> str:
     return " and ".join(parts)
 
 
-def _diverged_words(kind: str, label: str, changed: int, added: int, deleted: int):
+def _diverged_words(
+    kind: str, label: str, changed: int, added: int, deleted: int
+) -> tuple[str, str]:
     """`(text, stops)` of one divergence problem."""
+    files = _files_word(changed, added)
     if kind == divergence.COURSE:
-        return (
-            f"{label} has changed in the course since it was released: "
-            f"{_files_word(changed, added)}.",
+        text = f"{label} has changed in the course since it was released: {files}."
+        stops = (
             "Students still have the version released; release it again to give them "
-            "the change.",
+            "the change."
         )
+        return text, stops
     if kind == divergence.DELETED:
-        were = "was" if deleted == 1 else "were"
-        return (
-            f"{plural(deleted, 'file')} of {label} {were} deleted from the course copy "
-            f"and {'is' if deleted == 1 else 'are'} still in the released copy.",
-            "Students still see "
-            f"{'it' if deleted == 1 else 'them'}; release it again and choose to remove "
-            f"{'it' if deleted == 1 else 'them'}.",
+        one = deleted == 1
+        text = (
+            f"{plural(deleted, 'file')} of {label} {'was' if one else 'were'} deleted "
+            f"from the course copy and {'is' if one else 'are'} still in the released "
+            f"copy."
         )
-    return (
-        f"The released copy of {label} was edited in the semester: "
-        f"{_files_word(changed, added)}.",
+        them = "it" if one else "them"
+        stops = (
+            f"Students still see {them}; release it again and choose to remove {them}."
+        )
+        return text, stops
+    text = f"The released copy of {label} was edited in the semester: {files}."
+    stops = (
         "Future semesters will not get these edits unless you keep them for future "
-        "semesters.",
+        "semesters."
     )
+    return text, stops
 
 
 def divergence_problems(
