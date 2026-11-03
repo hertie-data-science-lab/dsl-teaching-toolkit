@@ -2830,8 +2830,8 @@ DECLINED = _Declined()
 def _own_comment(line: str) -> str:
     """A key line's trailing `# comment`, with the spaces before it; "" for none. Kept
     when the engine rewrites the value."""
-    at = line.find(" #")
-    return line[at:].rstrip("\r\n") if at >= 0 else ""
+    found = re.search(r"\s+#.*$", line.rstrip("\r\n"))
+    return found.group(0) if found else ""
 
 
 def _eol(line: str) -> str:
