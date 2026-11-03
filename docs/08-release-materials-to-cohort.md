@@ -29,6 +29,8 @@ Two ops, in the console or on the CLI:
 
 Re-releasing is safe - copies are additive and idempotent. A release made here is recorded like a scheduled one, so the scheduler does not copy it again - even a copy whose planned time is still to come: releasing it by hand is its release, and its `release_datetime` becomes the time it went out.
 
+The console's semester **Materials** page shows each semester repo as students have it, each released folder linked to its Release page.
+
 ### Phased code release
 
 The same copy releases **code**, because code is just another path. Keep a growing package in a course-org repo (e.g. `lecture-code-f2026`) and disclose it topic by topic as you teach: 

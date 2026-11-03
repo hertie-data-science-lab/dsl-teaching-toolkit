@@ -20,7 +20,7 @@ import { OpPanel } from './ops/Panel';
 import { OpsSession, type OpDef } from './ops/session';
 import { DetailsScreen, MaterialsScreen, WebsiteScreen } from './screens/CourseEdit';
 import { takeInstallReturn } from './wizards/drafts';
-import { COHORT_SCREENS, COURSE_SCREENS, WIZARD_NAV, installReturn, modeOf, movedHash, parseHash, replaceHash, parseSearch, resolveContext, studentContext, studentLanding, studentNavKey, wizardOf } from './router';
+import { COHORT_SCREENS, COURSE_SCREENS, WIZARD_NAV, RELEASED_MATERIALS, installReturn, modeOf, movedHash, parseHash, replaceHash, parseSearch, resolveContext, screenOf, studentContext, studentLanding, studentNavKey, wizardOf } from './router';
 import { AssignmentScreen, AssignmentsScreen } from './screens/Assignments';
 import { CohortScreen } from './screens/Cohort';
 import { CourseHeaderActions, CourseScreen, TemplateScreen, courseOf, semesterChip, templateTitle } from './screens/Course';
@@ -28,6 +28,7 @@ import { MaterialsIndexScreen, TemplatesIndexScreen, otherRepos } from './screen
 import { HomeScreen, Invitations, ReadonlyScreen, SignInScreen } from './screens/Home';
 import { InstructorsScreen, StudentsScreen } from './screens/People';
 import { ReleaseScreen, ScheduleScreen } from './screens/Schedule';
+import { SemesterMaterialsScreen } from './screens/SemesterMaterials';
 import { SemesterDefaultsScreen } from './screens/SemesterSettings';
 import { OperationsScreen, SiteScreen } from './screens/Site';
 import { HelpScreen } from './screens/Help';
@@ -221,7 +222,7 @@ export function App({ state: s }: { state: AppState }) {
   }
 
   // A URL naming no page lands an instructor on All courses (decision 0030 rule 1).
-  const screen = route.screen || 'home';
+  const screen = screenOf(sel, route) || 'home';
   const r = { ...route, screen };
   const ctx = resolveContext(courses, sel, r);
   const wiz = wizardOf(screen);
@@ -279,12 +280,13 @@ export function App({ state: s }: { state: AppState }) {
   } else {
     const cp: CohortProps = {
       course: ctx.course, cohort: ctx.cohort, loaded: cohortLoaded ?? { kind: 'loading' }, files: s.files, now: s.now.value, entry: route.entry, tab: route.tab, open: route.open,
-      heartbeat: s.heartbeat(ctx.course.org), prefill: sel.template, courseLoaded: s.statuses.course(ctx.course.org).value,
+      heartbeat: s.heartbeat(ctx.course.org), prefill: sel.template, courseLoaded: s.statuses.course(ctx.course.org).value, folder: sel.folder, file: sel.file,
     };
     const screens: Record<string, () => preact.JSX.Element> = {
       dashboard: () => <CohortScreen {...cp} />,
       schedule: () => <ScheduleScreen {...cp} />,
       release: () => <ReleaseScreen {...cp} />,
+      [RELEASED_MATERIALS]: () => <SemesterMaterialsScreen {...cp} />,
       assignments: () => <AssignmentsScreen {...cp} />,
       assignment: () => <AssignmentScreen {...cp} />,
       students: () => <StudentsScreen {...cp} />,
