@@ -30,6 +30,8 @@ def test_the_shipped_policy_carries_hertie_values():
         "assignment_repo_visibility": "private",
         "archive_grace_days": 60,
         "materials_repo": "materials",
+        # Decision 0043: a release is one copy unless a course or semester turns this on.
+        "autosync_released_edits": False,
         "marks_per_question": True,
     }
     # Decision 0039 rule 2: `team_formation` is set from the course down, `formats` by

@@ -523,3 +523,64 @@ def test_the_skeleton_shows_every_key_with_what_it_inherits():
     )
     # The late pair: a level stating one half states both.
     assert any("late_penalty_per_day" in line and "late pair" in line for line in lines)
+
+
+@pytest.mark.parametrize("value", [True, False])
+def test_autosync_reads_a_yaml_boolean(value):
+    dropped: list = []
+    got = settings.read_defaults({"autosync_released_edits": value}, "w", dropped)
+    assert (got, dropped) == ({"autosync_released_edits": value}, [])
+
+
+@pytest.mark.parametrize("text", ['"yes"', '"true"', "1", "maybe"])
+def test_autosync_refuses_anything_but_true_or_false(text):
+    # Strict, unlike `marks_per_question`: a value YAML does not read as a boolean
+    # states nothing, so the next layer answers and the line is a fault.
+    read = settings.parse_instance(f"defaults:\n  autosync_released_edits: {text}\n")
+    assert read.defaults == {"autosync_released_edits": None}
+    (fault,) = read.faults
+    assert fault.field == "autosync_released_edits" and fault.lineno == 2
+
+
+def _autosync_layers(monkeypatch, course: object, semester: object) -> None:
+    def block(value: object) -> dict:
+        return {} if value is None else {"autosync_released_edits": value}
+
+    monkeypatch.setattr(settings, "course_org_for_semester", lambda org: "C")
+    monkeypatch.setattr(settings, "org_meta", lambda org: {"defaults": block(course)})
+    text = (
+        ""
+        if semester is None
+        else f"defaults:\n  autosync_released_edits: {semester}\n"
+    )
+    monkeypatch.setattr(settings, "_semester_text", lambda org: text)
+
+
+@pytest.mark.parametrize(
+    ("course", "semester", "expected"),
+    [
+        (None, None, (False, "institution")),
+        (True, None, (True, "course")),
+        (True, "false", (False, "semester")),
+        (None, "true", (True, "semester")),
+        # A refused semester value states nothing: the course answers.
+        (True, '"yes"', (True, "course")),
+    ],
+)
+def test_autosync_resolves_semester_then_course_then_institution(
+    monkeypatch, course, semester, expected
+):
+    _autosync_layers(monkeypatch, course, semester)
+    # The call WP-2's release engine makes (decision 0043 rule 2).
+    assert settings.effective("Sem", "autosync_released_edits", course_org="C") == (
+        expected
+    )
+    assert settings.effective_defaults("C", "Sem")["autosync_released_edits"] == {
+        "value": expected[0],
+        "source": expected[1],
+    }
+
+
+def test_autosync_has_no_entry_layer():
+    # A semester-wide key: written on a schedule entry it is not a run setting.
+    assert settings.inline_settings({"autosync_released_edits": True}, "e", []) == {}

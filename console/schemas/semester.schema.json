@@ -16,6 +16,9 @@
           ],
           "type": "string"
         },
+        "autosync_released_edits": {
+          "type": "boolean"
+        },
         "late_penalty_per_day": {
           "type": [
             "string",

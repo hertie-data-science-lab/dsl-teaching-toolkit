@@ -24,6 +24,7 @@ export interface Policy {
   defaults: {
     archive_grace_days: number;
     assignment_repo_visibility: string;
+    autosync_released_edits: boolean;
     late_penalty_per_day: string;
     late_window_days: number;
     marks_per_question: boolean;

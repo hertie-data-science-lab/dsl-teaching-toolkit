@@ -673,9 +673,9 @@ drop it; the public website neither hosts nor links its files, since it hosts by
 
 One hand-edited file per level (decision 0039), each with the same fixed `defaults:` key set:
 `timezone`, `late_window_days`, `late_penalty_per_day`, `max_team_size`,
-`assignment_repo_visibility`, `archive_grace_days`, `materials_repo`, `marks_per_question`, and
-`team_formation` from the course level down (none at the institution: absent everywhere is
-`none`, no team forms, `settings.TEAM_FORMATION_FALLBACK`).
+`assignment_repo_visibility`, `archive_grace_days`, `materials_repo`, `autosync_released_edits`,
+`marks_per_question`, and `team_formation` from the course level down (none at the institution:
+absent everywhere is `none`, no team forms, `settings.TEAM_FORMATION_FALLBACK`).
 `formats` is not a default: New assignment asks. A key resolves nearest first, per key never per
 block, and `settings.resolve` returns `(value, source)`:
 
@@ -687,7 +687,10 @@ block, and `settings.resolve` returns `(value, source)`:
 | `institution` | `institution.yml` | `defaults.<key>` |
 
 The semester-wide keys (`settings.SEMESTER_KEYS`: timezone, archive grace, default materials
-repo) have no entry layer. The late pair is one rule: a layer stating either half answers both,
+repo) have no entry layer, and neither has `autosync_released_edits` (decision 0043;
+institution `false`): whether an edit to an already-released course folder re-ships on the
+next scheduler tick. Its reader takes only what YAML loads as a boolean, and the release engine
+reads it with `settings.effective(semester_org, "autosync_released_edits", course_org=...)`. The late pair is one rule: a layer stating either half answers both,
 the other half none. Seeds write every key, commented, with the inherited value and its source
 (`settings.defaults_skeleton`). A template's `grading_config.yml` states no run setting: one
 written there refuses the whole file as `RUN_SETTING_IN_TEMPLATE` (`grading_spec.TEMPLATE_KEYS`
