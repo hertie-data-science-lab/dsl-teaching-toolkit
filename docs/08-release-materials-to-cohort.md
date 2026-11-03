@@ -125,7 +125,7 @@ sites then choose what they show on top (`student_site.host`, `open_course_site.
 
 An assignment is not a materials copy: its template copy and its solution push carry exactly the
 template's files, `tests/` and grading files included. The denylist and the sites' selections
-do not apply; only the template's own `.releaseignore` withholds.
+do not apply; only the template's own `.releaseignore` withholds (and the toolkit's own Release assignment button stays out).
 
 What that means in practice:
 

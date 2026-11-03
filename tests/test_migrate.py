@@ -739,6 +739,13 @@ def test_moving_the_zone_into_semester_yml():
     assert migrate.zone_move(sched, None) == ("UTC", "# mine\nlectures: {}\n", [])
     assert migrate.zone_move(sched, "UTC") == (None, "# mine\nlectures: {}\n", [])
     assert migrate.zone_move("lectures: {}\n", None) == (None, None, [])
+    # A blank zone is the default: only dropped. Comments around the line stay.
+    blank = "# head\ntimezone:\n\n# my notes\nlectures: {}\n"
+    assert migrate.zone_move(blank, None) == (
+        None,
+        "# head\n\n# my notes\nlectures: {}\n",
+        [],
+    )
     _, _, stops = migrate.zone_move("timezone: Mars/Base\n", None)
     assert stops == [
         "schedule.yml: `timezone: Mars/Base` is not a known zone - correct or delete it"

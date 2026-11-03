@@ -2056,14 +2056,20 @@ def zone_move(
     `timezone:` into `semester.yml` `defaults:` (decision 0039 rule 2). `zone` is the
     name to state there, None when `semester.yml` already says it (`stated`: its
     `defaults: timezone`, or the folded one) or the schedule names none; the rewrite is
-    None when there is no line to drop. A zone that is not one, or a `semester.yml` that
-    states another, stops the step: the semester's times would move. Pure."""
+    None when there is no line to drop. A blank one (the default) is only dropped. A zone
+    that is not one, or a `semester.yml` that states another, stops the step: the
+    semester's times would move. Only the one line goes - faculty's comments stay. Pure."""
     old = _yaml(schedule_text)
     if OLD_TIMEZONE not in old:
         return None, None, []
     name = str(old[OLD_TIMEZONE] or "").strip()
     where = f"{schedule.SCHEDULE_PATH}: `{OLD_TIMEZONE}: {old[OLD_TIMEZONE]}`"
-    if not name or str(schedule._tz(name)) != name:
+    new = re.sub(rf"(?m)^{OLD_TIMEZONE}:.*(\n|$)", "", schedule_text or "")
+    if _yaml(new) != {k: v for k, v in old.items() if k != OLD_TIMEZONE}:
+        return None, None, [f"{where} cannot be removed safely - move it by hand"]
+    if not name:
+        return None, new, []
+    if str(schedule._tz(name)) != name:
         return None, None, [f"{where} is not a known zone - correct or delete it"]
     if stated and stated != name:
         return (
@@ -2074,9 +2080,6 @@ def zone_move(
                 f"{stated}` - keep one by hand, then run again"
             ],
         )
-    new = _without_block(schedule_text, OLD_TIMEZONE) or ""
-    if _yaml(new) != {k: v for k, v in old.items() if k != OLD_TIMEZONE}:
-        return None, None, [f"{where} cannot be removed safely - move it by hand"]
     return (None if stated else name), new, []
 
 
@@ -3853,13 +3856,14 @@ class Semester:
             files[SEMESTER_FILE] = text.encode()
         elif zone and current is not None:
             text = with_default(current, "timezone", zone)
-            if settings.parse_instance(text).defaults.get("timezone") != zone:
+            if settings.parse_instance(text).defaults.get("timezone") == zone:
+                old[SEMESTER_FILE] = current
+                files[SEMESTER_FILE] = text.encode()
+            else:
                 stops.append(
                     f"{SEMESTER_FILE}: `{DEFAULTS_BLOCK}: timezone: {zone}` cannot "
                     f"be written safely - add it by hand"
                 )
-            old[SEMESTER_FILE] = current
-            files[SEMESTER_FILE] = text.encode()
         elif zone:
             stops.append(
                 f"{schedule.SCHEDULE_PATH} states a `{OLD_TIMEZONE}:` and there is "

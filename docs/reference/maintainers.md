@@ -251,7 +251,7 @@ Things whose *literal spelling* is depended on from outside Python:
   An assignment's copies are outside it too (decision 0040 amendment): the template copy
   (`assign.withhold_from_template`) and the solution push (`assign.push_solution`) carry exactly
   the template's files, `tests/` and grading files included, less only what the template's own
-  `.releaseignore` names - no denylist, no use-site selection, no floor.
+  `.releaseignore` names and the toolkit's release buttons (`workflows_place.NEVER_IN_STUDENT_REPOS`) - no denylist, no use-site selection, no floor.
 - **`course.UPSTREAM_BRANCH`** (`upstream`) is the toolkit's branch in every release dest,
   and the dest's DEFAULT branch is what students, the website and `propagate` read. The
   release commits onto `upstream` and merges it into the default one; a conflict aborts the

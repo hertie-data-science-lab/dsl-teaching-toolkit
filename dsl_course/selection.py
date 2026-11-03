@@ -22,7 +22,8 @@ materials - a release, a hosted copy, the open site - asks `select` (a path list
 An assignment's copies are outside the Selection (decision 0040 amendment): the template
 copy (`assign.withhold_from_template`) and the solution push (`assign.push_solution`) carry
 exactly the template's files, tests and grading files included, less only what the
-template's own `.releaseignore` names. No denylist, use-site selection or floor applies.
+template's own `.releaseignore` names and the toolkit's own release buttons
+(`workflows_place.NEVER_IN_STUDENT_REPOS`). No denylist, use-site selection or floor applies.
 
 A key left out is "no filter on that key"; a use fills its own defaults in first
 (`with_defaults`). A path with no kind matches no `kinds:` list: it is still released, but
