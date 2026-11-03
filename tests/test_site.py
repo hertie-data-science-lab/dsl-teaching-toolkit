@@ -1605,6 +1605,42 @@ def test_a_released_tbc_row_github_cannot_date_stays_out_of_the_box(
     assert "materials/lectures/09_week-9 first landed" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize(
+    ("tree", "date_line"),
+    [
+        # Its readings landed weeks before its slides: dated by the slides, its own copy.
+        (
+            ("lectures/09_week-9/slides.pdf", "readings/09_week-9/paper.pdf"),
+            "date: 2026-10-26T10:00:00\n",
+        ),
+        # Nothing of its own has landed, only the readings: dated by those.
+        (("readings/09_week-9/paper.pdf",), "date: 2026-10-04T10:00:00\n"),
+    ],
+)
+def test_a_released_tbc_row_is_dated_by_its_own_copies_before_its_readings(
+    monkeypatch, tmp_path, tree, date_line
+):
+    landed = {
+        "lectures/09_week-9": datetime(2026, 10, 26, 9, 0, tzinfo=ZoneInfo("UTC")),
+        "readings/09_week-9": datetime(2026, 10, 4, 8, 0, tzinfo=ZoneInfo("UTC")),
+    }
+    monkeypatch.setattr(site, "first_landed", lambda org, repo, path: landed[path])
+    sched = _tbc_lecture("lectures/09_week-9")
+    sched.releases.append(
+        Release(
+            "readings-9",
+            datetime(2026, 10, 1, 9, 0),
+            deploy=[Deploy("cm", "readings/09_week-9", "materials", None)],
+            number=9,
+            show_on_site=False,
+        )
+    )
+    plan = _plan(monkeypatch, tmp_path, sched, trees={"materials": tree})
+    row = plan.collections["_lectures"]["session-09.md"]
+    assert "announce: true\n" in row and "dateless: true\n" in row
+    assert date_line in row
+
+
 def test_events_render_as_their_declared_types(monkeypatch, tmp_path):
     plan = _plan(
         monkeypatch,
