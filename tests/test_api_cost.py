@@ -21,6 +21,7 @@ import hashlib
 import json
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -29,6 +30,7 @@ from conftest import clear_process_memos
 
 from dsl_course import (
     central,
+    collect,
     discovery,
     gh_contents,
     ghcli,
@@ -744,7 +746,19 @@ def test_every_operation_stays_under_its_ceiling(
         assert _reads_twice(fake.calls) == []
 
 
+class _StoppedClock(datetime):
+    """`collect`'s wall clock, stopped: a sheet's `info.checked` is stamped to the minute,
+    so two ticks either side of a minute's turn differ by a sheet write that has nothing
+    to do with the term being compared (CI, 2026-11-03: 43 - 37)."""
+
+    @classmethod
+    def now(cls, tz=None):
+        at = datetime(2026, 9, 26, 12, 0, tzinfo=timezone.utc)
+        return at.astimezone(tz) if tz else at
+
+
 def _cost_in_a_term(monkeypatch, argv, **term) -> int:
+    monkeypatch.setattr(collect, "datetime", _StoppedClock)
     fake = FakeGitHub(**term)
     monkeypatch.setattr(subprocess, "run", fake.run)
     _drive(monkeypatch, (*_TICK, "--no-preview"))
