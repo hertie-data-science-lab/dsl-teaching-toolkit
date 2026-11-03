@@ -92,8 +92,8 @@ from .schedule_plan import (
     refuse_unnumbered,
     unnumbered_release,
 )
-from .selection import ROOT_RELEASE_EXCLUDED, Selection
 from .selection import deny as selection_deny
+from .selection import release_use
 
 
 def _warn_withheld_stub(course_org: str, repo: str, path: str) -> None:
@@ -142,24 +142,6 @@ def _resolve_within(base: Path, rel: str) -> Path | None:
         return base_r
     target = (base / rel.strip("/")).resolve()
     return target if target.is_relative_to(base_r) else None
-
-
-def _release_use(whole_repo: bool, stubs: frozenset[str] = frozenset()) -> Selection:
-    """A release's use-site selection (decision 0040 rule 3): nothing more for a subpath
-    copy; for a WHOLE-repo copy, the root `.github/` and each root stub still carrying the
-    scaffold placeholder (`stubs`, decided per release).
-
-    Skipping the COPY rather than deleting the result afterwards is what keeps a withheld
-    stub from touching the destination: a delete-after-copy stages a deletion of whatever
-    the semester repo already had there."""
-    if not whole_repo:
-        return Selection()
-    return Selection(
-        exclude=(
-            *(f"/{name}/" for name in ROOT_RELEASE_EXCLUDED),
-            *(f"/{stub}" for stub in sorted(stubs)),
-        )
-    )
 
 
 class Dest(NamedTuple):
@@ -693,7 +675,7 @@ def deploy_many(
                         srcp,
                         destp,
                         selection_deny(
-                            src_root, use=_release_use(srcp == src_root, withheld)
+                            src_root, use=release_use(srcp == src_root, withheld)
                         ),
                     )
                 elif is_withheld_stub(

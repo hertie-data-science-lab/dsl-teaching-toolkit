@@ -506,7 +506,7 @@ def _release_filter(root: Path, names: list[str], whole: bool, at: Path | None =
             (here / n).mkdir()
         else:
             (here / n).write_text("x")
-    ignore = selection.deny(root, use=deploy._release_use(whole))
+    ignore = selection.deny(root, use=selection.release_use(whole))
     return ignore(str(here), names)
 
 
@@ -558,7 +558,7 @@ def test_a_solution_named_outright_ships_exactly_what_it_names(tmp_path):
     copy_tree(
         src / "solutions/labs/02_lab",
         dest,
-        selection.deny(src, use=deploy._release_use(False)),
+        selection.deny(src, use=selection.release_use(False)),
     )
     assert sorted(
         p.relative_to(dest).as_posix() for p in dest.rglob("*") if p.is_file()

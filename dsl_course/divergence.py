@@ -31,7 +31,7 @@ from .course import is_repo_root
 from .gh_contents import WITHHELD_ROOT_STUBS
 from .release_record import inside
 from .schedule_plan import within
-from .selection import ROOT_RELEASE_EXCLUDED, denied
+from .selection import kept, release_use
 
 COURSE = "DIVERGED_COURSE"
 DELETED = "DIVERGED_DELETED"
@@ -80,14 +80,12 @@ def source_files(
         if src in WITHHELD_ROOT_STUBS and src in unwritten:
             return {}
         return {dest_path.rsplit("/", 1)[-1] or src: blobs[src]}
+    use = release_use(root, unwritten)  # what `deploy` copies through, layer 3
     out = {}
     for path, sha in blobs.items():
         rel = within(src, path)
-        if not rel or path in withheld or denied(rel):
-            continue
-        if root and (rel.split("/", 1)[0] in ROOT_RELEASE_EXCLUDED or rel in unwritten):
-            continue
-        out[rel] = sha
+        if rel and path not in withheld and kept(rel, use=use):
+            out[rel] = sha
     return out
 
 
@@ -100,16 +98,8 @@ def dest_files(
     files = inside(dict(dest_blobs), dest_path)
     if not is_repo_root(dest_path):
         return files
-    return {
-        p: s
-        for p, s in files.items()
-        if p in manifest
-        or not (
-            p.split("/", 1)[0] in ROOT_RELEASE_EXCLUDED
-            or denied(p)
-            or p in WITHHELD_ROOT_STUBS
-        )
-    }
+    use = release_use(True, WITHHELD_ROOT_STUBS)
+    return {p: s for p, s in files.items() if p in manifest or kept(p, use=use)}
 
 
 def source_present(src_path: str, blobs: Mapping[str, str]) -> bool:

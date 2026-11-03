@@ -121,7 +121,7 @@ from .collect import (
 from .course import COURSE_ADMIN_TEAM, shared_repo, submission_repo
 from .deploy import deploy_many
 from .distribute import marks_due
-from .faults import ConfigFault, FaultKind, Severity, Unusable, parse_moment
+from .faults import ConfigFault, FaultKind, Severity, Unusable
 from .gh_contents import WITHHELD_ROOT_STUBS, repo_blob_shas, root_stub_unwritten
 from .ghcli import gh, start_budget
 from .grading_sheet import sheet_path
@@ -740,11 +740,11 @@ def _first_shipped(
         if unreadable:
             return None  # asked once: not again for every late moment
         try:
-            copy = read_record().copies.get(release_record.key_of(d))
+            copies = read_record().copies
         except (RuntimeError, ValueError):
             unreadable = True
             return None
-        return parse_moment((copy or {}).get("first_shipped_at"))
+        return release_record.first_shipped(copies, release_record.key_of(d))
 
     return first
 
