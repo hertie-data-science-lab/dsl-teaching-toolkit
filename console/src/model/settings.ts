@@ -95,6 +95,9 @@ export function readSetting(key: string, v: unknown): unknown {
     case 'marks_per_question':
       // `setting_readers._boolean`: true, yes, on or 1 is on; anything else is off.
       return typeof v === 'boolean' ? v : ['true', 'yes', 'on', '1'].includes(String(v).trim().toLowerCase());
+    case 'autosync_released_edits':
+      // `settings._autosync`: a YAML boolean only.
+      return typeof v === 'boolean' ? v : undefined;
     default:
       return v;
   }
@@ -102,7 +105,9 @@ export function readSetting(key: string, v: unknown): unknown {
 
 /** A form's value as the file writes it: a yes/no setting chosen from a select is a boolean, not text. */
 export function fileValue(key: string, v: unknown): unknown {
-  return key === 'marks_per_question' && typeof v === 'string' && v !== '' ? readSetting(key, v) : v;
+  if (typeof v !== 'string' || v === '') return v;
+  if (key === 'marks_per_question') return readSetting(key, v);
+  return key === 'autosync_released_edits' ? v === 'true' : v;
 }
 
 /** Whether the engine reads `v` for `key`. */

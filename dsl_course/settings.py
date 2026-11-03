@@ -2,7 +2,7 @@
 its effective value comes from.
 
 Every value is read by its key's reader (`setting_readers`, and `_SEMESTER_READERS` for
-the three semester-wide keys).
+the semester-wide keys).
 
 The cascade (decision 0039): a key of the fixed `defaults:` set resolves nearest-first,
 per key never per block, through four layers -
@@ -15,7 +15,8 @@ per key never per block, through four layers -
 and `effective` says which layer answered. A RUN setting (`RUN_KEYS`: how teams form, the
 team cap, the late pair, the repo visibility, the external submit link, whether returned
 marks show each question) has all four; a SEMESTER-WIDE one (`SEMESTER_KEYS`: timezone,
-archive grace, the default materials repo) has no entry layer. `team_formation` has no
+archive grace, the default materials repo, whether edits to released folders re-ship) has no
+entry layer. `team_formation` has no
 institution layer (decision 0039 rule 2). The late pair is ONE rule: whichever layer
 states either half states both, the other half absent meaning none (`_late_pair`). The
 files spell `visibility` as `assignment_repo_visibility` (`FILE_NAMES`). A template's
@@ -73,7 +74,14 @@ RUN_KEYS = (
 )
 LATE_PAIR = ("late_window_days", "late_penalty_per_day")
 # The defaults that hold for a whole semester: no entry states them.
-SEMESTER_KEYS = ("timezone", "archive_grace_days", "materials_repo")
+# `autosync_released_edits`: true = an edit to an already-released course folder re-ships
+# on the next scheduler tick; false = a release is one copy at its time (decision 0043).
+SEMESTER_KEYS = (
+    "timezone",
+    "archive_grace_days",
+    "materials_repo",
+    "autosync_released_edits",
+)
 # A setting as the files spell it: `visibility` says whose the repos are, so a file writes
 # `assignment_repo_visibility` (decision 0038 rule 9, 0039 rule 2).
 FILE_NAMES = {"visibility": "assignment_repo_visibility"}
@@ -89,6 +97,7 @@ DEFAULT_KEYS = (
     "visibility",
     "archive_grace_days",
     "materials_repo",
+    "autosync_released_edits",
     "marks_per_question",
     "team_formation",
 )
@@ -145,10 +154,26 @@ def _materials_repo(value: object, where: str, dropped: list[str]) -> str | None
     return None
 
 
+def _autosync(value: object, where: str, dropped: list[str]) -> bool | None:
+    """Strictly a YAML boolean: a lenient reading (`setting_readers._boolean` takes
+    `yes`) would turn re-shipping on or off on a guess."""
+    if isinstance(value, bool):
+        return value
+    dropped.append(
+        Dropped(
+            where,
+            "autosync_released_edits",
+            f"`autosync_released_edits: {value}` is not true or false - ignored",
+        )
+    )
+    return None
+
+
 _SEMESTER_READERS = {
     "timezone": _timezone,
     "archive_grace_days": _grace_days,
     "materials_repo": _materials_repo,
+    "autosync_released_edits": _autosync,
 }
 
 
@@ -261,6 +286,9 @@ class Instance:
     )
     materials_repo: str = field(
         default_factory=lambda: policy.defaults()["materials_repo"]
+    )
+    autosync_released_edits: bool = field(
+        default_factory=lambda: policy.defaults()["autosync_released_edits"]
     )
 
 

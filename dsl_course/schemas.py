@@ -736,6 +736,7 @@ def _defaults(keys) -> dict:
         "timezone": _str(),
         "archive_grace_days": {"type": "integer"},
         "materials_repo": {"type": "string", "pattern": r"^[\w.-]+$"},
+        "autosync_released_edits": {"type": "boolean"},
     }
     out = _obj(_keys(keys, types))
     out["type"] = ["object", "null"]

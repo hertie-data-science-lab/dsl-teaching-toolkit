@@ -2,6 +2,7 @@
   "defaults": {
     "archive_grace_days": 60,
     "assignment_repo_visibility": "private",
+    "autosync_released_edits": false,
     "late_penalty_per_day": "10%",
     "late_window_days": 10,
     "marks_per_question": true,

@@ -38,10 +38,15 @@ export const COURSE_FACTS: Tiers = {
 /** The run settings a level's `defaults:` states (`settings.DEFAULT_KEYS`): no submit link, which is the assignment's. */
 export const DEFAULT_RUN_KEYS: RunKey[] = ['max_team_size', 'late_window_days', 'late_penalty_per_day', 'team_formation', 'visibility', 'marks_per_question'];
 
-/** The three `defaults:` keys that hold for a whole semester, as fields; `fallback` is what applies when one is left empty. */
+/** `autosync_released_edits`'s two values in words (decision 0043). */
+const AUTOSYNC: Record<string, string> = { true: 'On', false: 'Off' };
+
+/** The `defaults:` keys that hold for a whole semester, as fields; `fallback` is what applies when one is left empty. */
 function semesterWideTiers(fallback: (k: string) => Effective, saved: Values): Tiers {
-  const grey = (k: string) => `${SOURCE_WORD[fallback(k).source]}: ${String(fallback(k).value ?? 'not set')}`;
+  const word = (k: string) => (k === 'autosync_released_edits' ? AUTOSYNC[String(fallback(k).value)] : null) ?? String(fallback(k).value ?? 'not set');
+  const grey = (k: string) => `${SOURCE_WORD[fallback(k).source]}: ${word(k)}`;
   const tz = fallback('timezone');
+  const sync = fallback('autosync_released_edits');
   return {
     timezone: {
       tier: 'default', label: 'Timezone', widget: 'select', reason: 'The semester’s dates and times are read in it; a schedule’s own timezone wins.', defaultLabel: grey('timezone'),
@@ -55,11 +60,16 @@ function semesterWideTiers(fallback: (k: string) => Effective, saved: Values): T
       tier: 'default', label: 'Repo a release lands in', defaultLabel: grey('materials_repo'), placeholder: String(fallback('materials_repo').value ?? ''),
       reason: 'In the semester org, when a schedule entry names none.', check: (x) => (blank(x) || REPO_NAME_RE.test(String(x).trim()) ? null : 'Not a repo name (letters, digits, `.`, `_`, `-`).'),
     },
+    autosync_released_edits: {
+      tier: 'default', label: 'Send fixes to released files automatically', widget: 'select', defaultLabel: grey('autosync_released_edits'),
+      reason: 'On: an edit to a course folder that has already been released reaches students on the next scheduled run. Off: a release is one copy; use Release again after a fix.',
+      options: defaultFirst(sync.value, word('autosync_released_edits'), Object.entries(AUTOSYNC).map(([v, l]) => opt(v, l)), saved.autosync_released_edits),
+    },
   };
 }
 
 /**
- * A level's `defaults:` as fields: the run settings, then the semester-wide three. `inherited`
+ * A level's `defaults:` as fields: the run settings, then the semester-wide ones. `inherited`
  * is what each key falls back to at this level; `saved` is the level as its file holds it, so a
  * value pinned equal to the inherited one shows as "set here".
  */
@@ -69,4 +79,4 @@ export function defaultsTiers(inherited: Effectives, saved: Values = {}): Tiers 
 }
 
 /** The keys a defaults form edits, as the form spells them (`visibility`). */
-export const DEFAULT_FORM_KEYS: string[] = [...DEFAULT_RUN_KEYS, 'timezone', 'archive_grace_days', 'materials_repo'];
+export const DEFAULT_FORM_KEYS: string[] = [...DEFAULT_RUN_KEYS, 'timezone', 'archive_grace_days', 'materials_repo', 'autosync_released_edits'];
