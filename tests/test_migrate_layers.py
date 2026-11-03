@@ -144,6 +144,34 @@ def test_the_demo_semester_states_its_own_defaults_live_and_the_rest_commented()
     assert yaml.safe_load(new)["student_site"] == {"syllabus": "SYLLABUS.pdf"}
 
 
+def test_a_0_10_default_stating_one_late_half_folds_with_the_other_as_none():
+    # 0.10's pair rule: the window alone meant no penalty; 0.11.0 would inherit one.
+    meta = "course_name: X\nassignment_defaults:\n  late_window_days: 4\n"
+    new, _notes, stops = migrate.course_layer(meta, None)
+    assert stops == [], stops
+    assert yaml.safe_load(new)["defaults"] == {
+        "late_window_days": 4,
+        "late_penalty_per_day": "0%",
+    }
+    kept = migrate.course_layer_kept(meta, None, new)
+    assert not any("assignment_defaults" in line for line in kept), kept
+    assignments = "defaults:\n  late_penalty_per_day: 5%\n"
+    new, stops = migrate.semester_layer(
+        "x-f2026",
+        "release",
+        None,
+        assignments,
+        "",
+        [("institution", settings.institution_defaults())],
+    )
+    assert stops == [], stops
+    assert yaml.safe_load(new)["defaults"] == {
+        "late_window_days": 0,
+        "late_penalty_per_day": "5%",
+    }
+    assert migrate.semester_layer_kept(None, assignments, "", new) == []
+
+
 def test_per_assignment_blocks_left_in_assignments_yml_stop_the_fold():
     _, stops = migrate.semester_layer(
         "x-f2026",

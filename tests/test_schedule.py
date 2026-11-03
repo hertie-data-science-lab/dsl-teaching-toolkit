@@ -1522,12 +1522,11 @@ def test_the_late_cutoff_is_the_due_date_plus_the_effective_window(monkeypatch):
         schedule.grading_cutoff_datetime(sched, "a1", submit_via="assignment_repo")
         == due
     )
-    # A late rule naming only the penalty names no window: no late work either.
+    # An entry naming only the penalty keeps the window below it: the institution's.
     sched.assignments["a1"].settings = {"late_penalty_per_day": "5%"}
-    assert (
-        schedule.grading_cutoff_datetime(sched, "a1", submit_via="assignment_repo")
-        == due
-    )
+    assert schedule.grading_cutoff_datetime(
+        sched, "a1", submit_via="assignment_repo"
+    ) == due + timedelta(days=10)
     assert (
         schedule.grading_cutoff_datetime(sched, "unknown", submit_via="assignment_repo")
         is None

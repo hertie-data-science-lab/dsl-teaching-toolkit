@@ -59,23 +59,35 @@ def test_an_explicit_late_rule_wins(monkeypatch):
     assert (spec.late_window_days, spec.late_penalty_per_day) == (3, "25%")
 
 
+WINDOW = policy.defaults()["late_window_days"]
+PENALTY = policy.defaults()["late_penalty_per_day"]
+
+
 @pytest.mark.parametrize(
     ("config", "window", "penalty"),
     [
-        ("late_window_days: 3", 3, None),
-        ("late_penalty_per_day: 25%", None, "25%"),
-        ("late_window_days: 0", 0, None),
+        ("late_window_days: 3", 3, PENALTY),
+        ("late_penalty_per_day: 25%", WINDOW, "25%"),
+        ("late_window_days: 0", 0, PENALTY),
     ],
     ids=["window-alone", "penalty-alone", "zero-alone"],
 )
-def test_half_a_late_rule_is_never_completed_from_the_default(
+def test_half_a_late_rule_keeps_the_other_half_inherited(
     monkeypatch, config, window, penalty
 ):
-    # A semester that names one of the two has stated its own rule - three days late
-    # accepted free, or a rate with nothing collected to spend it on - and finishing the
-    # sentence out of the syllabus would grade a semester by words nobody wrote.
+    # Each late key inherits on its own, like every other default: a semester that
+    # changes the window keeps the penalty below it, and the other way round.
     spec = _semester_spec(monkeypatch, config)
     assert (spec.late_window_days, spec.late_penalty_per_day) == (window, penalty)
+    sources = dict(spec.sources)
+    assert (
+        sources["late_window_days" if "window" in config else "late_penalty_per_day"]
+        == "entry"
+    )
+    assert (
+        sources["late_penalty_per_day" if "window" in config else "late_window_days"]
+        == "institution"
+    )
 
 
 @pytest.mark.parametrize("key", ["late_window_days", "visibility", "max_team_size"])
@@ -130,7 +142,7 @@ def test_an_unknown_key_on_a_question_is_named_and_ignored():
 @pytest.mark.parametrize(
     ("config", "window", "penalty"),
     [
-        ("late_penalty_per_day: 0", None, "0"),
+        ("late_penalty_per_day: 0", WINDOW, "0"),
         ("late_window_days: 3\nlate_penalty_per_day: 0", 3, "0"),
         ("late_window_days: 0\nlate_penalty_per_day: 0", 0, "0"),
     ],
@@ -154,10 +166,11 @@ def test_one_penalty_reader_gives_the_rate_and_the_fault_together():
     from dsl_course.setting_readers import read_penalty
 
     assert read_penalty("10%") == (Decimal("0.1"), "")
-    assert read_penalty("0.1") == (Decimal("0.1"), "")
+    assert read_penalty("10") == read_penalty(10) == (Decimal("0.1"), "")
+    assert read_penalty("0.1") == (Decimal("0.001"), "")
     assert read_penalty(0) == (Decimal(0), "")
     assert read_penalty(None) == read_penalty("  ") == (None, "")
-    for raw, fault in (("10", "bare"), ("-5%", "negative"), ("x", "unwritten")):
+    for raw, fault in (("-5", "negative"), ("-5%", "negative"), ("x", "unwritten")):
         assert read_penalty(raw) == (None, fault)
     assert read_penalty("150%") == (None, "over")
 

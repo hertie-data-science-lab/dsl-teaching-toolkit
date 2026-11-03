@@ -15,7 +15,6 @@ export const DEFAULTS_BLOCK = 'defaults';
 const HEAD = 'defaults:   # every key present; uncomment to override. The comment shows the inherited value and its source.';
 /** The column the source comment starts at (`ljust(44)` in the engine). */
 const COMMENT_COLUMN = 44;
-const LATE_PAIR = ['late_window_days', 'late_penalty_per_day'];
 /** What a commented `team_formation` says when no level below states one (`settings._SKELETON_HINTS`). */
 const TEAM_FORMATION_HINT = 'self_select | assigned';
 
@@ -50,8 +49,7 @@ export function semesterInheritance(course: Effectives | undefined, semester: Ef
 }
 
 /** The comment line for a key this level does not state. */
-function commentLine(indent: string, key: string, inherited: Effective | undefined, pairStated: boolean): string {
-  if (LATE_PAIR.includes(key) && pairStated) return `${indent}# ${key}:`.padEnd(COMMENT_COLUMN) + '(none: the late pair is set above)';
+function commentLine(indent: string, key: string, inherited: Effective | undefined): string {
   const v = inherited?.value;
   if (key === 'team_formation' && (v === null || v === undefined || v === 'none'))
     return `${indent}# ${key}:`.padEnd(COMMENT_COLUMN) + `(${TEAM_FORMATION_HINT}; not set above)`;
@@ -60,9 +58,8 @@ function commentLine(indent: string, key: string, inherited: Effective | undefin
 
 /** The whole block, as the engine seeds it: `stated` live, every other key commented. */
 export function skeleton(stated: Block, inherited: Effectives): string {
-  const pair = LATE_PAIR.some((k) => k in stated);
   const lines = [HEAD];
-  for (const k of DEFAULT_KEYS) lines.push(k in stated ? `  ${k}: ${scalar(stated[k])}` : commentLine('  ', k, inherited[k], pair));
+  for (const k of DEFAULT_KEYS) lines.push(k in stated ? `  ${k}: ${scalar(stated[k])}` : commentLine('  ', k, inherited[k]));
   return `${lines.join('\n')}\n`;
 }
 
@@ -96,7 +93,6 @@ export function withDefaults(text: string, after: Block, inherited: Effectives):
   while (end < lines.length && /^\s+\S/.test(lines[end])) end++;
   const block = lines.slice(at + 1, end);
   const indent = block.map((l) => /^(\s+)/.exec(l)?.[1]).find(Boolean) ?? '  ';
-  const pair = LATE_PAIR.some((k) => k in after);
   const find = (k: string, re: (k: string) => RegExp) => block.findIndex((l) => re(k).test(l));
   for (const k of changed) {
     const live = find(k, liveRe), comment = find(k, commentRe);
@@ -111,13 +107,7 @@ export function withDefaults(text: string, after: Block, inherited: Effectives):
         for (let i = order - 1; i >= 0 && after_ < 0; i--) after_ = Math.max(find(DEFAULT_KEYS[i], liveRe), find(DEFAULT_KEYS[i], commentRe));
         block.splice(after_ + 1, 0, line);
       }
-    } else if (live >= 0) block[live] = commentLine(indent, k, inherited[k], pair);
-  }
-  // The other half of the late pair follows the pair: its comment says why it is none, or what it inherits.
-  for (const k of LATE_PAIR) {
-    if (k in after || !changed.some((c) => LATE_PAIR.includes(c))) continue;
-    const comment = find(k, commentRe);
-    if (comment >= 0) block[comment] = commentLine(indent, k, inherited[k], pair);
+    } else if (live >= 0) block[live] = commentLine(indent, k, inherited[k]);
   }
   return [...lines.slice(0, at + 1), ...block, ...lines.slice(end)].join('\n');
 }

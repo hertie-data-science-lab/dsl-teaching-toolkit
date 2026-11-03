@@ -87,7 +87,8 @@ def test_an_override_merges_defaults_and_replaces_lists(tmp_path):
 @pytest.mark.parametrize(
     ("data", "problem"),
     [
-        ({"defaults": {"late_penalty_per_day": "10"}}, "late_penalty_per_day"),
+        ({"defaults": {"late_penalty_per_day": "-10"}}, "late_penalty_per_day"),
+        ({"defaults": {"late_penalty_per_day": 150}}, "late_penalty_per_day"),
         ({"defaults": {"late_penalty_per_day": "150%"}}, "late_penalty_per_day"),
         ({"defaults": {"late_penalty_per_day": "100.9%"}}, "late_penalty_per_day"),
         ({"defaults": {"max_team_size": -3}}, "max_team_size"),

@@ -90,8 +90,6 @@ def _spec(config: str) -> grading_spec.GradingSpec:
     data = yaml.safe_load(config) or {}
     run = {k: data.pop(k) for k in settings.RUN_KEYS if k in data}
     values = read_settings(run, settings.RUN_KEYS, "assignments.yml", [])
-    if any(k in values for k in settings.LATE_PAIR):
-        values = {k: values.get(k) for k in settings.LATE_PAIR} | values
     spec = grading_spec.parse_grading_spec(yaml.safe_dump(data) if data else "")
     return dataclasses.replace(spec, **values)
 
@@ -1063,7 +1061,8 @@ def test_an_external_assignments_shape_names_no_visibility(monkeypatch):
             "late_window_days: 7\nlate_penalty_per_day: 10%\n",
             "10% per day, up to 7 days",
         ),
-        ("late_window_days: 7\n", "accepted up to 7 days late"),
+        # The window alone keeps the institution's penalty (each key inherits on its own).
+        ("late_window_days: 7\n", "10% per day, up to 7 days"),
         ("late_window_days: 0\n", "not accepted after the deadline"),
     ],
 )

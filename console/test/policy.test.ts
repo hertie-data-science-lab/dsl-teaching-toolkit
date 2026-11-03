@@ -6,9 +6,11 @@ import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 import policy from '../schemas/policy.json';
 import { YamlText } from '../src/edit/yamlText';
-import { effectiveOf, effectiveWord, institutionDefaults, lateWord, over, readSetting, semesterName, usableBlock, writeBlock, type Effectives } from '../src/model/settings';
+import { effectiveOf, effectiveWord, fileValue, institutionDefaults, lateWord, over, readSetting, semesterName, usableBlock, writeBlock, type Effectives } from '../src/model/settings';
+import { runTier } from '../src/tiers/runSettings';
+import { runErrors, withRun } from '../src/screens/RunSettings';
 import { questionFileError, questionsValue } from '../src/tiers/grading';
-import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO, DEFAULT_TIMEZONE, HANDLE_RE, ORG_NAME_RE, penaltyRate } from '../src/model/policy';
+import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO, DEFAULT_TIMEZONE, HANDLE_RE, ORG_NAME_RE, penaltyError, penaltyRate, typedPenalty } from '../src/model/policy';
 
 const SOURCES = import.meta.glob('../src/**/*.{ts,tsx}', { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
 
@@ -62,8 +64,12 @@ describe('no default literal in the console', () => {
 
   it('reads a penalty as the engine does', () => {
     expect(penaltyRate(policy.defaults.late_penalty_per_day)).toBeCloseTo(0.1);
-    expect(penaltyRate('0.05')).toBe(0.05);
-    expect(penaltyRate('10')).toBeNull(); // a bare number of 1 or more
+    // A bare number is always a percentage, never a fraction (`setting_readers.read_penalty`).
+    expect(penaltyRate('10')).toBeCloseTo(0.1);
+    expect(penaltyRate(10)).toBeCloseTo(0.1);
+    expect(penaltyRate('0.05')).toBeCloseTo(0.0005);
+    expect(penaltyRate('0')).toBe(0);
+    expect(penaltyRate('150')).toBeNull();
     expect(penaltyRate('-5%')).toBeNull();
     expect(penaltyRate('100.9%')).toBeNull();
     expect(penaltyRate('ten')).toBeNull();
@@ -88,10 +94,14 @@ describe('effective values', () => {
     expect(institutionDefaults().archive_grace_days).toEqual({ value: policy.defaults.archive_grace_days, source: 'institution' });
   });
 
-  it('lays a form’s values over the answer below, the late pair as one rule', () => {
+  it('lays a form’s values over the answer below, each late key on its own', () => {
     expect(over('max_team_size', { max_team_size: 2 }, 'entry', semester)).toEqual({ value: 2, source: 'entry' });
     expect(over('max_team_size', {}, 'entry', semester)).toEqual({ value: 4, source: 'course' });
-    expect(over('late_penalty_per_day', { late_window_days: 3 }, 'entry', semester)).toEqual({ value: null, source: 'entry' });
+    // A window set here keeps the penalty below, and a penalty set here keeps the window below.
+    expect(over('late_window_days', { late_window_days: 3 }, 'entry', semester)).toEqual({ value: 3, source: 'entry' });
+    expect(over('late_penalty_per_day', usableBlock({ late_window_days: 3 }), 'entry', semester)).toEqual({ value: '5%', source: 'semester' });
+    expect(over('late_window_days', usableBlock({ late_penalty_per_day: '20' }), 'entry', semester)).toEqual({ value: 5, source: 'semester' });
+    expect(over('late_penalty_per_day', usableBlock({ late_penalty_per_day: '20' }), 'entry', semester)).toEqual({ value: '20%', source: 'entry' });
     expect(over('max_team_size', usableBlock({ max_team_size: -3 }), 'entry', semester).source).toBe('course');
     expect(lateWord(3, null)).toBe('3 days, no penalty');
     expect(lateWord(0, '5%')).toBe('no late work');
@@ -101,6 +111,41 @@ describe('effective values', () => {
     expect(effectiveWord('max_team_size', over('max_team_size', { max_team_size: 2 }, 'entry', semester))).toBe('up to 2, set for this assignment');
     expect(effectiveWord('late_window_days', effectiveOf(semester, 'late_window_days'))).toBe('5 days, this semester’s default');
     expect(effectiveWord('visibility', effectiveOf({}, 'visibility'))).toBe('Private, institution default');
+  });
+});
+
+describe('the late window and the penalty, typed', () => {
+  it('asks for neither half when the other is set: each inherits on its own', () => {
+    const keys = ['late_window_days', 'late_penalty_per_day'] as const;
+    expect(runErrors([...keys], semester, { late_window_days: 3 })).toEqual({});
+    expect(runErrors([...keys], semester, { late_penalty_per_day: '20' })).toEqual({});
+    expect(runErrors([...keys], semester, { late_window_days: 0 })).toEqual({});
+  });
+
+  it('reads a plain number typed into the penalty as a percentage, and saves it with %', () => {
+    expect(typedPenalty('20')).toBe('20%');
+    expect(typedPenalty(' 12.5 ')).toBe('12.5%');
+    expect(typedPenalty('5%')).toBe('5%');
+    // A file's own YAML number is not a typed value: the engine reads it as written.
+    expect(typedPenalty(0.1)).toBe(0.1);
+    expect(penaltyError('20')).toBeNull();
+    expect(penaltyError('12.5')).toBeNull();
+    expect(penaltyError('150')).toMatch(/percentage/);
+    expect(penaltyError('ten')).toMatch(/percentage/);
+    expect(runTier('late_penalty_per_day', semester.late_penalty_per_day!).check?.('20', {})).toBeNull();
+    expect(runTier('late_penalty_per_day', semester.late_penalty_per_day!).reason).toMatch(/plain number is a percentage/);
+    expect(fileValue('late_penalty_per_day', '20')).toBe('20%');
+    expect(fileValue('late_penalty_per_day', 0.1)).toBe(0.1);
+    expect(readSetting('late_penalty_per_day', '12.5')).toBe('12.5%');
+  });
+
+  it('writes a typed plain-number penalty into the file as a percentage', () => {
+    const y = new YamlText('defaults:\n  max_team_size: 4\n');
+    writeBlock(y, ['defaults'], { max_team_size: 4 }, { max_team_size: 4, late_penalty_per_day: '20' }, ['max_team_size', 'late_penalty_per_day']);
+    expect(parse(y.text).defaults).toEqual({ max_team_size: 4, late_penalty_per_day: '20%' });
+    // An assignment's own row, as the Overview form saves it.
+    const d = withRun({ run: {} } as unknown as Parameters<typeof withRun>[0], { late_window_days: 3, late_penalty_per_day: '12.5' });
+    expect(d.run).toEqual({ late_window_days: 3, late_penalty_per_day: '12.5%' });
   });
 });
 

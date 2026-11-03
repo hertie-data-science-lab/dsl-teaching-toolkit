@@ -35,6 +35,7 @@ import { DivergencePanel, releaseAgainDrift } from './Divergence';
 import { useSetAside } from './SetAside';
 import { divergenceOf, isDiverged } from '../model/divergence';
 import { gapLabel } from '../model/format';
+import { SemesterDefaultsButton } from './SemesterSettings';
 import { SessionDate, releasedTbc } from './SessionDate';
 
 const LABELS: Record<Block, string> = { releases: 'Releases', assignments: 'Assignments', events: 'Events' };
@@ -571,7 +572,7 @@ function AssignmentForm({ p, d, set, errors, consoleOn, templates, tiered, hande
   );
 }
 
-/** The semester dates sheet. The timezone is the `defaults:` one (decision 0039), set in Semester settings. */
+/** The semester dates sheet. The timezone is the `defaults:` one (decision 0039), set in Semester defaults. */
 export function SemesterForm({ d, set, errors }: { d: SemesterDraft; set: Set_<SemesterDraft>; errors: Record<string, string> }) {
   return (
     <>
@@ -870,7 +871,7 @@ function View(p: ReadyProps) {
           <h2 class="h1">Schedule <Hint doc="07-schedule-releases.md">The schedule drives everything automatic: releases, hand outs, collection and the student site’s calendar. Dates are in the semester’s timezone.</Hint></h2>
           <p class="lede">{counts.releases + counts.assignments + counts.events} entries. {heldLine || 'Every planned release has its associated folder.'}</p>
         </div>
-        <div class="actions"><CheckNow p={p} label="Check" about={{ text: SCHEDULE_CHECK_HINT, doc: 'reference/actions-reference.md' }} /><a class="btn outline" href="#schedule-new">Add entry</a></div>
+        <div class="actions"><CheckNow p={p} label="Check" about={{ text: SCHEDULE_CHECK_HINT, doc: 'reference/actions-reference.md' }} /><SemesterDefaultsButton p={p} at="releases" /><a class="btn outline" href="#schedule-new">Add entry</a></div>
       </div>
       <div class="term-meta">
         {sched?.start && sched?.end ? <span>Semester <b>{fmtDay(sched.start, tz, year)} to {fmtDay(sched.end, tz)}</b></span> : null}

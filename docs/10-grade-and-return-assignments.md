@@ -54,7 +54,7 @@ teams:
 | `score_group` | you | yes: every member's gradebook shows the team's score and its marks per question, beside their own final grade |
 | `adjustment_individual` | you - one person's change to their final grade, in both shapes (the late penalty has its own override, `late_penalty`) | yes, their own only, as its own line (`adjustment +4`); never a team-mate's |
 | `days_late` (per student or team, top level; `submit_via: external` only, which has no `info:`) | you: whole days late, blank is 0 | as `days_late`, with the penalty it costs |
-| `late_penalty` (per student or team, beside `info:`; optional) | you: `apply` (the default), `waive`, or the whole penalty as `15%` / `0.15` | with their marks (Distribute grades), the penalty that applied: `-20%`, `waived` or `-15% (set by hand)`; a submission receipt quotes the late rule's own figure only |
+| `late_penalty` (per student or team, beside `info:`; optional) | you: `apply` (the default), `waive`, or the whole penalty as `15%` / `15` (a bare number is a percentage) | with their marks (Distribute grades), the penalty that applied: `-20%`, `waived` or `-15% (set by hand)`; a submission receipt quotes the late rule's own figure only |
 | `notes_not_shared_with_students` (each person's; on a group sheet the team's own too, beside `feedback_group`) | you | **never** |
 | `marked_by` (per student or team) | the console, on each unit whose marks a save changes: the signed-in login | **never** |
 | `snippets` (top level, beside `submissions:` / `teams:`) | you: reusable feedback comments for this assignment, edited in the console | **never** |

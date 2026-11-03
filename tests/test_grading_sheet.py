@@ -635,19 +635,18 @@ def test_score_total_adds_only_what_it_can_add(score, expected):
     "text,expected",
     [
         ("10%", Decimal("0.10")),
-        ("0.1", Decimal("0.10")),
+        ("10", Decimal("0.10")),  # bare: always a percentage
+        ("0.1", Decimal("0.001")),  # never a fraction
         ("5.5%", Decimal("0.055")),
         ("0%", Decimal(0)),
-        ("10", None),  # bare: neither 1000% nor silently 10%
-        ("1", None),
+        ("0", Decimal(0)),
+        ("150", None),
         ("ten percent", None),
         ("", None),
         (None, None),
     ],
 )
-def test_penalty_rate_reads_a_percentage_or_a_fraction_and_refuses_a_bare_number(
-    text, expected
-):
+def test_penalty_rate_reads_a_percentage_with_or_without_its_sign(text, expected):
     assert penalty_rate(text) == expected
 
 
@@ -997,10 +996,11 @@ def test_a_question_marked_from_another_file_names_it_beside_its_maximum():
         ("apply", Decimal("0.20")),
         ("Waive", Decimal(0)),
         ("15%", Decimal("0.15")),  # the WHOLE penalty, not a rate per day
-        (0.15, Decimal("0.15")),
+        (15, Decimal("0.15")),  # bare: always a percentage
+        ("15", Decimal("0.15")),
         ("0%", Decimal(0)),
         # Nobody can apply these: the late rule's arithmetic, and the unit held.
-        ("15", Decimal("0.20")),  # bare: neither 1500% nor silently 15%
+        ("150", Decimal("0.20")),
         ("waived", Decimal("0.20")),
         ("half", Decimal("0.20")),
         (True, Decimal("0.20")),
@@ -1020,8 +1020,8 @@ def test_effective_penalty_reads_apply_waive_or_the_whole_penalty(
         (" Apply ", "apply"),
         ("WAIVE", "waive"),
         ("15%", "set"),
-        ("0.15", "set"),
-        ("15", "invalid"),
+        ("15", "set"),
+        ("150", "invalid"),
         ("waived", "invalid"),
         # a set penalty of nothing is a waiver, and reads as one
         ("0%", "waive"),
@@ -1048,7 +1048,7 @@ def test_final_grade_applies_the_penalty_the_grader_chose():
     assert final_grade(20, rate, 2, None, "apply") == Decimal(16)
     assert final_grade(20, rate, 2, None, "waive") == Decimal(20)
     assert final_grade(20, rate, 2, None, "5%") == Decimal(19)
-    assert final_grade(20, rate, 2, "+1", "0.5") == Decimal(11)
+    assert final_grade(20, rate, 2, "+1", "50") == Decimal(11)
     # no late rule at all: there is nothing to waive or override, so it is ignored
     assert final_grade(20, None, 2, None, "10%") == Decimal(20)
     # unreadable: the late rule's arithmetic, and the unit held (below)
