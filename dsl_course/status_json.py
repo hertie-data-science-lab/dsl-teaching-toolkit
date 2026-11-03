@@ -53,6 +53,7 @@ from . import (
     grading_spec,
     policy,
     records,
+    release_record,
     roster,
     run,
     schedule,
@@ -274,6 +275,9 @@ class SemesterFacts:
     # `{semester-side name: when its grading sheet last changed}`; None = not known.
     sheet_changed: dict[str, datetime | None] = field(default_factory=dict)
     dest_paths: dict[str, set[str]] = field(default_factory=dict)  # release dest trees
+    # The copies the release record holds (`release_record.key_of`): shipped, whatever
+    # their destination holds now.
+    recorded: frozenset[tuple[str, str, str, str]] = frozenset()
     dest_branches: dict[str, str] = field(default_factory=dict)  # and their branches
     # `{(source repo, root stub path): still the placeholder}` for every copy the plan
     # makes of a root SYLLABUS.md / README.md: the release leaves such a copy out.
@@ -976,7 +980,7 @@ def number_problems(facts: SemesterFacts, now: datetime) -> list[dict]:
     released = {
         r.label
         for r in facts.sched.releases
-        if r.deploy and all(_dest_present(facts, d) for d in r.deploy)
+        if r.deploy and all(_shipped(facts, d) for d in r.deploy)
     }
     out = []
     for m in unnumbered(facts.sched):
@@ -1678,6 +1682,14 @@ def _dest_present(facts: SemesterFacts, d: schedule.Deploy) -> bool:
     return bool(paths) if is_repo_root(dest) else dest in paths
 
 
+def _shipped(facts: SemesterFacts, d: schedule.Deploy) -> bool:
+    """Whether copy `d` has gone out (decision 0043): the release record says so, else
+    its destination is there (a copy made before the record, or by hand off the plan).
+    A recorded copy whose destination was deleted since is still shipped: releasing it
+    again is a choice (Release again), not something the engine decides."""
+    return release_record.key_of(d) in facts.recorded or _dest_present(facts, d)
+
+
 def release_state(
     release: schedule.Release,
     facts: SemesterFacts,
@@ -1687,15 +1699,16 @@ def release_state(
 ) -> str:
     """`planned | will_be_skipped | released | late` (lifecycle, per scheduled release).
 
-    released - every copy is on the destination's default branch (whenever it got there:
-    an early release is released); late - a copy whose moment has passed is not there (a
+    released - every copy has shipped (`_shipped`: recorded, else on the destination's
+    default branch; whenever it got there: an early release is released); late - a copy
+    whose moment has passed has not shipped (a
     copy that landed and another still to come is not late); will_be_skipped - automation
     cannot perform it as written (a source not found or held back, or an entry that needs
     a number and has none); planned otherwise. An entry with nothing to copy is released
     once its moment has passed."""
-    if release.deploy and all(_dest_present(facts, d) for d in release.deploy):
+    if release.deploy and all(_shipped(facts, d) for d in release.deploy):
         return "released"
-    if any(not _dest_present(facts, d) for d in release.due_deploys(now)):
+    if any(not _shipped(facts, d) for d in release.due_deploys(now)):
         return "late"
     if faults or (release.deploy and not numbered):
         return "will_be_skipped"
@@ -2266,7 +2279,7 @@ def late_problems(
         moment = min(
             d.deploy_datetime or r.when
             for d in r.due_deploys(now)
-            if not _dest_present(facts, d)
+            if not _shipped(facts, d)
         )
         out.append(
             {
@@ -2296,7 +2309,7 @@ def unwritten_problems(
             path = d.course_source_path.strip("/")
             if not facts.stubs.get((d.course_source_repo, path)):
                 continue
-            if _dest_present(facts, d):
+            if _shipped(facts, d):
                 continue
             when = d.deploy_datetime or r.when
             if when is None:
@@ -2728,6 +2741,9 @@ def gather_semester(course_org: str, semester_org: str, now: datetime) -> Semest
             branch = default_branch(semester_org, repo, fallback="main")
             facts.dest_branches[repo] = branch
             facts.dest_paths[repo] = set(repo_tree(semester_org, repo, branch))
+    # The release record, off the tree already read: no read at all before the first one.
+    if release_record.PATH in facts.config_paths:
+        facts.recorded = release_record.load(semester_org).keys()
     # The root stubs the plan copies, each read once: a placeholder is left out.
     for repo, path in sorted(
         {

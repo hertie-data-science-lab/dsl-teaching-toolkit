@@ -2,11 +2,12 @@
 into beside faculty (decision 0010).
 
 A repo's root holds only what an instructor edits; everything the engine writes - its
-status, the outcomes of console runs, the fire-once markers, the records of what was sent -
-lives under `.system/`. `path(kind, ...)` is the one spelling of each: the writers and the
-readers ask it, the console reads the same table from `console/schemas/names.json`, and
-`migrate` is the only module that knows where a record used to be - but for
-`RETIRED_SEMESTER_GRADES`, which `distribute` also renames on its first write.
+status, the outcomes of console runs, the fire-once markers, the records of what was sent
+or released - lives under `.system/`. `path(kind, ...)` is the one spelling of each: the
+writers and the readers ask it, the console reads the same table from
+`console/schemas/names.json`, and `migrate` is the only module that knows where a record
+used to be - but for `RETIRED_SEMESTER_GRADES`, which `distribute` also renames on its
+first write.
 
 Stdlib only, no I/O: this is a vocabulary, like `course`.
 """
@@ -31,6 +32,9 @@ RECORDS = {
     "snapshots": "snapshots",
     "autograde": "autograde",
     "solutions": "solutions",
+    # every copy a release has made: its entry, source commit, ship times and manifest
+    # (`release_record`, decision 0043)
+    "releases": "releases.json",
     # the last preview of a hand out WITH the solution: who, and which template - the
     # real run of it goes ahead only straight after (`assign.preview_first`)
     "solution_preview": "solution-preview.json",

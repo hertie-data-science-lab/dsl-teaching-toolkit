@@ -478,14 +478,18 @@ def test_a_release_preview_counts_what_would_go(monkeypatch):
 
 
 def test_a_release_says_what_it_released(monkeypatch):
-    monkeypatch.setattr(deploy, "deploy_many", lambda *a, **k: (0, True))
+    monkeypatch.setattr(
+        deploy, "deploy_many", lambda *a, **k: deploy.Batch(0, True, [])
+    )
     out = _deploy_main(monkeypatch)
     assert out.text == "Released 2 items from course-materials-f2026 to materials."
     assert out.counts == {"items": 2}
 
 
 def test_a_release_with_nothing_new_had_nothing_to_do(monkeypatch):
-    monkeypatch.setattr(deploy, "deploy_many", lambda *a, **k: (0, False))
+    monkeypatch.setattr(
+        deploy, "deploy_many", lambda *a, **k: deploy.Batch(0, False, [])
+    )
     out = _deploy_main(monkeypatch)
     assert out.conclusion == "nothing_to_do"
     assert out.text == (

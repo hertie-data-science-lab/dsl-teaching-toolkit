@@ -120,7 +120,7 @@ def test_cli_builds_one_deploy_per_pair_and_one_batch(monkeypatch):
         seen.update(
             course_org=course_org, semester_org=semester_org, deploys=deploys, sync=sync
         )
-        return 0, True
+        return deploy.Batch(0, True, [])
 
     monkeypatch.setattr(deploy, "deploy_many", fake_deploy_many)
     monkeypatch.setattr(
@@ -191,7 +191,9 @@ def test_an_entry_is_released_in_one_batch_with_one_sync(monkeypatch):
     monkeypatch.setattr(
         deploy,
         "deploy_many",
-        lambda org, sem, deploys, sync=True: calls.append((deploys, sync)) or (0, True),
+        lambda org, sem, deploys, sync=True: (
+            calls.append((deploys, sync)) or deploy.Batch(0, True, [])
+        ),
     )
     argv = ["deploy", "--course-org", "Course", "--semester-org", "Semester-f2026"]
     monkeypatch.setattr("sys.argv", [*argv, "--entry", "s5", "--no-preview"])
@@ -208,7 +210,7 @@ def test_semester_dest_repo_defaults_to_materials(monkeypatch):
     monkeypatch.setattr(
         deploy,
         "deploy_many",
-        lambda *a, **k: (captured.append(a[2]), (0, True))[1],
+        lambda *a, **k: (captured.append(a[2]), deploy.Batch(0, True, []))[1],
     )
     monkeypatch.setattr(
         "sys.argv",
@@ -756,7 +758,7 @@ def test_a_dangling_symlink_is_copied_as_a_link_not_followed(monkeypatch):
         (src / "sec" / "gone.md").symlink_to("nowhere.md")
 
     snaps = _stub_deploy_many(monkeypatch, build)
-    errors, _changed = deploy.deploy_many(
+    errors, _changed, _copies = deploy.deploy_many(
         "COURSE", "SEMESTER", [_deploy("sec")], sync=False
     )
     assert errors == 0
@@ -771,7 +773,7 @@ def test_a_directory_symlink_loop_does_not_recurse(monkeypatch):
         (src / "sec" / "loop").symlink_to(src / "sec", target_is_directory=True)
 
     snaps = _stub_deploy_many(monkeypatch, build)
-    errors, _changed = deploy.deploy_many(
+    errors, _changed, _copies = deploy.deploy_many(
         "COURSE", "SEMESTER", [_deploy("sec")], sync=False
     )
     assert errors == 0
@@ -795,7 +797,7 @@ def test_one_unusable_path_is_one_counted_error_and_the_rest_still_ship(monkeypa
         return real_copytree(src, dst, **kwargs)
 
     monkeypatch.setattr(deploy.shutil, "copytree", flaky)
-    errors, _changed = deploy.deploy_many(
+    errors, _changed, _copies = deploy.deploy_many(
         "COURSE", "SEMESTER", [_deploy("bad"), _deploy("good")], sync=False
     )
     assert errors == 1  # not an exception out of deploy_many
@@ -820,7 +822,7 @@ def test_a_dest_that_cannot_reach_upstream_is_dropped_like_a_failed_clone(
         return stubbed(*args, **kwargs)
 
     monkeypatch.setattr(deploy, "git", refuses_the_checkout)
-    errors, changed = deploy.deploy_many(
+    errors, changed, _copies = deploy.deploy_many(
         "COURSE", "SEMESTER", [_deploy("sec")], sync=False
     )
 
@@ -889,7 +891,9 @@ def test_release_now_refuses_a_copy_of_an_entry_with_no_number(
     # Decision 0038: the copy of a lecture with no session is refused as the scheduled
     # release skips it; one with a session, or a copy off the plan, goes.
     _plan_with_guest(monkeypatch)
-    monkeypatch.setattr(deploy, "deploy_many", lambda *a, **k: (0, True))
+    monkeypatch.setattr(
+        deploy, "deploy_many", lambda *a, **k: deploy.Batch(0, True, [])
+    )
     monkeypatch.setattr(
         "sys.argv",
         ["deploy", "--course-org", "C", "--course-source-repo", "cm",

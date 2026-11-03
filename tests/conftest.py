@@ -28,6 +28,7 @@ from dsl_course import (
     issues,
     log,
     pulls,
+    release_record,
     roster,
     run,
     schedule,
@@ -191,6 +192,19 @@ def _no_semester_is_closed_out(monkeypatch):
     is the default answer to that as well."""
     monkeypatch.setattr(discovery, "repo_is_archived", lambda org, name: False)
     monkeypatch.setattr(discovery, "repo_missing", lambda org, name: False)
+
+
+@pytest.fixture(autouse=True)
+def _nothing_is_recorded_as_released(monkeypatch):
+    """Answer the release record's live reads (`release_record`) with "no record yet, and
+    nothing at any destination", and accept its write: every due copy ships, as it did
+    before the record. The tests about the record, the seed and fire-once set their own
+    after this fixture and win."""
+    monkeypatch.setattr(release_record, "get_file_with_sha", lambda *a, **k: None)
+    monkeypatch.setattr(release_record, "repo_blob_shas", lambda *a, **k: {})
+    monkeypatch.setattr(
+        release_record, "put_file_as_read", lambda org, repo, path, body, *a, **k: body
+    )
 
 
 @pytest.fixture(autouse=True)
