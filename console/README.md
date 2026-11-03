@@ -108,8 +108,8 @@ time with Show more; always shown, saying so when the person has none). A semest
 cannot be read ends on a last day its key implies (a fall semester on 31 January, spring 31 July,
 summer 30 September, winter 31 March), over once the next day starts in its timezone. The person's own rows are in colour and ordered by what needs
 them, each card with the course code on a quiet line under its title and naming their role
-(course admin from `dsl-course.yml`, else instructor or teaching assistant from the newest
-running semester's `instructors.yml`, else "you teach on this course"); the others are greyed,
+(course admin from `course.yml`, else instructor or teaching assistant from the newest
+running semester's `semester.yml` `people:`, else "you teach on this course"); the others are greyed,
 not links, and say "Not one of your courses" ("You are a student" for a course the person
 studies in). Each section has its own **My courses** checkbox (the first one in the page head,
 left of New course), on by default and kept in this browser per account and section; while it is
@@ -201,7 +201,7 @@ hand-out cites among them, as the engine writes it), with the day each becomes a
 Suggestions lists the suggested setup steps and to-dos; the syllabus and its weekly plan are one
 engine check, "Syllabus". For a viewer with write access the circle before a suggestion is a
 button (decisions 0032 and 0034, `useSetAside`): it asks, then writes the id into the course's
-`dsl-course.yml` `set_aside:` through the Course details save path, and the line moves to Set aside, with Bring back. A needed item has no circle. A
+`course.yml` `set_aside:` through the Course details save path, and the line moves to Set aside, with Bring back. A needed item has no circle. A
 needed to-do is never listed in the panel: it shows once, at its point of need, the repo's row
 ("Not ready" and the first missing needed item) and its settings checklist, split into Needed
 and Suggested.
@@ -226,6 +226,8 @@ each with its effective value and source from `status.json`: the run defaults as
 words them, "Send fixes to released files automatically", the semester dates. Edit opens one
 modal of three folds, each heading carrying its line: Assignments (semester.yml `defaults:`),
 Releases (`autosync_released_edits`) and Semester dates (schedule.yml's `semester:` block).
+The timezone is asked once, the `defaults:` one in Assignments; schedule.yml's own `timezone`
+stays on the Schedule screen.
 A save is at most one commit per file (`saveSteps`). From the Dashboard all three are folded;
 the Assignments page's Semester defaults button opens it with Assignments open and focused; the
 `#settings` route (the Site page's link, New semester's Semester defaults card) opens it on
@@ -383,7 +385,7 @@ a first visit, mostly free 304s after).
 - Courses: organisations whose `.github` repo carries the `dsl-course-hub` topic; semesters from
   `.github/semesters.yml`; write access = push on `.github`.
 - Semesters: organisations whose `.github` carries `dsl-semester`; the course
-  from the pointer `semester-config/.system/dsl-course.yml` (`course:`), its name from the course's public `.github`;
+  from the pointer `semester-config/.system/course.yml` (`course:`), its name from the course's public `.github`;
   archived when that `.github` repo is archived. A semester known only from a course's
   registry has its `.github` read when its student screens open. Org names compare
   case-insensitively.
@@ -395,7 +397,7 @@ a first visit, mostly free 304s after).
   status file shows "Status not computed yet".
 - Automation's heartbeat: the course's Scheduled release run list.
 - Screens that show a file read it directly: `schedule.yml` (Details, events),
-  `students.csv`, `instructors.yml`, a template's `grading_config.yml`, the site's `index.md`.
+  `semester.yml`, `students.csv`, a template's `grading_config.yml`, the site's `index.md`.
 - Course materials: the course org's repo list (`GET /orgs/{org}/repos`) for Other repos and
   last changes; a materials repo's recursive tree, badged from its `.releaseignore` on its
   settings page. The index lists each materials repo's files under its row as a read-only folder
@@ -408,10 +410,9 @@ a first visit, mostly free 304s after).
 ## What it changes
 
 - Files, as the signed-in user, with a sha-conditional write (a file that moved on since it
-  was read is refused, never overwritten): `schedule.yml`, `instructors.yml`, `students.csv`,
-  `teams.csv`, `grading_sheets/<slug>.yml`, `.github/dsl-course.yml`, a template's
-  `grading_config.yml` (on `solution`), a materials repo's `materials.yml` and `.releaseignore`,
-  the course's `.github/opencourse.yml` (the public website),
+  was read is refused, never overwritten): `schedule.yml`, `semester.yml`, `students.csv`,
+  `grading_sheets/<slug>.yml`, `.github/course.yml` (its `open_course_site:` is the public
+  website), a template's `grading_config.yml` (on `solution`), a materials repo's `.releaseignore`,
   the site's `index.md`, `_announcements/` and the institution keys of its `_config.yml`. "Treat as course materials" on an Other repos
   row adds the `dsl-materials` topic to that repo (`PUT /repos/{o}/{r}/topics`). YAML is edited in place (`src/edit/yamlText.ts`):
   only the changed values' bytes move, so comments and their columns survive. After a write the
@@ -447,7 +448,7 @@ a first visit, mostly free 304s after).
 
 Every repo and path name comes from `src/model/names.ts`, which reads the engine's
 `schemas/names.json` (decisions 0010 and 0012). A semester's course comes from its pointer,
-`.system/dsl-course.yml` in `semester-config`. The console reads the new names only and
+`.system/course.yml` in `semester-config`. The console reads the new names only and
 spells no old one (`names.json` carries the engine's `legacy` rows, decision 0042).
 
 ## Schemas
