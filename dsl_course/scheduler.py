@@ -79,6 +79,7 @@ PREVIEWS - prints what would fire and writes nothing - and acts only with --no-p
 from __future__ import annotations
 
 import contextlib
+import functools
 import json
 import sys
 from collections.abc import Callable
@@ -120,7 +121,7 @@ from .collect import (
 from .course import COURSE_ADMIN_TEAM, shared_repo, submission_repo
 from .deploy import deploy_many
 from .distribute import marks_due
-from .faults import ConfigFault, FaultKind, Severity, Unusable
+from .faults import ConfigFault, FaultKind, Severity, Unusable, parse_moment
 from .gh_contents import WITHHELD_ROOT_STUBS, repo_blob_shas, root_stub_unwritten
 from .ghcli import gh, start_budget
 from .grading_sheet import sheet_path
@@ -725,11 +726,29 @@ def _sort_copies(
     return ship, seed
 
 
+def _first_shipped(
+    read_record: Callable[[], release_record.Record],
+) -> Callable[[schedule.Deploy], datetime | None]:
+    """When the release record says a copy first went out; None when it is not in the
+    record, was seeded, or the record cannot be read (lateness is then judged as before
+    the record; the releases say the read failed)."""
+
+    def first(d: schedule.Deploy) -> datetime | None:
+        try:
+            copy = read_record().copies.get(release_record.key_of(d))
+        except (RuntimeError, ValueError):
+            return None
+        return parse_moment((copy or {}).get("first_shipped_at"))
+
+    return first
+
+
 def _release_copies(
     course_org: str,
     semester_org: str,
     pairs: list[tuple[Release, schedule.Deploy]],
     now: datetime,
+    read_record: Callable[[], release_record.Record] | None = None,
 ) -> tuple[int, bool]:
     """Seed and ship this tick's due copies (`_sort_copies`) through ONE `deploy_many` - each
     unique source and dest repo cloned once for the whole run - and record every one
@@ -737,11 +756,17 @@ def _release_copies(
     have it, so it stays late and the next tick offers it again. Returns `(errors,
     site_changed)`.
 
-    The record is read once and written at most once, only when something changed. One
-    that cannot be read releases nothing this tick: whether a copy has shipped is not
-    known, and the next tick asks again."""
+    The record is read once (`read_record`, the tick's one read, shared with the cadence
+    check) and written at most once, only when something changed. One that cannot be
+    read releases nothing this tick: whether a copy has shipped is not known, and the next
+    tick asks again.
+
+    Nothing is written back to schedule.yml (`schedule.record_release_times`): a copy is
+    due here only once its planned moment has passed, so a scheduled ship is on time or
+    late, never early and never TBC - and the table of decision 0043 rule 3 writes nothing
+    for either."""
     try:
-        record = release_record.load(semester_org)
+        record = (read_record or functools.partial(release_record.load, semester_org))()
         ship, seed = _sort_copies(course_org, semester_org, pairs, record)
     except (RuntimeError, ValueError) as exc:
         log_err(
@@ -780,6 +805,7 @@ def _run_releases(
     semester_org: str,
     due: list[Release],
     now: datetime,
+    read_record: Callable[[], release_record.Record] | None = None,
 ) -> tuple[int, bool]:
     """Fire every due release's due actions. Returns `(errors, site_changed)`. `now` gates
     each action individually: a deploy with its own deploy_datetime fires on its own clock,
@@ -793,7 +819,9 @@ def _run_releases(
     pairs = [(release, d) for release in due for d in release.due_deploys(now)]
     changed = False
     if pairs:
-        errors, changed = _release_copies(course_org, semester_org, pairs, now)
+        errors, changed = _release_copies(
+            course_org, semester_org, pairs, now, read_record
+        )
 
     # Assignment handouts run per release (they aren't file copies).
     did_assign = False
@@ -1880,6 +1908,9 @@ def _release_phase(
     # window are `created_at` instants (`verdict.now` is this run's own), so the gap is on
     # GitHub's clock rather than a runner clock that also carries this run's queue delay.
     errors = 0
+    # The release record, read on first need and once: by the lateness check for a moment
+    # it would report, else by the releases below.
+    read_record = functools.cache(functools.partial(release_record.load, semester_org))
     if verdict is not None and not dry_run:
         try:
             errors += cadence.report_semester(
@@ -1895,6 +1926,7 @@ def _release_phase(
                         slug: _submit_via(course_org, sched, slug)
                         for slug in sched.assignments
                     },
+                    first_shipped=_first_shipped(read_record),
                 ),
                 dry_run,
             )
@@ -2005,7 +2037,7 @@ def _release_phase(
         log_ok("nothing due.")
     else:
         release_errors, release_changed = _run_releases(
-            course_org, semester_org, due, now
+            course_org, semester_org, due, now, read_record
         )
         errors += release_errors
     return_errors = _return_marks(course_org, semester_org, sched, marks_ready)
