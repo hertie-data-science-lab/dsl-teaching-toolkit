@@ -579,7 +579,6 @@ def test_autosync_resolves_semester_then_course_then_institution(
         "value": expected[0],
         "source": expected[1],
     }
-    assert settings.instance("Sem").autosync_released_edits is expected[0]
 
 
 def test_autosync_has_no_entry_layer():

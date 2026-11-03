@@ -214,7 +214,8 @@ describe('Send fixes to released files automatically (decision 0043)', () => {
     expect(seed).toContain(`${'  # autosync_released_edits: false'.padEnd(44)}(institution)\n`);
     expect(withDefaults(on, {}, institutionDefaults())).toBe(seed);
   });
-  it('reads only a YAML boolean, as the engine does', () => {
-    expect([true, false, 'yes', 'true'].map((v) => readSetting('autosync_released_edits', v))).toEqual([true, false, undefined, undefined]);
+  it('reads what the engine’s YAML loads as a boolean, and keeps other hand-written text on a save', () => {
+    expect([true, false, 'yes', 'Off', '1', 'maybe'].map((v) => readSetting('autosync_released_edits', v))).toEqual([true, false, true, false, undefined, undefined]);
+    expect(statedDefaults({ autosync_released_edits: 'yes' })).toEqual({ autosync_released_edits: 'yes' });
   });
 });
