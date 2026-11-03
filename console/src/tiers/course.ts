@@ -3,7 +3,7 @@
 // one form: each field shows, in grey, the value it inherits and where that comes from (the
 // engine's answer, status.json), the one that applies when it is left empty.
 
-import { REPO_NAME_RE, SOURCE_WORD, effectiveOf, type Effective, type Effectives, type RunKey } from '../model/settings';
+import { REPO_NAME_RE, SOURCE_WORD, effectiveOf, valueWord, type Effective, type Effectives, type RunKey } from '../model/settings';
 import { CONTACTS, DEFAULT_TIMEZONE, POLICY } from '../model/policy';
 import { blank } from '../edit/yamlText';
 import { runTiers } from './runSettings';
@@ -38,13 +38,9 @@ export const COURSE_FACTS: Tiers = {
 /** The run settings a level's `defaults:` states (`settings.DEFAULT_KEYS`): no submit link, which is the assignment's. */
 export const DEFAULT_RUN_KEYS: RunKey[] = ['max_team_size', 'late_window_days', 'late_penalty_per_day', 'team_formation', 'visibility', 'marks_per_question'];
 
-/** `autosync_released_edits`'s two values in words (decision 0043). */
-const AUTOSYNC: Record<string, string> = { true: 'On', false: 'Off' };
-
 /** The `defaults:` keys that hold for a whole semester, as fields; `fallback` is what applies when one is left empty. */
 function semesterWideTiers(fallback: (k: string) => Effective, saved: Values): Tiers {
-  const word = (k: string) => (k === 'autosync_released_edits' ? AUTOSYNC[String(fallback(k).value)] : null) ?? String(fallback(k).value ?? 'not set');
-  const grey = (k: string) => `${SOURCE_WORD[fallback(k).source]}: ${word(k)}`;
+  const grey = (k: string) => `${SOURCE_WORD[fallback(k).source]}: ${valueWord(k, fallback(k).value)}`;
   const tz = fallback('timezone');
   const sync = fallback('autosync_released_edits');
   return {
@@ -63,7 +59,7 @@ function semesterWideTiers(fallback: (k: string) => Effective, saved: Values): T
     autosync_released_edits: {
       tier: 'default', label: 'Send fixes to released files automatically', widget: 'select', defaultLabel: grey('autosync_released_edits'),
       reason: 'On: an edit to a course folder that has already been released reaches students on the next scheduled run. Off: a release is one copy; use Release again after a fix.',
-      options: defaultFirst(sync.value, word('autosync_released_edits'), Object.entries(AUTOSYNC).map(([v, l]) => opt(v, l)), saved.autosync_released_edits),
+      options: defaultFirst(sync.value, valueWord('autosync_released_edits', sync.value), [opt('true', 'On'), opt('false', 'Off')], saved.autosync_released_edits),
     },
   };
 }

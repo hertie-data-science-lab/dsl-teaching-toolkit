@@ -168,8 +168,8 @@ export const SOURCE_WORD: Record<Source, string> = {
   institution: 'institution default',
 };
 
-/** A run setting's value in words: "<n> days", "Students form their own". */
-export function valueWord(key: RunKey, v: unknown): string {
+/** A `defaults:` setting's value in words: "<n> days", "Students form their own". */
+export function valueWord(key: string, v: unknown): string {
   if (v === null || v === undefined || v === '') return key === 'late_penalty_per_day' ? 'no penalty' : key === 'late_window_days' ? 'no late work' : 'not set';
   switch (key) {
     case 'team_formation':
@@ -183,6 +183,7 @@ export function valueWord(key: RunKey, v: unknown): string {
     case 'max_team_size':
       return `up to ${String(v)}`;
     case 'marks_per_question':
+    case 'autosync_released_edits':
       return readSetting(key, v) ? 'on' : 'off';
     default:
       return String(v);

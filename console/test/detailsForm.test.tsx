@@ -22,7 +22,7 @@ import { OpsSession } from '../src/ops/session';
 import { DetailsScreen } from '../src/screens/CourseEdit';
 import { defaultsTiers, COURSE_FACTS } from '../src/tiers/course';
 import { institutionDefaults, readSetting } from '../src/model/settings';
-import { statedDefaults, withDefaults } from '../src/model/config';
+import { skeleton, statedDefaults, withDefaults } from '../src/model/config';
 import { runTier } from '../src/tiers/runSettings';
 import { EditFile } from '../src/ui/bits';
 import { Field } from '../src/forms/Form';
@@ -199,18 +199,19 @@ describe('Send fixes to released files automatically (decision 0043)', () => {
   it('shows the inherited value and its source while unset, read from status.json, never a console default', () => {
     const t = defaultsTiers(institutionDefaults()).autosync_released_edits;
     expect(t.label).toBe('Send fixes to released files automatically');
-    expect(t.defaultLabel).toBe('institution default: Off');
+    expect(t.defaultLabel).toBe('institution default: off');
     expect(labels(t.options)).toEqual(['Off (default)', 'On']);
     const course = defaultsTiers({ ...institutionDefaults(), autosync_released_edits: { value: true, source: 'course' } }).autosync_released_edits;
-    expect(course.defaultLabel).toBe('this course’s default: On');
+    expect(course.defaultLabel).toBe('this course’s default: on');
     expect(labels(course.options)).toEqual(['On (default)', 'Off']);
     expect(labels(defaultsTiers(institutionDefaults(), { autosync_released_edits: false }).autosync_released_edits.options)).toEqual(['Off (default)', 'Off (set here)', 'On']);
   });
   it('writes a boolean over its skeleton comment, and comments it back when cleared', () => {
     expect(statedDefaults({ autosync_released_edits: 'true' })).toEqual({ autosync_released_edits: true });
-    const seed = `defaults:\n${'  # autosync_released_edits: false'.padEnd(44)}(institution)\n`;
+    const seed = skeleton({}, institutionDefaults());
     const on = withDefaults(seed, statedDefaults({ autosync_released_edits: 'true' }), institutionDefaults());
     expect(parse(on).defaults).toEqual({ autosync_released_edits: true });
+    expect(seed).toContain(`${'  # autosync_released_edits: false'.padEnd(44)}(institution)\n`);
     expect(withDefaults(on, {}, institutionDefaults())).toBe(seed);
   });
   it('reads only a YAML boolean, as the engine does', () => {
