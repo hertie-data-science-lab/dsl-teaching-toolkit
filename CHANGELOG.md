@@ -2,6 +2,11 @@
 
 ## 0.11.0 (unreleased)
 
+- The console's semester nav has **Materials** after Schedule: Released materials
+  (`?cohort=<org>#materials`), the semester's materials repos as students have them, each
+  file opening in the viewer, each released folder linked to its Release page and a released
+  copy edited in the semester said in the Dashboard's words. The course nav's Course
+  materials link now names the course (`?course=<org>#materials`).
 - The Updates box dates a released row by the release record (decision 0043): a released
   `tbc` row is announced at the moment it first shipped (the site's `date:` and `released_at:`,
   the student status's `rows[].released_at`), where before every dateless row was dropped. A

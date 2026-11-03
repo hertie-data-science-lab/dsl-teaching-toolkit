@@ -141,7 +141,7 @@ goes, as a semester's Dashboard is where its name goes; a read-only course shows
 then its semesters as nodes: being set up
 first, every live one (a green dot), then past ones ("ended" or "archived") newest first to
 three rows, the rest under "Older semesters (n)". A semester node carries its problem count
-(now or soon only, `problemCount`); its Dashboard leaf does not repeat it. The open semester is expanded to its eight
+(now or soon only, `problemCount`); its Dashboard leaf does not repeat it. The open semester is expanded to its nine
 pages, else on a course page the newest live one; one at a time. Other courses are reached
 through All courses, and so are the person's own student semesters. A student's tree is
 inverted, since a student takes each course once: the open semester's term is the anchor, its
@@ -221,6 +221,16 @@ templates the semester's schedule does not use, each with Add to the schedule. I
 meter plus every state, each line opening the Students tab: on the roster with no code sent
 yet, codes sent but not joined yet, and joined (`status.json` does not say who has an org
 invitation still to accept, so that step is not counted); it is hidden once every row has joined.
+**Released materials** (`?cohort=<org>#materials`, nav label Materials, after Schedule) is the
+course materials index's mirror for the semester's copies, what students have received: one row
+per materials repo (`materials`, then any other repo a released entry of `status.json`
+`releases` wrote to), with its count of releases, last change, Open, and the index's tree
+(`RepoFiles`, `MaterialsTree` with `at="cohort"`), each file opening in the viewer beside it
+(`?file=`, `?folder=` as on the index). Each released folder's row links its Release page; a
+`DIVERGED_RELEASED` problem shows as one line in the Dashboard's words. `?cohort=` with
+`#materials` is this page (`screenOf`); `?course=` with `#materials`, and `#materials-<repo>`
+under either, are the course's, so the course nav's Course materials link names the course.
+
 **Semester defaults** (decision 0043; `#defaults`, in the semester nav between Site and
 Operations) edits the semester's settings: three open folds, each heading
 carrying its line with the effective value and source from `status.json`: Assignments
