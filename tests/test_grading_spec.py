@@ -166,10 +166,11 @@ def test_one_penalty_reader_gives_the_rate_and_the_fault_together():
     from dsl_course.setting_readers import read_penalty
 
     assert read_penalty("10%") == (Decimal("0.1"), "")
-    assert read_penalty("0.1") == (Decimal("0.1"), "")
+    assert read_penalty("10") == read_penalty(10) == (Decimal("0.1"), "")
+    assert read_penalty("0.1") == (Decimal("0.001"), "")
     assert read_penalty(0) == (Decimal(0), "")
     assert read_penalty(None) == read_penalty("  ") == (None, "")
-    for raw, fault in (("10", "bare"), ("-5%", "negative"), ("x", "unwritten")):
+    for raw, fault in (("-5", "negative"), ("-5%", "negative"), ("x", "unwritten")):
         assert read_penalty(raw) == (None, fault)
     assert read_penalty("150%") == (None, "over")
 

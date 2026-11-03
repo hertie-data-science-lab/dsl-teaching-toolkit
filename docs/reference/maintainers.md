@@ -742,9 +742,10 @@ next scheduler tick. Its reader takes only what YAML loads as a boolean, and the
 reads it with `settings.effective(semester_org, "autosync_released_edits", course_org=...)`. The late window and penalty resolve each on its own, like every key
 (`late_window_days: 0` is no late work); the 0.11.0 migration writes a 0.10 layer that named
 one half with the other as none, `0` / `0%` (`migrate.old_late_pair`), since 0.10 read them as
-one pair. A plain number typed into a console penalty field is a percentage
-(`policy.typedPenalty`, saved with `%`); the engine reads a file's bare number below 1 as a
-fraction and refuses one of 1 or more (`setting_readers.read_penalty`). Seeds write every key, commented, with the inherited value and its source
+one pair. A penalty's bare number is always a percentage, never a fraction:
+`10` is 10%, `0.5` is 0.5% (`setting_readers.read_penalty`, the one reader of
+`late_penalty_per_day` and of a unit's `late_penalty`; the console's `penaltyRate` mirrors it).
+A console penalty field saves a typed plain number with its `%` (`policy.typedPenalty`). Seeds write every key, commented, with the inherited value and its source
 (`settings.defaults_skeleton`). A template's `grading_config.yml` states no run setting: one
 written there refuses the whole file as `RUN_SETTING_IN_TEMPLATE` (`grading_spec.TEMPLATE_KEYS`
 is what it reads). `settings.parse_instance` is the one parser of `semester.yml` `defaults:`;

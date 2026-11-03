@@ -244,7 +244,7 @@ describe('the semester’s defaults', () => {
   });
 
   it('print the penalty as a percentage however the file writes it', () => {
-    const defaults = { ...SEMESTER_DEFAULTS, late_window_days: E(3, 'semester'), late_penalty_per_day: E('0.05', 'semester') };
+    const defaults = { ...SEMESTER_DEFAULTS, late_window_days: E(3, 'semester'), late_penalty_per_day: E('5', 'semester') };
     expect(defaultsLine(defaults)).toBe('Defaults: 3 days, 5%, teams of 4.');
   });
 

@@ -61,8 +61,9 @@ READ_DEFAULTS = {
 
 _HEX = "^#[0-9a-fA-F]{6}$"
 _KEY = r"^[a-z][a-z0-9_-]*$"
-# `10%` or a fraction `0.1`: the two spellings `setting_readers.penalty_fault` accepts.
-_PENALTY = r"^(?:(?:100|[0-9]{1,2})(?:\.[0-9]+)?%|0?\.[0-9]+|0)$"
+# A percentage of 0 to 100, its `%` optional (`10%`, `10`, `0.5`): what
+# `setting_readers.penalty_fault` accepts.
+_PENALTY = r"^(?:(?:100|[0-9]{1,2})(?:\.[0-9]+)?|\.[0-9]+)%?$"
 _WHOLE = {"type": "integer"}
 
 SCHEMA = {
@@ -73,7 +74,12 @@ SCHEMA = {
             "properties": {
                 "timezone": {"type": "string"},
                 "late_window_days": _WHOLE,
-                "late_penalty_per_day": {"type": "string", "pattern": _PENALTY},
+                "late_penalty_per_day": {
+                    "anyOf": [
+                        {"type": "string", "pattern": _PENALTY},
+                        {"type": "number", "minimum": 0, "maximum": 100},
+                    ]
+                },
                 "max_team_size": _WHOLE,
                 "assignment_repo_visibility": {
                     "type": "string",

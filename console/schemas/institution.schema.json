@@ -20,8 +20,17 @@
           "type": "boolean"
         },
         "late_penalty_per_day": {
-          "pattern": "^(?:(?:100|[0-9]{1,2})(?:\\.[0-9]+)?%|0?\\.[0-9]+|0)$",
-          "type": "string"
+          "anyOf": [
+            {
+              "pattern": "^(?:(?:100|[0-9]{1,2})(?:\\.[0-9]+)?|\\.[0-9]+)%?$",
+              "type": "string"
+            },
+            {
+              "maximum": 100,
+              "minimum": 0,
+              "type": "number"
+            }
+          ]
         },
         "late_window_days": {
           "type": "integer"

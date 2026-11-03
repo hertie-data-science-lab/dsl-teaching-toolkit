@@ -63,7 +63,7 @@ INFO_COMMENT = "toolkit-owned, shown for information only - nothing is declared 
 QUESTION_FEEDBACK_KEY = "feedback_per_question"
 # The grader's say over one SUBMISSION UNIT's late penalty, beside its `info:`: `apply` (the
 # late rule's own arithmetic, and what an absent key means), `waive`, or the whole penalty
-# as a percent or fraction (`10%`, `0.1`). Never seeded: it appears when a grader writes it.
+# as a percentage, its `%` optional (`10%`, `10`). Never seeded: it appears when a grader writes it.
 LATE_PENALTY_KEY = "late_penalty"
 # Work handed in outside GitHub has no `info:` to time it, so the GRADER says how many
 # whole days late each unit was, here, beside its marks; blank (as seeded) counts as 0.
@@ -825,7 +825,7 @@ def score_total(
 
 
 def penalty_rate(text: object) -> Decimal | None:
-    """`late_penalty_per_day` as a fraction: `10%` and `0.1` both give 0.10.
+    """`late_penalty_per_day` as a fraction: `10%` and `10` both give 0.10.
 
     None for anything `read_penalty` refuses - which `parse_grading_spec` has already
     said out loud, once, when the assignment's definition was read."""
@@ -842,7 +842,7 @@ class LateChoice(NamedTuple):
 
 
 def late_choice(late_penalty: object) -> LateChoice:
-    """The grader's `late_penalty` as a `LateChoice`: a percent or fraction (`10%`, `0.1`)
+    """The grader's `late_penalty` as a `LateChoice`: a percentage, its `%` optional (`10%`, `10`),
     sets the whole penalty; anything else that is not apply or waive is `invalid`. A set
     penalty of nothing (`0%`) IS a waiver, and reads as one everywhere it is shown."""
     text = "" if late_penalty is None else str(late_penalty).strip()
@@ -870,7 +870,7 @@ def effective_penalty(
     """The fraction of the earned total a unit loses for lateness, and why.
 
     `late_penalty` is the grader's say (`late_choice`): absent or `apply` is `rate x
-    days_late`, `waive` is nothing, and a percent or fraction (`set`) is the WHOLE penalty
+    days_late`, `waive` is nothing, and a percentage (`set`) is the WHOLE penalty
     in place of that arithmetic. A unit that is not late loses nothing whatever is written.
     An `invalid` one keeps the late rule's arithmetic - not a penalty anybody can apply,
     so `sheet_hold_reasons` holds a late unit for a hand decision rather than guess.

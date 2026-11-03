@@ -6,8 +6,10 @@
   (they were one pair: a layer naming one half set the other to none). Setting only the
   window keeps the inherited penalty, and vice versa; `late_window_days: 0` is still no late
   work. The migration writes a 0.10 layer that named one half with the other as none
-  (`0` / `0%`). In the console's penalty fields a plain number is a percentage: `20` is
-  saved as `20%`.
+  (`0` / `0%`). A bare number in a penalty is always a percentage, in the files and the
+  console alike: `10` is 10% and `0.5` is 0.5% (a bare number below 1 was a fraction, and
+  one of 1 or more was refused). This covers `late_penalty_per_day` and a unit's
+  `late_penalty`. The console's penalty fields save a plain number with its `%`.
 - The Updates box dates a released row by the release record (decision 0043): a released
   `tbc` row is announced at the moment it first shipped (the site's `date:` and `released_at:`,
   the student status's `rows[].released_at`), where before every dateless row was dropped. A

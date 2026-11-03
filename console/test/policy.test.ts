@@ -64,8 +64,12 @@ describe('no default literal in the console', () => {
 
   it('reads a penalty as the engine does', () => {
     expect(penaltyRate(policy.defaults.late_penalty_per_day)).toBeCloseTo(0.1);
-    expect(penaltyRate('0.05')).toBe(0.05);
-    expect(penaltyRate('10')).toBeNull(); // a bare number of 1 or more
+    // A bare number is always a percentage, never a fraction (`setting_readers.read_penalty`).
+    expect(penaltyRate('10')).toBeCloseTo(0.1);
+    expect(penaltyRate(10)).toBeCloseTo(0.1);
+    expect(penaltyRate('0.05')).toBeCloseTo(0.0005);
+    expect(penaltyRate('0')).toBe(0);
+    expect(penaltyRate('150')).toBeNull();
     expect(penaltyRate('-5%')).toBeNull();
     expect(penaltyRate('100.9%')).toBeNull();
     expect(penaltyRate('ten')).toBeNull();
