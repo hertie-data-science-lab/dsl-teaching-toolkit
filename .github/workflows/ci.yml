@@ -110,6 +110,10 @@ jobs:
           BUNDLE_GEMFILE: ${{ github.workspace }}/tests/fixtures/site/Gemfile.github-pages
           BUNDLE_DEPLOYMENT: "false"
           BUNDLE_FROZEN: "false"
+          # As a site's own deploy.yml sets them: jekyll-github-metadata refuses to build
+          # without a repo to attribute the site to.
+          JEKYLL_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PAGES_REPO_NWO: ${{ github.repository }}
         run: |
           bundle install --jobs 4
           bundle exec jekyll build \
