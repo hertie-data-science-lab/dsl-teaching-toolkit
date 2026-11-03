@@ -123,6 +123,10 @@ outright ships exactly what it names. `--validate` warns when a folder leaves on
 sites then choose what they show on top (`student_site.host`, `open_course_site.publish`:
 [11](11-configure-cohort-site.md#what-the-public-sites-show)).
 
+An assignment is not a materials copy: its template copy and its solution push carry exactly the
+template's files, `tests/` and grading files included. The denylist and the sites' selections
+do not apply; only the template's own `.releaseignore` withholds.
+
 What that means in practice:
 
 - **Nested.** A `.releaseignore` in a subfolder applies to that subfolder, and overrides the

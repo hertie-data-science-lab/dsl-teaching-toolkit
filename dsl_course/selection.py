@@ -10,14 +10,19 @@ A `Selection` is four optional keys, the same wherever one is written:
 
 Three uses: the materials repo's `.releaseignore` (exclude only: what students never get),
 `semester.yml student_site.host` (viewable copies on the PUBLIC semester site) and
-`course.yml open_course_site.publish` (the open-courseware site). Every outbound copy asks
-`select` (a path list) or `deny` (a `copytree` walk), which compose the same layers in a
-fixed order:
+`course.yml open_course_site.publish` (the open-courseware site). Every outbound copy of
+materials - a release, a hosted copy, the open site - asks `select` (a path list) or `deny`
+(a `copytree` walk), which compose the same layers in a fixed order:
 
     1. the institution denylist (`DENYLIST`, `CLUTTER`): never copied anywhere
     2. the repo's `.releaseignore` files
     3. the use-site selection
     4. `institution.yml selection_floor` for that use: a hard limit, applied last
+
+An assignment's copies are outside the Selection (decision 0040 amendment): the template
+copy (`assign.withhold_from_template`) and the solution push (`assign.push_solution`) carry
+exactly the template's files, tests and grading files included, less only what the
+template's own `.releaseignore` names. No denylist, use-site selection or floor applies.
 
 A key left out is "no filter on that key"; a use fills its own defaults in first
 (`with_defaults`). A path with no kind matches no `kinds:` list: it is still released, but
