@@ -583,10 +583,11 @@ OFFLINE_CONFIG = """# Fixture-only overlay - see build_fixture.py.
 #
 # The theme is NOT fetched: `_layouts/default.html`, `page.html` and `post.html` are
 # stubbed in the fixture, so the build exercises the course templates in templates/site/
-# and nothing else. jekyll-remote-theme is not installed either (see the Gemfile), so the
-# plugin list has to go with it.
+# and nothing else. jekyll-remote-theme is not loaded either, so the plugin list has to go
+# with it. `remote_theme` is null, not "": the github-pages build (Gemfile.github-pages)
+# loads the plugin whenever the key exists, and it crashes parsing an empty theme name.
 plugins: []
-remote_theme: ""
+remote_theme: null
 """
 
 
