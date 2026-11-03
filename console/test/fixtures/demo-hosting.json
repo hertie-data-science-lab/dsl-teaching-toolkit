@@ -56,6 +56,7 @@
     "labs/01_week-1/Lab_Session_1.ipynb": "labs",
     "labs/02_week-2/Lab_Session_2.ipynb": null,
     "labs/05_week-5/Lab_Session_5.ipynb": "labs",
+    "labs/06_week-6/Lab_Session_6.ipynb": "labs",
     "lectures/01_week-1/Deck.PPTX": "lectures",
     "lectures/01_week-1/demo.py": "lectures",
     "lectures/01_week-1/handouts/extra/further-notes.pdf": "lectures",
@@ -83,6 +84,7 @@
     "clinic/notes.pdf",
     "exams/mock.pdf",
     "labs/02_week-2/Lab_Session_2.ipynb",
-    "labs/05_week-5/Lab_Session_5.ipynb"
+    "labs/05_week-5/Lab_Session_5.ipynb",
+    "labs/06_week-6/Lab_Session_6.ipynb"
   ]
 }

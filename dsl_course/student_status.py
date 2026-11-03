@@ -31,6 +31,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 import yaml
 
@@ -38,6 +39,7 @@ from . import (
     grading_spec,
     policy,
     records,
+    release_record,
     schedule,
     team_formation,
     teams,
@@ -64,6 +66,7 @@ from .readings import demote_headings
 from .repos import default_branch
 from .schedule_plan import (
     PlannedRow,
+    SiteRow,
     declared_syllabus,
     deploy_dest,
     planned_rows,
@@ -120,6 +123,7 @@ ROW_KEYS = (
     "details",
     "assignment",
     "released",
+    "released_at",
     "tbc",
     "dateless",
     "off_schedule",
@@ -198,6 +202,7 @@ def json_schema() -> dict:
         "repeat": _B,
         "when": _SN,
         "sort_at": _SN,
+        "released_at": _SN,
         "assignment": _SN,
         "links": _list(link),
         "readings": _list(link),
@@ -286,6 +291,9 @@ class StudentFacts:
     announcements: list[dict] = field(default_factory=list)
     # The site repo's `_data/previous_offering.yml`, as `previous_offerings` reads it.
     previous_offerings: list[dict] = field(default_factory=list)
+    # `{copy: when its destination first landed}` for each landed copy of a released
+    # dateless row the release record does not date (`release_record.released_at`).
+    landed_at: dict[release_record.Key, datetime | None] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------- pure core
@@ -305,16 +313,16 @@ def _files(paths: set[str]) -> list[str]:
 
 def _landed(
     facts: SemesterFacts, row: PlannedRow, readings: bool, allow: frozenset[str]
-) -> tuple[list[dict], list[tuple[str, str]], bool]:
-    """(links, overlays, landed) for every copy of `row` that is in its destination,
-    listed as the semester site lists them (`site_repo.landed_links`). A copy inside
-    another copy of the same row (a lab's `solutions/`) is that one's."""
+) -> tuple[list[dict], list[tuple[str, str]], list[release_record.Key]]:
+    """(links, overlays, the copies that landed) for every copy of `row` that is in its
+    destination, listed as the semester site lists them (`site_repo.landed_links`). A
+    copy inside another copy of the same row (a lab's `solutions/`) is that one's."""
     dests = [
         (d.semester_dest_repo, "" if is_repo_root(deploy_dest(d)) else deploy_dest(d))
         for d in row.deploys
     ]
-    links, overlays, landed = [], [], False
-    for repo, dest in dests:
+    links, overlays, landed = [], [], []
+    for d, (repo, dest) in zip(row.deploys, dests, strict=True):
         paths = facts.dest_paths.get(repo)
         if not paths:
             continue
@@ -330,7 +338,8 @@ def _landed(
         if found is None:
             continue
         got, prose = found
-        landed = landed or bool(got or prose)
+        if got or prose:
+            landed.append(release_record.key_of(d))
         links += [
             {"name": k.name, "repo": repo, "path": k.path, "url": k.url} for k in got
         ]
@@ -359,6 +368,7 @@ def _row(
     details: str = "",
     assignment: str | None = None,
     released: bool = True,
+    released_at: datetime | None = None,
     tbc: bool = False,
     dateless: bool = False,
     off_schedule: bool = False,
@@ -383,6 +393,9 @@ def _row(
         "details": details or "",
         "assignment": assignment,
         "released": released,
+        # When a released row first reached students (`release_record.released_at`);
+        # null when nothing can say. The student console's Updates box sorts by it.
+        "released_at": _iso(released_at),
         "tbc": tbc,
         # `event_datetime: tbc`: no `when` (the site's `dateless`).
         "dateless": dateless,
@@ -403,24 +416,44 @@ def _row(
     }
 
 
+def _shipped_copies(
+    facts: SemesterFacts, sr: SiteRow, allow: frozenset[str]
+) -> list[release_record.Key]:
+    """The copies a released row is dated by (the site's `_released_at`): its own that
+    landed, else its attached readings' that did."""
+    own = _landed(facts, sr.row, sr.row.kind == "readings", allow)[2]
+    return own or [
+        k for attached in sr.readings for k in _landed(facts, attached, True, allow)[2]
+    ]
+
+
 def release_rows(facts: SemesterFacts, extra: StudentFacts) -> list[dict]:
     """A row per slot of each entry the site shows (`schedule_plan.site_rows`; a second
     slot's id is `<key>-2`, as the site names its file), numbered as the site numbers
-    it, with the files it has landed and the readings attached to it. A row that ships
+    it, with the files it has landed and the readings attached to it, and when it
+    first reached students (`released_at`, as the site dates it). A row that ships
     nothing is `no_materials`, and a later slot `repeat`, as on the site."""
     out = []
+    tz = ZoneInfo(facts.sched.timezone)
     for sr in site_rows(planned_rows(facts.sched)):
         r = sr.row
         own = r.kind == "readings"
         links, prose, landed = _landed(facts, r, own, extra.link_extensions)
         if not r.shown and not landed:
             continue
-        readings, pending = [], False
+        readings, pending, attached_landed = [], False, []
         for attached in sr.readings:
             got, more, done = _landed(facts, attached, True, extra.link_extensions)
             readings += got
             prose += more
+            attached_landed += done
             pending = pending or not done
+        shipped = release_record.released_at(
+            facts.recorded,
+            landed or attached_landed,
+            r.undated,
+            extra.landed_at.get,
+        )
         title = policy.numbered_title(r.kind, sr.number)
         nothing = not (landed or readings or pending or r.deploys)
         out.append(
@@ -432,7 +465,8 @@ def release_rows(facts: SemesterFacts, extra: StudentFacts) -> list[dict]:
                 sort_at=r.sort_at,
                 subtitle=row_name(r.subtitle, title),
                 details=r.details,
-                released=landed or bool(readings) or nothing,
+                released=bool(landed) or bool(readings) or nothing,
+                released_at=shipped.astimezone(tz) if shipped else None,
                 tbc=r.tbc,
                 dateless=r.undated,
                 off_schedule=not r.shown,
@@ -868,8 +902,14 @@ def gather(course: CourseFacts, facts: SemesterFacts, now: datetime) -> StudentF
             )
         if spec.is_group and spec.team_formation_resolved == SELF_SELECT:
             extra.caps[key] = team_formation.team_cap(course.org, spec, org, key)
-    # The reading lists: the prose overlays of every readings copy that has landed.
+    # The reading lists: the prose overlays of every readings copy that has landed. And
+    # when each copy of a released dateless row first landed, where the release record
+    # does not say - the only date such a row has.
     for sr in site_rows(planned_rows(sched)):
+        if sr.row.undated:
+            copies = _shipped_copies(facts, sr, extra.link_extensions)
+            for k in release_record.undated(facts.recorded, copies, True):
+                extra.landed_at[k] = release_record.landed_at(org, k[2], k[3])
         own = [sr.row] if sr.row.kind == "readings" else []
         for row in [*own, *sr.readings]:
             for repo, path in _landed(facts, row, True, frozenset())[1]:

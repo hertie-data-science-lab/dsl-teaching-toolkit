@@ -1,6 +1,6 @@
-// The console's one modal dialog: the semester defaults form, the set-aside question.
+// The console's one modal dialog: the semester settings, the set-aside question.
 
-import type { ComponentChildren } from 'preact';
+import type { ComponentChildren, RefObject } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -13,15 +13,16 @@ export const MODAL_TEXT_ID = 'modal-text';
  * On close focus goes back to what had it when the dialog opened, or, when that has left the page
  * (the line it was on moved), to `fallback()`. A `small` dialog carries its own Close button, so
  * its × is hidden from assistive tech, and it is described by its `MODAL_TEXT_ID` paragraph.
+ * `initial` is what takes the focus on opening, when not the dialog itself.
  */
-export function Modal({ title, onClose, children, small = false, fallback }: { title: string; onClose: () => void; children: ComponentChildren; small?: boolean; fallback?: () => HTMLElement | null | undefined }) {
+export function Modal({ title, onClose, children, small = false, fallback, initial }: { title: string; onClose: () => void; children: ComponentChildren; small?: boolean; fallback?: () => HTMLElement | null | undefined; initial?: RefObject<HTMLElement> }) {
   const box = useRef<HTMLDivElement>(null);
   const downOnScrim = useRef(false);
   const back = useRef(fallback);
   back.current = fallback;
   useEffect(() => {
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    box.current?.focus();
+    (initial?.current ?? box.current)?.focus();
     const key = (e: KeyboardEvent) => {
       // Handled here: a full screen behind the dialog stays (it ignores a prevented Escape).
       if (e.key === 'Escape') {

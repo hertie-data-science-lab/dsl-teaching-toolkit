@@ -44,6 +44,7 @@ sys.path.insert(0, str(ROOT))
 
 from dsl_course import (
     grading_spec,
+    release_record,
     schedule,
     schedule_plan,
     selection,
@@ -120,11 +121,35 @@ TREE = (
     "labs/02_week-2/Lab_Session_2.ipynb",
     # A TBC lab released by hand (`event_datetime: tbc`, its files landed).
     "labs/05_week-5/Lab_Session_5.ipynb",
+    # Its second copy, released through the record (`.system/releases.json` dates it).
+    "labs/06_week-6/Lab_Session_6.ipynb",
 )
 
 # When the released TBC lab's folder first landed (`gh_commits.first_landed`): after
 # lecture 2, so it is the newest bullet in the Updates box.
 LAB_5_LANDED = datetime(2026, 9, 15, 8, 30, tzinfo=ZoneInfo("UTC"))
+
+# The semester's release record (`semester-config/.system/releases.json`) for lab 5's two
+# copies: `labs/06_week-6` with its ship time (the record dates it), `labs/05_week-5`
+# SEEDED (`first_shipped_at: null`: it was there before the record), so its history does.
+# The row is dated by the earlier, the recorded one: one row keeps the box at seven.
+RECORD = release_record.dump(
+    {
+        k: {
+            "entry": label,
+            "source": {"repo": k[0], "path": k[1], "commit": None},
+            "dest": {"repo": k[2], "path": k[3]},
+            "first_shipped_at": at,
+            "last_shipped_at": at,
+            "files": {name: "0" * 40},
+        }
+        for label, path, name, at in (
+            ("lab-5", "labs/05_week-5", "Lab_Session_5.ipynb", None),
+            ("lab-5", "labs/06_week-6", "Lab_Session_6.ipynb", "2026-09-15T07:00:00Z"),
+        )
+        for k in [(MATERIALS, path, MATERIALS, path)]
+    }
+)
 
 # What this semester's `student_site.host` says (decision 0040): the default kinds, as
 # rendered decks only - the shape a Quarto course takes. Lecture 1 therefore carries BOTH
@@ -377,6 +402,7 @@ SCHEDULE = schedule.Schedule(
             "lab-5",
             None,
             "labs/05_week-5",
+            "labs/06_week-6",
             kind="lab",
             number=5,
             session="5",
@@ -602,9 +628,13 @@ def generated(
     real_tree, real_content = site._repo_tree, site.get_file_content
     real_spec = site.load_grading_spec
     real_clone, real_teams = site.clone, site._formed_teams
-    real_landed = site.first_landed
+    real_landed = release_record.first_landed
+    real_record = release_record.get_file_with_sha
+    release_record.get_file_with_sha = lambda _org, _repo, path: (
+        (RECORD, "sha") if path == release_record.PATH else None
+    )
     site._repo_tree, site.get_file_content = _repo_tree, _get_file_content
-    site.first_landed = lambda _org, _repo, path: (
+    release_record.first_landed = lambda _org, _repo, path: (
         LAB_5_LANDED if path == "labs/05_week-5" else None
     )
     site.load_grading_spec = _grading_spec
@@ -629,8 +659,10 @@ def generated(
         site._repo_tree, site.get_file_content = real_tree, real_content
         site.load_grading_spec = real_spec
         site.clone, site._formed_teams = real_clone, real_teams
-        site.first_landed = real_landed
-        site._first_landed.cache_clear()
+        release_record.first_landed = real_landed
+        release_record.get_file_with_sha = real_record
+        release_record.landed_at.cache_clear()
+        site._release_copies.cache_clear()
 
 
 # The overlay the offline build layers on top of the generated `_config.yml`. The primary

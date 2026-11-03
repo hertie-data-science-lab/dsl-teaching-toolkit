@@ -384,7 +384,7 @@ def test_a_malformed_release_record_leaves_the_status_to_the_destinations(counte
     gh = counted
     gh.files[(f"{LIVE}/semester-config", "main")][release_record.PATH] = "[]\n"
     facts = status_json.gather_semester(COURSE, LIVE, NOW)
-    assert facts.recorded == frozenset()
+    assert facts.recorded == {}
 
 
 def test_the_course_tick_reads_one_file_per_semester(counted):

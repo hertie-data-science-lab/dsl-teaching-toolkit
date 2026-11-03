@@ -15,6 +15,7 @@ import {
 import type { Assignment, Release } from '../model/types';
 import { archive, keepFuture, releaseAdhoc, releaseAgain, releaseEarly, releaseNow, scheduledPreview } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
+import type { OpDef } from '../ops/session';
 import { TIMEZONES } from '../tiers/course';
 import { RUN_REASON } from '../tiers/runSettings';
 import { CheckLine, DueSubmit, EditFile, Md, ProblemCards, ReleaseMarks, ghUrl } from '../ui/bits';
@@ -31,6 +32,7 @@ import { RUN_KEYS, TEAM_FORMATION, TEAM_FORMATIONS, VISIBILITIES, VISIBILITY, ef
 import { HandOutDialog, HandOutNow, ManualWaiting, NO_LATE_WINDOW, SolutionNote, canHoldSolution, cutoffOf, draftHandout, entryBelow, forcedVisibility, waitingHandOut, waitsByHand, windowDays } from './RunSettings';
 import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO, DEFAULT_TIMEZONE, KINDS, SUBMIT_VIA_DEFAULT, penaltyError, pluralOf } from '../model/policy';
 import { otherRepos } from './CourseIndex';
+import { SessionDate, releasedTbc } from './SessionDate';
 
 const LABELS: Record<Block, string> = { releases: 'Releases', assignments: 'Assignments', events: 'Events' };
 
@@ -83,8 +85,8 @@ export function useSchedFile(p: CohortProps): SchedFile | null | 'loading' {
   return { text: f.text, sha: f.sha, ...parsed! };
 }
 
-/** schedule.yml after the semester's dates sheet (`drafts`), or why it would not be valid. */
-export function scheduleAfter(sf: SchedFile, drafts: SemesterDraft[]): { text: string } | { error: string } {
+/** schedule.yml after `drafts` (the semester's dates sheet, one entry), or why it would not be valid. */
+export function scheduleAfter(sf: SchedFile, drafts: Draft[]): { text: string } | { error: string } {
   const y = new YamlText(sf.text);
   for (const d of drafts) writeDraft(y, d, sf.doc);
   return validSchedule(y.toJS()) ? { text: y.text } : { error: invalidText('the schedule', validSchedule) };
@@ -955,6 +957,8 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
   const problems = releaseProblems(status, rel);
   const last = (status.operations ?? []).find((o) => o.op.startsWith('release.') && o.summary.includes(`${ident}:`));
   const dest = rel.dest?.repo || DEFAULT_DEST_REPO, destPath = rel.dest?.path || ref.source.path;
+  // A TBC entry's console release offers its session date in the result panel (decision 0043 rule 5).
+  const dated = (def: OpDef): OpDef => (rel.when === null ? { ...def, doneExtra: <SessionDate p={p} rel={rel} id="op-sd" /> } : def);
   return (
     <>
       <div class="page-head">
@@ -968,6 +972,7 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
         </div>
         <div class="actions"><a class="btn quiet" href={`#schedule-${rel.id}`}>Edit entry</a></div>
       </div>
+      {releasedTbc(rel) ? <section class="panel section"><SessionDate p={p} rel={rel} id="rd-sd" /></section> : null}
       <div class="grid-2">
         <section class="panel section">
           <h2>From and to</h2>
@@ -985,9 +990,9 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
       <section class="panel section" style="margin-top:20px">
         <h2>Actions</h2>
         <div class="actions">
-          {st === 'planned' ? <OpButtons def={releaseEarly(scope, ref)} label="Release early" />
-            : st === 'released' ? <><OpButtons def={releaseAgain(scope, ref)} label="Release again" /><OpOpen def={keepFuture(scope)} cls="btn quiet" label="Keep for future semesters" /></>
-            : st === 'late' ? <OpButtons def={releaseNow(scope, ref)} label="Release now" />
+          {st === 'planned' ? <OpButtons def={dated(releaseEarly(scope, ref))} label="Release early" />
+            : st === 'released' ? <><OpButtons def={dated(releaseAgain(scope, ref))} label="Release again" /><OpOpen def={keepFuture(scope)} cls="btn quiet" label="Keep for future semesters" /></>
+            : st === 'late' ? <OpButtons def={dated(releaseNow(scope, ref))} label="Release now" />
             : <span class="footnote">Nothing to run until the problem above is fixed.</span>}
         </div>
         <div class="savebar"><span class="footnote">After changing the course copy, the student site may need an update.</span><a class="btn small quiet" href="#site">Update site on the Site page</a></div>

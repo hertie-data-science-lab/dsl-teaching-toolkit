@@ -17,6 +17,7 @@ import pytest
 
 from dsl_course import (
     grading_spec,
+    release_record,
     roster,
     schedule,
     schemas,
@@ -720,6 +721,58 @@ def test_an_undated_release_is_a_dateless_row_after_its_kind():
     assert tbc["when"] is None
     lec2 = rows[ids.index("lecture_02")]
     assert tbc["sort_at"] > lec2["sort_at"] == lec2["when"]
+
+
+def _copy_of(facts: SemesterFacts, label: str) -> release_record.Key:
+    release = next(r for r in facts.sched.releases if r.label == label)
+    return release_record.key_of(release.deploy[0])
+
+
+def test_a_released_row_carries_when_the_record_says_it_shipped():
+    # Decision 0043 rule 4: the student console's Updates box sorts by `released_at`, the
+    # same moment the site dates the row by: the copy's recorded first ship time.
+    facts = _facts()
+    facts.recorded = {
+        _copy_of(facts, "lecture_02"): {"first_shipped_at": "2026-09-29T08:00:00Z"}
+    }
+    facts.dest_paths["materials"] |= {"lectures/02_trees/slides.pdf"}
+    rows = {r["id"]: r for r in student_status.release_rows(facts, _extra(facts))}
+    assert rows["lecture_02"]["released_at"] == "2026-09-29T10:00:00+02:00"
+    # Released before the record (nothing dates it there): null, and the console sorts
+    # the row by its own date. No history read for a dated row.
+    assert rows["lecture_01"]["released"] is True
+    assert rows["lecture_01"]["released_at"] is None
+
+
+def test_a_released_tbc_row_is_dated_by_its_history_when_the_record_cannot(
+    monkeypatch,
+):
+    # Seeded (released before the record): the only date a TBC row has is when its
+    # destination first landed, read in `gather` so `render` stays pure.
+    facts = _facts()
+    k = _copy_of(facts, "lecture_03")
+    facts.recorded = {k: {"first_shipped_at": None}}
+    facts.dest_paths["materials"] |= {"lectures/03_forests/slides.pdf"}
+    asked = []
+    monkeypatch.setattr(
+        release_record,
+        "first_landed",
+        lambda org, repo, path: (
+            asked.append(path) or datetime(2026, 10, 27, 13, 49, tzinfo=UTC)
+        ),
+    )
+    monkeypatch.setattr(student_status, "get_file_content", lambda *a, **k: "")
+    monkeypatch.setattr(student_status, "repo_tree", lambda *a, **k: ())
+    monkeypatch.setattr(student_status, "default_branch", lambda *a, **k: "main")
+    fake_config(monkeypatch, lambda *a: INSTRUCTORS)
+    monkeypatch.setattr(student_status.team_formation, "team_cap", lambda *a, **k: 3)
+    extra = student_status.gather(_course(), facts, NOW)
+    # The TBC row's copy only: a dated row, or a copy the record dates, asks nothing.
+    assert asked == ["lectures/03_forests"]
+    rows = {r["id"]: r for r in student_status.release_rows(facts, extra)}
+    assert rows["lecture_03"]["released"] is True
+    assert rows["lecture_03"]["released_at"] == "2026-10-27T14:49:00+01:00"
+    assert rows["lecture_03"]["when"] is None and rows["lecture_03"]["dateless"]
 
 
 def test_an_undated_event_is_a_dateless_row_with_no_when():
