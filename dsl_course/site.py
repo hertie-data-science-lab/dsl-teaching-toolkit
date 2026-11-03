@@ -734,12 +734,13 @@ class _Row:
 )
 def _release_copies(org: str) -> dict[release_record.Key, dict]:
     """The semester's release record (`release_record.load`), read once for the run;
-    empty when there is none yet, or when it cannot be read - logged, since that dates a
-    released row by its destination's history alone."""
+    empty when there is none yet, or when it is not the record - logged, since that dates
+    a released row by its destination's history alone. A read GitHub fails raises, as a
+    tree read does: a passing error must not re-date (and recommit) every row."""
     try:
         return release_record.load(org).copies
-    except (RuntimeError, ValueError) as e:
-        log(f"  could not read the release record ({e})")
+    except ValueError as e:
+        log(f"  the release record is unreadable ({e})")
         return {}
 
 

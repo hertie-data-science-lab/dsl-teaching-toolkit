@@ -1218,7 +1218,7 @@ def released_tbc_todo(
     """`schedule:released_tbc:<label>` for each `event_datetime: tbc` entry whose copies
     have all gone out (`releases`: the rendered rows, state `released`): "Lab 8 is
     released; its session date is still TBC." Its screen is the release's own, which
-    offers the date."""
+    offers the date. A `show_on_site: false` entry has no session row, so no date to ask."""
     return [
         _todo(
             SUGGESTED,
@@ -1233,7 +1233,7 @@ def released_tbc_todo(
             entry=r["id"],
         )
         for r in releases
-        if r["when"] is None and r["state"] == "released"
+        if r["when"] is None and r["state"] == "released" and r["show_on_site"]
     ]
 
 

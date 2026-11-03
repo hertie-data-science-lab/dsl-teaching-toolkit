@@ -234,9 +234,11 @@ def load(semester_org: str) -> Record:
 
 
 def first_shipped(copies: dict[Key, dict], k: Key) -> datetime | None:
-    """When copy `k` first shipped, as the record says; None when it holds no entry for
-    it, or a seeded one (`first_shipped_at: null`: found already there, time unknown)."""
-    return parse_moment((copies.get(k) or {}).get("first_shipped_at"))
+    """When copy `k` first shipped, as the record says (a stamp with no offset, as a hand
+    repair may write, is UTC); None when it holds no entry for it, or a seeded one
+    (`first_shipped_at: null`: found already there, time unknown)."""
+    at = parse_moment((copies.get(k) or {}).get("first_shipped_at"))
+    return at.replace(tzinfo=UTC) if at is not None and at.tzinfo is None else at
 
 
 @run.per_run(lambda org, repo, path: run.scope(org, repo, path))
@@ -255,6 +257,15 @@ def landed_at(org: str, repo: str, path: str) -> datetime | None:
     return when
 
 
+def undated(copies: dict[Key, dict], landed: list[Key], dateless: bool) -> list[Key]:
+    """The copies of a released row `released_at` dates by their history: on a
+    `dateless` row, each landed copy the record does not date, but a copy into the
+    repo's root (the whole repo's oldest commit is not when this row landed)."""
+    if not dateless:
+        return []
+    return [k for k in landed if k[3] and first_shipped(copies, k) is None]
+
+
 def released_at(
     copies: dict[Key, dict],
     landed: list[Key],
@@ -270,13 +281,9 @@ def released_at(
     repo's oldest commit is not when this row landed). On a dated row such a copy leaves
     the moment unknown - None, and the row's own date stands - rather than spend a
     history read per copy on every row of a semester released before the record."""
-    found = []
-    for k in landed:
-        at = first_shipped(copies, k)
-        if at is None:
-            if not dateless:
-                return None
-            at = history(k) if k[3] else None
-        if at is not None:
-            found.append(at)
+    recorded = [first_shipped(copies, k) for k in landed]
+    if not dateless and None in recorded:
+        return None
+    found = [at for at in recorded if at is not None]
+    found += [at for k in undated(copies, landed, dateless) if (at := history(k))]
     return min(found) if found else None

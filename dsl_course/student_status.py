@@ -907,9 +907,9 @@ def gather(course: CourseFacts, facts: SemesterFacts, now: datetime) -> StudentF
     # does not say - the only date such a row has.
     for sr in site_rows(planned_rows(sched)):
         if sr.row.undated:
-            for k in _shipped_copies(facts, sr, extra.link_extensions):
-                if k[3] and release_record.first_shipped(facts.recorded, k) is None:
-                    extra.landed_at[k] = release_record.landed_at(org, k[2], k[3])
+            copies = _shipped_copies(facts, sr, extra.link_extensions)
+            for k in release_record.undated(facts.recorded, copies, True):
+                extra.landed_at[k] = release_record.landed_at(org, k[2], k[3])
         own = [sr.row] if sr.row.kind == "readings" else []
         for row in [*own, *sr.readings]:
             for repo, path in _landed(facts, row, True, frozenset())[1]:

@@ -119,7 +119,8 @@ export function SemesterSettings({ p, draft, expand, onClose }: { p: ReadyProps;
   const semExists = p.files.file(org, CONFIG_REPO, SEMESTER_FILE).kind !== 'absent';
 
   const doSave = async () => {
-    if (Object.keys(fieldErrors(null, tiers, cur)).length || Object.keys(dateErrors).length) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
+    // Only what was edited is checked: a fault in a fold left alone never blocks the other's save.
+    if ((defaultsDirty && Object.keys(fieldErrors(null, tiers, cur)).length) || (datesDirty && Object.keys(dateErrors).length)) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
     let defaultsStep: Step | null = null, datesStep: Step | null = null;
     if (defaultsDirty && yaml) {
       const out = semesterDefaultsAfter(yaml, cur, inherited);

@@ -30,7 +30,7 @@ export interface OpDef {
   facts?: string[];
   /** Shown under a preview's outcome, read afresh after each preview (who would be emailed). */
   dryExtra?: ComponentChildren;
-  /** Shown under the verb's outcome when it is done (a released TBC entry's session date). */
+  /** Shown under the verb's outcome unless it failed (a released TBC entry's session date). */
   doneExtra?: ComponentChildren;
   verb: string;
   /** A `?` beside the verb, wherever it shows: its name, and one paragraph per string. */

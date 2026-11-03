@@ -623,6 +623,15 @@ def test_a_released_tbc_entry_is_a_suggested_todo_on_its_release_screen():
     assert not [
         t for t in dated["semester"]["todo"] if t.get("check") == "released_tbc"
     ]
+    # Off the site (`show_on_site: false`): no session row, so no date to ask for.
+    silent = _sched(
+        SCHEDULE.replace(
+            "    event_datetime: 2026-09-24T10:00\n",
+            "    event_datetime: tbc\n    show_on_site: false\n",
+        )
+    )
+    off = _render(semester=_semester(sched=silent, recorded=_recorded("s3")))
+    assert not [t for t in off["semester"]["todo"] if t.get("check") == "released_tbc"]
 
 
 def test_a_copy_with_no_record_has_shipped_when_its_destination_is_there():

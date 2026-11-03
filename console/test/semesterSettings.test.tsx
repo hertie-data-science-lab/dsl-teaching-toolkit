@@ -55,7 +55,7 @@ const SCHEDULE = [
   '',
 ].join('\n');
 const SEMESTER = '# INSTRUCTOR-OWNED\ndefaults:\n  late_window_days: 5\n  late_penalty_per_day: 5%\n';
-const files = () => new StaticFiles({ [`${ORG}/semester-config/schedule.yml`]: SCHEDULE, [`${ORG}/semester-config/semester.yml`]: SEMESTER });
+const files = (semester = SEMESTER) => new StaticFiles({ [`${ORG}/semester-config/schedule.yml`]: SCHEDULE, [`${ORG}/semester-config/semester.yml`]: semester });
 
 let root: HTMLElement | null = null;
 afterEach(() => {
@@ -64,10 +64,10 @@ afterEach(() => {
   root = null;
 });
 
-async function mount(view: (f: StaticFiles) => preact.VNode) {
+async function mount(view: (f: StaticFiles) => preact.VNode, semester = SEMESTER) {
   const gh = new FakeGitHub().on('PUT', /\/contents\//, { content: { sha: 'b1' }, commit: { sha: 'c1' } }).on('GET', /\/check-runs/, { check_runs: [] });
   const client = new GitHubClient({ token: () => 't', fetch: gh.fetch });
-  const f = files();
+  const f = files(semester);
   const env: Env = { client, user: USER, ops: new OpsSession(new DispatchAdapter(client, () => USER.login)), statuses: new StatusStore(client), files: f, pollMs: 0 };
   root = document.body.appendChild(document.createElement('div'));
   await act(() => render(<EnvCtx.Provider value={env}>{view(f)}</EnvCtx.Provider>, root!));
@@ -113,6 +113,16 @@ describe('Semester settings', () => {
   it('opens on arrival from the #settings route (the Site page’s and New semester’s link)', async () => {
     await mount((f) => <CohortScreen {...props(f)} settings />);
     expect(q('[role="dialog"]').textContent).toContain('Semester settings');
+  });
+
+  it('checks only what was edited: a fault in a fold left alone never blocks the save', async () => {
+    // The file's window has no penalty (a fault), but only the dates are edited.
+    const gh = await mount((f) => <CohortScreen {...props(f)} settings />, '# INSTRUCTOR-OWNED\ndefaults:\n  late_window_days: 5\n');
+    await type('#e-te', '2026-12-20');
+    await act(() => button('Save', q('[role="dialog"]')).click());
+    await settle(() => puts(gh, 'schedule.yml').length > 0);
+    expect(puts(gh, 'schedule.yml')).toHaveLength(1);
+    expect(puts(gh, 'semester.yml')).toHaveLength(0);
   });
 
   it('saves Assignments and Releases in one commit to semester.yml, and the dates in one to schedule.yml', async () => {
