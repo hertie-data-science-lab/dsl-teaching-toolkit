@@ -2,6 +2,7 @@
 // will_be_skipped, release.entry) never reach the screen except through these maps.
 
 import { hostOf } from './settings';
+import { divergedLabel } from './divergence';
 import { DEFAULT_TIMEZONE, EVENT_KIND, KINDS } from './policy';
 import type { Assignment, AssignmentState, Bites, Need, Release, ReleaseState } from './types';
 import type { ItemState, ReleaseMark, RepoReadiness, Verdict } from './readiness';
@@ -401,8 +402,8 @@ function para(lines: string[]): string {
   return `<p>${inline(lines.map((l, i) => (i === lines.length - 1 ? l : / {2,}$/.test(l) ? `${l.trimEnd()}<br>` : `${l.trimEnd()} `)).join(''))}</p>`;
 }
 
-/** A set-aside gap's name from its id alone: `emptyWeekLabel`'s, or "Nothing to release, lecture-9" from `nothing_to_release:lecture-9`; null for any other id. */
+/** A set-aside item's name from its id alone: `emptyWeekLabel`'s, "Nothing to release, lecture-9" from `nothing_to_release:lecture-9`, or a released folder's divergence (`divergedLabel`, decision 0043); null for any other id. */
 export function gapLabel(id: string): string | null {
   if (id.startsWith(NOTHING_TO_RELEASE_ID)) return `Nothing to release, ${id.slice(NOTHING_TO_RELEASE_ID.length)}`;
-  return emptyWeekLabel(id);
+  return divergedLabel(id) ?? emptyWeekLabel(id);
 }

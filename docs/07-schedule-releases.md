@@ -238,6 +238,16 @@ The one caveat: already-fired **one-shot** actions don't rewind. A deadline snap
 
 A material release is **fire-once**: each `files:` item is copied once, at its time, and recorded in `semester-config/.system/releases.json`. An edit to the course copy afterwards does not reach students by itself - release the entry again (**Release again** in the console, or `release.entry`). A semester whose `autosync_released_edits` is `true` re-ships such edits on every tick instead. A release already shipped stays shipped, even if its folder is later deleted from the semester repo: releasing it again is your call.
 
+**When a released folder differs from what was released.** The console's Dashboard (Coming up) and the release's page say so, one line per kind, against the record's file list:
+
+| What happened | What to do |
+|---|---|
+| **Course copy changed** - a released file was edited in the course, or a file added under the folder (not said when `autosync_released_edits` is on: it ships on the next tick) | **Release again** |
+| **Deleted in course** - a released file is gone from the course copy (deleted, or now withheld by `.releaseignore`) but still in the released copy | **Release again** and tick *Also remove the N files deleted from the course copy* (a release otherwise only adds) |
+| **Released copy edited** - a released file was edited in the semester repo, a file added there, or a released file removed from it (students lack a file they were given) | **Keep for future semesters**, to propose the edits back to the course; **Release again** puts a removed file back |
+
+Each can be **set aside**; it comes back when that side changes again. A folder another entry releases into (a lab's `solutions/`) is that entry's, never counted as an edit. From the CLI: `python -m dsl_course.deploy ... --entry <key> --remove-deleted`.
+
 A copy released **before** its time (Release early / now), or from a `tbc` entry, gets `release_datetime: <when it went out>` written on its `files:` item, in one bot commit per release. On time, late, or released again: nothing is written. There is no such write for `solution_datetime`.
 
 Everything else is **cumulative**: assignment handouts, the site sync and the source digest are re-applied at every tick, so a late or lost tick heals itself.

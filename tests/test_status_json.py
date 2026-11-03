@@ -1366,6 +1366,9 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
         lambda org, repo, branch: (
             {"course.yml": "c0ffee"}
             if repo == ".github"
+            # A release destination: one read answers its paths and its files.
+            else {"lectures": "7ree"}
+            if repo == "materials"
             else {"schedule.yml": "5c4ed", ".system/outcomes/release.entry.json": "0u7"}
         ),
     )
@@ -1393,9 +1396,6 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
     )
     monkeypatch.setattr(
         status_json.teams, "load", lambda org, faults=None, known=None: {}
-    )
-    monkeypatch.setattr(
-        status_json, "repo_tree", lambda org, repo, branch: ("lectures",)
     )
     # A materials repo is read by its top and its top folders' tops, never its whole
     # tree.

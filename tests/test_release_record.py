@@ -82,7 +82,7 @@ def _shipping(monkeypatch, outcome=RELEASED, files=FILES):
     """deploy_many as seen from the scheduler: every copy applied, its dest `outcome`."""
     calls: list[list[Deploy]] = []
 
-    def fake(course_org, semester_org, deploys, sync=True):
+    def fake(course_org, semester_org, deploys, sync=True, remove=None):
         calls.append(list(deploys))
         copies = [Copied(d, "c1", files, outcome) for d in deploys]
         return Batch(0, outcome == RELEASED, copies)
@@ -227,7 +227,8 @@ def test_with_autosync_an_edit_ships_and_refreshes_the_record(monkeypatch):
     assert _tick(_release(LAB)) == (0, True)
     assert calls == [[LAB]]
     (copy,) = store.copies
-    assert copy["files"] == {"slides.pdf": "edited"}
+    # A copy only adds: requirements.txt, not in this copy, is still at the destination.
+    assert copy["files"] == {"requirements.txt": "b2", "slides.pdf": "edited"}
     assert copy["first_shipped_at"] == EARLIER
     assert copy["last_shipped_at"] == "2026-10-27T13:49:03Z"
 
@@ -348,7 +349,7 @@ def _cli(monkeypatch, argv, files=FILES, outcome=RELEASED):
     monkeypatch.setattr(deploy.schedule, "load", lambda org: _sched())
     batches = []
 
-    def fake(course_org, semester_org, deploys, sync=True):
+    def fake(course_org, semester_org, deploys, sync=True, remove=None):
         batches.append(list(deploys))
         return Batch(0, True, [Copied(d, "c9", files, outcome) for d in deploys])
 
@@ -368,7 +369,8 @@ def test_release_again_re_copies_and_refreshes_the_record(monkeypatch):
     rc, batches = _cli(monkeypatch, ["--entry", "lab-08"], files={"slides.pdf": "v2"})
     assert rc == 0 and batches == [[LAB]]
     (copy,) = store.copies
-    assert copy["files"] == {"slides.pdf": "v2"}
+    # A copy only adds: requirements.txt, not in this copy, is still at the destination.
+    assert copy["files"] == {"requirements.txt": "b2", "slides.pdf": "v2"}
     assert copy["first_shipped_at"] == EARLIER
     assert copy["last_shipped_at"] != EARLIER
 
@@ -507,7 +509,7 @@ def test_a_hand_release_leaves_a_copy_due_later_to_the_schedule(monkeypatch):
     monkeypatch.setattr(
         deploy,
         "deploy_many",
-        lambda c, s, deploys, sync=True: Batch(
+        lambda c, s, deploys, sync=True, remove=None: Batch(
             0,
             True,
             [Copied(d, "c", {"08_session-8/a": "1"}, RELEASED) for d in deploys],

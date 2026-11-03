@@ -1976,8 +1976,8 @@ def _org(monkeypatch, trees: dict[str, list[str]]):
     monkeypatch.setattr(schedule, "default_branch", lambda org, repo: "main")
     monkeypatch.setattr(
         schedule,
-        "repo_tree",
-        lambda org, repo, branch, kind="": tuple(trees.get(repo, [])),
+        "repo_path_shas",
+        lambda org, repo, branch: dict.fromkeys(trees.get(repo, []), "0" * 40),
     )
 
 
@@ -2119,10 +2119,10 @@ def test_an_unreadable_repo_is_never_reported_as_missing(monkeypatch, capsys):
     monkeypatch.setattr(schedule, "repo_missing", lambda org, repo: False)
     monkeypatch.setattr(schedule, "default_branch", lambda org, repo: "main")
 
-    def boom(org, repo, branch, kind="", **_kw):
+    def boom(org, repo, branch):
         raise RuntimeError("API rate limit exceeded")
 
-    monkeypatch.setattr(schedule, "repo_tree", boom)
+    monkeypatch.setattr(schedule, "repo_path_shas", boom)
     s = Schedule(releases=[_release("lecture-1", "lectures/01_a")])
     assert [f.line() for f in schedule.source_faults(s, "Course-Org")] == []
     # ...and it says so, so a silent tick is not mistaken for a clean one.
@@ -2136,10 +2136,10 @@ def test_only_a_404_says_the_repo_is_not_there(monkeypatch):
     monkeypatch.setattr(schedule, "repo_missing", lambda org, repo: False)
     monkeypatch.setattr(schedule, "default_branch", lambda org, repo: "main")
 
-    def unreadable(org, repo, branch, kind=""):
+    def unreadable(org, repo, branch):
         raise RuntimeError("HTTP 403: rate limit")
 
-    monkeypatch.setattr(schedule, "repo_tree", unreadable)
+    monkeypatch.setattr(schedule, "repo_path_shas", unreadable)
     s = Schedule(releases=[_release("lecture-1", "lectures/01_a", repo="gone")])
     assert schedule.source_faults(s, "Course-Org") == []
     # A positive 404, and the same plan reports the repo.
@@ -2154,11 +2154,11 @@ def test_one_tree_fetch_per_repo_however_many_deploys(monkeypatch):
     monkeypatch.setattr(schedule, "repo_missing", lambda org, repo: False)
     monkeypatch.setattr(schedule, "default_branch", lambda org, repo: "main")
 
-    def counting(org, repo, branch, kind=""):
+    def counting(org, repo, branch):
         calls.append(repo)
-        return ("lectures", "lectures/01_a")
+        return {"lectures": "t", "lectures/01_a": "b"}
 
-    monkeypatch.setattr(schedule, "repo_tree", counting)
+    monkeypatch.setattr(schedule, "repo_path_shas", counting)
     s = Schedule(releases=[_release(f"lecture-{i}", "lectures/01_a") for i in range(6)])
     schedule.source_faults(s, "Course-Org")
     # ONE fetch for the whole repo: files and folders come back together, and six deploys

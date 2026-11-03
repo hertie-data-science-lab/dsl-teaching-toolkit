@@ -432,6 +432,20 @@ def status_schema(*, closed: bool = True) -> dict:
         },
         ("org", "stages", "stage_need", "live"),
     )
+    side = obj({"repo": _str(), "path": _str(), "branch": _str()}, ("repo", "path"))
+    paths = {"type": "array", "items": _str()}
+    diverged_copy = obj(
+        {
+            "source": side,
+            "dest": side,
+            "added": paths,
+            "changed": paths,
+            "deleted": paths,
+            # Released-side only: manifest files gone from the released copy.
+            "removed": paths,
+        },
+        ("source", "dest", "added", "changed", "deleted"),
+    )
     problem = obj(
         {
             "id": _str(),
@@ -454,6 +468,9 @@ def status_schema(*, closed: bool = True) -> dict:
             # Decision 0034: `now` (passed, or no moment), `soon` (inside `horizon`),
             # `later` (beyond it, or a deliberately undated entry).
             "bites": _enum(BITES),
+            # Decision 0043 rule 6, a DIVERGED_* problem only (the semester file's): per
+            # copy, where it is copied from and to, and its files relative to the copy.
+            "diverged": {"type": "array", "items": diverged_copy},
         },
         ("id", "scope", "stage", "text", "bites"),
     )

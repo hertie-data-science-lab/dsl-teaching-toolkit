@@ -251,7 +251,7 @@ def _cli(monkeypatch, text, argv):
     monkeypatch.setattr(
         deploy,
         "deploy_many",
-        lambda c, s, deploys, sync=True: Batch(
+        lambda c, s, deploys, sync=True, remove=None: Batch(
             0, True, [Copied(d, "c9", FILES, RELEASED) for d in deploys]
         ),
     )

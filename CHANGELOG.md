@@ -15,6 +15,12 @@
   is recorded without being copied, so no semester re-ships on upgrade. The status reads a
   recorded copy as released whatever its destination holds; the preview says
   `ALREADY_DONE` for an entry whose copies are all out.
+- A released folder that differs from what was released is told, per kind (decision 0043
+  rule 6): the course copy changed, files deleted in the course and still released, or the
+  released copy edited. Each is a set-aside-able suggestion on the Dashboard and a panel on
+  the release's page with its files; Release again can also remove the files deleted from
+  the course copy (`deploy --remove-deleted`). The record keeps a file a re-copy did not
+  overwrite, since it is still at the destination.
 - A copy released before its time, or from a `tbc` entry, has the time it went out written
   into its `files:` item's `release_datetime` (one bot commit per release; nothing for an
   on-time or late release or a Release again). A hand-out run earlier than its
