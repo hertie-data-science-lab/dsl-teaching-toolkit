@@ -275,7 +275,7 @@ export function cohortFlags(l: Loaded | undefined): { problems: number | null; a
 const SEMESTER_PAGES: [string, string][] = [
   ['dashboard', 'Dashboard'], ['schedule', 'Schedule'], ['materials', 'Materials'], ['assignments', 'Assignments'], ['students', 'Students'],
   ['instructors', 'Instructors'], ['site', 'Site'],
-  ['defaults', 'Semester defaults'], ['operations', 'Operations'],
+  ['defaults', 'Defaults'], ['operations', 'Operations'],
 ];
 
 /** One sub-page under a course nav item: a repo's settings page, or a repo on GitHub (`ext`). */

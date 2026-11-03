@@ -231,7 +231,7 @@ per materials repo (`materials`, then any other repo a released entry of `status
 `#materials` is this page (`screenOf`); `?course=` with `#materials`, and `#materials-<repo>`
 under either, are the course's, so the course nav's Course materials link names the course.
 
-**Semester defaults** (decision 0043; `#defaults`, in the semester nav between Site and
+**Semester defaults** (decision 0043; `#defaults`, "Defaults" in the semester nav between Site and
 Operations) edits the semester's settings: three open folds, each heading
 carrying its line with the effective value and source from `status.json`: Assignments
 (semester.yml `defaults:`, the run defaults as `defaultsLine` words them), Releases
