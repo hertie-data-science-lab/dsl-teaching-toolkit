@@ -13,6 +13,7 @@ import type { FileState, Files } from '../model/files';
 import { COURSE_FILE, COURSE_REPO } from '../model/names';
 import { validCourseFile } from '../model/settings';
 import { isIntentionalGap } from '../model/format';
+import { isDivergedId } from '../model/divergence';
 import { CheckLine } from '../ui/bits';
 import { MODAL_TEXT_ID, Modal } from '../ui/Modal';
 
@@ -49,7 +50,7 @@ export interface Ask {
 export function SetAsideDialog({ ask, busy, error, onSetAside, onClose, fallback }: { ask: Ask; busy: boolean; error?: string; onSetAside: () => void; onClose: () => void; fallback?: () => HTMLElement | null | undefined }) {
   return (
     <Modal small title={`Set aside “${ask.label}”?`} onClose={onClose} fallback={fallback}>
-      <p id={MODAL_TEXT_ID}>{isIntentionalGap(ask.id) ? 'Setting this aside tells the console the gap is intentional.' : 'It’s optional: automation runs without it.'} It moves to Set aside at the end of this list, for everyone on the course. You can bring it back at any time.</p>
+      <p id={MODAL_TEXT_ID}>{isIntentionalGap(ask.id) ? 'Setting this aside tells the console the gap is intentional.' : isDivergedId(ask.id) ? 'Both copies stay as they are; it comes back if that copy changes again.' : 'It’s optional: automation runs without it.'} It moves to Set aside at the end of this list, for everyone on the course. You can bring it back at any time.</p>
       {error ? <CheckLine cls="bad">{error}</CheckLine> : null}
       <div class="actions">
         <button class="btn" type="button" disabled={busy} onClick={onSetAside}>{busy ? 'Setting aside…' : 'Set aside'}</button>

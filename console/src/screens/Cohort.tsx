@@ -321,7 +321,7 @@ export function semesterItems(status: Status, tiered: Tiered[], list: string[] |
       aside: todoAside(t, list),
     };
   });
-  // A set-aside gap (an empty week, decision 0032, or a release with nothing to release) has no row of its own once set aside: list it here so it can be brought back.
+  // A set-aside gap (an empty week, decision 0032, a release with nothing to release, or a released folder's divergence, decision 0043) has no row of its own once set aside: list it here so it can be brought back.
   const weeks: SetupItem[] = (list ?? []).flatMap((id) => {
     const label = gapLabel(id);
     return label ? [{ id, label, kind: 'todo' as const, need: 'suggested' as const, state: 'open' as const, aside: true }] : [];

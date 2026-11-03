@@ -31,6 +31,10 @@ import { RUN_KEYS, TEAM_FORMATION, TEAM_FORMATIONS, VISIBILITIES, VISIBILITY, ef
 import { HandOutDialog, HandOutNow, ManualWaiting, NO_LATE_WINDOW, SolutionNote, canHoldSolution, cutoffOf, draftHandout, entryBelow, forcedVisibility, waitingHandOut, waitsByHand, windowDays } from './RunSettings';
 import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO, DEFAULT_TIMEZONE, KINDS, SUBMIT_VIA_DEFAULT, penaltyError, pluralOf } from '../model/policy';
 import { otherRepos } from './CourseIndex';
+import { DivergencePanel, releaseAgainDrift } from './Divergence';
+import { useSetAside } from './SetAside';
+import { divergenceOf, isDiverged } from '../model/divergence';
+import { gapLabel } from '../model/format';
 
 const LABELS: Record<Block, string> = { releases: 'Releases', assignments: 'Assignments', events: 'Events' };
 
@@ -938,6 +942,7 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
   const st = rel.state;
   const scope = cohortScope(p);
   const ref = releaseRef(rel, tz, year);
+  const aside = useSetAside({ org: p.course.org, files: p.files, write: p.course.write });
   if (!ref) {
     return (
       <>
@@ -952,7 +957,9 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
     );
   }
   // The problems that hold it back, joined on `release` (a placeholder stub's fix names its repo, not the entry).
-  const problems = releaseProblems(status, rel);
+  // A divergence holds nothing back: it has its own panel below (decision 0043).
+  const problems = releaseProblems(status, rel).filter((x) => !isDiverged(x));
+  const drift = divergenceOf(status, rel.id).filter((x) => !aside.list?.includes(x.id));
   const last = (status.operations ?? []).find((o) => o.op.startsWith('release.') && o.summary.includes(`${ident}:`));
   const dest = rel.dest?.repo || DEFAULT_DEST_REPO, destPath = rel.dest?.path || ref.source.path;
   return (
@@ -982,10 +989,20 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
           {problems.length ? <ProblemCards list={problems} /> : last ? <p class="o-say">{last.summary}</p> : st === 'released' ? <p>Released {fmtWhen(rel.when, tz, year)}.</p> : <p>Not released yet. It goes out {fmtDay(rel.when, tz, year)} at {fmtTime(rel.when, tz)} without you.</p>}
         </section>
       </div>
+      <div ref={aside.ref}>
+        <DivergencePanel
+          list={drift} courseOrg={p.course.org} cohortOrg={p.cohort.org}
+          onSetAside={aside.onCircle ? (x) => aside.onCircle!({ id: x.id, label: gapLabel(x.id) ?? x.text }) : undefined}
+          again={<OpButtons def={releaseAgain(scope, ref, releaseAgainDrift(drift))} label="Release again" />}
+          keep={<OpOpen def={keepFuture(scope)} cls="btn quiet" label="Keep for future semesters" />}
+        />
+        {aside.after}
+      </div>
       <section class="panel section" style="margin-top:20px">
         <h2>Actions</h2>
         <div class="actions">
           {st === 'planned' ? <OpButtons def={releaseEarly(scope, ref)} label="Release early" />
+            : st === 'released' && drift.length ? <span class="footnote">Release again or keep the edits from Differs from the course copy, above.</span>
             : st === 'released' ? <><OpButtons def={releaseAgain(scope, ref)} label="Release again" /><OpOpen def={keepFuture(scope)} cls="btn quiet" label="Keep for future semesters" /></>
             : st === 'late' ? <OpButtons def={releaseNow(scope, ref)} label="Release now" />
             : <span class="footnote">Nothing to run until the problem above is fixed.</span>}

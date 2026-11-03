@@ -84,11 +84,27 @@ export function releaseEarly(s: Scope, r: ReleaseRef): OpDef {
   });
 }
 
-export function releaseAgain(s: Scope, r: ReleaseRef): OpDef {
-  return releaseDef(s, r, {
+/**
+ * Release again, with what differs from the course copy (decision 0043 rule 6): one line per
+ * kind in `facts`, and - when files were deleted from the course copy - the unticked choice to
+ * remove them from the released copy too (`remove_deleted`).
+ */
+export function releaseAgain(s: Scope, r: ReleaseRef, drift: { facts: string[]; deleted: number } = { facts: [], deleted: 0 }): OpDef {
+  const def = releaseDef(s, r, {
     name: 'Release again', where: `Released ${r.when}`, intro: `Copies the course’s current version of ${r.ident} to students again, for a fixed file.`,
     verb: `Release ${r.ident} again`, running: `Releasing ${r.ident} again`, cancel: 'Stop before copying',
   });
+  if (drift.facts.length) def.facts = drift.facts;
+  if (drift.deleted) {
+    def.options = {
+      remove_deleted: {
+        tier: 'ask', widget: 'checkbox', default: false,
+        label: `Also remove the ${plural(drift.deleted, 'file')} deleted from the course copy`,
+        reason: 'Off: they stay in the released copy, as a release only ever adds.',
+      },
+    };
+  }
+  return def;
 }
 
 export function releaseNow(s: Scope, r: ReleaseRef): OpDef {
