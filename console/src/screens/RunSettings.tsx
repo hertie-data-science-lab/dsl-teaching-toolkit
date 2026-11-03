@@ -1,21 +1,23 @@
-// How a semester runs its assignments (decisions 0009 and 0010 rule 5): the semester's
-// defaults block on the Assignments index, and each assignment's Overview form, which edits
-// the schedule entry (timings) and the assignment's block in assignments.yml as one form.
-// Every run setting shows its effective value and where it comes from; a save writes only
-// the keys the instructor set.
+// How a semester runs its assignments (decisions 0009 and 0039): the semester's `defaults:`
+// (semester.yml) on the Assignments index, and each assignment's Overview form, which edits its
+// schedule entry, timings and inline run settings, as one form (decision 0038 rule 9). Every
+// run setting shows its effective value and where it comes from; a save writes only the keys
+// the instructor set.
 
 import { useRef, useState } from 'preact/hooks';
 import { useEnv } from '../env';
-import { invalidText, saveSteps, useSave, type SaveState, type Step } from '../edit/save';
-import { YamlText, compact, deepEqual, obj, type Path } from '../edit/yamlText';
+import { invalidText, useSave } from '../edit/save';
+import { YamlText, compact, deepEqual } from '../edit/yamlText';
 import { Field, SchemaForm, fieldErrors } from '../forms/Form';
 import { MODAL_TEXT_ID, Modal } from '../ui/Modal';
 import {
-  LATE_PAIR, REPO_NAME_RE, RUN_KEYS, semesterName, SOURCE_WORD, assignmentsFile, below, courseBlock, effectiveWord, lateWord, layersOf, rawBlock, resolve, scheduleFile, usableBlock,
-  validAssignments, validSchedule, valueWord, writeBlock, type Block, type Layers, type RunKey, type YamlFile,
-} from '../model/cascade';
+  LATE_PAIR, REPO_NAME_RE, RUN_KEYS, semesterName, SOURCE_WORD, courseDefaults, effectiveOf, effectiveWord, lateWord, over, scheduleFile, semesterDefaults, semesterFile, usableBlock,
+  fileValue, validSchedule, validSemesterBlocks, validSemesterFile, valueWord, type Block, type Effectives, type RunKey, type YamlFile,
+} from '../model/settings';
+import { defaultsOf, semesterInheritance, statedDefaults, withDefaults } from '../model/config';
 import { addDays, assignmentTitle, fmtDay, fmtWhen } from '../model/format';
-import { ASSIGNMENTS_FILE, CONFIG_REPO } from '../model/names';
+import { CONFIG_REPO, SEMESTER_FILE } from '../model/names';
+import { defaultsTiers } from '../tiers/course';
 import { draftErrors, newlyManual, readDraft, writeDraft, type AssignmentDraft, type Draft } from '../model/scheduleEdit';
 import { handout, type AsgRef } from '../ops/defs';
 import type { OpDef } from '../ops/session';
@@ -25,7 +27,7 @@ import type { Assignment } from '../model/types';
 import { isGroup, pastDue } from '../model/assignment';
 import { penaltyRate } from '../model/policy';
 import { round } from '../model/marks';
-import { RUN_LABEL, lateError, runTier, runTiers } from '../tiers/runSettings';
+import { RUN_LABEL, lateError, runTier } from '../tiers/runSettings';
 import type { FieldTier, Values } from '../tiers/types';
 import { CheckLine, EditFile, Loading } from '../ui/bits';
 import { Hint } from '../ui/Hint';
@@ -35,22 +37,18 @@ import type { ReadyProps } from './types';
 
 
 
-/** The semester's layers for `key` (empty for its defaults), read from the files as they are now. */
-export function semesterLayers(p: Pick<ReadyProps, 'files' | 'course' | 'cohort'>, doc: Block, key = ''): Layers {
-  return layersOf(courseBlock(p.files, p.course.org, p.course.meta), doc, key);
-}
+/** What an assignment's own settings fall back to: the semester's effective defaults (status.json). */
+export const entryBelow = (p: Pick<ReadyProps, 'status'>): Effectives => semesterDefaults(p.status);
 
-/** The effective value of every run key for an assignment, with its source, from the files. */
-export function assignmentSettings(p: Pick<ReadyProps, 'files' | 'course' | 'cohort'>, key: string): Layers | null {
-  const f = assignmentsFile(p.files, p.cohort.org);
-  if (f === 'loading' || f === null) return f === null ? semesterLayers(p, {}, key) : null;
-  return semesterLayers(p, f.doc, key);
+/** An assignment's effective run settings, each with its source, as the engine resolved them (status.json). */
+export function assignmentSettings(p: Pick<ReadyProps, 'status'>, key: string): Effectives | null {
+  return p.status.assignments?.find((a) => a.slug === key)?.settings ?? null;
 }
 
 /** The semester-side name of the assignment with schedule key `key` (`schedule.semester_name`): what its mark
- *  sheet and Return marks key on. The key while assignments.yml is still being read. */
+ *  sheet and Return marks key on. The schedule entry's `repo_name`, else the key while the schedule is read. */
 export function sheetName(p: Pick<ReadyProps, 'files' | 'cohort'>, key: string): string {
-  const f = assignmentsFile(p.files, p.cohort.org);
+  const f = scheduleFile(p.files, p.cohort.org);
   return f && f !== 'loading' ? semesterName(f.doc, key) : key;
 }
 
@@ -115,11 +113,11 @@ const toValues = (b: Block): Values => Object.fromEntries(Object.entries(b).map(
 
 // ------------------------------------------------------------------ the semester's defaults
 
-/** "Defaults: 5 days, 5%, teams of 4." from the effective semester defaults. */
-export function defaultsLine(layers: Layers): string {
-  const days = resolve('late_window_days', layers, 'semester').value;
-  const pen = resolve('late_penalty_per_day', layers, 'semester').value;
-  const size = resolve('max_team_size', layers, 'semester').value;
+/** "Defaults: 5 days, 5%, teams of 4." from the semester's effective defaults (status.json). */
+export function defaultsLine(defaults: Effectives): string {
+  const days = effectiveOf(defaults, 'late_window_days').value;
+  const pen = effectiveOf(defaults, 'late_penalty_per_day').value;
+  const size = effectiveOf(defaults, 'max_team_size').value;
   const rate = penaltyRate(pen);
   const late = typeof days === 'number' && days >= 1 ? [valueWord('late_window_days', days), rate ? `${round(rate * 100)}%` : 'no penalty'] : ['no late work'];
   return `Defaults: ${[...late, ...(size ? [`teams of ${String(size)}`] : [])].join(', ')}.`;
@@ -127,7 +125,7 @@ export function defaultsLine(layers: Layers): string {
 
 /** The Assignments page's Semester defaults button: it opens the semester's defaults, their summary as the lede, in a modal. */
 export function SemesterDefaults({ p }: { p: ReadyProps }) {
-  const f = assignmentsFile(p.files, p.cohort.org);
+  const f = semesterFile(p.files, p.cohort.org);
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<Values | null>(null);
   const opener = useRef<HTMLButtonElement>(null);
@@ -139,71 +137,83 @@ export function SemesterDefaults({ p }: { p: ReadyProps }) {
     <>
       <button class="btn quiet" type="button" ref={opener} aria-haspopup="dialog" onClick={() => setOpen(true)}>Semester defaults</button>
       {open ? (
-        <Modal title="Defaults for this semester’s assignments" onClose={close}>
-          {f === 'loading' ? <Loading what={`Reading ${ASSIGNMENTS_FILE}`} />
-            : f === null ? <CheckLine cls="bad">Could not read {ASSIGNMENTS_FILE}.</CheckLine>
-            : <><p class="lede">{defaultsLine(semesterLayers(p, f.doc))}</p><DefaultsForm p={p} f={f} draft={draft} setDraft={setDraft} /></>}
+        <Modal title="Defaults for this semester" onClose={close}>
+          {f === 'loading' ? <Loading what={`Reading ${SEMESTER_FILE}`} />
+            : f === null ? <CheckLine cls="bad">Could not read {SEMESTER_FILE}.</CheckLine>
+            : <><p class="lede">{defaultsLine(entryBelow(p))}</p><DefaultsForm p={p} f={f} draft={draft} setDraft={setDraft} /></>}
         </Modal>
       ) : null}
     </>
   );
 }
 
+/** What this semester's own defaults fall back to: the course's effective values (the status's course block), else the semester's answer where it is not the semester's own. */
+export const semesterInherited = (p: Pick<ReadyProps, 'status'>): Effectives => semesterInheritance(courseDefaults(p.status), semesterDefaults(p.status));
+
+/** semester.yml with its `defaults:` stating `after` (form values), or why it would not be valid. */
+export function semesterDefaultsAfter(f: YamlFile, after: Values, inherited: Effectives): { text: string } | { error: string } {
+  const text = withDefaults(f.text, statedDefaults(after), inherited);
+  return validSemesterBlocks(new YamlText(text).toJS(), ['defaults']) ? { text } : { error: invalidText(SEMESTER_FILE, validSemesterFile) };
+}
+
 function DefaultsForm({ p, f, draft, setDraft }: { p: ReadyProps; f: YamlFile; draft: Values | null; setDraft: (v: Values | null) => void }) {
   // Absent, the form edits the stub, and the edit link goes to GitHub's new-file page.
-  const exists = p.files.file(p.cohort.org, CONFIG_REPO, ASSIGNMENTS_FILE).kind !== 'absent';
+  const exists = p.files.file(p.cohort.org, CONFIG_REPO, SEMESTER_FILE).kind !== 'absent';
   const env = useEnv();
   const [save, runSave, setSave] = useSave(env);
-  const layers = semesterLayers(p, f.doc);
-  const before = toValues(rawBlock(f.doc, ['defaults']));
-  const all = runTiers((k) => resolve(k, layers, 'course'), RUN_KEYS, before);
-  // One submission site for every assignment handed in outside GitHub; each may still set its own.
-  const tiers = { ...all, submit_url: { ...all.submit_url, label: 'Submission link (assignments handed in outside GitHub)' } };
+  const before = toValues(defaultsOf(f.doc));
+  const inherited = semesterInherited(p);
+  const tiers = defaultsTiers(inherited, before);
   const cur = draft ?? before;
   const errors = fieldErrors(null, tiers, cur);
   const dirty = draft !== null && !deepEqual(compact(draft), compact(before));
   const doSave = async () => {
     if (f.error) return;
     if (Object.keys(errors).length) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
-    const y = new YamlText(f.text);
-    writeBlock(y, ['defaults'], before, cur, RUN_KEYS);
-    if (!validAssignments(y.toJS() ?? {})) return setSave({ kind: 'bad', text: invalidText(ASSIGNMENTS_FILE, validAssignments) });
-    if (await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path: ASSIGNMENTS_FILE }, y.text, f.sha, { message: 'assignments: edit the semester’s defaults, from the DSL Teaching Console', statusRepo: [p.cohort.org, CONFIG_REPO] })) setDraft(null);
+    const out = semesterDefaultsAfter(f, cur, inherited);
+    if ('error' in out) return setSave({ kind: 'bad', text: out.error });
+    if (await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path: SEMESTER_FILE }, out.text, f.sha, { message: 'semester: edit the semester’s defaults, from the DSL Teaching Console', statusRepo: [p.cohort.org, CONFIG_REPO] })) setDraft(null);
   };
   return (
     <>
       <p class="footnote">Every assignment this semester runs on these unless its own page says otherwise. Left empty, the value in grey applies: the course’s default, else the institution’s. <a class="textlink" href={`?course=${p.course.org}#details`}>Change the course’s defaults</a></p>
-      {f.error ? <CheckLine cls="bad">{ASSIGNMENTS_FILE} does not parse ({f.error}); fix it with Edit the file directly.</CheckLine> : (
+      {f.error ? <CheckLine cls="bad">{SEMESTER_FILE} does not parse ({f.error}); fix it with Edit the file directly.</CheckLine> : (
         <>
           <SchemaForm id="sd" schema={null} tiers={tiers} values={cur} onChange={(v) => { setDraft(v); setSave({ kind: 'idle' }); }} />
-          <SaveBar state={save} onSave={() => void doSave()} disabled={!dirty} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: ASSIGNMENTS_FILE, exists }} />
+          <SaveBar state={save} onSave={() => void doSave()} disabled={!dirty} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: SEMESTER_FILE, exists }} />
         </>
       )}
-      {f.error ? <div class="savebar"><EditFile org={p.cohort.org} repo={CONFIG_REPO} path={ASSIGNMENTS_FILE} exists={exists} /></div> : null}
+      {f.error ? <div class="savebar"><EditFile org={p.cohort.org} repo={CONFIG_REPO} path={SEMESTER_FILE} exists={exists} /></div> : null}
     </>
   );
 }
 
 // ------------------------------------------------------------------ one assignment's run settings
 
-/** Whether the template's work is handed in outside GitHub (`submit_via: external`): no repo, so no late window and no visibility. */
-export const isExternal = (cfg: Record<string, unknown>) => cfg.submit_via === 'external';
+/** Where the work is handed in: the entry's `submit_via` override, else the template's. */
+const routeOf = (cfg: Record<string, unknown>, submitVia?: string) => submitVia || cfg.submit_via || 'assignment_repo';
+
+/** Whether the work is handed in outside GitHub (`submit_via: external`, `submitVia` the entry's override): no repo, so no late window and no visibility. */
+export const isExternal = (cfg: Record<string, unknown>, submitVia?: string) => routeOf(cfg, submitVia) === 'external';
 
 /** `course.can_hold_solution`: a unit's own private repo, or the shared drop box (always private). */
-export function canHoldSolution(cfg: Record<string, unknown>, visibility: unknown): boolean {
-  const via = cfg.submit_via ?? 'assignment_repo';
+export function canHoldSolution(cfg: Record<string, unknown>, visibility: unknown, submitVia?: string): boolean {
+  const via = routeOf(cfg, submitVia);
   return via === 'shared_dropbox_repo' || (via === 'assignment_repo' && visibility === 'private');
 }
 
 /** The late window that sets the cutoff: none for external work, whatever the cascade says. */
-export const windowDays = (cfg: Record<string, unknown>, days: unknown) => (isExternal(cfg) ? 0 : days);
+export const windowDays = (cfg: Record<string, unknown>, days: unknown, submitVia?: string) => (isExternal(cfg, submitVia) ? 0 : days);
+
+/** The late line for external work, wherever its cutoff would be. */
+export const NO_LATE_WINDOW = 'No late window: handed in outside GitHub, so the cutoff is the due date.';
 
 /**
  * Which run settings apply to an assignment of this template: teams only for a team assignment;
  * for external work the link, the late penalty without a window, and no visibility (no repo).
  */
-export function applicableKeys(cfg: Record<string, unknown>, group: boolean): RunKey[] {
-  const ext = isExternal(cfg);
+export function applicableKeys(cfg: Record<string, unknown>, group: boolean, submitVia?: string): RunKey[] {
+  const ext = isExternal(cfg, submitVia);
   return RUN_KEYS.filter((k) => (k === 'team_formation' || k === 'max_team_size' ? group : k === 'submit_url' ? ext : k === 'late_window_days' || k === 'visibility' ? !ext : true));
 }
 
@@ -212,14 +222,13 @@ export function forcedVisibility(cfg: Record<string, unknown>): string | null {
   return cfg.submit_via === 'shared_dropbox_repo' ? 'Private: a shared drop box is always private.' : null;
 }
 
-/** The late line for external work, wherever its cutoff would be. */
-export const NO_LATE_WINDOW = 'No late window: handed in outside GitHub, so the cutoff is the due date.';
-
 export interface RunRowsProps {
   id: string;
   keys: RunKey[];
-  /** The layers under this assignment's block (semester, course, institution). */
-  layers: Layers;
+  /** What this assignment's own settings fall back to: the semester's effective defaults. */
+  below: Effectives;
+  /** The assignment's effective settings as the engine resolved them (status.json), shown while the form states nothing; none for a new entry. */
+  current?: Effectives | null;
   draft: Values;
   setDraft: (v: Values) => void;
   errors: Record<string, string>;
@@ -232,9 +241,10 @@ export interface RunRowsProps {
  * the field. The external link has no default: its row is the field. The semester's defaults
  * are changed from the Assignments page, never per row.
  */
-export function RunRows({ id, keys, layers, draft, setDraft, errors, teamsHref, forced }: RunRowsProps) {
+export function RunRows({ id, keys, below, current, draft, setDraft, errors, teamsHref, forced }: RunRowsProps) {
   const [opened, setOpened] = useState<string[]>([]);
-  const mine: Layers = { ...layers, assignment: usableBlock(draft) };
+  const own = usableBlock(draft);
+  const mine = (k: RunKey) => over(k, own, 'entry', current ?? below);
   const has = (k: string) => draft[k] !== undefined && draft[k] !== '' && draft[k] !== null;
   const rows: { name: string; keys: RunKey[] }[] = [];
   for (const k of keys) {
@@ -245,7 +255,7 @@ export function RunRows({ id, keys, layers, draft, setDraft, errors, teamsHref, 
     <>
       {rows.map((r) => {
         const field = (k: RunKey) => (
-          <Field id={`${id}-${k}`} k={k} t={runTier(k, resolve(k, layers, below('assignment')), { override: true }) as FieldTier} value={draft[k]} values={draft} error={errors[k]}
+          <Field id={`${id}-${k}`} k={k} t={runTier(k, effectiveOf(below, k), { override: true }) as FieldTier} value={draft[k]} values={draft} error={errors[k]}
             set={(key, v) => setDraft({ ...draft, [key]: v })} />
         );
         if (r.name === 'submit_url') return <div class="run-row">{field('submit_url')}</div>;
@@ -253,8 +263,8 @@ export function RunRows({ id, keys, layers, draft, setDraft, errors, teamsHref, 
         const late = r.name === 'late';
         // A penalty with no window: work handed in outside GitHub, its days late entered by the marker.
         const marked = r.name === 'late_penalty_per_day';
-        const eff = resolve(r.keys[0], mine);
-        const effText = late ? `${lateWord(eff.value, resolve('late_penalty_per_day', mine).value)}, ${SOURCE_WORD[eff.source]}` : effectiveWord(r.keys[0], eff);
+        const eff = mine(r.keys[0]);
+        const effText = late ? `${lateWord(eff.value, mine('late_penalty_per_day').value)}, ${SOURCE_WORD[eff.source]}` : effectiveWord(r.keys[0], eff);
         const label = late ? 'Late work' : marked ? 'Late penalty' : RUN_LABEL[r.keys[0]];
         const teams = r.name === 'team_formation' ? teamsHref : undefined;
         if (r.name === 'visibility' && forced)
@@ -285,35 +295,22 @@ export function RunRows({ id, keys, layers, draft, setDraft, errors, teamsHref, 
 }
 
 /** The run settings' errors as typed at the assignment layer. */
-export function runErrors(keys: RunKey[], layers: Layers, draft: Values): Record<string, string> {
+export function runErrors(keys: RunKey[], below: Effectives, draft: Values): Record<string, string> {
   const out: Record<string, string> = {};
   for (const k of keys) {
-    const t = runTier(k, resolve(k, layers, 'semester'));
+    const t = runTier(k, effectiveOf(below, k));
     const msg = t.check?.(draft[k], draft);
     if (msg && (draft[k] !== undefined || (k === 'late_window_days' && lateError(draft)))) out[k] = msg;
   }
   return out;
 }
 
-/**
- * assignments.yml after a schedule save: a new entry's run settings as its block (only the
- * keys set; none, no block), and no block left for a removed entry, which the engine would
- * fault. Null when nothing changes.
- */
-export function assignmentsAfterSchedule(af: YamlFile, added: { key: string; run: Values } | null, removed: string[]): string | null {
-  const y = new YamlText(af.text);
-  if (added) writeBlock(y, ['assignments', added.key], {}, added.run, RUN_KEYS);
-  const blocks = obj(af.doc.assignments);
-  for (const id of removed) if (id in blocks) writeBlock(y, ['assignments'], { [id]: true }, {}, [id]);
-  return y.text === af.text ? null : y.text;
-}
-
 // ------------------------------------------------------------------ the Overview form
 
-/** `semester_dest_repo` as `settings.parse_instance` checks it, in its words. */
+/** `repo_name` as `settings.parse_instance` checks it, in its words. */
 export function repoNameError(v: unknown): Record<string, string> {
   const t = typeof v === 'string' ? v.trim() : v == null ? '' : String(v);
-  return t && !REPO_NAME_RE.test(t) ? { semester_dest_repo: 'Not a repo name (letters, digits, `.`, `_`, `-`); the schedule key names the repos instead.' } : {};
+  return t && !REPO_NAME_RE.test(t) ? { repo_name: 'Not a repo name (letters, digits, `.`, `_`, `-`); the schedule key names the repos instead.' } : {};
 }
 
 /** The late cutoff a due date and a late window give: due + N days, as the engine computes it. */
@@ -384,68 +381,78 @@ function Timings({ d, set, errors, cutoff, days, lateOk, external, solutionOff, 
 
 export const LATE_MOVES = 'The due date has passed: this moves the late cutoff and the late penalties of this assignment, and the engine recomputes them.';
 
-/** The assignment's Overview form: its schedule entry and its assignments.yml block, saved together. */
+/** An entry's inline run settings and repo name, as the Overview form edits them. */
+export const runValues = (d: AssignmentDraft): Values => toValues({ ...(d.run ?? {}), ...(d.repoName ? { repo_name: d.repoName } : {}) });
+
+/** The draft with the form's run settings and repo name written back, each as the file spells it. */
+export function withRun(d: AssignmentDraft, r: Values): AssignmentDraft {
+  const run = Object.fromEntries(RUN_KEYS.filter((k) => r[k] !== undefined && r[k] !== '' && r[k] !== null).map((k) => [k, fileValue(k, r[k])]));
+  return { ...d, run, repoName: typeof r.repo_name === 'string' ? r.repo_name.trim() : '' };
+}
+
+/**
+ * The schedule's text with one inline run setting of assignment `key` set to `value`, or null
+ * when its entry already says so. Throws when the file cannot be written as it stands.
+ */
+export function withRunSetting(f: YamlFile, key: string, setting: RunKey, value: unknown): string | null {
+  if (f.error) throw new Error(`schedule.yml does not parse (${f.error}); nothing was saved`);
+  const d = readDraft(f.doc, key);
+  if (!d || d.kind !== 'assignments') throw new Error(`${key} is not in the schedule; nothing was saved`);
+  if (deepEqual(d.run?.[setting], value)) return null;
+  const y = new YamlText(f.text);
+  writeDraft(y, { ...d, run: { ...(d.run ?? {}), [setting]: value } }, f.doc);
+  if (!validSchedule(y.toJS() ?? {})) throw new Error('schedule.yml would not be valid; nothing was saved');
+  return y.text === f.text ? null : y.text;
+}
+
+/** The assignment's Overview form: its schedule entry, dates and inline run settings, saved as one commit. */
 export function AssignmentRun({ p, a, group }: { p: ReadyProps; a: Assignment; group: boolean }) {
   const env = useEnv();
   const tz = tzOf(p.status), year = yearOf(p.now, tz);
   const [timing, setTiming] = useState<AssignmentDraft | null>(null);
   const [run, setRun] = useState<Values | null>(null);
-  const [save, setSave] = useState<SaveState>({ kind: 'idle' });
+  const [save, runSave, setSave] = useSave(env);
   const [askManual, setAskManual] = useState(false);
   const sf = scheduleFile(p.files, p.cohort.org);
-  const af = assignmentsFile(p.files, p.cohort.org);
-  if (sf === 'loading' || af === 'loading') return <section class="panel section"><h2>How this semester runs it</h2><Loading what="Reading the schedule and assignments.yml" /></section>;
+  if (sf === 'loading') return <section class="panel section"><h2>How this semester runs it</h2><Loading what="Reading the schedule" /></section>;
   if (!sf || sf.error) return <section class="panel section"><h2>How this semester runs it</h2><CheckLine cls="bad">The schedule could not be read{sf?.error ? ` (${sf.error})` : ''}; fix it with Edit the file directly.</CheckLine></section>;
   const baseT = readDraft(sf.doc, a.slug);
   if (!baseT || baseT.kind !== 'assignments') return <section class="panel section"><h2>How this semester runs it</h2><p class="footnote">{a.slug} is not in the schedule.</p></section>;
-  const afOk = af !== null && !af.error;
-  const doc = afOk ? af!.doc : {};
   const cfg = gradingConfig(p, a.template);
-  const keys = applicableKeys(cfg, group);
-  const path: Path = ['assignments', a.slug];
-  const beforeRun = toValues(rawBlock(doc, path));
   const d = timing ?? baseT;
+  // The entry's own route as saved: the run settings that apply follow it.
+  const keys = applicableKeys(cfg, group, baseT.submitVia);
+  const beforeRun = runValues(baseT);
   const r = run ?? beforeRun;
-  const layers = semesterLayers(p, doc, a.slug);
-  const mine: Layers = { ...layers, assignment: usableBlock(r) };
-  const external = isExternal(cfg);
-  const days = windowDays(cfg, resolve('late_window_days', mine).value);
-  const vis = forcedVisibility(cfg) ? 'private' : resolve('visibility', mine).value;
-  const solutionOff = !canHoldSolution(cfg, vis) ? 'Not available: student repos are not private, so the solution cannot be pushed automatically.' : d.manual ? 'Needs a hand out time; the solution must follow it.' : null;
+  const below = entryBelow(p);
+  const current = run === null ? a.settings : null;
+  const own = usableBlock(r);
+  const external = isExternal(cfg, d.submitVia);
+  const days = windowDays(cfg, over('late_window_days', own, 'entry', current ?? below).value, d.submitVia);
+  const vis = forcedVisibility({ ...cfg, submit_via: d.submitVia || cfg.submit_via }) ? 'private' : over('visibility', own, 'entry', current ?? below).value;
+  const solutionOff = !canHoldSolution(cfg, vis, d.submitVia) ? 'Not available: student repos are not private, so the solution cannot be pushed automatically.' : d.manual ? 'Needs a hand out time; the solution must follow it.' : null;
   const tErr = draftErrors(d, undefined, cutoffOf(d.dueDate, d.dueTime, typeof days === 'number' ? days : 0));
-  const rErr = { ...runErrors(keys, layers, r), ...repoNameError(r.semester_dest_repo) };
+  const rErr = { ...runErrors(keys, below, r), ...repoNameError(r.repo_name) };
   const dirtyT = timing !== null && !deepEqual(timing, baseT);
   const dirtyR = run !== null && !deepEqual(compact(run), compact(beforeRun));
   // Past the due date the engine recomputes the cutoff and every late deduction off a changed late rule.
   const lateMoved = dirtyR && pastDue(a) && LATE_PAIR.some((k) => !deepEqual(compact({ k: r[k] }), compact({ k: beforeRun[k] })));
   const change = (patch: Partial<AssignmentDraft>) => { setTiming({ ...d, ...patch }); setSave({ kind: 'idle' }); };
   const hasErrors = Object.keys(tErr).length > 0 || Object.keys(rErr).length > 0;
-  /** Save both files; `handOut` then opens Hand out on the entry once the save lands. */
+  /** Save the entry; `handOut` then opens Hand out on it once the save lands. */
   const doSave = async (handOut = false) => {
     if (hasErrors) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
-    // Both files are built and checked before either is written; then the schedule goes
-    // first, since a block in assignments.yml for a key the schedule does not name is a problem.
-    let first: Step | null = null, second: Step | null = null;
-    if (dirtyT) {
-      const y = new YamlText(sf.text);
-      writeDraft(y, { ...d, solutionOn: d.solutionOn && !solutionOff }, sf.doc);
-      if (!validSchedule(y.toJS())) return setSave({ kind: 'bad', text: invalidText('the schedule', validSchedule) });
-      first = { target: { owner: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }, text: y.text, sha: sf.sha, opts: { message: `schedule: edit ${a.slug}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] } };
-    }
-    if (dirtyR) {
-      if (!afOk) return setSave({ kind: 'bad', text: `Not saved: ${ASSIGNMENTS_FILE} could not be read, so nothing was written.` });
-      const y = new YamlText(af!.text);
-      writeBlock(y, path, beforeRun, r, [...RUN_KEYS, 'semester_dest_repo']);
-      if (!validAssignments(y.toJS() ?? {})) return setSave({ kind: 'bad', text: invalidText(ASSIGNMENTS_FILE, validAssignments) });
-      second = { target: { owner: p.cohort.org, repo: CONFIG_REPO, path: ASSIGNMENTS_FILE }, text: y.text, sha: af!.sha, opts: { message: `assignments: edit ${a.slug}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] } };
-    }
-    if (!(await saveSteps(env, setSave, first, second, 'Dates saved; run settings not saved', () => setTiming(null)))) return;
+    const y = new YamlText(sf.text);
+    writeDraft(y, withRun({ ...d, solutionOn: d.solutionOn && !solutionOff }, r), sf.doc);
+    if (!validSchedule(y.toJS())) return setSave({ kind: 'bad', text: invalidText('the schedule', validSchedule) });
+    if (!(await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }, y.text, sf.sha, { message: `schedule: edit ${a.slug}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] }))) return;
+    setTiming(null);
     setRun(null);
     if (handOut) env?.ops.open(draftHandout(p, d));
   };
   // An entry newly handed out by hand asks first, as the Schedule's Save does.
   const requestSave = () => (dirtyT && !hasErrors && newlyManual(d, baseT, a.state) ? setAskManual(true) : void doSave());
-  const repoName = typeof r.semester_dest_repo === 'string' ? r.semester_dest_repo : '';
+  const repoName = typeof r.repo_name === 'string' ? r.repo_name : '';
   return (
     <section class="panel section" aria-label="How this semester runs it" id="run-settings">
       <div class="section-head"><h2>How this semester runs it</h2><a class="textlink" href={`#schedule-${a.slug}`}>Details and the site row</a></div>
@@ -457,14 +464,13 @@ export function AssignmentRun({ p, a, group }: { p: ReadyProps; a: Assignment; g
         </div>
         <div class="form-section">
           <h3>Run settings</h3>
-          {af === null ? <CheckLine cls="bad">Could not read {ASSIGNMENTS_FILE}; the defaults below may not be this semester’s.</CheckLine> : af.error ? <CheckLine cls="bad">{ASSIGNMENTS_FILE} does not parse ({af.error}); fix it with Edit the file directly.</CheckLine> : null}
-          <RunRows id="ov" keys={keys} layers={layers} draft={r} setDraft={(v) => { setRun(v); setSave({ kind: 'idle' }); }} errors={rErr}
-            teamsHref={group ? `#assignment-${a.slug}/teams` : undefined} forced={forcedVisibility(cfg)} />
+          <RunRows id="ov" keys={keys} below={below} current={current} draft={r} setDraft={(v) => { setRun(v); setSave({ kind: 'idle' }); }} errors={rErr}
+            teamsHref={group ? `#assignment-${a.slug}/teams` : undefined} forced={forcedVisibility({ ...cfg, submit_via: d.submitVia || cfg.submit_via })} />
           <details class="fold" open={!!repoName}>
             <summary>Advanced <span class={`cnt${repoName ? ' changed' : ''}`}>({repoName ? '1 changed' : 'none changed'})</span></summary>
             <div class="fold-body">
-              <Field id="ov-repo" k="semester_dest_repo" values={r} value={r.semester_dest_repo} set={(k, v) => { setRun({ ...r, [k]: v }); setSave({ kind: 'idle' }); }}
-                error={rErr.semester_dest_repo}
+              <Field id="ov-repo" k="repo_name" values={r} value={r.repo_name} set={(k, v) => { setRun({ ...r, [k]: v }); setSave({ kind: 'idle' }); }}
+                error={rErr.repo_name}
                 t={{
                   tier: 'advanced', placeholder: a.slug, defaultLabel: `default: ${a.slug}`,
                   label: external ? 'Name in this semester (sheet and site page)' : 'Repo name in this semester',
@@ -475,8 +481,8 @@ export function AssignmentRun({ p, a, group }: { p: ReadyProps; a: Assignment; g
         </div>
         <div class="form-section">
           {lateMoved ? <CheckLine cls="warn">{LATE_MOVES}</CheckLine> : null}
-          <SaveBar state={save} onSave={requestSave} disabled={!dirtyT && !dirtyR} file={dirtyR && !dirtyT ? { org: p.cohort.org, repo: CONFIG_REPO, path: ASSIGNMENTS_FILE, exists: p.files.file(p.cohort.org, CONFIG_REPO, ASSIGNMENTS_FILE).kind !== 'absent' } : { org: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }} />
-          <p class="lives">Dates live in <code>{CONFIG_REPO}/schedule.yml</code>; run settings in <code>{CONFIG_REPO}/{ASSIGNMENTS_FILE}</code>.</p>
+          <SaveBar state={save} onSave={requestSave} disabled={!dirtyT && !dirtyR} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }} />
+          <p class="lives">Dates and run settings live in <code>{CONFIG_REPO}/schedule.yml</code>.</p>
         </div>
       </div>
       {askManual ? <HandOutDialog one onSave={(h) => void doSave(h)} onClose={() => setAskManual(false)} /> : null}

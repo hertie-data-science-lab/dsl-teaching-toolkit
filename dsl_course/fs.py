@@ -1,9 +1,7 @@
 """Local-filesystem copying: the one tree copy every outbound path runs through.
 
-Stdlib only - no GitHub, no config. What the release path (deploy), the public site
-(public_site) and the solution push (assign) withhold is each their own policy and stays
-with them; what they must NOT get wrong is here. Faculty's own withhold list is the one
-policy all three share - see `releaseignore`.
+Stdlib only - no GitHub, no config. What an outbound copy withholds is `selection`'s
+(the solution push in `assign` keeps its own); what every copy must NOT get wrong is here.
 """
 
 from __future__ import annotations
@@ -14,21 +12,6 @@ from pathlib import Path
 
 # A copytree `ignore`: (directory being walked, its entry names) -> the names to skip.
 Deny = Callable[[str, list[str]], set[str]]
-
-
-def union_deny(*denies: Deny) -> Deny:
-    """One `Deny` that withholds whatever ANY of `denies` withholds.
-
-    Mechanism, not policy - it names no filter and no filename, so each caller's own
-    exclusions still live with the caller. Here because every outbound path now composes
-    its own rules with faculty's `.releaseignore`, and two hand-written unions of the same
-    shape differ by one character (`&` for `|`) from silently withholding nothing at all,
-    on a green run."""
-
-    def deny(dirpath: str, names: list[str]) -> set[str]:
-        return set().union(*(d(dirpath, names) for d in denies))
-
-    return deny
 
 
 def copy_tree(src: Path, dst: Path, deny: Deny | None = None) -> None:

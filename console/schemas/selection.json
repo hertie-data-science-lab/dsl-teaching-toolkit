@@ -1,0 +1,611 @@
+{
+  "cases": [
+    {
+      "floor": null,
+      "kept": [
+        "SYLLABUS.md",
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/slides_files/libs/reveal.js",
+        "lectures/01_intro/media/fig.png",
+        "lectures/01_intro/notes.pdf",
+        "lectures/02_trees/deck.HTML",
+        "lectures/02_trees/images/tree.svg",
+        "lectures/02_trees/lab.ipynb",
+        "lectures/09_exam/review.html",
+        "labs/01_intro/lab.pdf",
+        "labs/01_intro/data/a.csv",
+        "readings/01_intro/READINGS.md",
+        "readings/01_intro/paper.pdf",
+        "a[b]/notes.pdf"
+      ],
+      "kinds_by_folder": {
+        "labs": "labs",
+        "lectures": "lectures",
+        "readings": "readings"
+      },
+      "name": "a release: the denylist only",
+      "paths": [
+        "SYLLABUS.md",
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/slides_files/libs/reveal.js",
+        "lectures/01_intro/media/fig.png",
+        "lectures/01_intro/notes.pdf",
+        "lectures/01_intro/solutions/answers.pdf",
+        "lectures/01_intro/.DS_Store",
+        "lectures/02_trees/deck.HTML",
+        "lectures/02_trees/images/tree.svg",
+        "lectures/02_trees/lab.ipynb",
+        "lectures/09_exam/review.html",
+        "labs/01_intro/lab.pdf",
+        "labs/01_intro/Tests/test_lab.py",
+        "labs/01_intro/data/a.csv",
+        "readings/01_intro/READINGS.md",
+        "readings/01_intro/paper.pdf",
+        "grading_config.yml",
+        ".env.local",
+        "a[b]/notes.pdf"
+      ],
+      "releaseignore": [],
+      "use": null
+    },
+    {
+      "floor": null,
+      "kept": [
+        "SYLLABUS.md",
+        "labs/01_intro/lab.pdf",
+        "labs/01_intro/data/a.csv",
+        "readings/01_intro/READINGS.md",
+        "readings/01_intro/paper.pdf",
+        "a[b]/notes.pdf"
+      ],
+      "kinds_by_folder": {
+        "labs": "labs",
+        "lectures": "lectures",
+        "readings": "readings"
+      },
+      "name": "a release with a .releaseignore",
+      "paths": [
+        "SYLLABUS.md",
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/slides_files/libs/reveal.js",
+        "lectures/01_intro/media/fig.png",
+        "lectures/01_intro/notes.pdf",
+        "lectures/01_intro/solutions/answers.pdf",
+        "lectures/01_intro/.DS_Store",
+        "lectures/02_trees/deck.HTML",
+        "lectures/02_trees/images/tree.svg",
+        "lectures/02_trees/lab.ipynb",
+        "lectures/09_exam/review.html",
+        "labs/01_intro/lab.pdf",
+        "labs/01_intro/Tests/test_lab.py",
+        "labs/01_intro/data/a.csv",
+        "readings/01_intro/READINGS.md",
+        "readings/01_intro/paper.pdf",
+        "grading_config.yml",
+        ".env.local",
+        "a[b]/notes.pdf"
+      ],
+      "releaseignore": [
+        "lectures/**",
+        "!lectures/09_*/"
+      ],
+      "use": null
+    },
+    {
+      "floor": null,
+      "kept": [
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/notes.pdf",
+        "lectures/02_trees/deck.HTML",
+        "lectures/09_exam/review.html",
+        "labs/01_intro/lab.pdf"
+      ],
+      "kinds_by_folder": {
+        "labs": "labs",
+        "lectures": "lectures",
+        "readings": "readings"
+      },
+      "name": "the host default",
+      "paths": [
+        "SYLLABUS.md",
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/slides_files/libs/reveal.js",
+        "lectures/01_intro/media/fig.png",
+        "lectures/01_intro/notes.pdf",
+        "lectures/01_intro/solutions/answers.pdf",
+        "lectures/01_intro/.DS_Store",
+        "lectures/02_trees/deck.HTML",
+        "lectures/02_trees/images/tree.svg",
+        "lectures/02_trees/lab.ipynb",
+        "lectures/09_exam/review.html",
+        "labs/01_intro/lab.pdf",
+        "labs/01_intro/Tests/test_lab.py",
+        "labs/01_intro/data/a.csv",
+        "readings/01_intro/READINGS.md",
+        "readings/01_intro/paper.pdf",
+        "grading_config.yml",
+        ".env.local",
+        "a[b]/notes.pdf"
+      ],
+      "releaseignore": [],
+      "use": "host"
+    },
+    {
+      "floor": null,
+      "kept": [
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/slides_files/libs/reveal.js",
+        "lectures/01_intro/media/fig.png",
+        "lectures/01_intro/notes.pdf",
+        "lectures/02_trees/deck.HTML",
+        "lectures/02_trees/images/tree.svg",
+        "lectures/02_trees/lab.ipynb",
+        "labs/01_intro/lab.pdf",
+        "labs/01_intro/data/a.csv"
+      ],
+      "kinds_by_folder": {
+        "labs": "labs",
+        "lectures": "lectures",
+        "readings": "readings"
+      },
+      "name": "the publish default",
+      "paths": [
+        "SYLLABUS.md",
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/slides_files/libs/reveal.js",
+        "lectures/01_intro/media/fig.png",
+        "lectures/01_intro/notes.pdf",
+        "lectures/01_intro/solutions/answers.pdf",
+        "lectures/01_intro/.DS_Store",
+        "lectures/02_trees/deck.HTML",
+        "lectures/02_trees/images/tree.svg",
+        "lectures/02_trees/lab.ipynb",
+        "lectures/09_exam/review.html",
+        "labs/01_intro/lab.pdf",
+        "labs/01_intro/Tests/test_lab.py",
+        "labs/01_intro/data/a.csv",
+        "readings/01_intro/READINGS.md",
+        "readings/01_intro/paper.pdf",
+        "grading_config.yml",
+        ".env.local",
+        "a[b]/notes.pdf"
+      ],
+      "releaseignore": [],
+      "use": "publish"
+    },
+    {
+      "floor": null,
+      "kept": [
+        "lectures/01_intro/slides.html",
+        "lectures/02_trees/deck.HTML",
+        "lectures/09_exam/review.html"
+      ],
+      "kinds_by_folder": {
+        "labs": "labs",
+        "lectures": "lectures",
+        "readings": "readings"
+      },
+      "name": "kinds and types",
+      "paths": [
+        "SYLLABUS.md",
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/slides_files/libs/reveal.js",
+        "lectures/01_intro/media/fig.png",
+        "lectures/01_intro/notes.pdf",
+        "lectures/01_intro/solutions/answers.pdf",
+        "lectures/01_intro/.DS_Store",
+        "lectures/02_trees/deck.HTML",
+        "lectures/02_trees/images/tree.svg",
+        "lectures/02_trees/lab.ipynb",
+        "lectures/09_exam/review.html",
+        "labs/01_intro/lab.pdf",
+        "labs/01_intro/Tests/test_lab.py",
+        "labs/01_intro/data/a.csv",
+        "readings/01_intro/READINGS.md",
+        "readings/01_intro/paper.pdf",
+        "grading_config.yml",
+        ".env.local",
+        "a[b]/notes.pdf"
+      ],
+      "releaseignore": [],
+      "use": {
+        "kinds": [
+          "lectures"
+        ],
+        "types": [
+          "html"
+        ]
+      }
+    },
+    {
+      "floor": null,
+      "kept": [
+        "readings/01_intro/paper.pdf"
+      ],
+      "kinds_by_folder": {
+        "labs": "labs",
+        "lectures": "lectures",
+        "readings": "readings"
+      },
+      "name": "include beats kinds",
+      "paths": [
+        "SYLLABUS.md",
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/slides_files/libs/reveal.js",
+        "lectures/01_intro/media/fig.png",
+        "lectures/01_intro/notes.pdf",
+        "lectures/01_intro/solutions/answers.pdf",
+        "lectures/01_intro/.DS_Store",
+        "lectures/02_trees/deck.HTML",
+        "lectures/02_trees/images/tree.svg",
+        "lectures/02_trees/lab.ipynb",
+        "lectures/09_exam/review.html",
+        "labs/01_intro/lab.pdf",
+        "labs/01_intro/Tests/test_lab.py",
+        "labs/01_intro/data/a.csv",
+        "readings/01_intro/READINGS.md",
+        "readings/01_intro/paper.pdf",
+        "grading_config.yml",
+        ".env.local",
+        "a[b]/notes.pdf"
+      ],
+      "releaseignore": [],
+      "use": {
+        "include": [
+          "readings/**/*.pdf"
+        ],
+        "kinds": []
+      }
+    },
+    {
+      "floor": null,
+      "kept": [
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/slides_files/libs/reveal.js",
+        "lectures/01_intro/media/fig.png",
+        "lectures/01_intro/notes.pdf",
+        "lectures/02_trees/deck.HTML",
+        "lectures/02_trees/images/tree.svg",
+        "lectures/02_trees/lab.ipynb",
+        "lectures/09_exam/review.html",
+        "readings/01_intro/paper.pdf",
+        "a[b]/notes.pdf"
+      ],
+      "kinds_by_folder": {
+        "labs": "labs",
+        "lectures": "lectures",
+        "readings": "readings"
+      },
+      "name": "exclude beats include",
+      "paths": [
+        "SYLLABUS.md",
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/slides_files/libs/reveal.js",
+        "lectures/01_intro/media/fig.png",
+        "lectures/01_intro/notes.pdf",
+        "lectures/01_intro/solutions/answers.pdf",
+        "lectures/01_intro/.DS_Store",
+        "lectures/02_trees/deck.HTML",
+        "lectures/02_trees/images/tree.svg",
+        "lectures/02_trees/lab.ipynb",
+        "lectures/09_exam/review.html",
+        "labs/01_intro/lab.pdf",
+        "labs/01_intro/Tests/test_lab.py",
+        "labs/01_intro/data/a.csv",
+        "readings/01_intro/READINGS.md",
+        "readings/01_intro/paper.pdf",
+        "grading_config.yml",
+        ".env.local",
+        "a[b]/notes.pdf"
+      ],
+      "releaseignore": [],
+      "use": {
+        "exclude": [
+          "labs/"
+        ],
+        "include": [
+          "*.pdf"
+        ],
+        "kinds": [
+          "lectures",
+          "labs"
+        ]
+      }
+    },
+    {
+      "floor": null,
+      "kept": [
+        "a[b]/notes.pdf"
+      ],
+      "kinds_by_folder": {
+        "labs": "labs",
+        "lectures": "lectures",
+        "readings": "readings"
+      },
+      "name": "a kindless path by include only",
+      "paths": [
+        "SYLLABUS.md",
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/slides_files/libs/reveal.js",
+        "lectures/01_intro/media/fig.png",
+        "lectures/01_intro/notes.pdf",
+        "lectures/01_intro/solutions/answers.pdf",
+        "lectures/01_intro/.DS_Store",
+        "lectures/02_trees/deck.HTML",
+        "lectures/02_trees/images/tree.svg",
+        "lectures/02_trees/lab.ipynb",
+        "lectures/09_exam/review.html",
+        "labs/01_intro/lab.pdf",
+        "labs/01_intro/Tests/test_lab.py",
+        "labs/01_intro/data/a.csv",
+        "readings/01_intro/READINGS.md",
+        "readings/01_intro/paper.pdf",
+        "grading_config.yml",
+        ".env.local",
+        "a[b]/notes.pdf"
+      ],
+      "releaseignore": [],
+      "use": {
+        "include": [
+          "/a\\[b\\]/notes.pdf"
+        ],
+        "kinds": []
+      }
+    },
+    {
+      "floor": null,
+      "kept": [
+        "lectures/01_intro/notes.pdf",
+        "readings/01_intro/paper.pdf",
+        "a[b]/notes.pdf"
+      ],
+      "kinds_by_folder": {
+        "labs": "labs",
+        "lectures": "lectures",
+        "readings": "readings"
+      },
+      "name": "include with a negation",
+      "paths": [
+        "SYLLABUS.md",
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/slides_files/libs/reveal.js",
+        "lectures/01_intro/media/fig.png",
+        "lectures/01_intro/notes.pdf",
+        "lectures/01_intro/solutions/answers.pdf",
+        "lectures/01_intro/.DS_Store",
+        "lectures/02_trees/deck.HTML",
+        "lectures/02_trees/images/tree.svg",
+        "lectures/02_trees/lab.ipynb",
+        "lectures/09_exam/review.html",
+        "labs/01_intro/lab.pdf",
+        "labs/01_intro/Tests/test_lab.py",
+        "labs/01_intro/data/a.csv",
+        "readings/01_intro/READINGS.md",
+        "readings/01_intro/paper.pdf",
+        "grading_config.yml",
+        ".env.local",
+        "a[b]/notes.pdf"
+      ],
+      "releaseignore": [],
+      "use": {
+        "include": [
+          "*.pdf",
+          "!labs/**"
+        ],
+        "kinds": []
+      }
+    },
+    {
+      "floor": null,
+      "kept": [
+        "lectures/01_intro/notes.pdf",
+        "labs/01_intro/lab.pdf",
+        "readings/01_intro/paper.pdf",
+        "a[b]/notes.pdf"
+      ],
+      "kinds_by_folder": {
+        "labs": "labs",
+        "lectures": "lectures",
+        "readings": "readings"
+      },
+      "name": "no kinds key keeps every kind",
+      "paths": [
+        "SYLLABUS.md",
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/slides_files/libs/reveal.js",
+        "lectures/01_intro/media/fig.png",
+        "lectures/01_intro/notes.pdf",
+        "lectures/01_intro/solutions/answers.pdf",
+        "lectures/01_intro/.DS_Store",
+        "lectures/02_trees/deck.HTML",
+        "lectures/02_trees/images/tree.svg",
+        "lectures/02_trees/lab.ipynb",
+        "lectures/09_exam/review.html",
+        "labs/01_intro/lab.pdf",
+        "labs/01_intro/Tests/test_lab.py",
+        "labs/01_intro/data/a.csv",
+        "readings/01_intro/READINGS.md",
+        "readings/01_intro/paper.pdf",
+        "grading_config.yml",
+        ".env.local",
+        "a[b]/notes.pdf"
+      ],
+      "releaseignore": [],
+      "use": {
+        "types": [
+          "pdf"
+        ]
+      }
+    },
+    {
+      "floor": null,
+      "kept": [
+        "lectures/01_intro/notes.pdf",
+        "lectures/02_trees/deck.HTML",
+        "labs/01_intro/lab.pdf"
+      ],
+      "kinds_by_folder": {
+        "labs": "labs",
+        "lectures": "lectures",
+        "readings": "readings"
+      },
+      "name": "the .releaseignore before the use",
+      "paths": [
+        "SYLLABUS.md",
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/slides_files/libs/reveal.js",
+        "lectures/01_intro/media/fig.png",
+        "lectures/01_intro/notes.pdf",
+        "lectures/01_intro/solutions/answers.pdf",
+        "lectures/01_intro/.DS_Store",
+        "lectures/02_trees/deck.HTML",
+        "lectures/02_trees/images/tree.svg",
+        "lectures/02_trees/lab.ipynb",
+        "lectures/09_exam/review.html",
+        "labs/01_intro/lab.pdf",
+        "labs/01_intro/Tests/test_lab.py",
+        "labs/01_intro/data/a.csv",
+        "readings/01_intro/READINGS.md",
+        "readings/01_intro/paper.pdf",
+        "grading_config.yml",
+        ".env.local",
+        "a[b]/notes.pdf"
+      ],
+      "releaseignore": [
+        "*.html"
+      ],
+      "use": "host"
+    },
+    {
+      "floor": {
+        "exclude": [
+          "*.svg"
+        ],
+        "never": [
+          "readings"
+        ]
+      },
+      "kept": [
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/slides_files/libs/reveal.js",
+        "lectures/01_intro/media/fig.png",
+        "lectures/01_intro/notes.pdf",
+        "lectures/02_trees/deck.HTML",
+        "lectures/02_trees/lab.ipynb",
+        "lectures/09_exam/review.html"
+      ],
+      "kinds_by_folder": {
+        "labs": "labs",
+        "lectures": "lectures",
+        "readings": "readings"
+      },
+      "name": "a floor",
+      "paths": [
+        "SYLLABUS.md",
+        "lectures/01_intro/slides.html",
+        "lectures/01_intro/slides_files/libs/reveal.js",
+        "lectures/01_intro/media/fig.png",
+        "lectures/01_intro/notes.pdf",
+        "lectures/01_intro/solutions/answers.pdf",
+        "lectures/01_intro/.DS_Store",
+        "lectures/02_trees/deck.HTML",
+        "lectures/02_trees/images/tree.svg",
+        "lectures/02_trees/lab.ipynb",
+        "lectures/09_exam/review.html",
+        "labs/01_intro/lab.pdf",
+        "labs/01_intro/Tests/test_lab.py",
+        "labs/01_intro/data/a.csv",
+        "readings/01_intro/READINGS.md",
+        "readings/01_intro/paper.pdf",
+        "grading_config.yml",
+        ".env.local",
+        "a[b]/notes.pdf"
+      ],
+      "releaseignore": [],
+      "use": {
+        "kinds": [
+          "lectures",
+          "readings"
+        ]
+      }
+    }
+  ],
+  "clutter": [
+    ".DS_Store",
+    ".gitkeep",
+    ".ipynb_checkpoints",
+    "Thumbs.db",
+    "__pycache__",
+    "desktop.ini"
+  ],
+  "defaults": {
+    "host": {
+      "exclude": [],
+      "include": [],
+      "kinds": [
+        "lectures",
+        "labs",
+        "exams",
+        "drop-ins",
+        "events"
+      ],
+      "types": [
+        "html",
+        "pdf"
+      ]
+    },
+    "publish": {
+      "exclude": [
+        "[Ss]olution*",
+        "*[-_.][Ss]olution*",
+        "*[Ee]xam",
+        "*[Ee]xams",
+        "*[Ee]xam[-_.]*",
+        "[Gg]rade*",
+        "*[-_.][Gg]rade*",
+        "[Mm]arks*",
+        "*[-_.][Mm]arks*",
+        "*[Pp]rivate*"
+      ],
+      "include": [],
+      "kinds": [
+        "lectures",
+        "labs"
+      ]
+    }
+  },
+  "denylist": [
+    ".system",
+    "solution",
+    "solutions",
+    "grading_config.yml",
+    "grading.yml",
+    "tests",
+    ".env",
+    ".env.*",
+    ".git"
+  ],
+  "floor": {
+    "open_course_site_publish": {
+      "exclude": [],
+      "never": []
+    },
+    "student_site_host": {
+      "exclude": [],
+      "never": []
+    }
+  },
+  "kinds": [
+    "lectures",
+    "labs",
+    "readings",
+    "exams",
+    "drop-ins",
+    "assets",
+    "events"
+  ],
+  "readings": "readings",
+  "type_aliases": {
+    "htm": "html"
+  }
+}

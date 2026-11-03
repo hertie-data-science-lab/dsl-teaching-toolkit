@@ -30,22 +30,27 @@ real course the tier moves inside a HOLD of every org of the course (`--hold`,
 refuse is asked in the plan ("will stop here"): the preview fails there, and a run stops
 before its pause.
 
-Semester org, in order: preflight, pause, rename repos, layout, keys, proposed releases,
-topic, re-render, status, unpause. Course org: preflight, pause, registry, .system/,
-dsl-course.yml keys, template keys, seeded text, template starter (decision 0028:
+Semester org, in order: preflight, pause, rename repos, layout, keys, schedule shape,
+config layers, topic, re-render, status, unpause. Course org: preflight, pause, registry,
+.system/, dsl-course.yml keys, template keys, seeded text, template starter (decision 0028:
 `starter:` written into each live template's grading_config.yml, read from its answer
-markers), materials topic, materials files, public website, assignment topic, re-render,
-status, unpause.
+markers), materials topic, materials files, public website, assignment topic, config
+layers, re-render, status, unpause. The steps before "config layers" bring an org to the
+0.10 files (their seeds frozen in `templates/legacy-0.10/`); "config layers" folds those
+into one file per level (decision 0039).
 """
 
 from __future__ import annotations
 
+import csv
 import difflib
+import io
 import json
 import os
 import re
 import sys
-from collections.abc import Callable
+import textwrap
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -54,49 +59,59 @@ from time import time as clock
 
 import yaml
 
-from . import cadence, policy, records, schedule, seed, settings, status
-from .bootstrap_course import semester_scaffold
-from .central import CENTRAL
+from . import (
+    cadence,
+    legacy,
+    opencourse,
+    policy,
+    records,
+    roster,
+    schedule,
+    seed,
+    selection,
+    settings,
+    status,
+    teams,
+)
+from .central import CENTRAL, pin_central_ref
+from .config import read_course, read_semester
 from .course import (
-    ASSIGNMENTS_FILE,
     CONFIG_REPO,
-    COURSE_CONFIG,
+    COURSE_BLOCK,
     COURSE_HUB_TOPIC,
-    INSTRUCTORS_FILE,
+    DEFAULTS_BLOCK,
     JOIN_REPO,
-    LEGACY_SUBMIT_VIA,
     MAINTAINING_FILE,
     MATERIALS_REPO_PREFIX,
     MIGRATE_DRIVER,
-    OLD_CONFIG_REPO,
-    OLD_JOIN_REPO,
-    OLD_PEOPLE_FILE,
-    OLD_SEMESTER_TOPIC,
-    RETIRED_COURSE_KEYS,
+    OPEN_SITE_BLOCK,
+    PEOPLE_BLOCK,
+    SEMESTER_FILE,
     SEMESTER_TOPIC,
-    SETTING_PLACEHOLDER,
     SOLUTION_BRANCH,
+    STUDENT_SITE_BLOCK,
     SUBMIT_VIA,
     SYLLABUS_SAMPLE_FILE,
     SYLLABUS_SESSIONS_FILE,
+    TOOLKIT_REF_KEY,
+    course_admins,
+    course_block,
     pages_repo,
+    semester_of,
 )
+from .course import COURSE_CONFIG as NEW_COURSE_FILE
 from .derive import derivable_sources, starter_mode
 from .discovery import (
-    OLD_SEMESTERS_PATH,
     SEMESTERS_PATH,
     TEMPLATE_TOPIC,
     central_ref_for,
     discover_content_repos,
     discover_semesters,
     is_assignment_template,
-    is_untopicked_template,
     list_org_repos,
 )
-from .faults import NOT_MIGRATED, NotMigrated
-from .gh_commits import first_landed
+from .faults import NOT_MIGRATED, RunSettingInTemplate, Unusable
 from .gh_contents import (
-    LINES,
     blob_sha,
     get_file_content,
     load_yaml_lines,
@@ -106,19 +121,24 @@ from .gh_contents import (
     top_level,
 )
 from .ghcli import forget_all, gh, git
-from .grades import (
-    GRADING_FILE,
-    TEAM_LOCK_PATH,
-    assignment_title,
-    parse_grading_spec,
-    sync_team_lock,
-    team_lock_content,
-)
+from .grading_spec import GRADING_FILE, assignment_title, parse_grading_spec
+from .legacy import OLD_ASSIGNMENTS_FILE as ASSIGNMENTS_FILE
+from .legacy import OLD_COURSE_FILE as COURSE_CONFIG
+from .legacy import OLD_INSTRUCTORS_FILE as INSTRUCTORS_FILE
+from .legacy import OLD_OPENCOURSE_FILE as OPENCOURSE_FILE
 from .log import CLIParser, add_preview_flag, log, log_err, log_ok, log_step
-from .materials import MATERIALS_TOPIC, is_materials_repo, kinds_reader
-from .opencourse import OPENCOURSE_FILE, READINGS_MODES, OpenCourse
+from .materials import (
+    EMPTY_ENTRY_KIND,
+    MATERIALS_TOPIC,
+    alias_kind,
+    infer_kind,
+    is_materials_repo,
+    known_kind,
+)
+from .opencourse import READING_LISTS, OpenCourse
 from .opencourse import seed_text as opencourse_text
 from .profile_readme import profile_files, update_profile_readme
+from .readings import is_reading_overlay
 from .repos import (
     current_description,
     default_branch,
@@ -127,17 +147,10 @@ from .repos import (
     set_repo_topics,
 )
 from .scaffold import materials_system_files, starter_line
-from .schedule import label_number, own_number
-from .schedule_plan import (
-    Aliases,
-    entry_kind,
-    needs_number,
-    offplan_folders,
-    planned_rows,
-)
-from .setting_readers import RENAMED_SETTINGS, read_settings
-from .settings import ASSIGNMENT_DEFAULTS_KEY, RUN_KEYS
-from .sync_faculty import retired_course_faults
+from .setting_readers import read_settings
+from .settings import RUN_KEYS
+from .status_json import SET_ASIDE_KEY
+from .team_formation import TEAM_LOCK_PATH, sync_team_lock, team_lock_content
 from .welcome import (
     RETIRED_JOIN_FORMS,
     config_system_files,
@@ -153,6 +166,30 @@ from .workflows_place import (
     TEMPLATE_WORKFLOWS,
     content_workflow_files,
 )
+
+# The old names this migration rewrites, every one of them out of `legacy`.
+OLD_CONFIG_REPO = legacy.old_name(CONFIG_REPO, legacy.SEMESTER_ORG)
+OLD_JOIN_REPO = legacy.old_name(JOIN_REPO, legacy.SEMESTER_ORG)
+OLD_PEOPLE_FILE = legacy.old_name(INSTRUCTORS_FILE, legacy.SEMESTER_ORG)
+OLD_SEMESTER_TOPIC = legacy.old_name(SEMESTER_TOPIC, legacy.SEMESTER_TOPICS)
+OLD_SEMESTERS_PATH = legacy.old_name(SEMESTERS_PATH, legacy.COURSE_GITHUB)
+OLD_TEMPLATE_PREFIX = legacy.old_name(TEMPLATE_TOPIC, legacy.COURSE_REPOS)
+RETIRED_COURSE_KEYS = tuple(legacy.renames(legacy.COURSE_CONFIG))
+# A 0.10 `dsl-course.yml`'s course-wide defaults block.
+ASSIGNMENT_DEFAULTS_KEY = legacy.old_name("defaults", legacy.COURSE_FILE_KEYS)
+LEGACY_SUBMIT_VIA = legacy.renames(legacy.GRADING_CONFIG)
+RENAMED_SETTINGS = legacy.renames(legacy.SETTINGS)
+
+
+def is_untopicked_template(row: dict) -> bool:
+    """An assignment template by its old mark only - an `assignment-*` GitHub template
+    without the topic, which the topic step stamps."""
+    return (
+        row["name"].startswith(OLD_TEMPLATE_PREFIX)
+        and bool(row.get("isTemplate"))
+        and not is_assignment_template(row)
+    )
+
 
 # ------------------------------------------------------------------ the old layout
 # Where each record lived before decision 0010, in semester-config: a path, or a folder
@@ -186,6 +223,32 @@ MATERIALS_MOVES = {
 }
 # The semester's pointer to its course org, before it moved into semester-config.
 OLD_POINTER_REPO = ".github"
+# ... and where 0.10 put it in semester-config, before decision 0039 renamed it.
+OLD_SEMESTER_POINTER = legacy.old_name(records.path("pointer"), legacy.SEMESTER_CONFIG)
+# The 0.10 seeds the 0.10 steps compare against and write (decision 0039 replaced them):
+# kept beside this module, and removed with it.
+LEGACY_TEMPLATES = "legacy-0.10"
+
+
+def old_template(rel: str) -> str:
+    """A 0.10 seed, by its path under `templates/`."""
+    return template(f"{LEGACY_TEMPLATES}/{rel}")
+
+
+def old_scaffold(org: str, path: str, ref: str) -> str:
+    """A 0.10 semester-config skeleton (`instructors.yml`, `assignments.yml`) exactly as
+    Bootstrap semester seeded it for `org`, the institution's defaults filled in."""
+    tag = semester_of(org) or "f2026"
+    year = int(tag[1:])
+    ours = settings.institution_defaults()
+    return pin_central_ref(old_template(f"semester-config/{path}"), ref).format(
+        tag=tag,
+        year=year,
+        year_next=year + 1,
+        **{key: ours[key] for key in settings.RUN_KEYS if key in ours},
+    )
+
+
 # The course's `.github`: the run settings the template-keys step took out of each
 # template, `{template: {key: value}}` - what its semesters' keys steps write into their
 # `assignments.yml`, since the course is migrated first. Public, like the repo: run
@@ -331,7 +394,7 @@ def formats_line(line: str, indent: str = "") -> str:
 
 def submit_via_line(line: str, indent: str = "") -> str:
     """One `submit_via: github` line (at `indent`) in the canonical word
-    (`course.LEGACY_SUBMIT_VIA`), its comment kept at its column; any other line
+    (`LEGACY_SUBMIT_VIA`), its comment kept at its column; any other line
     unchanged."""
     match = re.match(rf"^{indent}submit_via:(.*)$", line)
     if not match:
@@ -356,7 +419,7 @@ def grading_config_keys(text: str) -> str:
 
 
 def course_config_keys(text: str) -> str:
-    """The course `dsl-course.yml`: every retired key (`course.RETIRED_COURSE_KEYS` -
+    """The course `dsl-course.yml`: every retired key (`RETIRED_COURSE_KEYS` -
     `org`, `org_name`, `cohort_defaults`, `semester_defaults`) removed with its block, and
     under `assignment_defaults:` `format:` -> `formats:` and `submit_via: github` ->
     `assignment_repo`. `assignment_defaults` stays: it is the course layer of the cascade
@@ -409,7 +472,7 @@ def lost_semester_values(meta: dict, defaults: dict) -> list[str]:
             "timezone": (raw.get("timezone"), defaults["timezone"]),
             "archive.grace_days": (
                 archive.get("grace_days") if isinstance(archive, dict) else None,
-                defaults["archive"]["grace_days"],
+                defaults["archive_grace_days"],
             ),
         }
         out += [
@@ -1032,7 +1095,7 @@ OLD_PEOPLE_HEADER = """\
 
 def seeded_blocks() -> list[tuple[list[str], str]]:
     """`[(the old block's lines, the new template's block)]`, each old spelling once."""
-    new = template("course/people-header.yml")
+    new = old_template("course/people-header.yml")
     old = OLD_PEOPLE_HEADER.rstrip("\n")
     return [
         (variant.split("\n"), new)
@@ -1114,7 +1177,8 @@ PUBLISH_COMMIT = "migrate: seed opencourse.yml"
 
 def opencourse_from(config: str | None) -> OpenCourse:
     """`opencourse.yml`'s values from a leftover `_publish-config.yml`: on, with its
-    settings, when it names a source repo; else off."""
+    settings folded into `publish:` (`fold_open_site`), when it names a source repo; else
+    off."""
     try:
         cfg = yaml.safe_load(config or "")
     except yaml.YAMLError:
@@ -1122,89 +1186,1012 @@ def opencourse_from(config: str | None) -> OpenCourse:
     if not isinstance(cfg, dict) or not cfg.get("source_repo"):
         return OpenCourse()
     mode = str(cfg.get("readings_mode") or "")
-    return OpenCourse(
-        enabled=True,
-        source_repo=str(cfg["source_repo"]),
-        readings_mode=mode if mode in READINGS_MODES else READINGS_MODES[0],
-        include_lectures=bool(cfg.get("include_lectures", True)),
+    old = {
+        "enabled": True,
+        "source_repo": str(cfg["source_repo"]),
+        "readings_mode": mode if mode in OLD_READINGS_MODES else OLD_READINGS_MODES[0],
+        "include_lectures": bool(cfg.get("include_lectures", True)),
+    }
+    return opencourse.parse(fold_open_site(old))
+
+
+# Decision 0040: a 0.10 open site's `readings_mode` / `include_lectures` / `withhold` fold
+# into one `publish:` Selection (`legacy.OPEN_SITE_KEYS`).
+OLD_SITE_KEYS = legacy.renames(legacy.OPEN_SITE_KEYS)
+OLD_READINGS_MODES = ("reading-list", "actual-readings", "none")
+
+
+def fold_open_site(data: object) -> object:
+    """A 0.10 `opencourse.yml` mapping with its selection keys folded into `publish:`,
+    faithfully: `include_lectures` (on by default) published every shown kind but
+    readings; `actual-readings` hosts the readings, `reading-list` (the default) is
+    `reading_lists: true`; `withhold` is `exclude` (written even empty, so the open
+    site's default exclusions do not change a live site). A mapping that already says
+    `publish:`, or is empty, is returned as it is. Pure."""
+    if not isinstance(data, dict) or not data or "publish" in data:
+        return data
+    out = {k: v for k, v in data.items() if k not in OLD_SITE_KEYS}
+    mode = str(data.get("readings_mode") or OLD_READINGS_MODES[0])
+    kinds = (
+        [k for k in selection.shown_kind_names() if k != selection.READINGS]
+        if data.get("include_lectures", True) is not False
+        else []
+    )
+    if mode == "actual-readings":
+        kinds.append("readings")
+    out["publish"] = {
+        "kinds": kinds,
+        "exclude": [str(p) for p in data.get("withhold") or ()],
+        READING_LISTS: mode == OLD_READINGS_MODES[0],
+    }
+    return out
+
+
+# ------------------------------------------------------------------ schedule shape
+# Decision 0038: schedule.yml goes from one `releases:` block (kind and number on the entry
+# or inferred from a folder or a label) and `events:` (display rows and a lab's second
+# group) to one block per kind. Each entry keeps its KEY (it already names its row and
+# ids), its kind is written by the block it lands in (today's inference, once), lectures
+# and labs get `session:` (their number today), a readings entry the site joins to a
+# lecture gets that lecture's `session:`, `number:` only where it differs, a lab's second
+# group becomes a slot of its lab, the copies' fields are renamed, a READINGS.md becomes
+# the entry's `reading_list:`, and each assignment's `assignments.yml` block moves onto
+# its entry. Rendered rows stay as they were, except what 0038 drops.
+SHAPE_COMMIT = "migrate: schedule shape"
+SHAPE_HEADER = """\
+# INSTRUCTOR-OWNED - yours to edit freely; edits here are not overwritten.
+#
+# This semester's plan: one block per kind (lectures, labs, readings, exams, events, assets),
+# each a map whose KEY names what the toolkit makes for the entry (its site row, its ids; an
+# assignment's repos and mark sheet) and is never displayed or read for a number.
+#   session         the teaching unit (integer): REQUIRED on lectures and labs; optional on
+#                   readings (absent = a standalone row)
+#   number          optional, default = session: the row word ("Lab 2"); REQUIRED on assignments
+#   event_datetime  a datetime, `tbc`, or a list of slots {at, location, details}
+#   files           from_course_repo, from_path, to_semester_repo, to_path, release_datetime
+# The term's own dates are the `semester:` block, each entry with a `type`: start, end,
+# break (`from`/`to`) or archive. Field reference: docs/07-schedule-releases.md.
+"""
+# A label's own number, as 0.10 read it: trailing (`lecture_03`, `lab-9`) or leading
+# (`01_lab`). The migration reads it ONCE, to write `session:` / `number:`.
+_LABEL_NUMBER = re.compile(r"0*(\d+)$|^0*(\d+)[-_ ]")
+_FILE_FIELDS = legacy.renames(legacy.SCHEDULE_FILE)
+_ASSIGNMENT_FIELDS = legacy.renames(legacy.SCHEDULE_ASSIGNMENT)
+# The 0.10 top-level keys of the term's own dates, and the `semester:` entry each becomes
+# (decision 0038 amendment 2): key and `type`.
+_SEMESTER_KEYS = {
+    "semester_start": "start",
+    "semester_end": "end",
+    "archive": "archive",
+}
+
+
+def _semester_block(old: dict) -> dict:
+    """The `semester:` block for a file that may still carry `semester_start`,
+    `semester_end` and `archive:` at the top: each becomes an entry of its `type`, beside
+    whatever entries the block already has."""
+    block = dict(old.get(schedule.SEMESTER_BLOCK) or {})
+    for top, kind in _SEMESTER_KEYS.items():
+        if top not in old or kind in block:
+            continue
+        value = old[top]
+        if kind == "archive":
+            extra = value if isinstance(value, dict) else {}
+            block[kind] = {"type": kind, **extra}
+        elif value not in (None, ""):
+            block[kind] = {"type": kind, "event_datetime": value}
+    return block
+
+
+def _guide(entry: dict) -> dict:
+    """A readings entry with `reading_list:` renamed `reading_guide:` (amendment 2)."""
+    if "reading_list" not in entry:
+        return entry
+    return {
+        ("reading_guide" if k == "reading_list" else k): v for k, v in entry.items()
+    }
+
+
+class _Verbatim(yaml.SafeLoader):
+    """A SafeLoader that leaves dates and datetimes as the text they were written as, so
+    the rewritten file says `2026-09-01T18:00` where the old one did."""
+
+
+_Verbatim.yaml_implicit_resolvers = {
+    first: [(tag, rx) for tag, rx in rules if tag != "tag:yaml.org,2002:timestamp"]
+    for first, rules in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
+
+
+def _label_number(label: str) -> int | None:
+    m = _LABEL_NUMBER.search(label.strip())
+    return int(m.group(1) or m.group(2)) if m else None
+
+
+def _own_number(entry: dict, key: str) -> int | None:
+    """An entry's number as 0.10 read it: its `number:`, else its key's."""
+    n = entry.get("number")
+    if isinstance(n, int) and not isinstance(n, bool) and n > 0:
+        return n
+    return _label_number(key)
+
+
+def _old_kind(entry: dict, aliases: Aliases) -> str:
+    """The kind 0.10 gave a `releases:` entry: its `kind:`, else the section its first copy
+    lands in (the source repo's `materials.yml` aliases, else the built-in ones), else
+    `lecture` for an entry that copies nothing."""
+    kind = str(entry.get("kind") or "").strip().lower()
+    if kind:
+        return kind if kind in policy.content_kinds() else policy.FALLBACK_KIND
+    deploys = entry.get("deploy")
+    deploys = [deploys] if isinstance(deploys, dict) else deploys or []
+    deploys = [d for d in deploys if isinstance(d, dict)]
+    if not deploys:
+        return EMPTY_ENTRY_KIND
+    return _copy_kind(deploys[0], aliases)
+
+
+def _copy_kind(copy: dict, aliases: Aliases) -> str:
+    """The kind 0.10 read off where one `deploy:` copy lands: the section its destination
+    names (the source repo's `materials.yml` aliases, else the built-in ones)."""
+    kinds = aliases(str(copy.get("course_source_repo") or ""))
+    dest = str(copy.get("semester_dest_path") or copy.get("course_source_path") or "")
+    head, sep, _ = dest.strip("/").partition("/")
+    section = (
+        head
+        if sep or (head and alias_kind(head, kinds))
+        else str(copy.get("semester_dest_repo") or schedule.DEFAULT_DEST_REPO)
+    )
+    return infer_kind(section, kinds)
+
+
+def _copies(entry: dict) -> list[dict]:
+    """The `deploy:` copies as `files:` items: each field renamed (`legacy`)."""
+    deploys = entry.get("deploy")
+    deploys = [deploys] if isinstance(deploys, dict) else deploys or []
+    return [
+        {_FILE_FIELDS.get(k, k): v for k, v in d.items() if v not in (None, "")}
+        for d in deploys
+        if isinstance(d, dict)
+    ]
+
+
+def _readings_twin(
+    key: str,
+    kind: str,
+    entry: dict,
+    new: dict,
+    aliases: Aliases,
+    reading_list: ReadingList,
+) -> tuple[str, dict] | None:
+    """A lecture's or lab's copies that land in a readings section, moved off `new` into a
+    readings entry of the same session (`<key>-readings`): under 0.11 the block says what
+    a file is, so a session's own row lists only its own files and its readings attach to
+    the unit as any readings entry does. Same date, so the copies ship when they did. None
+    when it copied no readings."""
+    if kind not in schedule.SESSION_KINDS or not new.get("session"):
+        return None
+    deploys = entry.get("deploy")
+    deploys = [deploys] if isinstance(deploys, dict) else deploys or []
+    deploys = [d for d in deploys if isinstance(d, dict)]
+    split = [i for i, d in enumerate(deploys) if _copy_kind(d, aliases) == "readings"]
+    if not split:
+        return None
+    files = new["files"]
+    moved = [files[i] for i in split]
+    new["files"] = [f for i, f in enumerate(files) if i not in split]
+    twin = {"session": new["session"], "event_datetime": new.get("event_datetime")}
+    if "tbc" in new:
+        twin["tbc"] = new["tbc"]
+    twin["files"] = moved
+    texts = [
+        t.strip()
+        for f in moved
+        if (t := reading_list(str(f.get("from_course_repo")), str(f.get("from_path"))))
+        and t.strip()
+    ]
+    if texts:
+        twin["reading_guide"] = "\n\n".join(texts) + "\n"
+    return f"{key}-readings", {k: v for k, v in twin.items() if v not in (None, "")}
+
+
+def _first_time(value: object) -> str | None:
+    """A written date or datetime, None for `tbc` or nothing."""
+    text = str(value or "").strip()
+    return None if not text or text.lower() == "tbc" else text
+
+
+def _hour_before(text: str, tz) -> str | None:
+    """When a copy with no time of its own shipped under 0.10: an hour before a timed
+    event, the day's start for a whole-day one."""
+    when = schedule._coerce_date_or_datetime(text, tz)
+    if isinstance(when, datetime):
+        return f"{when - schedule.DEFAULT_DEPLOY_LEAD:%Y-%m-%dT%H:%M}"
+    return f"{when:%Y-%m-%d}" if when else None
+
+
+# A source repo's `materials.yml` folder aliases (None: it does not parse).
+Aliases = Callable[[str], Mapping[str, str] | None]
+ReadingList = Callable[[str, str], str]
+
+
+def schedule_shape(
+    text: str,
+    instance_text: str | None = None,
+    aliases: Aliases = lambda repo: {},
+    reading_list: ReadingList = lambda repo, path: "",
+) -> tuple[str, str | None, list[str], list[str]]:
+    """`(schedule.yml, assignments.yml or None when it has no `assignments:` block,
+    notes, stops)` for a 0.10 `text` (and the `assignments.yml` beside it): the 0.11 shape
+    (decision 0038), rows unchanged but for what 0038 drops. `aliases(repo)` are a source
+    repo's `materials.yml` folder aliases (today's kind inference); `reading_list(repo,
+    path)` the READINGS.md text a copy of `path` from `repo` carries ("" for none).
+    `stops` are what a person must settle first; `notes` what changes for them to check."""
+    notes: list[str] = []
+    stops: list[str] = []
+    old = yaml.load(schedule_timing(schedule_keys(text)), _Verbatim) or {}
+    if not isinstance(old, dict):
+        return text, instance_text, notes, ["schedule.yml is not a mapping"]
+    if "releases" not in old and any(
+        isinstance(old.get(b), dict) for b in schedule.BLOCKS if b not in ("events",)
+    ):
+        # Already one block per kind (a file shaped before amendment 2): only the term's
+        # dates and the readings guide take their new names.
+        shaped = {
+            b: {k: _guide(e) if isinstance(e, dict) else e for k, e in old[b].items()}
+            for b in schedule.BLOCKS
+            if isinstance(old.get(b), dict)
+        }
+        assignments = (
+            old.get("assignments") if isinstance(old.get("assignments"), dict) else {}
+        )
+        return _shape_text(text, old, shaped, assignments, notes), None, notes, stops
+    tz = schedule._tz(old.get("timezone"))
+    releases = old.get("releases") if isinstance(old.get("releases"), dict) else {}
+    events = old.get("events") if isinstance(old.get("events"), dict) else {}
+    blocks: dict[str, dict[str, dict]] = {b: {} for b in schedule.BLOCKS}
+    plain = lambda e: {k: v for k, v in e.items() if v not in (None, "")}
+
+    # 1. Releases, by today's kind. Lectures' numbers are what readings join.
+    kinds = {
+        str(k): _old_kind(e, aliases)
+        for k, e in releases.items()
+        if isinstance(e, dict)
+    }
+    numbers = {k: _own_number(releases[k], k) for k in kinds}
+    lectures = {
+        numbers[k]
+        for k in kinds
+        if kinds[k] == "lecture"
+        and numbers[k]
+        and releases[k].get("show_on_site") is not False
+    }
+    hosts: dict[
+        tuple[str, int], str
+    ] = {}  # (kind, n) -> the shown key a session repeats
+    # (key, entry) of each readings entry split off a lecture's or lab's copies.
+    twins: list[tuple[str, dict]] = []
+    for key, kind in kinds.items():
+        entry, n = releases[key], numbers[key]
+        new: dict = {}
+        if kind in schedule.SESSION_KINDS:
+            if n:
+                new["session"] = n
+            else:
+                notes.append(f"{key}: no number today, so no session - give it one")
+        elif kind == "readings":
+            if n and n in lectures:
+                new["session"] = n
+            elif n and entry.get("show_on_site") is not False:
+                new["number"] = n
+        elif n and kind in policy.numbered_kinds():
+            new["number"] = n
+        new |= {
+            k: entry[k]
+            for k in (
+                "title",
+                "details",
+                "event_datetime",
+                "location",
+                "show_on_site",
+                "tbc",
+            )
+            if k in entry and entry[k] not in (None, "")
+        }
+        if "deploy" in entry or kind in schedule.DISPLAY_KINDS:
+            new["files"] = _copies(entry)
+        twin = _readings_twin(key, kind, entry, new, aliases, reading_list)
+        if twin:
+            twins.append(twin)
+        if kind == "readings":
+            texts = [
+                t.strip()
+                for f in new.get("files", [])
+                if (
+                    t := reading_list(
+                        str(f.get("from_course_repo")), str(f.get("from_path"))
+                    )
+                )
+                and t.strip()
+            ]
+            if texts:
+                new["reading_guide"] = "\n\n".join(texts) + "\n"
+        blocks[policy.plural_of(kind)][key] = new
+        if n and entry.get("show_on_site") is not False:
+            hosts.setdefault((kind, n), key)
+
+    for key, twin in twins:
+        if key in kinds or key in blocks["readings"]:
+            stops.append(
+                f"{key}: the readings split off its session need this key - free it"
+            )
+            continue
+        blocks["readings"][key] = twin
+        notes.append(
+            f"{key}: the readings its session copied, now a readings entry of that session"
+        )
+
+    # 2. Events: exams and special events are display rows; a session of a content kind
+    # repeats a release - a slot of it where it says nothing of its own but its date,
+    # room and words, else an entry of its own in the same unit.
+    for key, entry in events.items():
+        if not isinstance(entry, dict):
+            continue
+        key = str(key)
+        kind = str(entry.get("kind") or "special_event").strip().lower()
+        if kind in ("exam", "special_event"):
+            block = (
+                "exams" if kind == "exam" else policy.plural_of(policy.FALLBACK_KIND)
+            )
+            blocks[block][key] = plain(
+                {
+                    k: entry.get(k)
+                    for k in (
+                        "title",
+                        "details",
+                        "event_datetime",
+                        "location",
+                        "show_on_site",
+                        "tbc",
+                    )
+                }
+            )
+            continue
+        if kind not in policy.content_kinds():
+            kind = policy.FALLBACK_KIND
+        m = re.search(r"\d+", key)
+        n = (
+            _own_number(entry, key)
+            if entry.get("number")
+            else (int(m.group()) if m else None)
+        )
+        host = hosts.get((kind, n)) if n else None
+        target = blocks[policy.plural_of(kind)]
+        own_title = str(entry.get("title") or "")
+        if (
+            host
+            and entry.get("show_on_site") is not False
+            and not entry.get("tbc")
+            and own_title in ("", str(target[host].get("title") or ""))
+            and _first_time(entry.get("event_datetime"))
+            and _first_time(target[host].get("event_datetime"))
+            and not target[host].get("tbc")
+        ):
+            first = target[host]
+            slots = first["event_datetime"]
+            if not isinstance(slots, list):
+                slots = [slots]
+            slot = plain(
+                {
+                    "at": entry["event_datetime"],
+                    "location": entry.get("location"),
+                    "details": entry.get("details"),
+                }
+            )
+            slots.append(slot if len(slot) > 1 else slot["at"])
+            # Files still ship before the release's own date, not the earlier group's.
+            at = _hour_before(str(slots[0]), tz)
+            for f in first.get("files", []):
+                f.setdefault("release_datetime", at)
+            first["event_datetime"] = slots
+            continue
+        new = {"session": n} if n and kind in schedule.SESSION_KINDS else {}
+        if n and kind not in schedule.SESSION_KINDS:
+            new["number"] = n
+        new |= plain(
+            {
+                k: entry.get(k)
+                for k in (
+                    "details",
+                    "event_datetime",
+                    "location",
+                    "show_on_site",
+                    "tbc",
+                )
+            }
+        )
+        title = own_title or (str(target[host].get("title") or "") if host else "")
+        if title:
+            new["title"] = title
+        if key in target:
+            stops.append(f"events.{key}: its key is a {kind} entry's too - rename one")
+            continue
+        target[key] = new
+    taken: dict[str, str] = {}
+    for block, entries in blocks.items():
+        for key in entries:
+            if key in taken:
+                stops.append(
+                    f"{block}.{key}: the key of a {taken[key]} entry too - rename one"
+                )
+            taken[key] = block
+
+    # 3. Assignments: `template`, `number`, `repo_name` where it is not the default, and
+    # the `assignments.yml` block inline.
+    instance = settings.parse_legacy_assignments(instance_text)
+    raw_blocks = (
+        (yaml.load(instance_text or "", _Verbatim) or {}) if instance_text else {}
+    )
+    raw_blocks = raw_blocks.get("assignments") if isinstance(raw_blocks, dict) else None
+    raw_blocks = raw_blocks if isinstance(raw_blocks, dict) else {}
+    assignments: dict[str, dict] = {}
+    for key, entry in (old.get("assignments") or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        key = str(key)
+        n = _own_number(entry, key)
+        new = {}
+        if n:
+            new["number"] = n
+        else:
+            notes.append(f"assignments.{key}: no number today - give it one")
+        if entry.get("course_source_repo") is not None:
+            new["template"] = entry["course_source_repo"]
+        name = instance.dests.get(key) or key
+        if name != key:
+            new["repo_name"] = name
+        new |= plain(
+            {
+                _ASSIGNMENT_FIELDS.get(k, k): v
+                for k, v in entry.items()
+                if k not in ("number", "course_source_repo")
+            }
+        )
+        block = raw_blocks.get(key) if isinstance(raw_blocks.get(key), dict) else {}
+        new |= {
+            settings.INLINE_NAMES.get(k, k): v
+            for k, v in block.items()
+            if k in settings.RUN_KEYS and v is not None
+        }
+        assignments[key] = new
+    for key in sorted(set(map(str, raw_blocks)) - set(assignments)):
+        stops.append(
+            f"{ASSIGNMENTS_FILE} assignments.{key}: no such assignment in schedule.yml"
+        )
+
+    instance_after = _without_block(instance_text, settings.ASSIGNMENTS_BLOCKS)
+    return (
+        _shape_text(text, old, blocks, assignments, notes),
+        instance_after,
+        notes,
+        stops,
     )
 
 
-# ------------------------------------------------------------------ proposed releases
-# Decision 0013 item 4: a semester whose materials repos hold folders no `releases:` entry
-# copies (released by hand) gets a releases plan PROPOSED, dated by the commit that
-# landed each folder. Faculty content: written beside the schedule, never into it.
-PROPOSED_RELEASES = records.path("proposed_releases")
-PROPOSAL_COMMIT = "migrate: propose releases"
-PROPOSAL_HEADER = f"""\
-# PROPOSED by the migration - read by nothing, and not part of schedule.yml.
-#
-# These folders of this semester were released outside the plan (no `releases:` entry
-# copies them): the site shows them unnumbered on their kind's tab, off the Schedule. To
-# put them in the plan, copy the entries you want under `releases:` in schedule.yml,
-# check each date (and title, where one is given), then delete this file. Each is dated by the commit that
-# first landed its folder in this semester. The dates have passed, so the next tick
-# copies each folder again from its course repo (nothing changes where the source has
-# not). `course_source_repo: {SETTING_PLACEHOLDER}`: no one course repo holds that
-# folder - name the one it came from.
-"""
+def _shape_text(
+    text: str, old: dict, blocks: dict, assignments: dict, notes: list[str]
+) -> str:
+    """The rewritten schedule.yml: the header, `timezone`, the `semester:` block, one
+    block per kind and `assignments:`; `notes` gains the count of comments left behind."""
+    out = [SHAPE_HEADER]
+    if "timezone" in old:
+        out.append(_emit({"timezone": old["timezone"]}))
+    semester = _semester_block(old)
+    if semester:
+        out.append(_emit({schedule.SEMESTER_BLOCK: semester}))
+    for block, entries in blocks.items():
+        if entries:
+            out.append(_emit({block: entries}))
+    if assignments:
+        out.append(_emit({"assignments": assignments}))
+    comments = sum(1 for line in text.splitlines() if line.lstrip().startswith("#"))
+    if comments:
+        # Rewritten from the data: a comment has no entry to travel with. Counted, never
+        # quoted (a person's words may name someone); git history keeps the old file.
+        notes.append(
+            f"{comments} comment line(s) of {schedule.SCHEDULE_PATH} are not carried "
+            "into the new shape - the old file stays in its history"
+        )
+    return "\n".join(out)
 
 
-def _folder_slug(name: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "folder"
-
-
-def _folder_title(name: str) -> str:
-    """A folder's name as a title (`02_transformers-and-attention` -> `Transformers and
-    attention`)."""
-    name = re.sub(r"^0*\d+_", "", name)
-    return name.replace("-", " ").replace("_", " ").strip().capitalize()
-
-
-# A title that only restates a number (`Session 1`): the site's row would read `Lecture 1
-# - Session 1`, so the entry gets none and the row reads `Lecture 1` from its label.
-NUMBER_ONLY_TITLE = re.compile(
-    r"(session|lecture|lab|week|readings?)\s*\d+", re.IGNORECASE
+_DATE_LIKE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?([+-]\d{2}:?\d{2}|Z)?)?$"
 )
 
 
-def proposed_entries(
-    folders: list[tuple[str, str, str, datetime | None, str]],
-    taken: set[str],
-    tz,
-) -> str:
-    """The `releases:` block for `folders` (`(semester repo, folder, kind, landed, course
-    repo)`), in date order (an undated one last, `tbc`), each label `<kind>-NN` from the
-    folder's number (else its name), never one `taken`. A readings entry has no title; its
-    label's number joins it to its lecture (decision 0013 item 3). Nor has a folder whose
-    name only restates its number (`01_session-1`): its row reads `<Kind> N`, as off-plan."""
-    taken = set(taken)
-    rows = []
-    for repo, folder, kind, landed, source in sorted(
-        folders, key=lambda f: (f[3] is None, f[3] or datetime.min.replace(tzinfo=UTC))
+def _scalar_text(value: object) -> str:
+    """One scalar as YAML: a written date as written, anything else as YAML quotes it."""
+    if isinstance(value, str) and _DATE_LIKE.match(value):
+        return value
+    return (
+        yaml.safe_dump(value, default_flow_style=True, allow_unicode=True, width=10**6)
+        .removesuffix("\n...\n")
+        .strip()
+    )
+
+
+def _emit(value: object, indent: int = 0) -> str:
+    """`value` (mappings, lists and scalars) as block YAML at `indent`; a string with a
+    line break as a literal block."""
+    pad = " " * indent
+    if isinstance(value, dict):
+        lines = []
+        for k, v in value.items():
+            key = (
+                _scalar_text(k)
+                if not isinstance(k, str)
+                else (k if re.fullmatch(r"[A-Za-z0-9_.-]+", k) else _scalar_text(k))
+            )
+            if isinstance(v, (dict, list)) and v:
+                lines.append(f"{pad}{key}:")
+                lines.append(_emit(v, indent + 2))
+            elif isinstance(v, str) and "\n" not in v.strip():
+                lines.append(f"{pad}{key}: {_scalar_text(v.strip())}")
+            elif isinstance(v, str):
+                lines.append(f"{pad}{key}: |")
+                lines += [
+                    f"{pad}  {line}" if line else ""
+                    for line in v.rstrip("\n").split("\n")
+                ]
+            elif isinstance(v, (dict, list)):
+                lines.append(f"{pad}{key}: {'{}' if isinstance(v, dict) else '[]'}")
+            else:
+                lines.append(f"{pad}{key}: {_scalar_text(v)}")
+        return "\n".join(lines)
+    if isinstance(value, list):
+        lines = []
+        for item in value:
+            if isinstance(item, dict) and item:
+                body = _emit(item, indent + 2).split("\n")
+                lines.append(f"{pad}- {body[0].lstrip()}")
+                lines += body[1:]
+            else:
+                lines.append(f"{pad}- {_scalar_text(item)}")
+        return "\n".join(lines)
+    return f"{pad}{_scalar_text(value)}"
+
+
+def _without_block(text: str | None, block: str) -> str | None:
+    """`text` without its top-level `block:` and everything under it (comments above the
+    next top-level key kept); None when it has no such block."""
+    if not text or not re.search(rf"^{block}:", text, re.MULTILINE):
+        return None
+    out, cutting = [], False
+    for line in text.split("\n"):
+        if re.match(rf"^{block}:", line):
+            cutting = True
+            continue
+        if cutting and line and not line[0].isspace() and not line.startswith("#"):
+            cutting = False
+        if not cutting:
+            out.append(line)
+    return re.sub(r"\n\n\n+", "\n\n", "\n".join(out)).rstrip("\n") + "\n"
+
+
+# ------------------------------------------------------------------ config layers
+# Decision 0039: one hand-edited file per level. The course's `dsl-course.yml` and
+# `opencourse.yml` fold into `.github/course.yml`; the semester's `instructors.yml`,
+# `assignments.yml` `defaults:` and its source repos' `materials.yml` `syllabus:` fold into
+# `semester-config/semester.yml`; `students.csv` + `teams.csv` split into `students.csv`
+# (team columns) and `.system/roster.csv`; the semester's pointer moves to
+# `.system/course.yml`. Each new file is checked against the old ones before anything is
+# written (`*_kept`): a value the fold would lose stops the step.
+LAYERS_COMMIT = "migrate: config layers"
+# The old course file's keys and where each lands (`legacy.COURSE_FILE_KEYS`; "" = dropped).
+COURSE_KEY_MOVES = legacy.renames(legacy.COURSE_FILE_KEYS)
+# An old defaults block's keys that changed (`legacy.DEFAULTS_KEYS`; "" = dropped).
+DEFAULTS_KEY_MOVES = legacy.renames(legacy.DEFAULTS_KEYS)
+# Kept as they were, at the top of course.yml: the set-aside to-dos (decision 0032).
+COURSE_KEPT_KEYS = (SET_ASIDE_KEY,)
+# The course block's keys, in the order course.yml writes them.
+_COURSE_ORDER = (
+    "name",
+    "code",
+    "description",
+    TOOLKIT_REF_KEY,
+    "licence",
+    "student_console",
+)
+# What the old roster files were, by their rows: the old names `roster.split_legacy` reads.
+OLD_TEAMS_PATH = legacy.old_name(
+    "students.csv `team:<number>` columns", legacy.ROSTER_FILES
+)
+OLD_SEMESTER_FILES = (INSTRUCTORS_FILE, ASSIGNMENTS_FILE, OLD_TEAMS_PATH)
+
+
+def _old_defaults(raw: object) -> tuple[dict, list[str]]:
+    """An old `assignment_defaults:` block with its keys renamed (`visibility` ->
+    `assignment_repo_visibility`), and the keys dropped (`formats`, which the New
+    assignment wizard asks)."""
+    if not isinstance(raw, dict):
+        return {}, []
+    out, dropped = {}, []
+    for key, value in raw.items():
+        new = DEFAULTS_KEY_MOVES.get(str(key), str(key))
+        if not new:
+            dropped.append(str(key))
+            continue
+        out[new] = value
+    return out, dropped
+
+
+def _stated(block: dict, where: str) -> tuple[dict, list[str]]:
+    """`block` (a `defaults:` block as the files spell it) through the readers, keyed by
+    setting, and a line for each value a reader refuses: the fold never drops one
+    silently."""
+    dropped: list = []
+    values = settings.read_defaults(block, where, dropped)
+    return (
+        {k: v for k, v in values.items() if v is not None},
+        [getattr(d, "what", str(d)) for d in dropped],
+    )
+
+
+def old_opencourse_text(oc: OpenCourse) -> str:
+    """`opencourse.yml` as the 0.10 public-website step seeded it: the `open_course_site:`
+    block's lines at the top level."""
+    body = opencourse_text(oc).split("\n", 1)[1]
+    return (
+        "# INSTRUCTOR-OWNED - yours to edit freely; edits here are not overwritten.\n"
+        + textwrap.dedent(body)
+    )
+
+
+def course_layer(
+    meta_text: str | None, oc_text: str | None
+) -> tuple[str, list[str], list[str]]:
+    """`(course.yml, notes, stops)` folded out of a 0.10 `dsl-course.yml` and
+    `opencourse.yml`. `notes` name what decision 0039 drops; `stops` name what has no home
+    in the new file (a person moves it, then the step runs). Pure."""
+    meta = _yaml(meta_text)
+    notes: list[str] = []
+    stops = [
+        f"{COURSE_CONFIG}: `{key}:` has no place in {NEW_COURSE_FILE} - move or delete "
+        f"it by hand, then run again"
+        for key in meta
+        if key not in COURSE_KEY_MOVES and key not in COURSE_KEPT_KEYS
+    ]
+    identity: dict = {}
+    for old, new in COURSE_KEY_MOVES.items():
+        if new.startswith(f"{COURSE_BLOCK}.") and meta.get(old) not in (None, ""):
+            identity[new.split(".", 1)[1]] = meta[old]
+        elif not new and old in meta:
+            notes.append(f"dropped (decision 0039): `{old}:`")
+    raw_people = meta.get(PEOPLE_BLOCK)
+    people = raw_people if isinstance(raw_people, dict) else {}
+    for role in ("instructors", "teaching_assistants"):
+        if people.get(role):
+            notes.append(
+                f"dropped (decision 0039 rule 3): course-level `people.{role}` "
+                f"({len(people[role])} card(s)); a semester's semester.yml names its own"
+            )
+    defaults, gone = _old_defaults(meta.get(ASSIGNMENT_DEFAULTS_KEY))
+    notes += [
+        f"dropped (decision 0039 rule 2): `{ASSIGNMENT_DEFAULTS_KEY}.{key}` (the New "
+        f"assignment wizard asks)"
+        for key in gone
+    ]
+    homeless = [k for k in defaults if k not in settings.DEFAULT_FILE_KEYS]
+    stops += [
+        f"{COURSE_CONFIG}: `{ASSIGNMENT_DEFAULTS_KEY}.{key}:` has no place in "
+        f"{NEW_COURSE_FILE} `{DEFAULTS_BLOCK}:` - move or delete it by hand, then run again"
+        for key in homeless
+    ]
+    stated, refused = _stated(
+        {k: v for k, v in defaults.items() if k not in homeless},
+        f"{COURSE_CONFIG} {ASSIGNMENT_DEFAULTS_KEY}",
+    )
+    stops += [f"{COURSE_CONFIG}: {line} - fix it first" for line in refused]
+    try:
+        oc = (
+            opencourse.parse(fold_open_site(_yaml(oc_text)), OPENCOURSE_FILE)
+            if oc_text
+            else None
+        )
+    except Unusable as exc:
+        oc, stops = None, [*stops, f"{OPENCOURSE_FILE}: {exc} - fix it first"]
+    header = template("course/course.yml").split(f"{COURSE_BLOCK}:\n", 1)[0]
+    lines = [header + f"{COURSE_BLOCK}:"]
+    lines += [
+        f"  {key}: {_scalar_text(identity[key])}"
+        for key in _COURSE_ORDER
+        if key in identity
+    ]
+    admins = course_admins(meta)
+    out = "\n".join(lines) + "\n\n"
+    if admins:
+        out += f"{PEOPLE_BLOCK}:\n  course_admins:\n" + _emit(admins, 4) + "\n\n"
+    out += settings.defaults_skeleton(
+        [("institution", settings.institution_defaults())], stated
+    )
+    out += "\n" + opencourse_text(oc or OpenCourse(), str(meta.get("contact") or ""))
+    for key in COURSE_KEPT_KEYS:
+        if meta.get(key):
+            out += f"\n{key}:\n" + _emit(meta[key], 2) + "\n"
+    notes += _comments_note(meta_text, COURSE_CONFIG)
+    return out, notes, stops
+
+
+def _comments_note(text: str | None, path: str) -> list[str]:
+    """A note counting `text`'s comment lines, which a fold does not carry (never quoted:
+    a person's words may name someone)."""
+    count = sum(1 for ln in (text or "").split("\n") if ln.lstrip().startswith("#"))
+    return (
+        [f"{count} comment line(s) of {path} are not carried: they stay in its history"]
+        if count
+        else []
+    )
+
+
+def course_layer_kept(
+    meta_text: str | None, oc_text: str | None, new: str
+) -> list[str]:
+    """What `new` (a course.yml) says differently from the old files, one line per value;
+    `[]` when every value the fold keeps is kept."""
+    old, now = _yaml(meta_text), _yaml(new)
+    out = []
+    block = course_block(now)
+    for key, place in COURSE_KEY_MOVES.items():
+        stated = place.startswith(f"{COURSE_BLOCK}.") and old.get(key) not in (None, "")
+        if stated and block.get(place.split(".", 1)[1]) != old[key]:
+            out.append(f"`{key}` -> `{place}`")
+    if course_admins(now) != course_admins(old):
+        out.append("`people.course_admins`")
+    before = _stated(_old_defaults(old.get(ASSIGNMENT_DEFAULTS_KEY))[0], "")[0]
+    if settings.parse_course_defaults(now.get(DEFAULTS_BLOCK)) != before:
+        out.append(f"`{ASSIGNMENT_DEFAULTS_KEY}` -> `{DEFAULTS_BLOCK}`")
+    site = (
+        now.get(OPEN_SITE_BLOCK) if isinstance(now.get(OPEN_SITE_BLOCK), dict) else {}
+    )
+    try:
+        was = (
+            opencourse.parse(fold_open_site(_yaml(oc_text)))
+            if oc_text
+            else OpenCourse()
+        )
+        if opencourse.parse(site) != was:
+            out.append(f"{OPENCOURSE_FILE} -> `{OPEN_SITE_BLOCK}`")
+    except Unusable:
+        out.append(f"{OPENCOURSE_FILE} -> `{OPEN_SITE_BLOCK}` (does not validate)")
+    if str(site.get("contact") or "") != str(old.get("contact") or ""):
+        out.append(f"`contact` -> `{OPEN_SITE_BLOCK}.contact`")
+    for key in COURSE_KEPT_KEYS:
+        if now.get(key) != old.get(key):
+            out.append(f"`{key}`")
+    return out
+
+
+OLD_MATERIALS_FILE = legacy.old_name(
+    f"{SEMESTER_FILE} student_site.syllabus", legacy.MATERIALS_ROOT
+)
+
+
+def old_materials(org: str, repo: str) -> tuple[str, dict[str, str]]:
+    """A materials repo's 0.10 `materials.yml`: `(declared syllabus or "", {folder:
+    kind})`. Absent, or not a mapping, declares nothing (the 0.10 engine refused such a
+    file and looked for the default)."""
+    data = _yaml(get_file_content(org, repo, OLD_MATERIALS_FILE))
+    syllabus = str(data.get("syllabus") or "").strip().strip("/")
+    kinds = data.get("kinds") if isinstance(data.get("kinds"), dict) else {}
+    return syllabus, {
+        str(folder).strip().strip("/").lower(): known_kind(str(kind))
+        for folder, kind in kinds.items()
+    }
+
+
+def _top_block(text: str, key: str) -> list[str] | None:
+    """The lines of `text`'s top-level `key:` block, its own line first, through its last
+    indented line (comments and blank lines after it left out); None when it has none."""
+    lines = text.split("\n")
+    start = next((i for i, ln in enumerate(lines) if re.match(rf"^{key}:", ln)), None)
+    if start is None:
+        return None
+    end = start + 1
+    for i in range(start + 1, len(lines)):
+        line = lines[i]
+        if line and not line[0].isspace() and not line.startswith("#"):
+            break
+        if line.strip() and not line.startswith("#"):
+            end = i + 1
+    return lines[start:end]
+
+
+def carried_defaults(course: Mapping, semester: Mapping) -> dict:
+    """What a semester relied on the 0.10 institution for and 0.11 no longer gives it:
+    `team_formation`, which left the institution's file (decision 0039 rule 2, absent
+    everywhere = no team). The 0.10 default is carried into the semester's own
+    `defaults:` when neither its course nor the semester states one. Keyed by setting."""
+    old = (yaml.safe_load(old_template("policy.default.yml")) or {}).get("defaults", {})
+    value = old.get("team_formation")
+    if (
+        value
+        and not course.get("team_formation")
+        and not semester.get("team_formation")
     ):
-        name = folder.rsplit("/", 1)[-1]
-        n = label_number(name)
-        base = f"{kind}-{n:02d}" if n is not None else _folder_slug(name)
-        label, i = base, 2
-        while label in taken:
-            label, i = f"{base}-{i}", i + 1
-        taken.add(label)
-        when = f"{landed.astimezone(tz):%Y-%m-%dT%H:%M}" if landed else "tbc"
-        rows += [f"  {label}:", f"    event_datetime: {when}"]
-        title = _folder_title(name)
-        if kind != "readings" and not NUMBER_ONLY_TITLE.fullmatch(title):
-            rows.append(f"    title: {_scalar(title)}")
-        rows += [
-            f"    kind: {kind}",
-            "    show_on_site: true",
-            "    deploy:",
-            f"      - course_source_repo: {_scalar(source)}",
-            f"        course_source_path: {_scalar(folder)}",
-        ]
-        if repo != schedule.DEFAULT_DEST_REPO:
-            rows.append(f"        semester_dest_repo: {_scalar(repo)}")
-    return "\n".join(["releases:", *rows]) + "\n"
+        return {"team_formation": value}
+    return {}
+
+
+def semester_layer(
+    org: str,
+    ref: str,
+    instructors: str | None,
+    assignments: str | None,
+    syllabus: str,
+    inherited: list,
+    carried: Mapping | None = None,
+    host: dict | None = None,
+) -> tuple[str, list[str]]:
+    """`(semester.yml, stops)` folded out of a 0.10 `instructors.yml` (its list becomes
+    `people:`, faculty's lines and comments as written), `assignments.yml` `defaults:` (the
+    skeleton's live keys, with `carried` - `carried_defaults` - live beside them; every
+    other key commented with what it inherits from `inherited`), the declared `syllabus`
+    (`student_site.syllabus`; "" = none) and the course's `publish.yml` folded into
+    `student_site.host` (`publish_host`; None = none). Pure."""
+    stops: list[str] = []
+    meta = _yaml(instructors)
+    extra = [k for k in meta if k != "instructors"]
+    stops += [
+        f"{INSTRUCTORS_FILE}: `{k}:` has no place in {SEMESTER_FILE} - move or delete it "
+        f"by hand, then run again"
+        for k in extra
+    ]
+    old = settings.parse_legacy_assignments(assignments)
+    if old.blocks:
+        stops.append(
+            f"{ASSIGNMENTS_FILE}: per-assignment blocks are still there - the schedule "
+            f"shape step moves them onto their entries first"
+        )
+    stops += [
+        f"{ASSIGNMENTS_FILE} {f.label}: {f.what} - fix it first" for f in old.faults
+    ]
+    tag = semester_of(org) or "f2026"
+    year = int(tag[1:])
+    text = pin_central_ref(template(f"semester-config/{SEMESTER_FILE}"), ref).format(
+        year=year,
+        year_next=year + 1,
+        defaults=settings.defaults_skeleton(
+            inherited, {**old.defaults, **(carried or {})}
+        ),
+    )
+    people = _top_block(instructors or "", "instructors") if instructors else None
+    if people and isinstance(meta.get("instructors"), list) and meta["instructors"]:
+        head, rest = text.split("# people:\n", 1)
+        rest = rest.split("\n\n", 1)[1]
+        text = head + "\n".join([f"{PEOPLE_BLOCK}:", *people[1:]]) + "\n\n" + rest
+    if syllabus or host is not None:
+        head, rest = text.split(f"# {STUDENT_SITE_BLOCK}:\n", 1)
+        rest = "".join(
+            line + "\n"
+            for line in rest.split("\n")
+            if line and not line.startswith("#   ")
+        )
+        block = f"{STUDENT_SITE_BLOCK}:\n"
+        if syllabus:
+            block += (
+                f"  syllabus: {_scalar_text(syllabus)}"
+                "   # the released path the home page pins\n"
+            )
+        if host is not None:
+            flow = yaml.safe_dump(host, default_flow_style=True, width=10_000).strip()
+            block += f"  host: {flow}   # folded from {PUBLISH_FILE} (decision 0040)\n"
+        text = head + block + rest
+    return text, stops
+
+
+# A 0.10 materials repo's hosted-copy opt-in (`legacy.MATERIALS_REPO`): its `public:`
+# patterns fold into each semester's `student_site.host` `include:`.
+PUBLISH_FILE = legacy.old_name(
+    f"{SEMESTER_FILE} student_site.host include", legacy.MATERIALS_REPO
+)
+
+
+def publish_host(texts: dict[str, str | None]) -> tuple[dict | None, list[str]]:
+    """`(host, stops)` out of the `publish.yml` text of each source repo a semester
+    releases from (None = absent): None when no repo has one; else `{kinds: [],
+    include: [...]}` - nothing hosted by kind, exactly the patterns the files listed (a
+    repo's `!` lines kept in its order). Pure."""
+    host: dict | None = None
+    stops: list[str] = []
+    for repo, text in sorted(texts.items()):
+        if text is None:
+            continue
+        try:
+            declared = (yaml.safe_load(text) or {}).get("public")
+        except (yaml.YAMLError, AttributeError):
+            stops.append(f"{repo}/{PUBLISH_FILE} does not parse - fix it first")
+            continue
+        if declared is not None and (
+            not isinstance(declared, list)
+            or not all(isinstance(x, str) for x in declared)
+        ):
+            stops.append(f"{repo}/{PUBLISH_FILE}: `public:` is not a list of patterns")
+            continue
+        host = host or {"kinds": [], "include": []}
+        host["include"] += [x for x in declared or () if x not in host["include"]]
+    return host, stops
+
+
+def semester_layer_kept(
+    instructors: str | None,
+    assignments: str | None,
+    syllabus: str,
+    new: str,
+    carried: Mapping | None = None,
+    host: dict | None = None,
+) -> list[str]:
+    """What `new` (a semester.yml) says differently from the old files; `[]` when every
+    value is kept."""
+    out = []
+    now = _yaml(new)
+    if (now.get(PEOPLE_BLOCK) or []) != (_yaml(instructors).get("instructors") or []):
+        out.append(f"{INSTRUCTORS_FILE} -> `{PEOPLE_BLOCK}`")
+    if settings.parse_instance(new).defaults != {
+        **settings.parse_legacy_assignments(assignments).defaults,
+        **(carried or {}),
+    }:
+        out.append(f"{ASSIGNMENTS_FILE} `defaults:` -> `{DEFAULTS_BLOCK}`")
+    site = now.get(STUDENT_SITE_BLOCK) or {}
+    if str(site.get("syllabus") or "") != syllabus:
+        out.append(f"`syllabus` -> `{STUDENT_SITE_BLOCK}.syllabus`")
+    if site.get("host") != host:
+        out.append(f"{PUBLISH_FILE} -> `{STUDENT_SITE_BLOCK}.host`")
+    return out
+
+
+def roster_kept(
+    students: str, teams: str | None, new_students: str, new_system: str, cols: dict
+) -> list[str]:
+    """Counts of what the split would lose (never a value: the roster is per-person):
+    `[]` when every row's email, name, role, handle, id, code and send time, and every
+    team row, is kept."""
+    old = list(csv.DictReader(io.StringIO(students.lstrip("﻿"))))
+    email = roster.LEGACY_EMAIL
+    by_email = {
+        (r.get("email") or "").strip().casefold(): r
+        for r in csv.DictReader(io.StringIO(new_students))
+    }
+    system = {
+        (r.get("email") or "").strip().casefold(): r
+        for r in csv.DictReader(io.StringIO(new_system))
+    }
+    lost = 0
+    for row in old:
+        key = (row.get(email) or row.get("email") or "").strip().casefold()
+        now = {**by_email.get(key, {}), **system.get(key, {})}
+        for column, value in row.items():
+            name = "email" if column == email else column
+            if (value or "").strip() and (now.get(name) or "").strip() != value.strip():
+                lost += 1
+    handle_email = {
+        (r.get("github_handle") or "").strip().casefold(): (r.get(email) or "")
+        .strip()
+        .casefold()
+        for r in old
+    }
+    folded = {k.casefold(): v for k, v in cols.items()}
+    for t in csv.DictReader(io.StringIO((teams or "").lstrip("﻿"))):
+        key = (t.get("assignment") or "").strip().casefold()
+        who = handle_email.get((t.get("github_handle") or "").strip().casefold())
+        if not who:
+            continue  # on no roster row: never a team member (split_legacy drops it)
+        column = roster.team_column(folded.get(key, key))
+        if (by_email.get(who, {}).get(column) or "").strip().casefold() != (
+            t.get("team") or ""
+        ).strip().casefold():
+            lost += 1
+    return [f"{lost} roster value(s) would not survive the split"] if lost else []
 
 
 # ------------------------------------------------------------------ GitHub, narrowly
@@ -1213,88 +2200,6 @@ def proposed_entries(
 # `{org: {repo name: listing row}}`: each org is listed once, and listed again only after
 # a step has written (`_forget`) - a rename or a topic changes what the listing says.
 _LISTINGS: dict[str, dict[str, dict]] = {}
-
-
-# ------------------------------------------------------------------ explicit numbers
-# Decision 0020 rule 6: a number is explicit, so every entry whose number was its POSITION
-# gets that number written as `number:`, and nothing a student sees moves. Entries whose
-# label carries the number are left alone.
-NUMBERS_COMMIT = "migrate: explicit numbers"
-
-
-def position_numbers(
-    sched: schedule.Schedule, aliases: Aliases
-) -> dict[tuple[str, str], int]:
-    """`{(block, key): n}` for every entry the engine before decision 0020 numbered by its
-    position, with that number: a shown release row of a numbered kind among the shown
-    rows of its kind in date order, and an assignment among the plan's by due date.
-    A readings row is not stamped: a number there joins it to that lecture."""
-    out: dict[tuple[str, str], int] = {}
-    # Undated entries never had a position (`undated_unnumbered` names them instead).
-    # Nor had an `events:` session (it postdates 0020).
-    rows = [r for r in planned_rows(sched, aliases) if not r.undated and not r.session]
-    lectures: set[int] = set()
-    position = 0
-    for r in rows:
-        if r.shown and r.kind == "lecture":
-            position += 1
-            lectures.add(own_number(r.number, r.key) or position)
-    counts: dict[str, int] = {}
-    for r in rows:
-        n = own_number(r.number, r.key)
-        if not r.shown or (r.kind == "readings" and n in lectures):
-            continue  # silent, or readings joined to a lecture: no row of its own
-        counts[r.kind] = counts.get(r.kind, 0) + 1
-        if n is None and r.kind != "readings":
-            out["releases", r.key] = counts[r.kind]
-    by_due = sorted(sched.assignments.items(), key=lambda kv: kv[1].due_datetime)
-    for position, (key, entry) in enumerate(by_due, start=1):
-        if own_number(entry.number, key) is None:
-            out["assignments", key] = position
-    return out
-
-
-def undated_unnumbered(sched: schedule.Schedule, aliases: Aliases) -> list[str]:
-    """The shown `releases:` keys of a numbered kind that are undated (`tbc`) and carry
-    no number: no position numbered them, so there is nothing to stamp, and each will be a
-    problem until it is dated and numbered."""
-    return [
-        r.label
-        for r in sched.releases
-        if r.when is None
-        and needs_number(r, entry_kind(r, aliases)[0])
-        and own_number(r.number, r.label) is None
-    ]
-
-
-def stamp_numbers(
-    text: str, stamps: dict[tuple[str, str], int]
-) -> tuple[str, dict[str, str]]:
-    """`text` with `number: <n>` written as the first key of each stamped entry, at its
-    own indent - every other line, comment and order kept - and `{key: why}` for each
-    entry it could not stamp (empty, or written as a flow mapping), for a person to fix
-    by hand."""
-    meta = load_yaml_lines(text) or {}
-    lines = text.splitlines(keepends=True)
-    inserts: list[tuple[int, str]] = []
-    declined: dict[str, str] = {}
-    for (block, key), n in stamps.items():
-        mapping = meta.get(block) if isinstance(meta, dict) else None
-        entry = mapping.get(key) if isinstance(mapping, dict) else None
-        at = (mapping or {}).get(LINES, {}).get(key)
-        own = entry.get(LINES, {}) if isinstance(entry, dict) else {}
-        children = [line for k, line in own.items() if k]
-        if not at or not children or min(children) <= at:
-            empty = entry is None or (isinstance(entry, dict) and not children)
-            declined[key] = "empty" if empty else "written as a flow mapping"
-            continue
-        first = lines[min(children) - 1]
-        indent = first[: len(first) - len(first.lstrip())]
-        eol = "\r\n" if lines[at - 1].endswith("\r\n") else "\n"
-        inserts.append((at, f"{indent}number: {n}{eol}"))
-    for at, line in sorted(inserts, reverse=True):
-        lines.insert(at, line)
-    return "".join(lines), declined
 
 
 def _listing(org: str) -> dict[str, dict]:
@@ -2137,7 +3042,7 @@ def _schedule_clean(
     if text is None:
         return True
     sched = schedule.parse(
-        load_yaml_lines(text) or {}, settings.parse_instance(instance)
+        load_yaml_lines(text) or {}, settings.parse_legacy_assignments(instance)
     )
     bad = [f for f in sched.faults if f.code == NOT_MIGRATED]
     bad += [d for d in sched.dropped if NOT_MIGRATED in d]
@@ -2148,9 +3053,15 @@ def _schedule_clean(
     return not bad
 
 
-def _instance_clean(text: str) -> bool:
-    """An `assignments.yml` this engine reads whole: YAML, and no line it refuses."""
-    faults = settings.parse_instance(text).faults
+def _instance_clean(text: str, *, legacy_ok: bool = False) -> bool:
+    """An `assignments.yml` this engine reads whole: YAML, and no line it refuses -
+    except, with `legacy_ok`, the per-assignment blocks the schedule-shape step moves into
+    `schedule.yml` (NOT_MIGRATED until it has)."""
+    faults = [
+        f
+        for f in settings.parse_legacy_assignments(text).faults
+        if not (legacy_ok and f.code == NOT_MIGRATED)
+    ]
     for fault in faults:
         log_err(f"{ASSIGNMENTS_FILE} {fault.label}: {fault.what} - fix by hand")
     return not faults
@@ -2169,7 +3080,7 @@ def _meta_faults(text: str | None) -> list[str]:
     an old spelling in the course layer), named."""
     meta = _yaml(text)
     defaults = meta.get(ASSIGNMENT_DEFAULTS_KEY)
-    bad = [f.field for f in retired_course_faults(meta)]
+    bad = [key for key in RETIRED_COURSE_KEYS if key in meta]
     bad += [
         f"{ASSIGNMENT_DEFAULTS_KEY}.{key}"
         for key in RENAMED_SETTINGS
@@ -2186,7 +3097,7 @@ def _grading_clean(text: str | None) -> bool:
         return True
     try:
         spec = parse_grading_spec(text)
-    except NotMigrated:
+    except RunSettingInTemplate:
         return False
     return not any(NOT_MIGRATED in d for d in spec.dropped)
 
@@ -2293,7 +3204,7 @@ class Semester:
             return None
         if parsed is None:
             # The seeded skeleton, all comments: the current skeleton replaces it.
-            return semester_scaffold(self.org, INSTRUCTORS_FILE, ref)
+            return old_scaffold(self.org, INSTRUCTORS_FILE, ref)
         new = people_to_instructors(old)
         if new is None:
             return None
@@ -2367,13 +3278,19 @@ class Semester:
             if INSTRUCTORS_FILE not in live:
                 old = get_file_content(self.org, repo, OLD_PEOPLE_FILE) or ""
                 files[INSTRUCTORS_FILE] = (self.instructors_text(old) or "").encode()
-        if live and records.path("pointer") not in live:
-            files[records.path("pointer")] = self.pointer()
+        if live and not {OLD_SEMESTER_POINTER, records.path("pointer")} & set(live):
+            files[OLD_SEMESTER_POINTER] = self.old_pointer()
         old_pointer = COURSE_CONFIG in _files(self.org, OLD_POINTER_REPO)
         return moves, files, deletes, old_pointer
 
     def pointer(self) -> bytes:
-        return template("semester/dsl-course.yml").format(course=self.course).encode()
+        return template("semester/course.yml").format(course=self.course).encode()
+
+    def old_pointer(self) -> bytes:
+        """The pointer as the 0.10 layout wrote it (`OLD_SEMESTER_POINTER`)."""
+        return (
+            old_template("semester/dsl-course.yml").format(course=self.course).encode()
+        )
 
     def layout_done(self) -> bool:
         if not self.renamed():
@@ -2395,8 +3312,8 @@ class Semester:
             out.append(
                 f"{OLD_PEOPLE_FILE} -> {INSTRUCTORS_FILE} (one list, a role each)"
             )
-        if records.path("pointer") in files:
-            out.append(f"write the course pointer to {records.path('pointer')}")
+        if OLD_SEMESTER_POINTER in files:
+            out.append(f"write the course pointer to {OLD_SEMESTER_POINTER}")
         outcomes = self.outcome_work(_files(self.org, repo))
         if outcomes:
             out.append(
@@ -2544,7 +3461,7 @@ class Semester:
         if current is not None and (text is None or text == self.keys_text()[1]):
             return None, []
         meta = _yaml(text)
-        existing = settings.parse_instance(current)
+        existing = settings.parse_legacy_assignments(current)
         lower = [
             ("semester", existing.defaults),
             ("course", settings.course_defaults(self.course)),
@@ -2556,28 +3473,30 @@ class Semester:
         base = current
         if base is None:
             ref = central_ref_for(self.course)
-            base = semester_scaffold(self.org, ASSIGNMENTS_FILE, ref)
+            base = old_scaffold(self.org, ASSIGNMENTS_FILE, ref)
         new = with_instance_keys(base, additions) if additions else base
         return (None if new == current else new), notes
 
     def keys_done(self) -> bool:
-        """The schedule holds only this engine's keys and reads clean, and the semester
-        has its `assignments.yml`. A key the line rewrite cannot reach (inside a flow
-        mapping, say) keeps this undone: the step then stops, naming the entry to fix by
-        hand."""
+        """The schedule holds none of the 0.9 keys this step rewrites, and the semester
+        has its `assignments.yml` reading clean. Whether the schedule reads clean is the
+        schedule-shape step's to say: this engine reads only the 0.11 shape."""
         if not self.renamed():
             return False
         text, new = self.keys_text()
+        if self.layers_landed():
+            return text == new
+        instance = self.instance_text()
         return (
             text == new
-            and self.instance_text() is not None
-            and _schedule_clean(text, self.instance_text(), quiet=True)
+            and instance is not None
+            and _instance_clean(instance, legacy_ok=True)
         )
 
     def title_notes(self, meta: dict) -> list[str]:
         """`assignments.<key>: title "old" -> "new"` for each `title:` the keys step
         strips that is not the name the assignment takes from now on (its template's,
-        `grades.assignment_title`): for faculty to check, nothing is written."""
+        `grading_spec.assignment_title`): for faculty to check, nothing is written."""
         entries = meta.get("assignments")
         out = []
         for key, entry in entries.items() if isinstance(entries, dict) else ():
@@ -2589,7 +3508,7 @@ class Semester:
             )
             try:
                 spec = parse_grading_spec(text or "")
-            except (NotMigrated, yaml.YAMLError):
+            except (RunSettingInTemplate, yaml.YAMLError):
                 spec = parse_grading_spec("")
             old, new = (
                 str(entry["title"]).strip(),
@@ -2619,7 +3538,7 @@ class Semester:
             seeded = current is None
             if seeded:
                 ref = central_ref_for(self.course)
-                current = semester_scaffold(self.org, ASSIGNMENTS_FILE, ref)
+                current = old_scaffold(self.org, ASSIGNMENTS_FILE, ref)
             out.append(
                 f"{CONFIG_REPO}/{ASSIGNMENTS_FILE}: "
                 + ("seed the skeleton, and " if seeded else "")
@@ -2635,11 +3554,8 @@ class Semester:
         instance, _ = self.instance_work()
         if text != new and not entries_kept(text, new):
             return [f"the {schedule.SCHEDULE_PATH} rewrite would lose or add an entry"]
-        if instance is not None and not _instance_clean(instance):
+        if instance is not None and not _instance_clean(instance, legacy_ok=True):
             return [f"the {ASSIGNMENTS_FILE} it writes would not read clean"]
-        after = self.instance_text() if instance is None else instance
-        if not _schedule_clean(new, after):
-            return [f"{schedule.SCHEDULE_PATH} would still say NOT_MIGRATED"]
         return []
 
     def keys(self) -> bool:
@@ -2652,7 +3568,7 @@ class Semester:
                 return False
             files[schedule.SCHEDULE_PATH] = new.encode()
         if instance is not None:
-            if not _instance_clean(instance):
+            if not _instance_clean(instance, legacy_ok=True):
                 return False
             files[ASSIGNMENTS_FILE] = instance.encode()
         if not files:
@@ -2668,150 +3584,309 @@ class Semester:
             text == new
             and entries_kept(self.schedule_before, text)
             and instance is not None
-            and _instance_clean(instance)
-            and _schedule_clean(text, instance)
+            and _instance_clean(instance, legacy_ok=True)
         )
 
-    # explicit numbers --------------------------------------------------------
-    def numbers_work(
-        self,
-    ) -> tuple[str | None, str | None, dict, dict[str, str], list[str]]:
-        """`(schedule.yml now, as this step leaves it, {(block, key): n}, declined,
-        undated)`, over the schedule as the keys step leaves it."""
-        text, keyed = self.keys_text()
-        if keyed is None:
-            return text, None, {}, {}, []
-        sched = schedule.parse(
-            load_yaml_lines(keyed) or {}, settings.parse_instance(self.instance_text())
-        )
-        aliases = kinds_reader(self.course)
-        stamps = position_numbers(sched, aliases)
-        new, declined = stamp_numbers(keyed, stamps)
-        return text, new, stamps, declined, undated_unnumbered(sched, aliases)
+    # schedule shape ----------------------------------------------------------
+    def _aliases(self, repo: str) -> Mapping[str, str]:
+        """A source repo's `materials.yml` folder aliases, as 0.10 inferred kinds by."""
+        return old_materials(self.course, repo)[1]
 
-    def numbers_done(self) -> bool:
-        return self.keys_done() and not self.numbers_work()[2]
-
-    def numbers_plan(self) -> list[str]:
-        _, _, stamps, declined, undated = self.numbers_work()
-        return [
-            (
-                f"{CONFIG_REPO}/{schedule.SCHEDULE_PATH}: write `number:` on each entry "
-                f"numbered by its position, with the number it shows today"
-            ),
-            *(f"  {key}: {n}" for (_, key), n in stamps.items()),
-            *(
-                f"  {key}: {why} - add `number:` by hand"
-                for key, why in declined.items()
-            ),
-            *(
-                f"  {key}: undated: will show as a problem until dated and numbered"
-                for key in undated
-            ),
-        ]
-
-    def numbers_stops(self) -> list[str]:
-        declined = self.numbers_work()[3]
-        return [
-            f"{schedule.SCHEDULE_PATH} {key}: add `number:` by hand" for key in declined
-        ]
-
-    def numbers(self) -> bool:
-        text, new, _, declined, _ = self.numbers_work()
-        for key in declined:
-            log_err(f"{schedule.SCHEDULE_PATH} {key}: add `number:` by hand")
-        if not self.keys_done() or text is None or new is None:
-            return False
-        if new != text and not move_files(
-            self.org,
-            self.config(),
-            {},
-            NUMBERS_COMMIT,
-            files={schedule.SCHEDULE_PATH: new.encode()},
-        ):
-            return False
-        return not declined
-
-    # proposed releases -------------------------------------------------------
-    def offplan(self) -> list[tuple[str, str, str]]:
-        """`(repo, folder, kind)` for each folder of the semester's release repos that no
-        entry of the schedule - as the keys step leaves it - copies."""
-        _, text = self.keys_text()
-        sched = schedule.parse(
-            load_yaml_lines(text or "") or {},
-            settings.parse_instance(self.instance_text()),
-        )
-        deploys = [d for r in sched.releases for d in r.deploy]
-        listing = _listing(self.org)
-        dests = {schedule.DEFAULT_DEST_REPO, *(d.semester_dest_repo for d in deploys)}
-        trees = {
-            repo: list(_files(self.org, repo))
-            for repo in sorted(dests)
-            if repo in listing and not listing[repo].get("archived")
-        }
-        return offplan_folders(deploys, trees)
-
-    def proposal(self) -> str | None:
-        """The proposed releases plan (header and `releases:` block), or None when every
-        released folder is in the plan. Read once per run: each folder costs a history
-        read."""
-        if not hasattr(self, "_proposal"):
-            self._proposal = self._propose()
-        return self._proposal
-
-    def _propose(self) -> str | None:
-        folders = self.offplan()
-        if not folders:
-            return None
-        _, text = self.keys_text()
-        meta = _yaml(text)
-        course = Course(self.course)
-        sources = {r: set(_files(self.course, r)) for r in course.materials_repos()}
-        rows = []
-        for repo, folder, kind in folders:
-            holders = [
-                r
-                for r, paths in sources.items()
-                if any(p.startswith(f"{folder}/") for p in paths)
-            ]
-            source = holders[0] if len(holders) == 1 else SETTING_PLACEHOLDER
-            rows.append(
-                (repo, folder, kind, first_landed(self.org, repo, folder), source)
+    def _reading_list(self, repo: str, path: str) -> str:
+        """The READINGS.md (or .txt/.bib) text a copy of `path` from the course's `repo`
+        carries: the file itself, or each one directly inside the folder."""
+        path = path.strip("/")
+        found = [
+            p
+            for p in sorted(_files(self.course, repo))
+            if is_reading_overlay(p)
+            and (
+                p == path or p.rsplit("/", 1)[0] == path or (not path and "/" not in p)
             )
-        releases = meta.get("releases")
-        taken = {str(k) for k in releases} if isinstance(releases, dict) else set()
-        tz = schedule._tz(meta.get("timezone"))
-        return PROPOSAL_HEADER + proposed_entries(rows, taken, tz)
-
-    def proposal_done(self) -> bool:
-        """Proposed already (the file is there), or nothing to propose."""
-        if PROPOSED_RELEASES in _files(self.org, self.config()):
-            return True
-        return self.proposal() is None
-
-    def proposal_plan(self) -> list[str]:
-        text = self.proposal() or ""
-        block = [line for line in text.split("\n") if line and not line.startswith("#")]
-        return [
-            (
-                f"write {CONFIG_REPO}/{PROPOSED_RELEASES}: a releases plan for "
-                f"{len(self.offplan())} folder(s) released outside the plan, for faculty "
-                f"to copy into {schedule.SCHEDULE_PATH} by hand (never merged by this tool)"
-            ),
-            *(f"  {line}" for line in block),
         ]
+        texts = [(get_file_content(self.course, repo, p) or "").strip() for p in found]
+        return "\n\n".join(t for t in texts if t)
 
-    def propose(self) -> bool:
-        text = self.proposal()
-        if text is None:
+    def shape_work(
+        self,
+    ) -> tuple[str | None, str | None, str | None, list[str], list[str]]:
+        """`(schedule.yml now, rewritten, assignments.yml rewritten or None, notes,
+        stops)`; nothing to rewrite (None) once the schedule reads clean."""
+        text = get_file_content(self.org, self.config(), schedule.SCHEDULE_PATH)
+        instance = self.instance_text()
+        if text is None or _schedule_clean(text, instance, quiet=True):
+            return text, None, None, [], []
+        new, after, notes, stops = schedule_shape(
+            text, instance, self._aliases, self._reading_list
+        )
+        return text, new, after, notes, stops
+
+    def shape_done(self) -> bool:
+        return self.keys_done() and self.shape_work()[1] is None
+
+    def shape_plan(self) -> list[str]:
+        if not self.keys_done():
+            when = "listed once the keys step has run"
+            return [
+                f"{CONFIG_REPO}/{schedule.SCHEDULE_PATH}: one block per kind - {when}"
+            ]
+        text, new, after, notes, _ = self.shape_work()
+        out = [
+            (
+                f"{CONFIG_REPO}/{schedule.SCHEDULE_PATH}: one block per kind (decision "
+                f"0038); keys kept, sessions and numbers written, copies' fields renamed"
+                + (
+                    f"; {ASSIGNMENTS_FILE}'s blocks moved onto their entries"
+                    if after
+                    else ""
+                )
+            ),
+            # The new lines only: the old file's are faculty's own words and comments,
+            # which a public log never quotes - counted instead.
+            *(
+                line
+                for line in _diff(schedule.SCHEDULE_PATH, text or "", new or "")
+                if not line.startswith("  -")
+            ),
+            f"  ({len((text or '').splitlines())} line(s) of the old file replaced)",
+        ]
+        if after is not None:
+            out += _diff(ASSIGNMENTS_FILE, self.instance_text() or "", after)
+        return out + [f"  {note}" for note in notes]
+
+    def shape_stops(self) -> list[str]:
+        _, new, after, _, stops = self.shape_work()
+        if new is None or stops:
+            return stops
+        if not _schedule_clean(
+            new, after if after is not None else self.instance_text()
+        ):
+            return [f"{schedule.SCHEDULE_PATH} would still say NOT_MIGRATED"]
+        return []
+
+    def shape(self) -> bool:
+        _, new, after, _, stops = self.shape_work()
+        if new is None:
             return True
+        if stops or self.shape_stops():
+            return False
+        files = {schedule.SCHEDULE_PATH: new.encode()}
+        if after is not None:
+            files[ASSIGNMENTS_FILE] = after.encode()
+        return move_files(self.org, self.config(), {}, SHAPE_COMMIT, files=files)
+
+    # config layers -------------------------------------------------------------
+    def layers_landed(self) -> bool:
+        """`semester.yml` is there and the files it replaced are gone: the steps before
+        this one read those files, so each counts as done once they have folded."""
+        live = _files(self.org, self.config())
+        return SEMESTER_FILE in live and not set(OLD_SEMESTER_FILES) & set(live)
+
+    def _syllabus(self) -> tuple[str, list[str]]:
+        """The syllabus the semester's source repos declare in a 0.10 `materials.yml`
+        (folded into `student_site.syllabus`), and a stop when they declare two."""
+        text = get_file_content(self.org, self.config(), schedule.SCHEDULE_PATH)
+        sched = schedule.parse(load_yaml_lines(text or "") or {})
+        repos = sorted({d.course_source_repo for r in sched.releases for d in r.deploy})
+        found = {old_materials(self.course, repo)[0] for repo in repos} - {""}
+        if len(found) > 1:
+            stop = (
+                f"the source repos' {OLD_MATERIALS_FILE} declare {len(found)} syllabuses "
+                f"({', '.join(sorted(found))}) - {SEMESTER_FILE} names one: set "
+                f"`{STUDENT_SITE_BLOCK}.syllabus` by hand, then run again"
+            )
+            return "", [stop]
+        return (found.pop() if found else ""), []
+
+    def layers_work(self) -> dict:
+        """Everything the step reads and would write: the old texts, `files` (path ->
+        bytes), `delete`, `notes` and `stops`. Empty `files` and `delete` = done."""
+        repo = self.config()
+        live = _files(self.org, repo)
+        old = {
+            p: get_file_content(self.org, repo, p)
+            for p in (*OLD_SEMESTER_FILES, OLD_SEMESTER_POINTER, roster.STUDENTS_PATH)
+            if p in live
+        }
+        files: dict[str, bytes] = {}
+        delete = sorted(p for p in old if p != roster.STUDENTS_PATH)
+        notes: list[str] = []
+        stops: list[str] = []
+        # What the steps above leave, for a preview, which runs none of them.
+        laid = {} if self.layers_landed() else self.layout_work()[1]
+        if INSTRUCTORS_FILE not in old and laid.get(INSTRUCTORS_FILE):
+            old[INSTRUCTORS_FILE] = laid[INSTRUCTORS_FILE].decode()
+        if OLD_SEMESTER_POINTER in laid:
+            old[OLD_SEMESTER_POINTER] = laid[OLD_SEMESTER_POINTER].decode()
+        if not self.layers_landed():
+            after = self._assignments_after()
+            if after is not None:
+                old[ASSIGNMENTS_FILE] = after
+        if INSTRUCTORS_FILE in old or ASSIGNMENTS_FILE in old:
+            if SEMESTER_FILE in live:
+                stops.append(
+                    f"{SEMESTER_FILE} is already there beside the files it replaces - "
+                    f"fold them into it by hand, then delete them"
+                )
+            syllabus, more = self._syllabus()
+            stops += more
+            inherited = settings.layers(self.course)[2:]
+            host, more = publish_host(self.publish_texts())
+            stops += more
+            carried = carried_defaults(
+                inherited[0][1],
+                settings.parse_legacy_assignments(old.get(ASSIGNMENTS_FILE)).defaults,
+            )
+            notes += [
+                f"{SEMESTER_FILE} `{DEFAULTS_BLOCK}:` states `{key}: {value}`: the 0.10 "
+                f"institution default this semester ran on (decision 0039 rule 2)"
+                for key, value in carried.items()
+            ]
+            text, more = semester_layer(
+                self.org,
+                central_ref_for(self.course),
+                old.get(INSTRUCTORS_FILE),
+                old.get(ASSIGNMENTS_FILE),
+                syllabus,
+                inherited,
+                carried,
+                host,
+            )
+            stops += more
+            lost = semester_layer_kept(
+                old.get(INSTRUCTORS_FILE),
+                old.get(ASSIGNMENTS_FILE),
+                syllabus,
+                text,
+                carried,
+                host,
+            )
+            stops += [f"{SEMESTER_FILE} would lose {what}" for what in lost]
+            files[SEMESTER_FILE] = text.encode()
+        students = old.get(roster.STUDENTS_PATH)
+        legacy_roster = students is not None and (
+            roster.LEGACY_EMAIL in (students.lstrip("﻿").split("\n", 1)[0])
+            or OLD_TEAMS_PATH in old
+        )
+        if legacy_roster:
+            if roster.SYSTEM_PATH in live:
+                stops.append(
+                    f"{roster.SYSTEM_PATH} is already there beside an unsplit "
+                    f"{roster.STUDENTS_PATH} - split it by hand"
+                )
+            sched_text = get_file_content(self.org, repo, schedule.SCHEDULE_PATH)
+            cols = teams.columns(
+                schedule.parse(load_yaml_lines(sched_text or "") or {})
+            )
+            new_students, new_system = roster.split_legacy(
+                students, old.get(OLD_TEAMS_PATH), cols
+            )
+            stops += roster_kept(
+                students, old.get(OLD_TEAMS_PATH), new_students, new_system, cols
+            )
+            files[roster.STUDENTS_PATH] = new_students.encode()
+            files[roster.SYSTEM_PATH] = new_system.encode()
+            rows = len(list(csv.DictReader(io.StringIO(new_students))))
+            notes.append(
+                f"{roster.STUDENTS_PATH}: {rows} row(s); the engine's columns move to "
+                f"{roster.SYSTEM_PATH}"
+                + (
+                    f", {OLD_TEAMS_PATH} becomes its `team:` columns"
+                    if OLD_TEAMS_PATH in old
+                    else ""
+                )
+            )
+        if OLD_SEMESTER_POINTER in old:
+            files[records.path("pointer")] = self.pointer()
+        if not files and not delete:
+            return {}
+        return {
+            "old": old,
+            "files": files,
+            "delete": delete,
+            "notes": notes,
+            "stops": stops,
+        }
+
+    def publish_texts(self) -> dict[str, str | None]:
+        """Each course source repo this semester's schedule releases from, mapped to its
+        `publish.yml` text (None = absent): what `publish_host` folds."""
+        sched_text = get_file_content(self.org, self.config(), schedule.SCHEDULE_PATH)
+        try:
+            sched = schedule.parse(load_yaml_lines(sched_text or "") or {})
+        except (yaml.YAMLError, Unusable):
+            return {}
+        repos = {
+            d.course_source_repo
+            for r in sched.releases
+            for d in r.deploy
+            if d.course_source_repo
+        }
+        return {
+            repo: get_file_content(self.course, repo, PUBLISH_FILE)
+            for repo in sorted(repos)
+        }
+
+    def _assignments_after(self) -> str | None:
+        """`assignments.yml` as the keys and schedule-shape steps leave it."""
+        after = self.shape_work()[2]
+        if after is not None:
+            return after
+        if not self.keys_done():
+            new, _ = self.instance_work()
+            if new is not None:
+                return _without_block(new, settings.ASSIGNMENTS_BLOCKS) or new
+        return self.instance_text()
+
+    def layers_done(self) -> bool:
+        return not self.layers_work()
+
+    def layers_plan(self) -> list[str]:
+        work = self.layers_work()
+        if not work:
+            return []
+        old = work["old"]
+        out = [f"{CONFIG_REPO}: fold the 0.10 files into one per level (decision 0039)"]
+        for path, new in work["files"].items():
+            if path in (roster.STUDENTS_PATH, roster.SYSTEM_PATH):
+                continue  # per-person: counted in the notes, never printed
+            out += _diff(path, "", new.decode())
+        out += [f"  {note}" for note in work["notes"]]
+        out += [f"  delete {path}" for path in work["delete"]]
+        if (
+            ASSIGNMENTS_FILE in old
+            and not settings.parse_legacy_assignments(old[ASSIGNMENTS_FILE]).defaults
+        ):
+            out.append(f"  ({ASSIGNMENTS_FILE} states no defaults)")
+        return out
+
+    def layers_stops(self) -> list[str]:
+        return (self.layers_work() or {}).get("stops", [])
+
+    def layers(self) -> bool:
+        work = self.layers_work()
+        if not work:
+            return True
+        if work["stops"]:
+            return False
         return move_files(
             self.org,
             self.config(),
             {},
-            PROPOSAL_COMMIT,
-            files={PROPOSED_RELEASES: text.encode()},
+            LAYERS_COMMIT,
+            files=work["files"],
+            delete=work["delete"],
         )
+
+    def layers_verified(self) -> bool:
+        """Done, and the new files read clean with this engine's own readers."""
+        if not self.layers_done():
+            return False
+        text = get_file_content(self.org, self.config(), SEMESTER_FILE)
+        bad = settings.parse_instance(text).faults
+        for fault in bad:
+            log_err(f"{SEMESTER_FILE} {fault.label}: {fault.what}")
+        return not bad
 
     # topic -------------------------------------------------------------------
     def topics(self) -> set[str]:
@@ -2851,6 +3926,7 @@ class Semester:
             self.renamed()
             and self.layout_done()
             and self.keys_done()
+            and self.shape_done()
             and self.topic_done()
         )
 
@@ -2910,27 +3986,25 @@ class Semester:
                 ),
             ),
             Step(
-                "explicit numbers",
-                done=self.numbers_done,
-                plan=self.numbers_plan,
-                do=self.numbers,
-                verify=self.numbers_done,
-                stops=self.numbers_stops,
+                "schedule shape",
+                done=self.shape_done,
+                plan=self.shape_plan,
+                do=self.shape,
+                verify=self.shape_done,
+                stops=self.shape_stops,
                 rollback=(
-                    f"git revert the '{NUMBERS_COMMIT}' commit in {repo} (it holds "
-                    f"only {schedule.SCHEDULE_PATH})"
+                    f"git revert the '{SHAPE_COMMIT}' commit in {repo} (it holds "
+                    f"{schedule.SCHEDULE_PATH} and {ASSIGNMENTS_FILE})"
                 ),
             ),
             Step(
-                "proposed releases",
-                done=self.proposal_done,
-                plan=self.proposal_plan,
-                do=self.propose,
-                verify=lambda: PROPOSED_RELEASES in _files(self.org, self.config()),
-                rollback=(
-                    f"git revert the '{PROPOSAL_COMMIT}' commit in {repo} (it holds "
-                    f"only {PROPOSED_RELEASES})"
-                ),
+                "config layers",
+                done=self.layers_done,
+                plan=self.layers_plan,
+                do=self.layers,
+                verify=self.layers_verified,
+                stops=self.layers_stops,
+                rollback=f"git revert the '{LAYERS_COMMIT}' commit in {repo}",
             ),
             Step(
                 "topic",
@@ -3316,7 +4390,11 @@ class Course:
 
     # public website ----------------------------------------------------------
     def opencourse_missing(self) -> bool:
-        return get_file_content(self.org, ".github", OPENCOURSE_FILE) is None
+        """No `opencourse.yml`, and no `course.yml` it has folded into yet."""
+        return (
+            get_file_content(self.org, ".github", OPENCOURSE_FILE) is None
+            and read_course(self.org).text is None
+        )
 
     def opencourse_seed(self) -> OpenCourse:
         return opencourse_from(
@@ -3334,7 +4412,7 @@ class Course:
                 f".github/{OPENCOURSE_FILE}: seeded "
                 + (
                     f"on, from {pages_repo(self.org)}/{RETIRED_PUBLISH_CONFIG} "
-                    f"(source_repo {oc.source_repo}, readings_mode {oc.readings_mode})"
+                    f"(source_repo {oc.source_repo}, publish {oc.publish_data()})"
                     if oc.enabled
                     else "off (no earlier publish settings)"
                 )
@@ -3349,8 +4427,93 @@ class Course:
             ".github",
             {},
             PUBLISH_COMMIT,
-            files={OPENCOURSE_FILE: opencourse_text(self.opencourse_seed()).encode()},
+            files={
+                OPENCOURSE_FILE: old_opencourse_text(self.opencourse_seed()).encode()
+            },
         )
+
+    # config layers -------------------------------------------------------------
+    def layers_texts(self) -> tuple[str | None, str | None]:
+        """The 0.10 `dsl-course.yml` and `opencourse.yml`, None where absent."""
+        return (
+            get_file_content(self.org, ".github", COURSE_CONFIG),
+            get_file_content(self.org, ".github", OPENCOURSE_FILE),
+        )
+
+    def layers_work(self) -> tuple[str | None, list[str], list[str]]:
+        """`(course.yml to write, notes, stops)`; None to write once both old files are
+        gone."""
+        meta, oc = self.layers_texts()
+        if meta is None and oc is None:
+            return None, [], []
+        # As the keys and public-website steps leave them, for a preview, which runs
+        # neither.
+        meta = course_config_keys(meta) if meta is not None else None
+        if oc is None and read_course(self.org).text is None:
+            oc = old_opencourse_text(self.opencourse_seed())
+        new, notes, stops = course_layer(meta, oc)
+        if read_course(self.org).text is not None:
+            stops.append(
+                f"{NEW_COURSE_FILE} is already there beside the files it replaces - fold "
+                f"them into it by hand, then delete them"
+            )
+        stops += [
+            f"{NEW_COURSE_FILE} would lose {what}"
+            for what in course_layer_kept(meta, oc, new)
+        ]
+        return new, notes, stops
+
+    def layers_done(self) -> bool:
+        return self.layers_work()[0] is None
+
+    def layers_plan(self) -> list[str]:
+        new, notes, _ = self.layers_work()
+        if new is None:
+            return []
+        meta, oc = self.layers_texts()
+        return [
+            (
+                f".github: fold {COURSE_CONFIG} and {OPENCOURSE_FILE} into "
+                f"{NEW_COURSE_FILE} (decision 0039)"
+            ),
+            *_diff(NEW_COURSE_FILE, "", new),
+            *(f"  {note}" for note in notes),
+            *(
+                f"  delete {path}"
+                for path, text in ((COURSE_CONFIG, meta), (OPENCOURSE_FILE, oc))
+                if text is not None
+            ),
+        ]
+
+    def layers_stops(self) -> list[str]:
+        return self.layers_work()[2]
+
+    def layers(self) -> bool:
+        new, _, stops = self.layers_work()
+        if new is None:
+            return True
+        if stops:
+            return False
+        return move_files(
+            self.org,
+            ".github",
+            {},
+            LAYERS_COMMIT,
+            files={NEW_COURSE_FILE: new.encode()},
+            delete=[COURSE_CONFIG, OPENCOURSE_FILE],
+        )
+
+    def layers_verified(self) -> bool:
+        """Done, and course.yml reads with this engine's own readers."""
+        if not self.layers_done():
+            return False
+        try:
+            meta = read_course(self.org).mapping()
+            opencourse.parse(opencourse.block(meta))
+        except (yaml.YAMLError, Unusable) as exc:
+            log_err(f"{NEW_COURSE_FILE}: {exc}")
+            return False
+        return True
 
     # re-render ---------------------------------------------------------------
     def drift(self) -> list[str]:
@@ -3545,6 +4708,15 @@ class Course:
                 rollback=f"remove the {TEMPLATE_TOPIC} topic from the templates",
             ),
             Step(
+                "config layers",
+                done=self.layers_done,
+                plan=self.layers_plan,
+                do=self.layers,
+                verify=self.layers_verified,
+                stops=self.layers_stops,
+                rollback=f"git revert the '{LAYERS_COMMIT}' commit in {dotgithub}",
+            ),
+            Step(
                 "re-render",
                 done=self.rerender_done,
                 plan=lambda: (
@@ -3577,7 +4749,9 @@ class Course:
 def _pointer_course(org: str, listing: dict[str, dict]) -> str:
     """The course org a semester points at, from whichever pointer it has now."""
     if CONFIG_REPO in listing:
-        text = get_file_content(org, CONFIG_REPO, records.path("pointer"))
+        text = read_semester(org).pointer.text
+        if text is None:
+            text = get_file_content(org, CONFIG_REPO, OLD_SEMESTER_POINTER)
         if text is not None:
             return str(_yaml(text).get("course") or "")
     old = get_file_content(org, OLD_POINTER_REPO, COURSE_CONFIG)
@@ -3992,6 +5166,16 @@ def main() -> int:
     log(f"  central ref of the course: {ref}")
     _warn_drift(course, ref)
     return run(args.org, target.steps(), args.preview, target.pause)
+
+
+def _list_semester_grades_rename() -> None:
+    """0.11.0: the semester grades file's old name joins the layout step's moves, so a
+    semester that returned no marks since lists and moves it. (Return marks renames it on
+    its own first real run.)"""
+    SEMESTER_MOVES[records.RETIRED_SEMESTER_GRADES] = records.path("semester_gradebook")
+
+
+_list_semester_grades_rename()
 
 
 if __name__ == "__main__":

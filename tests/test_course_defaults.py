@@ -1,4 +1,4 @@
-"""Course-level defaults in `dsl-course.yml`: `assignment_defaults:` answers the New
+"""Course-level defaults in `course.yml`: `assignment_defaults:` answers the New
 assignment boxes left at the course-default choice; the `schedule.yml` Bootstrap semester
 seeds names the institution's defaults and copies none of them."""
 
@@ -10,52 +10,57 @@ from datetime import date
 import pytest
 import yaml
 
-from dsl_course import bootstrap_course, course, policy, scaffold, schedule, settings
+from dsl_course import (
+    bootstrap_course,
+    course,
+    legacy,
+    policy,
+    scaffold,
+    schedule,
+    settings,
+)
 from dsl_course.ops.registry import REGISTRY
 from dsl_course.ops.request import RequestError, parse_request
-from dsl_course.welcome import template
 
 SENTINEL = course.COURSE_DEFAULT_CHOICE
 
 
-# ------------------------------------------------------------- assignment_defaults
+# ------------------------------------------------------------- course.yml defaults
 
 
-def test_the_four_new_assignment_boxes_can_be_set_course_wide():
+def test_the_course_defaults_block_reads_its_keys_and_never_the_submit_box():
     block = {
-        "formats": "py",
         "submit_via": "external",
         "team_formation": "assigned",
-        "visibility": "public",
+        "assignment_repo_visibility": "public",
+        "materials_repo": "handouts",
     }
-    assert settings.parse_assignment_defaults(block) == {**block, "formats": ("py",)}
-    # Read back as the box types it.
+    assert settings.parse_course_defaults(block) == {
+        "team_formation": "assigned",
+        "visibility": "public",
+        "materials_repo": "handouts",
+    }
+
+
+def test_formats_left_the_cascade(capsys):
+    # Decision 0039 rule 2: the New assignment wizard asks; a course cannot set it.
+    assert settings.parse_course_defaults({"formats": "py"}) == {}
+    assert "formats" in capsys.readouterr().err
     assert scaffold.resolve_answers({"formats": SENTINEL}, {"formats": ("py",)}) == {
-        "formats": "py"
+        "formats": "ipynb"
     }
 
 
 def test_a_course_default_outside_the_vocabulary_is_refused_out_loud(capsys):
     # Refused, so the course states nothing and the institution's value applies.
-    got = settings.parse_assignment_defaults({"visibility": "everyone"})
+    got = settings.parse_course_defaults({"assignment_repo_visibility": "everyone"})
     assert got == {}
     assert "visibility" in capsys.readouterr().err
 
 
-def test_a_course_default_format_is_a_list_of_starters_as_the_box_takes(capsys):
-    got = settings.parse_assignment_defaults({"formats": "ipynb, py"})
-    assert got == {"formats": ("ipynb", "py")}
-    # An unusable answer is dropped, so the toolkit's ipynb applies - never `none`.
-    for bad in ("ipnb", "none,py", ""):
-        assert settings.parse_assignment_defaults({"formats": bad}) == {}
-        assert "format" in capsys.readouterr().err
-    assert scaffold.resolve_answers({"formats": SENTINEL}, {}) == {"formats": "ipynb"}
-
-
-def test_the_legacy_submit_via_word_reads_as_its_new_name():
-    assert settings.parse_assignment_defaults({"submit_via": "github"}) == {
-        "submit_via": "assignment_repo"
-    }
+def test_submit_via_is_not_a_course_default():
+    # Decision 0039's fixed key set: the New assignment wizard asks for it.
+    assert settings.parse_course_defaults({"submit_via": "external"}) == {}
 
 
 def test_a_box_left_at_the_course_default_takes_the_courses_value():
@@ -68,11 +73,12 @@ def test_a_box_left_at_the_course_default_takes_the_courses_value():
     got = scaffold.resolve_answers(
         answers, {"formats": "rmd", "submit_via": "external", "visibility": "private"}
     )
-    # A box somebody chose is kept; one they left falls to the course, then the toolkit.
+    # A box somebody chose is kept; one they left falls to the course, then the toolkit
+    # (formats and submit_via to the toolkit at once: they left the cascade).
     assert got == {
-        "formats": "rmd",
-        "team_formation": "self_select",
-        "submit_via": "external",
+        "formats": "ipynb",
+        "team_formation": "none",
+        "submit_via": "assignment_repo",
         "visibility": "public",
     }
 
@@ -83,7 +89,7 @@ def test_with_no_course_defaults_the_toolkit_answers_as_the_form_used_to():
     )
     assert scaffold.resolve_answers(answers, {}) == {
         "formats": "ipynb",
-        "team_formation": "self_select",
+        "team_formation": "none",
         "submit_via": "assignment_repo",
         "visibility": "private",
     }
@@ -124,9 +130,10 @@ def test_the_button_untouched_scaffolds_with_the_courses_defaults(monkeypatch):
             "team_formation": "assigned",
         },
     )
-    assert seen["formats"] == ["py"]
-    assert seen["submit_via"] == "shared_dropbox_repo"
-    # No run box at all: how a semester runs it is that semester's assignments.yml.
+    assert seen["formats"] == ["ipynb"]
+    # `submit_via` left the course's defaults (decision 0039): the toolkit answers.
+    assert seen["submit_via"] == "assignment_repo"
+    # No run box at all: how a semester runs it is that semester's schedule.yml entry.
     assert "team_formation" not in seen and "visibility" not in seen
 
 
@@ -197,31 +204,36 @@ def test_the_seeded_skeleton_names_the_institution_s_defaults_and_sets_none():
     text = _seeded()
     ours = policy.defaults()
     assert f"# timezone: {ours['timezone']}" in text
-    assert f"semester_end + {ours['archive']['grace_days']} days" in text
+    assert f"the end + {ours['archive_grace_days']} days" in text
     sched = schedule.parse(yaml.safe_load(text) or {})
     # Nothing copied into the semester: absent means the institution's default.
     assert sched.timezone == schedule.DEFAULT_TZ == ours["timezone"]
-    assert "\narchive:\n" in text
+    assert "\n    type: archive\n" in text
 
 
 def test_an_unusable_grace_days_is_flagged_and_the_sixty_days_stand():
     sched = schedule.parse(
-        {"semester_end": "2026-12-18", "archive": {"grace_days": "a month"}}
+        {
+            "semester": {
+                "end": {"type": "end", "event_datetime": "2026-12-18"},
+                "archive": {"type": "archive", "grace_days": "a month"},
+            }
+        }
     )
     assert sched.archive.when == date(2026, 12, 18) + schedule.ARCHIVE_GRACE
     (drop,) = sched.dropped
-    assert drop.startswith("archive.grace_days")
+    assert drop.startswith("semester.archive.grace_days")
 
 
-def test_the_course_template_offers_the_course_layer_and_nothing_retired():
-    text = template("course/dsl-course.yml")
-    for key in course.RETIRED_COURSE_KEYS:
-        assert f"\n{key}:" not in text and f"# {key}:" not in text
-    block = yaml.safe_load(text.format(course_name="C", course_code="E1"))
-    # Every line commented: the course layer is optional, absent = the institution's.
-    assert block[settings.ASSIGNMENT_DEFAULTS_KEY] is None
-    for key in ("formats", "submit_via", "team_formation", "visibility"):
-        assert key in text
+def test_the_course_seed_offers_every_default_and_nothing_retired():
+    text = bootstrap_course.course_seed("C", "E1")
+    for key in legacy.renames(legacy.COURSE_FILE_KEYS):
+        assert f"\n{key}:" not in text
+    seeded = yaml.safe_load(text)
+    # Every default commented: the course layer is optional, absent = the institution's.
+    assert seeded["defaults"] is None
+    for key in settings.DEFAULT_FILE_KEYS:
+        assert f"  # {key}:" in text
 
 
 def test_the_console_s_starter_choice_reaches_the_scaffold():

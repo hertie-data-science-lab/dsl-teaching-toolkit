@@ -212,8 +212,8 @@ of truth (SSOT) `sync_faculty` reconciles against. **Anything not in the SSOT ge
 so an admin added via the Teams UI or a one-off `gh api` call must also be declared in
 `dsl-course.yml`.
 
-A **semester** is bootstrapped from the course org's own **Bootstrap semester** button (not the
-central action), given the empty semester org's name. It runs the same `bootstrap_course` with
+A **semester** is bootstrapped by the Console's New semester (`semester.bootstrap`, run in the
+course org's Console workflow, not the central action), given the empty semester org's name. It runs the same `bootstrap_course` with
 `--semester`: seeds `join` + `semester-config` (roster, teams, `schedule.yml`,
 `instructors.yml`), creates the `students` + `auditors` teams, tightens permissions, scaffolds the
 website, applies the course's current `course_admins`, registers the semester in the course's
@@ -460,7 +460,7 @@ why `autograde_score` is faculty-reviewed before distribution and never shown to
 `collect` creates at handout, refreshes each tick and seals at the cutoff. `distribute` then fans
 out what a grader typed there: a comment on each submission repo's Feedback issue, each student's
 private `grades-<handle>` gradebook (provisioned by `ensure_gradebooks` on the way in), the
-registrar export, and an email saying there is something new to read. Everything the toolkit owns
+semester grades file, and an email saying there is something new to read. Everything the toolkit owns
 sits under `info:`; everything else is the grader's and is never rewritten. Nothing is said twice -
 every send is recorded in `.system/gradebook/distributed.csv`, so a re-run after one correction reaches one
 student.
@@ -651,9 +651,9 @@ rebuilt from scratch each run`"]
 call `sync_site` in-process when they change something.
 
 **Row types.** The three collections are rebuilt from scratch each run, so a de-released row
-disappears. Each row carries its own `type`, and the theme picks a template - and therefore a
-colour - from it alone: `lecture`, `lab`, `assignment` (with a nested `due` event), `exam`,
-`special_event`, `term_date`. Lecture vs lab is decided by the **released section
+disappears. Each row carries its own `kind`, and one template labels and colours it from the
+policy's kinds: `lecture`, `lab`, `assignment` (with a nested `due` event), `exam`,
+`special_event`, `semester`. Lecture vs lab is decided by the **released section
 directory** (`labs/`), never by a faculty declaration; term rows are synthesised from
 `semester_start` / `semester_end`; undated entries sort to the end of term and render as
 TBC.
@@ -770,7 +770,7 @@ Self-contained - workflows and their Python implementation both live in this rep
   - `sync_membership` - the one consolidated entrypoint (roster + teams + faculty) behind the
     **Sync membership** button/cron/dispatch.
   - `roster` / `teams` - read `students.csv` / `teams.csv`.
-  - `status` - the **Check semester setup** per-semester checklist.
+  - `status` - the per-semester checklist the Console's Check runs.
   - `list_orgs` - enumerate DSL course and semester orgs by topic; drives `refresh-inventory.yml`.
   - `ghcli` - the shared `gh`/git subprocess wrappers, their timeouts and rate-limit
     backoff, and the fail-loud read contract (`is_missing_resource`).

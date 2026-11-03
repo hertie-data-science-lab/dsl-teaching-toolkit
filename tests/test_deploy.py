@@ -8,9 +8,13 @@ batching itself is exercised in test_scheduler.py, which drives the same
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from dsl_course import access, course, deploy, ghcli, records, repos
+from dsl_course import access, course, deploy, ghcli, records, repos, selection
+from dsl_course import repos as repo_mod
+from dsl_course.fs import copy_tree
 from dsl_course.schedule import Deploy, Release, Schedule
 
 
@@ -116,7 +120,7 @@ def test_cli_builds_one_deploy_per_pair_and_one_batch(monkeypatch):
         seen.update(
             course_org=course_org, semester_org=semester_org, deploys=deploys, sync=sync
         )
-        return 0, True
+        return deploy.Batch(0, True, [])
 
     monkeypatch.setattr(deploy, "deploy_many", fake_deploy_many)
     monkeypatch.setattr(
@@ -187,7 +191,9 @@ def test_an_entry_is_released_in_one_batch_with_one_sync(monkeypatch):
     monkeypatch.setattr(
         deploy,
         "deploy_many",
-        lambda org, sem, deploys, sync=True: calls.append((deploys, sync)) or (0, True),
+        lambda org, sem, deploys, sync=True: (
+            calls.append((deploys, sync)) or deploy.Batch(0, True, [])
+        ),
     )
     argv = ["deploy", "--course-org", "Course", "--semester-org", "Semester-f2026"]
     monkeypatch.setattr("sys.argv", [*argv, "--entry", "s5", "--no-preview"])
@@ -204,7 +210,7 @@ def test_semester_dest_repo_defaults_to_materials(monkeypatch):
     monkeypatch.setattr(
         deploy,
         "deploy_many",
-        lambda *a, **k: (captured.append(a[2]), (0, True))[1],
+        lambda *a, **k: (captured.append(a[2]), deploy.Batch(0, True, []))[1],
     )
     monkeypatch.setattr(
         "sys.argv",
@@ -376,6 +382,7 @@ def _converge(monkeypatch, listing):
 def test_a_superseded_description_is_updated_and_others_are_left_alone(monkeypatch):
     # Only a wording WE have since replaced may be overwritten. Faculty's own text, and a
     # repo already carrying the current wording, must produce no request at all.
+    monkeypatch.setattr(repo_mod, "SUPERSEDED_DESCRIPTIONS", {SUPERSEDED: CURRENT})
     repos = [
         {"name": "materials", "description": SUPERSEDED},
         {"name": "labs", "description": CURRENT},
@@ -423,10 +430,21 @@ def test_every_superseded_description_names_a_replacement_we_still_write(monkeyp
             )
 
 
-def test_the_dotgithub_description_says_the_opposite_thing_per_tier():
+def test_the_dotgithub_description_says_the_opposite_thing_per_tier(monkeypatch):
     # A semester org's .github is scaffolding nobody should open; a course org's is where
     # faculty work. Converging both onto one wording would tell half of them the wrong
     # thing, which is why the tier picks the table.
+    old = "Org profile and configuration"
+    monkeypatch.setattr(
+        repos,
+        "SUPERSEDED_SEMESTER_DESCRIPTIONS",
+        {old: "[do not touch]: Org profile and configuration"},
+    )
+    monkeypatch.setattr(
+        repos,
+        "SUPERSEDED_COURSE_DESCRIPTIONS",
+        {old: "[control panel]: Org profile & configuration"},
+    )
     listing = [{"name": ".github", "description": "Org profile and configuration"}]
     calls = []
     original = repos.gh
@@ -474,29 +492,80 @@ def test_a_normal_subpath_still_resolves_under_the_clone(tmp_path):
     assert deploy._resolve_within(tmp_path, "labs/") == (tmp_path / "labs").resolve()
 
 
+# The folders among the names these tests hand the filter; every other name is a file.
+_DIRS = {".git", ".github", ".system", "labs", "solutions", "Tests", "__pycache__"}
+
+
+def _release_filter(root: Path, names: list[str], whole: bool, at: Path | None = None):
+    """What a release's copy filter skips of `names` in `at` (default `root`), made real
+    on disk first: the filter asks the disk whether a name is a folder."""
+    here = at or root
+    here.mkdir(parents=True, exist_ok=True)
+    for n in names:
+        if n in _DIRS or n == ".ipynb_checkpoints":
+            (here / n).mkdir()
+        else:
+            (here / n).write_text("x")
+    ignore = selection.deny(root, use=deploy._release_use(whole))
+    return ignore(str(here), names)
+
+
 def test_a_whole_repo_release_skips_the_faculty_side_of_the_repo(tmp_path):
-    # `.system/` is written into every materials repo by scaffold as "never released";
-    # `.github` is the Release buttons and their bot-token wiring. Both are faculty-side, so
-    # neither may ride along with "give me everything".
-    ignore = deploy._copy_ignore(tmp_path)
+    # `.system/` is written into every materials repo by scaffold as "never released"
+    # (the institution denylist, at every depth); `.github` is the Release buttons and
+    # their bot-token wiring, skipped at the root of "give me everything".
     names = [".git", ".github", ".system", "labs", "SYLLABUS.md"]
-    assert ignore(str(tmp_path), names) == {".git", ".github", ".system"}
+    assert _release_filter(tmp_path, names, whole=True) == {
+        ".git",
+        ".github",
+        ".system",
+    }
 
 
 def test_the_faculty_side_is_skipped_only_at_the_repo_root(tmp_path):
-    # The exclusion is root-ANCHORED, not a basename glob: a faculty member's own
+    # `.github` is root-ANCHORED, not a basename glob: a faculty member's own
     # `labs/.github/` or `labs/MAINTAINING.md` is content, not release plumbing, and must
     # travel. `.git` is the exception - it is never copyable, at any depth.
-    ignore = deploy._copy_ignore(tmp_path)
     names = [".git", ".github", "MAINTAINING.md", "01.md"]
-    assert ignore(str(tmp_path / "labs"), names) == {".git"}
+    skipped = _release_filter(tmp_path, names, whole=True, at=tmp_path / "labs")
+    assert skipped == {".git"}
 
 
 def test_naming_the_faculty_side_explicitly_still_releases_it(tmp_path):
-    # The skip is what "everything" means, not a ban: releasing `.github` as a named
-    # course_source_path is a subpath copy, which excludes nothing but `.git`.
-    ignore = deploy._copy_ignore(None)
-    assert ignore(str(tmp_path), [".git", ".github", "MAINTAINING.md"]) == {".git"}
+    # The `.github` skip is what "everything" means, not a ban: releasing it as a named
+    # course_source_path is a subpath copy, which excludes nothing but the denylist.
+    names = [".git", ".github", "MAINTAINING.md"]
+    assert _release_filter(tmp_path, names, whole=False) == {".git"}
+
+
+def test_a_folder_release_does_not_sweep_up_the_denylist(tmp_path):
+    # Decision 0040 rule 3: the institution denylist is the first layer of every outbound
+    # copy - a `solutions/` beside the lab it answers stays behind when the lab ships.
+    names = ["solutions", "Tests", "grading_config.yml", ".env.local", "lab.ipynb"]
+    skipped = _release_filter(tmp_path, names, whole=False, at=tmp_path / "labs" / "01")
+    assert skipped == {"solutions", "Tests", "grading_config.yml", ".env.local"}
+
+
+def test_a_solution_named_outright_ships_exactly_what_it_names(tmp_path):
+    # The Maths shape (coordinator ruling on PR #478): `from_path:
+    # solutions/labs/02_lab` -> `labs/02_lab/solutions`. The denylist judges what lies
+    # BELOW the named path, never its ancestors, so the whole folder ships.
+    src = tmp_path / "src"
+    for rel in ("solutions/labs/02_lab/a.ipynb", "solutions/labs/02_lab/data/x.csv"):
+        (src / rel).parent.mkdir(parents=True, exist_ok=True)
+        (src / rel).write_text("x")
+    dest = tmp_path / "dest" / "labs" / "02_lab" / "solutions"
+    copy_tree(
+        src / "solutions/labs/02_lab",
+        dest,
+        selection.deny(src, use=deploy._release_use(False)),
+    )
+    assert sorted(
+        p.relative_to(dest).as_posix() for p in dest.rglob("*") if p.is_file()
+    ) == [
+        "a.ipynb",
+        "data/x.csv",
+    ]
 
 
 # ------------------------------------------ what is never course material, wherever it is
@@ -509,7 +578,6 @@ def test_naming_the_faculty_side_explicitly_still_releases_it(tmp_path):
 def test_junk_never_travels_with_a_release_at_any_depth(tmp_path):
     # Unlike the faculty-side exclusions, this one is NOT root-anchored: the junk is in the
     # session folder, several levels below any root a release names.
-    ignore = deploy._copy_ignore(None)
     names = [
         ".DS_Store",
         ".gitkeep",
@@ -520,19 +588,17 @@ def test_junk_never_travels_with_a_release_at_any_depth(tmp_path):
         "lab.ipynb",
         ".Rprofile",
     ]
-    skipped = ignore(str(tmp_path / "labs" / "01_session-1"), names)
+    skipped = _release_filter(
+        tmp_path, names, whole=False, at=tmp_path / "labs" / "01_session-1"
+    )
     # `.Rprofile` is course material an R course's students need - the rule is a closed
     # list of names, never a rule about dots.
     assert skipped == set(names) - {"lab.ipynb", ".Rprofile"}
 
 
 def test_junk_is_matched_however_the_machine_that_wrote_it_spelled_it(tmp_path):
-    ignore = deploy._copy_ignore(None)
-    assert ignore(str(tmp_path), [".ds_store", "THUMBS.DB", "Desktop.ini"]) == {
-        ".ds_store",
-        "THUMBS.DB",
-        "Desktop.ini",
-    }
+    names = [".ds_store", "THUMBS.DB", "Desktop.ini"]
+    assert _release_filter(tmp_path, names, whole=False) == set(names)
 
 
 # The end-to-end half of this - a session folder copied through clone -> copytree ->
@@ -608,8 +674,9 @@ def test_an_unwritten_syllabus_stub_is_withheld_too():
 
 
 def test_the_excluded_root_files_are_named_from_one_place():
-    # Excluded as ONE folder, so no file the toolkit writes there can lapse out of it.
-    assert records.SYSTEM_DIR in deploy.ROOT_RELEASE_EXCLUDED
+    # Excluded as ONE folder (the institution denylist), so no file the toolkit writes
+    # there can lapse out of it.
+    assert records.SYSTEM_DIR in selection.DENYLIST
     for path in (
         course.SYLLABUS_SAMPLE_FILE,
         course.SYLLABUS_SESSIONS_FILE,
@@ -691,7 +758,7 @@ def test_a_dangling_symlink_is_copied_as_a_link_not_followed(monkeypatch):
         (src / "sec" / "gone.md").symlink_to("nowhere.md")
 
     snaps = _stub_deploy_many(monkeypatch, build)
-    errors, _changed = deploy.deploy_many(
+    errors, _changed, _copies = deploy.deploy_many(
         "COURSE", "SEMESTER", [_deploy("sec")], sync=False
     )
     assert errors == 0
@@ -706,7 +773,7 @@ def test_a_directory_symlink_loop_does_not_recurse(monkeypatch):
         (src / "sec" / "loop").symlink_to(src / "sec", target_is_directory=True)
 
     snaps = _stub_deploy_many(monkeypatch, build)
-    errors, _changed = deploy.deploy_many(
+    errors, _changed, _copies = deploy.deploy_many(
         "COURSE", "SEMESTER", [_deploy("sec")], sync=False
     )
     assert errors == 0
@@ -730,7 +797,7 @@ def test_one_unusable_path_is_one_counted_error_and_the_rest_still_ship(monkeypa
         return real_copytree(src, dst, **kwargs)
 
     monkeypatch.setattr(deploy.shutil, "copytree", flaky)
-    errors, _changed = deploy.deploy_many(
+    errors, _changed, _copies = deploy.deploy_many(
         "COURSE", "SEMESTER", [_deploy("bad"), _deploy("good")], sync=False
     )
     assert errors == 1  # not an exception out of deploy_many
@@ -755,7 +822,7 @@ def test_a_dest_that_cannot_reach_upstream_is_dropped_like_a_failed_clone(
         return stubbed(*args, **kwargs)
 
     monkeypatch.setattr(deploy, "git", refuses_the_checkout)
-    errors, changed = deploy.deploy_many(
+    errors, changed, _copies = deploy.deploy_many(
         "COURSE", "SEMESTER", [_deploy("sec")], sync=False
     )
 
@@ -795,7 +862,11 @@ def _plan_with_guest(monkeypatch):
                     "guest", when, [Deploy("cm", "lectures/guest")], kind="lecture"
                 ),
                 Release(
-                    "lecture-2", when, [Deploy("cm", "lectures/02")], kind="lecture"
+                    "lecture-2",
+                    when,
+                    [Deploy("cm", "lectures/02")],
+                    kind="lecture",
+                    session="2",
                 ),
             ]
         ),
@@ -817,10 +888,12 @@ def _plan_with_guest(monkeypatch):
 def test_release_now_refuses_a_copy_of_an_entry_with_no_number(
     monkeypatch, path, refused
 ):
-    # Decision 0020 rule 3: the copy of an unnumbered entry is refused as the scheduled
-    # release skips it; a numbered entry's, or one off the plan, goes.
+    # Decision 0038: the copy of a lecture with no session is refused as the scheduled
+    # release skips it; one with a session, or a copy off the plan, goes.
     _plan_with_guest(monkeypatch)
-    monkeypatch.setattr(deploy, "deploy_many", lambda *a, **k: (0, True))
+    monkeypatch.setattr(
+        deploy, "deploy_many", lambda *a, **k: deploy.Batch(0, True, [])
+    )
     monkeypatch.setattr(
         "sys.argv",
         ["deploy", "--course-org", "C", "--course-source-repo", "cm",
@@ -830,7 +903,7 @@ def test_release_now_refuses_a_copy_of_an_entry_with_no_number(
     if refused:
         assert out == 1
         assert out.reasons == [
-            {"code": "NOT_NUMBERED", "text": "Give guest a number first."}
+            {"code": "NO_SESSION", "text": "Give guest a session first."}
         ]
     else:
         assert out == 0

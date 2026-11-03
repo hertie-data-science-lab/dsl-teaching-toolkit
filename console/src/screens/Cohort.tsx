@@ -55,8 +55,8 @@ export function headerLine(status: Status, sched: Schedule | null, tz: string, t
   return out.join(' ');
 }
 
-const KIND_ORDER = ['lec', 'lab', 'asg', 'exam', 'evt', 'term'];
-const KIND_WORD: Record<string, string> = { lec: 'lecture', lab: 'lab', asg: 'assignment', exam: 'exam', evt: 'event', term: 'semester date' };
+const KIND_ORDER = ['lec', 'lab', 'asg', 'exam', 'evt', 'semester'];
+const KIND_WORD: Record<string, string> = { lec: 'lecture', lab: 'lab', asg: 'assignment', exam: 'exam', evt: 'event', semester: 'semester date' };
 
 /** A week's badge on the strip: how many problems, and whether they are all later (hollow). */
 export interface WeekCount { n: number; later: boolean }
@@ -286,7 +286,7 @@ export const SEMESTER_STEPS: { id: string; name: string }[] = [
 const K_HINT: Record<string, string> = {
   K1: 'The console and automation can read the semester’s GitHub org.',
   K2: 'The semester’s repos exist (semester-config, join and the student site) and the course lists the semester.',
-  K3: 'At least one instructor in instructors.yml, on the Instructors page.',
+  K3: 'At least one instructor in semester.yml, on the Instructors page.',
   K4: 'schedule.yml with the semester’s start and end and at least one release or assignment.',
   K5: 'At least one student on the roster (students.csv).',
   K6: 'The student site’s repo exists.',
@@ -453,7 +453,7 @@ function Overview(p: ReadyProps) {
   const [selected, setSelected] = useState<number[]>(thisWeek);
   // Every problem with its time, once per render (decision 0034): now or soon are the strip's red
   // counts and the Problems tab; later ones are Coming up.
-  const aside = useSetAside({ org: p.course.org, files: p.files, migrated: p.courseMigrated, write: p.course.write });
+  const aside = useSetAside({ org: p.course.org, files: p.files, write: p.course.write });
   // An empty week the course set aside leaves the moment the list says so, before the status is rewritten.
   const tiered = useMemo(() => tier(status).filter(({ p: x }) => !(x.aside && aside.list?.includes(x.id))), [status, aside.list?.join('\n')]);
   const marks = useMemo(() => releaseMarks(status, tiered, now), [status, tiered, now]);

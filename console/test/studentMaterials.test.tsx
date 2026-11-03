@@ -9,7 +9,8 @@ import { GitHubClient, encodeBase64, type TreeEntry } from '../src/github/client
 import { ASSET_LIMIT, forgetShown, showFile } from '../src/model/materials';
 import { CELL_BREAK, htmlRefs, inlineHtml, notebookCells, notebookHtml, resolve, splitRendered } from '../src/model/viewer';
 import { AskedList, JoinCourseForm, TeamForm, issueState, joinCourseUrl, joinTeamUrl } from '../src/screens/StudentJoin';
-import { MaterialsTree, ShownView, splitEntry } from '../src/screens/StudentMaterials';
+import { MaterialsTree, splitEntry } from '../src/screens/StudentMaterials';
+import { ShownView } from '../src/ui/Viewer';
 import { materialHref } from '../src/screens/StudentFiles';
 import { FakeGitHub, fileBody, json } from './fake';
 

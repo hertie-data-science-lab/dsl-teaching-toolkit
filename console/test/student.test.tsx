@@ -9,6 +9,7 @@ import { isMarked, markEntry, parseGradebook, readMine, readReceipts, unitOf, ty
 import { FRESH_MS, SiteSource, cutoffFrom, instant, myState, startOfDay, type SemesterFacts } from '../src/model/student';
 import { weekItems } from '../src/model/week';
 import { StudentScreen } from '../src/screens/Student';
+import { MarkBody } from '../src/screens/StudentAssignment';
 import { AssignmentsView, YourMarks } from '../src/screens/StudentAssignments';
 import { InstructorsView } from '../src/screens/StudentInstructors';
 import { ArchiveNotice, ScheduleView } from '../src/screens/StudentSchedule';
@@ -59,7 +60,7 @@ describe('the site source behind StudentData', () => {
     expect(kinds).toContain('session-01:lecture');
     expect(kinds).toContain('lab-03:lab');
     expect(kinds).toContain('01-midterm-exam:exam');
-    expect(kinds).toContain('term-start:term_date');
+    expect(kinds).toContain('term-start:semester');
     expect(kinds).toContain('02-assignment-2:handout:assignment');
     expect(kinds).toContain('02-assignment-2:due:due');
     const s1 = f.rows.find((r) => r.id === 'session-01')!;
@@ -67,7 +68,7 @@ describe('the site source behind StudentData', () => {
     expect(f.rows.find((r) => r.id === 'session-12')!.released).toBe(false);
     expect(f.rows.find((r) => r.id === 'term-start')!.allDay).toBe(true);
     expect(f.archive).toBe('2027-01-12T09:00:00');
-    expect(f.rows.find((r) => r.id === 'cohort-archived')).toMatchObject({ title: 'Semester archived', details: '', allDay: true });
+    expect(f.rows.find((r) => r.id === 'semester-archived')).toMatchObject({ title: 'Semester archived', details: '', allDay: true });
     expect(f.materialsRepos).toEqual(['materials']);
     expect(f.latePolicy).toHaveLength(2);
   });
@@ -173,6 +174,12 @@ describe('a student’s own data', () => {
     const b3 = markEntry({ final_grade: 30, feedback: { overall: 'Good.', Q1: 'Tidy.', Q2: null }, question_feedback: { Q3: 'Check units.' } });
     expect(b3).toMatchObject({ finalGrade: '30', feedback: 'Good.', questionFeedback: { Q1: 'Tidy.', Q3: 'Check units.' } });
     expect(parseGradebook('total: 88\nassignments: {}\n')?.total).toBe('88');
+    // 0.11.0: the team's score and the student's own adjustment are on the page.
+    const team = markEntry({ final_grade: '40', score: { Q1: 14, Q2: 29 }, adjustment: '-3', team: 'team-alpha', days_late: 0 });
+    expect(team).toMatchObject({ adjustment: '-3', score: { Q1: '14', Q2: '29' } });
+    const html = render(<MarkBody e={team} />);
+    expect(html).toContain('<dt>Adjustment</dt><dd>-3</dd>');
+    expect(render(<MarkBody e={markEntry({ final_grade: '43', score: 43 })} />)).not.toContain('Adjustment');
     expect(parseGradebook(': : :')).toBeNull();
   });
 
@@ -234,7 +241,7 @@ describe('the screens', () => {
     expect(out).toContain('Week 1 <span>from Mon 3 Aug</span>');
     expect(out).toMatch(/trow lec/);
     expect(out).toMatch(/trow lab/);
-    expect(out).toMatch(/trow term/);
+    expect(out).toMatch(/trow semester/);
     expect(out).toMatch(/trow asg mine/);
     expect(out).toContain('not released yet');
     expect(out).toContain('today-line');

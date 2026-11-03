@@ -1,0 +1,38 @@
+# INSTRUCTOR-OWNED - yours to edit freely; edits here are not overwritten.
+#
+# This semester: who delivers it, the defaults its assignments run on, and its student
+# site. The dates live in schedule.yml; what each assignment IS lives in its template's
+# grading_config.yml. Reference: https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/release/docs/05-manage-teaching-team.md
+# Worked example: https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/release/example-course/semester-org/semester.yml
+
+# Who delivers THIS semester: GitHub access, fault mail, the student site's instructor cards.
+# people:
+#   - github_handle: "janedoe"        # REQUIRED
+#     role: instructor                # REQUIRED - instructor | teaching_assistant
+#     email: "jane@example.org"       # REQUIRED - fault mail; not shown on the site unless `show_email: true`
+#     name: "Prof. Jane Doe"          # optional
+#     title: "Professor of ..."       # optional
+#     photo: "https://github.com/janedoe.png"   # optional: a hotlinkable URL, or a path under _images/pp/ in the site repo
+#     url: "https://.../profile/jane" # optional
+#     start: "2026-09-01"           # optional - no start = active immediately
+#     end: "2027-01-31"        # optional - no end = indefinite
+#   - github_handle: "anOther"
+#     role: teaching_assistant
+#     email: "another@example.org"
+#     name: "..."
+
+defaults:   # every key present; uncomment to override. The comment shows the inherited value and its source.
+  # timezone: Europe/Berlin                 (institution)
+  # late_window_days: 10                    (institution)
+  # late_penalty_per_day: 10%               (institution)
+  # max_team_size: 3                        (course)
+  # assignment_repo_visibility: private     (institution)
+  # archive_grace_days: 60                  (institution)
+  # materials_repo: materials               (institution)
+  # marks_per_question: true                (institution)
+  # team_formation: self_select             (course)
+
+# The semester's student site (public, no sign-in).
+# student_site:
+#   syllabus: SYLLABUS.md             # the released path the home page pins
+#   host: {kinds: [lectures, labs, exams, events], types: [html, pdf]}   # viewable copies on this public site; left out = every kind but readings (copyright), html and pdf

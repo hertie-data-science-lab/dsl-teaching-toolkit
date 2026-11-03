@@ -11,7 +11,7 @@ import { GitHubClient, type GhRepo } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
 import { StaticFiles } from './staticFiles';
 import { KIND_LABEL } from '../src/model/format';
-import { CONTENT_KINDS, inferKind } from '../src/model/materialsRules';
+import { KINDS } from '../src/model/policy';
 import { StatusStore } from '../src/model/status';
 import type { Adapter, Handle } from '../src/ops/adapter';
 import { generateSyllabus } from '../src/ops/defs';
@@ -102,13 +102,9 @@ describe('Treat as course materials', () => {
 });
 
 describe('the Supporting files kind', () => {
-  it('comes from the policy export, with its names', () => {
+  it('comes from the policy export, released but never a row', () => {
     expect(KIND_LABEL.assets).toBe('Supporting files');
-    expect(CONTENT_KINDS).toContain('assets');
-    for (const f of ['data', 'img', 'images', 'src', 'assets', 'figures', 'fig', 'static']) expect(inferKind(f)).toEqual({ kind: 'assets', named: true });
-    // Decision 0031 rule 10: any other name is supporting files by default, not a lecture.
-    expect(inferKind('code')).toEqual({ kind: 'assets', named: false });
-    expect(inferKind('Lectures')).toEqual({ kind: 'lecture', named: true });
+    expect(KINDS.find((k) => k.key === 'assets')).toMatchObject({ shown: false, system: false });
   });
 });
 

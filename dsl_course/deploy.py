@@ -1,5 +1,5 @@
 """dsl-course deploy -- publish path(s) from a course-org source repo into a semester-org
-repo, additively + idempotently:
+repo, additively:
 
     source/<repo>/<course_source_path>          (a folder - e.g. lectures/02_intro - or a file)
             |  copy that path
@@ -23,6 +23,13 @@ paired by index (parse_path_pairs) - one Deploy per pair, one deploy_many call f
 `--entry KEY` releases one schedule.yml entry instead: every copy it lists, from every
 source repo it draws on, in ONE deploy_many call with one site sync.
 
+A release is ONE copy at its time (decision 0043): `deploy_many` reports, per copy, what
+it copied and whether it landed, and the caller records each landed copy in the
+semester's release record (`release_record`). The scheduler ships a recorded copy again
+only when the semester autosyncs released edits; this CLI always copies - it is the
+deliberate path (Release early / now / again, or a hand release) - and records every copy
+of `--entry`, and every schedule copy a release of paths covers.
+
 Usage:
     python3 -m dsl_course.deploy \\
         --course-org COURSE --course-source-repo course-materials-f2026 \\
@@ -36,10 +43,11 @@ from __future__ import annotations
 import shutil
 import sys
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import NamedTuple
 
-from . import pulls, schedule, site
+from . import pulls, release_record, schedule, site
 from .access import (
     COURSE_TEAM_ACCESS,
     grant_faculty,
@@ -51,9 +59,10 @@ from .course import (
     UPSTREAM_BRANCH,
     is_repo_root,
 )
-from .fs import copy_tree, union_deny
+from .fs import copy_tree
 from .gh_contents import (
     WITHHELD_ROOT_STUBS,
+    blob_sha,
     is_withheld_stub,
 )
 from .ghcli import GIT_ENV, clone, git
@@ -68,34 +77,29 @@ from .log import (
     log_withheld,
     plural,
 )
-from .materials import kinds_reader
-from .records import SYSTEM_DIR
-from .releaseignore import RELEASEIGNORE, deny_for, excludes
+from .releaseignore import RELEASEIGNORE, excludes
 from .repos import (
     allow_forking,
     create_repo,
     default_branch,
-    is_never_material,
     repo_is_archived,
 )
 from .schedule import DEFAULT_DEST_REPO, Deploy
-from .schedule_plan import deploy_dest, refuse_unnumbered, unnumbered_release
+from .schedule_plan import (
+    covered_copies,
+    deploy_dest,
+    refuse_unnumbered,
+    unnumbered_release,
+)
+from .selection import Selection
+from .selection import deny as selection_deny
 
-# Never copied, at any depth: a `.git` landing in the dest overwrites its git metadata and
-# redirects the release's own push into the SOURCE repo. That is a mechanical fact about
-# copying a repo into a repo, not a judgement about content - clutter that is never course
-# material is the separate `repos.NEVER_MATERIAL`, which `_copy_ignore` applies alongside
-# this.
-NEVER_COPIED = frozenset({".git"})
-
-# Additionally skipped when the WHOLE repo is released (`course_source_path: /`), and only
-# at the repo root: `.github` holds the Release workflows and their bot-token wiring,
-# `.system/` holds the maintainer guide, the filled syllabus example faculty copy from, and
-# the sessions block the Generate syllabus workflow builds for them to paste - the toolkit
-# describing itself, never released. Excluded as a folder, so a file added there later is
-# withheld too. Naming any of these paths explicitly still releases it: that is
-# what "give me everything" means, not a ban.
-ROOT_RELEASE_EXCLUDED = frozenset({".github", SYSTEM_DIR})
+# Skipped when the WHOLE repo is released (`course_source_path: /`), and only at the repo
+# root: `.github` holds the Release workflows and their bot-token wiring - the toolkit's
+# plumbing, never released. Naming a path inside it explicitly still releases it: that is
+# what "give me everything" means, not a ban. (`.system/`, `.git` and clutter are the
+# institution denylist's, at every depth: `selection`.)
+ROOT_RELEASE_EXCLUDED = (".github",)
 
 
 def _warn_withheld_stub(course_org: str, repo: str, path: str) -> None:
@@ -146,35 +150,22 @@ def _resolve_within(base: Path, rel: str) -> Path | None:
     return target if target.is_relative_to(base_r) else None
 
 
-def _copy_ignore(
-    whole_repo_root: Path | None, extra_root_skips: frozenset[str] = frozenset()
-):
-    """A copytree `ignore` filter: NEVER_COPIED and `repos.NEVER_MATERIAL` at every depth,
-    plus ROOT_RELEASE_EXCLUDED and `extra_root_skips` at `whole_repo_root` when a whole
-    repo is being released (None for a subpath copy).
+def _release_use(whole_repo: bool, stubs: frozenset[str] = frozenset()) -> Selection:
+    """A release's use-site selection (decision 0040 rule 3): nothing more for a subpath
+    copy; for a WHOLE-repo copy, the root `.github/` and each root stub still carrying the
+    scaffold placeholder (`stubs`, decided per release).
 
-    The two every-depth rules answer different questions and are kept apart on purpose.
-    NEVER_COPIED is about this copy working at all; NEVER_MATERIAL is about what a release
-    means - a session folder is copied wholesale, so a `.gitkeep` holding it open and the
-    `.DS_Store` a file manager left in it ship to students as course material unless
-    something drops them here.
-
-    Root-anchored deliberately, rather than `shutil.ignore_patterns`, which matches by
-    basename at every level of the walk - that would also drop a `labs/.github/`, which is
-    the faculty member's own content and nothing to do with the release plumbing.
-
-    `extra_root_skips` is decided per release rather than by contract - currently a README
-    still carrying the scaffold placeholder. Skipping the COPY rather than deleting the
-    result afterwards is what keeps a withheld file from touching the destination: a
-    delete-after-copy stages a deletion of whatever the semester repo already had there."""
-
-    def ignore(dirpath: str, names: list[str]) -> set[str]:
-        skip = {n for n in names if n in NEVER_COPIED or is_never_material(n)}
-        if whole_repo_root is not None and Path(dirpath) == whole_repo_root:
-            skip |= {n for n in names if n in ROOT_RELEASE_EXCLUDED | extra_root_skips}
-        return skip
-
-    return ignore
+    Skipping the COPY rather than deleting the result afterwards is what keeps a withheld
+    stub from touching the destination: a delete-after-copy stages a deletion of whatever
+    the semester repo already had there."""
+    if not whole_repo:
+        return Selection()
+    return Selection(
+        exclude=(
+            *(f"/{name}/" for name in ROOT_RELEASE_EXCLUDED),
+            *(f"/{stub}" for stub in sorted(stubs)),
+        )
+    )
 
 
 class Dest(NamedTuple):
@@ -361,6 +352,14 @@ def _merge_conflicted(dd: Path, out: str) -> bool:
     return code == 0 and bool(unmerged.strip())
 
 
+# What became of one dest's release (`_merge_and_push`): the branch students read moved;
+# it already held everything released (the idempotent no-op); the merge conflicted and is
+# held at a pull request; or it failed. A copy into a RELEASED or UNCHANGED dest has
+# landed - students have it - and is what the release record records.
+RELEASED, UNCHANGED, HELD, FAILED = "released", "unchanged", "held", "failed"
+LANDED = frozenset({RELEASED, UNCHANGED})
+
+
 def _merge_and_push(
     semester_org: str,
     repo: str,
@@ -368,11 +367,11 @@ def _merge_and_push(
     touched: set[str],
     *,
     committed: bool,
-) -> tuple[int, bool]:
+) -> tuple[int, str]:
     """Merge one dest's `UPSTREAM_BRANCH` into the branch students read and push both.
 
-    `(errors, base_moved)` - `base_moved` only when the branch students read actually
-    moved, so a release held at a pull request does not report itself as a change.
+    `(errors, outcome)` - `RELEASED` only when the branch students read actually moved,
+    so a release held at a pull request (`HELD`) does not report itself as a change.
 
     `committed` is whether the caller's commit-on-`upstream` ran this time. With
     `dest.unborn` it answers both of the questions a `rev-parse` used to: a clone that was
@@ -380,7 +379,7 @@ def _merge_and_push(
     `base` branch to merge into."""
     dd = dest.dir
     if dest.unborn and not committed:
-        return 0, False  # an empty dest nothing could be copied into
+        return 0, UNCHANGED  # an empty dest nothing could be copied into
     if dest.unborn:
         # A dest this run created: there is nothing to merge into, so the branch students
         # read simply starts where the released copy now is. No `-f`: `base` cannot exist
@@ -388,7 +387,7 @@ def _merge_and_push(
         # overwrite the branch students read with.
         if git("-C", str(dd), *GIT_ENV, "branch", dest.base, UPSTREAM_BRANCH)[0] != 0:
             log_err(f"  {repo}: could not start `{dest.base}`")
-            return 1, False
+            return 1, FAILED
     elif (
         git("-C", str(dd), "merge-base", "--is-ancestor", UPSTREAM_BRANCH, dest.base)[0]
         == 0
@@ -407,18 +406,18 @@ def _merge_and_push(
             # keep it.
             if _push(dd, UPSTREAM_BRANCH) != 0:
                 log_err(f"  {repo}: could not push `{UPSTREAM_BRANCH}`")
-                return 1, False
+                return 1, FAILED
             log_ok(
                 f"  {repo}: `{UPSTREAM_BRANCH}` created - semester edits are kept now"
             )
         if repo in touched:
             log_ok(f"  {repo}: nothing new to release")
-        return 0, False
+        return 0, UNCHANGED
     else:
         code, out = git("-C", str(dd), *GIT_ENV, "checkout", dest.base)
         if code != 0:
             log_err(f"  {repo}: could not check out `{dest.base}` - {out[:200]}")
-            return 1, False
+            return 1, FAILED
         code, out = git(
             "-C",
             str(dd),
@@ -439,7 +438,7 @@ def _merge_and_push(
                 f"  {repo}: could not merge `{UPSTREAM_BRANCH}` into `{dest.base}` - "
                 f"{first[:200]}"
             )
-            return 1, False
+            return 1, FAILED
         if code != 0:
             # The semester has edited what this release also changed. Leave `base` exactly
             # as students last read it, ship the release to `upstream` anyway so nothing
@@ -450,7 +449,7 @@ def _merge_and_push(
             # on it, so the local branch is already what the remote holds.
             if committed and _push(dd, UPSTREAM_BRANCH) != 0:
                 log_err(f"  {repo}: push failed")
-                return 1, False
+                return 1, FAILED
             opened = pulls.upsert_pr(
                 f"{semester_org}/{repo}",
                 head=UPSTREAM_BRANCH,
@@ -461,12 +460,63 @@ def _merge_and_push(
             )
             if opened.url:
                 log(f"  {repo}: held for review - {opened.url}")
-            return opened.errors, False
+            return opened.errors, HELD
     if _push(dd, UPSTREAM_BRANCH, dest.base) != 0:
         log_err(f"  {repo}: push failed")
-        return 1, False
+        return 1, FAILED
     log_ok(f"  {repo}: released")
-    return 0, True
+    return 0, RELEASED
+
+
+class Copied(NamedTuple):
+    """One copy `deploy_many` made: the Deploy, the source commit it was copied from, its
+    manifest (each copied file's path relative to the copy - a single file by its
+    destination name - and blob sha: what `.releaseignore`, the denylist and a withheld
+    stub left), and its dest's outcome (`_merge_and_push`)."""
+
+    deploy: Deploy
+    commit: str
+    files: dict[str, str]
+    outcome: str
+
+    @property
+    def landed(self) -> bool:
+        """Students have it: its dest merged (or already held it), and it copied
+        something - a copy everything in it was excluded from has not shipped."""
+        return bool(self.files) and self.outcome in LANDED
+
+
+class Batch(NamedTuple):
+    """What `deploy_many` did: `errors` counts copies that could not be applied, `changed`
+    is whether any branch students read moved, `copies` every copy it applied."""
+
+    errors: int
+    changed: bool
+    copies: list[Copied]
+
+
+def _blob_of(path: Path) -> str:
+    """The git blob sha of a file as committed: a symlink is its target's text."""
+    if path.is_symlink():
+        return blob_sha(str(path.readlink()).encode())
+    return blob_sha(path.read_bytes())
+
+
+def _copy_listed(srcp: Path, destp: Path, deny) -> dict[str, str]:
+    """`copy_tree`, answering the manifest of what it copied: `deny` is asked about every
+    folder the copy walks, and what it lets through is what lands."""
+    files: dict[str, str] = {}
+
+    def ignore(folder: str, names: list[str]) -> set[str]:
+        skip = deny(folder, names)
+        for name in names:
+            p = Path(folder) / name
+            if name not in skip and (p.is_symlink() or not p.is_dir()):
+                files[p.relative_to(srcp).as_posix()] = _blob_of(p)
+        return skip
+
+    copy_tree(srcp, destp, ignore)
+    return files
 
 
 def deploy_many(
@@ -474,35 +524,41 @@ def deploy_many(
     semester_org: str,
     deploys: list[Deploy],
     sync: bool = True,
-) -> tuple[int, bool]:
+) -> Batch:
     """Apply a batch of Deploy copies, cloning each unique source and dest repo ONCE.
 
     Every deploy's `course_source_path` is copied from its (course-org) `course_source_repo`
     into its (semester-org) `semester_dest_repo` at `semester_dest_path` (default: mirror
     `course_source_path`). Each touched dest repo gets a single commit on `UPSTREAM_BRANCH`
     covering all its copies, which is then merged into the branch students read; a dest with
-    no net change is left alone (idempotent). Returns `(errors, changed)` - `errors` counts
-    copies that could not be applied, `changed` is True if the branch students read moved
-    (a release held at a pull request has NOT changed it). `sync` runs a
-    single website sync at the end when `changed` (callers batching several release kinds
-    pass sync=False and sync once themselves)."""
+    no net change is left alone (idempotent). Returns a `Batch`: `changed` is True if the
+    branch students read moved (a release held at a pull request has NOT changed it), and
+    `copies` says, per copy applied, what it copied and its dest's outcome - a copy that
+    could not be applied, or was withheld whole, is not among them. `sync` runs a single
+    website sync at the end when `changed` (callers batching several release kinds pass
+    sync=False and sync once themselves)."""
     deploys = [d for d in deploys if d]
     if not deploys:
-        return 0, False
+        return Batch(0, False, [])
 
     errors = 0
     changed = False
+    # Per copy applied: (deploy, source commit, manifest); its outcome comes from its dest.
+    applied: list[tuple[Deploy, str, dict[str, str]]] = []
+    outcomes: dict[str, str] = {}
     with tempfile.TemporaryDirectory() as work:
         root = Path(work)
 
         # 1. clone each unique source repo once (course org)
         src_dirs: dict[str, Path] = {}
+        commits: dict[str, str] = {}
         for repo in sorted({d.course_source_repo for d in deploys}):
             sd = root / "src" / repo
             if not clone(course_org, repo, sd):
                 log_err(f"could not clone source {course_org}/{repo}")
             else:
                 src_dirs[repo] = sd
+                commits[repo] = git("-C", str(sd), "rev-parse", "HEAD")[1].strip()
 
         # 2. clone (create if needed) each unique dest repo once (semester org)
         dests: dict[str, Dest] = {}
@@ -577,7 +633,9 @@ def deploy_many(
             if excludes(src_root, srcp):
                 # The source path is itself excluded - so is everything under it, and no
                 # `!` deeper down can re-include any of it. Nothing else was asked for, so
-                # this copy is a no-op rather than a partial one.
+                # this copy is a no-op rather than a partial one. (A path on the
+                # institution denylist named outright DOES ship: the denylist only stops
+                # a folder copy sweeping one up - `selection.deny`.)
                 _warn_ignored_source(
                     course_org, d.course_source_repo, d.course_source_path
                 )
@@ -604,16 +662,14 @@ def deploy_many(
                                 _warn_withheld_stub(
                                     course_org, d.course_source_repo, stub
                                 )
-                    copy_tree(
+                    # The selection's layers (decision 0040): the institution denylist,
+                    # faculty's `.releaseignore`, this release's own exclusions. Anchored
+                    # at the CLONE root even for a subpath copy, as a root `.gitignore`.
+                    files = _copy_listed(
                         srcp,
                         destp,
-                        union_deny(
-                            # Two filters unioned, not one list: the toolkit's exclusions
-                            # are a contract it keeps with itself, `.releaseignore` is
-                            # faculty's. The patterns anchor at the CLONE root even for a
-                            # subpath copy, as a root `.gitignore` would.
-                            _copy_ignore(srcp if srcp == src_root else None, withheld),
-                            deny_for(src_root),
+                        selection_deny(
+                            src_root, use=_release_use(srcp == src_root, withheld)
                         ),
                     )
                 elif is_withheld_stub(
@@ -629,6 +685,7 @@ def deploy_many(
                 else:
                     destp.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(srcp, destp)
+                    files = {destp.name: _blob_of(srcp)}
             except (shutil.Error, OSError) as exc:
                 # One unreadable path is ONE failed copy, counted like any other - not an
                 # exception out of deploy_many that takes every other release with it.
@@ -640,6 +697,7 @@ def deploy_many(
                 continue
             log_ok(f"+ {d.semester_dest_repo}/{dest_rel or '(repo root)'}")
             touched.add(d.semester_dest_repo)
+            applied.append((d, commits[d.course_source_repo], files))
 
         # 4. one commit on `upstream` per dest, then merge it into the branch students
         # read. Every CLONED dest, not just the ones this run copied into: a run whose
@@ -673,13 +731,14 @@ def deploy_many(
                 if code != 0:
                     log_err(f"  {repo}: commit failed - {out[:200]}")
                     errors += 1
+                    outcomes[repo] = FAILED
                     continue
                 committed = True
-            merge_errors, base_moved = _merge_and_push(
+            merge_errors, outcomes[repo] = _merge_and_push(
                 semester_org, repo, dest, touched, committed=committed
             )
             errors += merge_errors
-            changed = changed or base_moved
+            changed = changed or outcomes[repo] == RELEASED
 
     if sync and changed:
         # site.sync_site RAISES on a genuine tree/team read failure - one semester's
@@ -692,7 +751,11 @@ def deploy_many(
         except Exception as exc:
             log_err(f"site sync failed after release: {exc}")
             errors += 1
-    return errors, changed
+    copies = [
+        Copied(d, commit, files, outcomes.get(d.semester_dest_repo, FAILED))
+        for d, commit, files in applied
+    ]
+    return Batch(errors, changed, copies)
 
 
 def _items(spec: str) -> list[str]:
@@ -733,6 +796,40 @@ def _entry_deploys(sched: schedule.Schedule, label: str) -> list[Deploy] | str:
     if found is None:
         return f"{label} is not an entry in this semester's schedule.yml."
     return list(found.deploy)
+
+
+def _record(
+    semester_org: str, sched: schedule.Schedule, entry: str, copies: list[Copied]
+) -> int:
+    """Record every copy that landed (`release_record`): each copy of `entry`, or - for a
+    release of paths - each schedule copy those paths made (`covered_copies`) whose time
+    has come or is TBC; a path the schedule does not copy, and a copy still due later,
+    stay unrecorded (the scheduler ships that one at its time, with what is current
+    then). A deliberate release, so each recorded copy's manifest and `last_shipped_at`
+    are refreshed. Returns the error count."""
+    landed = [c for c in copies if c.landed]
+    if not landed:
+        return 0
+    try:
+        record = release_record.load(semester_org)
+    except (RuntimeError, ValueError) as exc:
+        log_err(f"could not read {release_record.PATH} ({exc}) - not recorded")
+        return 1
+    at = datetime.now(UTC)
+    for c in landed:
+        if entry:
+            record.ship(entry, c.deploy, c.commit, c.files, at, refresh=True)
+            continue
+        for release, planned, sub in covered_copies(sched, c.deploy):
+            moment = planned.deploy_datetime or release.when
+            if moment is not None and moment > at:
+                continue  # its own time still to come: the schedule ships it then
+            if files := release_record.inside(c.files, sub):
+                record.ship(release.label, planned, c.commit, files, at, refresh=True)
+    if not record.save(semester_org):
+        log_err(f"could not write {release_record.PATH} - this release is not recorded")
+        return 1
+    return 0
 
 
 def _named(names: list[str], what: str) -> str:
@@ -808,13 +905,11 @@ def main() -> int:
         return 1
     # A copy the plan names under an entry that needs a number and has none is refused,
     # as the scheduled release skips it (decision 0020 rule 3). Off the plan it goes.
-    aliases = kinds_reader(args.course_org)
     for repo in dict.fromkeys(d.course_source_repo for d in deploys):
         refusal = unnumbered_release(
             sched,
             repo,
             [d.course_source_path for d in deploys if d.course_source_repo == repo],
-            aliases,
         )
         if refusal:
             return refuse_unnumbered(refusal)
@@ -864,10 +959,13 @@ def main() -> int:
     # ONE batch, whatever the entry draws from: each repo clones once and the site syncs
     # once, as the scheduler's own release pass does.
     try:
-        errors, changed = deploy_many(args.course_org, args.semester_org, deploys)
+        errors, changed, copies = deploy_many(
+            args.course_org, args.semester_org, deploys
+        )
     except RuntimeError as e:
         log_err(str(e))
         return 1
+    errors += _record(args.semester_org, sched, args.entry, copies)
     if errors:
         return 1
     log("done")

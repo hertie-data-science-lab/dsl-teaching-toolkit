@@ -19,29 +19,76 @@ import yaml
 from dsl_course import (
     bootstrap_course,
     central,
-    collect,
+    config,
     discovery,
     gh_contents,
     gh_teams,
     ghcli,
-    grades,
+    grading_sheet,
     issues,
     log,
     pulls,
-    repos,
+    release_record,
     roster,
+    run,
     schedule,
+    scheduler,
     settings,
-    site,
-    sync_faculty,
-    teams,
 )
 
-# students.csv's header row, DERIVED from the columns the engine declares rather than
-# re-typed. `roster.FIELDS` is a frozen public contract (the shipped JavaScript spells the
-# same columns out by hand), and five test files each carried their own copy of it - so a
-# column added to FIELDS left five fixtures describing a roster that no longer exists.
-ROSTER_HEADER = ",".join(roster.FIELDS)
+# A test writes each student as ONE row in the pre-0.11.0 combined shape (students.csv
+# with the engine's columns on it), DERIVED from the columns the engine declares rather
+# than re-typed. `parse_roster` / `roster_files` split it exactly as the migration does
+# (`roster.split_legacy`), so a fixture stays one line per student and the parse under
+# test is the real one over the real two files.
+ROSTER_HEADER = ",".join(
+    (roster.LEGACY_EMAIL, *roster.FIELDS[1:], *roster.LEGACY_SYSTEM_COLUMNS)
+)
+
+
+def roster_files(
+    text: str, teams: str | None = None, numbers: dict | None = None
+) -> dict[str, str]:
+    """`{students.csv: text, .system/roster.csv: text}` from one combined fixture (and an
+    old-shape teams.csv, `numbers` = schedule key -> assignment number)."""
+    students, system = roster.split_legacy(text, teams, numbers or {})
+    return {roster.STUDENTS_PATH: students, roster.SYSTEM_PATH: system}
+
+
+def parse_roster(
+    text: str, teams: str | None = None, numbers: dict | None = None
+) -> list[roster.Student]:
+    """`roster.parse` over `roster_files(text)`."""
+    files = roster_files(text, teams, numbers)
+    return roster.parse(files[roster.STUDENTS_PATH], files[roster.SYSTEM_PATH])
+
+
+def new_sheet(
+    spec: grading_sheet.SheetSpec, units: list[tuple[str, list[str]]]
+) -> dict:
+    """A brand-new sheet: every unit present from the moment of handout, every human field
+    blank. A sheet that arrives complete is one a grader can start typing into as soon as
+    anything is in, and one whose missing row is visibly missing.
+
+    `units` is `[(unit key, member handles)]`: for an individual assignment the key IS the
+    handle and the list holds only it; for a group one the key is the team name."""
+    return {
+        spec.container_key: {
+            unit: grading_sheet._fresh_block(spec, members) for unit, members in units
+        }
+    }
+
+
+def split_grading(text: str | None) -> tuple[str | None, str | None]:
+    """A test's old-style grading config split where the keys live now: the template's
+    `grading_config.yml`, and the run settings as the semester's `assignments.yml`
+    `defaults:` (decision 0009)."""
+    if text is None:
+        return None, None
+    data = yaml.safe_load(text) or {}
+    run = {k: data.pop(k) for k in settings.RUN_KEYS if k in data}
+    template = yaml.safe_dump(data) if data else ""
+    return template, (yaml.safe_dump({"defaults": run}) if run else None)
 
 
 def repo_row(name: str, **extra) -> dict:
@@ -149,14 +196,30 @@ def _no_semester_is_closed_out(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _nothing_is_recorded_as_released(monkeypatch):
+    """Answer the release record's read (`release_record`) and the scheduler's destination
+    tree read with "no record yet, and nothing at any destination", and accept the write: every due copy ships, as it did
+    before the record. The tests about the record, the seed and fire-once set their own
+    after this fixture and win."""
+    monkeypatch.setattr(release_record, "get_file_with_sha", lambda *a, **k: None)
+    monkeypatch.setattr(scheduler, "repo_blob_shas", lambda *a, **k: {})
+    monkeypatch.setattr(
+        release_record, "put_file_as_read", lambda org, repo, path, body, *a, **k: body
+    )
+
+
+@pytest.fixture(autouse=True)
 def _no_course_or_semester_defaults(monkeypatch):
     """Answer the cascade's live reads (`settings`) with "nothing declared" by default:
-    the course's `dsl-course.yml`, the semester's `assignments.yml` and the semester's
-    pointer to its course. Every spec read and every late cutoff resolves through them,
-    and the institution's policy is the uninteresting answer for every test but the ones
+    the course's `course.yml`, the semester's `semester.yml`, the run settings
+    the settings written on a schedule.yml entry (`schedule.run_settings_of`, which reads
+    the parsed plan) and the semester's pointer to its course. Every spec read and every late cutoff resolves through them,
+    and the institution's defaults are the uninteresting answer for every test but the ones
     about a layer, which set their own after this fixture and win."""
     monkeypatch.setattr(settings, "org_meta", lambda org: {})
-    monkeypatch.setattr(settings, "_assignments_text", lambda org: None)
+    monkeypatch.setattr(settings, "_semester_text", lambda org: None)
+    monkeypatch.setattr(schedule, "run_settings_of", lambda org, slug: {})
+    monkeypatch.setattr(schedule, "shape_of", lambda org, slug: {})
     monkeypatch.setattr(settings, "course_org_for_semester", lambda org: "")
 
 
@@ -172,8 +235,7 @@ def _not_on_a_runner(monkeypatch):
     are answered once per process, so a test that sets `GITHUB_ACTIONS` itself must not
     leave its answer behind for the next one."""
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
-    collect.sandbox_user.cache_clear()
-    collect.sandbox_unusable.cache_clear()
+    run.reset()
 
 
 @pytest.fixture(autouse=True)
@@ -182,40 +244,25 @@ def _clear_process_memos():
 
 
 def clear_process_memos() -> None:
-    """The per-process memos a single CLI run is entitled to keep: a repo's tree and its
-    paths, a repo's metadata and its last committer, whether a central ref exists, the
-    semester-config files a run re-reads (students.csv, teams.csv, schedule.yml,
-    instructors.yml), an assignment's definition, its course's defaults and its handed-out
-    starters, and the login the token belongs to. Tests reuse the same org/repo names
-    with different fakes, so clear them between tests - and the CLI's read-once memos
-    (`gh_contents`, `issues`) go back to off, as a CLI start turns them on."""
-    site._repo_tree.cache_clear()
-    site._first_landed.cache_clear()
-    site._materials.cache_clear()
-    central.central_ref_exists.cache_clear()
-    repos._repos.clear()
-    gh_teams.get_org_owners.cache_clear()
-    gh_teams.acting_login.cache_clear()
-    ghcli.bot_login.cache_clear()
-    discovery.hold_listings(False)
-    roster._roster_text.cache_clear()
-    teams._teams_text.cache_clear()
-    schedule._schedule_text.cache_clear()
-    schedule._repo_paths.cache_clear()
-    grades._grading_text.cache_clear()
-    grades.readme_heading.cache_clear()
-    settings.course_defaults.cache_clear()
-    settings._assignments_text.cache_clear()
-    settings.semester_blocks.cache_clear()
-    collect._starter_notebook_shas.cache_clear()
-    gh_contents.last_committer.cache_clear()
-    gh_contents.blame_logins.cache_clear()
-    gh_contents.path_committers.cache_clear()
-    sync_faculty._semester_faculty.cache_clear()
-    ghcli.bot_login.cache_clear()
-    gh_contents.read_once(False)
-    issues.list_once(False)
-    ghcli._start_budget = None
+    """Back to the state a process starts in (`run.reset`): a fresh per-run context and
+    every read-once memo off. Tests reuse the same org/repo names with different fakes,
+    so nothing one test read may answer the next."""
+    run.reset()
+
+
+def fake_config(monkeypatch, files) -> None:
+    """Answer `config.read` - the one door to every hand-edited config file - from
+    `files(org, repo, path)`: a mapping (written out as YAML), the file's text, or None
+    for a file that is not there."""
+
+    def read(org: str, repo: str, path: str) -> config.ConfigFile:
+        found = files(org, repo, path)
+        text = (
+            found if found is None or isinstance(found, str) else yaml.safe_dump(found)
+        )
+        return config.ConfigFile(org, repo, path, text)
+
+    monkeypatch.setattr(config, "read", read)
 
 
 def stub_bootstrap(monkeypatch) -> None:
@@ -242,7 +289,7 @@ def stub_bootstrap(monkeypatch) -> None:
     monkeypatch.setattr(bc, "register_semester", lambda course, semester: True)
     monkeypatch.setattr(bc, "update_profile_readme", lambda *a, **k: 0)
     monkeypatch.setattr(bc.sync_faculty, "sync", lambda course, semesters=None: 0)
-    # The org's tier is read off its (not yet written) dsl-course.yml; a bootstrap test is
+    # The org's tier is read off its (not yet written) course.yml; a bootstrap test is
     # about what the run does, not which ref it seeds at.
     monkeypatch.setattr(bc, "central_ref_for", lambda org: "release")
 
@@ -533,3 +580,43 @@ def entry_link_rows(rendered: str) -> list[dict]:
 def entry_links(rendered: str) -> list[tuple[str, str]]:
     """The (section, name) pairs of the same block - the view most assertions want."""
     return [(l["section"], l["name"]) for l in entry_link_rows(rendered)]
+
+
+def run_settings(monkeypatch, read) -> None:
+    """Stub a semester's run settings from `read(org)`, the text of an `assignments.yml`
+    as it was written before decisions 0038/0039: its `defaults:` become `semester.yml`'s,
+    and each `assignments.<key>` block becomes the settings written on that key's
+    schedule.yml entry (`settings.inline_settings`). `visibility` is spelt
+    `assignment_repo_visibility` in both. Text that is not YAML is `semester.yml` as it
+    stands."""
+
+    def split(org):
+        text = read(org)
+        try:
+            data = yaml.safe_load(text) if text else None
+        except yaml.YAMLError:
+            return text, None
+        if not isinstance(data, dict):
+            return text, None
+        blocks = data.pop("assignments", None)
+        if isinstance(data.get("defaults"), dict):
+            data["defaults"] = {
+                settings.INLINE_NAMES.get(k, k): v for k, v in data["defaults"].items()
+            }
+        defaults = yaml.safe_dump(data, sort_keys=False) if data else None
+        if not isinstance(blocks, dict):
+            return defaults, None
+        inline = {
+            key: {settings.INLINE_NAMES.get(k, k): v for k, v in (block or {}).items()}
+            for key, block in blocks.items()
+        }
+        return defaults, yaml.safe_dump({"assignments": inline}, sort_keys=False)
+
+    def inline(org, slug):
+        text = split(org)[1]
+        blocks = (yaml.safe_load(text) or {}).get("assignments") if text else None
+        return settings.inline_blocks(blocks).get(slug, {})
+
+    monkeypatch.setattr(settings, "_semester_text", lambda org: split(org)[0])
+    # The entry's own settings, as the parsed plan carries them (`AssignmentEntry.settings`).
+    monkeypatch.setattr(schedule, "run_settings_of", inline)

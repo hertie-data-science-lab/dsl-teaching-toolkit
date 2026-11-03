@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def _override(tmp_path: Path, data: dict) -> Path:
-    path = tmp_path / "policy.yml"
+    path = tmp_path / "institution.yml"
     path.write_text(yaml.safe_dump(data))
     return path
 
@@ -23,30 +23,34 @@ def _override(tmp_path: Path, data: dict) -> Path:
 def test_the_shipped_policy_carries_hertie_values():
     shipped = policy.read(override=None)
     assert shipped["defaults"] == {
+        "timezone": "Europe/Berlin",
         "late_window_days": 10,
         "late_penalty_per_day": "10%",
         "max_team_size": 5,
-        "visibility": "private",
-        "team_formation": "self_select",
-        "formats": ["ipynb"],
-        "timezone": "Europe/Berlin",
-        "archive": {"grace_days": 60},
-        "semester_dest_repo": "materials",
+        "assignment_repo_visibility": "private",
+        "archive_grace_days": 60,
+        "materials_repo": "materials",
+        "marks_per_question": True,
     }
+    # Decision 0039 rule 2: `team_formation` is set from the course down, `formats` by
+    # the New assignment wizard; neither is an institutional default.
+    assert list(shipped["defaults"]) == list(policy.DEFAULT_KEYS)
     assert [k["key"] for k in shipped["kinds"]] == [
         "lecture",
         "lab",
         "readings",
         "exam",
         "assignment",
-        "term",
+        "semester",
         "archive",
         "drop-in",
         "assets",
         "other",
     ]
     assert shipped["licences"][0]["name"] == "CC BY-NC-SA 4.0"
-    assert "@" in shipped["contact"]
+    assert all("@" in c for c in shipped["institution"]["contacts"])
+    assert policy.contact() == shipped["institution"]["contacts"][0]
+    assert shipped["selection_floor"] == {}
 
 
 def test_the_shipped_default_validates():
@@ -56,14 +60,15 @@ def test_the_shipped_default_validates():
 
 def test_an_override_merges_defaults_and_replaces_lists(tmp_path):
     kinds = [
-        {"key": k, "label": k.title(), "colour": "#000000", "background": "#ffffff"}
+        {"key": k, "plural": f"{k}s", "numbered": False, "label": k.title()}
+        | {"colour": "#000000", "background": "#ffffff"}
         | {"system": k in policy.SYSTEM_KINDS}
         for k in ("seminar", *policy.SYSTEM_KINDS, policy.FALLBACK_KIND)
     ]
     path = _override(
         tmp_path,
         {
-            "defaults": {"late_window_days": 3, "archive": {"grace_days": 30}},
+            "defaults": {"late_window_days": 3, "archive_grace_days": 30},
             "institution": {"name": "Elsewhere"},
             "kinds": kinds,
         },
@@ -71,7 +76,7 @@ def test_an_override_merges_defaults_and_replaces_lists(tmp_path):
     got = policy.read(override=path)
     assert got["defaults"]["late_window_days"] == 3
     assert got["defaults"]["late_penalty_per_day"] == "10%"
-    assert got["defaults"]["archive"] == {"grace_days": 30}
+    assert got["defaults"]["archive_grace_days"] == 30
     assert got["institution"]["name"] == "Elsewhere"
     assert got["institution"]["dsl_org_url"].startswith("https://")
     assert got["kinds"][0]["key"] == "seminar"
@@ -85,17 +90,22 @@ def test_an_override_merges_defaults_and_replaces_lists(tmp_path):
         ({"defaults": {"late_penalty_per_day": "100.9%"}}, "late_penalty_per_day"),
         ({"defaults": {"max_team_size": -3}}, "max_team_size"),
         ({"defaults": {"late_window_days": -10}}, "late_window_days"),
-        ({"defaults": {"archive": {"grace_days": -60}}}, "grace_days"),
-        ({"defaults": {"visibility": "internal"}}, "visibility"),
+        ({"defaults": {"archive_grace_days": -60}}, "archive_grace_days"),
+        ({"defaults": {"assignment_repo_visibility": "internal"}}, "visibility"),
+        ({"defaults": {"team_formation": "assigned"}}, "team_formation"),
+        ({"defaults": {"materials_repo": "no spaces"}}, "materials_repo"),
         ({"defaults": {"timezone": "Mars/Olympus"}}, "timezone"),
         ({"defaults": {"typo": 1}}, "typo"),
-        ({"contact": "nobody"}, "contact"),
+        ({"institution": {"contacts": ["nobody"]}}, "contacts"),
+        ({"institution": {"contacts": []}}, "contacts"),
         ({"licences": []}, "licences"),
         (
             {
                 "kinds": [
                     {
                         "key": "other",
+                        "plural": "other",
+                        "numbered": False,
                         "label": "Event",
                         "colour": "#000000",
                         "background": "#ffffff",
@@ -110,6 +120,8 @@ def test_an_override_merges_defaults_and_replaces_lists(tmp_path):
                 "kinds": [
                     {
                         "key": k,
+                        "plural": k,
+                        "numbered": False,
                         "label": k,
                         "colour": "#000000",
                         "background": "#ffffff",
@@ -136,6 +148,39 @@ def test_the_seeded_site_config_carries_the_policy_institution_block():
     assert seed["address"].strip() == block["address"].strip()
 
 
+def test_every_kind_carries_its_plural_and_whether_it_is_numbered_and_shown():
+    kinds = {k["key"]: k for k in policy.read(override=None)["kinds"]}
+    assert kinds["lecture"]["plural"] == "lectures" and kinds["lecture"]["numbered"]
+    assert kinds["drop-in"]["plural"] == "drop-ins"
+    # `shown` defaults to true; supporting files are released, never a row or a tab.
+    assert [k for k, v in kinds.items() if not v["shown"]] == ["assets"]
+
+
+def test_the_kind_accessors_read_the_policy():
+    assert policy.plural_of("lab") == "labs"
+    assert policy.plural_of("readings") == "readings"
+    assert policy.kind_for_plural("exams") == "exam"
+    assert policy.kind_for_plural("seminars") is None
+    assert policy.numbered_kinds() == ("lecture", "lab", "assignment", "drop-in")
+    assert "assets" not in policy.shown_kinds()
+    assert "lecture" in policy.shown_kinds() and "semester" in policy.shown_kinds()
+
+
+def test_two_kinds_may_not_share_a_plural(tmp_path):
+    kinds = policy.read(override=None)["kinds"]
+    kinds = [dict(k, plural="lectures") if k["key"] == "lab" else k for k in kinds]
+    with pytest.raises(policy.PolicyError, match="each plural may appear once"):
+        policy.read(override=_override(tmp_path, {"kinds": kinds}))
+
+
 def test_the_console_export_is_the_policy_the_engine_runs_on():
     exported = json.loads((ROOT / "console/schemas/policy.json").read_text())
     assert exported == policy.load()
+
+
+def test_a_leftover_policy_yml_is_refused_not_ignored(tmp_path):
+    # Decision 0039: `policy.yml` is now `institution.yml`. A checkout that still carries
+    # the old file would otherwise run on the shipped values with nothing said.
+    (tmp_path / "policy.yml").write_text("defaults: {}\n")
+    with pytest.raises(policy.PolicyError, match="policy.yml is now institution.yml"):
+        policy.read(override=tmp_path / "institution.yml")

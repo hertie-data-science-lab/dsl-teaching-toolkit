@@ -53,7 +53,7 @@ from typing import NamedTuple
 
 from . import pulls, schedule
 from .course import PROPOSAL_BRANCH_PREFIX, UPSTREAM_BRANCH, is_repo_root
-from .deploy import _copy_ignore, _resolve_within
+from .deploy import ROOT_RELEASE_EXCLUDED, _resolve_within
 from .fs import Deny, copy_tree
 from .ghcli import GIT_ENV, clone, git
 from .log import (
@@ -66,8 +66,10 @@ from .log import (
     log_step,
     plural,
 )
+from .records import SYSTEM_DIR
 from .schedule import Deploy
 from .schedule_plan import deploy_dest
+from .selection import is_clutter
 
 
 def branch_for(semester_org: str) -> str:
@@ -125,20 +127,25 @@ def due_deploys(semester_org: str, now: datetime) -> list[Deploy]:
 
 
 def _deny(path: Path, clone_root: Path) -> Deny:
-    """The copy filter for one end of a propagate.
+    """The copy filter for one end of a propagate: `.git` and clutter at every depth, and
+    for a WHOLE repo the root's plumbing (`deploy.ROOT_RELEASE_EXCLUDED` and `.system/`),
+    so what a release refuses to ship as plumbing a propagate refuses to carry back. The
+    `.github` a semester repo has holds nothing but toolkit workflows, and `.system/` is
+    the course org describing itself.
 
-    `deploy._copy_ignore` applies its root-only exclusions at the clone root when a WHOLE
-    repo is being copied, and nowhere for a subpath copy - the toolkit's own half of the
-    release filter, run in reverse, so what a release refuses to ship is what a propagate
-    refuses to carry back. The `.github` a semester repo has holds nothing but toolkit
-    workflows, and `.system/` is the course org describing itself.
+    Deliberately NOT the rest of the release's layers (`selection`): the denylist and a
+    source's `.releaseignore` say what students may not see, and a file the semester ADDED
+    at such a path is a proposal in a pull request a human reads, not a leak."""
+    root = path if path == clone_root else None
+    plumbing = {*ROOT_RELEASE_EXCLUDED, SYSTEM_DIR}
 
-    Deliberately NOT the other half: a source's `.releaseignore` (`deploy` unions
-    `releaseignore.deny_for` into this) is faculty saying what students may not see, and
-    a released tree never held those paths in the first place. There is nothing in the
-    semester to withhold on the way back - and a file the semester ADDED at a withheld path
-    is a proposal in a pull request a human reads, not a leak."""
-    return _copy_ignore(path if path == clone_root else None)
+    def ignore(dirpath: str, names: list[str]) -> set[str]:
+        skip = {n for n in names if n == ".git" or is_clutter(n)}
+        if root is not None and Path(dirpath) == root:
+            skip |= {n for n in names if n in plumbing}
+        return skip
+
+    return ignore
 
 
 def _carried(root: Path, deny: Deny) -> set[str]:

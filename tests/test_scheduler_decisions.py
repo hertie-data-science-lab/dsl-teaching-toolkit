@@ -7,7 +7,14 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 
-from dsl_course import gh_contents, grades, roster, schedule, scheduler
+from dsl_course import (
+    gh_contents,
+    grading_spec,
+    roster,
+    run,
+    schedule,
+    scheduler,
+)
 from dsl_course.faults import ConfigFault, FaultKind
 from dsl_course.schedule import Deploy, Release
 
@@ -26,7 +33,7 @@ CODES = {
 
 
 def _fault(where, kind, fires, what="cm/lectures/05_trees does not exist"):
-    return ConfigFault(where, what, fires, kind=kind, field="course_source_path")
+    return ConfigFault(where, what, fires, kind=kind, field="from_path")
 
 
 def _parsed(line: str) -> tuple[str, str, str]:
@@ -39,11 +46,11 @@ def _parsed(line: str) -> tuple[str, str, str]:
 def test_a_due_source_that_is_not_there_is_a_decision():
     decisions = scheduler.source_decisions(
         [
-            _fault("releases.s5", FaultKind.MISSING_PATH, PAST),
+            _fault("lectures.s5", FaultKind.MISSING_PATH, PAST),
             _fault("assignments.a2", FaultKind.MISSING_REPO, PAST, "no repo cm/a2"),
-            _fault("releases.s6", FaultKind.WITHHELD, PAST, "the files are held back"),
+            _fault("lectures.s6", FaultKind.WITHHELD, PAST, "the files are held back"),
             # Not due yet: the digest counts it down, the dry run says nothing.
-            _fault("releases.s9", FaultKind.MISSING_PATH, LATER),
+            _fault("lectures.s9", FaultKind.MISSING_PATH, LATER),
         ],
         NOW,
     )
@@ -57,23 +64,20 @@ def test_a_due_source_that_is_not_there_is_a_decision():
 def test_an_archived_semester_releases_nothing_that_is_due():
     sched = schedule.parse(
         {
-            "releases": {
+            "lectures": {
                 "s1": {
                     "event_datetime": "2026-09-01T10:00",
-                    "deploy": [
-                        {"course_source_repo": "cm", "course_source_path": "l1"}
-                    ],
+                    "files": [{"from_course_repo": "cm", "from_path": "l1"}],
                 },
                 "s9": {
                     "event_datetime": "2026-12-01T10:00",
-                    "deploy": [
-                        {"course_source_repo": "cm", "course_source_path": "l9"}
-                    ],
+                    "files": [{"from_course_repo": "cm", "from_path": "l9"}],
                 },
             },
             "assignments": {
                 "a1": {
-                    "course_source_repo": "a1-f2026",
+                    "number": 1,
+                    "template": "a1-f2026",
                     "handout_datetime": "2026-09-10T10:00",
                     "due_datetime": "2026-09-20T23:59",
                 }
@@ -104,14 +108,16 @@ def _handout(monkeypatch, *, group: bool, teams_csv: dict, listing: dict | None)
         {
             "assignments": {
                 "a1": {
-                    "course_source_repo": "a1-f2026",
+                    "number": 1,
+                    "repo_name": "a1",
+                    "template": "a1-f2026",
                     "handout_datetime": "2026-09-10T10:00",
                     "due_datetime": "2026-10-20T23:59",
                 }
             }
         }
     )
-    spec = grades.GradingSpec(type="group" if group else "individual")
+    spec = grading_spec.GradingSpec(type="group" if group else "individual")
     monkeypatch.setattr(scheduler, "load_grading_spec", lambda org, template, **_: spec)
     monkeypatch.setattr(scheduler.teams, "load", lambda org: teams_csv)
     monkeypatch.setattr(
@@ -125,7 +131,9 @@ def _handout(monkeypatch, *, group: bool, teams_csv: dict, listing: dict | None)
     release = Release(
         label="a1-handout", when=PAST, assignment="a1-f2026", assignment_slug="a1"
     )
-    return scheduler._handout_decisions("Course", "Semester", sched, [release], listing)
+    if listing is not None:
+        run.current().listings["semester"] = listing
+    return scheduler._handout_decisions("Course", "Semester", sched, [release])
 
 
 def test_a_group_handout_with_no_teams_waits_for_them(monkeypatch):
@@ -154,5 +162,5 @@ def test_a_read_that_fails_costs_its_decisions_not_the_preview(monkeypatch, caps
 
     monkeypatch.setattr(scheduler.schedule, "source_faults", boom)
     sched = schedule.parse({})
-    assert scheduler.dry_run_decisions("Course", "Semester", sched, [], NOW, {}) == []
+    assert scheduler.dry_run_decisions("Course", "Semester", sched, [], NOW) == []
     assert "could not work out every decision" in capsys.readouterr().err

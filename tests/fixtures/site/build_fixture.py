@@ -13,9 +13,10 @@ rest of the seed-once half from `templates/site-seed/`. Only the THEME's stand-i
 not fetch - are vendored, under `base/`.
 
 The states it covers are the ones that render DIFFERENTLY, one of each: a released
-lecture, an unreleased one, a lab, a second lab group with nothing to ship, a silent readings row with its reading list inlined, a
-drop-in whose one copy is a single file, a silent syllabus copy that raises no row, a
-handed-out assignment with a declared `details:`, a pending one, one handed in off GitHub, one handed in off GitHub
+lecture, an unreleased one, a lab in two slots in two rooms, a session with nothing to
+ship, readings inlined on their unit's first row with a chip on the unit's others, a
+drop-in whose one copy is a single file, a supporting-files syllabus copy that raises no
+row, a handed-out assignment with a declared `details:`, a pending one, one handed in off GitHub, one handed in off GitHub
 that is not out yet, one whose repos are public, one handed into a shared drop box, one
 group assignment inside its team-formation window, a dated exam and a TBC
 one, a TBC lab not released and one released (announced when its files landed), a special event, the two term boundaries, the archive row inside its notice window,
@@ -41,7 +42,14 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 sys.path.insert(0, str(ROOT))
 
-from dsl_course import grades, materials, schedule, schedule_plan, site, site_repo
+from dsl_course import (
+    grading_spec,
+    schedule,
+    schedule_plan,
+    selection,
+    site,
+    site_repo,
+)
 
 BERLIN = ZoneInfo("Europe/Berlin")
 COURSE_ORG = "hertie-dsl-fixture-course"
@@ -103,26 +111,28 @@ TREE = (
     "lectures/01_week-1/slides_files/figure/plot.svg",
     "lectures/01_week-1/slides.pdf",
     "lectures/02_week-2/slides.pdf",
-    "readings/01_week-1/READINGS.md",
     "readings/01_week-1/schmidhuber-1997.pdf",
     "readings/extra/attention.pdf",
     "clinic/notes.pdf",
     "exams/mock.pdf",
-    # Released outside the plan (no entry copies it): an undated row on the Labs tab.
+    # Released outside the plan (no entry copies it): All Materials only, no row
+    # (decision 0038).
     "labs/02_week-2/Lab_Session_2.ipynb",
     # A TBC lab released by hand (`event_datetime: tbc`, its files landed).
-    "labs/04_week-4/Lab_Session_4.ipynb",
+    "labs/05_week-5/Lab_Session_5.ipynb",
 )
 
 # When the released TBC lab's folder first landed (`gh_commits.first_landed`): after
 # lecture 2, so it is the newest bullet in the Updates box.
-LAB_4_LANDED = datetime(2026, 9, 15, 8, 30, tzinfo=ZoneInfo("UTC"))
+LAB_5_LANDED = datetime(2026, 9, 15, 8, 30, tzinfo=ZoneInfo("UTC"))
 
-# What this course's `publish.yml` declares, through the real parser: rendered decks and
-# nothing else - the shape a Quarto course takes. Lecture 1 therefore carries BOTH link
-# shapes, a published `slides.html` (whose `slides_files/` bundle follows it) beside an
-# unpublished `slides.pdf`, which is the pair the templates have to tell apart.
-PUBLISH_POLICY = {MATERIALS: (site.parse_patterns("lectures/**/*.html"),)}
+# What this semester's `student_site.host` says (decision 0040): the default kinds, as
+# rendered decks only - the shape a Quarto course takes. Lecture 1 therefore carries BOTH
+# link shapes, a hosted `slides.html` (whose `slides_files/` bundle follows it) beside an
+# unhosted `slides.pdf`, which is the pair the templates have to tell apart.
+HOST = selection.with_defaults(
+    selection.Selection(types=("html",)), selection.host_default()
+)
 
 READINGS_MD = """# Session 1 readings
 
@@ -145,24 +155,22 @@ Push to `main`.
 """
 
 PEOPLE = {
-    "people": {
-        "instructors": [
-            {
-                "github_handle": "prof-a",
-                "name": "Alex Instructor",
-                "photo": "/_images/pp/placeholder.jpg",
-                "url": "https://example.invalid/alex",
-                "title": "Professor of Data Science",
-            }
-        ],
-        "teaching_assistants": [
-            {
-                "github_handle": "ta-b",
-                "name": "Blair Assistant",
-                "photo": "/_images/pp/placeholder.jpg",
-            }
-        ],
-    }
+    "people": [
+        {
+            "github_handle": "prof-a",
+            "role": "instructor",
+            "name": "Alex Instructor",
+            "photo": "/_images/pp/placeholder.jpg",
+            "url": "https://example.invalid/alex",
+            "title": "Professor of Data Science",
+        },
+        {
+            "github_handle": "ta-b",
+            "role": "teaching_assistant",
+            "name": "Blair Assistant",
+            "photo": "/_images/pp/placeholder.jpg",
+        },
+    ]
 }
 
 
@@ -170,7 +178,7 @@ def _repo_tree(_org: str, repo: str) -> tuple[str, tuple[str, ...]]:
     return "main", TREE if repo == MATERIALS else ()
 
 
-def _formed_teams(_org: str):
+def _formed_teams(_org: str, _sched=None):
     """Two teams for the assignment inside its team-formation window - one with room and
     one full, so the built page carries both halves of the Places-left column."""
     return lambda _key: [
@@ -213,7 +221,7 @@ def _grading_spec(_org: str, repo: str, **_):
         return _spec("submit_via: shared_dropbox_repo\n")
     if repo == GROUP_FORMING:
         # The cap is the semester's (assignments.yml), so the page prints it without the
-        # course-org read `grades.team_cap` falls back to.
+        # course-org read `team_formation.team_cap` falls back to.
         return _spec("type: group\n", team_formation="self_select", max_team_size=4)
     return _spec(
         "questions:\n  Q1: 15\n  Q2: 10\n",
@@ -222,15 +230,13 @@ def _grading_spec(_org: str, repo: str, **_):
     )
 
 
-def _spec(text: str, **run) -> grades.GradingSpec:
+def _spec(text: str, **run) -> grading_spec.GradingSpec:
     """The template's definition with the run settings its semester's assignments.yml
     gives it - what `load_grading_spec` hands the site."""
-    return dataclasses.replace(grades.parse_grading_spec(text), **run)
+    return dataclasses.replace(grading_spec.parse_grading_spec(text), **run)
 
 
-def _get_file_content(_org: str, _repo: str, path: str, **_kw) -> str | None:
-    if path.endswith("READINGS.md"):
-        return READINGS_MD
+def _get_file_content(_org: str, _repo: str, path: str) -> str | None:
     if path == "README.md":
         return ASSIGNMENT_README
     return None
@@ -248,67 +254,96 @@ def _release(label: str, when: datetime, *paths: str, **kw) -> schedule.Release:
     return schedule.Release(label, when, [_copy(p) for p in paths], **kw)
 
 
-# The release plan the rows come from, one entry per row state.
+# The plan the rows come from, one entry per row state (decision 0038: kind from the
+# block, number and session explicit).
 SCHEDULE = schedule.Schedule(
     semester_start=date(2026, 9, 7),
     releases=[
-        # Silent, and all it lands is a root file: a course document, not a row.
+        # Supporting files whose one copy is a root file: released, never a row.
         _release(
             "course-intro",
             datetime(2026, 8, 31, 9, 0, tzinfo=BERLIN),
             "SYLLABUS.md",
-            show_on_site=False,
+            kind="assets",
         ),
-        # Silent readings a week ahead, numbered 1: joins lecture 1 (its list inlined,
-        # and lecture 1 listed on the Readings tab).
+        # Readings for unit 1: inline on lecture 1 (its list), listed under it on the
+        # Readings tab, and a readings chip on every row of the unit.
         _release(
-            "readings-1",
+            "readings-week-1",
             datetime(2026, 9, 1, 9, 0, tzinfo=BERLIN),
             "readings/01_week-1",
-            show_on_site=False,
+            kind="readings",
+            session="1",
+            reading_list=READINGS_MD,
         ),
-        # A titled silent readings entry: its own unnumbered row, on the Readings tab only.
+        # A titled silent readings entry with no session: its own unnumbered row, on the
+        # Readings tab only.
         _release(
-            "extra-reading",
+            "readings-extra",
             datetime(2026, 9, 2, 9, 0, tzinfo=BERLIN),
             "readings/extra",
+            kind="readings",
             show_on_site=False,
             title="Attention, further",
         ),
-        # A drop-in whose one copy is a single file outside any session folder. Its label
-        # carries no number, so the entry says it (decision 0020: never by position).
+        # A drop-in whose one copy is a single file outside any session folder.
         _release(
             "clinic",
             datetime(2026, 9, 4, 16, 0, tzinfo=BERLIN),
             "clinic/notes.pdf",
             kind="drop-in",
             number=1,
+            session="clinic",
             title="Project clinic",
+            location="Room 1.10",
         ),
         # Released, with a published deck beside an unpublished pdf.
         _release(
             "lecture-1",
             datetime(2026, 9, 7, 10, 0, tzinfo=BERLIN),
             "lectures/01_week-1",
+            kind="lecture",
+            number=1,
+            session="1",
             title="What a neural network is",
             details="Perceptrons, activation functions and the chain rule.",
         ),
-        _release("lab-1", datetime(2026, 9, 9, 14, 0, tzinfo=BERLIN), "labs/01_week-1"),
+        # Two groups: two rows of Lab 1, one set of files, each slot its own room.
+        _release(
+            "lab-1",
+            datetime(2026, 9, 9, 14, 0, tzinfo=BERLIN),
+            "labs/01_week-1",
+            kind="lab",
+            number=1,
+            session="1",
+            slots=[
+                schedule.Slot(
+                    datetime(2026, 9, 9, 14, 0, tzinfo=BERLIN), "Lab 2.30", "Group 1."
+                ),
+                schedule.Slot(
+                    datetime(2026, 9, 10, 18, 0, tzinfo=BERLIN), "Lab 2.32", "Group 2."
+                ),
+            ],
+        ),
         # Its readings are still to come: readings_pending on lecture 2.
         _release(
-            "readings-2",
+            "readings-week-2",
             datetime(2026, 9, 10, 9, 0, tzinfo=BERLIN),
             "readings/02_week-2",
-            show_on_site=False,
+            kind="readings",
+            session="2",
         ),
         _release(
             "lecture-2",
             datetime(2026, 9, 14, 10, 0, tzinfo=BERLIN),
             "lectures/02_week-2",
+            kind="lecture",
+            number=2,
+            session="2",
             title="Backpropagation",
         ),
-        # An exam kind: the Exams tab, which also lists the `events:` exams. Dated early,
-        # so it stays out of the Updates box the CI job checks (the seven newest).
+        # An exam with files: the Exams tab, which also lists the display-only exams.
+        # Dated early, so it stays out of the Updates box the CI job checks.
         _release(
             "mock-exam",
             datetime(2026, 8, 25, 10, 0, tzinfo=BERLIN),
@@ -320,26 +355,42 @@ SCHEDULE = schedule.Schedule(
             "lecture-3",
             datetime(2026, 9, 21, 10, 0, tzinfo=BERLIN),
             "lectures/03_week-3",
+            kind="lecture",
+            number=3,
+            session="3",
             title="Convolutions",
             details="Why weight sharing works.\n\nAnd where it does not.",
         ),
         # `event_datetime: tbc`: a "TBC" row after lab 1 on the schedule and the Labs tab,
         # not in the Updates box while nothing of it has landed...
-        _release("lab-3", None, "labs/03_week-3", title="Attention lab"),
+        _release(
+            "lab-3",
+            None,
+            "labs/03_week-3",
+            kind="lab",
+            number=3,
+            session="3",
+            title="Attention lab",
+        ),
         # ...and in it, at the moment its files first landed, once they have.
-        _release("lab-4", None, "labs/04_week-4", title="Transformer lab"),
-    ],
-    # A second lab group with nothing to ship: a "Lab 1" row of its own (the release's
-    # title), no files, never in the Updates box.
-    sessions=[
-        schedule.Event(
-            "lab-1-group-2",
-            "",
-            datetime(2026, 9, 10, 18, 0, tzinfo=BERLIN),
-            "lab",
-            details="Group 2, room 2.32.",
-            number=1,
-        )
+        _release(
+            "lab-5",
+            None,
+            "labs/05_week-5",
+            kind="lab",
+            number=5,
+            session="5",
+            title="Transformer lab",
+        ),
+        # A session with nothing to ship: a row, no files, never in the Updates box.
+        schedule.Release(
+            "lab-4",
+            datetime(2026, 9, 30, 14, 0, tzinfo=BERLIN),
+            kind="lab",
+            number=4,
+            session="4",
+            title="Revision",
+        ),
     ],
 )
 
@@ -351,7 +402,6 @@ def _lectures(hosted: site_repo.Hosted) -> tuple[dict[str, str], list[str]]:
         schedule_plan.planned_rows(SCHEDULE),
         frozenset(),
         frozenset({MATERIALS}),
-        schedule_plan._no_aliases,
         hosted,
     )
 
@@ -478,8 +528,14 @@ def _events() -> dict[str, str]:
         "03-resit-exam.md": site._event_row(
             "exam", "Resit Exam", end, tbc=True, dateless=True
         ),
-        "term-start.md": site._term_date_entry("Semester starts", date(2026, 9, 7)),
-        "term-end.md": site._term_date_entry("Semester ends", end),
+        "term-start.md": site._semester_entry("Semester starts", date(2026, 9, 7)),
+        "term-end.md": site._semester_entry("Semester ends", end),
+        # A reading week: one grey band from its first day to its last.
+        "break-reading-week.md": site._break_entry(
+            schedule.Break(
+                "reading-week", date(2026, 10, 19), date(2026, 10, 23), "Reading week"
+            )
+        ),
         # Inside its notice window and with a sentence, which is the only shape that
         # carries `announce: true` - the one row the Updates box takes off the schedule.
         "semester-archived.md": site._archive_entry(
@@ -513,7 +569,8 @@ def data_files(hosted: site_repo.Hosted) -> dict[str, str]:
         "_data/people.yml": site_repo.people_yaml(
             SEMESTER_ORG,
             PEOPLE,
-            edit_at=f"{SEMESTER_ORG}/semester-config/instructors.yml",
+            edit_at=f"{SEMESTER_ORG}/semester-config/semester.yml",
+            semester=True,
         ),
         "_data/nav.yml": site_repo.nav_yaml(semester=True, kinds=kinds),
         "_data/materials.yml": site._materials_index(
@@ -543,20 +600,23 @@ def generated(
     link. Without one the mirror still runs, into a throwaway directory: what the rows say
     is hosted has to come from the REAL `_mirror_public` either way."""
     real_tree, real_content = site._repo_tree, site.get_file_content
-    real_spec, real_materials = site.load_grading_spec, site.read_materials
+    real_spec = site.load_grading_spec
     real_clone, real_teams = site.clone, site._formed_teams
     real_landed = site.first_landed
     site._repo_tree, site.get_file_content = _repo_tree, _get_file_content
     site.first_landed = lambda _org, _repo, path: (
-        LAB_4_LANDED if path == "labs/04_week-4" else None
+        LAB_5_LANDED if path == "labs/05_week-5" else None
     )
     site.load_grading_spec = _grading_spec
-    site.read_materials = lambda _org, _repo: materials.Declared()
     site.clone, site._formed_teams = _clone, _formed_teams
     try:
         with tempfile.TemporaryDirectory() as work:
             hosted = site._mirror_public(
-                site_wd or Path(work), SEMESTER_ORG, PUBLISH_POLICY
+                site_wd or Path(work),
+                SEMESTER_ORG,
+                [MATERIALS],
+                HOST,
+                site._landings(SCHEDULE),
             )
         return {
             "collections": collections(hosted),
@@ -567,7 +627,7 @@ def generated(
         }
     finally:
         site._repo_tree, site.get_file_content = real_tree, real_content
-        site.load_grading_spec, site.read_materials = real_spec, real_materials
+        site.load_grading_spec = real_spec
         site.clone, site._formed_teams = real_clone, real_teams
         site.first_landed = real_landed
         site._first_landed.cache_clear()

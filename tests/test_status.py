@@ -9,7 +9,7 @@ from datetime import date
 
 from dsl_course import (
     config_digest,
-    grades,
+    grading_sheet,
     mailer,
     roster,
     schedule,
@@ -51,19 +51,19 @@ def test_render_markdown_c7_instructors_row_present_with_edit_link():
         "Semester-f2026",
         _data(
             C7={
-                "label": "Instructors/TAs (instructors.yml)",
+                "label": "Instructors/TAs (semester.yml)",
                 "org": "Semester-f2026",
                 "repo": "semester-config",
-                "path": "instructors.yml",
+                "path": "semester.yml",
                 "status": "ok",
                 "detail": "2 active",
-                "edit_url": "https://x/edit/instructors.yml",
+                "edit_url": "https://x/edit/semester.yml",
             }
         ),
     )
-    assert "Instructors/TAs (instructors.yml)" in md
+    assert "Instructors/TAs (semester.yml)" in md
     assert "2 active" in md
-    assert "[edit](https://x/edit/instructors.yml)" in md
+    assert "[edit](https://x/edit/semester.yml)" in md
 
 
 def test_render_markdown_missing_status_uses_add_link_text():
@@ -102,7 +102,7 @@ def test_instructors_course_admins_and_mail_are_needed():
 
 def test_markdown_mode_keeps_loader_chatter_off_stdout(monkeypatch, capsys):
     # The workflow appends stdout to $GITHUB_STEP_SUMMARY of a PUBLIC repo, and the
-    # loaders log lines that can name instructors.yml entries. Only the rendered table may
+    # loaders log lines that can name semester.yml entries. Only the rendered table may
     # reach stdout, in both formats.
     from dsl_course import status
 
@@ -127,7 +127,7 @@ def _stub_every_read(monkeypatch, standing=None):
     monkeypatch.setattr(status, "org_meta", lambda org: {"course_name": "Course"})
     monkeypatch.setattr(status, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(roster, "load", lambda org: [])
-    monkeypatch.setattr(grades, "sheet_slugs", lambda org: [])
+    monkeypatch.setattr(grading_sheet, "sheet_slugs", lambda org: [])
     monkeypatch.setattr(teams, "load", lambda org: {})
     monkeypatch.setattr(schedule, "load", lambda org: schedule.Schedule())
     monkeypatch.setattr(sync_faculty, "load_semester_faculty", lambda org: None)
@@ -147,7 +147,7 @@ def test_main_walks_every_row_and_points_c7_at_semester_config(monkeypatch, caps
     data = json.loads(capsys.readouterr().out)
     assert set(data) == set(status.ITEMS)
     assert data["C7"]["repo"] == "semester-config"
-    assert data["C7"]["path"] == "instructors.yml"
+    assert data["C7"]["path"] == "semester.yml"
 
 
 def test_c7_says_how_many_of_the_teaching_team_cannot_be_notified(monkeypatch):
@@ -281,11 +281,11 @@ def test_c8_reports_the_release_plans_own_digest(monkeypatch):
 def test_c9_names_the_files_whose_digest_issues_are_standing(monkeypatch):
     _stub_every_read(
         monkeypatch,
-        standing={config_digest.ROSTER.title, config_digest.TEAMS.title},
+        standing={config_digest.ROSTER.title, config_digest.PEOPLE.title},
     )
     row = status.collect("Course", "Semester-f2026")["C9"]
     assert row["status"] == status.ATTENTION
-    assert row["detail"] == "config faults: 2 open - students.csv, teams.csv"
+    assert row["detail"] == "config faults: 2 open - semester.yml, students.csv"
 
 
 def test_c9_covers_every_digest_a_semester_can_have(monkeypatch):
@@ -342,11 +342,13 @@ def test_c6_says_when_the_whole_semester_freezes(monkeypatch):
     )
 
 
-def test_c6_counts_the_events_sessions_with_the_exams(monkeypatch):
-    # A schedule whose only dated entries are `events:` sessions still has dates.
+def test_c6_counts_the_display_rows_with_the_exams(monkeypatch):
+    # A schedule whose only dated entries are `events:` rows still has dates.
     _stub_every_read(monkeypatch)
-    lab = schedule.Event("lab-1-b", "Lab", None, kind="lab")
-    monkeypatch.setattr(schedule, "load", lambda org: schedule.Schedule(sessions=[lab]))
+    clinic = schedule.Event("clinic", "Project clinic", None)
+    monkeypatch.setattr(
+        schedule, "load", lambda org: schedule.Schedule(events=[clinic])
+    )
     row = status.collect("Course", "Semester-f2026")["C6"]
     assert "1 event(s)" in row["detail"]
     assert row["status"] == "ok"
@@ -369,7 +371,7 @@ def test_a_semester_that_has_not_migrated_its_instructors_is_a_line_not_a_crash(
     _stub_every_read(monkeypatch)
 
     def refuse(org):
-        raise NotMigrated("people.yml", "instructors.yml", org)
+        raise NotMigrated("people.yml", "semester.yml", org)
 
     monkeypatch.setattr(sync_faculty, "load_semester_faculty", refuse)
     row = status.collect("Course", "Semester-f2026")["C7"]

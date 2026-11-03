@@ -106,13 +106,6 @@ _SINGLE_LINE = ("GRAPH_TENANT_ID", "GRAPH_CLIENT_ID", "GRAPH_SENDER")
 # out of `secrets.` like the rest of the mail env. `workflows_render._MAIL_ENV` carries it
 # alongside GRAPH_ENV, so a rename cannot leave an org silently unaddressed.
 MAINTAINER_ENV = "DSL_MAINTAINER_EMAIL"
-# Where a fault in the COURSE org's own config goes: the course admins, comma-separated.
-# The FALLBACK: an admin's own `email:` in `dsl-course.yml` wins when any admin declares
-# one (see `course_admin_addresses`). Held centrally as a repository variable on the toolkit
-# and propagated onto each course org by `bootstrap_course`, exactly as MAINTAINER_ENV is.
-# COURSE orgs only: every course-level mail is sent from the course org's `.github`, and
-# no workflow seeded into a semester may wire the mail env at all (see maintainers.md).
-COURSE_ADMIN_ENV = "DSL_COURSE_ADMIN_EMAILS"
 
 
 def graph_config_from_env() -> GraphConfig | None:
@@ -153,7 +146,7 @@ def maintainer_address() -> str:
 
     `DSL_MAINTAINER_EMAIL` when the org has it, else `GRAPH_SENDER` - the shared mailbox
     the toolkit already sends AS is a mailbox the maintainer can read, which beats a fault
-    nobody hears about - else the institution's `contact` (policy.yml), so a fault always
+    nobody hears about - else the institution's first `contacts` address (institution.yml), so a fault always
     has somewhere to go.
 
     Never logged: every faculty workflow runs in a PUBLIC repo. Log the NAME, or
@@ -162,33 +155,19 @@ def maintainer_address() -> str:
         value = (os.environ.get(name) or "").strip()
         if value:
             return value
-    return policy.load()["contact"]
+    return policy.contact()
 
 
 def course_admin_addresses(declared: Iterable[str] = ()) -> tuple[str, ...]:
-    """The course admins' addresses for THIS org, in declaration order. `()` when none is
-    declared and the secret is unset, blank, or holds nothing that can be an address.
+    """The course admins' addresses for THIS org, in declaration order: the `email:` of
+    each active admin in `course.yml` (`sync_faculty.course_admin_emails`). `()` when
+    none declares one; the committer git names is @mentioned on the digest issue either way.
 
-    `declared` is the `email:` of each active admin in `dsl-course.yml`
-    (`sync_faculty.course_admin_emails`). When it holds any address it is the answer and
-    the secret is not read: the file is where a course keeps its admins, and a secret
-    somebody set at bootstrap goes stale the first time an admin changes.
+    Anything without an `@` is dropped rather than handed to Graph.
 
-    The secret is a comma-separated list, because that is what fits in one org secret and one repository
-    variable - there is no handle here, and therefore no way (and no need) to address one
-    admin rather than another: a course-level fault is the course's to fix, and the
-    committer git names is @mentioned on the digest issue instead.
-
-    Anything without an `@` is dropped rather than handed to Graph, so one stray comma in
-    the secret costs a mail to nobody instead of a 400 for everybody.
-
-    Never logged: every faculty workflow runs in a PUBLIC repo. Log the NAME, a count, or
+    Never logged: every faculty workflow runs in a PUBLIC repo. Log a count, or
     `mask_email` of the value."""
-    own = tuple(a for a in (str(d).strip() for d in declared) if "@" in a)
-    if own:
-        return own
-    raw = os.environ.get(COURSE_ADMIN_ENV) or ""
-    return tuple(a for a in (part.strip() for part in raw.split(",")) if "@" in a)
+    return tuple(a for a in (str(d).strip() for d in declared) if "@" in a)
 
 
 def _b64url(raw: bytes) -> str:
@@ -416,7 +395,7 @@ def _masked(addresses: tuple[str, ...]) -> str:
     apart, not enough to identify either.
 
     For `log_person` ONLY, which prints under `DSL_VERBOSE=1` and is set by no rendered
-    workflow. A mask is not anonymity: `j***@pm.me` beside a semester's instructors.yml is a
+    workflow. A mask is not anonymity: `j***@pm.me` beside a semester's semester.yml is a
     name, and every one of these workflows runs in a PUBLIC repo. What the run log gets is
     a count."""
     return ", ".join(mask_email(a) for a in addresses)
@@ -562,17 +541,10 @@ def sample_message_of(
     where the message shows one (`<code>`, `<handle>`). No real name, handle or credential
     appears, so the result is safe in a world-readable Actions log."""
     fields = {
-        "hertie_email": "<email>",
+        "email": "<email>",
         "name": "<name>",
         "github_handle": "",
         "github_id": "",
     } | placeholders
     _to, subject, body = build(roster.Student(**fields))
     return subject, body
-
-
-def sample_of(
-    build: Callable[[roster.Student], tuple[str, str, str]], **placeholders: str
-) -> str:
-    """The BODY of `sample_message_of` - what `send_bulk` prints under a dry run."""
-    return sample_message_of(build, **placeholders)[1]

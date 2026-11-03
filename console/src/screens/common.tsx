@@ -4,7 +4,7 @@ import { parse } from 'yaml';
 import { useEnv } from '../env';
 import { invalidText, useSave, type SaveState } from '../edit/save';
 import { YamlText } from '../edit/yamlText';
-import { validGrading } from '../model/cascade';
+import { validGrading } from '../model/settings';
 import { cohortName } from '../model/discovery';
 import { dayKey, zoned } from '../model/format';
 import type { FileState, TreeState } from '../model/files';

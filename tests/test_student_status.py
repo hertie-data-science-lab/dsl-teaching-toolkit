@@ -15,12 +15,17 @@ from pathlib import Path
 
 import pytest
 
-from dsl_course import grades, roster, schedule, schemas, student_status
+from dsl_course import (
+    grading_spec,
+    roster,
+    schedule,
+    schemas,
+    student_status,
+)
 from dsl_course.gh_contents import load_yaml_lines
-from dsl_course.materials import Declared
 from dsl_course.schema_check import validate
 from dsl_course.status_json import CourseFacts, SemesterFacts
-from tests.conftest import repo_row
+from tests.conftest import fake_config, repo_row
 
 # The console's student-model tests read this render (`console/test/studentStatus.test.tsx`).
 CONSOLE_FIXTURE = (
@@ -32,67 +37,68 @@ NOW = datetime(2026, 9, 23, 9, 0, tzinfo=UTC)
 
 SCHEDULE = """\
 timezone: Europe/Berlin
-semester_start: 2026-09-07
-semester_end: 2026-12-18
-archive:
-  event_datetime: 2027-01-31
-  show_on_site: false
-releases:
+semester:
+  start: {type: start, event_datetime: 2026-09-07}
+  end: {type: end, event_datetime: 2026-12-18}
+  archive: {type: archive, event_datetime: 2027-01-31, show_on_site: false}
+lectures:
   lecture_01:
-    event_datetime: 2026-09-08T10:00
-    kind: lecture
+    session: 1
+    event_datetime:
+      - 2026-09-08T10:00
+      - {at: 2026-09-09T18:00, details: "The same lecture, online."}
     title: Intro
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: lectures/01_intro
-        semester_dest_repo: materials
-  readings_01:
-    event_datetime: 2026-09-01T10:00
-    kind: readings
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: readings/01_intro
-        semester_dest_repo: materials
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: lectures/01_intro
+        to_semester_repo: materials
   lecture_02:
+    session: 2
     event_datetime: 2026-09-30T10:00
-    kind: lecture
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: lectures/02_trees
-        semester_dest_repo: materials
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: lectures/02_trees
+        to_semester_repo: materials
   lecture_03:
+    session: 3
     event_datetime: tbc
-    kind: lecture
     title: Forests
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: lectures/03_forests
-        semester_dest_repo: materials
-events:
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: lectures/03_forests
+        to_semester_repo: materials
+readings:
+  readings_01:
+    session: 1
+    event_datetime: 2026-09-01T10:00
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: readings/01_intro
+        to_semester_repo: materials
+exams:
   midterm:
-    kind: exam
     event_datetime: 2026-10-28T09:00
     title: Midterm
-  lecture-1-online:
-    kind: lecture
-    number: 1
-    details: The same lecture, online.
-    event_datetime: 2026-09-09T18:00
 assignments:
   assignment-1:
-    course_source_repo: assignment-1-f2026
+    number: 1
+    template: assignment-1-f2026
     handout_datetime: 2026-09-15T10:00
     due_datetime: 2026-09-27T23:59
   assignment-2-project:
-    course_source_repo: assignment-2-project-f2026
+    number: 2
+    repo_name: assignment-2-project
+    template: assignment-2-project-f2026
     handout_datetime: 2026-09-20T10:00
     due_datetime: 2026-10-30T23:59
   assignment-3:
-    course_source_repo: assignment-3-f2026
+    number: 3
+    template: assignment-3-f2026
     handout_datetime: 2026-10-20T10:00
     due_datetime: 2026-11-01T23:59
   assignment-4:
-    course_source_repo: assignment-4-f2026
+    number: 4
+    template: assignment-4-f2026
     handout_datetime: 2026-10-20T10:00
     due_datetime: 2026-11-01T23:59
     show_on_site: false
@@ -111,7 +117,7 @@ PII = (
 )
 
 INSTRUCTORS = {
-    "instructors": [
+    "people": [
         {
             "github_handle": "prof-x",
             "role": "instructor",
@@ -162,16 +168,16 @@ def _facts() -> SemesterFacts:
     ]
     facts.teams = {"assignment-2-project": {"red-team": ["octocat", "hubot"]}}
     group = dataclasses.replace(
-        grades.GradingSpec(),
+        grading_spec.GradingSpec(),
         type="group",
         team_formation="self_select",
         max_team_size=3,
         questions={"Q1": "4", "Q2": "6"},
     )
     facts.specs = {
-        "assignment-1": dataclasses.replace(grades.GradingSpec(), title=""),
+        "assignment-1": dataclasses.replace(grading_spec.GradingSpec(), title=""),
         "assignment-2-project": group,
-        "assignment-3": grades.GradingSpec(),
+        "assignment-3": grading_spec.GradingSpec(),
     }
     facts.dest_paths = {
         "materials": {
@@ -194,6 +200,8 @@ def _extra(facts: SemesterFacts) -> student_status.StudentFacts:
         readmes={
             "assignment-1": README_1,
             "assignment-2-project": "# Project\n\nBuild it.",
+            # Read, but not handed out: nothing of it may reach the public file.
+            "assignment-3": README_3,
         },
         caps={"assignment-2-project": 3},
         overlays={
@@ -213,9 +221,11 @@ def _course() -> CourseFacts:
     return CourseFacts(
         org=COURSE,
         meta={
-            "course_name": "Deep Learning",
-            "course_description": "Neural networks, from scratch.",
-            "student_console": True,
+            "course": {
+                "name": "Deep Learning",
+                "description": "Neural networks, from scratch.",
+                "student_console": True,
+            },
         },
     )
 
@@ -351,7 +361,7 @@ def test_work_handed_in_off_github_states_the_rate_the_marker_counts_against():
     # and the rate comes off, so the student reads the rule (`course.late_rule`).
     facts = _facts()
     facts.specs["assignment-1"] = dataclasses.replace(
-        grades.GradingSpec(), submit_via="external", late_penalty_per_day="10%"
+        grading_spec.GradingSpec(), submit_via="external", late_penalty_per_day="10%"
     )
     by = {
         a["slug"]: a
@@ -513,21 +523,35 @@ def test_hand_out_due_exam_and_term_rows():
     assert rows["assignment-1:handout"]["kind"] == "assignment"
     assert rows["assignment-1:due"]["assignment"] == "assignment-1"
     assert rows["midterm"]["kind"] == "exam"
-    assert rows["term-start"]["all_day"] and rows["term-start"]["kind"] == "term_date"
+    assert rows["term-start"]["all_day"] and rows["term-start"]["kind"] == "semester"
     ids = [r["id"] for r in _render()["rows"]]
     assert ids.index("term-start") < ids.index("lecture_01") < ids.index("term-end")
+
+
+def test_a_term_row_carries_the_entry_s_own_title_and_details():
+    facts = _facts()
+    facts.sched.semester_start_title = "Welcome week"
+    facts.sched.semester_start_details = "Orientation in the atrium."
+    rows = {
+        r["id"]: r
+        for r in student_status.render(_course(), facts, _extra(facts), NOW)["rows"]
+    }
+    assert rows["term-start"]["title"] == "Welcome week"
+    assert rows["term-start"]["details"] == "Orientation in the atrium."
+    assert rows["term-end"]["title"] == "Semester ends"
 
 
 def test_kinds_come_from_the_policy():
     kinds = _render()["kinds"]
     assert kinds["lecture"]["label"] == "Lecture"
-    assert set(kinds["lecture"]) == {"label", "colour", "background", "tab"}
+    assert set(kinds["lecture"]) == {"label", "plural", "colour", "background", "tab"}
+    assert kinds["lab"]["plural"] == "labs"
 
 
 def test_a_kind_has_a_tab_unless_the_engine_makes_its_rows():
     kinds = _render()["kinds"]
     assert kinds["lecture"]["tab"] and kinds["readings"]["tab"] and kinds["exam"]["tab"]
-    assert not kinds["assignment"]["tab"] and not kinds["term"]["tab"]
+    assert not kinds["assignment"]["tab"] and not kinds["semester"]["tab"]
 
 
 def test_a_row_is_on_the_tabs_the_site_lists_it_on():
@@ -565,7 +589,13 @@ def test_the_course_description_and_the_previous_offerings():
 def test_the_course_opt_in_travels_to_the_console():
     assert _render()["student_console"] is True
     facts = _facts()
-    for meta in ({}, {"student_console": False}, {"student_console": "yes"}):
+    for meta in (
+        {},
+        {"course": {"student_console": False}},
+        {"course": {"student_console": "yes"}},
+        # The flag lives in the `course:` block; a stray top-level one says nothing.
+        {"student_console": True},
+    ):
         bare = CourseFacts(org=COURSE, meta=meta)
         doc = student_status.render(bare, facts, _extra(facts), NOW)
         assert doc["student_console"] is False
@@ -645,9 +675,8 @@ def test_gather_reads_briefs_only_for_what_is_out(monkeypatch):
         lambda *a, **k: ("_announcements/2026-09-20-room.md", "index.md"),
     )
     monkeypatch.setattr(student_status, "default_branch", lambda *a, **k: "main")
-    monkeypatch.setattr(student_status, "yaml_file", lambda *a: INSTRUCTORS)
-    monkeypatch.setattr(student_status, "read_materials", lambda org, repo: Declared())
-    monkeypatch.setattr(student_status.grades, "team_cap", lambda *a, **k: 3)
+    fake_config(monkeypatch, lambda *a: INSTRUCTORS)
+    monkeypatch.setattr(student_status.team_formation, "team_cap", lambda *a, **k: 3)
     facts = _facts()
     extra = student_status.gather(_course(), facts, NOW)
     readme_reads = [r for r in reads if r[2] == "README.md"]
@@ -703,35 +732,53 @@ def test_an_undated_event_is_a_dateless_row_with_no_when():
     assert row["sort_at"].startswith(facts.sched.semester_end.isoformat())
 
 
-def test_a_session_event_is_a_row_of_its_kind_with_nothing_to_ship():
-    # An `events:` entry of a policy kind: "Lecture 1" with the release's title, on the
-    # Lectures tab, no files and nothing pending - and no exam/special-event row.
+def test_an_assignment_with_no_due_date_is_two_dateless_rows():
+    import dataclasses
+
+    facts = _facts()
+    key = next(iter(facts.sched.assignments))
+    entry = facts.sched.assignments[key]
+    facts.sched.assignments[key] = dataclasses.replace(entry, due_datetime=None)
+    name = schedule.semester_name(key, entry)
+    rows = {r["id"]: r for r in student_status.event_rows(facts)}
+    for row in (rows[f"{name}:handout"], rows[f"{name}:due"]):
+        assert row["when"] is None and row["dateless"] is True and row["tbc"] is True
+        assert row["sort_at"].startswith(facts.sched.semester_end.isoformat())
+
+
+def test_a_second_slot_is_a_row_of_its_entry():
+    # Decision 0038 rule 3: lecture 1 given twice is two rows, "Lecture 1" with the
+    # entry's title and files; the second's id is `<key>-2`, as the site names its file.
     rows = {r["id"]: r for r in _render()["rows"]}
-    row = rows["lecture-1-online"]
+    row = rows["lecture_01-2"]
     assert (row["kind"], row["title"], row["subtitle"]) == (
         "lecture",
         "Lecture 1",
         "Intro",
     )
     assert row["details"] == "The same lecture, online."
-    assert row["released"] is True and row["no_materials"] is True
-    assert row["links"] == [] and row["tabs"] == ["lecture"]
     assert row["when"].startswith("2026-09-09T18:00")
-    assert not rows["lecture_01"]["no_materials"]
-    assert "lecture-1-online" not in {
-        r["id"] for r in student_status.event_rows(_facts())
-    }
+    # Its own files; the unit's readings ride its first row alone.
+    assert row["links"] and all(x in rows["lecture_01"]["links"] for x in row["links"])
+    assert len(row["links"]) < len(rows["lecture_01"]["links"])
+    assert "lecture_01-2" not in {r["id"] for r in student_status.event_rows(_facts())}
 
 
-def test_a_whole_day_session_is_all_day_for_the_student_console():
-    # A session dated with no time: the console prints the day and no 09:00.
+def test_a_whole_day_slot_is_all_day_for_the_student_console():
+    # A slot dated with no time: the console prints the day and no 09:00.
     facts = _facts()
-    facts.sched.sessions.append(
-        schedule.Event("field-trip", "Field trip", NOW.date(), "lab", number=7)
+    facts.sched.releases.append(
+        schedule.Release(
+            "field-trip",
+            None,
+            kind="lab",
+            number=7,
+            slots=[schedule.Slot(NOW.date())],
+        )
     )
     rows = {r["id"]: r for r in student_status.release_rows(facts, _extra(facts))}
     assert rows["field-trip"]["all_day"] is True
-    assert rows["lecture-1-online"]["all_day"] is False
+    assert rows["lecture_01-2"]["all_day"] is False
 
 
 def test_a_release_with_an_empty_deploy_ships_nothing_like_a_session():

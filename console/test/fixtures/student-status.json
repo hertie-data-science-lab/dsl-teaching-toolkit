@@ -23,60 +23,70 @@
   "kinds": {
     "lecture": {
       "label": "Lecture",
+      "plural": "lectures",
       "colour": "#a94442",
       "background": "#f2dede",
       "tab": true
     },
     "lab": {
       "label": "Lab",
+      "plural": "labs",
       "colour": "#3c763d",
       "background": "#dff0d8",
       "tab": true
     },
     "readings": {
       "label": "Readings",
+      "plural": "readings",
       "colour": "#2b6a60",
       "background": "#dcefec",
       "tab": true
     },
     "exam": {
       "label": "Exam",
+      "plural": "exams",
       "colour": "#2b2f36",
       "background": "#e6e8ec",
       "tab": true
     },
     "assignment": {
       "label": "Assignment",
+      "plural": "assignments",
       "colour": "#1f5fa8",
       "background": "#d6e6f7",
       "tab": false
     },
-    "term": {
+    "semester": {
       "label": "Semester",
+      "plural": "semesters",
       "colour": "#7b3fb8",
       "background": "#ead9f6",
       "tab": false
     },
     "archive": {
       "label": "Archive",
+      "plural": "archives",
       "colour": "#7d6230",
       "background": "#fbf2d5",
       "tab": false
     },
     "drop-in": {
       "label": "Drop-in",
+      "plural": "drop-ins",
       "colour": "#8f4a1c",
       "background": "#fbe3d6",
       "tab": true
     },
     "assets": {
       "label": "Supporting files",
+      "plural": "assets",
       "colour": "#4a5560",
       "background": "#eceff1",
       "tab": true
     },
     "other": {
       "label": "Event",
+      "plural": "events",
       "colour": "#7d6230",
       "background": "#fbf2d5",
       "tab": true
@@ -85,7 +95,7 @@
   "rows": [
     {
       "id": "term-start",
-      "kind": "term_date",
+      "kind": "semester",
       "when": "2026-09-07",
       "sort_at": "2026-09-07",
       "all_day": true,
@@ -102,9 +112,10 @@
       "reading_list": "",
       "readings_pending": false,
       "tabs": [
-        "term_date"
+        "semester"
       ],
-      "no_materials": false
+      "no_materials": false,
+      "repeat": false
     },
     {
       "id": "lecture_01",
@@ -154,10 +165,11 @@
         "lecture",
         "readings"
       ],
-      "no_materials": false
+      "no_materials": false,
+      "repeat": false
     },
     {
-      "id": "lecture-1-online",
+      "id": "lecture_01-2",
       "kind": "lecture",
       "when": "2026-09-09T18:00:00+02:00",
       "sort_at": "2026-09-09T18:00:00+02:00",
@@ -170,14 +182,28 @@
       "tbc": false,
       "dateless": false,
       "off_schedule": false,
-      "links": [],
+      "links": [
+        {
+          "name": "slides.pdf",
+          "repo": "materials",
+          "path": "lectures/01_intro/slides.pdf",
+          "url": "https://github.com/hertie-dsl-demo-f2026/materials/blob/main/lectures/01_intro/slides.pdf"
+        },
+        {
+          "name": "code/ (2 files)",
+          "repo": "materials",
+          "path": "lectures/01_intro/code",
+          "url": "https://github.com/hertie-dsl-demo-f2026/materials/tree/main/lectures/01_intro/code"
+        }
+      ],
       "readings": [],
       "reading_list": "",
       "readings_pending": false,
       "tabs": [
         "lecture"
       ],
-      "no_materials": true
+      "no_materials": false,
+      "repeat": true
     },
     {
       "id": "assignment-1:handout",
@@ -200,7 +226,8 @@
       "tabs": [
         "assignment"
       ],
-      "no_materials": false
+      "no_materials": false,
+      "repeat": false
     },
     {
       "id": "assignment-2-project:handout",
@@ -223,7 +250,8 @@
       "tabs": [
         "assignment"
       ],
-      "no_materials": false
+      "no_materials": false,
+      "repeat": false
     },
     {
       "id": "assignment-1:due",
@@ -246,7 +274,8 @@
       "tabs": [
         "due"
       ],
-      "no_materials": false
+      "no_materials": false,
+      "repeat": false
     },
     {
       "id": "lecture_02",
@@ -269,7 +298,8 @@
       "tabs": [
         "lecture"
       ],
-      "no_materials": false
+      "no_materials": false,
+      "repeat": false
     },
     {
       "id": "lecture_03",
@@ -292,7 +322,8 @@
       "tabs": [
         "lecture"
       ],
-      "no_materials": false
+      "no_materials": false,
+      "repeat": false
     },
     {
       "id": "assignment-3:handout",
@@ -315,7 +346,8 @@
       "tabs": [
         "assignment"
       ],
-      "no_materials": false
+      "no_materials": false,
+      "repeat": false
     },
     {
       "id": "midterm",
@@ -338,7 +370,8 @@
       "tabs": [
         "exam"
       ],
-      "no_materials": false
+      "no_materials": false,
+      "repeat": false
     },
     {
       "id": "assignment-2-project:due",
@@ -361,7 +394,8 @@
       "tabs": [
         "due"
       ],
-      "no_materials": false
+      "no_materials": false,
+      "repeat": false
     },
     {
       "id": "assignment-3:due",
@@ -384,11 +418,12 @@
       "tabs": [
         "due"
       ],
-      "no_materials": false
+      "no_materials": false,
+      "repeat": false
     },
     {
       "id": "term-end",
-      "kind": "term_date",
+      "kind": "semester",
       "when": "2026-12-18",
       "sort_at": "2026-12-18",
       "all_day": true,
@@ -405,9 +440,10 @@
       "reading_list": "",
       "readings_pending": false,
       "tabs": [
-        "term_date"
+        "semester"
       ],
-      "no_materials": false
+      "no_materials": false,
+      "repeat": false
     }
   ],
   "assignments": [

@@ -16,13 +16,13 @@ def test_the_dropdowns_never_offer_a_semester_being_set_up(monkeypatch):
     monkeypatch.setattr(seed, "discover_content_repos", lambda org: [])
     monkeypatch.setattr(seed, "discover_materials_repos", lambda org: [])
     monkeypatch.setattr(seed, "discover_assignments", lambda org: [])
-    real = seed.render_provision
+    real = seed.render_collect_submissions
 
     def spy(semesters, assignments):
         offered.append(list(semesters))
         return real(semesters, assignments)
 
-    monkeypatch.setattr(seed, "render_provision", spy)
+    monkeypatch.setattr(seed, "render_collect_submissions", spy)
     seed.github_workflow_files("Course", "release")
     assert offered == [["Course-f2026"]]
 

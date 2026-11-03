@@ -68,7 +68,7 @@ export function assignmentStart(templates: string[], repoHint?: ComponentChildre
 
 /** How students work on it: the template's own keys. How each semester runs it (teams,
  * max team size, visibility, the submit link, the late rule) is that semester's
- * assignments.yml, asked when the assignment is added to a semester's schedule (decision 0009). */
+ * schedule entry, asked when the assignment is added to a semester's schedule (decisions 0009, 0038). */
 export function assignmentWork(): Tiers {
   return pick(settingsTiers(), ['type', 'submit_via']);
 }

@@ -1,7 +1,7 @@
 // A template's `grading_config.yml` (on its `solution` branch) as the Settings form reads
 // and writes it: design/inputs.md "Assignment Settings", revision brief v3 section 3. The
 // template holds what the task IS (decision 0009 rule 2): how each semester runs it (teams,
-// visibility, the late rule, the submit link) is that semester's assignments.yml. The form
+// visibility, the late rule, the submit link) is that semester's schedule entry. The form
 // works on a flat model; `toConfig` turns it back into the file's shape.
 
 import { h } from 'preact';
@@ -11,7 +11,7 @@ import { FORMAT_KEYS, LEGACY_SUBMIT_VIA, SUBMIT_VIA_DEFAULT, SUBMIT_VIA_KEYS } f
 import { AUTOGRADE_EXAMPLE } from '../ui/bits';
 import { opt, type Tiers, type Values } from './types';
 
-export { VISIBILITY } from '../model/cascade';
+export { VISIBILITY } from '../model/settings';
 
 /** Every format a template may list (the schema's), with the engine's label. */
 export const FORMATS: [string, string][] = FORMAT_KEYS.map((k) => [k, labelOf('formats', k)]);

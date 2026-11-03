@@ -22,7 +22,7 @@ import { homeText } from './siteText';
 /** One row of the semester calendar. `when` is wall-clock time in the semester's timezone ("2026-09-22T10:00:00") or a full ISO instant; null for a row with no date yet (`dateless`). */
 export interface ScheduleRow {
   id: string;
-  /** lecture | lab | assignment (hand out) | due | exam | special_event | term_date, or a kind added later. */
+  /** lecture | lab | assignment (hand out) | due | exam | special_event | semester, or a kind added later. */
   kind: string;
   when: string | null;
   /** Where the row sorts: its `when`, or a dateless row's place after its kind's last dated one. Orders, never shown. */
@@ -38,6 +38,8 @@ export interface ScheduleRow {
   released: boolean;
   /** A session with nothing to ship (an `events:` lab, the site's `no_materials`): no files, never pending, never news. Absent from older engines: false. */
   noMaterials?: boolean;
+  /** An entry's later slot (the site's `repeat`): the same files as its first, so never news. Absent from older engines: false. */
+  repeat?: boolean;
   /** Released files: `path` within `repo` when they live in a materials repo the console can open. */
   links: FileLink[];
   /** The date is provisional ("TBC"); the row still happens when it says. */
@@ -161,7 +163,7 @@ export interface SemesterFacts {
    * plus the undated and off-schedule ones the schedule leaves out. Absent: `rows`.
    */
   tabRows?: ScheduleRow[];
-  /** The course's one-line blurb (`course_description` in dsl-course.yml); absent or '' when unset. */
+  /** The course's one-line blurb (`course.description` in course.yml); absent or '' when unset. */
   courseDescription?: string;
   /** Earlier runs of the course, as the site's landing page lists them; absent when the source does not say. */
   previousOfferings?: PreviousOffering[];
@@ -171,7 +173,7 @@ export interface SemesterFacts {
   /** When the engine last found the facts changed (an ISO instant); absent when the source does not say. */
   generatedAt?: string;
   /**
-   * The course's opt-in (`student_console: true` in dsl-course.yml, `course.advertises_console`):
+   * The course's opt-in (`course.student_console: true` in course.yml, `course.advertises_console`):
    * only true opens these screens. Absent (the site fallback, a status file written before the
    * engine carried it) counts as off, as the engine reads an unset key.
    */
@@ -180,14 +182,13 @@ export interface SemesterFacts {
 
 export interface RowKind {
   label: string;
+  /** Its block and tab name (`lectures`). */
+  plural: string;
   colour: string;
   background: string;
   /** The kind has a tab of its own (the site's kind tabs); false for the rows the engine makes (hand-out, term dates, archive). */
   tab: boolean;
 }
-
-/** The kinds that had a tab before the file said which do: a file without `tab` is read this way. */
-const TABBED_KINDS = ['lecture', 'lab', 'readings'];
 
 /** A row's kind tabs as written, or its own kind's alone when the source says nothing. */
 function tabsOf(v: unknown, kind: string): string[] {
@@ -302,8 +303,8 @@ export function repoPath(url: string, org: string): { repo: string; path: string
   return { repo: m[2], path: decodeURIComponent(m[3]) };
 }
 
-/** The schedule's archive row ids, now and under the retired name. */
-export const ARCHIVE_ROWS = ['semester-archived', 'cohort-archived'];
+/** The schedule's archive row id. */
+export const ARCHIVE_ROW = 'semester-archived';
 const stem = (name: string) => name.replace(/\.md$/, '');
 const SHAPES: Record<string, SubmitVia> = { external: 'external', 'shared-dropbox-repo': 'shared_dropbox_repo' };
 
@@ -366,6 +367,7 @@ function rowsOf(dir: string, file: string, fm: Record<string, unknown>, org: str
     allDay: fm.hide_time === true,
     released: fm.unreleased !== true,
     noMaterials: fm.no_materials === true,
+    repeat: fm.repeat === true,
     links: [] as FileLink[],
     tbc: fm.tbc === true,
     dateless: fm.dateless === true,
@@ -488,12 +490,9 @@ export class SiteSource implements StudentData {
         if (fm.date) announcements.push({ when: str(fm.date), title: str(fm.title), details: str(fm.details) || bodyOf(text).trim() });
         return;
       }
-      // `semester-archived.md` since the rename, `cohort-archived.md` on a site synced before it.
-      const archiveRow = d === '_events' && ARCHIVE_ROWS.includes(stem(e.name));
+      const archiveRow = d === '_events' && stem(e.name) === ARCHIVE_ROW;
       if (archiveRow) archive = fm.date ? str(fm.date) : null;
-      // An old site titles that row with the old word; the console says semester.
-      const title = str(fm.title) === 'Cohort archived' ? 'Semester archived' : str(fm.title);
-      rows.push(...rowsOf(d, e.name, archiveRow ? { ...fm, title, details: '' } : fm, org));
+      rows.push(...rowsOf(d, e.name, archiveRow ? { ...fm, details: '' } : fm, org));
       if (d === '_assignments') assignments.push(assignmentOf(e.name, fm, bodyOf(text)));
     });
     const ppl = yamlOf(people?.text);
@@ -556,6 +555,7 @@ export function factsFromStatus(doc: Obj): SemesterFacts {
       assignment: r.assignment ? str(r.assignment) : undefined,
       released: r.released === true,
       noMaterials: r.no_materials === true,
+      repeat: r.repeat === true,
       links,
       tbc: r.tbc === true,
       dateless: r.dateless === true,
@@ -597,7 +597,7 @@ export function factsFromStatus(doc: Obj): SemesterFacts {
   const syl = doc.syllabus as Obj | null | undefined;
   const syllabusPath = syl ? str(syl.path) : '';
   const kinds: Record<string, RowKind> = {};
-  for (const [k, v] of Object.entries((doc.kinds as Record<string, Obj> | undefined) ?? {})) kinds[k] = { label: str(v.label), colour: str(v.colour), background: str(v.background), tab: typeof v.tab === 'boolean' ? v.tab : TABBED_KINDS.includes(k) };
+  for (const [k, v] of Object.entries((doc.kinds as Record<string, Obj> | undefined) ?? {})) kinds[k] = { label: str(v.label), plural: str(v.plural), colour: str(v.colour), background: str(v.background), tab: v.tab === true };
   const org = str(doc.semester);
   return {
     courseName: str(doc.course_name),

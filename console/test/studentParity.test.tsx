@@ -187,33 +187,32 @@ describe('the student shell', () => {
 
 describe('Materials', () => {
   it('shows no empty list above Supporting files when a repo holds nothing else', () => {
-    const tree: TreeEntry[] = ['data/x.csv'].map((path) => ({ path, mode: '100644', type: 'blob', sha: path, size: 1 }));
+    const tree: TreeEntry[] = ['assets/x.csv'].map((path) => ({ path, mode: '100644', type: 'blob', sha: path, size: 1 }));
     const out = html(<MaterialsTree org={ORG} trees={[['materials', tree]]} />);
     expect(out.slice(0, out.indexOf('Supporting files'))).not.toContain('file-tree');
     expect(out).not.toContain('Nothing released yet');
   });
 
-  it('folds only the folders named as supporting files, never one the instructor may have set a kind on', () => {
-    // `code/` is supporting files by default (decision 0031), but the student's status
-    // carries no repo's kinds: a course that set it to a lecture must still see it.
-    const tree: TreeEntry[] = ['code/run.py', 'static/s.css'].map((path) => ({ path, mode: '100644', type: 'blob', sha: path, size: 1 }));
+  it('folds only the folder named for the institution’s supporting-files kind: a folder name implies no other kind (decision 0038)', () => {
+    const tree: TreeEntry[] = ['code/run.py', 'static/s.css', 'Assets/s.css'].map((path) => ({ path, mode: '100644', type: 'blob', sha: path, size: 1 }));
     const out = html(<MaterialsTree org={ORG} trees={[['materials', tree]]} />);
     const main = out.slice(0, out.indexOf('Supporting files'));
     expect(main).toContain('code/');
-    expect(main).not.toContain('static/');
+    expect(main).toContain('static/');
+    expect(main).not.toContain('Assets/');
   });
 
   it('puts supporting folders last, folded, under Supporting files', () => {
-    const tree: TreeEntry[] = ['data/x.csv', 'lectures/01/slides.pdf', 'img/a.png', 'SYLLABUS.md'].map((path) => ({ path, mode: '100644', type: 'blob', sha: path, size: 1 }));
+    const tree: TreeEntry[] = ['assets/x.csv', 'lectures/01/slides.pdf', 'assets/a.png', 'SYLLABUS.md'].map((path) => ({ path, mode: '100644', type: 'blob', sha: path, size: 1 }));
     const out = html(<MaterialsTree org={ORG} trees={[['materials', tree]]} />);
     const main = out.slice(0, out.indexOf('Supporting files'));
     expect(main).toContain('lectures/');
     expect(main).toContain('SYLLABUS.md');
-    expect(main).not.toContain('data/');
+    expect(main).not.toContain('assets/');
     expect(out).toMatch(/<details class="fold supporting"><summary>Supporting files<\/summary>/);
     const fold = out.slice(out.indexOf('Supporting files'));
-    expect(fold).toContain('data/');
-    expect(fold).toContain('img/');
+    expect(fold).toContain('assets/');
+    expect(fold).toContain('a.png');
     expect(fold).not.toMatch(/<details open/);
     // The same row heads as the instructors' tree: folder and file icons.
     expect(main).toContain('class="ft-closed"');

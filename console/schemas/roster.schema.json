@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "columns": [
+    "email",
+    "github_handle",
+    "github_id",
+    "enrol_code",
+    "code_sent_at"
+  ],
+  "items": {
+    "additionalProperties": false,
+    "properties": {
+      "code_sent_at": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "email": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "enrol_code": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "github_handle": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "github_id": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "email"
+    ],
+    "type": "object"
+  },
+  "title": "semester-config/.system/roster.csv",
+  "type": "array"
+}

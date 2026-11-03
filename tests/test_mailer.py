@@ -226,7 +226,7 @@ def test_with_no_address_set_the_institution_contact_is_the_maintainer(monkeypat
     # Never "" or None: a fault always has somewhere to go - the policy's contact.
     for key in (*mailer.GRAPH_ENV, mailer.MAINTAINER_ENV):
         monkeypatch.delenv(key, raising=False)
-    assert mailer.maintainer_address() == policy.load()["contact"]
+    assert mailer.maintainer_address() == policy.contact()
 
 
 # ------------------------------------------------------------------- pacing and the budget
@@ -387,7 +387,7 @@ def test_a_plain_three_tuple_is_still_a_message(monkeypatch):
 
 def test_a_group_is_counted_not_named_in_the_run_log(monkeypatch, capsys):
     # Every workflow runs in a PUBLIC repo, so its log is world-readable - and a mask is
-    # not anonymity: `a***@x.edu` beside a semester's instructors.yml is a name.
+    # not anonymity: `a***@x.edu` beside a semester's semester.yml is a name.
     _payloads(monkeypatch)
     mailer.send_bulk([mailer.Message(("ada@x.edu", "bo@x.edu"), "Subj", "Body")])
     out = capsys.readouterr().out
@@ -411,32 +411,11 @@ def test_a_dry_run_counts_the_copies_without_naming_them(monkeypatch, capsys):
     assert "boss@x.edu" not in out
 
 
-def test_the_course_admin_addresses_come_out_of_one_org_secret(monkeypatch):
-    # A comma-separated list, because that is what fits in one org secret and one central
-    # repository variable. Never a line in the public dsl-course.yml, which is itself one
-    # of the files these mails are about.
-    monkeypatch.setenv(mailer.COURSE_ADMIN_ENV, "a@x.edu, b@x.edu")
-    assert mailer.course_admin_addresses() == ("a@x.edu", "b@x.edu")
-
-
-def test_a_course_org_without_the_secret_has_no_admin_addresses(monkeypatch):
-    for value in (None, "", "   ", ",,", "nothing-like-an-address"):
-        if value is None:
-            monkeypatch.delenv(mailer.COURSE_ADMIN_ENV, raising=False)
-        else:
-            monkeypatch.setenv(mailer.COURSE_ADMIN_ENV, value)
-        assert mailer.course_admin_addresses() == ()
-
-
-def test_an_admin_email_declared_in_the_course_file_beats_the_secret(monkeypatch):
-    monkeypatch.setenv(mailer.COURSE_ADMIN_ENV, "secret@x.edu")
-    assert mailer.course_admin_addresses(["a@x.edu", "b@x.edu"]) == (
+def test_the_course_admin_addresses_are_the_declared_ones_in_order():
+    assert mailer.course_admin_addresses(
+        [" a@x.edu", "", "not-an-address", "b@x.edu"]
+    ) == (
         "a@x.edu",
         "b@x.edu",
     )
-
-
-def test_the_secret_is_the_fallback_when_no_admin_declares_an_address(monkeypatch):
-    monkeypatch.setenv(mailer.COURSE_ADMIN_ENV, "secret@x.edu")
-    for declared in ([], ["", "  "], ["nothing-like-an-address"]):
-        assert mailer.course_admin_addresses(declared) == ("secret@x.edu",)
+    assert mailer.course_admin_addresses([]) == ()

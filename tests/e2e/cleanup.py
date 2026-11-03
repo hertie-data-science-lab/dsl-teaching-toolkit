@@ -32,7 +32,7 @@ from dsl_course import (
     discovery,
     gh_contents,
     ghcli,
-    grades,
+    grading_sheet,
     repos,
     schedule,
     seed,
@@ -54,7 +54,7 @@ _DRIFT = re.compile(rf"^assignment-{ASSIGNMENT_NUMBER}-|e2e[0-9a-z]{{6}}")
 
 # The engine's own names, every one of them, so a rename there cannot leave artefacts
 # uncollected here.
-ARTEFACT_DIRS = (collect.SNAPSHOT_DIR, collect.AUTOGRADE_DIR, grades.SHEETS_DIR)
+ARTEFACT_DIRS = (collect.SNAPSHOT_DIR, collect.AUTOGRADE_DIR, grading_sheet.SHEETS_DIR)
 
 
 def new_run_id() -> str:
@@ -190,11 +190,11 @@ def _is_artefact(path: str, run_id: str) -> bool:
 def _refresh_workflows(org: str, run_id: str, dry_run: bool) -> int:
     """Re-render a course org's org-level workflows, the way Refresh actions does.
 
-    Deleting the repos is not enough. Four of the buttons carry an assignment dropdown
+    Deleting the repos is not enough. Two of the buttons carry an assignment dropdown
     rendered from the course org's own repo listing (`release-assignment.yml`,
-    `collect-submissions.yml`, `patch-assignment.yml`, `derive-student-version.yml`), so
-    every run rewrites them the moment it creates its template - and the deletion above
-    takes the template away while leaving the four still offering it. The org is then a
+    `collect-submissions.yml`), so every run rewrites them the moment it creates its
+    template - and the deletion above takes the template away while leaving the two
+    still offering it. The org is then a
     state no refresh has produced, and it is the NEXT run's preflight that pays for it:
     `estate.workflow_drift` refuses with "run Refresh actions" before anything is
     dispatched. So the teardown presses that button itself, in process, through the same

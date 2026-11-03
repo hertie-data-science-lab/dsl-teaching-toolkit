@@ -23,7 +23,7 @@ describe('md', () => {
 
 describe('assignment names', () => {
   it('numbers an assignment by its entry, never by a position', () => {
-    expect(assignmentIdent('assignment-3')).toBe('Assignment 3'); // an older status: the key's own
+    expect(assignmentIdent('assignment-3')).toBe('assignment-3'); // never the key's digits (decision 0038 amendment rule 1)
     expect(assignmentIdent('assignment-4-project', 'Project', 4)).toBe('Assignment 4');
     expect(assignmentIdent('assignment-4-project', 'Project', null)).toBe('Project');
     expect(assignmentIdent('assignment-4-project')).toBe('assignment-4-project');
@@ -46,9 +46,9 @@ describe('releaseIdent', () => {
     expect(releaseIdent(rel('extra', 'readings', '1', null))).toBe('Readings');
     expect(releaseIdent(rel('clinic', 'drop-in', '1', 2))).toBe('Drop-in 2');
   });
-  it('falls back to the label, never the position, as the engine does', () => {
-    expect(releaseIdent(rel('lecture_03', 'lecture', '1'))).toBe('Lecture 3');
-    expect(releaseIdent(rel('01_lab', 'lab', '1'))).toBe('Lab 1');
+  it('never reads a number out of the key (decision 0038 amendment rule 1)', () => {
+    expect(releaseIdent(rel('lecture_03', 'lecture', '1'))).toBe('Lecture');
+    expect(releaseIdent(rel('01_lab', 'lab', '1'))).toBe('Lab');
     expect(releaseIdent(rel('wrap', 'lecture', '2026-09-08'))).toBe('Lecture');
   });
 });

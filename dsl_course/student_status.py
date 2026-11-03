@@ -34,13 +34,20 @@ from datetime import date, datetime
 
 import yaml
 
-from . import grades, policy, records, schedule, teams
+from . import (
+    grading_spec,
+    policy,
+    records,
+    schedule,
+    team_formation,
+    teams,
+)
+from .config import read_semester
 from .course import (
-    CONFIG_REPO,
     CUTOFF_SENTENCE,
-    INSTRUCTORS_FILE,
     SELF_SELECT,
     advertises_console,
+    course_block,
     identifier,
     is_repo_root,
     late_rule,
@@ -51,10 +58,8 @@ from .course import (
     shape_note,
 )
 from .discovery import handed_out_assignments
-from .faults import Unusable
 from .gh_contents import get_file_content, repo_tree
-from .materials import publishable
-from .materials import read as read_materials
+from .materials import semester_syllabus
 from .readings import demote_headings
 from .repos import default_branch
 from .schedule_plan import (
@@ -65,12 +70,11 @@ from .schedule_plan import (
     site_rows,
     term_end,
 )
+from .selection import publishable
 from .site_repo import (
     landed_links,
-    link_extensions,
     people_cards,
     row_tabs,
-    yaml_file,
 )
 from .status_json import CourseFacts, SemesterFacts, _iso, dumps, handed_out
 
@@ -125,6 +129,7 @@ ROW_KEYS = (
     "readings_pending",
     "tabs",
     "no_materials",
+    "repeat",
 )
 LINK_KEYS = ("name", "repo", "path", "url")
 ASSIGNMENT_KEYS = (
@@ -156,7 +161,7 @@ TEAM_KEYS = ("name", "members", "cap")
 INSTRUCTOR_KEYS = ("name", "title", "webpage", "picture", "role", "email")
 ANNOUNCEMENT_KEYS = ("when", "title", "details")
 SYLLABUS_KEYS = ("repo", "path")
-KIND_KEYS = ("label", "colour", "background", "tab")
+KIND_KEYS = ("label", "plural", "colour", "background", "tab")
 OFFERING_KEYS = ("title", "url")
 
 _S, _SN = {"type": "string"}, {"type": ["string", "null"]}
@@ -190,6 +195,7 @@ def json_schema() -> dict:
         "off_schedule": _B,
         "readings_pending": _B,
         "no_materials": _B,
+        "repeat": _B,
         "when": _SN,
         "sort_at": _SN,
         "assignment": _SN,
@@ -270,9 +276,10 @@ class StudentFacts:
     # `{(repo, path): text}` of every reading-list overlay that landed.
     overlays: dict[tuple[str, str], str] = field(default_factory=dict)
     syllabus: tuple[str, str] | None = None
-    # The course's `site_link_extensions` (`site_repo.link_extensions`): what a row lists.
+    # What a row lists beyond the folder-shaped default: nothing since decision 0039
+    # dropped the course's `site_link_extensions`.
     link_extensions: frozenset[str] = frozenset()
-    # (instructors, teaching assistants) as site cards; None when instructors.yml
+    # (instructors, teaching assistants) as site cards; None when semester.yml
     # declares nobody.
     cards: tuple[list[dict], list[dict]] | None = None
     home: str = ""
@@ -290,7 +297,7 @@ def _all_day(when: datetime | date | None) -> bool:
 
 def _files(paths: set[str]) -> list[str]:
     """The files of a destination tree read with both kinds (`dest_paths`), sorted, minus
-    any path the public file may not name (`materials.publishable`): every path no other
+    any path the public file may not name (`selection.publishable`): every path no other
     path sits under."""
     folders = {p.rsplit("/", 1)[0] for p in paths if "/" in p}
     return sorted(p for p in paths if p not in folders and publishable(p))
@@ -361,6 +368,7 @@ def _row(
     readings_pending: bool = False,
     tabs: list[str] | None = None,
     no_materials: bool = False,
+    repeat: bool = False,
 ) -> dict:
     return {
         "id": id_,
@@ -389,16 +397,19 @@ def _row(
         # It ships nothing (an `events:` session): nothing pends, and it is never news
         # (the site's `no_materials`).
         "no_materials": no_materials,
+        # An entry's later slot (the site's `repeat`): its files shipped with the first,
+        # so it is never news.
+        "repeat": repeat,
     }
 
 
 def release_rows(facts: SemesterFacts, extra: StudentFacts) -> list[dict]:
-    """A row per entry the site shows (`schedule_plan.site_rows`, the `events:` sessions
-    among them), numbered as the site numbers it, with the files it has landed and the
-    readings attached to it. A row that ships nothing is `no_materials`, as on the site."""
-    aliases = lambda repo: facts.aliases.get(repo, {})
+    """A row per slot of each entry the site shows (`schedule_plan.site_rows`; a second
+    slot's id is `<key>-2`, as the site names its file), numbered as the site numbers
+    it, with the files it has landed and the readings attached to it. A row that ships
+    nothing is `no_materials`, and a later slot `repeat`, as on the site."""
     out = []
-    for sr in site_rows(planned_rows(facts.sched, aliases)):
+    for sr in site_rows(planned_rows(facts.sched)):
         r = sr.row
         own = r.kind == "readings"
         links, prose, landed = _landed(facts, r, own, extra.link_extensions)
@@ -414,7 +425,7 @@ def release_rows(facts: SemesterFacts, extra: StudentFacts) -> list[dict]:
         nothing = not (landed or readings or pending or r.deploys)
         out.append(
             _row(
-                r.key,
+                r.key if r.slot == 0 else f"{r.key}-{r.slot + 1}",
                 r.kind,
                 r.when,
                 title,
@@ -432,6 +443,7 @@ def release_rows(facts: SemesterFacts, extra: StudentFacts) -> list[dict]:
                 # Readings attached, landed or not: the site's own test.
                 tabs=row_tabs(r.kind, bool(sr.readings)),
                 no_materials=nothing,
+                repeat=r.slot > 0,
             )
         )
     return out
@@ -453,16 +465,22 @@ def event_rows(facts: SemesterFacts) -> list[dict]:
     for key, entry in _public_assignments(sched):
         name = schedule.semester_name(key, entry)
         title = identifier(name)
-        if entry.handout_datetime is not None:
+        # No due date yet: both rows TBC at the end of term, as an undated session is (the
+        # site's `_assignment_entry`); nothing fires for it, so its hand-out is TBC too.
+        undated = entry.due_datetime is None
+        end = term_end(sched, []) if undated else None
+        if entry.handout_datetime is not None or undated:
             out.append(
                 _row(
                     f"{name}:handout",
                     "assignment",
-                    entry.handout_datetime,
+                    None if undated else entry.handout_datetime,
                     title,
+                    sort_at=end,
                     details=entry.details,
                     assignment=name,
-                    tbc=entry.tbc,
+                    tbc=entry.tbc or undated,
+                    dateless=undated,
                 )
             )
         out.append(
@@ -471,9 +489,11 @@ def event_rows(facts: SemesterFacts) -> list[dict]:
                 "due",
                 entry.due_datetime,
                 title,
+                sort_at=end,
                 details=entry.details,
                 assignment=name,
-                tbc=entry.tbc,
+                tbc=entry.tbc or undated,
+                dateless=undated,
             )
         )
         if entry.marks_return_datetime is not None and entry.marks_return_on_site:
@@ -504,12 +524,24 @@ def event_rows(facts: SemesterFacts) -> list[dict]:
                 dateless=ev.when is None,
             )
         )
-    for id_, title, when in (
-        ("term-start", "Semester starts", sched.semester_start),
-        ("term-end", "Semester ends", sched.semester_end),
+    for id_, title, details, when in (
+        (
+            "term-start",
+            sched.semester_start_title,
+            sched.semester_start_details,
+            sched.semester_start,
+        ),
+        (
+            "term-end",
+            sched.semester_end_title,
+            sched.semester_end_details,
+            sched.semester_end,
+        ),
     ):
         if when is not None:
-            out.append(_row(id_, "term_date", when, title, all_day=True))
+            out.append(
+                _row(id_, "semester", when, title, all_day=True, details=details)
+            )
     archive = sched.archive
     if archive and archive.when and archive.show_on_site:
         details = (archive.details or "").replace("{date}", archive.when.isoformat())
@@ -566,7 +598,7 @@ def render_assignments(
     shape note wait for the hand-out, as the site's did."""
     out = []
     for key, entry in _public_assignments(facts.sched):
-        spec = facts.specs.get(key, grades.GradingSpec())
+        spec = facts.specs.get(key, grading_spec.GradingSpec())
         name = schedule.semester_name(key, entry)
         title = identifier(name)
         out_now = handed_out(name, entry, extra.handed_out, now)
@@ -632,7 +664,7 @@ def render_assignments(
                     )
                     or entry.solution_datetime
                 ),
-                "max_points": _number(grades.total_points(spec)),
+                "max_points": _number(grading_spec.total_points(spec)),
                 "handed_out": out_now,
                 "brief": brief,
                 "tbc": entry.tbc,
@@ -642,7 +674,7 @@ def render_assignments(
 
 
 def _number(text: str) -> int | float | None:
-    """`grades.total_points`'s "10" / "7.5" as a number; None when there is no total."""
+    """`grading_spec.total_points`'s "10" / "7.5" as a number; None when there is no total."""
     if not text:
         return None
     return int(text) if text.lstrip("-").isdigit() else float(text)
@@ -698,11 +730,11 @@ def home_markdown(text: str, config: dict[str, str]) -> str:
 
 def site_config(course: CourseFacts, org: str) -> dict[str, str]:
     """The `site.*` keys a home page may name, as the site sync writes them."""
-    meta = course.meta or {}
+    identity = course_block(course.meta or {})
     config = {
-        k: str(meta[k])
-        for k in ("course_name", "course_code", "course_description")
-        if meta.get(k)
+        f"course_{k}": str(identity[k])
+        for k in ("name", "code", "description")
+        if identity.get(k)
     }
     if semester_label(semester_of(org)):
         config["course_semester"] = semester_label(semester_of(org))
@@ -722,8 +754,8 @@ def render(
     return {
         "schema": SCHEMA,
         "semester": facts.org,
-        "course_name": str((course.meta or {}).get("course_name") or ""),
-        "course_description": str((course.meta or {}).get("course_description") or ""),
+        "course_name": str(course_block(course.meta).get("name") or ""),
+        "course_description": str(course_block(course.meta).get("description") or ""),
         # The course's opt-in: false, and the console shows a student the site instead.
         "student_console": advertises_console(course.meta or {}),
         # schedule.yml's dates, so the console counts "Week N of M" as the instructor's does.
@@ -742,6 +774,7 @@ def render(
         "kinds": {
             k["key"]: {
                 "label": k["label"],
+                "plural": k["plural"],
                 "colour": k["colour"],
                 "background": k["background"],
                 # A kind the engine makes rows for itself has no tab (`kinds_yaml`).
@@ -824,10 +857,9 @@ def gather(course: CourseFacts, facts: SemesterFacts, now: datetime) -> StudentF
     org, sched = facts.org, facts.sched
     extra = StudentFacts(
         handed_out=handed_out_assignments(list(facts.listing.values())),
-        link_extensions=link_extensions(course.meta or {}),
     )
     for key, entry in _public_assignments(sched):
-        spec = facts.specs.get(key, grades.GradingSpec())
+        spec = facts.specs.get(key, grading_spec.GradingSpec())
         name = schedule.semester_name(key, entry)
         if handed_out(name, entry, extra.handed_out, now):
             extra.readmes[key] = (
@@ -835,26 +867,22 @@ def gather(course: CourseFacts, facts: SemesterFacts, now: datetime) -> StudentF
                 or ""
             )
         if spec.is_group and spec.team_formation_resolved == SELF_SELECT:
-            extra.caps[key] = grades.team_cap(course.org, spec, org, key)
+            extra.caps[key] = team_formation.team_cap(course.org, spec, org, key)
     # The reading lists: the prose overlays of every readings copy that has landed.
-    for sr in site_rows(planned_rows(sched, lambda repo: facts.aliases.get(repo, {}))):
+    for sr in site_rows(planned_rows(sched)):
         own = [sr.row] if sr.row.kind == "readings" else []
         for row in [*own, *sr.readings]:
             for repo, path in _landed(facts, row, True, frozenset())[1]:
                 text = get_file_content(org, repo, path, confirm_absent=True)
                 extra.overlays[(repo, path)] = text or ""
-    try:
-        extra.syllabus = declared_syllabus(
-            sched,
-            frozenset(facts.dest_paths),
-            lambda repo: facts.dest_paths.get(repo, set()),
-            lambda repo: read_materials(course.org, repo),
-        )
-    except Unusable:
-        extra.syllabus = None  # the site sync names the bad materials.yml
-    extra.cards = people_cards(
-        yaml_file(org, CONFIG_REPO, INSTRUCTORS_FILE), semester=True
+    semester_meta = read_semester(org).semester.meta()
+    extra.syllabus = declared_syllabus(
+        sched,
+        frozenset(facts.dest_paths),
+        lambda repo: facts.dest_paths.get(repo, set()),
+        semester_syllabus(semester_meta),
     )
+    extra.cards = people_cards(semester_meta, semester=True)
     site = pages_repo(org)
     if site in facts.listing:
         extra.home = facts.site_home or ""

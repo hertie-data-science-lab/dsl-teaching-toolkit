@@ -6,7 +6,7 @@ bootstrap_course imports seed, so seed cannot import bootstrap_course back - thi
 is what both sides may import.
 
 Everything this module writes is SYSTEM-owned, and that is the whole rule for what may
-live here: a semester's own config (students.csv, teams.csv, schedule.yml, instructors.yml) is
+live here: a semester's own config (students.csv, schedule.yml, semester.yml) is
 seeded create-if-missing by bootstrap_course and must never be refreshed from a template,
 or a nightly run would clobber a live roster.
 """
@@ -21,10 +21,10 @@ from . import policy, records
 from .central import CENTRAL, pin_central_ref
 from .course import JOIN_REPO
 from .gh_contents import get_file_content, put_file, put_files
-from .grades import TEAM_LOCK_PATH, parse_team_lock
 from .log import log_err, log_ok
 from .repos import ensure_label
-from .roster import CONFIG_REPO
+from .roster import CONFIG_REPO, STUDENTS_PATH, SYSTEM_PATH
+from .team_formation import TEAM_LOCK_PATH, parse_team_lock
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATES = ROOT / "templates"
@@ -36,10 +36,8 @@ EXAMPLE_COURSE = ROOT / "example-course" / "course-org"
 # rendered for this semester, so every example in a scaffold is copy-paste-correct.
 CONFIG_SCAFFOLDS = {
     "students.csv": "semester-config/students.csv",
-    "teams.csv": "semester-config/teams.csv",
     "schedule.yml": "semester-config/schedule.yml",
-    "instructors.yml": "semester-config/instructors.yml",
-    "assignments.yml": "semester-config/assignments.yml",
+    "semester.yml": "semester-config/semester.yml",
 }
 
 
@@ -50,7 +48,7 @@ def template(rel: str) -> str:
     Everything under templates/ is content pushed into a course/semester repo, kept in real
     files rather than Python literals so faculty & instructors can read (and PR) the thing
     they'll actually receive. Most are seeded verbatim; the few that carry `{placeholders}`
-    are rendered with str.format (see bootstrap_course._course_metadata)."""
+    are rendered with str.format (see bootstrap_course.course_seed)."""
     return (TEMPLATES / rel).read_text(encoding="utf-8")
 
 
@@ -86,6 +84,8 @@ def join_workflow(rel: str) -> str:
         "".join(out)
         .replace("__CONFIG_REPO__", CONFIG_REPO)
         .replace("__LOCK__", TEAM_LOCK_PATH)
+        .replace("__STUDENTS__", STUDENTS_PATH)
+        .replace("__ROSTER__", SYSTEM_PATH)
     )
 
 
@@ -139,7 +139,7 @@ def open_formations(lock_text: str) -> dict[str, str]:
     OPEN, sorted, each with its page (`team_formation_page`, "" where
     the lock carries none).
 
-    A filter over `grades.parse_team_lock`, which lives beside the writer of that file: the
+    A filter over `team_formation.parse_team_lock`, which lives beside the writer of that file: the
     format is hand-rolled for a line scanner, and a second scanner here would be a second
     opinion about a shape one module decides.
 
@@ -320,12 +320,9 @@ def refresh_join_team_form(org: str) -> int:
     return 1
 
 
-# The forms were renamed to control the issue-chooser ordering (01-/02- prefix); the old
-# filenames are deleted on live semesters or the chooser shows both generations.
-RETIRED_JOIN_FORMS = (
-    ".github/ISSUE_TEMPLATE/join.yml",
-    ".github/ISSUE_TEMPLATE/join-team.yml",
-)
+# Retired join-repo files, deleted on live semesters or the issue chooser shows both
+# generations. Emptied once every live semester had refreshed (14 Oct 2026).
+RETIRED_JOIN_FORMS: tuple[str, ...] = ()
 
 
 def join_files(org: str) -> dict[str, bytes]:
@@ -397,30 +394,28 @@ def refresh_join_workflows(org: str) -> int:
 # and the workflows that make the repo act on what they put in it, as
 # `(path in the repo, template file)`.
 #
-# HARD INVARIANT: nothing the semester edits may join this table. students.csv, teams.csv,
-# schedule.yml and instructors.yml hold the semester's LIVE state (enrol codes, onboarded
+# HARD INVARIANT: nothing the semester edits may join this table. students.csv,
+# schedule.yml and semester.yml hold the semester's LIVE state (enrol codes, onboarded
 # handles); they are seeded create-if-missing by bootstrap_course and stay that way.
 # Adding one here would have the nightly refresh overwrite it every night.
 # tests/test_bootstrap_seeding.py pins this set exactly, so an addition fails loud.
 CONFIG_SYSTEM_FILES = (
     ("README.md", "semester-config/README.md"),
-    (".github/workflows/dispatch-sync.yml", "semester-config/dispatch-sync.yml"),
-    (
-        ".github/workflows/dispatch-sync-site.yml",
-        "semester-config/dispatch-sync-site.yml",
-    ),
-    (
-        ".github/workflows/dispatch-scheduled-release.yml",
-        "semester-config/dispatch-scheduled-release.yml",
-    ),
-    (
-        ".github/workflows/dispatch-send-codes.yml",
-        "semester-config/dispatch-send-codes.yml",
-    ),
+    (".github/workflows/dispatch.yml", "semester-config/dispatch.yml"),
     (
         ".github/workflows/validate-schedule.yml",
         "semester-config/validate-schedule.yml",
     ),
+)
+
+# Retired semester-config workflows, deleted in the same commit that writes the set above.
+# Decision 0041: the four dispatchers became `dispatch.yml`. Emptied once every live
+# semester has refreshed (decision 0042).
+RETIRED_CONFIG_FILES: tuple[str, ...] = (
+    ".github/workflows/dispatch-sync.yml",
+    ".github/workflows/dispatch-sync-site.yml",
+    ".github/workflows/dispatch-scheduled-release.yml",
+    ".github/workflows/dispatch-send-codes.yml",
 )
 
 
@@ -444,7 +439,7 @@ def config_system_files(central_ref: str) -> dict[str, bytes]:
 
 
 def refresh_semester_pointer(org: str, course_org: str) -> int:
-    """Re-push a semester's `semester-config/.system/dsl-course.yml` - the pointer its
+    """Re-push a semester's `semester-config/.system/course.yml` - the pointer its
     dispatchers read to find which course org to fire Sync membership / Sync site at.
 
     SYSTEM-owned, but it used to be written ONLY by Bootstrap semester's own wiring, so it
@@ -459,7 +454,7 @@ def refresh_semester_pointer(org: str, course_org: str) -> int:
         org,
         CONFIG_REPO,
         {
-            records.path("pointer"): template("semester/dsl-course.yml")
+            records.path("pointer"): template("semester/course.yml")
             .format(course=course_org)
             .encode()
         },
@@ -479,7 +474,7 @@ def refresh_config_system_files(org: str, central_ref: str) -> int:
     run that workflow again - three live semesters drifted a whole semester that way.
     `put_files` compares blob shas, so a semester already current is written nothing.
 
-    A failed write here is not cosmetic: without dispatch-sync*.yml a semester's membership
+    A failed write here is not cosmetic: without dispatch.yml a semester's membership
     and site syncs never fire. Returns 1 if the commit didn't land, so callers
     (setup_semester_extras, seed.refresh) go red rather than report a converged semester."""
     if not put_files(
@@ -487,6 +482,7 @@ def refresh_config_system_files(org: str, central_ref: str) -> int:
         CONFIG_REPO,
         config_system_files(central_ref),
         "ci: refresh semester-config contract + dispatchers",
+        delete=RETIRED_CONFIG_FILES,
     ):
         log_err(f"semester-config system files not written in {org}")
         return 1

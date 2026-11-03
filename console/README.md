@@ -245,8 +245,7 @@ Each screen reads with the student's own account:
 | Profile: Your repos in <course>, <semester> (one section per live semester they study, the first open; a folded one reads nothing until opened) | the materials repos | whether they forked each (`GET /repos/{login}/{repo}`: `fork` and `parent`; asked again on focus and every 10 s, every 30 s after the first minute, for up to 5 minutes of the tab being shown, while a read says one is not forked); the Open button for each fork and each of their assignment repos, both in the semester's folder from Profile (decisions 0027, 0035 rule 9) |
 
 Marks, Join and Set up are no longer in the nav (decision 0035 rules 7-9): marks and team
-joining live in Assignments, Set up in Profile. `#marks` and `#join` open Assignments,
-`#setup` Profile.
+joining live in Assignments, Set up in Profile.
 | Instructors | the cards, with an email only where the instructor chose to show it | none (a picture hosted on the semester site is read through the API and shown as `data:`) |
 
 Every screen also reads the person's role: `GET /orgs/{org}/teams/auditors/memberships/{login}`
@@ -302,10 +301,14 @@ opens (not pdf, pptx, docx, xlsx, zip); the editor only once Profile has a folde
 an editor link with `{path}` (GitHub Desktop opens repos, not files), and until then a "Set up
 your editor in Profile" item in its place. The menu is the instructor Open button's
 (`ui/OpenButton.tsx` `useMenu`): it closes on a click outside, on Escape, and on Tab, so one is
-open at a time. The instructor screens' file lists keep their own rows. Whether the student forked a repo is
+open at a time. The row is `ui/FileRow.tsx`, the one the course materials tree draws too
+(decision 0040 rule 6). Whether the student forked a repo is
 read once per session, when a row first needs it, and Profile's fork check refreshes it.
 
-**Materials** open inside the console from the private copy: markdown and notebooks through
+**Materials** open inside the console (`ui/Viewer.tsx`, both consoles; no selection or hosted
+copy gates it, decision 0040 rule 6) from the private copy, the header carrying the file's
+GitHub link and a **Full screen** toggle (the panel covers the window and, where the browser
+allows, the screen; Escape or the button leaves): markdown and notebooks through
 GitHub's markdown endpoint (one call; its HTML is sanitised by GitHub), notebook outputs as
 text and images; an HTML page with its `<stem>_files/` bundle inlined (stylesheets as
 `<style>`, images and fonts as data: URLs) in a frame sandboxed with no permissions. The
@@ -381,8 +384,10 @@ a first visit, mostly free 304s after).
   last changes; a materials repo's recursive tree, badged from its `.releaseignore` on its
   settings page. The index lists each materials repo's files under its row as a read-only folder
   tree (`ui/MaterialsTree.tsx`): every folder collapsed, "N files" beside it while it is, a
-  GitHub link to its tree page; a file opens its blob page on GitHub. The folders a viewer opens
-  are kept per repo in sessionStorage; `?folder=<repo>/<path>#materials` opens that folder.
+  GitHub link to its tree page; each file is the student screens' file row (`ui/FileRow.tsx`),
+  its name opening the file in the console's viewer, `?file=<repo>/<path>#materials`, its repo's
+  tree beside it with the file marked. The folders a viewer opens are kept per repo in
+  sessionStorage; `?folder=<repo>/<path>#materials` opens that folder.
 
 ## What it changes
 
@@ -426,14 +431,8 @@ a first visit, mostly free 304s after).
 
 Every repo and path name comes from `src/model/names.ts`, which reads the engine's
 `schemas/names.json` (decisions 0010 and 0012). A semester's course comes from its pointer,
-`.system/dsl-course.yml` in `semester-config`. The console reads
-the new names only. An org that still carries a retired one (the `classroom-config` or
-`welcome` repo, `people.yml`, `.dsl/`, the `dsl-cohort` topic, the old course registry or its
-`cohorts:` key, `cohort_defaults:` in `dsl-course.yml`) shows one screen, "This semester has
-not been migrated yet" (or course), with the engine's `NOT_MIGRATED` sentence for each, and
-nothing else of it loads (`src/model/migration.ts`). Only the org a page is about is checked.
-A check GitHub does not answer shows "Could not check whether this semester is migrated" and
-runs again on the next page; it never counts as migrated.
+`.system/dsl-course.yml` in `semester-config`. The console reads the new names only and
+spells no old one (`names.json` carries the engine's `legacy` rows, decision 0042).
 
 ## Schemas
 
@@ -445,14 +444,9 @@ each record in it); read it rather than writing a literal.
 ## Routes
 
 Hash tokens as in the design mockup: `#dashboard`, `#schedule-s5`, `#assignment-<slug>`,
-`#release-<id>`, `#template-<slug>`, `#marks-<slug>`, `#teams-<slug>`, `#materials-<repo>`;
-the schedule editor also opens `#schedule-new`, `#schedule-semester` and `#schedule-archive`.
-Renamed hashes redirect: `#cohort` and `#semester` to `#dashboard`, `#staff` to
-`#instructors`, `#new-cohort-<n>` to `#new-semester-<n>`, `#schedule-term` to
-`#schedule-semester`, `#setup` to `#profile`, `#marks` to `#assignments` (decision 0037: each
-assignment's Marks tab, and the index's Marked and Returned columns, replace the semester's Marks page),
-and the retired Archive page `#archive` to `#schedule-archive` (its explanation is the `?` on the
-archive row, its Archive button on that entry).
+`#release-<id>`, `#template-<slug>`, `#materials-<repo>`; an assignment's tabs ride after a
+slash (`#assignment-<slug>/teams`, `/marks`); the schedule editor also opens `#schedule-new`,
+`#schedule-semester` and `#schedule-archive`. Old hashes no longer redirect (decision 0042).
 Wizards: `#new-course-1..4`, `#new-semester-1..3`, `#new-assignment-1..4`, `#new-materials`; a
 step past the first unfinished one opens that one instead. `?template=<repo>#schedule-new`
 opens a new assignment entry for that template; `?cohort=<org>#new-assignment-1` offers that
@@ -464,6 +458,5 @@ The course or semester rides in the query string: `?cohort=<org>` or `?course=<o
 Student screens: `?semester=<org>#home` (and `#week`, `#schedule`, `#kind-<kind>`,
 `#kind-<kind>/<repo>/<path>` for a file open in that tab (a slash, as a kind and a repo may
 both hold `-`), `#assignments`, `#assignment-<slug>` for one assignment's page, `#materials`,
-`#materials-<repo>/<path>` for an open file, `#instructors`; a
-student's old `#marks` and `#join` redirect to `#assignments`, `#setup` to `#profile`);
+`#materials-<repo>/<path>` for an open file, `#instructors`);
 `?join=<org>` for Join course.

@@ -1,6 +1,6 @@
 // New course (`#new-course-1..4`): create the org on GitHub, set it up through the central
 // Bootstrap Course Org workflow, write the course's details and defaults into its
-// dsl-course.yml, then check. Revision brief v3 section 2, design/inputs.md "Set up a course".
+// course.yml, then check. Revision brief v3 section 2, design/inputs.md "Set up a course".
 
 import type { ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
@@ -9,7 +9,9 @@ import { useSave } from '../edit/save';
 import { YamlText, deepEqual, obj } from '../edit/yamlText';
 import { SchemaForm, fieldErrors } from '../forms/Form';
 import type { Files } from '../model/files';
-import { ABOUT, courseDefaultTiers } from '../tiers/course';
+import { ABOUT, defaultsTiers } from '../tiers/course';
+import { courseBlock } from '../model/discovery';
+import { institutionDefaults } from '../model/settings';
 import type { Values } from '../tiers/types';
 import { COURSE_ORG } from '../tiers/wizard';
 import { CheckLine, Crumbs } from '../ui/bits';
@@ -21,7 +23,7 @@ import { courseOrgName, openAt } from '../wizards/model';
 import { allOk, checkCourseSetUp, checkOrg, useLive, usePoll, type Check } from '../wizards/verify';
 import { Checks, OrgSteps, OrgWhy, Rail, StepCard, Verified, WizError } from '../wizards/Wizard';
 import { AdminRows, courseFileAfter, detailsOf, missingAdmin, type Admin, type Details } from './CourseEdit';
-import { COURSE_REPO } from '../model/names';
+import { COURSE_FILE, COURSE_REPO } from '../model/names';
 
 const STEPS = [
   { t: 'Org', s: 'Three things on GitHub' },
@@ -72,7 +74,7 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
   useEffect(() => () => leaving.current.abort(), []);
   const [err, setErr] = useState<string | null>(null);
   const [save, runSave, setSave] = useSave(env);
-  const file = step >= 2 && setUp && allOk(setUp) ? files.file(org, COURSE_REPO, 'dsl-course.yml') : null;
+  const file = step >= 2 && setUp && allOk(setUp) ? files.file(org, COURSE_REPO, COURSE_FILE) : null;
   const y = file?.kind === 'ready' ? new YamlText(file.text) : null;
   const meta = y && !y.errors.length ? obj(y.toJS()) : null;
   const before: Details | null = meta ? detailsOf(meta) : null;
@@ -93,7 +95,7 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
       return false;
     }
     if (out.text === file.text) return true;
-    return runSave({ owner: org, repo: COURSE_REPO, path: 'dsl-course.yml' }, out.text, file.sha, { message: `course: ${what}, from the DSL Teaching Console` });
+    return runSave({ owner: org, repo: COURSE_REPO, path: COURSE_FILE }, out.text, file.sha, { message: `course: ${what}, from the DSL Teaching Console` });
   };
 
   const setUpCourse = async () => {
@@ -104,7 +106,7 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
       if (leaving.current.signal.aborted) return;
       if (r.state !== 'completed') setErr('Could not read the set-up run on GitHub, so the console stopped following it. Open it on GitHub to see how it ended.');
       else if (r.conclusion !== 'success') setErr('The set-up run did not finish cleanly. Open it on GitHub to see why; running it again is safe.');
-      files.refresh(org, COURSE_REPO, 'dsl-course.yml');
+      files.refresh(org, COURSE_REPO, COURSE_FILE);
       setupLive.run();
       void env.rediscover?.();
     } catch (e) {
@@ -151,7 +153,7 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
           )
         ) : null}
         {err ? <WizError>{err}</WizError> : null}
-        <Checks list={setUp} busy={setupLive.busy} pending={['Course settings are in place (dsl-course.yml)', 'The Console workflow is in place']} />
+        <Checks list={setUp} busy={setupLive.busy} pending={[`Course settings are in place (${COURSE_FILE})`, 'The Console workflow is in place']} />
         {ready ? <Verified>Set up: settings and automation are in place.</Verified> : null}
         <SaveLine state={save} />
       </>
@@ -170,10 +172,11 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
   } else if (step === 3) {
     title = 'Defaults';
     const defaults = d.defaults ?? before?.defaults ?? {};
-    const errs = fieldErrors(null, courseDefaultTiers(before?.defaults), defaults);
+    const tiers = defaultsTiers(institutionDefaults(), before?.defaults);
+    const errs = fieldErrors(null, tiers, defaults);
     body = (
       <>
-        <div class="form-section"><h3>Defaults for this course’s assignments <Hint label="About the defaults">Sets the course’s default; each assignment can override. Left empty, the institution’s value in grey applies.</Hint></h3><SchemaForm id="ncx" schema={null} tiers={courseDefaultTiers(before?.defaults)} values={defaults} onChange={(v) => set({ defaults: v })} /></div>
+        <div class="form-section"><h3>Defaults for this course’s semesters <Hint label="About the defaults">Sets the course’s default; each semester and each assignment can override. Left empty, the institution’s value in grey applies.</Hint></h3><SchemaForm id="ncx" schema={null} tiers={tiers} values={defaults} onChange={(v) => set({ defaults: v })} /></div>
         <SaveLine state={save} />
       </>
     );
@@ -190,8 +193,9 @@ export function NewCourseScreen({ files, step: asked }: { files: Files; step?: n
     title = 'Check';
     const people = obj(meta?.people);
     const admins = Array.isArray(people.course_admins) ? people.course_admins.length : 0;
+    const c = courseBlock(meta);
     const summary: Check[] = [
-      { text: `Name${meta?.course_name ? ` (${String(meta.course_name)})` : ''}, code${meta?.course_code ? ` (${String(meta.course_code)})` : ''} and ${admins} admin${admins === 1 ? '' : 's'} set`, ok: !!meta?.course_name && !!meta?.course_code && admins > 0 },
+      { text: `Name${c.name ? ` (${String(c.name)})` : ''}, code${c.code ? ` (${String(c.code)})` : ''} and ${admins} admin${admins === 1 ? '' : 's'} set`, ok: !!c.name && !!c.code && admins > 0 },
       { text: 'Defaults saved', ok: d.defaultsSaved === org },
     ];
     body = (

@@ -14,9 +14,9 @@ Idempotent: existing repos are left alone.
     where <slug> is the template name minus a trailing -fYYYY / -sYYYY.
 
 For a `type: group` assignment it instead makes ONE repo per team, `semester/<slug>-<team>`, and grants the
-GitHub Team materialised from semester-config/teams.csv (see dsl_course.sync_teams) - so
+GitHub Team materialised from the team columns of semester-config/students.csv (see dsl_course.sync_teams) - so
 membership changes propagate to access. Grades are never written here; they go to each
-student's private gradebook repo (see dsl_course.grades), so a possibly-public team repo
+student's private gradebook repo (see dsl_course.gradebook), so a possibly-public team repo
 never carries marks.
 
 For `submit_via: external` - handed in off GitHub (Moodle, Kaggle, in class) - it creates
@@ -61,7 +61,18 @@ from pathlib import Path
 
 import yaml
 
-from . import grades, records, roster, schedule, settings, site, sync_teams, teams
+from . import (
+    gradebook,
+    grading_spec,
+    receipts,
+    records,
+    roster,
+    schedule,
+    site,
+    sync_teams,
+    team_formation,
+    teams,
+)
 from .access import (
     FACULTY_READ_ACCESS,
     grant_faculty,
@@ -76,6 +87,7 @@ from .collect import (
 from .course import (
     CONFIG_REPO,
     CUTOFF_SENTENCE,
+    NO_TEAMS,
     SELF_SELECT,
     SOLUTION_BRANCH,
     SOLUTION_DIR,
@@ -194,7 +206,7 @@ def _about(what: str, shape: str) -> str:
     Set at CREATION and never patched afterwards, like every other description the toolkit
     writes (`repos.generate_from_template`); a reworded one reaches existing repos through
     `repos.converge_descriptions` or not at all. Which is also why the notes are capped:
-    GitHub TRUNCATES a description past `course.MAX_REPO_DESCRIPTION` rather than refusing
+    GitHub TRUNCATES a description past 350 characters rather than refusing
     it, so a note that outgrew the cap would lose its second half and say nothing about
     it."""
     note = shape_note(shape)
@@ -466,7 +478,7 @@ def push_solution(semester_org: str, repo: str, sol_dir: Path) -> bool:
 # One patch, one comment. The digest is over the paths and the CONTENT written, so a second
 # press that changes nothing says nothing, and a genuinely different correction to the same
 # path is a new note rather than a silent one. Same idea as the `dsl-receipt:` marker the
-# grading receipts carry - see `grades.post_marked_comment`, which is what enforces it.
+# grading receipts carry - see `receipts.post_marked_comment`, which is what enforces it.
 PATCH_MARKER = "<!-- dsl-patch:{digest} -->"
 
 # What one submission repo came to. Counted into the summary line; per-repo detail goes
@@ -646,7 +658,7 @@ def note_the_patch(
 
     And only where the LISTING says the repo is still private. `row` is this repo's row of
     the listing `patch_released` already holds, and the same guard every other write into
-    a Submission receipts issue takes (`grades.receipts_thread_policy`): a thread in a public repo
+    a Submission receipts issue takes (`receipts.receipts_thread_policy`): a thread in a public repo
     is a thread the internet reads, and this one names the files a student was handed
     wrong. Optimistic like `repos.listed_is_private` - a row nobody could read answers
     private - because the cost of being wrong the other way is a note nobody gets."""
@@ -656,13 +668,13 @@ def note_the_patch(
             f"patched, the note is not posted"
         )
         return False
-    found = grades.find_receipts_issue(semester_org, repo)
-    if isinstance(found, grades.IssueLookupFailed) or found is None:
+    found = receipts.find_receipts_issue(semester_org, repo)
+    if isinstance(found, receipts.IssueLookupFailed) or found is None:
         log_person(
             f"    {semester_org}/{repo}: no Submission receipts issue to post the patch note on"
         )
         return False
-    return grades.post_marked_comment(
+    return receipts.post_marked_comment(
         semester_org, repo, found[0], patch_note(paths, on), marker
     )
 
@@ -848,12 +860,12 @@ def provision_one(
 ) -> str:
     """Generate one submission repo and grant its members access.
 
-    `visibility` is a run setting (the semester's `assignments.yml`, else the course's or
-    the institution's default), and is acted on at CREATE only - see
+    `visibility` is a run setting (the assignment's schedule.yml entry, else the
+    semester's `semester.yml`, the course's or the institution's default), and is acted on at CREATE only - see
     `repos.set_visibility` for why a public repo is born private. A repo that already
     exists is never re-PATCHed: the tick re-fires every handed-out assignment, so that
     would nightly undo a deliberate change, and an edit to `visibility:` after hand-out is
-    reported as a fault instead (`grades._visibility_faults`).
+    reported as a fault instead (`grading_spec._visibility_faults`).
 
     It also decides the unit's own PERMISSION. `maintain` is the floor for everything the
     toolkit owns the flag on, and it deliberately excludes GitHub's visibility switch;
@@ -941,7 +953,7 @@ def provision_one(
         # has ever heard of (`course.github_visibility`); and a `public` flip that FAILED
         # leaves the repo exactly as `/generate` made it. Writing the INTENTION there hid
         # the failure from the one reader that exists to catch it - the digest's
-        # `grades._visibility_faults` compares these rows against the file.
+        # `grading_spec._visibility_faults` compares these rows against the file.
         listed_as = github_visibility(visibility)
         if visibility == "public" and not set_visibility(
             semester_org, repo, "public", person=True
@@ -957,7 +969,7 @@ def provision_one(
         # per student per hourly tick for the rest of the term, for an issue that does not
         # go away - and the refresh pass opens a missing one lazily when it first has
         # something to say.
-        if receipts_thread_body and not grades.ensure_receipts_issue(
+        if receipts_thread_body and not receipts.ensure_receipts_issue(
             semester_org, repo, receipts_thread_body
         ):
             # Reported in the RETURN value, not just the log. The issue is where the
@@ -1644,7 +1656,7 @@ def _release_units(
     # FIRE-ONCE marker is deliberately not written for it (`can_hold_solution` gates it in
     # `provision_all`), which leaves an instructor who corrects the shape able to release
     # it on a later run. The plan and the definition are edited by different people, so
-    # the digest reports the disagreement as well (`grades.grading_spec_faults`).
+    # the digest reports the disagreement as well (`grading_spec.grading_spec_faults`).
     if solution and not gspec.can_hold_solution:
         log(
             f"  (model solution not pushed - {slug}'s repos are public or "
@@ -1660,7 +1672,7 @@ def _release_units(
     # unit it was given a body for. The derived rule decides it, so nothing here re-states
     # which shapes have a thread and which do not.
     solo_body = (
-        grades.receipts_thread_body(spec)
+        receipts.receipts_thread_body(spec)
         if gspec.has_receipts_issue and not group
         else ""
     )
@@ -1670,7 +1682,7 @@ def _release_units(
         repo = submission_repo(slug, unit)
         units.append((repo, members, teams.team_slug(key, unit) if group else None))
         feedback_bodies[repo] = (
-            grades.receipts_thread_body(spec, unit, members)
+            receipts.receipts_thread_body(spec, unit, members)
             if gspec.has_receipts_issue and group
             else solo_body
         )
@@ -1739,7 +1751,7 @@ def _release_units(
 
 
 def _creates_any(
-    gspec: grades.GradingSpec,
+    gspec: grading_spec.GradingSpec,
     semester_org: str,
     slug: str,
     sheet_units: list[tuple[str, list[str]]],
@@ -1828,7 +1840,7 @@ def provision_all(
     # TWO names, and they are not interchangeable.
     #   `slug`: the semester-side NAME - `semester_dest_repo`, else the schedule key. Every
     #     repo made here, and every snapshot/autograde/grades artefact, is named after it.
-    #   `key`: the SCHEDULE KEY. teams.csv is keyed on it - the Join-team form
+    #   `key`: the SCHEDULE KEY. the team cells are keyed on it - the Join-team form
     #     validates the assignment against `assignments:` in schedule.yml and writes that
     #     key - and `sync_teams.desired_teams` derives its GitHub team slugs from it.
     # They differ exactly when `semester_dest_repo` is set. Keying the lookup or the team slug
@@ -1862,9 +1874,8 @@ def provision_all(
     gspec = load_grading_spec(course_org, template, semester_org=semester_org, slug=key)
     if gspec.not_migrated:
         log_err(
-            f"{template}/grading_config.yml is NOT_MIGRATED (an old key, or a run "
-            f"setting that moved to assignments.yml) - run the migration; nothing is "
-            f"handed out"
+            f"{template}/grading_config.yml is refused (an old key, or a run setting) - "
+            f"see its digest issue; nothing is handed out"
         )
         return 1, False
     group = gspec.is_group
@@ -1874,18 +1885,19 @@ def provision_all(
 
     # WHAT the assignment is handed out to, in the sheet's own vocabulary and known to
     # every shape: (unit, [member handles]). Individual = one per onboarded student; group
-    # = one per team from teams.csv, keyed on `key`. The repo names and the Submission receipts issue
+    # = one per team from the team cells, keyed on `key`. The repo names and the Submission receipts issue
     # bodies are the github arm's, and are built there.
     if group:
         groups = teams.teams_for(teams.load(semester_org), key)
         if not groups:
-            # WHO fills teams.csv is the assignment's own declaration, and the two answers
+            # WHO fills the team cells are the assignment's own declaration, and the two answers
             # need different words: telling a course whose teams the teaching team
             # allocates to wait for students to self-select points them at a form that
             # refuses every request (see templates/join/team-formation.yml).
-            # The EFFECTIVE value, off the settings cascade like every other reader's:
-            # an assignment nobody declared `assigned` for self-selects.
+            # The EFFECTIVE value, off the settings cascade like every other reader's: an
+            # assignment no layer gives a formation forms no team (decision 0039).
             self_select = gspec.team_formation_resolved == SELF_SELECT
+            undeclared = gspec.team_formation_resolved == NO_TEAMS
             # THE HANDOUT MOMENT IS NOW, whatever the CSV says. The brief is what hands
             # out; the repos follow each team as it forms, which is the whole point of the
             # rolling provisioning below - so the moment belongs on record here and not
@@ -1929,7 +1941,7 @@ def provision_all(
                 arrives = (
                     "the first team forms"
                     if self_select
-                    else "the instructors write them into teams.csv"
+                    else "the instructors write them into students.csv"
                 )
                 log(
                     f"  [wait] no teams for `{key}` in {semester_org} yet - the handout "
@@ -1937,19 +1949,25 @@ def provision_all(
                 )
                 return 0, False
             # The press opened team formation, which is what it is for: a green run that
-            # says who forms the teams, not an error about the empty CSV. Pressed after the
-            # late cutoff the window it opens is already shut, so only the teaching team
-            # can make teams.
+            # says who forms the teams, not an error about the empty team column. Pressed
+            # after the late cutoff the window it opens is already shut, so only the
+            # teaching team can make teams.
             cutoff = schedule.grading_cutoff_datetime(
                 sched, key, submit_via=gspec.submit_via
             )
             if cutoff is not None and datetime.now(timezone.utc) >= cutoff:
                 how = (
                     "the team window is already closed, so assign the teams on its "
-                    "Teams tab (teams.csv)"
+                    "Teams tab (students.csv)"
                 )
             elif self_select:
                 how = "students form teams from now"
+            elif undeclared:
+                how = (
+                    "no layer sets its `team_formation` (its schedule.yml entry, "
+                    "semester.yml or course.yml `defaults:`), so nobody forms teams: set "
+                    "`self_select` or `assigned`, or fill the team column"
+                )
             else:
                 how = "you assign the teams from now"
             if dry_run:
@@ -1958,29 +1976,29 @@ def provision_all(
                 ), False
             log(f"  no teams for `{key}` yet - handed out; {how}")
             return Summary(f"Handed out {slug}: no teams yet; {how}."), False
-        # teams.csv is student-writable (the "Join team" issue appends rows), so its
+        # the team cells are student-writable (the "Join team" issue writes them), so its
         # handles must pass the SAME roster allowlist sync_teams applies: only enrolled,
         # onboarded roster handles - never a typo or a stranger's login that would be INVITED
         # into the private semester org (and granted `maintain` on a repo) by ensure_team.
         # `vet_groups` is that one allowlist; the reporting below is this path's own.
         #
-        # The team NAME from teams.csv (and, below, the student's handle) is what the
+        # The team NAME from the team cells (and, below, the student's handle) is what the
         # GRADING SHEET is keyed on - the same key `collect.submission_targets` uses, so
         # the handout's rows and every later refresh's rows are the same rows.
         sheet_units: list[tuple[str, list[str]]] = []
         for team, vetted, rejected in sync_teams.vet_groups(groups, participants):
             for m in rejected:
-                # Names a handle a STUDENT typed into teams.csv, and this workflow's log is
+                # Names a handle a STUDENT typed into the team cells, and this workflow's log is
                 # world-readable - so the handle is verbose-only and the actionable line
                 # below names nobody. Same split as sync_teams' own rejection log.
                 log_person(
-                    f"    {m} in teams.csv ({key}/{team}) is not an enrolled, onboarded "
+                    f"    {m} in team ({key}/{team}) is not an enrolled, onboarded "
                     f"roster handle - excluding it (would invite an arbitrary account "
                     f"into {semester_org})"
                 )
             if rejected:
                 log_err(
-                    f"{len(rejected)} handle(s) in teams.csv ({key}/{team}) are not "
+                    f"{len(rejected)} member(s) of team ({key}/{team}) are not "
                     f"enrolled, onboarded roster handles - excluded (they would invite "
                     f"arbitrary accounts into {semester_org}). Re-run the CLI locally with "
                     f"DSL_VERBOSE=1 to see which."
@@ -2023,28 +2041,27 @@ def provision_all(
     # come to freeze different things. A dry run creates nothing and so takes none - each
     # arm says what it would do and returns before it would be used.
     #
-    # An ABSENT definition is a shape too (individual, course defaults), and repos made in
-    # the wrong one cannot be taken back - so before the first create, a 404 on either is
-    # confirmed, and a spurious one starts the handout again on the real answer. Only
-    # then: a handed-out release re-fires every tick and almost always creates nothing.
-    if not dry_run and _creates_any(gspec, semester_org, slug, sheet_units, listing):
-        found = [
-            grades.confirm_grading_text(course_org, template),
-            settings.confirm_assignments_text(semester_org),
-        ]
-        if any(found):
-            return provision_all(
-                course_org,
-                template,
-                semester_org,
-                roster_path=roster_path,
-                solution=solution,
-                touch_existing=touch_existing,
-                scheduled=scheduled,
-                slug=key,
-                listing=listing,
-                sync=sync,
-            )
+    # An ABSENT definition is a shape too (the defaults), and repos made in the wrong one
+    # cannot be taken back - so before the first create, a 404 on it is confirmed, and a
+    # spurious one starts the handout again on the real answer. Only then: a handed-out
+    # release re-fires every tick and almost always creates nothing.
+    if (
+        not dry_run
+        and _creates_any(gspec, semester_org, slug, sheet_units, listing)
+        and grading_spec.confirm_grading_text(course_org, template)
+    ):
+        return provision_all(
+            course_org,
+            template,
+            semester_org,
+            roster_path=roster_path,
+            solution=solution,
+            touch_existing=touch_existing,
+            scheduled=scheduled,
+            slug=key,
+            listing=listing,
+            sync=sync,
+        )
     semester_template = ""
     if gspec.creates_repos and not dry_run:
         frozen = ensure_semester_template(
@@ -2174,7 +2191,7 @@ def provision_all(
     # an hour to write a file `put_file` then finds unchanged. Not counted into `failed`:
     # the repos are out, and Sync membership rewrites it on every schedule.yml push anyway.
     if changed:
-        grades.sync_team_lock(
+        team_formation.sync_team_lock(
             semester_org=semester_org, course_org=course_org, sched=sched
         )
 
@@ -2203,7 +2220,7 @@ def provision_all(
     # is a call per student who has none yet, and everything ahead of it is what a semester
     # is waiting on - the repos, then the page that tells them where to find them.
     if changed:
-        grades.ensure_gradebooks(semester_org, existing=listing)
+        gradebook.ensure_gradebooks(semester_org, existing=listing)
 
     failed = site_failed or any(k.startswith("failed") for k in results)
     # Record the release only when every solution push in this run landed, and only when

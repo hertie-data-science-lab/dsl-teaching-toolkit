@@ -15,6 +15,8 @@ from __future__ import annotations
 import pytest
 
 from dsl_course import deploy, ghcli
+from dsl_course.course import FACULTY_ONLY_HEADING
+from dsl_course.gh_contents import blob_sha
 from dsl_course.schedule import Deploy
 from tests.conftest import BareOrigins, PullsFake, git_ok
 
@@ -31,6 +33,9 @@ class World(BareOrigins):
         self.pulls = pulls_fake
 
     def release(self, *paths: str) -> tuple[int, bool]:
+        return self.batch(*paths)[:2]
+
+    def batch(self, *paths: str) -> deploy.Batch:
         return deploy.deploy_many(
             "Course-Org",
             "Semester-Org",
@@ -288,3 +293,67 @@ def test_an_empty_dest_gets_both_branches(world):
     assert world.branches() == ["main", "upstream"]
     assert world.sha("main") == world.sha("upstream")
     assert world.files("main") == ["lectures/01/lab.md"]
+
+
+# ------------------------------------------------- what each copy reports (decision 0043)
+
+UNEDITED_README = (
+    "> **Replace this placeholder.** This file becomes the students' README.\n\n"
+    f"## For faculty & instructors ({FACULTY_ONLY_HEADING})\n"
+)
+
+
+def test_a_copy_reports_its_manifest_its_commit_and_that_it_landed(world):
+    # The manifest is what reached students: not what `.releaseignore` or the
+    # institution denylist held back.
+    world.commit(
+        "cm",
+        {
+            ".releaseignore": "drafts/\n",
+            "lectures/01/lab.md": "one",
+            "lectures/01/drafts/next.md": "not yet",
+            "lectures/01/.system/x": "engine",
+        },
+    )
+    world.commit("materials", {"README.md": "the semester"})
+    (copy,) = world.batch("lectures/01").copies
+    assert copy.outcome == deploy.RELEASED and copy.landed
+    assert copy.files == {"lab.md": blob_sha(b"one")}
+    assert copy.commit == world.sha("main", "cm")
+
+
+def test_a_whole_repo_copy_leaves_its_withheld_stub_out_of_the_manifest(world):
+    world.commit(
+        "cm",
+        {
+            "README.md": UNEDITED_README,
+            "SYLLABUS.md": "# Syllabus",
+            "notes.md": "n",
+            ".github/workflows/release.yml": "on: push",
+        },
+    )
+    world.commit("materials", {"README.md": "the semester"})
+    (copy,) = world.batch("/").copies
+    assert set(copy.files) == {"SYLLABUS.md", "notes.md"}
+
+
+def test_a_single_file_copy_lists_the_file_by_its_name(world):
+    world.commit("cm", {"lectures/01/lab.md": "one"})
+    world.commit("materials", {"README.md": "the semester"})
+    (copy,) = world.batch("lectures/01/lab.md").copies
+    assert copy.files == {"lab.md": blob_sha(b"one")}
+
+
+def test_a_copy_students_already_have_has_landed(world):
+    world.commit("cm", {"lectures/01/lab.md": "one"})
+    world.commit("materials", {"README.md": "the semester"})
+    world.release("lectures/01")
+    (copy,) = world.batch("lectures/01").copies
+    assert copy.outcome == deploy.UNCHANGED and copy.landed
+
+
+def test_a_copy_held_at_a_conflict_has_not_landed(world):
+    _conflict(world)
+    world.commit("cm", {"lectures/01/extra.md": "more"}, "more")
+    (copy,) = world.batch("lectures/01").copies
+    assert copy.outcome == deploy.HELD and not copy.landed

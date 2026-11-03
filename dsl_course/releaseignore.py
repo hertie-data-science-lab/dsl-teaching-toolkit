@@ -11,8 +11,8 @@ that makes `!` correct - is here.
 `Ignore` is the whole rule and reads no files. Two adapters feed it, because the outbound
 paths do not all have a clone to look at:
 
-  deny_for(root) / excludes(root, path)   a local clone      (deploy, public_site, assign)
-  deny_lines(root, lines)                 a pattern list     (opencourse.yml's withhold)
+  deny_for(root) / excludes(root, path)   a local clone      (selection, assign)
+  listed(lines)                           a pattern list     (selection's include/exclude)
   from_tree(paths, read)                  a GitHub tree      (assign's semester template,
                                                               schedule's source check)
 
@@ -40,6 +40,24 @@ RELEASEIGNORE = ".releaseignore"
 # so the materials checklist can tell a reviewed empty list from the seeded one. A comment:
 # it withholds nothing. The console writes it; spelt once, here.
 REVIEWED_MARK = "# Reviewed: nothing withheld."
+
+
+def reviewed(text: str | None) -> bool:
+    """A `.releaseignore` somebody has been through: one pattern (a line that is not blank
+    or a comment), or `REVIEWED_MARK`. The seeded one is every line a comment (`scaffold`),
+    in every wording it has had."""
+    lines = [line.strip() for line in (text or "").splitlines()]
+    return REVIEWED_MARK in lines or any(
+        line and not line.startswith("#") for line in lines
+    )
+
+
+def confirmed(text: str | None) -> str:
+    """`text` with `REVIEWED_MARK` appended (the Confirm of the materials checklist's
+    "Withheld patterns reviewed", plan 0.11.0 9b ruling 6): nothing else changes."""
+    body = (text or "").rstrip("\n")
+    return f"{body}\n{REVIEWED_MARK}\n" if body else f"{REVIEWED_MARK}\n"
+
 
 # Withheld by every copy, with no pattern needed and no way to opt back in - see the
 # module docstring. A `!` cannot re-include it: the check runs before the chain.
@@ -192,18 +210,12 @@ def listed(lines: Iterable[str]) -> Ignore:
     return Ignore(lambda dirrel: None if dirrel else spec)
 
 
-def deny_lines(root: Path, lines: Iterable[str]) -> Deny:
-    """`deny_for` for a pattern list that lives in no file (`opencourse.yml`'s
-    `withhold:`): the same rule, read as if it were `root`'s own `.releaseignore`."""
-    return _deny(root, listed(lines))
-
-
-def excludes(root: Path, path: Path, lines: Iterable[str] | None = None) -> bool:
-    """Whether one named `path` under the clone at `root` is withheld: by the
-    `.releaseignore` files under `root`, or, given `lines`, by that pattern list alone."""
+def excludes(root: Path, path: Path) -> bool:
+    """Whether one named `path` under the clone at `root` is withheld by the
+    `.releaseignore` files under `root`."""
     if path == root or root not in path.parents:
         return False
-    ignore = _local(root) if lines is None else listed(lines)
+    ignore = _local(root)
     return ignore.excludes(
         path.relative_to(root).as_posix(), lambda rel: _is_dir(root / rel)
     )

@@ -21,9 +21,9 @@ from dsl_course import (
     console,
     deploy,
     derive,
+    distribute,
     enrol_codes,
     gh_teams,
-    grades,
     propagate,
     scheduler,
     site_repo,
@@ -478,14 +478,18 @@ def test_a_release_preview_counts_what_would_go(monkeypatch):
 
 
 def test_a_release_says_what_it_released(monkeypatch):
-    monkeypatch.setattr(deploy, "deploy_many", lambda *a, **k: (0, True))
+    monkeypatch.setattr(
+        deploy, "deploy_many", lambda *a, **k: deploy.Batch(0, True, [])
+    )
     out = _deploy_main(monkeypatch)
     assert out.text == "Released 2 items from course-materials-f2026 to materials."
     assert out.counts == {"items": 2}
 
 
 def test_a_release_with_nothing_new_had_nothing_to_do(monkeypatch):
-    monkeypatch.setattr(deploy, "deploy_many", lambda *a, **k: (0, False))
+    monkeypatch.setattr(
+        deploy, "deploy_many", lambda *a, **k: deploy.Batch(0, False, [])
+    )
     out = _deploy_main(monkeypatch)
     assert out.conclusion == "nothing_to_do"
     assert out.text == (
@@ -511,16 +515,16 @@ def test_the_handout_sentence():
 
 def test_the_return_marks_sentence():
     counts = {"gradebooks": 3, "emails": 0, "held": 2, "unknown": 0, "failed": 0}
-    assert grades.return_summary(counts, 3, dry_run=True).text == (
+    assert distribute.return_summary(counts, 3, dry_run=True).text == (
         "Preview: 3 marks repos would be updated and 3 emails sent; 2 marks held until "
         "the sheet is fixed."
     )
     real = dict(counts, emails=1, held=0)
-    assert grades.return_summary(real, 1, dry_run=False).text == (
+    assert distribute.return_summary(real, 1, dry_run=False).text == (
         "Marks returned: 3 marks repos updated, 1 email sent."
     )
     none = dict(counts, gradebooks=0, held=0)
-    quiet = grades.return_summary(none, 0, dry_run=False)
+    quiet = distribute.return_summary(none, 0, dry_run=False)
     assert quiet.text == "No new marks to return."
     assert quiet.conclusion == "nothing_to_do"
 

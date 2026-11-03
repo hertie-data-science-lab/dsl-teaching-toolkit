@@ -1,6 +1,6 @@
 """bootstrap_course metadata builders: instructors/TAs/course-admins live on the
 persistent course org (the SSOT, mirrored into every semester by sync_faculty). A semester
-org's .github/dsl-course.yml is only a pointer back to it - its schedule lives in
+org's .github/course.yml is only a pointer back to it - its schedule lives in
 semester-config/schedule.yml (seeded from templates/semester-config/schedule.yml).
 
 The seeded content itself lives in real files under templates/, read at runtime by
@@ -16,21 +16,21 @@ import yaml
 
 from dsl_course import bootstrap_course as bc
 from dsl_course import roster, schedule, site, welcome
+from tests.conftest import parse_roster
 
 
 def test_course_metadata_carries_faculty_block():
-    md = bc._course_metadata("Deep Learning", "E1")
-    for key in ("org", "org_name", "semester_defaults"):
+    md = bc.course_seed("Deep Learning", "E1")
+    for key in ("org", "org_name", "semester_defaults", "course_name"):
         assert f"\n{key}:" not in md
-    assert "course_name: Deep Learning" in md
-    assert "course_code: E1" in md
+    assert "  name: Deep Learning" in md
+    assert "  code: E1" in md
     # the (commented) faculty block faculty fill in - schedule stays semester-side
     assert "# people:" in md
     assert "github_handle" in md
     assert "schedule:" not in md
-    # instructors get an OPTIONAL open-courseware card scaffold; TAs never do - they
-    # change every semester, so they're declared per semester, not course-level.
-    assert "# instructors:" in md
+    # Decision 0039 rule 3: no course-level instructors or TAs - only the admins.
+    assert "instructors:" not in md
     assert "teaching_assistants" not in md
 
 
@@ -38,7 +38,7 @@ def test_course_metadata_seeds_admins_live_when_given():
     # --admins at bootstrap must land in the SSOT itself (uncommented), not just get a
     # one-time direct team invite (add_course_admins) - otherwise the next sync_faculty
     # run sees them as undeclared and prunes them right back out.
-    md = bc._course_metadata("Deep Learning", "E1", admins=["alice", "bob"])
+    md = bc.course_seed("Deep Learning", "E1", admins=["alice", "bob"])
     assert "# people:" not in md  # live, not commented out
     assert "people:" in md
     assert '- github_handle: "alice"' in md
@@ -52,32 +52,47 @@ def test_parse_handles_splits_comma_and_space():
 
 
 def test_schedule_yml_seed_is_commented_and_covers_every_field():
-    # Mostly-commented, like the old semester dsl-course.yml schedule block - faculty
-    # uncomment what they want to pin. The one live block is `archive:` at the end: the
-    # maintainer wants every semester to say in its own file what happens at term end, with
-    # the date left to its default and the sentence written out.
+    # Mostly-commented, like the old semester course.yml schedule block - faculty
+    # uncomment what they want to pin. The one live entry is the `semester:` block's
+    # archive at the end (decision 0038 amendment 2): the maintainer wants every semester
+    # to say in its own file what happens at term end, with the date left to its default
+    # and the sentence written out.
     schedule = welcome.template("semester-config/schedule.yml")
-    skeleton, live = schedule.split("\narchive:\n")
+    skeleton, live = schedule.split("\nsemester:\n")
     assert all(
         line.startswith("#") or not line.strip() for line in skeleton.splitlines()
     )
-    assert live.startswith("  event_datetime:") and "details: >-" in live
+    live_lines = [ln for ln in live.splitlines() if not ln.lstrip().startswith("#")]
+    assert live_lines[0].startswith("  archive:") and "    type: archive" in live_lines
+    assert "details: >-" in live
     for key in (
         "timezone",
-        "releases",
+        # Decision 0038: a block per kind, each entry's fields, and its files'.
+        "lectures",
+        "labs",
+        "readings",
+        "exams",
+        "events",
+        "assets",
+        "session",
+        "number",
         "event_datetime",
-        "deploy",
-        "course_source_repo",
-        "course_source_path",
-        "semester_dest_repo",
-        "semester_dest_path",
-        "semester_start",
-        "semester_end",
+        "location",
+        "files",
+        "from_course_repo",
+        "from_path",
+        "to_semester_repo",
+        "to_path",
+        "release_datetime",
+        "reading_guide",
+        "type: start",
+        "type: end",
+        "type: break",
         "assignments",
+        "template",
         "handout_datetime",
         "solution_datetime",
         "marks_return_datetime",
-        "events",
         # The four display fields the schedule table's four columns read, which every
         # block now takes: a skeleton that teaches them on one block only is a skeleton
         # that teaches faculty they belong to that block alone.
@@ -88,7 +103,18 @@ def test_schedule_yml_seed_is_commented_and_covers_every_field():
     ):
         assert key in schedule
     # Timings only: nothing the seed offers is a key that left the file.
-    for key in ("grading_datetime", "default: the slug above", "README's `# ` heading"):
+    for key in (
+        "grading_datetime",
+        "default: the slug above",
+        "README's `# ` heading",
+        "releases:",
+        "deploy:",
+        "course_source_repo",
+        "kind:",
+        "reading_list",
+        "semester_start",
+        "semester_end",
+    ):
         assert key not in schedule, key
 
 
@@ -105,9 +131,9 @@ def test_the_seeded_archive_sentence_names_the_day_it_is_rendered_for():
         tag="f2026", year=2026, year_next=2027, timezone="Europe/Berlin", grace_days=60
     )
     meta = yaml.safe_load(seeded)
-    # The skeleton leaves `semester_end:` commented out, and the archive date defaults off
-    # it - so pin one, exactly as the semester filling this file in will.
-    meta["semester_end"] = "2026-12-18"
+    # The skeleton leaves the end date commented out, and the archive date defaults off it
+    # - so pin one, exactly as the semester filling this file in will.
+    meta["semester"]["end"] = {"type": "end", "event_datetime": "2026-12-18"}
     sched = schedule.parse(meta)
     assert sched.dropped == []
     row = site._archive_entry(sched.archive, date(2026, 12, 1))
@@ -118,10 +144,10 @@ def test_the_seeded_archive_sentence_names_the_day_it_is_rendered_for():
 
 
 def test_config_readme_documents_the_semester_files_it_holds():
-    # Instructors configure a semester HERE (instructors.yml, schedule.yml, the roster); the README
+    # Instructors configure a semester HERE (semester.yml, schedule.yml, the roster); the README
     # must document those files and never send them back up to the course org.
     readme = welcome.template("semester-config/README.md")
-    assert "instructors.yml" in readme
+    assert "semester.yml" in readme
     assert "schedule.yml" in readme
     assert "schedule.csv" not in readme
     assert "course org's" not in readme
@@ -135,7 +161,7 @@ def test_starter_roster_seeds_the_full_column_set():
     # (covered by the seeding tests, which validate every shipped sample).
     starter = welcome.template("semester-config/students.csv")
     assert tuple(starter.splitlines()[0].split(",")) == roster.FIELDS
-    assert roster.parse(starter) == []  # header-only: nobody to enrol by accident
+    assert parse_roster(starter) == []  # header-only: nobody to enrol by accident
 
 
 def test_config_readme_documents_every_roster_column():
@@ -144,6 +170,7 @@ def test_config_readme_documents_every_roster_column():
     readme = welcome.template("semester-config/README.md")
     documented = set(re.findall(r"^\| `?(\w+)`? \|", readme, re.MULTILINE))
     assert set(roster.FIELDS) <= documented
+    assert set(roster.SYSTEM_FIELDS) <= documented
 
 
 def test_every_seeded_template_path_resolves():
@@ -163,7 +190,7 @@ def test_every_seeded_template_path_resolves():
 
 
 def test_semester_metadata_carries_course_pointer():
-    # The semester .github/dsl-course.yml must carry a `course:` line - the semester-config
+    # The semester .github/course.yml must carry a `course:` line - the semester-config
     # dispatchers grep it to find where to fire Sync membership / Sync site.
     md = bc._semester_metadata("My-Course-E1")
     assert "course: My-Course-E1" in md
@@ -220,7 +247,7 @@ def test_a_repo_that_could_not_be_created_is_not_stamped(monkeypatch):
 
 def test_inventory_skips_semester_pointer_orgs(monkeypatch):
     # Semesters bootstrapped before the topic split still carry dsl-course-hub, so the
-    # inventory must also filter by metadata shape: a semester's dsl-course.yml is a
+    # inventory must also filter by metadata shape: a semester's course.yml is a
     # `course:` pointer, a course org's is not.
     from dsl_course import list_orgs
 
@@ -269,4 +296,4 @@ def test_a_semester_cannot_be_bootstrapped_onto_its_own_tier(monkeypatch, capsys
         ],
     )
     assert bc.main() == 1
-    assert "Course-Org/.github/dsl-course.yml" in capsys.readouterr().err
+    assert "Course-Org/.github/course.yml" in capsys.readouterr().err

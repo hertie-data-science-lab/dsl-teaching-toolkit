@@ -8,6 +8,7 @@ hourly and has NO check-team gate - scheduled runs have no actor).
 from __future__ import annotations
 
 import json
+import re
 import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -15,18 +16,20 @@ from zoneinfo import ZoneInfo
 
 import pytest
 import yaml
-from conftest import source_fault
+from conftest import run_settings, source_fault
 
 from dsl_course import (
     access,
     config_digest,
     course,
     deploy,
+    distribute,
     ghcli,
-    materials,
+    grading_sheet,
     notify,
     repos,
     roster,
+    run,
     scheduler,
     seed,
     settings,
@@ -34,13 +37,12 @@ from dsl_course import (
 )
 from dsl_course import collect as collect_mod
 from dsl_course import faults as faults_mod
-from dsl_course import grades as grades_mod
 from dsl_course import issues as issues_mod
 from dsl_course import schedule as schedule_mod
 from dsl_course import settings as settings_mod
 from dsl_course.collect import Target
 from dsl_course.faults import ConfigFault, Unusable
-from dsl_course.grades import GradingSpec, LockWrite
+from dsl_course.grading_spec import GradingSpec
 from dsl_course.schedule import (
     ArchiveRow,
     AssignmentEntry,
@@ -48,6 +50,7 @@ from dsl_course.schedule import (
     Release,
     Schedule,
 )
+from dsl_course.team_formation import LockWrite
 
 BERLIN = ZoneInfo("Europe/Berlin")
 WHEN = datetime(2026, 9, 15, 14, 0, tzinfo=BERLIN)
@@ -144,9 +147,8 @@ def _grading_spec_defaults(monkeypatch):
     real gh I/O, answered with the defaults."""
     _WINDOWS.clear()
     _institution_window(monkeypatch, 0)
-    monkeypatch.setattr(
-        settings,
-        "_assignments_text",
+    run_settings(
+        monkeypatch,
         lambda org: (
             yaml.safe_dump(
                 {
@@ -388,7 +390,8 @@ def test_run_batches_all_deploys_through_deploy_many(monkeypatch):
     monkeypatch.setattr(
         "dsl_course.scheduler.deploy_many",
         lambda course_org, semester_org, deploys, sync=True: (
-            calls.append((course_org, semester_org, list(deploys), sync)) or (0, True)
+            calls.append((course_org, semester_org, list(deploys), sync))
+            or deploy.Batch(0, True, [])
         ),
     )
     monkeypatch.setattr(
@@ -764,7 +767,7 @@ def _formation_release_phase(monkeypatch, windows):
         }
     )
     rc = scheduler._release_phase(
-        "Course-Org", "Semester-Org", sched, WHEN, False, None, {}
+        "Course-Org", "Semester-Org", sched, WHEN, False, None
     )
     return rc, seen, asked
 
@@ -1009,7 +1012,7 @@ def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
         ),
     )
     r = _r("s", WHEN, assignment="assignment-2-f2026", assignment_slug="assignment-2")
-    assert scheduler._execute_nondeploy("Course-Org", "Semester-Org", r, None) == (
+    assert scheduler._execute_nondeploy("Course-Org", "Semester-Org", r) == (
         0,
         True,
     )
@@ -1031,7 +1034,7 @@ def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
     # scheduled solution can never diverge from what include_solution does by hand.
     r = _r("s", WHEN, assignment="assignment-2-f2026", assignment_slug="assignment-2")
     r.assignment_solution = True
-    assert scheduler._execute_nondeploy("Course-Org", "Semester-Org", r, None) == (
+    assert scheduler._execute_nondeploy("Course-Org", "Semester-Org", r) == (
         0,
         True,
     )
@@ -1107,7 +1110,7 @@ def test_deploy_many_clones_each_repo_once(monkeypatch):
         Deploy("cm", "labs/00_y", "labs", None),
         Deploy("cm", "lectures/01_z", "lectures", None),
     ]
-    errors, changed = deploy.deploy_many(
+    errors, changed, _copies = deploy.deploy_many(
         "Course-Org", "Semester-Org", deploys, sync=False
     )
     assert (errors, changed) == (0, True)
@@ -1135,7 +1138,7 @@ def test_deploy_many_missing_course_source_path_is_an_error_not_silent(monkeypat
     monkeypatch.setattr(deploy, "repo_team_permissions", lambda *a: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
-    errors, changed = deploy.deploy_many(
+    errors, changed, _copies = deploy.deploy_many(
         "Course-Org",
         "Semester-Org",
         [Deploy("cm", "lectures/does-not-exist", "materials", None)],
@@ -1222,7 +1225,7 @@ def test_a_dest_that_could_not_be_made_forkable_still_releases(monkeypatch):
         "Semester-Org",
         [Deploy("cm", "lectures/00_x", "materials", None)],
         sync=False,
-    ) == (0, True)
+    )[:2] == (0, True)
 
 
 def test_an_archived_dest_is_skipped_rather_than_failed(monkeypatch, capsys):
@@ -1253,7 +1256,7 @@ def test_an_archived_dest_is_skipped_rather_than_failed(monkeypatch, capsys):
         "Semester-Org",
         [Deploy("cm", "lectures/00_x", "materials", None)],
         sync=False,
-    ) == (0, False)
+    )[:2] == (0, False)
     assert "[skip]" in capsys.readouterr().out
 
 
@@ -1280,7 +1283,7 @@ def test_a_live_dest_beside_an_archived_one_still_releases(monkeypatch):
             Deploy("cm", "lectures/00_x", "materials", None),
         ],
         sync=False,
-    ) == (0, True)
+    )[:2] == (0, True)
 
 
 def test_a_dest_whose_archived_flag_cannot_be_read_is_released_anyway(monkeypatch):
@@ -1302,14 +1305,14 @@ def test_a_dest_whose_archived_flag_cannot_be_read_is_released_anyway(monkeypatc
         "Semester-Org",
         [Deploy("cm", "lectures/00_x", "materials", None)],
         sync=False,
-    ) == (0, True)
+    )[:2] == (0, True)
 
 
 def test_deploy_many_counts_a_doomed_deploy_once(monkeypatch):
     # Source AND dest clone both fail: that is ONE copy lost, not two errors (a
     # double-count made `deploy` report 2 failures for a single deploy).
     _no_io(monkeypatch, _clone_failing("Course-Org/cm", "Semester-Org/materials"))
-    errors, changed = deploy.deploy_many(
+    errors, changed, _copies = deploy.deploy_many(
         "Course-Org",
         "Semester-Org",
         [Deploy("cm", "lectures/00_x", "materials", None)],
@@ -1326,7 +1329,9 @@ def test_deploy_many_counts_each_unrunnable_deploy_once(monkeypatch):
         Deploy("cm", "labs/00_y", "labs", None),
         Deploy("cm", "lectures/01_z", "lectures", None),
     ]
-    assert deploy.deploy_many("Course-Org", "Semester-Org", deploys, sync=False) == (
+    assert deploy.deploy_many("Course-Org", "Semester-Org", deploys, sync=False)[
+        :2
+    ] == (
         3,
         False,
     )
@@ -1389,7 +1394,7 @@ def test_deploy_many_releases_the_whole_repo_from_a_root_source_path(monkeypatch
     )
     monkeypatch.setattr(deploy, "git", _git_spying_staged(staged))
 
-    errors, changed = deploy.deploy_many(
+    errors, changed, _copies = deploy.deploy_many(
         "Course-Org",
         "Semester-Org",
         [Deploy("cm", "/", "materials", None)],
@@ -1418,7 +1423,7 @@ def test_a_copied_in_gitignore_cannot_swallow_released_files(monkeypatch):
 
     monkeypatch.setattr(deploy, "git", recording_git)
 
-    errors, changed = deploy.deploy_many(
+    errors, changed, _copies = deploy.deploy_many(
         "Course-Org", "Semester-Org", [Deploy("cm", "/", "materials", None)], sync=False
     )
     assert (errors, changed) == (0, True)
@@ -1428,7 +1433,7 @@ def test_a_copied_in_gitignore_cannot_swallow_released_files(monkeypatch):
 
 def test_deploy_many_rejects_a_dotdot_escaping_source_path(monkeypatch):
     _no_io(monkeypatch, _clone_with_tree({"lectures/00_x/f.txt": "x"}))
-    errors, changed = deploy.deploy_many(
+    errors, changed, _copies = deploy.deploy_many(
         "Course-Org",
         "Semester-Org",
         [Deploy("cm", "../../etc/passwd", "materials", None)],
@@ -1458,7 +1463,7 @@ def test_deploy_many_never_copies_a_dot_git_directory(monkeypatch):
     monkeypatch.setattr(deploy, "repo_team_permissions", lambda *a: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
-    errors, changed = deploy.deploy_many(
+    errors, changed, _copies = deploy.deploy_many(
         "Course-Org",
         "Semester-Org",
         [Deploy("cm", "lectures/00_x", "materials", None)],
@@ -1480,7 +1485,7 @@ def _release(monkeypatch, tree: dict[str, str], deploys, staged: list[str]):
     """One deploy_many run over `tree`, recording what reached the dest at `git add`."""
     _no_io(monkeypatch, _clone_with_tree(tree))
     monkeypatch.setattr(deploy, "git", _git_spying_staged(staged))
-    return deploy.deploy_many("Course-Org", "Semester-Org", deploys, sync=False)
+    return deploy.deploy_many("Course-Org", "Semester-Org", deploys, sync=False)[:2]
 
 
 def test_a_whole_repo_release_honours_a_releaseignore(monkeypatch):
@@ -1532,8 +1537,8 @@ def test_naming_an_excluded_path_outright_releases_nothing_and_stays_green(
     staged: list[str] = []
     errors, changed = _release(
         monkeypatch,
-        {".releaseignore": "solutions/\n", "solutions/01.ipynb": "THE ANSWERS"},
-        [Deploy("cm", "solutions", "materials", "week01")],
+        {".releaseignore": "drafts/\n", "drafts/01.ipynb": "NOT YET"},
+        [Deploy("cm", "drafts", "materials", "week01")],
         staged,
     )
     assert (errors, changed) == (0, False)
@@ -1580,7 +1585,7 @@ def test_deploy_many_counts_a_real_commit_failure(monkeypatch, capsys):
     monkeypatch.setattr(deploy, "repo_team_permissions", lambda *a: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
-    errors, changed = deploy.deploy_many(
+    errors, changed, _copies = deploy.deploy_many(
         "Course-Org",
         "Semester-Org",
         [Deploy("cm", "lectures/00_x", "materials", None)],
@@ -1607,7 +1612,7 @@ def test_deploy_many_reports_nothing_new_when_index_is_empty(monkeypatch, capsys
     monkeypatch.setattr(deploy, "repo_team_permissions", lambda *a: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
-    errors, changed = deploy.deploy_many(
+    errors, changed, _copies = deploy.deploy_many(
         "Course-Org",
         "Semester-Org",
         [Deploy("cm", "lectures/00_x", "materials", None)],
@@ -1634,7 +1639,7 @@ def test_deploy_many_counts_a_raised_site_sync(monkeypatch):
         raise RuntimeError("tree read failed")
 
     monkeypatch.setattr("dsl_course.site.sync_site", boom)
-    errors, changed = deploy.deploy_many(
+    errors, changed, _copies = deploy.deploy_many(
         "Course-Org",
         "Semester-Org",
         [Deploy("cm", "lectures/00_x", "materials", None)],
@@ -1651,9 +1656,12 @@ def test_deploy_many_counts_a_raised_site_sync(monkeypatch):
 
 
 def _assignments(**entries: AssignmentEntry) -> Schedule:
-    """A schedule of `entries`; one built by `_due(..., grading_day=)` has its late
-    window in the semester's assignments.yml (`_WINDOWS`)."""
+    """A schedule of `entries`, each numbered by the digits in its key unless it says
+    otherwise; one built by `_due(..., grading_day=)` has its late window in the
+    semester's assignments.yml (`_WINDOWS`)."""
     for slug, entry in entries.items():
+        if entry.number is None and (found := re.search(r"\d+", slug)):
+            entry.number = int(found.group())
         if getattr(entry, "window", None) is not None:
             _WINDOWS[slug] = entry.window
     return Schedule(org="Semester-f2026", assignments=dict(entries))
@@ -1667,6 +1675,9 @@ def _due(day: int, grading_day: int | None = None) -> AssignmentEntry:
         due_datetime=datetime(2026, 10, day, 23, 59, 59, tzinfo=BERLIN),
     )
     entry.window = None if grading_day is None else grading_day - day
+    if entry.window is not None:
+        # Written on the entry, as schedule.yml carries it (`AssignmentEntry.settings`).
+        entry.settings = {"late_window_days": entry.window}
     return entry
 
 
@@ -1768,7 +1779,6 @@ def test_the_sheet_refresh_runs_through_the_whole_late_window(monkeypatch):
         sched,
         datetime(2026, 10, 17, tzinfo=timezone.utc),
         False,
-        None,
     )
     assert refreshed == [("assignment-1", "assignment-1")]
 
@@ -2129,8 +2139,8 @@ def test_a_tick_takes_one_semester_listing_and_hands_it_to_every_pass(
     monkeypatch.setattr(
         scheduler,
         "_reprivatise_student_repos",
-        lambda course, semester, sched, now, dry_run, listing: (
-            seen.update(reprivatise=listing) or 0
+        lambda course, semester, sched, now, dry_run: (
+            seen.update(reprivatise=scheduler._listing(semester)) or 0
         ),
     )
     monkeypatch.setattr(scheduler, "_assignment_template", lambda org, slug, entry: "t")
@@ -2385,6 +2395,12 @@ def test_handout_releases_synthesised_from_the_assignments_block(monkeypatch):
                 course_source_repo="a-f2026",
                 due_datetime=datetime(2026, 12, 1, 23, 59, tzinfo=BERLIN),
             ),
+            # no due date yet (TBC): nothing fires, its hand-out included
+            "undated": AssignmentEntry(
+                course_source_repo="u-f2026",
+                due_datetime=None,
+                handout_datetime=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
+            ),
         }
     )
     (r,) = scheduler._handout_releases("Course-Org", "Semester-f2026", sched, WHEN)
@@ -2487,6 +2503,10 @@ def _early_solutions() -> Schedule:
         }
     )
     sched.org = "Sem-f2026"
+    # Each window written on its entry, as schedule.yml carries it.
+    for slug, entry in sched.assignments.items():
+        if slug in _WINDOWS:
+            entry.settings = {"late_window_days": _WINDOWS[slug]}
     return sched
 
 
@@ -2724,7 +2744,7 @@ def test_the_release_phase_counts_a_raised_site_sync(monkeypatch):
     # the tick (and, under --all-semesters, every semester scheduled after it).
     monkeypatch.setattr(
         "dsl_course.scheduler.deploy_many",
-        lambda *a, **k: (0, True),  # something changed
+        lambda *a, **k: deploy.Batch(0, True, []),  # something changed
     )
 
     def boom(course, semester, **_kw):
@@ -2733,7 +2753,7 @@ def test_the_release_phase_counts_a_raised_site_sync(monkeypatch):
     monkeypatch.setattr("dsl_course.site.sync_site", boom)
     due = [_r("wk1", WHEN, deploy=[Deploy("cm", "lectures/01", "materials", None)])]
     # The pass itself is green and says the site moved; the sync beside it is what fails.
-    assert scheduler._run_releases("Course-Org", "Semester-Org", due, WHEN, None) == (
+    assert scheduler._run_releases("Course-Org", "Semester-Org", due, WHEN) == (
         0,
         True,
     )
@@ -3080,7 +3100,7 @@ def test_lateness_is_asked_about_the_whole_plan_not_just_what_is_due(
     assert scheduler.main() == 0
     (_course, semester, verdict, items, _dry) = cadence_calls["report_semester"][0]
     assert semester == "Semester-A" and verdict is late
-    assert [i.label for i in items] == ["releases.wk1 -> deploy[0]"]
+    assert [i.label for i in items] == ["wk1 -> files[0]"]
     assert items[0].late == timedelta(hours=3)
 
 
@@ -3236,7 +3256,7 @@ ARCHIVES = date(2027, 2, 16)
 def _preflight(monkeypatch, faults, now=WHEN, dry_run=False, digest=None, extra=()):
     """Drive _preflight_sources with a fixed fault list, capturing every call it makes.
 
-    Routing is stubbed too: it reads blame and instructors.yml over the API, and what these
+    Routing is stubbed too: it reads blame and semester.yml over the API, and what these
     tests are about is the exit code and what the phases are handed."""
     seen: dict = {}
     monkeypatch.setattr(scheduler.schedule, "source_faults", lambda sched, org: faults)
@@ -3450,7 +3470,7 @@ def _run_release(monkeypatch, seed_source, deploys) -> tuple[int, set[str]]:
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
     monkeypatch.setattr(deploy, "repo_team_permissions", lambda *a: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
-    errors, _changed = deploy.deploy_many(
+    errors, _changed, _copies = deploy.deploy_many(
         "Course-Org", "Semester-Org", deploys, sync=False
     )
     return errors, landed
@@ -3559,7 +3579,7 @@ def test_withholding_the_stub_never_deletes_the_semesters_own_readme(monkeypatch
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
     monkeypatch.setattr(deploy, "repo_team_permissions", lambda *a: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
-    errors, _changed = deploy.deploy_many(
+    errors, _changed, _copies = deploy.deploy_many(
         "Course-Org", "Semester-Org", [Deploy("cm", "/", "materials", None)], sync=False
     )
     assert errors == 0  # reported, not failed
@@ -3809,9 +3829,8 @@ def _config_preflight(
     """Drive `_preflight_configs` with every reader stubbed, capturing what each digest
     was handed.
 
-    `vetted_against` is an out-parameter: a one-item list that ends up holding the
-    allowlist teams.csv was vetted against, which is how the roster's own state reaches
-    the teams check."""
+    `vetted_against` is an out-parameter: the roster each team-column check was handed
+    (none when the roster was absent)."""
     synced: dict = {}
     mailed: list = []
 
@@ -3830,16 +3849,17 @@ def _config_preflight(
             raise roster_raises
         return None if roster_absent else []
 
-    def _teams(semester, found=None, known=None):
+    def _teams(students, keys, found=None):
         if vetted_against is not None:
-            vetted_against.append(known)
+            vetted_against.append(students)
+        found.append(ConfigFault("team:9", "a team fault", file="students.csv"))
         return {}
 
     monkeypatch.setattr(scheduler.roster, "load", _roster)
     monkeypatch.setattr(
         scheduler.sync_faculty, "read_semester_people", lambda semester, found: {}
     )
-    monkeypatch.setattr(scheduler.teams, "load", _teams)
+    monkeypatch.setattr(scheduler.teams, "parse", _teams)
     monkeypatch.setattr(
         scheduler,
         "semester_sheet_faults",
@@ -3863,7 +3883,7 @@ def _config_preflight(
         lambda spec, *a, **k: mailed.append(spec.file) or notify.Unsent(),
     )
     rc = scheduler._preflight_configs(
-        "Course-Org", "Semester-Org", sched or Schedule(), WHEN, False, None
+        "Course-Org", "Semester-Org", sched or Schedule(), WHEN, False
     )
     return rc, synced, mailed
 
@@ -3880,36 +3900,36 @@ def test_the_config_preflight_checks_every_hand_edited_file(monkeypatch):
     rc, synced, mailed = _config_preflight(monkeypatch)
     assert rc == 0
     everything = {
-        "instructors.yml",
+        "semester.yml",
         "students.csv",
-        "teams.csv",
         "grading_sheets/",
         "grading_config.yml",
-        "assignments.yml",
     }
+    # semester.yml is two digests: its `people:` and its `defaults:`.
     assert set(synced) == everything
-    assert sorted(mailed) == sorted(everything)
+    assert sorted(mailed) == sorted([*everything, "semester.yml"])
 
 
 def test_an_assignments_yml_fault_from_the_definition_pass_goes_in_its_own_issue(
     monkeypatch, capsys
 ):
     template = ConfigFault("assignments.a1", "bad", file="grading_config.yml")
-    run = ConfigFault("assignments.a1", "drift", file="assignments.yml")
+    run = ConfigFault("assignments.a1", "drift", file="semester.yml")
     _rc, synced, _mailed = _config_preflight(monkeypatch, spec_faults=[template, run])
     assert synced["grading_config.yml"] == [template]
-    assert synced["assignments.yml"] == [run]
+    # The defaults digest syncs after the people digest, on the same file.
+    assert synced["semester.yml"] == [run]
     out = capsys.readouterr().out
     # Where each file is: the template's is in the course org, not the semester's.
     assert "in Semester-Org's `<assignment template>/grading_config.yml`" in out
-    assert "in Semester-Org's `semester-config/assignments.yml`" in out
+    assert "in Semester-Org's `semester-config/semester.yml`" in out
 
 
 def test_a_content_fault_reaches_that_files_digest_and_nobody_elses(monkeypatch):
     fault = _csv_fault()
     _rc, synced, _mailed = _config_preflight(monkeypatch, roster_faults=[fault])
-    assert synced["students.csv"] == [fault]
-    assert synced["teams.csv"] == []
+    assert synced["students.csv"][0] == fault
+    assert synced["semester.yml"] == []
 
 
 @pytest.mark.parametrize(
@@ -3945,7 +3965,7 @@ def test_a_file_that_could_not_be_read_is_left_exactly_as_it_was(monkeypatch):
         monkeypatch, roster_raises=RuntimeError("rate limited")
     )
     assert "students.csv" not in synced and "students.csv" not in mailed
-    assert "instructors.yml" in synced  # the others are still checked
+    assert "semester.yml" in synced  # the others are still checked
 
 
 def test_an_unreadable_header_is_a_content_fault_not_a_read_failure(monkeypatch):
@@ -3969,19 +3989,17 @@ def test_an_absent_roster_is_a_fault_of_its_own_not_a_healthy_empty_one(monkeypa
     assert fault.file == "students.csv" and "missing" in fault.what
 
 
-def test_an_absent_roster_does_not_report_every_teams_row_as_a_stranger(monkeypatch):
-    # The roster is the allowlist teams.csv is vetted against. Absent, it implies the
-    # EMPTY allowlist - and vetting against that files one "not an onboarded handle"
-    # fault per row, on top of the one fault that is actually true.
+def test_an_absent_roster_checks_no_team_column(monkeypatch):
     seen: list = []
     _config_preflight(monkeypatch, roster_absent=True, vetted_against=seen)
-    assert seen == [None]
+    assert seen == []
 
 
-def test_a_roster_that_was_read_still_vets_teams_against_it(monkeypatch):
+def test_the_team_columns_faults_go_on_the_students_csv_digest(monkeypatch):
     seen: list = []
-    _config_preflight(monkeypatch, vetted_against=seen)
-    assert seen == [set()]
+    _rc, synced, _mailed = _config_preflight(monkeypatch, vetted_against=seen)
+    assert seen == [[]]
+    assert [f.where for f in synced["students.csv"]] == ["team:9"]
 
 
 def test_a_digest_that_cannot_be_written_never_touches_the_exit_code(monkeypatch):
@@ -3995,14 +4013,14 @@ def test_a_digest_that_cannot_be_written_never_touches_the_exit_code(monkeypatch
     )
     monkeypatch.setattr(scheduler.config_digest, "sync", boom)
     rc = scheduler._preflight_configs(
-        "Course-Org", "Semester-Org", Schedule(), WHEN, False, None
+        "Course-Org", "Semester-Org", Schedule(), WHEN, False
     )
     assert rc == 0
 
 
 # ---------------------------------------------- the COURSE org's own config (unattended)
 #
-# dsl-course.yml and the semester registry belong to the course, not to a semester: one issue
+# course.yml and the semester registry belong to the course, not to a semester: one issue
 # for the whole course, once per tick, addressed to the admins rather than to a teaching
 # team. What matters is that it never reds the tick, that it is reported BEFORE the semester
 # listing a malformed registry makes raise, and that "we could not look" leaves the issue
@@ -4048,7 +4066,7 @@ def _course_preflight(
     return rc, seen
 
 
-def _course_fault(file: str = "dsl-course.yml"):
+def _course_fault(file: str = "course.yml"):
     return ConfigFault(
         file, "this file is not valid YAML", file=file, field="", in_repo=".github"
     )
@@ -4149,7 +4167,7 @@ def test_the_grading_matrix_leg_is_not_the_courses_own_tick(monkeypatch):
 
 
 def test_the_sync_membership_fast_path_checks_and_exits_green(monkeypatch):
-    # What a push to dsl-course.yml or the registry runs. Never red: a config faculty have
+    # What a push to course.yml or the registry runs. Never red: a config faculty have
     # to fix is a content fault, and Sync membership must not go red for one.
     called: list = []
     monkeypatch.setattr(
@@ -4428,7 +4446,7 @@ def test_the_mail_goes_once_however_many_ticks_the_fortnight_has(monkeypatch):
 
 
 def test_a_notice_whose_mail_never_went_offers_it_again(monkeypatch):
-    # An org with no address in instructors.yml, or with no mail transport wired up, gets a
+    # An org with no address in semester.yml, or with no mail transport wired up, gets a
     # `False` - and that must NOT be recorded as "mailed", or the tick after somebody
     # fixes the transport would read the mark and stay quiet for the rest of the
     # fortnight. The issue is filed either way; only the mark waits for a real send.
@@ -4472,7 +4490,7 @@ def test_a_semester_with_no_archive_date_earns_an_advisory_in_its_own_digest(
     # A fault with no clock: there is no moment it bites at, which is exactly what is
     # wrong with it. Not a parser drop, so `Validate schedule` stays green in August.
     (fault,) = scheduler._no_archive_date(Schedule())
-    assert "writes no `archive:` block" in fault.what
+    assert "has no `type: archive` entry" in fault.what
     assert "ever archive it" in fault.what
     assert fault.fires is None and fault.file == "schedule.yml"
     # And it stays a LINE. An undated fault sits at the notify bar by default, so without
@@ -4522,11 +4540,11 @@ def test_the_notice_says_what_the_freeze_does_and_links_the_runbook(monkeypatch)
 
 
 def test_an_unreadable_central_ref_still_files_the_notice(monkeypatch):
-    # The ref is read from the course org's own `dsl-course.yml`. A semester must still be
+    # The ref is read from the course org's own `course.yml`. A semester must still be
     # warned that it freezes in a fortnight when that file cannot be read, so the link
     # falls back to the default tier rather than the notice failing.
-    def boom(org, **_kw):
-        raise RuntimeError("no dsl-course.yml")
+    def boom(org):
+        raise RuntimeError("no course.yml")
 
     when = date(2027, 2, 16)
     rc, seen = _archive(
@@ -4626,6 +4644,11 @@ def test_a_notice_whose_date_moved_out_of_the_window_goes_with_it(monkeypatch):
 CUTOFF = datetime(2026, 10, 30, 23, 59, 59, tzinfo=BERLIN)
 
 
+def _tick_listing(listing: dict | None) -> None:
+    """Hold `listing` as the tick's listing of Semester-f2026, as `scheduler.run` does."""
+    run.current().listings["semester-f2026"] = listing
+
+
 def _choice_rows(*names_and_visibility: tuple[str, str], **extra) -> list[dict]:
     from conftest import repo_row
 
@@ -4667,9 +4690,9 @@ def _reprivatise(
             )
         }
     )
-    listing = None if rows is None else {r["name"]: r for r in rows}
+    _tick_listing(None if rows is None else {r["name"]: r for r in rows})
     rc = scheduler._reprivatise_student_repos(
-        "Course-Org", "Semester-f2026", sched, now, dry_run, listing
+        "Course-Org", "Semester-f2026", sched, now, dry_run
     )
     return rc, patched
 
@@ -4766,6 +4789,7 @@ def test_a_failed_patch_is_counted(monkeypatch):
         }
     )
     rows = _choice_rows(("assignment-1-ada-l", "public"))
+    _tick_listing({r["name"]: r for r in rows})
     assert (
         scheduler._reprivatise_student_repos(
             "Course-Org",
@@ -4773,7 +4797,6 @@ def test_a_failed_patch_is_counted(monkeypatch):
             sched,
             datetime(2026, 10, 14, tzinfo=BERLIN),
             False,
-            {r["name"]: r for r in rows},
         )
         == 1
     )
@@ -4799,13 +4822,13 @@ def test_an_assignment_that_has_not_gone_out_has_no_repos_to_close(monkeypatch):
         }
     )
     rows = _choice_rows(("assignment-1-ada-l", "public"))
+    _tick_listing({r["name"]: r for r in rows})
     scheduler._reprivatise_student_repos(
         "Course-Org",
         "Semester-f2026",
         sched,
         datetime(2026, 10, 14, tzinfo=BERLIN),
         False,
-        {r["name"]: r for r in rows},
     )
     assert patched == []
 
@@ -4895,7 +4918,7 @@ _AFTER_MARKS = datetime(2026, 10, 28, tzinfo=timezone.utc)
 
 
 def _sheet_reads(monkeypatch, scores: dict[str, object], marker: bool = False):
-    """The two reads `grades.marks_due` makes: the fire-once marker and the sheet."""
+    """The two reads `distribute.marks_due` makes: the fire-once marker and the sheet."""
     reads: list[str] = []
     sheet = yaml.safe_dump(
         {"submissions": {h: {"score_individual": v} for h, v in scores.items()}}
@@ -4907,12 +4930,12 @@ def _sheet_reads(monkeypatch, scores: dict[str, object], marker: bool = False):
             return '{"returned": "x"}' if marker else None
         return sheet
 
-    monkeypatch.setattr(grades_mod, "get_file_content", get)
+    monkeypatch.setattr(distribute, "get_file_content", get)
     monkeypatch.setattr(
-        grades_mod,
+        distribute,
         "sheet_specs",
         lambda course, sched: {
-            "assignment-1": grades_mod.SheetSpec(
+            "assignment-1": grading_sheet.SheetSpec(
                 slug="assignment-1", title="A1", is_group=False
             )
         },
@@ -4923,18 +4946,18 @@ def _sheet_reads(monkeypatch, scores: dict[str, object], marker: bool = False):
 def test_a_fully_marked_sheet_is_ready_at_its_marks_return_datetime(monkeypatch):
     _sheet_reads(monkeypatch, {"ada-l": 7, "bo-b": 9})
     sched = _assignments(**{"assignment-1": _marks_entry()})
-    assert grades_mod.marks_due("C", "S", sched, _AFTER_MARKS) == ([], ["assignment-1"])
+    assert distribute.marks_due("C", "S", sched, _AFTER_MARKS) == ([], ["assignment-1"])
     # Before the moment nothing is read at all.
     reads = _sheet_reads(monkeypatch, {"ada-l": 7})
     before = datetime(2026, 10, 20, tzinfo=timezone.utc)
-    assert grades_mod.marks_due("C", "S", sched, before) == ([], [])
+    assert distribute.marks_due("C", "S", sched, before) == ([], [])
     assert reads == []
 
 
 def test_an_unfinished_sheet_is_a_fault_that_counts_and_names_nobody(monkeypatch):
     _sheet_reads(monkeypatch, {"ada-l": 7, "bo-b": None, "cy-c": ""})
     sched = _assignments(**{"assignment-1": _marks_entry()})
-    faults, ready = grades_mod.marks_due("C", "S", sched, _AFTER_MARKS)
+    faults, ready = distribute.marks_due("C", "S", sched, _AFTER_MARKS)
     assert ready == []
     (fault,) = faults
     assert "2 of 3 unit(s) unmarked" in fault.what
@@ -4950,8 +4973,8 @@ def test_an_unfinished_sheet_is_a_fault_that_counts_and_names_nobody(monkeypatch
 def test_a_returned_assignment_reads_no_sheet_and_raises_nothing(monkeypatch):
     reads = _sheet_reads(monkeypatch, {"ada-l": None}, marker=True)
     sched = _assignments(**{"assignment-1": _marks_entry()})
-    assert grades_mod.marks_due("C", "S", sched, _AFTER_MARKS) == ([], [])
-    assert reads == [grades_mod.marks_return_record("assignment-1")]
+    assert distribute.marks_due("C", "S", sched, _AFTER_MARKS) == ([], [])
+    assert reads == [distribute.marks_return_record("assignment-1")]
 
 
 def test_the_tick_asks_distribute_grades_to_return_the_due_assignment(monkeypatch):
@@ -5021,13 +5044,13 @@ def test_an_assignments_yml_that_is_not_yaml_holds_the_tick_green(monkeypatch):
     # Every run setting is unknown: nothing acts, the tick stays green, and the fault goes
     # out on the schedule.yml digest.
     monkeypatch.setattr(
-        scheduler.schedule.settings, "_assignments_text", lambda org: "a: [\n"
+        scheduler.schedule.settings, "_semester_text", lambda org: "a: [\n"
     )
     monkeypatch.setattr(
         scheduler.schedule,
         "_schedule_text",
         lambda org: (
-            "assignments:\n  a1:\n    course_source_repo: t\n"
+            "assignments:\n  a1:\n    number: 1\n    template: t\n"
             "    due_datetime: 2026-10-13\n"
         ),
     )
@@ -5043,7 +5066,7 @@ def test_an_assignments_yml_that_is_not_yaml_holds_the_tick_green(monkeypatch):
     now = datetime(2026, 11, 1, tzinfo=timezone.utc)
     assert scheduler.run("Course", "Semester-f2026", now) == 0
     ((fault,),) = synced
-    assert fault.file == "assignments.yml"
+    assert fault.file == "semester.yml"
 
 
 # ------------------------------------------------------ the bot's pending invitations
@@ -5143,11 +5166,19 @@ def _numbers_phase(monkeypatch, dry_run: bool, sched: Schedule | None = None):
     earlier = WHEN - timedelta(hours=1)
     sched = sched or Schedule(
         releases=[
-            _r("guest", earlier, kind="lecture", deploy=[Deploy("cm", "lectures/g")]),
+            _r(
+                "guest",
+                earlier,
+                kind="lecture",
+                block="lectures",
+                deploy=[Deploy("cm", "lectures/g")],
+            ),
             _r(
                 "lecture-2",
                 earlier,
                 kind="lecture",
+                block="lectures",
+                session="2",
                 deploy=[Deploy("cm", "lectures/2")],
             ),
         ],
@@ -5160,7 +5191,7 @@ def _numbers_phase(monkeypatch, dry_run: bool, sched: Schedule | None = None):
         },
     )
     out = scheduler._release_phase(
-        "Course-Org", "Semester-Org", sched, WHEN, dry_run, None, {}
+        "Course-Org", "Semester-Org", sched, WHEN, dry_run, None
     )
     return out, seen
 
@@ -5173,53 +5204,24 @@ def test_a_due_entry_with_no_number_is_skipped_on_the_skipped_release_ladder(
     # The numbered lecture goes; the unnumbered lecture and hand-out do not.
     assert seen["fired"] == ["lecture-2"]
     log = capsys.readouterr().out
-    assert "[skip] guest - Give guest a number first." in log
+    assert "[skip] guest - Give guest a session first." in log
     assert "[skip] project - Give project a number first." in log
     # Both ride into the schedule.yml digest on the clock of what they stop.
-    faults = {f.where: f for f in seen["faults"] if f.field == "number"}
-    assert set(faults) == {"releases.guest", "assignments.project"}
-    assert faults["releases.guest"].fires == WHEN - timedelta(hours=1)
-    assert faults["releases.guest"].severity(WHEN) is faults_mod.Severity.MISSED
+    faults = {f.where: f for f in seen["faults"] if f.field in ("number", "session")}
+    assert set(faults) == {"lectures.guest", "assignments.project"}
+    assert faults["lectures.guest"].fires == WHEN - timedelta(hours=1)
+    assert faults["lectures.guest"].severity(WHEN) is faults_mod.Severity.MISSED
+    assert faults["lectures.guest"].plain == "Give guest a session."
     assert faults["assignments.project"].plain == "Give project a number."
-
-
-def test_a_materials_yml_that_does_not_parse_holds_no_inferred_entry(
-    monkeypatch, capsys
-):
-    # `week` would be aliased to readings; the file does not parse, so the kind is a
-    # guess (lecture) and no number is required on its strength. An explicit kind counts.
-    def broken(org, repo, path, **_kw):
-        raise yaml.YAMLError("bad")
-
-    monkeypatch.setattr(materials, "load_yaml_config", broken)
-    materials.read.cache_clear()
-    earlier = WHEN - timedelta(hours=1)
-    sched = Schedule(
-        releases=[
-            _r("week-reading", earlier, deploy=[Deploy("cm", "week/1")]),
-            _r("guest", earlier, kind="lecture", deploy=[Deploy("cm", "week/2")]),
-        ]
-    )
-    try:
-        _rc, seen = _numbers_phase(monkeypatch, dry_run=False, sched=sched)
-    finally:
-        materials.read.cache_clear()
-    assert seen["fired"] == ["week-reading"]
-    assert [f.where for f in seen["faults"] if f.field == "number"] == [
-        "releases.guest"
-    ]
-    log = capsys.readouterr().out
-    assert "Give week-reading a number" not in log
-    assert log.count("[numbers] cm: materials.yml does not parse") == 1
 
 
 def test_a_numbers_check_that_fails_leaves_the_digest_as_it_is(monkeypatch, capsys):
     # Syncing without the number faults would clear them for a tick and file them again
     # as New on the next: the digest is skipped instead, and nothing is held.
-    def fails(org):
+    def fails(sched):
         raise RuntimeError("rate limited")
 
-    monkeypatch.setattr(scheduler, "kinds_reader", fails)
+    monkeypatch.setattr(scheduler.schedule_plan, "unnumbered", fails)
     rc, seen = _numbers_phase(monkeypatch, dry_run=False)
     assert rc == 0
     assert "faults" not in seen
@@ -5232,8 +5234,8 @@ def test_a_numbers_check_that_fails_leaves_the_digest_as_it_is(monkeypatch, caps
 def test_the_preview_names_an_entry_with_no_number(monkeypatch):
     summary, _seen = _numbers_phase(monkeypatch, dry_run=True)
     assert {
-        "code": "NOT_NUMBERED",
-        "text": "guest not released: Give guest a number first.",
+        "code": "NO_SESSION",
+        "text": "guest not released: Give guest a session first.",
     } in summary.reasons
     assert {
         "code": "NOT_NUMBERED",
@@ -5246,7 +5248,7 @@ def test_an_unparseable_assignments_yml_holds_the_schedule_digest(monkeypatch):
     # It synced the schedule.yml digest with no window, number, marks-return or
     # held-solution faults: Cleared for each, with a mail, then New again once fixed.
     broken = ConfigFault(
-        "", "this file is not valid YAML", file=schedule_mod.ASSIGNMENTS_FILE
+        "", "this file is not valid YAML", file=schedule_mod.SEMESTER_FILE
     )
     standing = ConfigFault("releases.wk1", "no number", file=schedule_mod.SCHEDULE_PATH)
     sched = Schedule(faults=[broken, standing])
@@ -5281,3 +5283,27 @@ def test_a_tick_asks_for_each_template_once(monkeypatch):
     for _ in range(3):
         assert scheduler._template_for(templates, "C", "a1", entry) is None
     assert asked == ["a1"]
+
+
+def test_a_release_ships_a_solution_it_names_and_not_one_it_sweeps(monkeypatch):
+    # Coordinator ruling on PR #478 (decision 0040): the Maths shape ships the named
+    # `solutions/` folder whole; the lab folder's own `solutions/` stays behind.
+    staged: list[str] = []
+    errors, changed = _release(
+        monkeypatch,
+        {
+            "solutions/labs/02_lab/answers.ipynb": "THE ANSWERS",
+            "labs/01_lab/lab.ipynb": "lab",
+            "labs/01_lab/solutions/a.ipynb": "THE ANSWERS",
+        },
+        [
+            Deploy("cm", "solutions/labs/02_lab", "materials", "labs/02_lab/solutions"),
+            Deploy("cm", "labs/01_lab", "materials", "labs/01_lab"),
+        ],
+        staged,
+    )
+    assert (errors, changed) == (0, True)
+    assert sorted(staged) == [
+        "labs/01_lab/lab.ipynb",
+        "labs/02_lab/solutions/answers.ipynb",
+    ]

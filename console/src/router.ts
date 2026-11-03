@@ -1,10 +1,6 @@
 // Hash routes are the mockup's tokens (`#dashboard`, `#schedule-s5`, `#template-assignment-3`);
 // a problem's fix `{screen, entry}` is the route `#<screen>-<entry>`. An assignment's tabs
-// ride after a slash (`#assignment-assignment-2/marks`); the retired `#teams-<slug>` and
-// `#marks-<slug>` screens parse to those tabs, and the hashes decisions 0012 and 0015 renamed
-// (`#cohort`, `#staff`, `#new-cohort-<n>`, `#schedule-term`; `#semester` to `#dashboard`), 0021
-// (`#setup` to `#profile`), the retired `#archive` (to `#schedule-archive`), 0035 (a student's `#marks` and `#join` to `#assignments`, their
-// `#setup` to `#profile` too) and 0037 (an instructor's `#marks` to `#assignments`) to their new names, so old links still land. Which course or semester the page is about rides in the query string
+// ride after a slash (`#assignment-assignment-2/marks`). Which course or semester the page is about rides in the query string
 // (`?cohort=<org>` or `?course=<org>`: `?semester=` is taken by the student screens), so a
 // link from a fault mail can name both. `?semester=<org>` opens that semester's student screens:
 // a student's own, or an instructor's Student view. `?join=<org>` opens the Join course form
@@ -13,7 +9,7 @@
 // tab with that file open in it (after a slash: a kind key and a repo name may both hold `-`).
 
 import { semesterOver } from './model/catalogue';
-import { ORG_NAME_RE } from './model/policy';
+import { ORG_NAME_RE, tabTitle } from './model/policy';
 import { isInstructor, roleOf, type Course, type CohortRef, type Estate, type Mode, type Semester } from './model/discovery';
 import type { SemesterFacts } from './model/student';
 
@@ -32,32 +28,17 @@ const TABS: AssignmentTab[] = ['overview', 'teams', 'marks'];
 export type AssignmentOpen = 'return-preview' | 'return-run';
 const OPENS: AssignmentOpen[] = ['return-preview', 'return-run'];
 
-const ENTRY_SCREENS = ['schedule', 'assignment', 'release', 'template', 'marks', 'teams', 'materials'];
+const ENTRY_SCREENS = ['schedule', 'assignment', 'release', 'template', 'materials'];
 
-/** Hashes decisions 0012, 0015, 0021, 0035 and 0037 renamed (and the retired Archive page, now the schedule's archive entry), old -> new; the last flag marks a student-only rename. */
-const RENAMED: [RegExp, string, boolean?][] = [
-  [/^(cohort|semester)$/, 'dashboard'],
-  [/^staff$/, 'instructors'],
-  [/^new-cohort(-\d)?$/, 'new-semester$1'],
-  [/^schedule-term$/, 'schedule-semester'],
-  [/^setup$/, 'profile'],
-  [/^marks$/, 'assignments'],
-  [/^join$/, 'assignments', true],
-  [/^archive$/, 'schedule-archive'],
-];
-
-/** The route a hash names; `student` when it is read by a semester's student screens. */
-export function parseHash(hash: string, student = false): Route {
-  let r = decodeURIComponent(hash.replace(/^#/, ''));
+/** The route a hash names. */
+export function parseHash(hash: string): Route {
+  const r = decodeURIComponent(hash.replace(/^#/, ''));
   if (!r) return { screen: '' };
-  for (const [re, to, studentOnly] of RENAMED) if ((student || !studentOnly) && re.test(r)) r = r.replace(re, to);
-  if (r === 'teams') return { screen: 'assignments' };
   const kind = /^(kind-[\w-]+)\/(.+)$/.exec(r);
   if (kind) return { screen: kind[1], entry: kind[2] };
   for (const s of ENTRY_SCREENS) {
     if (!r.startsWith(`${s}-`)) continue;
     const entry = r.slice(s.length + 1);
-    if (s === 'teams' || s === 'marks') return { screen: 'assignment', entry, tab: s };
     if (s === 'assignment') {
       const [slug, tab, open] = entry.split('/');
       if (!TABS.includes(tab as AssignmentTab)) return { screen: s, entry: slug };
@@ -68,16 +49,16 @@ export function parseHash(hash: string, student = false): Route {
   return { screen: r };
 }
 
-/** The hash a route is canonically written as (the old Teams and Marks hashes rewrite to the tab). */
+/** The hash a route is canonically written as. */
 export function hashOf(r: Route): string {
   const sep = r.screen.startsWith('kind-') ? '/' : '-';
   return `#${r.screen}${r.entry ? `${sep}${r.entry}` : ''}${r.tab ? `/${r.tab}` : ''}${r.open ? `/${r.open}` : ''}`;
 }
 
-/** The hash to write instead of `hash` (an old Teams, Marks or renamed link), or null when it is already canonical. */
-export function movedHash(hash: string, student = false): string | null {
+/** The hash to write instead of `hash` (a tab the screen does not have, say), or null when it is already canonical. */
+export function movedHash(hash: string): string | null {
   if (!hash || hash === '#') return null;
-  const canonical = hashOf(parseHash(hash, student));
+  const canonical = hashOf(parseHash(hash));
   return decodeURIComponent(hash) === canonical ? null : canonical;
 }
 
@@ -123,6 +104,8 @@ export interface Selection {
   template?: string;
   /** A folder to open on the course materials index, `<repo>/<path>`. */
   folder?: string;
+  /** A file to open in the viewer on the course materials index, `<repo>/<path>`. */
+  file?: string;
 }
 
 export function parseSearch(search: string): Selection {
@@ -136,6 +119,7 @@ export function parseSearch(search: string): Selection {
     wizard: wizard && WIZARD_RE.test(wizard) ? wizard : undefined,
     template: q.get('template') ?? undefined,
     folder: q.get('folder') ?? undefined,
+    file: q.get('file') ?? undefined,
   };
 }
 
@@ -209,18 +193,15 @@ export const STUDENT_SCREENS: [string, string][] = [
   ['home', 'Home'], ['week', 'This week'], ['schedule', 'Schedule'], ['assignments', 'Assignments'], ['materials', 'All materials'], ['instructors', 'Instructors'],
 ];
 
-/** A kind's label as a tab name, as the engine's `site_repo.tab_word` writes it: one trailing `s`. */
-export const tabWord = (word: string) => (word.endsWith('s') ? word : `${word}s`);
-
 /**
  * The kind tabs a semester has (decision 0035 rule 3): each kind with a tab of its own that
- * at least one row is listed on, in the policy's order, as `kind-<key>` and its label
- * pluralised.
+ * at least one row is listed on, in the policy's order, as `kind-<key>` and its plural
+ * (`site_repo.kind_tab`).
  */
 export function kindTabs(facts: SemesterFacts | null | undefined): [string, string][] {
   if (!facts?.kinds) return [];
   const named = new Set((facts.tabRows ?? facts.rows).flatMap((r) => r.tabs));
-  return Object.entries(facts.kinds).filter(([k, v]) => v.tab && named.has(k)).map(([k, v]) => [`kind-${k}`, tabWord(v.label || k)]);
+  return Object.entries(facts.kinds).filter(([k, v]) => v.tab && named.has(k)).map(([k, v]) => [`kind-${k}`, tabTitle(v.plural || k)]);
 }
 
 /** A semester's student screens in nav order: the fixed ones with its kind tabs after Schedule; the fixed ones alone while its facts are read. */

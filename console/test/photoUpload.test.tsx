@@ -24,7 +24,7 @@ const USER = { login: 'a-example', id: 1, name: 'A. Example', email: null, avata
 const cohort = { org: ORG, term: 'f2026', termLabel: 'Fall 2026' };
 const course: Course = { org: COURSE_ORG, name: 'Machine Learning', code: 'E1234', description: '', write: true, admins: [], cohorts: [cohort], meta: {} };
 const loaded: Loaded = { kind: 'ready', status: example as unknown as Status, sha: 's', stale: [] };
-const files = new StaticFiles({ [`${ORG}/semester-config/instructors.yml`]: 'instructors:\n  - github_handle: a-example\n    role: instructor\n    email: a@staff.example.org\n    name: Dr A. Example\n' }, { [`${ORG}/${ORG}.github.io/_images/pp`]: ['jane.jpg'] });
+const files = new StaticFiles({ [`${ORG}/semester-config/semester.yml`]: 'people:\n  - github_handle: a-example\n    role: instructor\n    email: a@staff.example.org\n    name: Dr A. Example\n' }, { [`${ORG}/${ORG}.github.io/_images/pp`]: ['jane.jpg'] });
 
 let root: HTMLElement | null = null;
 afterEach(() => {

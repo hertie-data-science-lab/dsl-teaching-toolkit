@@ -1,0 +1,6 @@
+timezone: Europe/Berlin
+readings:
+  readings-background:
+    title: Background reading
+    event_datetime: 2026-08-25T09:00
+    reading_guide: "- Any linear algebra refresher."

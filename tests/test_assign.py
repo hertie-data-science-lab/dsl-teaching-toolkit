@@ -14,9 +14,18 @@ from pathlib import Path
 import pytest
 import yaml
 
-from dsl_course import assign, collect, course, grades, settings, workflows_place
+from dsl_course import (
+    assign,
+    collect,
+    course,
+    grading_spec,
+    receipts,
+    settings,
+    team_formation,
+    workflows_place,
+)
 from dsl_course.schedule import AssignmentEntry, Schedule
-from tests.conftest import ROSTER_HEADER, repo_row
+from tests.conftest import ROSTER_HEADER, repo_row, roster_files, run_settings
 from tests.plans import citing
 
 # Every template these tests hand out, collect or patch: the plan cites each.
@@ -32,9 +41,10 @@ HEADER = ROSTER_HEADER
 
 
 def _roster_file(tmp_path, *rows: str):
-    path = tmp_path / "students.csv"
-    path.write_text("\n".join((HEADER, *rows)) + "\n")
-    return str(path)
+    for name, text in roster_files("\n".join((HEADER, *rows)) + "\n").items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(text)
+    return str(tmp_path / "students.csv")
 
 
 @pytest.fixture(autouse=True)
@@ -46,11 +56,10 @@ def _no_semester_schedule(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _absent_definitions_are_not_confirmed(monkeypatch):
-    """A hand-out confirms an absent `grading_config.yml` and `assignments.yml` before it
-    acts on one; these tests stub the definitions themselves, so there is nothing to ask
-    again. The confirmation's own tests are in test_grades and test_settings."""
-    monkeypatch.setattr(grades, "confirm_grading_text", lambda org, template: None)
-    monkeypatch.setattr(settings, "confirm_assignments_text", lambda org: None)
+    """A hand-out confirms an absent `grading_config.yml` before it creates a repo; these
+    tests stub the definition themselves, so there is nothing to ask again. The
+    confirmation's own test is in test_gh_contents."""
+    monkeypatch.setattr(grading_spec, "confirm_grading_text", lambda org, t: False)
 
 
 @pytest.fixture(autouse=True)
@@ -66,16 +75,16 @@ def _empty_semester_listing(monkeypatch):
 def feedback_issues(monkeypatch):
     """The Submission receipts issue each new submission repo gets, recorded as `(repo, body)`.
 
-    Its own tests live in tests/test_grades.py; the assignment tests care only that one is
+    Its own tests live in tests/test_receipts_issue.py; the assignment tests care only that one is
     opened, on the create path, with this assignment's facts in it."""
     opened: list[tuple[str, str]] = []
     monkeypatch.setattr(
         assign,
         "load_grading_spec",
-        lambda org, template, **_: collect.grades.GradingSpec(),
+        lambda org, template, **_: collect.grading_spec.GradingSpec(),
     )
     monkeypatch.setattr(
-        assign.grades,
+        assign.receipts,
         "ensure_receipts_issue",
         lambda org, repo, body, dry_run=False: opened.append((repo, body)) or 1,
     )
@@ -85,9 +94,11 @@ def feedback_issues(monkeypatch):
 @pytest.fixture(autouse=True)
 def _team_lock_is_current(monkeypatch):
     """The Join-team form's mirror, refreshed beside `record_handout`. Its content has its
-    own tests (tests/test_grades.py); a handout test only needs it not to reach the API."""
+    own tests (tests/test_team_lock.py); a handout test only needs it not to reach the API."""
     monkeypatch.setattr(
-        assign.grades, "sync_team_lock", lambda *a, **k: grades.LockWrite(True, False)
+        assign.team_formation,
+        "sync_team_lock",
+        lambda *a, **k: team_formation.LockWrite(True, False),
     )
 
 
@@ -99,7 +110,7 @@ def gradebooks(monkeypatch):
     and never to reach the roster in the org."""
     calls: list[str] = []
     monkeypatch.setattr(
-        assign.grades,
+        assign.gradebook,
         "ensure_gradebooks",
         lambda org, dry_run=False, existing=None: calls.append(org) or 0,
     )
@@ -246,7 +257,7 @@ def test_the_handout_sheet_for_a_group_assignment_is_keyed_on_the_team_name(
     monkeypatch.setattr(
         assign,
         "load_grading_spec",
-        lambda org, template, **_: grades.GradingSpec(type="group"),
+        lambda org, template, **_: grading_spec.GradingSpec(type="group"),
     )
 
     assign.provision_all("COURSE", "assignment-1-f2026", "SEMESTER", roster_path=path)
@@ -379,7 +390,7 @@ def test_no_model_solution_is_pushed_into_repos_that_are_not_private(
     monkeypatch.setattr(
         assign,
         "load_grading_spec",
-        lambda org, template, **_: grades.GradingSpec(visibility=visibility),
+        lambda org, template, **_: grading_spec.GradingSpec(visibility=visibility),
     )
     monkeypatch.setattr(
         assign,
@@ -425,7 +436,7 @@ def test_the_marker_is_not_written_when_a_solution_push_failed(tmp_path, monkeyp
 
 def test_the_marker_IS_written_when_the_site_sync_fails(tmp_path, monkeypatch):
     # A site-sync failure says nothing about whether the solution shipped - and it is
-    # PERSISTENT (a malformed instructors.yml raises every run), so withholding the marker for
+    # PERSISTENT (a malformed semester.yml raises every run), so withholding the marker for
     # it would re-clone every student repo every hour for the rest of the term.
     rc, recorded = _marker_run(tmp_path, monkeypatch, site_raises=True)
     assert recorded == [("SEMESTER", "assignment-1", 1)]
@@ -478,7 +489,7 @@ def test_the_new_repo_status_says_its_feedback_issue_never_opened(
 ):
     _provision_one_env(monkeypatch)
     monkeypatch.setattr(
-        assign.grades, "ensure_receipts_issue", lambda *a, **k: grades.LOOKUP_FAILED
+        assign.receipts, "ensure_receipts_issue", lambda *a, **k: receipts.LOOKUP_FAILED
     )
     assert (
         assign.provision_one(
@@ -502,7 +513,7 @@ def test_a_failed_solution_push_still_wins_over_a_missing_feedback_issue(
     # must never be masked is the push that did not happen.
     _provision_one_env(monkeypatch)
     monkeypatch.setattr(
-        assign.grades, "ensure_receipts_issue", lambda *a, **k: grades.LOOKUP_FAILED
+        assign.receipts, "ensure_receipts_issue", lambda *a, **k: receipts.LOOKUP_FAILED
     )
     monkeypatch.setattr(assign, "_wait_for_content", lambda *a, **k: True)
     monkeypatch.setattr(assign, "push_solution", lambda *a, **k: False)
@@ -639,7 +650,15 @@ def test_a_retired_button_left_on_a_template_is_withheld_too(monkeypatch):
     # whose nightly refresh has not run yet still carries the file - and the semester copy
     # frozen from it is what students generate off. So the strip reads what may never be
     # in a student repo, which keeps the retired paths in it.
-    retired = workflows_place.RETIRED_WORKFLOWS[0]
+    assert set(workflows_place.RETIRED_WORKFLOWS) <= set(
+        workflows_place.NEVER_IN_STUDENT_REPOS
+    )
+    retired = ".github/workflows/release-code.yml"
+    monkeypatch.setattr(
+        assign,
+        "NEVER_IN_STUDENT_REPOS",
+        (*workflows_place.NEVER_IN_STUDENT_REPOS, retired),
+    )
     deleted = _template_tree(
         monkeypatch, {retired: "name: Release code", "starter.py": ""}
     )
@@ -842,11 +861,13 @@ def test_provisioning_still_works_for_a_roster_without_a_role_column(
     tmp_path, capsys, monkeypatch
 ):
     monkeypatch.setenv("DSL_VERBOSE", "1")  # per-repo lines are verbose-only
-    path = tmp_path / "students.csv"
-    path.write_text(
+    for name, text in roster_files(
         "student_id,hertie_email,name,github_handle,github_id,section\n"
         "1,ada@uni.edu,Ada,ada-l,42,A\n"
-    )
+    ).items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(text)
+    path = tmp_path / "students.csv"
     rc, _changed = assign.provision_all(
         "COURSE",
         "assignment-1-f2026",
@@ -908,7 +929,7 @@ def test_the_shape_is_read_off_the_templates_grading_yml(tmp_path, capsys, monke
     monkeypatch.setenv("DSL_VERBOSE", "1")  # per-repo lines are verbose-only
     monkeypatch.setattr(
         "dsl_course.assign.load_grading_spec",
-        lambda org, template, **_: collect.grades.GradingSpec(type="group"),
+        lambda org, template, **_: collect.grading_spec.GradingSpec(type="group"),
     )
     monkeypatch.setattr(assign.teams, "load", lambda semester_org: {"unused": {}})
     monkeypatch.setattr(
@@ -1037,7 +1058,7 @@ def test_group_provisioning_filters_teams_csv_through_the_roster_allowlist(
     monkeypatch.setenv("DSL_VERBOSE", "1")  # per-repo lines are verbose-only
     monkeypatch.setattr(
         "dsl_course.assign.load_grading_spec",
-        lambda org, template, **_: collect.grades.GradingSpec(type="group"),
+        lambda org, template, **_: collect.grading_spec.GradingSpec(type="group"),
     )
     monkeypatch.setattr(assign.teams, "load", lambda semester_org: {"unused": {}})
     monkeypatch.setattr(
@@ -1066,7 +1087,7 @@ def test_group_provisioning_filters_teams_csv_through_the_roster_allowlist(
     # Both rejections are reported - but the HANDLES a student typed go to the verbose
     # channel (this workflow's log is world-readable) and the actionable error is a count.
     assert "stranger-x" in captured.out and "Eve-E" in captured.out
-    assert "2 handle(s) in teams.csv" in captured.err
+    assert "2 member(s) of team" in captured.err
     assert "stranger-x" not in captured.err and "Eve-E" not in captured.err
 
 
@@ -1078,7 +1099,7 @@ def test_a_rejected_teams_csv_handle_is_not_published_in_the_workflow_log(
     monkeypatch.delenv("DSL_VERBOSE", raising=False)
     monkeypatch.setattr(
         "dsl_course.assign.load_grading_spec",
-        lambda org, template, **_: collect.grades.GradingSpec(type="group"),
+        lambda org, template, **_: collect.grading_spec.GradingSpec(type="group"),
     )
     monkeypatch.setattr(assign.teams, "load", lambda semester_org: {"unused": {}})
     monkeypatch.setattr(
@@ -1095,7 +1116,7 @@ def test_a_rejected_teams_csv_handle_is_not_published_in_the_workflow_log(
         dry_run=True,
     )
     captured = capsys.readouterr()
-    assert "1 handle(s) in teams.csv" in captured.err
+    assert "1 member(s) of team" in captured.err
     assert "stranger-x" not in captured.err + captured.out
 
 
@@ -1387,7 +1408,7 @@ def _scheduled(monkeypatch, key: str, dest: str, source: str):
     # ... and a group assignment, which only the template's grading_config.yml can say.
     monkeypatch.setattr(
         "dsl_course.assign.load_grading_spec",
-        lambda org, template, **_: collect.grades.GradingSpec(type="group"),
+        lambda org, template, **_: collect.grading_spec.GradingSpec(type="group"),
     )
 
 
@@ -1546,7 +1567,9 @@ def test_a_group_handout_with_no_teams_yet_waits_on_the_cron_and_opens_on_the_bu
     monkeypatch.setattr(
         assign,
         "load_grading_spec",
-        lambda org, template, **_: grades.GradingSpec(type="group"),
+        lambda org, template, **_: grading_spec.GradingSpec(
+            type="group", team_formation="self_select"
+        ),
     )
     monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
     path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
@@ -1577,7 +1600,7 @@ def test_a_group_handout_with_no_teams_records_the_moment_it_went_out(
     monkeypatch.setattr(
         assign,
         "load_grading_spec",
-        lambda org, template, **_: grades.GradingSpec(type="group"),
+        lambda org, template, **_: grading_spec.GradingSpec(type="group"),
     )
     recorded: list[tuple[str, str]] = []
     monkeypatch.setattr(
@@ -1591,18 +1614,21 @@ def test_a_group_handout_with_no_teams_records_the_moment_it_went_out(
     assert recorded == [("SEMESTER", "project")]
 
 
-def test_a_group_assignment_nobody_declared_a_formation_for_waits_on_students(
+def test_a_group_assignment_nobody_declared_a_formation_for_forms_no_team(
     tmp_path, monkeypatch, capsys
 ):
-    # Read through the real cascade, every layer silent: the institution's `self_select`
-    # answers, so the wait names the students and not the teaching team. The REAL read,
-    # not the file's autouse stub, off a template that says only `type: group`.
-    monkeypatch.setattr(assign, "load_grading_spec", grades.load_grading_spec)
+    # Read through the real cascade, every layer silent: no formation (decision 0039 -
+    # absent everywhere forms no team), so nobody is told to self-select and the button
+    # says which key to set. The REAL read, not the file's autouse stub, off a template
+    # that says only `type: group`.
+    monkeypatch.setattr(assign, "load_grading_spec", grading_spec.load_grading_spec)
     _due_ahead(monkeypatch)
     monkeypatch.setattr(assign.teams, "load", lambda semester_org: {})
     monkeypatch.setattr(assign.teams, "teams_for", lambda rows, slug: {})
-    monkeypatch.setattr(grades, "_grading_text", lambda org, template: "type: group\n")
-    monkeypatch.setattr(settings, "_assignments_text", lambda org: None)
+    monkeypatch.setattr(
+        grading_spec, "_grading_text", lambda org, template: "type: group\n"
+    )
+    run_settings(monkeypatch, lambda org: None)
     monkeypatch.setattr(settings, "org_meta", lambda org: {})
     monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
     path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
@@ -1613,9 +1639,11 @@ def test_a_group_assignment_nobody_declared_a_formation_for_waits_on_students(
         )
 
     assert run(scheduled=True) == (0, False)
-    assert "the first team forms" in capsys.readouterr().out
+    assert "the first team forms" not in capsys.readouterr().out
     rc, _ = run()
-    assert rc == 0 and "students form teams from now" in rc.text
+    assert rc == 0
+    assert "students form teams" not in rc.text and "you assign" not in rc.text
+    assert "no layer sets its `team_formation`" in rc.text
 
 
 def test_an_allocated_assignment_with_no_teams_names_the_teaching_team(
@@ -1630,7 +1658,7 @@ def test_an_allocated_assignment_with_no_teams_names_the_teaching_team(
     monkeypatch.setattr(
         assign,
         "load_grading_spec",
-        lambda org, template, **_: grades.GradingSpec(
+        lambda org, template, **_: grading_spec.GradingSpec(
             type="group", team_formation="assigned"
         ),
     )
@@ -1643,7 +1671,7 @@ def test_an_allocated_assignment_with_no_teams_names_the_teaching_team(
         )
 
     assert run(scheduled=True) == (0, False)
-    assert "the instructors write them into teams.csv" in capsys.readouterr().out
+    assert "the instructors write them into students.csv" in capsys.readouterr().out
     rc, _ = run()
     assert rc == 0
     assert rc.text == "Handed out project: no teams yet; you assign the teams from now."
@@ -1656,7 +1684,9 @@ def _press_with_no_teams(monkeypatch, via: str) -> list[tuple[str, str]]:
     monkeypatch.setattr(
         assign,
         "load_grading_spec",
-        lambda org, template, **_: grades.GradingSpec(type="group", submit_via=via),
+        lambda org, template, **_: grading_spec.GradingSpec(
+            type="group", submit_via=via
+        ),
     )
     recorded: list[tuple[str, str]] = []
     monkeypatch.setattr(
@@ -1684,7 +1714,7 @@ def test_a_group_handout_pressed_after_the_cutoff_says_the_window_is_shut(
     assert rc == 0
     assert rc.text == (
         "Handed out project: no teams yet; the team window is already closed, so "
-        "assign the teams on its Teams tab (teams.csv)."
+        "assign the teams on its Teams tab (students.csv)."
     )
     assert recorded == [("SEMESTER", "project")]
 
@@ -1890,10 +1920,7 @@ def test_a_handout_with_nothing_to_create_confirms_no_absent_definition(
     # to create a repo may ask - never the steady state.
     asked: list = []
     monkeypatch.setattr(
-        grades, "confirm_grading_text", lambda *a: asked.append(a) and False
-    )
-    monkeypatch.setattr(
-        settings, "confirm_assignments_text", lambda *a: asked.append(a) and False
+        grading_spec, "confirm_grading_text", lambda *a: asked.append(a) and False
     )
     every = {
         "assignment-1": _ready_template(),
@@ -1904,7 +1931,7 @@ def test_a_handout_with_nothing_to_create_confirms_no_absent_definition(
     assert asked == []
     del every["assignment-1-bob-b"]
     assert _listing_run(tmp_path, monkeypatch, every) == ["assignment-1-bob-b"]
-    assert asked == [("COURSE", "assignment-1-f2026"), ("SEMESTER",)]
+    assert asked == [("COURSE", "assignment-1-f2026")]
 
 
 def test_a_definition_found_on_confirming_restarts_the_handout_on_it(
@@ -1912,7 +1939,7 @@ def test_a_definition_found_on_confirming_restarts_the_handout_on_it(
 ):
     # The shape was worked out from a spurious 404: work it out again from the file.
     found = iter([True, False])
-    monkeypatch.setattr(grades, "confirm_grading_text", lambda *a: next(found))
+    monkeypatch.setattr(grading_spec, "confirm_grading_text", lambda *a: next(found))
     loads: list = []
     real = assign.load_grading_spec
     monkeypatch.setattr(
@@ -2244,7 +2271,7 @@ def test_the_handout_composes_one_feedback_body_per_team(
     monkeypatch.setattr(
         assign,
         "load_grading_spec",
-        lambda org, template, **_: grades.GradingSpec(type="group"),
+        lambda org, template, **_: grading_spec.GradingSpec(type="group"),
     )
 
     assign.provision_all("COURSE", "assignment-1-f2026", "SEMESTER", roster_path=path)
@@ -2261,11 +2288,11 @@ def test_the_handout_refreshes_the_team_formation_lock(tmp_path, monkeypatch):
     monkeypatch.setattr("dsl_course.schedule.load", lambda org: sched)
     locked: list[tuple] = []
     monkeypatch.setattr(
-        assign.grades,
+        assign.team_formation,
         "sync_team_lock",
         lambda semester_org, course_org, sched: (
             locked.append((course_org, semester_org, sched))
-            or grades.LockWrite(True, False)
+            or team_formation.LockWrite(True, False)
         ),
     )
     path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
@@ -2290,9 +2317,9 @@ def test_a_tick_that_handed_nothing_out_does_not_rewrite_the_lock(
     monkeypatch.setattr("dsl_course.schedule.load", lambda org: citing(*TEMPLATES))
     locked: list[tuple] = []
     monkeypatch.setattr(
-        assign.grades,
+        assign.team_formation,
         "sync_team_lock",
-        lambda **kw: locked.append(kw) or grades.LockWrite(True, False),
+        lambda **kw: locked.append(kw) or team_formation.LockWrite(True, False),
     )
     path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
     monkeypatch.setattr(
@@ -2350,10 +2377,10 @@ def _semester(monkeypatch, live: dict[str, dict[str, bytes]], corrected=None):
 
     monkeypatch.setattr(assign, "put_files", fake_put_files)
     monkeypatch.setattr(
-        assign.grades, "find_receipts_issue", lambda org, repo: (7, "open")
+        assign.receipts, "find_receipts_issue", lambda org, repo: (7, "open")
     )
     monkeypatch.setattr(
-        assign.grades, "post_marked_comment", lambda *a, **k: notes.append(a) or True
+        assign.receipts, "post_marked_comment", lambda *a, **k: notes.append(a) or True
     )
     return commits
 
@@ -2823,7 +2850,7 @@ def _external(monkeypatch, tmp_path, *, rows=(), group="", scheduled=True, **kwa
     monkeypatch.setattr(
         assign,
         "load_grading_spec",
-        lambda org, template, **_: grades.parse_grading_spec(
+        lambda org, template, **_: grading_spec.parse_grading_spec(
             "submit_via: external\n" + group
         ),
     )
@@ -2857,13 +2884,13 @@ def _external(monkeypatch, tmp_path, *, rows=(), group="", scheduled=True, **kwa
     )
     # Wrapped rather than replaced, so a test that installed its own sweep above still
     # sees its own calls - and so the order is recorded whichever one is in place.
-    swept = assign.grades.ensure_gradebooks
+    swept = assign.gradebook.ensure_gradebooks
 
     def record_sweep(org, dry_run=False, existing=None):
         effects["order"].append("gradebooks")
         return swept(org, dry_run=dry_run, existing=existing)
 
-    monkeypatch.setattr(assign.grades, "ensure_gradebooks", record_sweep)
+    monkeypatch.setattr(assign.gradebook, "ensure_gradebooks", record_sweep)
     path = _roster_file(
         tmp_path, *(rows or ("ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc",))
     )
@@ -2910,7 +2937,7 @@ def test_an_external_handout_runs_on_the_ticks_listing_and_takes_none(
     )
     given: list = []
     monkeypatch.setattr(
-        assign.grades,
+        assign.gradebook,
         "ensure_gradebooks",
         lambda org, dry_run=False, existing=None: given.append(existing) or 0,
     )
@@ -3052,7 +3079,7 @@ def _two_entries_one_numbered() -> Schedule:
                 course_source_repo="assignment-trees", due_datetime=due
             ),
             "assignment-2": AssignmentEntry(
-                course_source_repo="assignment-trees", due_datetime=due
+                course_source_repo="assignment-trees", due_datetime=due, number=2
             ),
         }
     )
@@ -3290,7 +3317,7 @@ def test_a_student_choice_handout_opens_no_feedback_issue(
         assign,
         "load_grading_spec",
         lambda org, template, **_: dataclasses.replace(
-            grades.parse_grading_spec(""), visibility="student_choice"
+            grading_spec.parse_grading_spec(""), visibility="student_choice"
         ),
     )
     monkeypatch.setattr(
@@ -3318,7 +3345,7 @@ def test_a_public_handout_opens_no_feedback_issue(
         assign,
         "load_grading_spec",
         lambda org, template, **_: dataclasses.replace(
-            grades.parse_grading_spec(""), visibility="public"
+            grading_spec.parse_grading_spec(""), visibility="public"
         ),
     )
     monkeypatch.setattr(
@@ -3444,7 +3471,7 @@ def _shared(monkeypatch, tmp_path, *, rows=(), group="", **kwargs):
     monkeypatch.setattr(
         assign,
         "load_grading_spec",
-        lambda org, template, **_: grades.parse_grading_spec(
+        lambda org, template, **_: grading_spec.parse_grading_spec(
             "submit_via: shared_dropbox_repo\n" + group
         ),
     )
@@ -3787,7 +3814,7 @@ def test_patching_a_drop_box_names_the_drop_box_and_nobody_else(monkeypatch, cap
     monkeypatch.setattr(
         assign,
         "load_grading_spec",
-        lambda org, tmpl, **_: assign.grades.GradingSpec(
+        lambda org, tmpl, **_: collect.grading_spec.GradingSpec(
             submit_via="shared_dropbox_repo"
         ),
     )
@@ -3879,4 +3906,4 @@ def test_every_about_line_fits_inside_githubs_cap():
     # About line now carries the cutoff sentence as well as the note.
     what = "assignment-10-neural-networks-from-scratch - shared submission drop box"
     for shape in course.SHAPE_NOTES:
-        assert len(assign._about(what, shape)) <= course.MAX_REPO_DESCRIPTION, shape
+        assert len(assign._about(what, shape)) <= 350, shape  # GitHub's cap

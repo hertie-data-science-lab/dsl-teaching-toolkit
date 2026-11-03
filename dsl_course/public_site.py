@@ -4,9 +4,11 @@ The course org's `<course-org>.github.io` is PUBLIC and opt-in. The `course-mate
 repos it publishes are private, so linking into them would 404 for the public; instead
 this HOSTS the chosen repo's files in the site repo (Jekyll serves any path not starting
 with `_`) and links to site-relative URLs. Session materials only - no assignments, no
-events, no semester repos. What it publishes is the course's `opencourse.yml`
-(`opencourse`): the Publish website operation and the daily update both read it,
-and `enabled: false` stops both.
+events, no semester repos. What it publishes is the course's `course.yml`
+`open_course_site:` (`opencourse`), its `publish:` Selection run through `selection` (the
+institution denylist, the repo's `.releaseignore`, then the selection and the institution's
+floor): the Publish website operation and the daily update both read it, and `enabled:
+false` stops both.
 
 Driven through `python3 -m dsl_course.site public-sync`, which delegates here.
 """
@@ -24,29 +26,25 @@ import yaml
 
 from . import policy
 from .course import (
+    OPEN_SITE_BLOCK,
+    course_block,
     discover_local_sessions,
     discover_sections,
     find_session_dir,
     pages_repo,
 )
+from .discovery import org_meta
 from .faults import Unusable
-from .fs import copy_tree, union_deny
+from .fs import copy_tree
 from .ghcli import clone
 from .log import Summary, log, log_err, log_step
-from .materials import ASSETS_KIND, MATERIALS_FILE, Declared, infer_kind
-from .materials import parse as parse_materials
+from .materials import folder_kind
 from .opencourse import OPENCOURSE_FILE, OpenCourse
 from .opencourse import read as read_opencourse
 from .readings import readings_block
-from .releaseignore import deny_for, deny_lines, excludes
-from .repos import (
-    has_denied_component,
-    has_never_material_component,
-    is_denied_publication,
-    is_never_material,
-)
+from .selection import PUBLISH, Selection, denied, deny, floor, kept
+from .selection import releaseignored as releaseignored_in
 from .site_repo import (
-    PUBLISH_CONFIG,
     ROW_NOUN,
     Link,
     SitePlan,
@@ -56,95 +54,62 @@ from .site_repo import (
     links_block,
     nav_yaml,
     people_yaml,
-    retired_pages,
     row_file,
     site_readme,
     site_templates,
     sync_site_repo,
     theme_pages,
-    yaml_file,
 )
 
 # Public course site: served folder for the hosted section files.
 PUBLIC_MATERIALS_DIR = "public-materials"
 
 # The open site is still built from one repo's folders (its own design, `openware`, is
-# not written yet): `readings` is the section `opencourse.yml`'s `readings_mode` governs,
-# and a lab-kind section makes a lab row (`row_kind`). The semester site reads kinds from
-# the schedule.
+# not written yet): `readings` is the section `publish.reading_lists` speaks for, and a
+# lab-kind section makes a lab row (`row_kind`). The semester site reads kinds from the
+# schedule.
 READINGS_SECTION = "readings"
 
 
 def course_facts(meta: dict) -> str:
     """`_data/course.yml`: the contact and the licence the home page shows (decision 0019).
 
-    The course's own `contact` / `licence` from dsl-course.yml, else the institution's
-    `policy.contact` and first licence. A licence `policy.licences` names carries its URL;
-    one it does not (or `All rights reserved`, which has none) is shown as plain text."""
+    The course's own `open_course_site.contact` / `course.licence` from course.yml, else
+    the institution's first contact and first licence. A licence the institution names
+    carries its URL; one it does not (or `All rights reserved`, which has none) is shown
+    as plain text."""
     pol = policy.load()
-    contact = str(meta.get("contact") or "").strip() or pol["contact"]
-    name = str(meta.get("licence") or "").strip() or pol["licences"][0]["name"]
+    site = (
+        meta.get(OPEN_SITE_BLOCK) if isinstance(meta.get(OPEN_SITE_BLOCK), dict) else {}
+    )
+    contact = str(site.get("contact") or "").strip() or policy.contact()
+    name = (
+        str(course_block(meta).get("licence") or "").strip()
+        or pol["licences"][0]["name"]
+    )
     url = next((lc["url"] for lc in pol["licences"] if lc["name"] == name), "")
     facts = {"contact": contact, "licence": {"name": name, "url": url}}
     return yaml.safe_dump(facts, sort_keys=False, allow_unicode=True)
 
 
-def _declared(src: Path) -> Declared:
-    """The clone's own `materials.yml`; none, or one that does not parse, is the defaults
-    (its problem is reported on the course page, not here)."""
-    try:
-        return parse_materials(
-            yaml.safe_load((src / MATERIALS_FILE).read_text(encoding="utf-8"))
-        )
-    except (OSError, yaml.YAMLError, Unusable):
-        return Declared()
+def shown_sections(sections: list[str]) -> list[str]:
+    """The sections that get rows: one whose name is a shown kind of the institution's
+    (`lectures/`, `labs/`); a supporting-files one (`data/`, and any folder no kind
+    names) never does (decisions 0026 rule 3, 0031 rule 10; kinds from the institution
+    file only, ruling of 14 Oct 2026)."""
+    return [s for s in sections if folder_kind(s) in policy.shown_kinds()]
 
 
-def shown_sections(sections: list[str], kinds: dict[str, str]) -> list[str]:
-    """The sections that get rows: a supporting-files one (`data/`, `img/`, and any
-    folder no alias names) never does (decisions 0026 rule 3, 0031 rule 10)."""
-    return [s for s in sections if infer_kind(s, kinds) != ASSETS_KIND]
+def row_kind(section: str) -> str:
+    """The open site's row for a section: its kind when the open site has a row of that
+    kind (`ROW_NOUN`: a lab-kind one, `labs/`), else 'lecture' (the session row)."""
+    kind = folder_kind(section)
+    return kind if kind in ROW_NOUN else "lecture"
 
 
-def row_kind(section: str, kinds: dict[str, str]) -> str:
-    """The open site's row for a section: 'lab' for a lab-kind one (`labs/`,
-    `tutorials/`, or so declared), else 'lecture' (the session row)."""
-    return "lab" if infer_kind(section, kinds) == "lab" else "lecture"
-
-
-def _publication_ignore(dirpath: str, names: list[str]) -> set[str]:
-    """A `copytree` ignore filter for the PUBLIC site: drop every denylisted name and every
-    name that is never course material, at any depth (repos.PUBLICATION_DENYLIST and
-    repos.NEVER_MATERIAL - two lists because one is what must not leak and the other is
-    only clutter).
-
-    At any depth, unlike `deploy._copy_ignore`, which anchors its exclusions to the repo
-    root: the release path excludes plumbing that only ever lives at the root, while the
-    thing this exists to stop - a `solution/` beside the lab it answers - is precisely a
-    nested folder.
-
-    It filters NAMES, which is why `fs.copy_tree` never follows a symlink: a
-    `notes.pdf -> ../solution/answers.pdf` would otherwise be copied in as the answers
-    themselves, under a name this filter has no reason to deny."""
-    return {n for n in names if is_denied_publication(n) or is_never_material(n)}
-
-
-def _withheld_from_site(root: Path, path: Path, withhold: tuple[str, ...] = ()) -> bool:
-    """Whether one path under the clone at `root` must not reach the public site.
-
-    The same rules `copy_tree`'s filter applies, as a PREDICATE - because the listing
-    paths cannot use a copytree filter. `reading-list` mode (the DEFAULT) hosts nothing, so
-    it never calls `copy_tree` and the `ignore` hook never runs: it publishes filenames,
-    and inlines the overlay's prose verbatim. Without this, a withheld reading was named on
-    the open web and a withheld OVERLAY had its full text published there. `withhold` is
-    `opencourse.yml`'s list, judged from the clone's root."""
-    rel = path.relative_to(root).as_posix()
-    return (
-        has_denied_component(rel)
-        or has_never_material_component(rel)
-        or excludes(root, path)
-        or excludes(root, path, withhold)
-    )
+def _section_kind(section: str) -> str:
+    """A section's kind as `publish.kinds` names it (`lectures`), from its folder name."""
+    return policy.plural_of(folder_kind(section))
 
 
 def _public_links(local_dir: Path, url_prefix: str) -> list[Link]:
@@ -172,13 +137,13 @@ def _public_links(local_dir: Path, url_prefix: str) -> list[Link]:
     the allowlist excluded would be served and unreachable. The semester site takes the extra
     narrowing because it CAN offer a folder link; this one keeps every file reachable."""
     files = sorted(q for q in local_dir.rglob("*") if q.is_file())
-    # Denylisted paths are already absent from a folder THIS run copied
-    # (`_publication_ignore`), so this is the second lock on the same door - and the one
-    # that holds if a file ever reaches the served tree by another route.
+    # Denylisted paths are already absent from a folder THIS run copied (`selection`),
+    # so this is the second lock on the same door - and the one that holds if a file
+    # ever reaches the served tree by another route.
     rels = [
         rel
         for rel in (q.relative_to(local_dir).as_posix() for q in files)
-        if not has_denied_component(rel)
+        if not denied(rel)
     ]
     if any("/" not in rel for rel in rels):
         rels = [rel for rel in rels if "/" not in rel]
@@ -241,26 +206,24 @@ def _public_lecture_entry(
 
 def sync_public_site(course_org: str, oc: OpenCourse) -> int:
     """Build/refresh the PUBLIC course site `<course-org>.github.io` (open courseware)
-    from `oc`, the course's `opencourse.yml`.
+    from `oc`, the course's `open_course_site:`.
 
-    The first run scaffolds the site (Pages), later runs re-sync it; each deletes a
-    `PUBLISH_CONFIG` an older publish left in the site repo. Hosts the declared
-    `source_repo`'s files - every section it
-    actually has (see course.discover_sections), plus, in `actual-readings` mode, `readings`
-    - in the public site repo and links to them with site-relative URLs. `reading-list` mode
-    publishes the citation text only. `include_lectures` toggles the file sections as a
-    group (its name predates generic sections). `withhold` keeps its paths off the site,
-    on top of the repo's `.releaseignore` and the denylist. Session materials only - no
+    The first run scaffolds the site (Pages), later runs re-sync it. Hosts the files of
+    the declared `source_repo`'s sections (see course.discover_sections) that `publish:`
+    keeps - a section's kind from its folder, each file through `selection`'s layers -
+    in the public site repo, and links to them with site-relative URLs. `reading_lists`
+    publishes the readings' citation text; the readings themselves only when `readings`
+    is a published kind or an `include` names them. Session materials only - no
     assignments/events. Served files are namespaced per source repo so several years can
     coexist on one site."""
-    source_repo, readings_mode = oc.source_repo, oc.readings_mode
-    include_lectures = oc.include_lectures
-    if not include_lectures and readings_mode == "none":
-        log_err("nothing to publish - file sections off and readings set to none.")
+    source_repo, sel = oc.source_repo, oc.selection
+    if not sel.kinds and not sel.include and not oc.reading_lists:
+        log_err("nothing to publish - no kinds, no includes and no reading lists.")
         return 1
+    limit = floor(PUBLISH)
 
     def build(site_wd: Path) -> SitePlan | None:
-        meta = yaml_file(course_org, ".github", "dsl-course.yml")
+        meta = org_meta(course_org)
         # A course site spans years and has no per-semester schedule.yml to read (that's
         # semester-scoped), so the date is a neutral fallback that only orders the session
         # entries.
@@ -277,13 +240,18 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
             if not clone(course_org, source_repo, src):
                 log_err(f"could not clone {spec}")
                 return None
-            # Three filters unioned, not one list: the denylist is what this toolkit
-            # refuses to publish, `.releaseignore` is faculty's own for every copy, and
-            # `opencourse.yml`'s `withhold` theirs for this site alone. Anchored at the
+
+            # One rule (`selection`): the institution denylist, faculty's
+            # `.releaseignore`, `publish:` and the institution's floor, anchored at the
             # CLONE root even though what gets copied is a session folder deep inside it.
-            withhold = union_deny(
-                _publication_ignore, deny_for(src), deny_lines(src, oc.withhold)
-            )
+            def withhold(section: str):
+                kind = _section_kind(section)
+                return deny(src, use=sel, kind_of=lambda _rel: kind, limit=limit)
+
+            withheld = releaseignored_in(src)
+            # A reading list NAMES files, so it is a copy of a kind too: the denylist,
+            # `.releaseignore` and `publish.exclude` hold for it as for the files.
+            listed_names = Selection(exclude=sel.exclude)
 
             # Both readings of the source's structure come off THE CLONE - which every
             # session below is copied out of anyway. The session list used to be a
@@ -291,24 +259,17 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
             sessions = discover_local_sessions(src)
             log_step(
                 f"Publishing {course_org}/{pages_repo(course_org)} from {source_repo}: "
-                f"{len(sessions)} session(s), readings={readings_mode}, "
-                f"file sections={'on' if include_lectures else 'off'}"
+                f"{len(sessions)} session(s), kinds={', '.join(sel.kinds or ()) or '(none)'}, "
+                f"reading lists={'on' if oc.reading_lists else 'off'}"
             )
 
             # Sections are whatever THIS repo has (the same discovery the release workflows
             # use), not a hardcoded lectures/readings pair - a course whose content lives
             # in `labs/` publishes labs. `readings` is the one section with special
-            # semantics (`readings_mode`, below); `include_lectures` gates all the others.
-            # Supporting-files sections (any folder no alias names) are never rows here
-            # either.
-            kinds = dict(_declared(src).kinds)
-            file_sections = (
-                shown_sections(
-                    [sec for sec in discover_sections(src) if sec != READINGS_SECTION],
-                    kinds,
-                )
-                if include_lectures
-                else []
+            # semantics (`reading_lists`, below). Supporting-files sections (any folder no
+            # kind names) are never rows here either.
+            file_sections = shown_sections(
+                [sec for sec in discover_sections(src) if sec != READINGS_SECTION]
             )
             log(
                 f"  sections published as files: {', '.join(file_sections) or '(none)'}"
@@ -330,28 +291,29 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
                     if sec_src is None:
                         continue
                     dest = site_session / section
-                    copy_tree(sec_src, dest, withhold)
+                    copy_tree(sec_src, dest, withhold(section))
                     links = _public_links(dest, f"{url_base}/{section}")
                     if links:
                         rows = (
-                            lab_links
-                            if row_kind(section, kinds) == "lab"
-                            else section_links
+                            lab_links if row_kind(section) == "lab" else section_links
                         )
                         rows.append((section, links))
 
                 read_src = find_session_dir(src / READINGS_SECTION, s)
                 if read_src is not None:
-                    if readings_mode == "actual-readings":
-                        dest = site_session / READINGS_SECTION
-                        copy_tree(read_src, dest, withhold)
-                        links = _public_links(dest, f"{url_base}/{READINGS_SECTION}")
-                        if links:
-                            section_links.append((READINGS_SECTION, links))
-                    elif readings_mode == "reading-list":
+                    dest = site_session / READINGS_SECTION
+                    copy_tree(read_src, dest, withhold(READINGS_SECTION))
+                    links = _public_links(dest, f"{url_base}/{READINGS_SECTION}")
+                    if links:
+                        section_links.append((READINGS_SECTION, links))
+                    if oc.reading_lists:
                         reading_list_md = _reading_list_md(
                             read_src,
-                            lambda p: not _withheld_from_site(src, p, oc.withhold),
+                            lambda p: kept(
+                                p.relative_to(src).as_posix(),
+                                use=listed_names,
+                                withheld=withheld,
+                            ),
                         )
 
                 # A row with nothing published gets no page at all, rather than an empty
@@ -370,13 +332,14 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
                     )
 
         config = {}
-        if meta.get("course_name"):
-            config["course_name"] = str(meta["course_name"])
-        if meta.get("course_code"):
-            config["course_code"] = str(meta["course_code"])
+        identity = course_block(meta)
+        if identity.get("name"):
+            config["course_name"] = str(identity["name"])
+        if identity.get("code"):
+            config["course_code"] = str(identity["code"])
         # Always written, blank included: the seed's placeholder paragraph must never
         # reach the open web (the home page drops the section when it is blank).
-        config["course_description"] = str(meta.get("course_description") or "").strip()
+        config["course_description"] = str(identity.get("description") or "").strip()
         config["course_semester"] = "Open Courseware"  # neutral: the site is multi-year
         # The public open-courseware site belongs to the COURSE org (multi-year), so its
         # footer links there - unlike a semester site, which links its semester org.
@@ -394,12 +357,12 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
             files={
                 # People from the course org's declared `people:` block (else the GitHub
                 # teams). Instructors only - the open-courseware site is multi-year, and
-                # TAs are declared per semester (in each semester's instructors.yml), never
+                # TAs are declared per semester (in each semester's semester.yml), never
                 # course-level.
                 "_data/people.yml": people_yaml(
                     course_org,
                     meta,
-                    edit_at=f"the `people:` block of {course_org}/.github/dsl-course.yml",
+                    edit_at=f"the `people:` block of {course_org}/.github/course.yml",
                     include_tas=False,
                 ),
                 "_data/course.yml": course_facts(meta),
@@ -414,12 +377,6 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
                 # writes its front matter before any site sees it.
                 **site_templates(),
             },
-            # The Assignments tab a public site no longer has, and the settings file an
-            # older publish kept here: `opencourse.yml` holds them now.
-            retire=(
-                *retired_pages(site_wd, ("assignments.md",)),
-                PUBLISH_CONFIG,
-            ),
             commit=f"site: publish public course site from {source_repo}",
             label="public site",
             title="Public website",
@@ -430,9 +387,9 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
 
 
 def publish(course_org: str, *, daily: bool = False) -> int:
-    """Publish the public website as the course's `opencourse.yml` declares it.
+    """Publish the public website as the course's `open_course_site:` declares it.
 
-    `daily` is the cron's catch-up: a course with no `opencourse.yml`, or one that says
+    `daily` is the cron's catch-up: a course with no `open_course_site:`, or one that says
     `enabled: false`, is a one-line no-op there, since the cron ships in every course org
     and most never publish. Asked for by a person, the same answer is a refusal with the
     sentence that says what to change."""

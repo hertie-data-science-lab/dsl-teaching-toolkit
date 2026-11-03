@@ -22,6 +22,7 @@ import importlib
 import json
 import os
 import sys
+from collections.abc import Callable
 from datetime import datetime, timezone
 
 from . import schedule, status
@@ -255,11 +256,20 @@ def assignment_names(request: Request | None) -> set[str]:
     }
 
 
-def _finish(outcome: Outcome, request: Request | None) -> None:
+# Who else hears the outcome: the laptop CLI (`dsl_course.cli`) prints its sentence. Set
+# for one `handle` call; the Console workflow leaves it None and reads the annotation.
+_Listener = Callable[[Outcome], None]
+
+
+def _finish(
+    outcome: Outcome, request: Request | None, listener: _Listener | None = None
+) -> None:
     """Emit the annotation, then - for a request that got past its identity check - the
     private record and the status refresh. A record that cannot be written is a broken
     run; the status refresh is best-effort."""
     print(annotation(outcome, assignment_names(request)), flush=True)
+    if listener:
+        listener(outcome)
     if request is None:
         return
     if _sealed(outcome, request):
@@ -317,14 +327,15 @@ def _outcome(op: Operation, request: Request, started: str) -> tuple[Outcome, bo
     ), crashed
 
 
-def run(text: str) -> int:
+def run(text: str, listener: _Listener | None = None) -> int:
     """0 whenever an Outcome was produced - refusals and content failures included - and
-    1 when the run itself broke: no token, or a target that crashed."""
+    1 when the run itself broke: no token, or a target that crashed. `listener` is also
+    handed the outcome (the laptop CLI's sentence)."""
     started = _now()
     try:
         request = parse_request(text)
     except RequestError as exc:
-        _finish(_refuse(exc.code, exc.text, _loose(text), started), None)
+        _finish(_refuse(exc.code, exc.text, _loose(text), started), None, listener)
         return 0
     login = acting_login()
     if login is None:
@@ -333,20 +344,33 @@ def run(text: str) -> int:
     refusal = identity_refusal(request, login)
     if refusal:
         # Not recorded privately: the request's orgs are exactly what is in doubt.
-        _finish(_refuse("ACTOR_MISMATCH", refusal, raw, started), None)
+        _finish(_refuse("ACTOR_MISMATCH", refusal, raw, started), None, listener)
         return 0
     refusal = check_access(request)
     if refusal:
         # Not recorded privately either: the refusal may be that the semester is not this
         # course's, and a refused caller must not be able to write into any org.
-        _finish(_refuse("NOT_ALLOWED", refusal, raw, started), None)
+        _finish(_refuse("NOT_ALLOWED", refusal, raw, started), None, listener)
         return 0
     try:
         outcome, crashed = _outcome(REGISTRY[request.op], request, started)
     except RequestError as exc:
         outcome, crashed = _refuse(exc.code, exc.text, raw, started), False
-    _finish(outcome, request)
+    _finish(outcome, request, listener)
     return 1 if crashed else 0
+
+
+def handle(text: str, listener: _Listener | None = None) -> int:
+    """`run`, with a broken run reported as one line rather than a traceback: what both
+    the Console workflow and the laptop CLI call."""
+    try:
+        return run(text, listener)
+    except Broken as exc:
+        log_err(f"The Console run broke: {exc}.")
+        return 1
+    except Exception as exc:
+        log_err(f"The Console run broke on an unexpected {type(exc).__name__}.")
+        return 1
 
 
 def main() -> int:
@@ -355,14 +379,7 @@ def main() -> int:
         "--request", required=True, help="A dsl.request/1 JSON document"
     )
     args = parser.parse_args()
-    try:
-        return run(args.request)
-    except Broken as exc:
-        log_err(f"The Console run broke: {exc}.")
-        return 1
-    except Exception as exc:
-        log_err(f"The Console run broke on an unexpected {type(exc).__name__}.")
-        return 1
+    return handle(args.request)
 
 
 if __name__ == "__main__":

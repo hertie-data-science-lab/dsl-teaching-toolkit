@@ -2,10 +2,12 @@
 into beside faculty (decision 0010).
 
 A repo's root holds only what an instructor edits; everything the engine writes - its
-status, the outcomes of console runs, the fire-once markers, the records of what was sent -
-lives under `.system/`. `path(kind, ...)` is the one spelling of each: the writers and the
-readers ask it, the console reads the same table from `console/schemas/names.json`, and
-`migrate` is the only module that knows where a record used to be.
+status, the outcomes of console runs, the fire-once markers, the records of what was sent
+or released - lives under `.system/`. `path(kind, ...)` is the one spelling of each: the
+writers and the readers ask it, the console reads the same table from
+`console/schemas/names.json`, and `migrate` is the only module that knows where a record
+used to be - but for `RETIRED_SEMESTER_GRADES`, which `distribute` also renames on its
+first write.
 
 Stdlib only, no I/O: this is a vocabulary, like `course`.
 """
@@ -22,19 +24,25 @@ RECORDS = {
     "student_status": "student-status.json",
     "outcomes": "outcomes",
     # semester-config: the pointer to the course org, and the semester's records
-    "pointer": "dsl-course.yml",
+    "pointer": "course.yml",
+    # semester-config: each student's GitHub account and enrolment code (`roster`),
+    # beside the instructor-owned students.csv
+    "roster": "roster.csv",
     "lock": "assignments.lock.yml",
     "snapshots": "snapshots",
     "autograde": "autograde",
     "solutions": "solutions",
+    # every copy a release has made: its entry, source commit, ship times and manifest
+    # (`release_record`, decision 0043)
+    "releases": "releases.json",
     # the last preview of a hand out WITH the solution: who, and which template - the
     # real run of it goes ahead only straight after (`assign.preview_first`)
     "solution_preview": "solution-preview.json",
     # one marker per assignment whose marks automation returned at its
-    # `marks_return_datetime` (`grades.marks_due`)
+    # `marks_return_datetime` (`distribute.marks_due`)
     "marks_returned": "marks-returned",
     # one file per grading sheet: each unit's block as it stood when the last real Return
-    # marks left every person in it told (`grades.returned_record`) - what the console
+    # marks left every person in it told (`distribute.returned_record`) - what the console
     # counts the next Return marks' emails against
     "returned": "returned",
     "gradebook": "gradebook",
@@ -44,7 +52,8 @@ RECORDS = {
     # workflow) and each switched-account relink (`relinks/<old id>.json`, `relink`)
     "enrolment": "enrolment",
     "archive": "archive.md",
-    "semester_gradebook": "semester-gradebook.csv",
+    # the semester grades file: one row per enrolled student, one column per assignment
+    "semester_gradebook": "semester-grades.csv",
     # the course org's `.github`: the refresh's heartbeat and its miss ledger
     "heartbeat": "last-refresh",
     "missing_semesters": "missing-semesters",
@@ -52,7 +61,7 @@ RECORDS = {
     # set to before, so the unpause restores exactly that
     "migration_pause": "migration-pause.json",
     # the course org's `.github`: the run settings `migrate` took out of each template,
-    # for its semesters' `assignments.yml`
+    # for its semesters' 0.10 `assignments.yml`
     "migration_run_keys": "migration-run-keys.json",
     # semester-config: the releases plan `migrate` proposes for folders released outside
     # the plan, for faculty to copy into schedule.yml by hand (never merged by the tool)
@@ -62,6 +71,12 @@ RECORDS = {
     "syllabus_sample": "SYLLABUS.md.sample",
     "syllabus_sessions": "SYLLABUS.sessions.md",
 }
+
+
+# The semester grades file's name before 0.11.0. `distribute` reads it while the new one is
+# not there yet and deletes it in the commit that first writes the new one; `migrate` moves
+# it for a semester that returns no marks before it is migrated.
+RETIRED_SEMESTER_GRADES = f"{SYSTEM_DIR}/semester-gradebook.csv"
 
 
 def path(kind: str, *parts: str) -> str:

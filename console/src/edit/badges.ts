@@ -1,5 +1,5 @@
 // What a withhold list does to each file of a repo, and how a click on the tree edits it.
-// One widget serves `.releaseignore` (withheld from students), `opencourse.yml`'s `withhold`
+// One widget serves `.releaseignore` (withheld from students), course.yml's `open_course_site.withhold`
 // (kept off the public website) and the import picker (decision 0016).
 //
 // The rule is the engine's (`releaseignore`): gitignore syntax, the last matching line wins,
@@ -7,21 +7,16 @@
 // `schemas/materials.json` were answered by the engine and the tests hold this file to them.
 // Never-material names (`.DS_Store`, `.gitkeep`) and the list file itself never leave the repo.
 
-import rules from '../../schemas/materials.json';
+import { clutter, denylisted } from '../model/selection';
 import { compile, compileAll, matchRules, withheldBy, type Rule } from './glob';
 
 export type Badge = 'withheld' | 'released';
 
-/** `repos.PUBLICATION_DENYLIST` as whole-name regexes, matched per path component. */
-const fnmatch = (p: string) => new RegExp(`^${p.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`);
-const DENYLIST = rules.denylist.map(fnmatch);
-/** `repos.NEVER_MATERIAL`, matched per path component, case-insensitively. */
-const NEVER_MATERIAL = new Set(rules.never_material.map((x) => x.toLowerCase()));
-
 const parts = (path: string) => path.split('/').filter(Boolean).map((x) => x.toLowerCase());
-export const neverMaterial = (path: string) => parts(path).some((x) => NEVER_MATERIAL.has(x) || x === '.releaseignore');
-/** Never published whatever a list says: solutions, tests, grading files, `.env`. */
-export const denylisted = (path: string) => parts(path).some((x) => DENYLIST.some((re) => re.test(x)));
+/** Clutter (`selection.CLUTTER`) and the list file itself: never copied anywhere. */
+export const neverMaterial = (path: string) => clutter(path) || parts(path).includes('.releaseignore');
+/** The institution denylist (`selection.DENYLIST`): solutions, tests, grading files, `.env*`, `.git`, `.system`. */
+export { denylisted };
 
 export interface Badged {
   badges: Record<string, Badge>;
@@ -42,7 +37,7 @@ export function badgeFiles(files: string[], lines: string[]): Badged {
 
 /**
  * A repo's files under one withhold list, counted three ways: never copied whatever the list says
- * (`materials.publishable`: denylisted or never-material), withheld by a line, and released.
+ * (`selection.publishable`: denylisted or never-material, unless a release names it), withheld by a line, and released.
  */
 export function withholdCounts(files: string[], lines: string[]): { never: number; withheld: number; released: number } {
   const rs = compileAll(lines);

@@ -13,9 +13,9 @@ function estate() {
     .on('GET', '/repos/hertie-ids-c11/.github', { name: '.github', topics: ['dsl-course-hub'], permissions: { push: false, pull: true } })
     .on('GET', '/repos/some-other-org/.github', { name: '.github', topics: ['profile'], permissions: { push: true } })
     .on('GET', '/repos/hertie-ml-e1234/.github/contents/semesters.yml', fileBody('semesters.yml', 'semesters:\n  - hertie-ml-s2026\n  - hertie-ml-f2026\n'))
-    .on('GET', '/repos/hertie-ml-e1234/.github/contents/dsl-course.yml', fileBody('dsl-course.yml', 'course_name: Machine Learning\ncourse_code: E1234\npeople:\n  course_admins:\n    - github_handle: a-example\n'))
+    .on('GET', '/repos/hertie-ml-e1234/.github/contents/course.yml', fileBody('dsl-course.yml', 'course:\n  name: Machine Learning\n  code: E1234\npeople:\n  course_admins:\n    - github_handle: a-example\n'))
     .on('GET', '/repos/hertie-ids-c11/.github/contents/semesters.yml', fileBody('x', '- hertie-ids-f2026\n'))
-    .on('GET', '/repos/hertie-ids-c11/.github/contents/dsl-course.yml', fileBody('x', 'course_name: Intro to Data Science\ncourse_code: C11\n'))
+    .on('GET', '/repos/hertie-ids-c11/.github/contents/course.yml', fileBody('x', 'course:\n  name: Intro to Data Science\n  code: C11\n'))
     .on('GET', /^\/repos\/[^/]+\/semester-config$/, { name: 'semester-config' });
 }
 
@@ -101,14 +101,14 @@ function orgs(gh: FakeGitHub, push: string[] = [], archived: string[] = []) {
     .on('GET', /^\/repos\/[^/]+\/semester-config$/, { name: 'semester-config' })
     .on('GET', `/repos/${COURSE}/.github`, dot(COURSE, ['course-e1234', 'dsl-course-hub']))
     .on('GET', `/repos/${COURSE}/.github/contents/semesters.yml`, fileBody('x', `semesters:\n  - ${OLD}\n  - ${SEM}\n`))
-    .on('GET', `/repos/${COURSE}/.github/contents/dsl-course.yml`, fileBody('x', 'course_name: Machine Learning\ncourse_code: E1234\n'))
+    .on('GET', `/repos/${COURSE}/.github/contents/course.yml`, fileBody('x', 'course:\n  name: Machine Learning\n  code: E1234\n'))
     .on('GET', `/repos/${SEM}/.github`, dot(SEM, ['dsl-semester']))
-    .on('GET', `/repos/${SEM}/semester-config/contents/.system/dsl-course.yml`, meta(COURSE))
+    .on('GET', `/repos/${SEM}/semester-config/contents/.system/course.yml`, meta(COURSE))
     .on('GET', `/repos/${OLD}/.github`, dot(OLD, ['dsl-semester']))
-    .on('GET', `/repos/${OLD}/semester-config/contents/.system/dsl-course.yml`, meta(COURSE))
+    .on('GET', `/repos/${OLD}/semester-config/contents/.system/course.yml`, meta(COURSE))
     .on('GET', `/repos/${OTHER_SEM}/.github`, dot(OTHER_SEM, ['dsl-semester']))
-    .on('GET', `/repos/${OTHER_SEM}/semester-config/contents/.system/dsl-course.yml`, meta('hertie-nlp-e1282'))
-    .on('GET', '/repos/hertie-nlp-e1282/.github/contents/dsl-course.yml', fileBody('x', 'course_name: Natural Language Processing\n'));
+    .on('GET', `/repos/${OTHER_SEM}/semester-config/contents/.system/course.yml`, meta('hertie-nlp-e1282'))
+    .on('GET', '/repos/hertie-nlp-e1282/.github/contents/course.yml', fileBody('x', 'course:\n  name: Natural Language Processing\n'));
 }
 
 const paths = (gh: FakeGitHub) => gh.seen.map((r) => r.url.replace('https://api.github.com', ''));
@@ -229,7 +229,7 @@ describe('roles', () => {
 
   it('takes a student’s semester’s course from the registry that lists it when its pointer is private', async () => {
     const gh = new FakeGitHub()
-      .on('GET', `/repos/${SEM}/semester-config/contents/.system/dsl-course.yml`, () => json({ message: 'Not Found' }, 404));
+      .on('GET', `/repos/${SEM}/semester-config/contents/.system/course.yml`, () => json({ message: 'Not Found' }, 404));
     orgs(gh).on('GET', MEMBERSHIPS, member([COURSE, SEM]));
     const e = await discover(gh);
     expect(e.courses).toEqual([]);
