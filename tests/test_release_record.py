@@ -245,7 +245,8 @@ def test_a_copy_already_at_its_destination_is_seeded_not_shipped(monkeypatch, ca
     # The upgrade path: a semester released into before the record existed. Nothing is
     # copied; the record is written from what students already have.
     tree = {"labs/08_session-8/slides.pdf": "s1", "README.md": "r"}
-    store = Store(None, {"materials": tree}).install(monkeypatch)
+    course = {"labs/08_session-8/slides.pdf": "s0"}
+    store = Store(None, {"materials": tree, "cm": course}).install(monkeypatch)
     calls = _shipping(monkeypatch)
     assert _tick(_release(LAB)) == (0, False)
     assert calls == []
@@ -255,6 +256,36 @@ def test_a_copy_already_at_its_destination_is_seeded_not_shipped(monkeypatch, ca
     assert copy["source"]["commit"] is None
     assert copy["files"] == {"slides.pdf": "s1"}
     assert "[seed] lab-08" in capsys.readouterr().out
+
+
+def test_a_seed_records_only_what_the_course_copy_also_has(monkeypatch):
+    # A file the semester added under the copy itself was never released: seeded into the
+    # manifest it would read as "deleted in the course", and Release again's "also
+    # remove" would delete the semester's own file.
+    tree = {"labs/08_session-8/slides.pdf": "s1", "labs/08_session-8/extra.ipynb": "e"}
+    course = {"labs/08_session-8/slides.pdf": "s0"}
+    store = Store(None, {"materials": tree, "cm": course}).install(monkeypatch)
+    _shipping(monkeypatch)
+    _tick(_release(LAB))
+    (copy,) = store.copies
+    assert copy["files"] == {"slides.pdf": "s1"}
+
+
+def test_with_no_listing_a_destination_is_read_on_its_own_branch(monkeypatch):
+    # The tick's listing could not be read: guessing `main` read a `master` repo as empty
+    # and shipped over what students have, instead of seeding.
+    tree = {"labs/08_session-8/slides.pdf": "s1"}
+    store = Store(None, {"cm": tree}).install(monkeypatch)
+    monkeypatch.setattr(scheduler, "default_branch", lambda org, repo: "master")
+    monkeypatch.setattr(
+        scheduler,
+        "repo_blob_shas",
+        lambda org, repo, branch: tree if branch == "master" else {},
+    )
+    calls = _shipping(monkeypatch)
+    _tick(_release(LAB))
+    assert calls == []
+    assert [c["first_shipped_at"] for c in store.copies] == [None]
 
 
 def test_a_copy_held_at_a_conflict_is_not_recorded(monkeypatch):

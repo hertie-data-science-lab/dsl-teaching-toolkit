@@ -203,6 +203,8 @@ def _nothing_is_recorded_as_released(monkeypatch):
     after this fixture and win."""
     monkeypatch.setattr(release_record, "get_file_with_sha", lambda *a, **k: None)
     monkeypatch.setattr(scheduler, "repo_blob_shas", lambda *a, **k: {})
+    monkeypatch.setattr(scheduler, "repo_missing", lambda *a, **k: False)
+    monkeypatch.setattr(scheduler, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(
         release_record, "put_file_as_read", lambda org, repo, path, body, *a, **k: body
     )

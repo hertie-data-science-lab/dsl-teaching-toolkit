@@ -14,8 +14,8 @@ and student status, which date a released row by its copies' `first_shipped_at`
 Who writes it:
 
 - the scheduled release (`scheduler`), for every copy it ships, and for a due copy that
-  has no entry but whose destination is already there - SEEDED from the destination tree,
-  `first_shipped_at: null`, and not copied (this is what upgrades a semester released into
+  has no entry but whose destination is already there - SEEDED from the destination tree
+  (for a folder, the files the course copy also has), `first_shipped_at: null`, and not copied (this is what upgrades a semester released into
   before the record existed, on its first tick, with nothing re-shipped);
 - Release materials (`deploy.main`): `--entry` (the console's Release early / now / again)
   for every copy of the entry, and a release of paths for each schedule copy those paths
