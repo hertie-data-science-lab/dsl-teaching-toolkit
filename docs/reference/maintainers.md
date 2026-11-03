@@ -117,6 +117,17 @@ Things whose *literal spelling* is depended on from outside Python:
   schedule copy a release of paths made (`schedule_plan.covered_copies`) whose time has
   come or is TBC - one dated later is left for the scheduler. `status_json._shipped` reads it first, the
   destination tree second; the site still reads the destination. Repo, path and sha only.
+- **The engine's writes to `schedule.yml`** (faculty-owned; line surgery, never a re-dump, at
+  the sha a fresh read gave). Two writers, both in `schedule.py`: `record_handout` fills a
+  blank `handout_datetime` and moves one only to an EARLIER actual hand-out (once: a later
+  run is never earlier); `record_release_times` writes `release_datetime` on a `files:` item
+  when Release materials released the copy for the first time before its effective plan
+  (explicit, else the parse default) or with no plan (`tbc`) - one commit per run, since each
+  push to the file fans out a scoped tick, Validate schedule and a status rewrite. A flow
+  mapping is declined and logged with the line to add by hand. No `solution_datetime`
+  write-back (it would precede the late cutoff; `.system/solutions/` is the record). The
+  scheduler never writes back: a due copy is on time or late by construction. Cadence's late
+  delivery skips a copy whose record says it first shipped by its moment + `GAP_SLO`.
 - **`distribute.returned_record`'s SHAPE.** `semester-config/.system/returned/<sheet>.yml` is
   each unit's block, under the sheet's own `submissions:` / `teams:`, exactly as the sheet
   held it when the last real Return marks left every person in the unit told

@@ -9,6 +9,11 @@
   is recorded without being copied, so no semester re-ships on upgrade. The status reads a
   recorded copy as released whatever its destination holds; the preview says
   `ALREADY_DONE` for an entry whose copies are all out.
+- A copy released before its time, or from a `tbc` entry, has the time it went out written
+  into its `files:` item's `release_datetime` (one bot commit per release; nothing for an
+  on-time or late release or a Release again). A hand-out run earlier than its
+  `handout_datetime` moves it to the actual moment, once. A copy released by hand in time is
+  never reported as a late delivery.
 - One kind model: the policy's `kinds` gain `plural`, `numbered` and `shown`, the `term` kind is
   `semester`, and every schedule row renders through one `schedule_row.html` (the per-kind row
   includes are retired from each semester site on its next Sync site).

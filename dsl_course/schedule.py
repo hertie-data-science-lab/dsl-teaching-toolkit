@@ -111,6 +111,7 @@ from .faults import (
     hours,
 )
 from .gh_contents import (
+    LINES,
     get_file_content,
     get_file_with_sha,
     line_of,
@@ -2808,6 +2809,9 @@ def _validate_report(sched: Schedule, source: str) -> str:
 
 
 _HANDOUT_COMMENT = "   # set automatically by the Release assignment workflow"
+# How a moment the engine writes into schedule.yml reads: the semester's wall clock, naive,
+# to the minute - the parser reads it back in that same zone.
+_STAMP = "%Y-%m-%dT%H:%M"
 _DUE_TODO = "# TODO: add `due_datetime:` - the date students see (required)"
 
 
@@ -2823,13 +2827,39 @@ class _Declined:
 DECLINED = _Declined()
 
 
-def _insert_handout(text: str, slug: str, stamp: str) -> str | _Declined | None:
+def _own_comment(line: str) -> str:
+    """A key line's trailing `# comment`, with the spaces before it; "" for none. Kept
+    when the engine rewrites the value."""
+    found = re.search(r"\s+#.*$", line.rstrip("\r\n"))
+    return found.group(0) if found else ""
+
+
+def _eol(line: str) -> str:
+    """The line ending `line` uses, for a line written beside it."""
+    return "\r\n" if line.endswith("\r\n") else "\n"
+
+
+def _earlier(stamp: str, planned: str, tz: ZoneInfo) -> bool:
+    """Whether the moment `stamp` (naive, the semester's wall clock) is before `planned`,
+    a value as written in schedule.yml (a datetime, a bare date: its start). False when
+    either cannot be read."""
+    try:
+        value = yaml.safe_load(planned)
+    except yaml.YAMLError:
+        return False
+    at, then = _coerce_datetime(stamp, tz), _coerce_datetime(value, tz)
+    return at is not None and then is not None and at < then
+
+
+def _insert_handout(
+    text: str, slug: str, stamp: str, tz: ZoneInfo | None = None
+) -> str | _Declined | None:
     """Pure text surgery for `record_handout` - schedule.yml is USER-owned and
     comment-rich, so we insert lines rather than re-serialising (which would destroy
     every comment).
 
-    Returns the new text; None when the entry already carries a handout (write-once, a
-    scheduled value is never touched); or DECLINED when the `assignments:` block is shaped
+    Returns the new text; None when the entry already carries a handout at or before
+    `stamp` (a scheduled value is never moved later); or DECLINED when the `assignments:` block is shaped
     in a way this line surgery can't recognise (a flow mapping). Declining leaves the file
     untouched rather than fabricating a duplicate entry - the old code assumed exactly
     two-space indentation, missed a deeper-nested entry, and injected a fake `  {slug}:`
@@ -2902,7 +2932,18 @@ def _insert_handout(text: str, slug: str, stamp: str) -> str | _Declined | None:
             if not seen_child:
                 child_indent, seen_child = indent_of(lines[j]), True
             if stripped.lstrip().startswith("handout_datetime:"):
-                return None  # write-once - never move a scheduled or recorded handout
+                # Handed out EARLIER than planned (decision 0043 rule 3): the actual
+                # moment replaces the plan, once - the next run's moment is at or after
+                # it, so it never moves again. A later hand-out leaves the plan alone.
+                planned = stripped.split(":", 1)[1]
+                if not _earlier(stamp, planned, tz or _tz(None)):
+                    return None
+                eol = _eol(lines[j])
+                lines[j] = (
+                    f"{' ' * indent_of(lines[j])}handout_datetime: {stamp}"
+                    f"{_own_comment(lines[j]) or _HANDOUT_COMMENT}{eol}"
+                )
+                return "".join(lines)
         lines.insert(
             i + 1, f"{' ' * child_indent}handout_datetime: {stamp}{_HANDOUT_COMMENT}\n"
         )
@@ -2928,7 +2969,7 @@ def _insert_handout(text: str, slug: str, stamp: str) -> str | _Declined | None:
 
 
 def _put_handout(
-    semester_org: str, slug: str, stamp: str, body: str, sha: str | None
+    semester_org: str, slug: str, stamp: str, body: str, sha: str | None, tz: ZoneInfo
 ) -> bool:
     """Write the recorded handout over schedule.yml at the sha its text was READ at
     (`put_file_as_read`), so a faculty edit committed during the run is refused rather
@@ -2938,7 +2979,7 @@ def _put_handout(
     def reapply(fresh: str | None) -> str | None:
         if fresh is None:
             return None
-        rebuilt = _insert_handout(fresh, slug, stamp)
+        rebuilt = _insert_handout(fresh, slug, stamp, tz)
         if rebuilt is None:
             return fresh  # the edit that beat us recorded the same handout
         return None if isinstance(rebuilt, _Declined) else rebuilt
@@ -2961,8 +3002,12 @@ def _put_handout(
 def record_handout(semester_org: str, slug: str, stamp: str | None = None) -> None:
     """Record a manual handout back into schedule.yml (`assignments.<slug>.handout_datetime`),
     so the schedule stays the one record of when every assignment went out - whether
-    the cron released it or a person ran the workflow. Write-once: an existing
-    handout_datetime (scheduled, or recorded by an earlier run) is never modified. Best
+    the cron released it or a person ran the workflow. A blank is filled; an existing
+    handout_datetime (scheduled, or recorded by an earlier run) is moved only when this
+    hand-out ran EARLIER than it, to the actual moment - once, since every later run's
+    moment is at or after it (decision 0043 rule 3). There is no `solution_datetime`
+    write-back: a solution released by hand before the late cutoff would make the file
+    invalid (`refuse_early_solutions`); `.system/solutions/` is that record. Best
     effort - a failure here must never fail the release itself, but it is never silent
     either: a file this can't edit means the handout happened and is on record nowhere.
 
@@ -2980,17 +3025,16 @@ def record_handout(semester_org: str, slug: str, stamp: str | None = None) -> No
     # read, where one held too long hands the next caller a plan missing this handout.
     _schedule_text.cache_clear()
     _parsed.cache_clear()
+    # the release moment, in the semester's own timezone (naive, like every other
+    # schedule datetime - the parser reads it back in that same zone)
+    try:
+        tz_name = (yaml.safe_load(text) or {}).get("timezone")
+    except yaml.YAMLError:
+        tz_name = None
+    tz = _tz(tz_name if isinstance(tz_name, str) else None)
     if stamp is None:
-        # the release moment, in the semester's own timezone (naive, like every other
-        # schedule datetime - the parser reads it back in that same zone)
-        try:
-            tz_name = (yaml.safe_load(text) or {}).get("timezone")
-        except yaml.YAMLError:
-            tz_name = None
-        stamp = datetime.now(
-            _tz(tz_name if isinstance(tz_name, str) else None)
-        ).strftime("%Y-%m-%dT%H:%M")
-    new = _insert_handout(text, slug, stamp)
+        stamp = datetime.now(tz).strftime(_STAMP)
+    new = _insert_handout(text, slug, stamp, tz)
     if isinstance(new, _Declined):
         # The handout HAPPENED; the record of it is what we just failed to write. Say so -
         # the alternative (a silent return, indistinguishable from the write-once no-op)
@@ -3004,8 +3048,8 @@ def record_handout(semester_org: str, slug: str, stamp: str | None = None) -> No
         )
         return
     if new is None:
-        return  # already recorded - write-once, nothing to do
-    if _put_handout(semester_org, slug, stamp, new, sha):
+        return  # already recorded at or before this moment - nothing to do
+    if _put_handout(semester_org, slug, stamp, new, sha, tz):
         log(f"  recorded handout in {CONFIG_REPO}/{SCHEDULE_PATH}: {slug} @ {stamp}")
     else:
         # Same fault as the DECLINED branch above, one step later: the handout HAPPENED
@@ -3017,6 +3061,222 @@ def record_handout(semester_org: str, slug: str, stamp: str | None = None) -> No
             f"on record nowhere - add `handout_datetime: {stamp}` to "
             f"`assignments.{slug}` by hand."
         )
+
+
+# ------------------------------------------------------------ release times written back
+
+_RELEASE_COMMENT = "   # set automatically: when it went out"
+RELEASE_TIMES_COMMIT = "schedule: record release times"
+# A key line's lead: its indent, and the `- ` of a list item's first key.
+_KEY_LEAD = re.compile(r"^(\s*(?:-\s+)?)")
+
+
+def beat_the_plan(release: Release, d: Deploy, at: datetime) -> bool:
+    """Whether a copy first shipped at `at` writes `at` back as its `release_datetime`
+    (decision 0043 rule 3): it went out before its EFFECTIVE planned moment - the
+    explicit `release_datetime`, else the parse default (`_default_ship_times`) - or it
+    had none (a `tbc` entry). On time or late, the plan stands: a late one is cadence's
+    evidence."""
+    planned = d.deploy_datetime or release.when
+    return planned is None or planned > at
+
+
+class ReleaseTime(NamedTuple):
+    """One `release_datetime` to write: the `files:` item of `release` that is `copy`,
+    and the stamp (`_STAMP`) it went out at."""
+
+    release: Release
+    copy: Deploy
+    stamp: str
+
+    def by_hand(self) -> str:
+        return (
+            f"add `release_datetime: {self.stamp}` to {self.release.where}'s copy of "
+            f"{self.copy.course_source_path} by hand"
+        )
+
+
+def _is_item(item: object, d: Deploy) -> bool:
+    """Whether a `files:` item as loaded is the copy `d` (an unwritten
+    `to_semester_repo` is the default the parse gave it)."""
+    if not isinstance(item, dict):
+        return False
+    to_path = item.get("to_path")
+    return (
+        str(item.get("from_course_repo") or "") == d.course_source_repo
+        and str(item.get("from_path") or "") == d.course_source_path
+        and (str(to_path) if to_path else None) == d.semester_dest_path
+        and str(item.get("to_semester_repo") or d.semester_dest_repo)
+        == d.semester_dest_repo
+    )
+
+
+def _key_column(lines: list[str], keyed: dict[str, int]) -> int | None:
+    """The column a block-style mapping's keys sit at, from each key's own line; None for
+    a flow mapping (two keys on one line, or a line that does not open on its key)."""
+    if not keyed or len(set(keyed.values())) != len(keyed):
+        return None
+    cols = set()
+    for key, n in keyed.items():
+        lead = _KEY_LEAD.match(lines[n - 1]).group(1)
+        rest = lines[n - 1][len(lead) :]
+        if not rest.startswith((f"{key}:", f'"{key}":', f"'{key}':")):
+            return None
+        cols.add(len(lead))
+    return cols.pop() if len(cols) == 1 else None
+
+
+def _stamp_release_times(
+    text: str, wanted: list[ReleaseTime]
+) -> tuple[str, list[tuple[ReleaseTime, str]], list[ReleaseTime]]:
+    """Pure text surgery: `text` with each wanted `release_datetime` written on its
+    `files:` item - the line rewritten when the item has one, else inserted after the
+    item's last key at its indent - every other line, comment and order kept (the
+    line-stamp approach of `migrate.stamp_numbers`). Returns the text, what was written
+    with the value it replaced ("(default)" for none), and what could not be: an item
+    written as a flow mapping, or one no longer in the file."""
+    try:
+        meta = load_yaml_lines(text) if text else {}
+    except yaml.YAMLError:
+        meta = {}
+    lines = text.splitlines(keepends=True)
+    edits: list[tuple[int, bool, str]] = []  # (0-based line, replace?, new line)
+    done: list[tuple[ReleaseTime, str]] = []
+    declined: list[ReleaseTime] = []
+    taken: set[int] = set()
+    for want in wanted:
+        block = meta.get(want.release.block) if isinstance(meta, dict) else None
+        entry = block.get(want.release.label) if isinstance(block, dict) else None
+        files = entry.get("files") if isinstance(entry, dict) else None
+        items = [files] if isinstance(files, dict) else files or []
+        item = next(
+            (
+                i
+                for i in items
+                if isinstance(i, dict) and id(i) not in taken and _is_item(i, want.copy)
+            ),
+            None,
+        )
+        keyed = {k: n for k, n in (item or {}).get(LINES, {}).items() if k}
+        col = _key_column(lines, keyed)
+        if item is None or col is None:
+            declined.append(want)
+            continue
+        taken.add(id(item))
+        line = f"release_datetime: {want.stamp}{_RELEASE_COMMENT}"
+        if (n := keyed.get("release_datetime")) is not None:
+            old = lines[n - 1]
+            lead = _KEY_LEAD.match(old).group(1)
+            kept = _own_comment(old) or _RELEASE_COMMENT
+            line = f"release_datetime: {want.stamp}{kept}"
+            edits.append((n - 1, True, f"{lead}{line}{_eol(old)}"))
+            done.append((want, old.split(":", 1)[1].split("#")[0].strip()))
+            continue
+        # After the item's last line: its last key, and whatever its value runs on to
+        # deeper than the item's keys.
+        last = max(keyed.values()) - 1
+        for j in range(last + 1, len(lines)):
+            if not lines[j].split("#")[0].strip():
+                continue
+            if len(lines[j]) - len(lines[j].lstrip()) <= col:
+                break
+            last = j
+        eol = _eol(lines[last])
+        if not lines[last].endswith("\n"):
+            lines[last] += eol
+        edits.append((last + 1, False, f"{' ' * col}{line}{eol}"))
+        done.append((want, "(default)"))
+    for at, replace, new in sorted(edits, reverse=True):
+        if replace:
+            lines[at] = new
+        else:
+            lines.insert(at, new)
+    return "".join(lines), done, declined
+
+
+def record_release_times(
+    semester_org: str, tz_name: str, shipped: list[tuple[Release, Deploy, datetime]]
+) -> None:
+    """Write each copy's actual ship time into schedule.yml when it beat the plan
+    (`beat_the_plan`; decision 0043 rule 3): `shipped` is every copy this run released
+    FIRST - a Release again, an autosync re-ship or a seeded copy is not among them, and
+    writes nothing. The time is the record's `last_shipped_at`, told in the semester's
+    zone to the minute, as `record_handout` stamps.
+
+    Engine-owned, no prompt. ONE commit for the whole run (each bot push to schedule.yml
+    fans out a scoped tick, Validate schedule and a status rewrite), at the sha a FRESH
+    read gave, re-applied once over a newer file. Best effort and loud: a copy whose item
+    cannot be edited (a flow mapping) is named with the line to add by hand. Nothing is
+    read when nothing beat its plan."""
+    tz = _tz(tz_name)
+    wanted = [
+        ReleaseTime(r, d, at.astimezone(tz).strftime(_STAMP))
+        for r, d, at in shipped
+        if r.block and beat_the_plan(r, d, at)
+    ]
+    if not wanted:
+        return
+    try:
+        read = get_file_with_sha(
+            semester_org, CONFIG_REPO, SCHEDULE_PATH, confirm_absent=True
+        )
+    except RuntimeError as exc:
+        for want in wanted:
+            log_err(
+                f"could NOT record when {want.release.where} went out: {CONFIG_REPO}/"
+                f"{SCHEDULE_PATH} could not be read ({exc}) - {want.by_hand()}."
+            )
+        return
+    text, sha = read if read is not None else ("", None)
+    _schedule_text.cache_clear()
+    _parsed.cache_clear()
+    new, done, declined = _stamp_release_times(text, wanted)
+    for want in declined:
+        log_err(
+            f"could NOT record when {want.release.where} went out in {CONFIG_REPO}/"
+            f"{SCHEDULE_PATH} (its `files:` item is a flow mapping, or gone): "
+            f"{want.by_hand()}."
+        )
+    if not done:
+        return
+
+    def said() -> list[str]:
+        return [
+            f"{w.release.label} {w.copy.course_source_path} release_datetime  "
+            f"{old} -> {w.stamp}"
+            for w, old in done
+        ]
+
+    def rebuild(fresh: str | None) -> str | None:
+        nonlocal done
+        if fresh is None:
+            return None
+        rebuilt, done, _declined = _stamp_release_times(fresh, wanted)
+        return rebuilt
+
+    try:
+        written = put_file_as_read(
+            semester_org,
+            CONFIG_REPO,
+            SCHEDULE_PATH,
+            new,
+            sha,
+            rebuild,
+            lambda: "\n".join([RELEASE_TIMES_COMMIT, "", *said()]),
+            attempts=2,
+        )
+    except RuntimeError as exc:
+        log_err(f"the write of {CONFIG_REPO}/{SCHEDULE_PATH} stopped ({exc})")
+        written = None
+    if written is None:
+        for w, _old in done:
+            log_err(
+                f"could NOT record when {w.release.where} went out: the write of "
+                f"{CONFIG_REPO}/{SCHEDULE_PATH} failed - {w.by_hand()}."
+            )
+        return
+    for line in said():
+        log(f"  {line}")
 
 
 def _write_output(line: str) -> None:
