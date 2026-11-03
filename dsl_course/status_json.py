@@ -275,9 +275,9 @@ class SemesterFacts:
     # `{semester-side name: when its grading sheet last changed}`; None = not known.
     sheet_changed: dict[str, datetime | None] = field(default_factory=dict)
     dest_paths: dict[str, set[str]] = field(default_factory=dict)  # release dest trees
-    # The copies the release record holds (`release_record.key_of`): shipped, whatever
-    # their destination holds now.
-    recorded: frozenset[release_record.Key] = frozenset()
+    # The release record's copies, by `release_record.key_of`: shipped, whatever their
+    # destination holds now; each entry's `first_shipped_at` dates its row.
+    recorded: dict[release_record.Key, dict] = field(default_factory=dict)
     dest_branches: dict[str, str] = field(default_factory=dict)  # and their branches
     # `{(source repo, root stub path): still the placeholder}` for every copy the plan
     # makes of a root SYLLABUS.md / README.md: the release leaves such a copy out.
@@ -1204,6 +1204,36 @@ def no_due_date_todo(
         )
         for key, entry in facts.sched.assignments.items()
         if entry.due_datetime is None
+    ]
+
+
+# Decision 0043 rule 5: a TBC entry released (by hand, from Actions or the CLI, or early
+# from the console) still has no session date: a quiet to-do on its release screen.
+RELEASED_STILL_TBC = "released_tbc"
+
+
+def released_tbc_todo(
+    releases: list[dict], aside: frozenset[str] = frozenset()
+) -> list[dict]:
+    """`schedule:released_tbc:<label>` for each `event_datetime: tbc` entry whose copies
+    have all gone out (`releases`: the rendered rows, state `released`): "Lab 8 is
+    released; its session date is still TBC." Its screen is the release's own, which
+    offers the date."""
+    return [
+        _todo(
+            SUGGESTED,
+            aside,
+            id=f"schedule:{RELEASED_STILL_TBC}:{r['id']}",
+            kind="schedule",
+            check=RELEASED_STILL_TBC,
+            repo=schedule.CONFIG_REPO,
+            text=f"{policy.numbered_title(r['kind'], r['number']) if r['number'] else r['id']}"
+            " is released; its session date is still TBC.",
+            screen="release",
+            entry=r["id"],
+        )
+        for r in releases
+        if r["when"] is None and r["state"] == "released"
     ]
 
 
@@ -2450,6 +2480,7 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
     todo = semester_todo(facts, today, set_aside_ids(course.meta))
     todo += no_files_todo(facts, now, set_aside_ids(course.meta))
     todo += no_due_date_todo(facts, set_aside_ids(course.meta))
+    todo += released_tbc_todo(releases, set_aside_ids(course.meta))
     week, weeks = semester_weeks(sched.semester_start, sched.semester_end, today)
     tag = semester_of(facts.org)
     assignments = flag_assignments(assignments, problems)
@@ -2746,7 +2777,7 @@ def gather_semester(course_org: str, semester_org: str, now: datetime) -> Semest
     # status still renders, and the scheduler's own read refuses to release on it.
     if release_record.PATH in facts.config_paths:
         try:
-            facts.recorded = frozenset(release_record.load(semester_org).copies)
+            facts.recorded = release_record.load(semester_org).copies
         except ValueError as exc:
             log_err(f"  ! {semester_org}'s release record is unreadable ({exc})")
     # The root stubs the plan copies, each read once: a placeholder is left out.

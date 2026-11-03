@@ -577,10 +577,10 @@ def test_release_states_follow_the_destination():
     )
 
 
-def _recorded(label: str) -> frozenset:
+def _recorded(label: str) -> dict:
     """The release record holding every copy of entry `label` (decision 0043)."""
     release = next(r for r in _sched().releases if r.label == label)
-    return frozenset(release_record.key_of(d) for d in release.deploy)
+    return {release_record.key_of(d): {} for d in release.deploy}
 
 
 def test_a_recorded_copy_has_shipped_whatever_its_destination_holds_now():
@@ -595,6 +595,34 @@ def test_a_recorded_copy_has_shipped_whatever_its_destination_holds_now():
     assert states == {"s3": "released", "s5": "late"}
     late = [p["release"] for p in doc["problems"] if p["kind"] == "LATE"]
     assert late == ["s5"]
+
+
+def test_a_released_tbc_entry_is_a_suggested_todo_on_its_release_screen():
+    # Decision 0043 rule 5: released by hand (Actions, the CLI) with its session still
+    # TBC - a quiet to-do that opens the release, which offers the date.
+    sched = _sched(
+        SCHEDULE.replace(
+            "    event_datetime: 2026-09-24T10:00\n", "    event_datetime: tbc\n"
+        )
+    )
+    doc = _render(semester=_semester(sched=sched, recorded=_recorded("s3")))
+    (todo,) = [t for t in doc["semester"]["todo"] if t.get("check") == "released_tbc"]
+    assert todo["id"] == "schedule:released_tbc:s3"
+    assert todo["text"] == "Lecture 3 is released; its session date is still TBC."
+    assert (todo["screen"], todo["entry"], todo["need"]) == (
+        "release",
+        "s3",
+        "suggested",
+    )
+    # A TBC entry not released yet, or a dated one released, is no such to-do.
+    plain = _render(semester=_semester(sched=sched, dest_paths={"materials": set()}))
+    assert not [
+        t for t in plain["semester"]["todo"] if t.get("check") == "released_tbc"
+    ]
+    dated = _render(semester=_semester(recorded=_recorded("s3")))
+    assert not [
+        t for t in dated["semester"]["todo"] if t.get("check") == "released_tbc"
+    ]
 
 
 def test_a_copy_with_no_record_has_shipped_when_its_destination_is_there():

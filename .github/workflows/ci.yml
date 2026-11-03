@@ -331,14 +331,15 @@ jobs:
         # one announces the last week of term as "New Lab is up" before week one has
         # happened - which is what two live semester sites showed all term. The fixture holds
         # a released lecture 2 beside an unreleased lecture 3, a silent readings row, an
-        # undated off-plan lab, a TBC lab not released beside a released one (lab 5,
-        # announced when its files first landed), and a handed-out assignment 1 beside a
+        # undated off-plan lab, a TBC lab not released beside two released ones (lab 6,
+        # announced when the release record says it shipped; lab 5, seeded in the record,
+        # when its files first landed), and a handed-out assignment 1 beside a
         # pending assignment 2, so the box is checked in both directions.
         run: |
           box=$(sed -n '/<h2>Updates<\/h2>/,/<\/ul>/p' "$RUNNER_TEMP/build/index.html")
           printf '%s\n' "$box"
           missing=0
-          for needle in "Lecture 1" "Lecture 2" "Lab 1" "Lab 5" "Assignment 1"; do
+          for needle in "Lecture 1" "Lecture 2" "Lab 1" "Lab 5" "Lab 6" "Assignment 1"; do
             if ! printf '%s' "$box" | grep -qF -- "$needle"; then
               echo "::error::the Updates box does not announce $needle, which released"
               missing=1

@@ -7,6 +7,10 @@ to, the source commit it was copied from, when it first and last shipped, and th
 manifest of what was copied - each file's path relative to the copy, and its blob sha.
 Repo, path and sha only: nothing here names a person.
 
+Who reads it: the scheduler and Release materials (above), the status, and the student site
+and student status, which date a released row by its copies' `first_shipped_at`
+(`released_at`).
+
 Who writes it:
 
 - the scheduled release (`scheduler`), for every copy it ships, and for a due copy that
@@ -25,12 +29,15 @@ than overwrite it. Nothing is written when nothing changed.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from . import records, schedule
+from . import records, run, schedule
 from .course import is_repo_root
+from .gh_commits import first_landed
 from .gh_contents import get_file_with_sha, put_file_as_read
+from .log import log
 from .schedule_plan import deploy_dest, within
 
 PATH = records.path("releases")
@@ -223,3 +230,56 @@ def load(semester_org: str) -> Record:
         return Record()
     text, sha = read
     return Record(parse(text), sha)
+
+
+def first_shipped(copies: dict[Key, dict], k: Key) -> datetime | None:
+    """When copy `k` first shipped, as the record says; None when it holds no entry for
+    it, or a seeded one (`first_shipped_at: null`: found already there, time unknown)."""
+    at = (copies.get(k) or {}).get("first_shipped_at")
+    try:
+        return datetime.fromisoformat(at) if isinstance(at, str) else None
+    except ValueError:
+        return None
+
+
+@run.per_run(lambda org, repo, path: run.scope(org, repo, path))
+def landed_at(org: str, repo: str, path: str) -> datetime | None:
+    """When `path` first landed in `org/repo` (`gh_commits.first_landed`), memoised for
+    the run: a copy the record does not date. None when nothing touches it or GitHub
+    cannot say - logged, naming the path only, since that leaves a released TBC row out
+    of the Updates box."""
+    try:
+        when = first_landed(org, repo, path)
+    except (RuntimeError, ValueError) as e:  # ValueError: a date that does not parse
+        log(f"  could not tell when {repo}/{path} first landed ({e})")
+        return None
+    if when is None:
+        log(f"  no commit in {repo} touches {path}")
+    return when
+
+
+def released_at(
+    copies: dict[Key, dict],
+    landed: list[Key],
+    dateless: bool,
+    history: Callable[[Key], datetime | None],
+) -> datetime | None:
+    """When a released row first reached students: the earliest `first_shipped_at` over
+    the copies of it that have `landed` (decision 0043 rule 4).
+
+    A copy the record does not date (seeded, or made off the record) is dated by
+    `history` (its destination's first commit, `landed_at`) on a `dateless` row only,
+    where nothing else dates it, and never for a copy into the repo's root (the whole
+    repo's oldest commit is not when this row landed). On a dated row such a copy leaves
+    the moment unknown - None, and the row's own date stands - rather than spend a
+    history read per copy on every row of a semester released before the record."""
+    found = []
+    for k in landed:
+        at = first_shipped(copies, k)
+        if at is None:
+            if not dateless:
+                return None
+            at = history(k) if k[3] else None
+        if at is not None:
+            found.append(at)
+    return min(found) if found else None
