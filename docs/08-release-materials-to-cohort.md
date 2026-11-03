@@ -27,7 +27,7 @@ Two ops, in the console or on the CLI:
 - Root files are just paths too: `SYLLABUS.md`.
 - **The whole repo**: `/` (or `.`), minus `.git`, `.github` and `.system/` (your operating notes `MAINTAINING.md` and the syllabus example - never released).
 
-Re-releasing is safe - copies are additive and idempotent. A release made here is recorded like a scheduled one, so the scheduler does not copy it again.
+Re-releasing is safe - copies are additive and idempotent. A release made here is recorded like a scheduled one, so the scheduler does not copy it again - even a copy whose planned time is still to come: releasing it by hand is its release, and its `release_datetime` becomes the time it went out.
 
 ### Phased code release
 

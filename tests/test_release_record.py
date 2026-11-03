@@ -532,7 +532,7 @@ def test_the_root_spellings_are_one_key():
     assert schedule_plan.within(".", "labs/08") == "labs/08"
 
 
-def test_a_hand_release_leaves_a_copy_due_later_to_the_schedule(monkeypatch):
+def test_a_hand_release_ahead_of_schedule_is_that_copys_release(monkeypatch):
     store = Store([]).install(monkeypatch)
     later = datetime(2099, 1, 1, tzinfo=UTC)
     sched = Schedule(releases=[Release("lab-08", later, deploy=[LAB])])
@@ -562,8 +562,18 @@ def test_a_hand_release_leaves_a_copy_due_later_to_the_schedule(monkeypatch):
             "--no-preview",
         ],
     )
+    times = []
+    monkeypatch.setattr(
+        deploy.schedule,
+        "record_release_times",
+        lambda org, tz, shipped: times.extend(shipped),
+    )
     assert deploy.main() == 0
-    assert store.writes == []
+    # Recorded, so the scheduler will not copy it again at 2099; and it beat the plan,
+    # so its ship time is written back.
+    (copy,) = store.copies
+    assert copy["entry"] == "lab-08" and copy["files"] == {"a": "1"}
+    assert [(r.label, d) for r, d, _at in times] == [("lab-08", LAB)]
 
 
 def test_a_release_that_stops_still_saves_its_seeds(monkeypatch):

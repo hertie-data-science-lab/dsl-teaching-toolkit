@@ -10,6 +10,9 @@
   and one modal of three folds: the run defaults (with the `defaults:` timezone, asked once;
   `schedule.yml`'s own `timezone` stays on the Schedule screen), `autosync_released_edits` and
   the semester dates. The Site page links to it for the dates.
+- A release of paths ahead of a copy's planned moment is that copy's release (decision 0043):
+  it is recorded, so the scheduler does not copy it again, and its `release_datetime` becomes
+  the time it went out.
 - Releases are fire-once (decision 0043): each copy ships once, at its time, and is recorded
   in `semester-config/.system/releases.json` with its source commit, ship times and file
   manifest. An edit to a released course folder reaches students on Release again, or on

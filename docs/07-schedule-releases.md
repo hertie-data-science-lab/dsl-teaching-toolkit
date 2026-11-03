@@ -248,7 +248,7 @@ A material release is **fire-once**: each `files:` item is copied once, at its t
 
 Each can be **set aside**; it comes back when that side changes again. A folder another entry releases into (a lab's `solutions/`) is that entry's, never counted as an edit. From the CLI: `python -m dsl_course.deploy ... --entry <key> --remove-deleted`.
 
-A copy released **before** its time (Release early / now), or from a `tbc` entry, gets `release_datetime: <when it went out>` written on its `files:` item, in one bot commit per release. On time, late, or released again: nothing is written. There is no such write for `solution_datetime`.
+A copy released **before** its time (Release early / now, or a `release.adhoc` of a path the entry copies), or from a `tbc` entry, gets `release_datetime: <when it went out>` written on its `files:` item, in one bot commit per release. On time, late, or released again: nothing is written. There is no such write for `solution_datetime`.
 
 Everything else is **cumulative**: assignment handouts, the site sync and the source digest are re-applied at every tick, so a late or lost tick heals itself.
 

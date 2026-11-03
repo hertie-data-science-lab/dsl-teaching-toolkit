@@ -114,8 +114,9 @@ Things whose *literal spelling* is depended on from outside Python:
   (`release_record.overlaps`); an overlapping one ships, a no-op merge where nothing
   changed. That is the one upgrade path, no migration. Release materials records every
   copy of `--entry` (Release again refreshes `files` and `last_shipped_at`) and each
-  schedule copy a release of paths made (`schedule_plan.covered_copies`) whose time has
-  come or is TBC - one dated later is left for the scheduler. `status_json._shipped` reads it first, the
+  schedule copy a release of paths made (`schedule_plan.covered_copies`), whatever its
+  planned moment - a hand release ahead of schedule is that copy's release, and its ship
+  time is written back like Release early's. `status_json._shipped` reads it first, the
   destination tree second; the site still reads the destination for links. Readers of
   `first_shipped_at`: the site and `student_status` date a released row by it
   (`release_record.released_at`: the earliest over the row's own landed copies, its readings'
