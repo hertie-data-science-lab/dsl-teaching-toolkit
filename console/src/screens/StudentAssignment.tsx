@@ -8,7 +8,7 @@
 // and each card on the Assignments tab renders the same body.
 
 import { useState } from 'preact/hooks';
-import { hostOf } from '../model/cascade';
+import { hostOf } from '../model/settings';
 import { fmtDay, fmtWhen } from '../model/format';
 import { isMarked, patchNotes, repoUrl, type MarkEntry, type Mine, type Receipts, type ThreadKind } from '../model/mine';
 import { DEFAULT_TIMEZONE } from '../model/policy';
@@ -20,7 +20,8 @@ import { Hint } from '../ui/Hint';
 import { Ext } from '../ui/icons';
 import { OpenButton } from '../ui/OpenButton';
 import { GhMd, LazyFold } from '../ui/rendered';
-import { FileLinkItem, FileList, useYourSetup } from './StudentFiles';
+import { useYourSetup } from '../ui/FileRow';
+import { FileLinkItem, FileList } from './StudentFiles';
 import { JoinRequests, TeamForm, TeamList } from './StudentJoin';
 
 /** Files the semester's rows for `slug` (its hand-out and due rows) carry, if any: listed with their menu (rule 10). */
@@ -253,7 +254,7 @@ function questionsOf(e: MarkEntry): string[] {
 /** A returned mark as a figure: "18 / 20". */
 export const MarkFigure = ({ e }: { e: MarkEntry }) => <span class="mark-big">{e.finalGrade}{e.maxPoints ? <span> / {e.maxPoints}</span> : null}</span>;
 
-/** One returned mark: submitted, days late, penalty, team, feedback, by question, team feedback. */
+/** One returned mark: submitted, days late, penalty, adjustment, team, feedback, by question, team feedback. */
 export function MarkBody({ e }: { e: MarkEntry }) {
   const qs = questionsOf(e);
   return (
@@ -263,6 +264,7 @@ export function MarkBody({ e }: { e: MarkEntry }) {
         {e.daysLate && e.daysLate !== '0' ? <><dt>Days late</dt><dd>{e.daysLate}</dd></> : null}
         {e.penalty ? <><dt>Late penalty</dt><dd>{e.penalty}</dd></> : null}
         {typeof e.score === 'string' && e.score !== e.finalGrade ? <><dt>Marks</dt><dd>{e.score}</dd></> : null}
+        {e.adjustment ? <><dt>Adjustment</dt><dd>{e.adjustment}</dd></> : null}
         {e.team ? <><dt>Team</dt><dd>{e.team}</dd></> : null}
       </dl>
       {e.feedback ? <div class="fb"><h4>Feedback</h4><Md src={e.feedback} /></div> : null}

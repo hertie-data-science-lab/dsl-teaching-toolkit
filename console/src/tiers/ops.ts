@@ -2,6 +2,7 @@
 // tables). Keys are the op's args-schema properties; anything not listed is Derived or
 // Hidden and never a field.
 
+import { SOURCE_WORD, type Source } from '../model/settings';
 import { SOLUTION_WARNING } from '../model/labels';
 import { DEFAULT_DEST_REPO } from '../model/policy';
 import { opt, type Tiers } from './types';
@@ -49,6 +50,21 @@ export const RETURN_MARKS: Tiers = {
   },
 };
 
+/** The `?` on "Include marks per question". */
+export const PER_QUESTION_HINT = 'On: the student’s page lists the mark per question and the per-question feedback. Off: the score, late line, adjustment and final only. Saved for this assignment, so automatic returns do the same.';
+
+/** Return marks' options, with "Include marks per question" prefilled from the assignment's effective `marks_per_question`. */
+export function returnMarksTiers(perQuestion: { value: boolean; source: Source }): Tiers {
+  return {
+    ...RETURN_MARKS,
+    per_question: {
+      tier: 'default', label: 'Include marks per question', widget: 'checkbox', default: perQuestion.value,
+      defaultLabel: `${perQuestion.value ? 'on' : 'off'}, ${SOURCE_WORD[perQuestion.source]}`,
+      hint: { text: PER_QUESTION_HINT },
+    },
+  };
+}
+
 export const RETURN_MARKS_ALWAYS = [
   { label: 'Update each student’s marks repo', note: 'always' },
   { label: 'Update the semester grades file (one CSV, every student, every assignment)', note: 'always' },
@@ -83,10 +99,6 @@ export function publishWebsite(repos: string[], siteExists = false): Tiers {
       reason: siteExists ? WEBSITE_OFF_LIVE : 'Off: nothing is published.',
     },
     source_repo: { tier: 'ask', label: 'Source materials', widget: 'select', reason: 'The website is built from this repo. Publishing replaces the live site.', options: repos.map((r) => opt(r, r)) },
-    readings_mode: {
-      tier: 'default', label: 'Readings', widget: 'select', default: 'reading-list', defaultLabel: 'default: reading list', reason: 'Publishing the readings themselves needs their licences.',
-      options: [opt('reading-list', 'Reading list only'), opt('actual-readings', 'The readings themselves'), opt('none', 'None')],
-    },
-    include_lectures: { tier: 'default', label: 'Include lectures', widget: 'checkbox', default: true, defaultLabel: 'default: on' },
+    reading_lists: { tier: 'default', label: 'Reading lists', widget: 'checkbox', default: true, defaultLabel: 'default: on', reason: 'Each session’s reading list, as text. The readings themselves are published only when Readings is In below.' },
   };
 }

@@ -4,38 +4,65 @@
 // falls back to is read here, so the console cannot disagree with the engine.
 
 import policy from '../../schemas/policy.json';
+import names from '../../schemas/names.json';
 import requestSchema from '../../schemas/request.schema.json';
 import gradingSchema from '../../schemas/grading_config.schema.json';
 
-export interface Policy {
-  contact: string;
-  defaults: {
-    archive: { grace_days: number };
-    formats: string[];
-    late_penalty_per_day: string;
-    late_window_days: number;
-    max_team_size: number;
-    semester_dest_repo: string;
-    team_formation: string;
-    timezone: string;
-    visibility: string;
-  };
-  institution: Record<string, string>;
-  kinds: { key: string; label: string; colour: string; background: string; system: boolean }[];
-  licences: { name: string; url: string }[];
+/** One row kind (`policy.kinds`): `plural` is its block and tab name, `numbered` whether its entries are, `shown` false for one that is released but never a row or a tab. */
+export interface Kind {
+  key: string;
+  plural: string;
+  numbered: boolean;
+  shown: boolean;
+  label: string;
+  colour: string;
+  background: string;
+  system: boolean;
 }
 
-export const POLICY: Policy = policy;
+export interface Policy {
+  defaults: {
+    archive_grace_days: number;
+    assignment_repo_visibility: string;
+    autosync_released_edits: boolean;
+    late_penalty_per_day: string;
+    late_window_days: number;
+    marks_per_question: boolean;
+    materials_repo: string;
+    max_team_size: number;
+    timezone: string;
+  };
+  institution: Record<string, string> & { contacts: string[] };
+  kinds: Kind[];
+  licences: { name: string; url: string }[];
+  selection_floor: Record<string, unknown>;
+}
+
+export const POLICY: Policy = policy as unknown as Policy;
+/** The institution's contacts in escalation order (`institution.contacts`); the first is the open site's contact when a course names none (`policy.contact`). */
+export const CONTACTS: string[] = POLICY.institution.contacts;
 export const DEFAULTS = POLICY.defaults;
+
+/** The row kinds, in display order: the console's only kind vocabulary. */
+export const KINDS = POLICY.kinds;
+/** A kind's block and tab name (`lecture` -> `lectures`); the key itself when unknown (`policy.plural_of`). */
+export const pluralOf = (key: string): string => KINDS.find((k) => k.key === key)?.plural ?? key;
+/** The kinds the engine makes rows for itself (assignment, semester, archive). */
+export const SYSTEM_KINDS: string[] = KINDS.filter((k) => k.system).map((k) => k.key);
+/** A kind's tab title: its plural, capitalised (`site_repo.kind_tab`): Lectures, Drop-ins. */
+export const tabTitle = (plural: string): string => plural.charAt(0).toUpperCase() + plural.slice(1);
+
+/** The kind of the `events:` block, and of a kind the policy does not know (the engine's `materials.FALLBACK_KIND`); the site labels it Event. */
+export const EVENT_KIND = 'other';
 
 /** The semester's timezone when its schedule names none. */
 export const DEFAULT_TIMEZONE = DEFAULTS.timezone;
 /** Days after the semester ends that it is archived, when the schedule says nothing. */
-export const ARCHIVE_GRACE_DAYS = DEFAULTS.archive.grace_days;
+export const ARCHIVE_GRACE_DAYS = DEFAULTS.archive_grace_days;
 /** Where a release lands in the semester when its deploy names no repo. */
-export const DEFAULT_DEST_REPO = DEFAULTS.semester_dest_repo;
-/** The starter formats a new template gets when nobody chose; the first is the runnable one. */
-export const DEFAULT_FORMATS = DEFAULTS.formats;
+export const DEFAULT_DEST_REPO = DEFAULTS.materials_repo;
+/** The starter formats a new template gets when nobody chose; the first is the runnable one (`course.DEFAULT_FORMATS`). */
+export const DEFAULT_FORMATS: string[] = names.default_formats;
 
 const pattern = (key: string) => new RegExp((requestSchema.properties as unknown as Record<string, { pattern: string }>)[key].pattern);
 /** A GitHub handle, as the engine's request schema spells it. */

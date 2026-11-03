@@ -50,11 +50,11 @@
           },
           "settings": {
             "properties": {
-              "late_penalty_per_day": {
+              "assignment_repo_visibility": {
                 "properties": {
                   "source": {
                     "enum": [
-                      "assignment",
+                      "entry",
                       "semester",
                       "course",
                       "institution"
@@ -65,6 +65,33 @@
                     "type": [
                       "string",
                       "integer",
+                      "boolean",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "value",
+                  "source"
+                ],
+                "type": "object"
+              },
+              "late_penalty_per_day": {
+                "properties": {
+                  "source": {
+                    "enum": [
+                      "entry",
+                      "semester",
+                      "course",
+                      "institution"
+                    ],
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": [
+                      "string",
+                      "integer",
+                      "boolean",
                       "null"
                     ]
                   }
@@ -79,7 +106,7 @@
                 "properties": {
                   "source": {
                     "enum": [
-                      "assignment",
+                      "entry",
                       "semester",
                       "course",
                       "institution"
@@ -90,6 +117,33 @@
                     "type": [
                       "string",
                       "integer",
+                      "boolean",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "value",
+                  "source"
+                ],
+                "type": "object"
+              },
+              "marks_per_question": {
+                "properties": {
+                  "source": {
+                    "enum": [
+                      "entry",
+                      "semester",
+                      "course",
+                      "institution"
+                    ],
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": [
+                      "string",
+                      "integer",
+                      "boolean",
                       "null"
                     ]
                   }
@@ -104,7 +158,7 @@
                 "properties": {
                   "source": {
                     "enum": [
-                      "assignment",
+                      "entry",
                       "semester",
                       "course",
                       "institution"
@@ -115,6 +169,7 @@
                     "type": [
                       "string",
                       "integer",
+                      "boolean",
                       "null"
                     ]
                   }
@@ -129,7 +184,7 @@
                 "properties": {
                   "source": {
                     "enum": [
-                      "assignment",
+                      "entry",
                       "semester",
                       "course",
                       "institution"
@@ -140,6 +195,7 @@
                     "type": [
                       "string",
                       "integer",
+                      "boolean",
                       "null"
                     ]
                   }
@@ -154,7 +210,7 @@
                 "properties": {
                   "source": {
                     "enum": [
-                      "assignment",
+                      "entry",
                       "semester",
                       "course",
                       "institution"
@@ -165,31 +221,7 @@
                     "type": [
                       "string",
                       "integer",
-                      "null"
-                    ]
-                  }
-                },
-                "required": [
-                  "value",
-                  "source"
-                ],
-                "type": "object"
-              },
-              "visibility": {
-                "properties": {
-                  "source": {
-                    "enum": [
-                      "assignment",
-                      "semester",
-                      "course",
-                      "institution"
-                    ],
-                    "type": "string"
-                  },
-                  "value": {
-                    "type": [
-                      "string",
-                      "integer",
+                      "boolean",
                       "null"
                     ]
                   }
@@ -278,6 +310,271 @@
       "properties": {
         "code": {
           "type": "string"
+        },
+        "defaults": {
+          "properties": {
+            "archive_grace_days": {
+              "properties": {
+                "source": {
+                  "enum": [
+                    "entry",
+                    "semester",
+                    "course",
+                    "institution"
+                  ],
+                  "type": "string"
+                },
+                "value": {
+                  "type": [
+                    "string",
+                    "integer",
+                    "boolean",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "source"
+              ],
+              "type": "object"
+            },
+            "assignment_repo_visibility": {
+              "properties": {
+                "source": {
+                  "enum": [
+                    "entry",
+                    "semester",
+                    "course",
+                    "institution"
+                  ],
+                  "type": "string"
+                },
+                "value": {
+                  "type": [
+                    "string",
+                    "integer",
+                    "boolean",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "source"
+              ],
+              "type": "object"
+            },
+            "autosync_released_edits": {
+              "properties": {
+                "source": {
+                  "enum": [
+                    "entry",
+                    "semester",
+                    "course",
+                    "institution"
+                  ],
+                  "type": "string"
+                },
+                "value": {
+                  "type": [
+                    "string",
+                    "integer",
+                    "boolean",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "source"
+              ],
+              "type": "object"
+            },
+            "late_penalty_per_day": {
+              "properties": {
+                "source": {
+                  "enum": [
+                    "entry",
+                    "semester",
+                    "course",
+                    "institution"
+                  ],
+                  "type": "string"
+                },
+                "value": {
+                  "type": [
+                    "string",
+                    "integer",
+                    "boolean",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "source"
+              ],
+              "type": "object"
+            },
+            "late_window_days": {
+              "properties": {
+                "source": {
+                  "enum": [
+                    "entry",
+                    "semester",
+                    "course",
+                    "institution"
+                  ],
+                  "type": "string"
+                },
+                "value": {
+                  "type": [
+                    "string",
+                    "integer",
+                    "boolean",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "source"
+              ],
+              "type": "object"
+            },
+            "marks_per_question": {
+              "properties": {
+                "source": {
+                  "enum": [
+                    "entry",
+                    "semester",
+                    "course",
+                    "institution"
+                  ],
+                  "type": "string"
+                },
+                "value": {
+                  "type": [
+                    "string",
+                    "integer",
+                    "boolean",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "source"
+              ],
+              "type": "object"
+            },
+            "materials_repo": {
+              "properties": {
+                "source": {
+                  "enum": [
+                    "entry",
+                    "semester",
+                    "course",
+                    "institution"
+                  ],
+                  "type": "string"
+                },
+                "value": {
+                  "type": [
+                    "string",
+                    "integer",
+                    "boolean",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "source"
+              ],
+              "type": "object"
+            },
+            "max_team_size": {
+              "properties": {
+                "source": {
+                  "enum": [
+                    "entry",
+                    "semester",
+                    "course",
+                    "institution"
+                  ],
+                  "type": "string"
+                },
+                "value": {
+                  "type": [
+                    "string",
+                    "integer",
+                    "boolean",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "source"
+              ],
+              "type": "object"
+            },
+            "team_formation": {
+              "properties": {
+                "source": {
+                  "enum": [
+                    "entry",
+                    "semester",
+                    "course",
+                    "institution"
+                  ],
+                  "type": "string"
+                },
+                "value": {
+                  "type": [
+                    "string",
+                    "integer",
+                    "boolean",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "source"
+              ],
+              "type": "object"
+            },
+            "timezone": {
+              "properties": {
+                "source": {
+                  "enum": [
+                    "entry",
+                    "semester",
+                    "course",
+                    "institution"
+                  ],
+                  "type": "string"
+                },
+                "value": {
+                  "type": [
+                    "string",
+                    "integer",
+                    "boolean",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "source"
+              ],
+              "type": "object"
+            }
+          },
+          "type": "object"
         },
         "materials": {
           "items": {
@@ -439,7 +736,9 @@
                   "description",
                   "home",
                   "archive_date",
-                  "email"
+                  "email",
+                  "due",
+                  "files"
                 ],
                 "type": "string"
               },
@@ -477,6 +776,9 @@
                 "type": "boolean"
               },
               "text": {
+                "type": "string"
+              },
+              "when": {
                 "type": "string"
               }
             },
@@ -601,6 +903,81 @@
               "later"
             ],
             "type": "string"
+          },
+          "diverged": {
+            "items": {
+              "properties": {
+                "added": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "changed": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "deleted": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "dest": {
+                  "properties": {
+                    "branch": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "repo": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "repo",
+                    "path"
+                  ],
+                  "type": "object"
+                },
+                "removed": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "source": {
+                  "properties": {
+                    "branch": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "repo": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "repo",
+                    "path"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "source",
+                "dest",
+                "added",
+                "changed",
+                "deleted"
+              ],
+              "type": "object"
+            },
+            "type": "array"
           },
           "fix": {
             "properties": {
@@ -781,6 +1158,271 @@
             "null"
           ]
         },
+        "defaults": {
+          "properties": {
+            "archive_grace_days": {
+              "properties": {
+                "source": {
+                  "enum": [
+                    "entry",
+                    "semester",
+                    "course",
+                    "institution"
+                  ],
+                  "type": "string"
+                },
+                "value": {
+                  "type": [
+                    "string",
+                    "integer",
+                    "boolean",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "source"
+              ],
+              "type": "object"
+            },
+            "assignment_repo_visibility": {
+              "properties": {
+                "source": {
+                  "enum": [
+                    "entry",
+                    "semester",
+                    "course",
+                    "institution"
+                  ],
+                  "type": "string"
+                },
+                "value": {
+                  "type": [
+                    "string",
+                    "integer",
+                    "boolean",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "source"
+              ],
+              "type": "object"
+            },
+            "autosync_released_edits": {
+              "properties": {
+                "source": {
+                  "enum": [
+                    "entry",
+                    "semester",
+                    "course",
+                    "institution"
+                  ],
+                  "type": "string"
+                },
+                "value": {
+                  "type": [
+                    "string",
+                    "integer",
+                    "boolean",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "source"
+              ],
+              "type": "object"
+            },
+            "late_penalty_per_day": {
+              "properties": {
+                "source": {
+                  "enum": [
+                    "entry",
+                    "semester",
+                    "course",
+                    "institution"
+                  ],
+                  "type": "string"
+                },
+                "value": {
+                  "type": [
+                    "string",
+                    "integer",
+                    "boolean",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "source"
+              ],
+              "type": "object"
+            },
+            "late_window_days": {
+              "properties": {
+                "source": {
+                  "enum": [
+                    "entry",
+                    "semester",
+                    "course",
+                    "institution"
+                  ],
+                  "type": "string"
+                },
+                "value": {
+                  "type": [
+                    "string",
+                    "integer",
+                    "boolean",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "source"
+              ],
+              "type": "object"
+            },
+            "marks_per_question": {
+              "properties": {
+                "source": {
+                  "enum": [
+                    "entry",
+                    "semester",
+                    "course",
+                    "institution"
+                  ],
+                  "type": "string"
+                },
+                "value": {
+                  "type": [
+                    "string",
+                    "integer",
+                    "boolean",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "source"
+              ],
+              "type": "object"
+            },
+            "materials_repo": {
+              "properties": {
+                "source": {
+                  "enum": [
+                    "entry",
+                    "semester",
+                    "course",
+                    "institution"
+                  ],
+                  "type": "string"
+                },
+                "value": {
+                  "type": [
+                    "string",
+                    "integer",
+                    "boolean",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "source"
+              ],
+              "type": "object"
+            },
+            "max_team_size": {
+              "properties": {
+                "source": {
+                  "enum": [
+                    "entry",
+                    "semester",
+                    "course",
+                    "institution"
+                  ],
+                  "type": "string"
+                },
+                "value": {
+                  "type": [
+                    "string",
+                    "integer",
+                    "boolean",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "source"
+              ],
+              "type": "object"
+            },
+            "team_formation": {
+              "properties": {
+                "source": {
+                  "enum": [
+                    "entry",
+                    "semester",
+                    "course",
+                    "institution"
+                  ],
+                  "type": "string"
+                },
+                "value": {
+                  "type": [
+                    "string",
+                    "integer",
+                    "boolean",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "source"
+              ],
+              "type": "object"
+            },
+            "timezone": {
+              "properties": {
+                "source": {
+                  "enum": [
+                    "entry",
+                    "semester",
+                    "course",
+                    "institution"
+                  ],
+                  "type": "string"
+                },
+                "value": {
+                  "type": [
+                    "string",
+                    "integer",
+                    "boolean",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "source"
+              ],
+              "type": "object"
+            }
+          },
+          "type": "object"
+        },
         "end": {
           "type": [
             "string",
@@ -867,7 +1509,9 @@
                   "description",
                   "home",
                   "archive_date",
-                  "email"
+                  "email",
+                  "due",
+                  "files"
                 ],
                 "type": "string"
               },
@@ -905,6 +1549,9 @@
                 "type": "boolean"
               },
               "text": {
+                "type": "string"
+              },
+              "when": {
                 "type": "string"
               }
             },

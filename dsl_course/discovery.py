@@ -9,10 +9,6 @@ The semester registry is the one exception to "read it from the live org": semes
 can't be found by naming convention (they're arbitrary), so they're listed explicitly in
 the course org's .github/semesters.yml (register_semester appends; faculty &
 instructors can edit it by hand).
-
-The session-folder rule itself lives in course.session_dirs - this module is only the API
-transport for it (a recursive git-tree fetch); course.discover_sections is the local
-filesystem transport of the same rule.
 """
 
 from __future__ import annotations
@@ -23,31 +19,29 @@ from datetime import datetime, timezone
 
 import yaml
 
-from . import records
+from . import run
 from .central import resolve_central_ref
+from .config import read_course, read_semester
 from .course import (
     CONFIG_REPO,
     COURSE_CONFIG,
     COURSE_HUB_TOPIC,
     GRADEBOOK_PREFIX,
     JOIN_REPO,
-    OLD_SEMESTER_TOPIC,
     SEMESTER_TOPIC,
+    TOOLKIT_REF_KEY,
     advertises_console,
-    session_dirs,
+    course_block,
 )
-from .faults import ConfigFault, NotMigrated, Unusable, not_migrated_fault
-from .gh_contents import get_file_content, load_yaml_config, put_file, repo_tree
+from .faults import ConfigFault, Unusable
+from .gh_contents import get_file_content, put_file
 from .ghcli import ALL, EVERYTHING, FILE, FILES, META, gh, is_missing_resource, on_write
 from .log import log, log_err, log_ok, on_cli_start
 from .materials import is_materials_repo
-from .repos import default_branch, repo_exists, repo_is_archived, repo_missing
+from .repos import repo_exists, repo_is_archived, repo_missing
 
 # The standalone semester registry in the course org's .github repo.
 SEMESTERS_PATH = "semesters.yml"
-# Its old name and key (decision 0012). Never read: a course that still has the old file
-# and not the new one, or the old `cohorts:` key, is refused as NOT_MIGRATED.
-OLD_SEMESTERS_PATH = "cohort-courses-pages.yml"
 
 INFRA_REPOS = {JOIN_REPO, CONFIG_REPO, ".github"}
 # The topic assign.py stamps on the frozen semester-side template it creates before
@@ -56,29 +50,17 @@ INFRA_REPOS = {JOIN_REPO, CONFIG_REPO, ".github"}
 ASSIGNMENT_TEMPLATE_TOPIC = "assignment-template"
 # Topics marking a repo as machinery rather than faculty-authored content: per-student
 # submission repos and the frozen semester-side assignment templates (assign.py), and the
-# private per-student gradebooks (grades.py).
+# private per-student gradebooks (gradebook.py).
 INFRA_TOPICS = {"submission", ASSIGNMENT_TEMPLATE_TOPIC, "gradebook"}
 # The topic that makes a COURSE-org repo an assignment template (decision 0014), as
 # `dsl-materials` makes a materials repo. The `assignment-` name is only the scaffold's
-# default; `scaffold` stamps the topic and the migration stamps it on older templates.
+# default; `scaffold` stamps the topic.
 TEMPLATE_TOPIC = "dsl-assignment"
-# What an assignment template was told by before the topic: the name, on a GitHub template.
-OLD_TEMPLATE_PREFIX = "assignment-"
 
 
 def is_assignment_template(row: dict) -> bool:
     """Whether a course-org listing row is an assignment template: it carries the topic."""
     return TEMPLATE_TOPIC in (row.get("topics") or [])
-
-
-def is_untopicked_template(row: dict) -> bool:
-    """An assignment template by its old mark only - an `assignment-*` GitHub template
-    without the topic: NOT_MIGRATED until the migration's topic step stamps it."""
-    return (
-        row["name"].startswith(OLD_TEMPLATE_PREFIX)
-        and bool(row.get("isTemplate"))
-        and not is_assignment_template(row)
-    )
 
 
 # The repos only a semester org has - the fallback tier signal for an org bootstrapped
@@ -96,14 +78,6 @@ def join_issue_url(semester_org: str) -> str:
     return f"https://github.com/{semester_org}/{JOIN_REPO}/issues/new/choose"
 
 
-def carries_old_semester_topic(repos: list[dict]) -> bool:
-    """Whether the org's `.github` still carries the OLD semester topic and not the new
-    one (decision 0012): a semester that has not been migrated."""
-    dotgithub = next((r for r in repos if r["name"] == ".github"), None)
-    topics = set((dotgithub or {}).get("topics") or [])
-    return OLD_SEMESTER_TOPIC in topics and SEMESTER_TOPIC not in topics
-
-
 def org_tier(repos: list[dict]) -> str | None:
     """`"semester"`, `"course"`, or None when the listing cannot say.
 
@@ -113,11 +87,6 @@ def org_tier(repos: list[dict]) -> str | None:
     elimination, and the faculty-access sweep treats "course" as "push everywhere"."""
     dotgithub = next((r for r in repos if r["name"] == ".github"), None)
     topics = set((dotgithub or {}).get("topics") or [])
-    # The old topic alone is NOT a tier (never read as one): the org's tier cannot be told,
-    # so the faculty-access sweep gives it the read floor. Its caller reports the org as
-    # NOT_MIGRATED (`carries_old_semester_topic`) and carries on with the rest.
-    if carries_old_semester_topic(repos):
-        return None
     if SEMESTER_TOPIC in topics:
         return "semester"
     if COURSE_HUB_TOPIC in topics:
@@ -203,8 +172,8 @@ _listings: dict[str, list[dict]] | None = None
 
 
 def hold_listings(on: bool) -> None:
-    """Turn the per-run listing memo on (empty) or off. `tests/conftest.py` turns it off
-    between tests."""
+    """Turn the per-run listing memo on (empty) or off. `run.reset` turns it
+    off."""
     global _listings
     _listings = {} if on else None
 
@@ -220,6 +189,7 @@ def _forget_listings(kind: str, targets: frozenset[str]) -> None:
 
 on_write(_forget_listings)
 on_cli_start(lambda parser: hold_listings(parser.read_once))
+run.on_reset(lambda: hold_listings(False))
 
 
 def list_org_repos(org: str) -> list[dict]:
@@ -327,7 +297,7 @@ def listing_row(org: str, name: str, visibility: str = "private") -> dict:
     `visibility` is GITHUB's word for the repo as it stands NOW - `private` unless this
     run has already flipped it and been told the flip landed. Never the config's
     `visibility:`: that file says what was ASKED for, this row says what is there, and a
-    reader that compares the two (`grades._visibility_faults`) can only notice a
+    reader that compares the two (`grading_spec._visibility_faults`) can only notice a
     difference if the row was not written from the same wish.
 
     A listing is taken once and handed to every pass of a tick, so the pass that CREATES
@@ -398,8 +368,6 @@ def _read_semesters(
     content = get_file_content(
         course_org, ".github", SEMESTERS_PATH, confirm_absent=True
     )
-    if content is None and get_file_content(course_org, ".github", OLD_SEMESTERS_PATH):
-        return _not_migrated(course_org, OLD_SEMESTERS_PATH, SEMESTERS_PATH, faults)
     if not content:
         return []
     try:
@@ -418,8 +386,6 @@ def _read_semesters(
             )
         )
         return []
-    if isinstance(data, dict) and "cohorts" in data and "semesters" not in data:
-        return _not_migrated(course_org, "cohorts", "semesters", faults)
     semesters = data.get("semesters", []) if isinstance(data, dict) else data
     if not isinstance(semesters, list) or not all(
         isinstance(c, str) for c in semesters
@@ -441,21 +407,6 @@ def _read_semesters(
     return [c for c in semesters if c]
 
 
-def _not_migrated(
-    course_org: str, old: str, new: str, faults: list[ConfigFault] | None
-) -> list[str]:
-    """An old spelling in the registry: raised, or - for a caller collecting faults -
-    filed, and read as no semesters at all."""
-    if faults is None:
-        raise NotMigrated(old, new, f"{course_org}/.github/{SEMESTERS_PATH}")
-    faults.append(
-        not_migrated_fault(
-            old, new, where=SEMESTERS_PATH, file=SEMESTERS_PATH, in_repo=".github"
-        )
-    )
-    return []
-
-
 def read_semester_registry(course_org: str, faults: list[ConfigFault]) -> list[str]:
     """This course's registered semesters, with what a human must fix collected rather than
     raised.
@@ -469,22 +420,22 @@ def read_semester_registry(course_org: str, faults: list[ConfigFault]) -> list[s
 
 
 def org_meta(org: str) -> dict:
-    """An org's `.github/dsl-course.yml`, or `{}` when it declares none.
+    """An org's `.github/course.yml`, or `{}` when it declares none.
 
     THE read for an org's declared identity - the course name, the faculty SSOT, a
     semester's `course:` pointer, the `central_ref:` its workflows run. `{}` for a genuine
     404 or an empty file; a MALFORMED one still raises, because reading a typo as "this
     org declares nothing" files a semester under the course orgs and rewrites the inventory
     around it. The one caller that must tell ABSENT from EMPTY - sync_faculty, which
-    would otherwise prune every admin - reads load_yaml_config directly."""
-    return load_yaml_config(org, ".github", COURSE_CONFIG) or {}
+    would otherwise prune every admin - reads `config.read_course` directly."""
+    return read_course(org).meta()
 
 
 def semester_pointer(semester_org: str) -> dict:
-    """A semester's pointer to its course org (`semester-config/.system/dsl-course.yml`),
+    """A semester's pointer to its course org (`semester-config/.system/course.yml`),
     or `{}` when there is none. Moved in from the semester's `.github` (decision 0010):
     its only readers are this repo's dispatchers and the engine, and `.github` is public."""
-    return load_yaml_config(semester_org, CONFIG_REPO, records.path("pointer")) or {}
+    return read_semester(semester_org).pointer.meta()
 
 
 def course_name_for_semester(semester_org: str) -> str:
@@ -507,7 +458,7 @@ def course_name_or(
     """The course's name for an email - `course_name_of(course_org)`, or
     `course_name_for_semester(semester_org)` - else `fallback`. Never raises.
 
-    Both readers raise on a dsl-course.yml that is malformed or that the API would not
+    Both readers raise on a course.yml that is malformed or that the API would not
     hand over (`load_yaml_config`), and a name is never worth losing the email over: a
     grade notice, a code or the one fault mail about that very file. A course carrying no
     name keeps the generic wording rather than mailing a blank."""
@@ -540,12 +491,11 @@ def course_name_of(course_org: str) -> str:
     course org needs no guard of its own."""
     if not course_org:
         return ""
-    meta = org_meta(course_org)
-    return str(meta.get("course_name") or "")
+    return str(course_block(org_meta(course_org)).get("name") or "")
 
 
 def student_console_for(course_org: str) -> bool:
-    """`course.advertises_console` off a COURSE org's own `dsl-course.yml`. Never raises: a
+    """`course.advertises_console` off a COURSE org's own `course.yml`. Never raises: a
     file that cannot be read answers False, which links the semester site - a page that
     always exists - so a mail or a lock is never lost over which page it links."""
     try:
@@ -560,9 +510,9 @@ def student_console_for(course_org: str) -> bool:
 def central_ref_for(org: str) -> str:
     """Which ref of the central toolkit this org's seeded workflows run the engine from.
 
-    Declared as `central_ref:` in the COURSE org's `.github/dsl-course.yml`, so one edit
+    Declared as `central_ref:` in the COURSE org's `.github/course.yml`, so one edit
     moves a course and every semester under it between tiers together. A semester org has
-    no `dsl-course.yml` of its own, only the pointer (`semester_pointer`), so this follows
+    no `course.yml` of its own, only the pointer (`semester_pointer`), so this follows
     it - a semester running a different engine from the course org that releases into it
     is not a state anyone wants to debug.
 
@@ -573,7 +523,7 @@ def central_ref_for(org: str) -> str:
     if course:
         org, meta = course, org_meta(course)
     return resolve_central_ref(
-        meta.get("central_ref"), source=f"{org}/.github/{COURSE_CONFIG}"
+        course_block(meta).get(TOOLKIT_REF_KEY), source=f"{org}/.github/{COURSE_CONFIG}"
     )
 
 
@@ -599,17 +549,10 @@ def semester_is_live(semester_org: str) -> bool:
     if repo_is_archived(semester_org, CONFIG_REPO):
         log(f"  [skip] {semester_org} (archived semester - left frozen)")
         return False
-    # No config repo under its name at all: either the old topic - a semester archived
-    # before decision 0010 (never migrated, never touched) or one the migration has not
-    # reached - or no semester topic at all, a semester the New semester wizard has
-    # registered before Bootstrap semester has run. Nothing may be written into either.
+    # No config repo under its name and no semester topic: a semester the New semester
+    # wizard has registered before Bootstrap semester has run. Nothing may be written into it.
     if repo_missing(semester_org, CONFIG_REPO):
         topics = _github_topics(semester_org)
-        if topics is not None and _old_topic_only(topics):
-            log(
-                f"  [skip] {semester_org} (not migrated - archived, or run the migration)"
-            )
-            return False
         if topics is not None and SEMESTER_TOPIC not in topics:
             log(
                 f"  [skip] {semester_org} (being set up - Bootstrap semester has not run)"
@@ -626,11 +569,7 @@ def being_set_up(semester_org: str) -> bool:
     if not repo_missing(semester_org, CONFIG_REPO):
         return False
     topics = _github_topics(semester_org)
-    return (
-        topics is not None
-        and SEMESTER_TOPIC not in topics
-        and not _old_topic_only(topics)
-    )
+    return topics is not None and SEMESTER_TOPIC not in topics
 
 
 def _github_topics(org: str) -> set[str] | None:
@@ -640,17 +579,6 @@ def _github_topics(org: str) -> set[str] | None:
     if code == 0:
         return set(out.split())
     return set() if is_missing_resource(out) else None
-
-
-def _old_topic_only(topics: set[str]) -> bool:
-    return OLD_SEMESTER_TOPIC in topics and SEMESTER_TOPIC not in topics
-
-
-def not_migrated_org(org: str) -> bool:
-    """Whether `org`'s `.github` carries the OLD semester topic and not the new one, read
-    from its topics. The listing form, for a caller that already holds one, is
-    `carries_old_semester_topic`."""
-    return _old_topic_only(_github_topics(org) or set())
 
 
 def live_semesters(course_org: str) -> list[str]:
@@ -738,36 +666,6 @@ def semester_content_repos(repos: list[dict]) -> list[str]:
     return sorted(r["name"] for r in repos if not _is_infra_repo(r))
 
 
-def _repo_tree_dirs(org: str, repo: str) -> tuple[str, ...]:
-    """Every directory path in a repo's default-branch tree - one recursive fetch,
-    shared by every discovery helper that needs a repo's directory structure (rather
-    than listing each top-level directory individually - N+1 API calls).
-
-    The fetch itself (and its absent-vs-failed discrimination) is gh_contents.repo_tree, shared
-    with the site builder's blob-side twin: an absent/empty tree is genuinely no
-    directories, any other failure RAISES. It must never come back as "no sessions" - the
-    site clears and rewrites its collections from these rows, so one rate-limited fetch
-    would republish the semester site with every session row deleted."""
-    return repo_tree(org, repo, default_branch(org, repo, fallback="main"), "tree")
-
-
-def discover_release_sources(
-    org: str, content_repos: list[str]
-) -> list[tuple[str, str, str, int]]:
-    """(repo, subpath, folder_name, session_number) for every session folder found
-    across a semester's `content_repos` (see discover_semester_repos), covering both shapes
-    a release can produce: nested - a session folder inside a subpath of a shared repo,
-    `subpath/NN_.../` - or root - `NN_.../` directly at the repo root (what a `deploy:`
-    with a bare `semester_dest_repo` and no `semester_dest_path` produces). One recursive tree fetch per
-    repo; the exact folder name is captured too, so callers can list its files directly
-    with no further discovery call."""
-    return [
-        (repo, subpath, folder, n)
-        for repo in content_repos
-        for subpath, folder, n in session_dirs(_repo_tree_dirs(org, repo))
-    ]
-
-
 def discover_assignment_repos(course_org: str) -> list[dict]:
     """The listing ROW of every assignment template (topic `dsl-assignment`) in the course
     org, in name order.
@@ -839,7 +737,5 @@ def discover_content_repos(course_org: str) -> list[str]:
     return sorted(
         r["name"]
         for r in list_org_repos(course_org)
-        if not _is_infra_repo(r)
-        and not is_assignment_template(r)
-        and not is_untopicked_template(r)
+        if not _is_infra_repo(r) and not is_assignment_template(r)
     )

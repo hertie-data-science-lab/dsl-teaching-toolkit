@@ -1,0 +1,230 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "course": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "licence": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "student_console": {
+          "type": "boolean"
+        },
+        "toolkit_version_ref": {
+          "pattern": "^(?:main|release|preview|[0-9a-f]{40})$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "defaults": {
+      "additionalProperties": false,
+      "properties": {
+        "archive_grace_days": {
+          "type": "integer"
+        },
+        "assignment_repo_visibility": {
+          "enum": [
+            "private",
+            "public",
+            "student_choice"
+          ],
+          "type": "string"
+        },
+        "autosync_released_edits": {
+          "type": "boolean"
+        },
+        "late_penalty_per_day": {
+          "type": [
+            "string",
+            "number"
+          ]
+        },
+        "late_window_days": {
+          "type": "integer"
+        },
+        "marks_per_question": {
+          "type": "boolean"
+        },
+        "materials_repo": {
+          "pattern": "^[\\w.-]+$",
+          "type": "string"
+        },
+        "max_team_size": {
+          "type": "integer"
+        },
+        "team_formation": {
+          "enum": [
+            "self_select",
+            "assigned"
+          ],
+          "type": "string"
+        },
+        "timezone": {
+          "type": "string"
+        }
+      },
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "open_course_site": {
+      "additionalProperties": false,
+      "properties": {
+        "contact": {
+          "pattern": "^[^@\\s]+@[^@\\s]+$",
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "publish": {
+          "additionalProperties": false,
+          "properties": {
+            "exclude": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "include": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kinds": {
+              "items": {
+                "enum": [
+                  "lectures",
+                  "labs",
+                  "readings",
+                  "exams",
+                  "drop-ins",
+                  "assets",
+                  "events"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "reading_lists": {
+              "type": "boolean"
+            },
+            "types": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        },
+        "source_repo": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "people": {
+      "additionalProperties": false,
+      "properties": {
+        "course_admins": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "email": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "end": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "github_handle": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "photo": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "start": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "github_handle"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "set_aside": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "title": ".github/course.yml",
+  "type": "object"
+}

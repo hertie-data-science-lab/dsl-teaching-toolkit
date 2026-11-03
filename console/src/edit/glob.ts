@@ -1,4 +1,4 @@
-// `.gitignore` pattern matching, for the previews of `.releaseignore` and `opencourse.yml`'s
+// `.gitignore` pattern matching, for the previews of `.releaseignore` and course.yml's
 // `withhold` (both use gitignore's syntax; the last matching pattern wins, `!` re-includes).
 // The preview reads the repo's root file only; nested `.releaseignore` files still apply
 // when the engine copies.

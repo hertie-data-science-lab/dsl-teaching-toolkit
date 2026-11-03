@@ -20,7 +20,7 @@ import { Checks, OrgSteps, OrgWhy, Rail, StepCard, Verified, WizError } from '..
 import { authorOf } from '../github/client';
 import { registerSemester } from '../model/discovery';
 import type { CourseProps } from './types';
-import { ASSIGNMENTS_FILE, CONFIG_REPO, INSTRUCTORS_FILE, JOIN_REPO } from '../model/names';
+import { CONFIG_REPO, JOIN_REPO, SEMESTER_FILE } from '../model/names';
 import { YamlText, obj } from '../edit/yamlText';
 
 const STEPS = [
@@ -48,7 +48,7 @@ const yamlDoc = (text: string): unknown => {
   return y.errors.length ? null : y.toJS();
 };
 
-/** Which of the cards are done, from the semester's own files; `defaults` (optional) once assignments.yml states any. */
+/** Which of the cards are done, from the semester's own files; `defaults` (optional) once semester.yml states any. */
 export function cardsDone(files: Files, org: string): { staff: boolean; schedule: boolean; students: boolean; defaults: boolean } {
   const f = (path: string) => {
     const s = files.file(org, CONFIG_REPO, path);
@@ -56,10 +56,10 @@ export function cardsDone(files: Files, org: string): { staff: boolean; schedule
   };
   const sched = parseSchedule(f('schedule.yml'));
   return {
-    staff: parseInstructors(f(INSTRUCTORS_FILE)).length > 0,
-    schedule: !!sched && Object.keys(sched.releases).length + Object.keys(sched.assignments).length > 0,
+    staff: parseInstructors(f(SEMESTER_FILE)).length > 0,
+    schedule: !!sched && Object.keys(sched.entries).length + Object.keys(sched.assignments).length > 0,
     students: parseRoster(f('students.csv')).rows.length > 0,
-    defaults: Object.keys(obj(obj(yamlDoc(f(ASSIGNMENTS_FILE))).defaults)).length > 0,
+    defaults: Object.values(obj(obj(yamlDoc(f(SEMESTER_FILE))).defaults)).some((v) => v != null),
   };
 }
 
@@ -164,7 +164,7 @@ export function NewCohortScreen({ course, files, now, step: asked }: Pick<Course
           {card('Instructors', 'instructors', c.staff, 'Who gets the instructor buttons and the problem emails.', 'At least one person listed.')}
           {card('Schedule', 'schedule-semester', c.schedule, 'Semester dates, releases, assignments, events.', 'Releases or assignments scheduled.')}
           {card('Students', 'students', c.students, 'The roster; adding a row sends a code.', 'Roster started.')}
-          {card('Assignment defaults', 'assignments', c.defaults, 'Optional. Late work, teams and who sees each repo for this semester’s assignments; left alone, the course’s defaults apply.', 'This semester’s defaults set.')}
+          {card('Semester defaults', 'settings', c.defaults, 'Optional. Late work, teams, who sees each repo, automatic fixes; left alone, the course’s defaults apply.', 'This semester’s defaults set.')}
         </div>
         {n === 3 ? <Verified>{label} is live. Automation takes it from here.</Verified> : <p class="footnote">{n} of 3 done. The semester goes live when instructors, schedule and students are done.</p>}
       </>

@@ -15,6 +15,7 @@ from dsl_course import faults as faults_mod
 from dsl_course import gh_contents, gh_teams, sync_faculty
 from dsl_course.course import people_by_role
 from dsl_course.schedule import Deploy, Release, Schedule
+from tests.conftest import fake_config
 from tests.plans import citing
 
 
@@ -30,7 +31,7 @@ def _cites(monkeypatch, plans: dict[str, Schedule]) -> None:
 
 
 def _parse(raw: str) -> dict:
-    """Parse a instructors.yml/dsl-course.yml text through the production entry point."""
+    """Parse a semester.yml/course.yml text through the production entry point."""
     return sync_faculty.parse_faculty_from_meta(yaml.safe_load(raw) or {})
 
 
@@ -55,7 +56,7 @@ def test_desired_team_members_skips_an_invalid_github_handle(capsys):
 
 
 def test_sync_course_admins_refuses_to_prune_when_the_config_is_absent(monkeypatch):
-    # The mass-de-admin bug: an absent dsl-course.yml must NOT be read as an empty desired
+    # The mass-de-admin bug: an absent course.yml must NOT be read as an empty desired
     # set, or a pruning reconcile strips course-admin from every org. Absent -> skip + error.
     monkeypatch.setattr(sync_faculty, "load_faculty", lambda org, skipped: None)
     calls = []
@@ -97,7 +98,7 @@ def test_sync_course_admins_removes_nobody_while_an_entry_cannot_be_placed(
             "course_admins": [{"github_handle": "alice"}, {"github_handle": "@bob"}]
         }
     }
-    monkeypatch.setattr(sync_faculty, "load_yaml_config", lambda *a, **k: meta)
+    fake_config(monkeypatch, lambda *a: meta)
     calls = []
     monkeypatch.setattr(
         sync_faculty,
@@ -115,9 +116,9 @@ def test_sync_course_admins_removes_nobody_while_an_entry_cannot_be_placed(
 def test_sync_semester_instructors_refuses_to_prune_when_people_yml_is_absent(
     monkeypatch,
 ):
-    # Nothing is reconciled - an absent instructors.yml with prune=True would strip the
+    # Nothing is reconciled - an absent semester.yml with prune=True would strip the
     # semester's whole instructors team - and the run stays GREEN: a file faculty have to
-    # write reaches them on the instructors.yml digest issue, while this run's red X reaches
+    # write reaches them on the semester.yml digest issue, while this run's red X reaches
     # only a maintainer who cannot write another org's teaching team.
     monkeypatch.setattr(sync_faculty, "_semester_faculty", lambda org: (None, False))
     calls = []
@@ -258,19 +259,24 @@ def test_desired_team_members_coerces_a_nonstring_handle():
 def test_parse_faculty_skips_entries_without_github_handle():
     raw = """
 people:
-  instructors:
-    - github_handle: janedoe
-      name: "Prof. Jane Doe"
-    - name: "No Handle"
-  teaching_assistants:
-    - github_handle: anOther
-  course_admins:
-    - github_handle: adminhandle
+  - github_handle: janedoe
+    role: instructor
+    name: "Prof. Jane Doe"
+  - name: "No Handle"
+    role: instructor
+  - github_handle: anOther
+    role: teaching_assistant
 """
     faculty = _parse(raw)
     assert [p["github_handle"] for p in faculty["instructors"]] == ["janedoe"]
     assert [p["github_handle"] for p in faculty["teaching_assistants"]] == ["anOther"]
-    assert [p["github_handle"] for p in faculty["course_admins"]] == ["adminhandle"]
+    # A course's `people:` is a block of its admins, and nothing else (decision 0039).
+    course = _parse(
+        "people:\n  course_admins:\n    - github_handle: adminhandle\n"
+        "  instructors:\n    - github_handle: card\n"
+    )
+    assert course["course_admins"] == [{"github_handle": "adminhandle"}]
+    assert not course.get("instructors")
 
 
 def test_parse_faculty_with_no_people_block_is_empty():
@@ -311,7 +317,7 @@ def test_semester_roles_only_is_safe_without_course_admins():
 
 
 def test_semester_people_yml_declaring_course_admins_grants_nothing():
-    # a stray course_admins: entry in a semester's instructors.yml must not grant admin -
+    # a stray course_admins: entry in a semester's semester.yml must not grant admin -
     # that role is exclusively course-level.
     raw = """
 people:
@@ -442,14 +448,12 @@ def test_parse_faculty_reports_a_teaching_entry_that_cannot_be_notified(capsys):
     # entry is still parsed (and therefore still reconciled into the team).
     raw = """
 people:
-  instructors:
-    - github_handle: janedoe
-      name: "Prof. Jane Doe"
-  teaching_assistants:
-    - github_handle: anOther
-      email: "not-an-address"
-  course_admins:
-    - github_handle: adminhandle
+  - github_handle: janedoe
+    role: instructor
+    name: "Prof. Jane Doe"
+  - github_handle: anOther
+    role: teaching_assistant
+    email: "not-an-address"
 """
     faculty = _parse(raw)
     assert [p["github_handle"] for p in faculty["instructors"]] == ["janedoe"]
@@ -458,33 +462,28 @@ people:
     assert "instructors entry janedoe" in err
     assert "teaching_assistants entry anOther" in err
     assert "`email:`" in err
-    # course_admins is notified through the course org, not a semester's instructors.yml
-    assert "adminhandle" not in err
     # the declared value is personal data: the report names the handle, never the address
     assert "not-an-address" not in err
 
 
 def test_teaching_contacts_carries_the_handle_the_address_and_the_role():
-    # All three, from one pass over instructors.yml: a notification is ADDRESSED by email,
+    # All three, from one pass over semester.yml: a notification is ADDRESSED by email,
     # ATTRIBUTED by handle (git blame speaks handles) and COPIED by role. Reading the role
     # back off the entry afterwards would mean iterating the file a second way.
     faculty = sync_faculty.parse_faculty_from_meta(
         yaml.safe_load("""
 people:
-  instructors:
-    - github_handle: janedoe
-      email: "jane@example.org"
-    - github_handle: nomail
-      name: "No Address"
-    - github_handle: future-hire
-      email: "later@example.org"
-      start: "2999-09-01"
-  teaching_assistants:
-    - github_handle: alex
-      email: "alex@example.org"
-    - github_handle: lapsed-ta
-      email: "gone@example.org"
-      end: "2000-01-31"
+  - {github_handle: janedoe, role: instructor, email: "jane@example.org"}
+  - {github_handle: nomail, role: instructor, name: "No Address"}
+  - github_handle: future-hire
+    role: instructor
+    email: "later@example.org"
+    start: "2999-09-01"
+  - {github_handle: alex, role: teaching_assistant, email: "alex@example.org"}
+  - github_handle: lapsed-ta
+    role: teaching_assistant
+    email: "gone@example.org"
+    end: "2000-01-31"
 """)
     )
     # Declaration order, instructors before TAs; an entry with no usable address is left
@@ -501,16 +500,14 @@ people:
 
 
 def test_teaching_contacts_takes_the_same_faculty_and_clock_as_without_email():
-    # One parse of instructors.yml and one clock answer both questions: who a notification can
+    # One parse of semester.yml and one clock answer both questions: who a notification can
     # reach, and who it cannot. Two signatures meant two parses and two `date.today()`
     # calls, neither of them the clock a scheduler tick is reasoning about.
     faculty = sync_faculty.parse_faculty_from_meta(
         yaml.safe_load("""
 people:
-  instructors:
-    - github_handle: janedoe
-      email: "jane@example.org"
-    - github_handle: nomail
+  - {github_handle: janedoe, role: instructor, email: "jane@example.org"}
+  - {github_handle: nomail, role: instructor}
 """)
     )
     assert [
@@ -544,31 +541,32 @@ def test_without_email_names_the_active_handles_no_notification_reaches():
 
 # ------------------------------------------------------------- faults a human must fix
 #
-# instructors.yml decides who has access and who can be told anything, so an entry the sync
+# semester.yml decides who has access and who can be told anything, so an entry the sync
 # skips is invisible twice over: no team membership, and no notification about the entry
 # either. These are the faults the digest issue and the mail carry.
 
 
 def _faults(raw: str) -> list:
-    """Parse instructors.yml text WITH line stamps, as the pre-flight reads it."""
+    """Parse semester.yml text WITH line stamps, as the pre-flight reads it."""
     found = []
     sync_faculty.parse_faculty_from_meta(gh_contents.load_yaml_lines(raw), found)
     return found
 
 
 PEOPLE = """people:
-  instructors:
-    - github_handle: jan-g
-      name: Jan
-      email: jan@x.edu
-    - github_handle: not a handle
-      name: Typo
-      email: typo@x.edu
-    - name: No Handle At All
-      role: guest
-  teaching_assistants:
-    - github_handle: cpj97
-      name: Camilo
+  - github_handle: jan-g
+    role: instructor
+    name: Jan
+    email: jan@x.edu
+  - github_handle: not a handle
+    role: instructor
+    name: Typo
+    email: typo@x.edu
+  - name: No Handle At All
+    role: instructor
+  - github_handle: cpj97
+    role: teaching_assistant
+    name: Camilo
 """
 
 
@@ -578,15 +576,15 @@ def test_every_unusable_people_entry_is_reported_with_its_line():
     # falls back to the line the entry opens on.
     found = _faults(PEOPLE)
     assert [(f.where, f.field, f.lineno) for f in found] == [
-        ("people.instructors[1]", "github_handle", 6),
-        ("people.teaching_assistants[0]", "email", 12),
+        ("people[1]", "github_handle", 6),
+        ("people[3]", "email", 12),
     ]
-    assert all(f.file == "instructors.yml" for f in found)
+    assert all(f.file == "semester.yml" for f in found)
 
 
 def test_an_entry_that_is_neither_a_handle_nor_a_card_is_a_fault():
-    (fault,) = _faults("people:\n  instructors:\n    - role: guest\n")
-    assert fault.where == "people.instructors[0]" and fault.lineno == 3
+    (fault,) = _faults("people:\n  - role: instructor\n")
+    assert fault.where == "people[0]" and fault.lineno == 2
     assert "no `github_handle:`" in fault.what
 
 
@@ -607,41 +605,33 @@ def test_the_line_stamps_never_survive_the_parse():
 
 def test_a_clean_people_yml_has_no_faults():
     clean = """people:
-  instructors:
-    - github_handle: jan-g
-      email: jan@x.edu
+  - github_handle: jan-g
+    role: instructor
+    email: jan@x.edu
 """
     assert _faults(clean) == []
 
 
 def test_a_people_yml_that_is_absent_or_unreadable_is_itself_the_fault(monkeypatch):
-    for raise_or_return, expected in (
-        (lambda **_: None, "missing"),
-        (_raiser(yaml.YAMLError("bad")), "not valid YAML"),
-        (_raiser(faults_mod.Unusable("not a mapping")), "not a YAML mapping"),
+    for text, expected in (
+        (None, "missing"),
+        ("people: [not closed", "not valid YAML"),
+        ("- a list\n- not a mapping\n", "not a YAML mapping"),
     ):
-        monkeypatch.setattr(
-            sync_faculty,
-            "load_yaml_config",
-            lambda *a, _f=raise_or_return, **k: _f(),
-        )
+        fake_config(monkeypatch, lambda *a, _text=text: _text)
         found = []
         assert sync_faculty.read_semester_people("Semester-f2026", found) is None
         (fault,) = found
         assert expected in fault.what
-        assert fault.file == "instructors.yml" and fault.lineno is None
+        assert fault.file == "semester.yml" and fault.lineno is None
 
 
 def test_a_read_that_failed_is_not_reported_as_a_broken_people_yml(monkeypatch):
     # A rate limit or a token that lost its scope raises a BARE RuntimeError out of
     # `get_file_content`. Recorded as a fault it would rewrite the digest with one entry
-    # saying instructors.yml is broken - closing every real fault in it as cleared and mailing
+    # saying semester.yml is broken - closing every real fault in it as cleared and mailing
     # the teaching team about a file nobody touched. It has to come back out.
-    monkeypatch.setattr(
-        sync_faculty,
-        "load_yaml_config",
-        lambda *a, **k: _raiser(RuntimeError("HTTP 403 rate limit"))(),
-    )
+    fake_config(monkeypatch, lambda *a: _raiser(RuntimeError("HTTP 403 rate limit"))())
     found = []
     with pytest.raises(RuntimeError):
         sync_faculty.read_semester_people("Semester-f2026", found)
@@ -657,26 +647,24 @@ def _raiser(exc):
 
 # ---------------------------------------------- the COURSE org's own identity file
 #
-# dsl-course.yml declares the course admins and the toolkit tier every workflow under
+# course.yml declares the course admins and the toolkit tier every workflow under
 # this course is rendered at. A fault in it is not one semester's problem: the sync walks
 # past the whole course, so it earns a digest of its own in the course org.
 
 
-COURSE_CONFIG = """course_name: Course
-central_ref: release
+COURSE_CONFIG = """course:
+  name: Course
+  toolkit_version_ref: release
 people:
   course_admins:
     - github_handle: jan-g
     - github_handle: not a handle
-  instructors:
-    - github_handle: janedoe
-      name: Prof. Jane Doe
 """
 
 
 def _course(monkeypatch, text: str | None):
-    # `gh_contents`, not `sync_faculty`: the read goes through `load_yaml_config`, so that
-    # is the module whose imported name has to be stubbed.
+    # `gh_contents`, not `sync_faculty`: the read goes through `config.read`, which reads
+    # through `gh_contents.get_file_content`.
     monkeypatch.setattr(gh_contents, "get_file_content", lambda *a, **k: text)
     found: list = []
     return sync_faculty.read_course_config("Course-Org", found), found
@@ -692,30 +680,22 @@ def test_a_course_admin_handle_no_team_can_be_given_is_a_fault(monkeypatch):
     assert (fault.where, fault.field, fault.lineno) == (
         "people.course_admins[1]",
         "github_handle",
-        6,
+        7,
     )
     # The COURSE org's own .github, so the citation and the deep link land on the file a
     # course admin actually edits - not on some semester's semester-config.
-    assert (fault.file, fault.in_repo) == ("dsl-course.yml", ".github")
+    assert (fault.file, fault.in_repo) == ("course.yml", ".github")
     assert fault.link("Course-Org") == (
-        "https://github.com/Course-Org/.github/blob/main/dsl-course.yml#L6"
+        "https://github.com/Course-Org/.github/blob/main/course.yml#L7"
     )
-
-
-def test_a_display_only_instructor_card_is_not_asked_for_an_address(monkeypatch):
-    # The course file's `instructors:` are website cards, and course-admin addresses live
-    # in an org secret - so nothing here is notified through its own entry. Requiring
-    # `email:` produced a fault, and now a mail, about a card doing exactly its job.
-    _faculty, found = _course(monkeypatch, COURSE_CONFIG)
-    assert [f.field for f in found] == ["github_handle"]
 
 
 def test_a_central_ref_nothing_can_be_pinned_to_is_a_fault(monkeypatch):
     _faculty, found = _course(
-        monkeypatch, "course_name: Course\ncentral_ref: stagign\n"
+        monkeypatch, "course:\n  name: Course\n  toolkit_version_ref: stagign\n"
     )
     (fault,) = found
-    assert fault.field == "central_ref" and fault.lineno == 2
+    assert fault.field == "toolkit_version_ref" and fault.lineno == 3
     assert "stays at its previous rendering" in fault.what
     # This one DOES have a line, so the file's own sentence is the right instruction.
     assert fault.fix() == "correct the line above"
@@ -731,7 +711,7 @@ def test_a_course_config_that_is_absent_or_unreadable_is_itself_the_fault(monkey
         assert faculty is None
         (fault,) = found
         assert expected in fault.what
-        assert fault.file == "dsl-course.yml" and fault.lineno is None
+        assert fault.file == "course.yml" and fault.lineno is None
         # One sentence for both of the course org's files, because both cost the course
         # the same thing (`faults.CONSEQUENCE`).
         assert "the sync skips this course" in faults_mod.CONSEQUENCE[fault.file]
@@ -739,7 +719,7 @@ def test_a_course_config_that_is_absent_or_unreadable_is_itself_the_fault(monkey
         # instruction about a line that is not there, under a bare filename with nothing
         # to link to.
         assert "line above" not in fault.fix()
-        assert fault.fix().startswith("restore dsl-course.yml")
+        assert fault.fix().startswith("restore course.yml")
 
 
 def test_a_course_config_that_could_not_be_READ_still_raises(monkeypatch):
@@ -861,7 +841,7 @@ COURSE_PEOPLE = """people:
 def _course_faults(raw: str) -> list:
     found = []
     sync_faculty.parse_faculty_from_meta(
-        gh_contents.load_yaml_lines(raw), found, file="dsl-course.yml", repo=".github"
+        gh_contents.load_yaml_lines(raw), found, file="course.yml", repo=".github"
     )
     return found
 
@@ -875,7 +855,7 @@ def test_a_course_admin_email_that_is_not_an_address_is_a_course_fault(capsys):
         "email",
         6,
     )
-    assert fault.file == "dsl-course.yml" and fault.in_repo == ".github"
+    assert fault.file == "course.yml" and fault.in_repo == ".github"
     assert "not-an-address" not in capsys.readouterr().out
 
 
@@ -885,7 +865,7 @@ def test_course_admin_emails_are_the_active_usable_ones_in_order():
 
 
 def test_a_course_admin_email_in_a_semester_file_is_not_checked():
-    # A semester's instructors.yml drops course_admins altogether; nothing to report there.
+    # A semester's semester.yml drops course_admins altogether; nothing to report there.
     assert _faults(COURSE_PEOPLE) == []
 
 
@@ -893,7 +873,7 @@ def test_a_role_is_read_whatever_its_case_and_surrounding_space():
     # `role: Instructor` was matched exactly, so the entry was skipped and the hourly
     # sync pruned that person from the teaching teams. The roster's role ignores case.
     meta = {
-        "instructors": [
+        "people": [
             {"github_handle": "prof-a", "role": "Instructor", "email": "a@x.org"},
             {
                 "github_handle": "ta-b",
@@ -907,7 +887,7 @@ def test_a_role_is_read_whatever_its_case_and_surrounding_space():
     assert [p["github_handle"] for p in faculty["instructors"]] == ["prof-a"]
     assert [p["github_handle"] for p in faculty["teaching_assistants"]] == ["ta-b"]
     assert faults == []
-    grouped = people_by_role(meta, semester=True)
+    grouped = people_by_role(meta)
     assert [len(grouped[k]) for k in ("instructors", "teaching_assistants")] == [1, 1]
 
 
@@ -915,15 +895,14 @@ def test_an_unknown_role_is_reported_and_holds_every_removal(monkeypatch, capsys
     # The faculty-access sweep is a floor: an entry it cannot place is left out of the
     # desired set, so pruning to that set would take its person's access away.
     text = (
-        "instructors:\n"
+        "people:\n"
         "  - {github_handle: prof-a, role: instructor, email: a@x.org}\n"
         "  - {github_handle: prof-b, role: lecturer, email: b@x.org}\n"
     )
-    monkeypatch.setattr(
-        sync_faculty,
-        "load_yaml_config",
-        lambda org, repo, path, lines=False, **k: (
-            yaml.safe_load(text) if path == sync_faculty.SEMESTER_PEOPLE_PATH else None
+    fake_config(
+        monkeypatch,
+        lambda org, repo, path: (
+            text if path == sync_faculty.SEMESTER_PEOPLE_PATH else None
         ),
     )
     calls = []
@@ -952,7 +931,7 @@ def test_an_unknown_role_is_reported_and_holds_every_removal(monkeypatch, capsys
 def test_any_entry_the_parse_cannot_place_is_reported_as_skipped():
     # One rule for every kind of bad entry: the sweep holds its removals on any of them.
     meta = {
-        "instructors": [
+        "people": [
             {"github_handle": "prof-a", "role": "instructor", "email": "a@x.org"},
             {"github_handle": "-not-a-login-", "role": "instructor", "email": "b@x"},
             {"role": "instructor", "email": "c@x.org"},
@@ -961,4 +940,4 @@ def test_any_entry_the_parse_cannot_place_is_reported_as_skipped():
     }
     skipped: list[str] = []
     sync_faculty.parse_faculty_from_meta(meta, skipped=skipped)
-    assert sorted(skipped) == ["instructors[1]", "instructors[2]", "instructors[3]"]
+    assert sorted(skipped) == ["people[1]", "people[2]", "people[3]"]

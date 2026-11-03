@@ -6,9 +6,16 @@ semester's own `semester-config/schedule.yml` `releases:` plan (see
 actions - `deploy` (copy a source path from a COURSE-org repo into a SEMESTER-org repo) and
 `assignment` (provision one student repo per enrolled student from a template). Grading is
 NOT one of them: it is driven off each assignment's own deadline, below, not off a
-`releases:` entry. A tick fires every release whose `when` has arrived. Because every
-release is idempotent, re-runs are no-ops and there is no "already released" state to
-track. Grading is the exception - see AUTOGRADE below.
+`releases:` entry. A tick fires every release whose `when` has arrived.
+
+A content copy is FIRE-ONCE (decision 0043): it ships at its time and is recorded in
+`semester-config/.system/releases.json` (`release_record`), and a later tick passes a
+recorded copy by - an edit to the course copy reaches students only when somebody
+releases it again (Release again), or on every tick for a semester whose
+`autosync_released_edits` resolves true. A due copy with no record whose destination is
+already there is recorded from the destination, not copied (the record's self-seed). A
+hand-out stays cumulative - it re-fires every tick so a student who onboards late still
+gets a repo - and grading has its own markers: see AUTOGRADE below.
 
 TWO DRIVERS deliver those ticks (see `workflows_render.render_scheduler`): GitHub's own
 cron, which is best-effort and in practice delivers a small fraction of its fires, and an
@@ -72,6 +79,7 @@ PREVIEWS - prints what would fire and writes nothing - and acts only with --no-p
 from __future__ import annotations
 
 import contextlib
+import functools
 import json
 import sys
 from collections.abc import Callable
@@ -85,14 +93,15 @@ from . import (
     invitations,
     issues,
     notify,
+    release_record,
     roster,
     schedule,
     schedule_plan,
+    settings,
     site,
     source_digest,
     status,
     sync_faculty,
-    sync_teams,
     team_formation,
     teams,
     teardown,
@@ -111,16 +120,15 @@ from .collect import (
 )
 from .course import COURSE_ADMIN_TEAM, shared_repo, submission_repo
 from .deploy import deploy_many
+from .distribute import marks_due
 from .faults import ConfigFault, FaultKind, Severity, Unusable
-from .gh_contents import WITHHELD_ROOT_STUBS, root_stub_unwritten
+from .gh_contents import WITHHELD_ROOT_STUBS, repo_blob_shas, root_stub_unwritten
 from .ghcli import gh, start_budget
-from .grades import (
+from .grading_sheet import sheet_path
+from .grading_spec import (
     grading_config_faults,
     load_grading_spec,
-    marks_due,
     semester_sheet_faults,
-    sheet_path,
-    sync_team_lock,
 )
 from .log import (
     CLIParser,
@@ -133,10 +141,11 @@ from .log import (
     log_step,
     plural,
 )
-from .materials import kinds_reader
-from .repos import listed_is_private, set_visibility
+from .repos import default_branch, listed_is_private, repo_missing, set_visibility
+from .run import current as current_run
 from .schedule import Release, grading_cutoff_datetime
 from .schedule_plan import deploy_dest
+from .team_formation import sync_team_lock
 
 # --------------------------------------------------------------------------- pure core
 
@@ -183,9 +192,9 @@ def due_snapshots(
     handed in off GitHub has a cutoff like any other. The COLLECTION gate belongs to the
     two passes that collect, and is applied there."""
     passed = []
-    for slug, entry in sched.assignments.items():
+    for slug in sched.assignments:
         at = grading_cutoff_datetime(
-            sched, slug, submit_via=_submit_via(course_org, entry)
+            sched, slug, submit_via=_submit_via(course_org, sched, slug)
         )
         if at is not None and at <= now:
             passed.append((slug, at))
@@ -262,8 +271,11 @@ def preview_summary(due: list[Release], decisions: list[Decision]) -> Summary:
 
 
 def _entry_ref(where: str) -> str:
-    """`releases.lecture-2` / `assignments.a1` -> the entry's own name."""
-    return where.split(".", 1)[1] if "." in where else where
+    """`assignments.a1` / `lectures.lecture-2.files[0]` -> the entry's own key."""
+    block, _, rest = where.partition(".")
+    if not rest or (block != "assignments" and block not in schedule.BLOCKS):
+        return where
+    return rest.split(".files", 1)[0]
 
 
 def source_decisions(faults: list[ConfigFault], now: datetime) -> list[Decision]:
@@ -319,12 +331,17 @@ def _stub_decisions(
     return out
 
 
+def _listing(semester_org: str) -> dict[str, dict] | None:
+    """This tick's ONE listing of the semester (`run`), held by the run while the tick's
+    release pass runs: None when it could not be read, and outside a tick."""
+    return current_run().listing(semester_org)
+
+
 def _handout_decisions(
     course_org: str,
     semester_org: str,
     sched: schedule.Schedule,
     due: list[Release],
-    listing: dict[str, dict] | None,
 ) -> list[Decision]:
     """`TEAMS_INCOMPLETE` for a due group handout with no teams yet, and `ALREADY_DONE`
     for a due handout whose every repo is already in the semester."""
@@ -332,6 +349,7 @@ def _handout_decisions(
     handouts = [r for r in due if r.assignment and r.assignment_slug]
     if not handouts:
         return out
+    listing = _listing(semester_org)
     per_team = teams.load(semester_org)
     students = roster.load(semester_org) or []
     onboarded = [s.github_handle for s in roster.enrolled(students) if s.onboarded]
@@ -369,13 +387,31 @@ def _handout_decisions(
     return out
 
 
+def _release_decisions(
+    course_org: str, semester_org: str, due: list[Release], now: datetime
+) -> list[Decision]:
+    """`ALREADY_DONE` for a due entry none of whose due copies would ship: each is in the
+    release record, or already at its destination (the tick would record it)."""
+    pairs = [(r, d) for r in due for d in r.due_deploys(now)]
+    if not pairs:
+        return []
+    ship, _seeds = _sort_copies(
+        course_org, semester_org, pairs, release_record.load(semester_org)
+    )
+    going = {r.label for r, _d in ship}
+    return [
+        Decision(label, "ALREADY_DONE", "Every copy has already been released.")
+        for label in dict.fromkeys(r.label for r, _d in pairs)
+        if label not in going
+    ]
+
+
 def dry_run_decisions(
     course_org: str,
     semester_org: str,
     sched: schedule.Schedule,
     due: list[Release],
     now: datetime,
-    listing: dict[str, dict] | None,
 ) -> list[Decision]:
     """Every decision the dry run can name for this semester. Guarded: a read that fails
     costs its decisions, never the preview."""
@@ -383,7 +419,8 @@ def dry_run_decisions(
     for decide in (
         lambda: source_decisions(schedule.source_faults(sched, course_org), now),
         lambda: _stub_decisions(course_org, due, now),
-        lambda: _handout_decisions(course_org, semester_org, sched, due, listing),
+        lambda: _handout_decisions(course_org, semester_org, sched, due),
+        lambda: _release_decisions(course_org, semester_org, due, now),
     ):
         try:
             out += decide()
@@ -402,14 +439,13 @@ def _execute_nondeploy(
     course_org: str,
     semester_org: str,
     release: Release,
-    listing: dict[str, dict] | None,
 ) -> tuple[int, bool]:
     """Run one release's non-deploy action (an assignment handout, and once its
     `solution_datetime` has passed, the model solution with it). Deploys are batched
     across the whole run (see `run`) so their source/dest repos clone once. Returns
     `(error count, whether anything was actually provisioned)` - the same shape
-    `deploy_many` answers in, and for the same reason: `due_releases` is cumulative, so
-    a handed-out release re-fires on every tick and almost all of them change nothing."""
+    `_release_copies` answers in. A hand-out is cumulative: a handed-out release re-fires
+    on every tick, and almost all of them change nothing."""
     errors = 0
     changed = False
     if release.assignment:
@@ -431,7 +467,7 @@ def _execute_nondeploy(
             # The tick's ONE listing of the semester, which this handout both reads
             # and adds every repo it creates to - so the next release in this same tick
             # sees them (see `assign.provision_all`).
-            listing=listing,
+            listing=_listing(semester_org),
             # The tick syncs the site once after every release it fired (`run`).
             sync=False,
         )
@@ -447,10 +483,16 @@ def _collects(course_org: str, entry: schedule.AssignmentEntry) -> bool:
     return load_grading_spec(course_org, entry.course_source_repo).collects_commits
 
 
-def _submit_via(course_org: str, entry: schedule.AssignmentEntry) -> str:
-    """How this assignment is handed in, which its late cutoff hangs on
-    (`schedule.grading_cutoff_datetime`). Off the same memoised read as `_collects`."""
-    return load_grading_spec(course_org, entry.course_source_repo).submit_via
+def _submit_via(course_org: str, sched: schedule.Schedule, slug: str) -> str:
+    """How assignment `slug` is handed in, which its late cutoff hangs on
+    (`schedule.grading_cutoff_datetime`): the template's, or this semester's override of it
+    on the entry (`schedule.shape_of`)."""
+    return load_grading_spec(
+        course_org,
+        sched.assignments[slug].course_source_repo,
+        semester_org=sched.org,
+        slug=slug,
+    ).submit_via
 
 
 def _snapshot_passed_deadlines(
@@ -459,7 +501,6 @@ def _snapshot_passed_deadlines(
     sched: schedule.Schedule,
     now: datetime,
     dry_run: bool,
-    listing: dict[str, dict] | None,
     templates: dict[str, str | None] | None = None,
     fired: set[str] | None = None,
 ) -> int:
@@ -471,7 +512,7 @@ def _snapshot_passed_deadlines(
     What was frozen is NOT returned: the snapshot file itself is the handoff to the
     autograde phase, which runs in another job (and so another process) entirely.
 
-    `listing` is the tick's own (see `run`), read for `pushed_at`. None is "it could not
+    The tick's own listing (`_listing`) is read for `pushed_at`. None is "it could not
     be read", handed down as None rather than as an empty org: every reader has its own
     answer to not knowing, and the freeze's is to take a listing of its own."""
     errors = 0
@@ -498,7 +539,7 @@ def _snapshot_passed_deadlines(
         # template that cannot be found leaves both at the parse's own defaults.
         gspec = load_grading_spec(course_org, template) if template else None
         is_group = gspec is not None and gspec.is_group
-        # `name` names the repos, `slug` (the schedule key) is what teams.csv is keyed on.
+        # `name` names the repos, `slug` (the schedule key) is what the team cells are keyed on.
         # A FAILED freeze counts; NOTHING_TO_FREEZE (nobody handed out yet) does not, and
         # neither writes a snapshot file - which is what keeps the autograde phase off an
         # assignment that would otherwise score write-once zeros for the whole semester.
@@ -509,7 +550,7 @@ def _snapshot_passed_deadlines(
             is_group=is_group,
             teams_key=slug,
             tz=sched.timezone,
-            listing=listing,
+            listing=_listing(semester_org),
             shared=gspec is not None and gspec.submit_shared,
         )
         if result is SnapshotResult.FAILED:
@@ -613,31 +654,206 @@ def _autograde_passed_deadlines(
     return errors
 
 
+def _autosync(course_org: str, semester_org: str) -> bool:
+    """Whether this semester re-ships edits to an already-released copy on every tick
+    (`autosync_released_edits`, decision 0043 rule 2; off unless a layer says true)."""
+    value, _source = settings.effective(
+        semester_org, "autosync_released_edits", course_org=course_org
+    )
+    return value is True
+
+
+def _sort_copies(
+    course_org: str,
+    semester_org: str,
+    pairs: list[tuple[Release, schedule.Deploy]],
+    record: release_record.Record,
+) -> tuple[
+    list[tuple[Release, schedule.Deploy]],
+    list[tuple[Release, schedule.Deploy, dict[str, str]]],
+]:
+    """`(ship, seed)` of `pairs` (each due copy with its entry), once each. Ship: a copy
+    the record does not have, or every one when the semester autosyncs. Seed, with what
+    its destination holds (`seeded`): a copy with no record whose destination is already there
+    (decision 0043 rule 1) - what upgrades a semester released into before the record
+    existed, with nothing re-shipped. Each destination tree is read once, and only for an
+    unrecorded copy (with no tick listing, on the branch the repo names); a seeded
+    folder's course tree once per source repo. One that cannot be read raises.
+
+    A destination counts as this copy's only when nothing else explains it: no other due
+    copy and no recorded one lands at, inside or above it (`release_record.overlaps`) - a
+    folder two entries copy into, a root copy, a parent of a released child, a copy whose
+    source was re-pointed. Such a copy ships, as it did before the record."""
+    autosync = _autosync(course_org, semester_org)
+    listing = {
+        name.casefold(): row for name, row in (_listing(semester_org) or {}).items()
+    }
+    trees: dict[str, dict[str, str]] = {}
+    sources: dict[str, dict[str, str]] = {}
+
+    def tree(repo: str) -> dict[str, str]:
+        if repo not in trees:
+            row = listing.get(repo.casefold())
+            if listing and row is None:
+                trees[repo] = {}  # not created yet: nothing has landed in it
+            elif row is not None:
+                branch = row.get("default_branch") or "main"
+                trees[repo] = repo_blob_shas(semester_org, repo, branch)
+            elif repo_missing(semester_org, repo):
+                trees[repo] = {}
+            else:
+                # No listing this tick: ask the repo its branch rather than guess `main`,
+                # which reads a `master` repo as empty and ships over what is there.
+                branch = default_branch(semester_org, repo)
+                trees[repo] = repo_blob_shas(semester_org, repo, branch)
+        return trees[repo]
+
+    def source(repo: str) -> dict[str, str]:
+        if repo not in sources:
+            branch = default_branch(course_org, repo)
+            sources[repo] = repo_blob_shas(course_org, repo, branch)
+        return sources[repo]
+
+    def seeded(d: schedule.Deploy, landed: dict[str, str]) -> dict[str, str]:
+        """A folder copy's seed manifest: what its destination holds that the course copy
+        also has. A file the semester added there itself was never released - it is the
+        released copy's own (an addition), never "deleted in the course"."""
+        if deploy_dest(d) in tree(d.semester_dest_repo):
+            return landed  # a single-file copy, keyed by its destination name
+        course = release_record.inside(
+            source(d.course_source_repo), d.course_source_path
+        )
+        return {p: s for p, s in landed.items() if p in course}
+
+    keys = {release_record.key_of(d) for _r, d in pairs} | set(record.copies)
+
+    def explained(key: release_record.Key) -> bool:
+        return any(o != key and release_record.overlaps(key, o) for o in keys)
+
+    ship, seed, seen = [], [], set()
+    for release, d in pairs:
+        key = release_record.key_of(d)
+        if key in seen:
+            continue  # two entries citing one copy: it ships once
+        seen.add(key)
+        if record.has(d):
+            if autosync:
+                ship.append((release, d))
+            continue
+        landed = (
+            {}
+            if explained(key)
+            else release_record.inside(tree(d.semester_dest_repo), deploy_dest(d))
+        )
+        if landed:
+            seed.append((release, d, seeded(d, landed)))
+        else:
+            ship.append((release, d))
+    return ship, seed
+
+
+def _first_shipped(
+    read_record: Callable[[], release_record.Record],
+) -> Callable[[schedule.Deploy], datetime | None]:
+    """When the release record says a copy first went out; None when it is not in the
+    record, was seeded, or the record cannot be read (lateness is then judged as before
+    the record; the releases say the read failed)."""
+
+    unreadable = False
+
+    def first(d: schedule.Deploy) -> datetime | None:
+        nonlocal unreadable
+        if unreadable:
+            return None  # asked once: not again for every late moment
+        try:
+            copies = read_record().copies
+        except (RuntimeError, ValueError):
+            unreadable = True
+            return None
+        return release_record.first_shipped(copies, release_record.key_of(d))
+
+    return first
+
+
+def _release_copies(
+    course_org: str,
+    semester_org: str,
+    pairs: list[tuple[Release, schedule.Deploy]],
+    now: datetime,
+    read_record: Callable[[], release_record.Record] | None = None,
+) -> tuple[int, bool]:
+    """Seed and ship this tick's due copies (`_sort_copies`) through ONE `deploy_many` - each
+    unique source and dest repo cloned once for the whole run - and record every one
+    that landed. A copy held at a conflict pull request is not recorded: students do not
+    have it, so it stays late and the next tick offers it again. Returns `(errors,
+    site_changed)`.
+
+    The record is read once (`read_record`, the tick's one read, shared with the cadence
+    check) and written at most once, only when something changed. One that cannot be
+    read releases nothing this tick: whether a copy has shipped is not known, and the next
+    tick asks again.
+
+    Nothing is written back to schedule.yml (`schedule.record_release_times`): a copy is
+    due here only once its planned moment has passed, so a scheduled ship is on time or
+    late, never early and never TBC - and the table of decision 0043 rule 3 writes nothing
+    for either."""
+    try:
+        record = (read_record or functools.partial(release_record.load, semester_org))()
+        ship, seed = _sort_copies(course_org, semester_org, pairs, record)
+    except (RuntimeError, ValueError) as exc:
+        log_err(
+            f"could not read what {semester_org} has released ({exc}) - "
+            f"no copy is released this tick"
+        )
+        return 1, False
+    for release, d, landed in seed:
+        record.seed(release.label, d, landed)
+        log(f"  [seed] {release.label}: already released - recorded, not copied")
+    done = len({release_record.key_of(d) for _r, d in pairs}) - len(ship) - len(seed)
+    if done:
+        log(f"  {plural(done, 'due copy', 'due copies')} already released")
+    errors, changed = 0, False
+    if ship:
+        entry = {release_record.key_of(d): r.label for r, d in ship}
+        try:
+            errors, changed, copies = deploy_many(
+                course_org, semester_org, [d for _r, d in ship], sync=False
+            )
+        except RuntimeError as exc:
+            log_err(f"the release stopped ({exc})")
+            errors, copies = 1, []
+        for c in copies:
+            if c.landed:
+                key = release_record.key_of(c.deploy)
+                record.ship(entry[key], c.deploy, c.commit, c.files, now, refresh=False)
+    if not record.save(semester_org):
+        log_err(f"could not write {release_record.PATH} in {semester_org}")
+        errors += 1
+    return errors, changed
+
+
 def _run_releases(
     course_org: str,
     semester_org: str,
     due: list[Release],
     now: datetime,
-    listing: dict[str, dict] | None,
+    read_record: Callable[[], release_record.Record] | None = None,
 ) -> tuple[int, bool]:
     """Fire every due release's due actions. Returns `(errors, site_changed)`. `now` gates
     each action individually: a deploy with its own deploy_datetime fires on its own clock,
     an entry's handout at its event_datetime - an entry can be due for one and not (yet)
-    the other.
+    the other. A due copy ships once (`_release_copies`).
 
     `site_changed` is "this pass moved something the semester website shows". The sync itself
     is `_release_phase`'s, so a tick that opens a team-formation window and fires a release
     still renders once - and a tick that moves only the window renders at all."""
     errors = 0
-    # Batch EVERY due release's due deploys through one deploy_many: each unique source
-    # and dest repo is cloned once for the whole run, not once per copy.
-    all_deploys = [d for release in due for d in release.due_deploys(now)]
-    deploy_errors, changed = 0, False
-    if all_deploys:
-        deploy_errors, changed = deploy_many(
-            course_org, semester_org, all_deploys, sync=False
+    pairs = [(release, d) for release in due for d in release.due_deploys(now)]
+    changed = False
+    if pairs:
+        errors, changed = _release_copies(
+            course_org, semester_org, pairs, now, read_record
         )
-        errors += deploy_errors
 
     # Assignment handouts run per release (they aren't file copies).
     did_assign = False
@@ -648,7 +864,7 @@ def _run_releases(
                 + (" + solution" if release.assignment_solution else "")
             )
             handout_errors, handout_changed = _execute_nondeploy(
-                course_org, semester_org, release, listing
+                course_org, semester_org, release
             )
             errors += handout_errors
             # Only a handout that PROVISIONED something has anything new to show the site.
@@ -689,7 +905,7 @@ def _solution_due(
     if entry.solution_datetime is None or entry.solution_datetime > now:
         return False
     cutoff = schedule.solution_cutoff(
-        sched, slug, submit_via=_submit_via(course_org, entry)
+        sched, slug, submit_via=_submit_via(course_org, sched, slug)
     )
     if cutoff is None or cutoff > now:
         reason = (
@@ -726,7 +942,7 @@ def _held_solution_faults(
     out = []
     for slug, entry in sched.assignments.items():
         cutoff = schedule.solution_held_until(
-            sched, slug, submit_via=_submit_via(course_org, entry)
+            sched, slug, submit_via=_submit_via(course_org, sched, slug)
         )
         if cutoff is None or cutoff <= now:
             continue
@@ -748,33 +964,25 @@ def _held_solution_faults(
 def _unnumbered(
     course_org: str, sched: schedule.Schedule
 ) -> tuple[list[ConfigFault] | None, set[str], set[str]]:
-    """Decision 0020 rule 3: the plan's entries that need a number and have none, as
-    `(faults for the schedule.yml digest, release labels held, assignment keys held)`.
+    """Decisions 0020 and 0038: the lectures and labs with no session and the
+    assignments with no number, as `(faults for the schedule.yml digest, release labels held, assignment keys held)`.
     Guarded: a read that fails holds nothing this tick and says so, and its faults are
-    None, so the digest is left as it is rather than cleared (`_preflight_sources`).
-    A release whose kind comes only from a `materials.yml` that does not parse is not
-    held either: one line says so."""
+    None, so the digest is left as it is rather than cleared (`_preflight_sources`)."""
     try:
-        kinds = kinds_reader(course_org)
-        missing = schedule_plan.unnumbered(sched, kinds)
+        missing = schedule_plan.unnumbered(sched)
         faults = schedule_plan.number_faults(missing)
-        unsure = sorted(
-            {
-                r.deploy[0].course_source_repo
-                for r in sched.releases
-                if schedule_plan.kind_unknown(r, kinds)
-            }
-        )
     except Exception as exc:
         log_err(f"could not check the schedule's numbers ({type(exc).__name__})")
         return None, set(), set()
-    if unsure:
-        log(
-            f"  [numbers] {', '.join(unsure)}: materials.yml does not parse, so an entry "
-            "whose kind only it decides needs no number this tick"
-        )
     releases = {m.key for m in missing if m.block == "releases"}
     return faults, releases, {m.key for m in missing if m.block == "assignments"}
+
+
+def _held_text(release: Release) -> str:
+    """Why a held release waits: its assignment's number, or its own session."""
+    if release.assignment_slug:
+        return schedule_plan.give_a_number(release.assignment_slug)
+    return schedule_plan.give_a_session(release.label)
 
 
 def _held(release: Release, releases: set[str], assignments: set[str]) -> bool:
@@ -819,6 +1027,10 @@ def _handout_releases(
     for slug, entry in sched.assignments.items():
         if entry.handout_datetime is None:
             continue
+        if entry.due_datetime is None:
+            # Dates to be confirmed: nothing fires until it has a due date.
+            log(f"  [skip] handout {slug} - {schedule_plan.give_a_due_date(slug)}")
+            continue
         template = _template_for(templates, course_org, slug, entry)
         if template is None:
             log(f"  [skip] handout {slug} - no template repo for it in {course_org}")
@@ -858,7 +1070,7 @@ def _preflight_sources(
     `None` is this tick failing to work those out at all, and it SKIPS the sync entirely,
     on the rule `_config_faults` states: absent from the map is not the same as no faults.
     An empty list is what closes the issue, so syncing the digest without the windows would
-    tell a semester whose teams.csv merely hit a rate limit that its standing team-formation
+    tell a semester whose team cells merely hit a rate limit that its standing team-formation
     fault had been fixed - a Cleared comment and a mail on one tick, and the same fault
     filed again as New on the next. Left exactly as it was instead, and the source faults
     wait a tick with it: a missed one is picked up by the next.
@@ -909,7 +1121,7 @@ def _preflight_sources(
     # Who to tell, asked ONCE and only if asked at all: the digest @mentions them and the
     # mail is addressed to them, so asking git twice would be two reads and two chances to
     # disagree - and `sync` calls this only on a tick with something to say, because the
-    # answer costs a blame query, a instructors.yml read and a commit lookup per repo.
+    # answer costs a blame query, a semester.yml read and a commit lookup per repo.
     routing = notify.Routing()
 
     def whom() -> list[str]:
@@ -982,7 +1194,6 @@ def _config_faults(
     course_org: str,
     semester_org: str,
     sched: schedule.Schedule,
-    listing: dict[str, dict] | None,
 ) -> dict:
     """Every hand-edited file in this semester's semester-config EXCEPT schedule.yml, and
     what is wrong with each. `{digest: faults}`, and a file left OUT of it is one this tick
@@ -1025,15 +1236,11 @@ def _config_faults(
     def read_roster(found: list) -> None:
         nonlocal students
         students = roster.load(semester_org, found)
+        # The team columns are students.csv's too, so their faults are its digest's.
+        if students is not None:
+            teams.parse(students, teams.columns(sched), found)
 
     collect(config_digest.ROSTER, read_roster)
-    # The roster is the allowlist teams.csv is vetted against, and only where it was
-    # actually read: an empty one would report every member as a stranger. `None` is a
-    # roster that is ABSENT as well as one whose read failed - a semester with no
-    # students.csv already has that fault in its own digest, and vetting against the
-    # empty set it implies would file one more teams.csv fault per row on top of it.
-    known = sync_teams.known_handles(students) if students is not None else None
-    collect(config_digest.TEAMS, lambda found: teams.load(semester_org, found, known))
     # The grading sheets, on this tick and no other: they have no push fast path, because a
     # sheet is edited all day while somebody marks and a mail per save would be a mail
     # about a file still being typed into.
@@ -1057,11 +1264,11 @@ def _config_faults(
     collect(
         config_digest.GRADING_CONFIG,
         lambda found: grading_config_faults(
-            course_org, semester_org, sched, found, listing
+            course_org, semester_org, sched, found, _listing(semester_org)
         ),
     )
     # The same pass checks the semester's own run settings against the handed-out repos:
-    # those faults are about assignments.yml, and go in its issue.
+    # those faults are about semester.yml's defaults, and go in their issue.
     if config_digest.GRADING_CONFIG in out:
         (
             out[config_digest.GRADING_CONFIG],
@@ -1087,7 +1294,7 @@ def _sync_config_digest(
 
     `route` is who to tell, for a digest that answers that differently: the COURSE-level
     one is addressed to the course admins out of an org secret rather than to a semester's
-    teaching team out of its instructors.yml. Everything else about the two is identical, which
+    teaching team out of its semester.yml. Everything else about the two is identical, which
     is why it is one function and one parameter."""
     routing = notify.Routing()
     ask = route or (lambda: notify.route(semester_org, course_org, faults, local))
@@ -1138,7 +1345,6 @@ def _preflight_configs(
     sched: schedule.Schedule,
     now: datetime,
     dry_run: bool,
-    listing: dict[str, dict] | None,
 ) -> int:
     """Check every hand-edited file in this semester's semester-config and keep one digest
     issue per file in step. Always returns 0.
@@ -1146,16 +1352,14 @@ def _preflight_configs(
     The hourly floor under the push fast path. An edit that leaves students.csv unreadable
     fires the dispatcher and is mailed within the minute; this is what catches the one
     that was pushed before any of this existed, the one whose dispatch failed, and the
-    instructors.yml entry whose `end:` date lapsed while nobody was pushing anything.
+    semester.yml entry whose `end:` date lapsed while nobody was pushing anything.
 
     Nothing here fails the run, at any rung, for the reason `_preflight_sources` does not:
     a file faculty have to fix is a CONTENT fault, and the exit code belongs to the run
     itself. The signature keeps its int so the caller's `errors +=` reads the same as
     every other phase."""
     local = schedule.in_semester_zone(sched, now)
-    for spec, faults in _config_faults(
-        course_org, semester_org, sched, listing
-    ).items():
+    for spec, faults in _config_faults(course_org, semester_org, sched).items():
         if faults:
             log_step(
                 f"{len(faults)} entr(y/ies) in {semester_org}'s {spec.cite_file()} the "
@@ -1171,7 +1375,7 @@ def _course_faults(course_org: str) -> tuple[list | None, set[str]]:
 
     None is not "no faults", for the reason `_config_faults` gives: syncing the digest with
     an empty list closes its issue and tells the course its config is fine, and a rate
-    limit on dsl-course.yml is not that. A file that is MISSING or MALFORMED is a fault and
+    limit on course.yml is not that. A file that is MISSING or MALFORMED is a fault and
     comes back in the list - both readers draw that line themselves.
 
     The handles ride along because the degraded-mode log line counts them (see
@@ -1198,7 +1402,7 @@ def _preflight_course(course_org: str, now: datetime, dry_run: bool) -> int:
     """Check the COURSE org's own hand-edited config and keep its digest issue in step.
     Always returns 0.
 
-    ONCE PER RUN, not once per semester: `dsl-course.yml` and the semester registry belong to
+    ONCE PER RUN, not once per semester: `course.yml` and the semester registry belong to
     the course, and a course admin asked to fix one of them wants one issue, not one per
     semester saying the same thing.
 
@@ -1238,7 +1442,6 @@ def _refresh_sheets(
     sched: schedule.Schedule,
     now: datetime,
     dry_run: bool,
-    listing: dict[str, dict] | None,
     templates: dict[str, str | None] | None = None,
 ) -> int:
     """Keep every open assignment's grading sheet current: one pass, after the freeze.
@@ -1252,8 +1455,8 @@ def _refresh_sheets(
     shipped (or one whose handout ran before the sheet had rows) gets one on the next
     tick rather than never.
 
-    `listing` is the tick's own (see `run`): every sheet refreshed in one pass reads the
-    same rows, where each used to take a listing of its own."""
+    Every sheet refreshed in one pass reads the tick's own listing (`_listing`), where
+    each used to take a listing of its own."""
     sealed = {
         schedule.semester_name(slug, sched.assignments[slug])
         for slug, _ in due_snapshots(course_org, sched, now)
@@ -1284,7 +1487,7 @@ def _refresh_sheets(
             template,
             is_group=is_group,
             now=now,
-            listing=listing,
+            listing=_listing(semester_org),
         ).written:
             errors += 1
     return errors
@@ -1313,27 +1516,29 @@ def _no_archive_date(sched: schedule.Schedule) -> list[ConfigFault]:
         return []
     if sched.archive is not None:
         what = (
-            "this semester's `archive:` block names no `event_datetime:` and the semester "
-            "no `semester_end`, so its archive date cannot be derived - nothing will "
-            "ever archive it"
+            "this semester's `type: archive` entry names no `event_datetime:` and the "
+            "semester no `type: end` entry, so its archive date cannot be derived - "
+            "nothing will ever archive it"
         )
         fix_text = (
-            "give the `archive:` block an `event_datetime:`, or add a `semester_end:`"
+            "give the `semester:` block's archive entry an `event_datetime:`, or add a "
+            "`type: end` entry"
         )
     else:
         what = (
-            "this semester writes no `archive:` block, so nothing will ever archive it - "
+            "this semester's `semester:` block has no `type: archive` entry, so nothing "
+            "will ever archive it - "
             "it stays live, writable and joinable after the semester ends"
         )
         fix_text = (
-            "add an `archive:` block; empty, it archives the semester 60 days after "
-            "`semester_end`"
+            "add `archive: {type: archive}` to the `semester:` block; with no date, it "
+            "archives the semester 60 days after its end"
         )
     return [
         ConfigFault(
             "",
             what,
-            field="archive",
+            field=schedule.SEMESTER_BLOCK,
             file=schedule.SCHEDULE_PATH,
             ceiling=Severity.ADVISORY,
             fix_text=fix_text,
@@ -1364,7 +1569,7 @@ def _archive_notice_body(
     the docs its own workflows are checked out at rather than on whatever `release`
     happens to hold."""
     # The mark goes in ONLY when a mail actually went. It is the whole of this issue's
-    # state, so stamping it on a tick that sent nothing - no address in instructors.yml, no
+    # state, so stamping it on a tick that sent nothing - no address in semester.yml, no
     # mail transport wired up - would record a mail that never happened and every later
     # tick would read it and stay quiet. Unstamped, the fortnight goes on offering it, and
     # the tick after somebody fixes the transport sends it.
@@ -1394,7 +1599,7 @@ _CALLED_OFF_COMMENT = (
     "This notice no longer matches `semester-config/schedule.yml`: the archive date has "
     "been moved, or the `archive:` block taken away - and a semester with no block is "
     "never archived automatically. Nothing was archived. If the semester should still be "
-    "archived, the **Archive semester** button does it."
+    "archived, the Instructor Console's **Archive** does it."
 )
 
 
@@ -1467,7 +1672,7 @@ def _archive_notice(
         central_ref = discovery.central_ref_for(course_org)
     except Exception:
         # Every exception, not just the RuntimeError a bad ref raises: this reads the
-        # course org's `dsl-course.yml`, and a notice that failed over one unreadable
+        # course org's `course.yml`, and a notice that failed over one unreadable
         # line in it would leave a semester with no warning that it freezes in a
         # fortnight. The default tier is the right guess, and the link still resolves.
         central_ref = CENTRAL_REF
@@ -1537,7 +1742,6 @@ def _reprivatise_student_repos(
     sched: schedule.Schedule,
     now: datetime,
     dry_run: bool,
-    listing: dict[str, dict] | None,
 ) -> int:
     """Put every `visibility: student_choice` repo back to private that has been published
     BEFORE its grading cutoff. Returns the error count.
@@ -1550,12 +1754,13 @@ def _reprivatise_student_repos(
     this pass never touches a visibility again, which is what makes the promise on the
     assignment page true.
 
-    Off the tick's OWN listing (`run`), which already carries each row's `visibility`: one
+    Off the tick's OWN listing (`_listing`), which already carries each row's `visibility`: one
     PATCH per offending repo and no read of its own. A listing that could not be taken is
     "we could not look", and nothing is flipped on the strength of that.
 
     `repos.listed_is_private` is optimistic - an unknown row answers private - so a row
     that does not say `public` is left alone rather than PATCHed on a guess."""
+    listing = _listing(semester_org)
     if not listing:
         return 0
     errors = 0
@@ -1614,9 +1819,9 @@ def _team_formation_phase(
 ) -> tuple[int, bool]:
     """Bring the team-formation lock up to this moment. Returns `(errors, lock_changed)`.
 
-    `windows` is this tick's roster x teams.csv diff, already read for the pre-flight's
+    `windows` is this tick's roster x the team cells diff, already read for the pre-flight's
     fault (`_release_phase`) and handed on rather than read again - it costs students.csv,
-    teams.csv and a definition per assignment. None is a semester this tick could not read.
+    the team cells and a definition per assignment. None is a semester this tick could not read.
 
     The window it carries is computed from datetimes, so nothing else in the semester has to
     happen for one to open or shut - and until this ran on the tick, nothing did: the lock
@@ -1692,7 +1897,6 @@ def _release_phase(
     now: datetime,
     dry_run: bool,
     verdict: cadence.Verdict | None,
-    listing: dict[str, dict] | None,
     defer_site_sync: bool = False,
     fired: set[str] | None = None,
 ) -> int:
@@ -1703,8 +1907,8 @@ def _release_phase(
     `verdict` is the cadence reading `main` took once for the whole course; None means this
     invocation does not report lateness at all (see `main`).
 
-    `listing` is this tick's one listing of the semester (see `run`), handed to each pass
-    below in the order they already run in. None means it could not be read.
+    Every pass below reads this tick's one listing of the semester (`_listing`). None
+    means it could not be read.
 
     `fired` gets `semester_org` when this pass released, handed out, froze or asked for
     marks to go back (see `run`)."""
@@ -1736,6 +1940,9 @@ def _release_phase(
     # window are `created_at` instants (`verdict.now` is this run's own), so the gap is on
     # GitHub's clock rather than a runner clock that also carries this run's queue delay.
     errors = 0
+    # The release record, read on first need and once: by the lateness check for a moment
+    # it would report, else by the releases below.
+    read_record = functools.cache(functools.partial(release_record.load, semester_org))
     if verdict is not None and not dry_run:
         try:
             errors += cadence.report_semester(
@@ -1748,9 +1955,10 @@ def _release_phase(
                     verdict.prev_executed_at,
                     verdict.now,
                     submit_vias={
-                        slug: _submit_via(course_org, entry)
-                        for slug, entry in sched.assignments.items()
+                        slug: _submit_via(course_org, sched, slug)
+                        for slug in sched.assignments
                     },
+                    first_shipped=_first_shipped(read_record),
                 ),
                 dry_run,
             )
@@ -1762,21 +1970,17 @@ def _release_phase(
     # snapshot. Independent of the release plan - a semester can pin due dates without
     # scheduling a single release.
     errors += _snapshot_passed_deadlines(
-        course_org, semester_org, sched, now, dry_run, listing, templates, fired
+        course_org, semester_org, sched, now, dry_run, templates, fired
     )
     # Then the sheets, in the same pass and straight after: the freeze has just settled
     # every assignment past its cutoff, and everything else that is past its DUE date
     # gets its `info:` refreshed here.
-    errors += _refresh_sheets(
-        course_org, semester_org, sched, now, dry_run, listing, templates
-    )
+    errors += _refresh_sheets(course_org, semester_org, sched, now, dry_run, templates)
     # And then the one shape whose visibility the toolkit does not own: a `student_choice`
     # repo published before its cutoff is closed again here. After the freeze above, so a
     # repo made public on the morning of the deadline is still snapshotted from the work
     # in it; before the releases below, because nothing a handout does depends on it.
-    errors += _reprivatise_student_repos(
-        course_org, semester_org, sched, now, dry_run, listing
-    )
+    errors += _reprivatise_student_repos(course_org, semester_org, sched, now, dry_run)
     # WHO is still waiting for a team, read ONCE for the whole tick and handed to both
     # passes that want it. Above the pre-flight because the fault it produces belongs in
     # the schedule.yml digest that pass already syncs - the entry a reader would edit is in
@@ -1812,10 +2016,10 @@ def _release_phase(
         ],
     )
     # The same treatment for every other file faculty edit by hand: a roster nobody can be
-    # enrolled from, a instructors.yml entry that grants nothing, a teams.csv row that will not
+    # enrolled from, a semester.yml entry that grants nothing, a team cell that will not
     # materialise. Each has its own digest issue and its own mail, and none of them can
     # red this run either.
-    errors += _preflight_configs(course_org, semester_org, sched, now, dry_run, listing)
+    errors += _preflight_configs(course_org, semester_org, sched, now, dry_run)
     # Last before the releases, and ABOVE the dry-run return so a preview says what it
     # would write: the team-formation window is pure datetime arithmetic, so this is the
     # pass that makes one open and shut on its own clock rather than whenever something
@@ -1835,12 +2039,16 @@ def _release_phase(
             log(
                 f"    PREVIEW  [{key}] return {key}'s marks (marks_return_datetime reached)"
             )
-        decisions = dry_run_decisions(
-            course_org, semester_org, sched, due, now, listing
-        )
+        decisions = dry_run_decisions(course_org, semester_org, sched, due, now)
         decisions += [
-            Decision(ref, schedule_plan.NOT_NUMBERED, schedule_plan.give_a_number(ref))
-            for ref in (r.assignment_slug or r.label for r in held)
+            Decision(
+                r.assignment_slug or r.label,
+                schedule_plan.NOT_NUMBERED
+                if r.assignment_slug
+                else schedule_plan.NO_SESSION,
+                _held_text(r),
+            )
+            for r in held
         ]
         for decision in decisions:
             log(decision.line())
@@ -1848,8 +2056,7 @@ def _release_phase(
         return Summary(preview.text, preview.counts, preview.reasons, code=errors)
 
     for r in held:
-        ref = r.assignment_slug or r.label
-        log(f"  [skip] {ref} - {schedule_plan.give_a_number(ref)}")
+        log(f"  [skip] {r.assignment_slug or r.label} - {_held_text(r)}")
     due = [r for r in due if not _held(r, held_releases, held_assignments)]
     release_changed = False
     if not releases:
@@ -1862,7 +2069,7 @@ def _release_phase(
         log_ok("nothing due.")
     else:
         release_errors, release_changed = _run_releases(
-            course_org, semester_org, due, now, listing
+            course_org, semester_org, due, now, read_record
         )
         errors += release_errors
     return_errors = _return_marks(course_org, semester_org, sched, marks_ready)
@@ -1884,8 +2091,8 @@ def _release_phase(
     # mean carrying "the site owes a render" somewhere durable, which is a second piece of
     # semester state to write, read and get wrong for a page that is a day stale at worst.
     if (release_changed or lock_changed) and defer_site_sync:
-        # A run fired by a semester-config push, which (for schedule.yml, instructors.yml or
-        # teams.csv) started Sync site too: rendering here as well pushed the site repo
+        # A run fired by a semester-config push, which (for schedule.yml, semester.yml or
+        # the team cells) started Sync site too: rendering here as well pushed the site repo
         # alongside it and lost the race. Queued behind Sync site's own concurrency group
         # instead, so the render lands after this release.
         errors += _request_site_sync(course_org, semester_org)
@@ -1990,12 +2197,12 @@ def run(
     preview: Summary | None = None
     if sched.instance_unparseable:
         # Every run setting is unknown, so nothing here may act on a default the semester
-        # did not choose. The tick stays green. The fault goes out on assignments.yml's own
+        # did not choose. The tick stays green. The fault goes out on semester.yml's defaults
         # digest, and the schedule.yml digest is HELD: its window, number, marks-return
         # and held-solution faults cannot be worked out without the settings, and syncing
         # it without them posted Cleared for each (and a mail), then New again once fixed.
         log_err(
-            f"{semester_org}/{schedule.CONFIG_REPO}/{schedule.ASSIGNMENTS_FILE} is not "
+            f"{semester_org}/{schedule.CONFIG_REPO}/{schedule.SEMESTER_FILE} is not "
             f"valid YAML - nothing is released, handed out or graded until it is fixed"
         )
         if release:
@@ -2004,7 +2211,7 @@ def run(
                 config_digest.ASSIGNMENTS,
                 course_org,
                 semester_org,
-                [f for f in sched.faults if f.file == schedule.ASSIGNMENTS_FILE],
+                [f for f in sched.faults if f.file == schedule.SEMESTER_FILE],
                 schedule.in_semester_zone(sched, now),
                 dry_run,
             )
@@ -2017,28 +2224,34 @@ def run(
         # every handout. Each used to take one of its own, so the cost grew with the number
         # of ASSIGNMENTS a semester carries rather than with the number of semesters.
         #
+        # It is held by the run (`Run.listings`, read through `_listing`) for exactly this
+        # tick, rather than handed down through every pass.
+        #
         # It is MUTABLE, and the handouts write back into it every repo and gradebook they
         # create (`discovery.listing_row`): a tick fires every handed-out release, so the
         # second one has to see what the first just made or it makes it again and counts
         # GitHub's refusals as failures. That is what keeps this at one listing per tick.
         #
-        # None is "we could not look", and it is handed down AS None - never as an empty
+        # None is "we could not look", and it is held AS None - never as an empty
         # org - because each pass reads it in its own way: the digest reports nothing, the
         # freeze and the sheets take a listing of their own, the re-privatise flips
         # nothing, and no receipt is posted on a repo nobody could confirm is private.
         # Not taken for the autograde phase, which asks the org nothing.
-        listing = discovery.listing_by_name(semester_org)
-        phase = _release_phase(
-            course_org,
-            semester_org,
-            sched,
-            now,
-            dry_run,
-            verdict,
-            listing,
-            defer_site_sync,
-            fired,
-        )
+        listings = current_run().listings
+        listings[semester_org.casefold()] = discovery.listing_by_name(semester_org)
+        try:
+            phase = _release_phase(
+                course_org,
+                semester_org,
+                sched,
+                now,
+                dry_run,
+                verdict,
+                defer_site_sync,
+                fired,
+            )
+        finally:
+            listings.pop(semester_org.casefold(), None)
         errors += phase
         if isinstance(phase, Summary):
             preview = phase
@@ -2156,7 +2369,7 @@ def main() -> int:
     parser.add_argument(
         "--check-course-config",
         action="store_true",
-        help="Pre-flight the COURSE org's own dsl-course.yml and semester registry, keep "
+        help="Pre-flight the COURSE org's own course.yml and semester registry, keep "
         "its digest issue in step, and exit 0. What Sync membership runs on a push to "
         "either file - the fast path under this cron's own hourly floor.",
     )

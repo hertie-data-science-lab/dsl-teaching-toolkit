@@ -20,6 +20,7 @@ import { Hint } from '../ui/Hint';
 import { MoreMenu, WithStatus, cohortScope, todayOf, tzOf, useOperations, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 import { CONFIG_REPO } from '../model/names';
+import { SemesterSettingsPanel } from './SemesterSettings';
 
 export function readSchedule(p: CohortProps): Schedule | null {
   const f = p.files.file(p.cohort.org, CONFIG_REPO, 'schedule.yml');
@@ -55,8 +56,8 @@ export function headerLine(status: Status, sched: Schedule | null, tz: string, t
   return out.join(' ');
 }
 
-const KIND_ORDER = ['lec', 'lab', 'asg', 'exam', 'evt', 'term'];
-const KIND_WORD: Record<string, string> = { lec: 'lecture', lab: 'lab', asg: 'assignment', exam: 'exam', evt: 'event', term: 'semester date' };
+const KIND_ORDER = ['lec', 'lab', 'asg', 'exam', 'evt', 'semester'];
+const KIND_WORD: Record<string, string> = { lec: 'lecture', lab: 'lab', asg: 'assignment', exam: 'exam', evt: 'event', semester: 'semester date' };
 
 /** A week's badge on the strip: how many problems, and whether they are all later (hollow). */
 export interface WeekCount { n: number; later: boolean }
@@ -286,7 +287,7 @@ export const SEMESTER_STEPS: { id: string; name: string }[] = [
 const K_HINT: Record<string, string> = {
   K1: 'The console and automation can read the semester’s GitHub org.',
   K2: 'The semester’s repos exist (semester-config, join and the student site) and the course lists the semester.',
-  K3: 'At least one instructor in instructors.yml, on the Instructors page.',
+  K3: 'At least one instructor in semester.yml, on the Instructors page.',
   K4: 'schedule.yml with the semester’s start and end and at least one release or assignment.',
   K5: 'At least one student on the roster (students.csv).',
   K6: 'The student site’s repo exists.',
@@ -321,7 +322,7 @@ export function semesterItems(status: Status, tiered: Tiered[], list: string[] |
       aside: todoAside(t, list),
     };
   });
-  // A set-aside gap (an empty week, decision 0032, or a release with nothing to release) has no row of its own once set aside: list it here so it can be brought back.
+  // A set-aside gap (an empty week, decision 0032, a release with nothing to release, or a released folder's divergence, decision 0043) has no row of its own once set aside: list it here so it can be brought back.
   const weeks: SetupItem[] = (list ?? []).flatMap((id) => {
     const label = gapLabel(id);
     return label ? [{ id, label, kind: 'todo' as const, need: 'suggested' as const, state: 'open' as const, aside: true }] : [];
@@ -440,7 +441,7 @@ export function AutomationHead({ heartbeat, now }: { heartbeat: CohortProps['hea
   );
 }
 
-function Overview(p: ReadyProps) {
+function Overview(p: ReadyProps & { settings?: boolean }) {
   const { status, now } = p;
   const tz = tzOf(status), year = yearOf(now, tz), today = todayOf(now, tz);
   const sched = readSchedule(p);
@@ -453,7 +454,7 @@ function Overview(p: ReadyProps) {
   const [selected, setSelected] = useState<number[]>(thisWeek);
   // Every problem with its time, once per render (decision 0034): now or soon are the strip's red
   // counts and the Problems tab; later ones are Coming up.
-  const aside = useSetAside({ org: p.course.org, files: p.files, migrated: p.courseMigrated, write: p.course.write });
+  const aside = useSetAside({ org: p.course.org, files: p.files, write: p.course.write });
   // An empty week the course set aside leaves the moment the list says so, before the status is rewritten.
   const tiered = useMemo(() => tier(status).filter(({ p: x }) => !(x.aside && aside.list?.includes(x.id))), [status, aside.list?.join('\n')]);
   const marks = useMemo(() => releaseMarks(status, tiered, now), [status, tiered, now]);
@@ -545,15 +546,17 @@ function Overview(p: ReadyProps) {
             <OpsList list={ops.slice(0, 3)} now={now} runRepo={`${p.course.org}/.github`} />
           </section>
         </div>
+        <SemesterSettingsPanel p={p} open={p.settings} />
       </div>
     </>
   );
 }
 
-export function CohortScreen(p: CohortProps) {
+/** The semester's Dashboard; `settings` (the `#settings` route) opens its Semester settings. */
+export function CohortScreen(p: CohortProps & { settings?: boolean }) {
   return (
     <WithStatus props={p} title="Dashboard">
-      {(r) => <Overview {...r} />}
+      {(r) => <Overview {...r} settings={p.settings} />}
     </WithStatus>
   );
 }

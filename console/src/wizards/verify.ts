@@ -10,7 +10,7 @@ import { GitHubError, type GitHubClient, type TreeEntry } from '../github/client
 import { poll } from '../github/poll';
 import { COURSE_HUB_TOPIC, REGISTRY_PATH, parseRegistry, type TokenKind } from '../model/discovery';
 import { APP_SLUG, BOT } from './model';
-import { CONFIG_REPO, COURSE_REPO, JOIN_REPO } from '../model/names';
+import { CONFIG_REPO, COURSE_FILE, COURSE_REPO, JOIN_REPO } from '../model/names';
 
 export interface Check {
   text: string;
@@ -93,10 +93,10 @@ export async function checkCourseSetUp(client: GitHubClient, org: string): Promi
     const topics = repo ? repo.topics ?? (await client.getRepoTopics(org, COURSE_REPO)) : [];
     const hub = !!repo && topics.includes(COURSE_HUB_TOPIC);
     const [meta, consoleWf] = hub
-      ? await Promise.all([client.getContents(org, COURSE_REPO, 'dsl-course.yml'), client.getContents(org, COURSE_REPO, '.github/workflows/console.yml')])
+      ? await Promise.all([client.getContents(org, COURSE_REPO, COURSE_FILE), client.getContents(org, COURSE_REPO, '.github/workflows/console.yml')])
       : [null, null];
     return [
-      { text: 'Course settings are in place (dsl-course.yml)', ok: hub && !!meta, hint: hub ? undefined : 'Set up the course; it takes a few minutes.' },
+      { text: `Course settings are in place (${COURSE_FILE})`, ok: hub && !!meta, hint: hub ? undefined : 'Set up the course; it takes a few minutes.' },
       { text: 'The Console workflow is in place', ok: !!consoleWf, hint: consoleWf ? undefined : 'Added by the set-up run.' },
     ];
   } catch (e) {

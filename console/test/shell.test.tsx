@@ -12,7 +12,7 @@ import { ConsoleAuth } from '../src/auth/console';
 import { PatAuth } from '../src/auth/pat';
 import { GitHubClient } from '../src/github/client';
 import type { Course, Semester } from '../src/model/discovery';
-import { movedHash, parseHash, parseSearch, resolveContext } from '../src/router';
+import { parseSearch, resolveContext } from '../src/router';
 import { SignInScreen } from '../src/screens/Home';
 import { Sidenav, Topbar } from '../src/ui/shell';
 import { FakeGitHub } from './fake';
@@ -23,16 +23,6 @@ const course: Course = { org: 'hertie-dsl-demo-course-e1234', name: 'Machine Lea
 const text = (v: preact.VNode) => render(v).replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&rsquo;/g, '’').replace(/\s+/g, ' ');
 
 describe('router', () => {
-  it('lands an old #setup on Profile and #marks on Assignments in both consoles, and a student’s #join on Assignments', () => {
-    expect(parseHash('#setup')).toEqual({ screen: 'profile' });
-    expect(movedHash('#setup')).toBe('#profile');
-    expect(parseHash('#setup', true)).toEqual({ screen: 'profile' });
-    expect(movedHash('#setup', true)).toBe('#profile');
-    for (const old of ['#marks', '#join']) expect(movedHash(old, true)).toBe('#assignments');
-    expect(movedHash('#marks')).toBe('#assignments');
-    expect(movedHash('#join')).toBeNull();
-    expect(movedHash('#profile')).toBeNull();
-  });
   it('makes Home about no course or semester, whatever the query names', () => {
     const home = { screen: 'home' };
     expect(resolveContext([course], parseSearch('?cohort=hertie-dsl-demo-f2026'), home)).toEqual({});

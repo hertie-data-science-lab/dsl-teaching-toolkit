@@ -24,21 +24,18 @@ from . import issues, notify, policy, scaffold, welcome
 from .course import (
     INSTRUCTORS_TEAM,
     active_today,
+    course_admins,
     is_repo_root,
     pages_repo,
     people_by_role,
 )
 from .discovery import course_org_for_semester, list_org_repos
-from .gh_contents import load_yaml_config
 from .gh_teams import acting_login
 from .ghcli import GIT_ENV, clone, gh, git, is_missing_resource
 from .log import Summary, log, log_err, log_ok, log_step, plural
 from .readings import is_reading_overlay
-from .repos import has_never_material_component, repo_exists, repo_is_archived
-
-# RETIRED (decision 0016): the settings an older publish committed into the site repo.
-# `opencourse.yml` holds them now; every publish deletes this, the migration reads it.
-PUBLISH_CONFIG = "_publish-config.yml"
+from .repos import repo_exists, repo_is_archived
+from .selection import is_clutter
 
 # The shared Jekyll theme, and the ref every generated site pins it at.
 #
@@ -110,7 +107,7 @@ def slug(text: str) -> str:
 def q(value: str) -> str:
     """Quote-safe a value for a ONE-LINE double-quoted YAML scalar: escape the two
     characters that are special inside one (`\\` and `"`), and fold newlines away - a
-    multi-line value (a faculty `>` block in dsl-course.yml, say) would otherwise write a
+    multi-line value (a faculty `>` block in course.yml, say) would otherwise write a
     raw newline mid-scalar and break the file it lands in."""
     return " ".join(value.replace("\\", "\\\\").replace('"', "'").split())
 
@@ -168,10 +165,10 @@ def site_readme(org: str, semester: bool) -> str:
     # page this site does not have - or omit one it rewrites.
     tab_pages = ", ".join(f"`{pg.file}`" for pg in _site_pages(semester))
     source = (
-        "the semester's `semester-config/` files (`schedule.yml`, `instructors.yml`) and what "
+        "the semester's `semester-config/` files (`schedule.yml`, `semester.yml`) and what "
         "the course org actually releases"
         if semester
-        else "the course org's `.github/dsl-course.yml` and the materials repo it publishes"
+        else "the course org's `.github/course.yml` and the materials repo it publishes"
     )
     return (
         f"<!-- SYSTEM-OWNED - do not edit. Generated and redeployed by the DSL course "
@@ -226,7 +223,7 @@ def _stamp_config(text: str, keys: list[str]) -> str:
     """Correct `_config.yml`'s "Edit the fields below" header for the keys the sync owns.
 
     The template's header invites faculty to edit the fields under it - true of most of
-    them, but not of the course-identity keys this sync overwrites from `dsl-course.yml`
+    them, but not of the course-identity keys this sync overwrites from `course.yml`
     every run. Naming exactly which keys are machine-written keeps the rest of the header's
     invitation honest. A template that has dropped the line is left alone: the header is
     theme text, not a contract, and a missing line is not worth a failed sync."""
@@ -238,7 +235,7 @@ def _stamp_config(text: str, keys: list[str]) -> str:
         line,
         "# Edit the fields below for your course - EXCEPT the course-identity keys the DSL\n"
         f"# course sync owns and rewrites on every run: {owned}.\n"
-        "# Change those in the course org's .github/dsl-course.yml instead.\n",
+        "# Change those in the course org's .github/course.yml instead.\n",
         1,
     )
 
@@ -392,25 +389,6 @@ _SEMESTER_PAGES = (
     ),
 )
 
-# A page the sync wrote for a tab the PUBLIC site no longer has (its Assignments tab).
-_RETIRED_PAGES = re.compile(
-    r"\A---\nlayout: (assignments|materials|profile)\ntitle: .*\npermalink: /"
-)
-
-
-def retired_pages(site_wd: Path, names: Iterable[str]) -> tuple[str, ...]:
-    """Those of `names` that are a retired tab's page the sync wrote (never one somebody
-    wrote by hand)."""
-    pages = []
-    for name in names:
-        try:
-            text = (site_wd / name).read_text(encoding="utf-8")
-        except OSError:
-            continue
-        if _RETIRED_PAGES.match(text):
-            pages.append(name)
-    return tuple(pages)
-
 
 def console_yaml(semester_org: str, console: bool) -> str:
     """`_data/console.yml`: where the banner sends a reader - this semester's screens in
@@ -451,19 +429,11 @@ _KIND_ICONS = {
 _KIND_ICON = "fas fa-folder"
 
 
-def tab_word(word: str) -> str:
-    """A kind's key or label as a tab name: `lab` -> `labs`, `readings` stays. No
-    inflection library: one trailing `s`."""
-    return word if word.endswith("s") else f"{word}s"
-
-
 def kind_tab(kind: dict) -> _ThemePage:
-    """The tab page listing one kind's rows: `lecture` -> Lectures at `/lectures/`, the
-    permalinks every existing site already has."""
-    # `other` is where an unknown kind lands: its tab says so, whatever the row label.
-    other = kind["key"] == policy.FALLBACK_KIND
-    slug_ = "other" if other else tab_word(kind["key"])
-    title = "Other" if other else tab_word(kind["label"])
+    """The tab page listing one kind's rows, named by the kind's policy `plural`:
+    `lecture` -> Lectures at `/lectures/`, the permalinks every existing site already has."""
+    slug_ = kind["plural"]
+    title = slug_[:1].upper() + slug_[1:]
     return _ThemePage(
         f"{slug_}.md",
         "kind",
@@ -615,19 +585,6 @@ def seed_templates() -> dict[str, str]:
     }
 
 
-def yaml_file(org: str, repo: str, path: str, confirm_absent: bool = True) -> dict:
-    """A YAML config file from a repo as a mapping - `{}` when it is genuinely absent or
-    empty (nothing declared: the site renders its defaults, which is correct).
-
-    A file that exists but does NOT parse - or parses to a list/scalar - raises out of
-    here (via load_yaml_config), to the per-semester isolation the callers already have. It
-    used to be coerced to `{}`, so one bad indent in a semester's instructors.yml republished the
-    site with the whole teaching team's cards wiped, green - exactly the failure
-    `_team_people` next door is hardened against. Absent is confirmed for the same reason:
-    a spurious 404 republishes the site without the cards."""
-    return load_yaml_config(org, repo, path, confirm_absent=confirm_absent) or {}
-
-
 def _team_people(course_org: str, team: str) -> list[tuple[str, str, str]]:
     """(display-name, avatar-url, profile-url) for each member of a course-org team.
 
@@ -731,15 +688,15 @@ def people_cards(
     meta: dict, *, semester: bool = False
 ) -> tuple[list[dict], list[dict]] | None:
     """Declared people from a `people:` block - either the COURSE org's
-    `.github/dsl-course.yml` (course site: instructors only, TAs are never declared
-    there) or a semester's own `semester-config/instructors.yml` (semester site: instructors
+    `.github/course.yml` (course site: instructors only, TAs are never declared
+    there) or a semester's own `semester-config/semester.yml` (semester site: instructors
     AND TAs). Same schema either way.
 
     Returns `(instructors, teaching_assistants)` as lists of **card dicts** keyed the way
     the Jekyll theme reads them, for entries active today (per optional start/end dates)
     that also declare a display `name`; or None when there is no `people:` block at all
     (then fall back to the GitHub teams). Schema (templates/course/people-header.yml +
-    people-cards.yml for the course org's block, templates/semester-config/instructors.yml
+    people-cards.yml for the course org's block, templates/semester-config/semester.yml
     for a semester's):
 
         people:
@@ -767,7 +724,12 @@ def people_cards(
     course chooses to add rides along verbatim, so a new field needs a theme change but no
     change here.
     """
-    people = people_by_role(meta, semester=semester)
+    # A course's open site shows its course admins as its leads (decision 0039 rule 3).
+    people = (
+        people_by_role(meta)
+        if semester
+        else ({"instructors": course_admins(meta)} if course_admins(meta) else None)
+    )
     if people is None:
         return None
     today = date.today().isoformat()
@@ -794,8 +756,8 @@ def people_yaml(
     semester: bool = False,
 ) -> str:
     """Build _data/people.yml. Prefer the declared `people:` block in the supplied meta
-    (the course org's dsl-course.yml for the course site, a semester's semester-config/
-    instructors.yml for the semester site); else fall back to the GitHub `instructors` team of
+    (the course org's course.yml for the course site, a semester's semester-config/
+    semester.yml for the semester site); else fall back to the GitHub `instructors` team of
     `org` (GitHub display name + avatar + profile link).
 
     `edit_at` names the file a human should edit instead - every sync rewrites this one,
@@ -983,19 +945,6 @@ def file_link(
 _BROWSE_ALL = "browse the folder"
 
 
-def link_extensions(meta: dict) -> frozenset[str]:
-    """`site_link_extensions` from a course's `dsl-course.yml`, lowercased and dot-stripped.
-
-    The OPTIONAL allowlist narrowing what a session row links (see `shape_links`); absent
-    or empty means the default folder-shaped listing. A bare string
-    (`site_link_extensions: pdf, html`) is accepted alongside a list - it is the shape
-    faculty reach for first, and refusing it would only produce a silently unfiltered site."""
-    raw = meta.get("site_link_extensions") or []
-    if isinstance(raw, str):
-        raw = raw.replace(",", " ").split()
-    return frozenset(str(x).strip().lstrip(".").lower() for x in raw if str(x).strip())
-
-
 def shape_links(
     blobs: list[Link], tree_base: str, allow: frozenset[str], base: str = ""
 ) -> list[Link]:
@@ -1012,7 +961,8 @@ def shape_links(
       folder's root links to the file; each immediate subfolder gets ONE link to its tree,
       named with its file count. Nothing to configure, and a course that keeps handouts in
       `handouts/` reaches them in one more click rather than losing them.
-    - ALLOWLIST (`site_link_extensions`) - only files with those extensions, at any depth,
+    - ALLOWLIST (`allow`; no course file sets it since decision 0039 dropped
+      `site_link_extensions`) - only files with those extensions, at any depth,
       plus one "browse the folder" link, so a file the list does not name is still one
       click away instead of invisible.
 
@@ -1021,7 +971,7 @@ def shape_links(
     a dot, while `.Rprofile`, `.env.example` and a `.devcontainer/` are real course
     material such a rule would hide. What is filtered is narrower and can be written
     honestly - the short closed list of NAMES that are never course material in any course
-    (`repos.NEVER_MATERIAL`), dropped before the counts are taken so a folder cannot be
+    (`selection.CLUTTER`), dropped before the counts are taken so a folder cannot be
     listed as "3 files" while showing two.
 
     The site applies it as well as the release, not instead: a semester site showed
@@ -1034,7 +984,7 @@ def shape_links(
     (`landed_links`); `tree_base` is the folder's own GitHub tree URL and `base` its path
     in the repo ("" for the root). Order follows `blobs` (path
     sorted), files before folders, for a stable diff."""
-    blobs = [b for b in blobs if not has_never_material_component(b.name)]
+    blobs = [b for b in blobs if not any(is_clutter(p) for p in b.name.split("/") if p)]
     if allow:
         return [b for b in blobs if file_ext(b.name) in allow] + [
             Link(_BROWSE_ALL, tree_base, base)
@@ -1271,9 +1221,9 @@ def _notify_overwritten_edits(
         + "\n\nNothing is lost - each link above is the commit that was overwritten, so "
         "the change can be copied back out of it.\n\nMake the edit at the source "
         "instead, and it survives every sync:\n\n"
-        "- **Instructor cards** - the semester's `semester-config/instructors.yml` (for a public "
+        "- **Instructor cards** - the semester's `semester-config/semester.yml` (for a public "
         "course site, the `people:` block of the course org's "
-        "`.github/dsl-course.yml`).\n"
+        "`.github/course.yml`).\n"
         "- **Schedule rows, sessions, assignments** - the org structure and the semester's "
         "`semester-config/schedule.yml`.\n\n"
         "The sync owns `_lectures/`, `_assignments/`, `_events/`, `_data/people.yml` and "
@@ -1312,7 +1262,7 @@ def _notify_overwritten_edits(
     else:
         log(f"  (manual edits to {len(rows)} file(s) were overwritten - issue filed)")
     # The mail, beside the issue and never instead of it: a course org's site has no
-    # instructors.yml to address, and a semester whose transport is unset gets the issue alone.
+    # semester.yml to address, and a semester whose transport is unset gets the issue alone.
     # `course_org_for_semester` is "" for the course org itself, which IS the course org.
     notify.notify_overwritten_edits(
         org,

@@ -13,7 +13,7 @@
 // A course that has not opted in (`student_console: true`, else off) gets none of these:
 // its students see `CourseWebsiteScreen`, the link to the semester site.
 
-import { DEFAULT_TIMEZONE } from '../model/policy';
+import { DEFAULT_TIMEZONE, pluralOf, tabTitle } from '../model/policy';
 import { useEffect } from 'preact/hooks';
 import { useEnv } from '../env';
 import type { GitHubClient } from '../github/client';
@@ -23,7 +23,7 @@ import { knownAuditor, patchLines, readAllReceipts, readMine, repoUrl, type Mine
 import { lastVisit, markVisit } from '../model/prefs';
 import { StatusFileSource, siteUrl, type SemesterFacts, type StudentData } from '../model/student';
 import { semesterLine, weekItems } from '../model/week';
-import { STUDENT_SCREENS, studentHref, studentScreens, tabWord } from '../router';
+import { STUDENT_SCREENS, studentHref, studentScreens } from '../router';
 import { CheckLine, Loading, ghUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { useLoad } from '../ui/load';
@@ -152,7 +152,7 @@ export function StudentScreen({ semester, screen: asked, studentView, entry, now
   const f = facts.kind === 'ready' ? facts.value : null;
   // A kind tab's label from the policy; its key until the facts are read (or for a kind the semester lacks).
   const key = screen.startsWith('kind-') ? screen.slice(5) : '';
-  const kind = key ? studentScreens(f).find(([k]) => k === screen)?.[1] ?? tabWord(key.charAt(0).toUpperCase() + key.slice(1)) : '';
+  const kind = key ? studentScreens(f).find(([k]) => k === screen)?.[1] ?? tabTitle(pluralOf(key)) : '';
   // Home's head is the site's h1: the course with "/ <semester>" (decision 0035 rule 4).
   const label = kind || (screen === 'home'
     ? <>{f?.courseName || semester.courseName || semester.org} <span class="h-sub">/ {semester.termLabel}</span></>

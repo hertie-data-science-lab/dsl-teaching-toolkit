@@ -20,15 +20,23 @@ from datetime import UTC, datetime
 
 import pytest
 
-from dsl_course import discovery, gh_contents, ghcli, materials, settings, status_json
+from dsl_course import (
+    discovery,
+    gh_contents,
+    ghcli,
+    release_record,
+    settings,
+    status_json,
+)
 
 # The real reads, captured before conftest's autouse stubs replace them.
 _REAL = {
     (settings, "org_meta"): discovery.org_meta,
     (settings, "course_org_for_semester"): discovery.course_org_for_semester,
-    (settings, "_assignments_text"): settings._assignments_text,
+    (settings, "_semester_text"): settings._semester_text,
     (discovery, "repo_is_archived"): discovery.repo_is_archived,
     (discovery, "repo_missing"): discovery.repo_missing,
+    (release_record, "get_file_with_sha"): gh_contents.get_file_with_sha,
 }
 NOW = datetime(2026, 9, 23, 9, 0, tzinfo=UTC)
 
@@ -192,42 +200,43 @@ class FakeGitHub:
 
 COURSE, LIVE, OLD1, OLD2 = "c-org-e1", "c-org-f2026", "c-org-f2025", "c-org-s2025"
 SCHEDULE = """\
-timezone: Europe/Berlin
-semester_start: 2026-09-07
-semester_end: 2026-12-18
-releases:
+semester:
+  start: {type: start, event_datetime: 2026-09-07}
+  end: {type: end, event_datetime: 2026-12-18}
+assets:
   syllabus:
     event_datetime: 2026-09-08T10:00
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: SYLLABUS.md
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: SYLLABUS.md
+lectures:
   lecture-1:
+    session: 1
     event_datetime: 2026-09-10T10:00
-    number: 1
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: lectures/01_intro
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: lectures/01_intro
   lecture-2:
+    session: 2
     event_datetime: 2026-09-24T10:00
-    number: 2
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: lectures/02_trees
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: lectures/02_trees
   lecture-3:
+    session: 3
     event_datetime: 2026-10-08T10:00
-    number: 3
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: lectures/03_forests
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: lectures/03_forests
 assignments:
   a1:
     number: 1
-    course_source_repo: assignment-a1
+    template: assignment-a1
     handout_datetime: 2026-09-15T10:00
     due_datetime: 2026-09-27T23:59
   a2:
     number: 2
-    course_source_repo: assignment-a2
+    template: assignment-a2
     handout_datetime: 2026-10-20T10:00
     due_datetime: 2026-11-01T23:59
 """
@@ -239,7 +248,7 @@ def world() -> FakeGitHub:
         COURSE,
         ".github",
         {
-            "dsl-course.yml": "course_name: ML\ncourse_code: E1\ncourse_description: d\npeople:\n  course_admins:\n    - github_handle: admin1\n      email: a@x.edu\n",
+            "course.yml": "course_name: ML\ncourse_code: E1\ncourse_description: d\npeople:\n  course_admins:\n    - github_handle: admin1\n      email: a@x.edu\n",
             "semesters.yml": f"semesters:\n  - {LIVE}\n  - {OLD1}\n  - {OLD2}\n",
             "opencourse.yml": "enabled: false\n",
             ".github/workflows/scheduled-release.yml": "on: push\n",
@@ -280,9 +289,9 @@ def world() -> FakeGitHub:
             "semester-config",
             {
                 "schedule.yml": SCHEDULE,
-                "instructors.yml": "instructors:\n  - github_handle: prof\n    email: p@x.edu\n",
+                "semester.yml": "instructors:\n  - github_handle: prof\n    email: p@x.edu\n",
                 "students.csv": "email,name,github_handle,student_id,enrol_code,code_sent_at,onboarded,role\n",
-                ".system/dsl-course.yml": f"course: {COURSE}\n",
+                ".system/course.yml": f"course: {COURSE}\n",
             },
             archived=archived,
         )
@@ -326,13 +335,11 @@ def counted(monkeypatch):
     for (module, name), real in _REAL.items():
         monkeypatch.setattr(module, name, real)
     monkeypatch.setattr(ghcli, "_run_gh", gh)
-    materials.read.cache_clear()
     gh_contents.read_once(True)
     discovery.hold_listings(True)
     yield gh
     gh_contents.read_once(False)
     discovery.hold_listings(False)
-    materials.read.cache_clear()
 
 
 def _reads_of(gh: FakeGitHub, org: str) -> list[str]:
@@ -345,11 +352,70 @@ def test_the_semester_tick_costs_what_it_did(counted):
     gh = counted
     doc = status_json.collect_semester(COURSE, LIVE, NOW)
     # origin/main before decision 0034: 43. The root stub the plan copies (SYLLABUS.md)
-    # is the course gather's own read, so the memo answers it.
-    assert len(gh.calls) == 43
+    # is the course gather's own read, so the memo answers it. Decision 0039: one
+    # semester.yml where instructors.yml and assignments.yml were two, and teams.csv folded
+    # into students.csv (.system/roster.csv is the one new read): -2.
+    # The materials repo's materials.yml is not read since 0.11.0 (-1).
+    # Decision 0043 rule 6: a source repo's tree is read with its shas, so an assignment
+    # template's source check and its starter check share one read (-2).
+    assert len(gh.calls) == 38
     assert doc["semester"]["template_moments"]["assignment-a2"] == (
         "2026-10-20T10:00:00+02:00"
     )
+
+
+def test_a_semester_with_a_release_record_reads_it_once(counted):
+    # Decision 0043: the record is read when the semester-config tree (read anyway) holds
+    # it - one call, and none before the first release has written it.
+    gh = counted
+    gh.files[(f"{LIVE}/semester-config", "main")][release_record.PATH] = (
+        '{"copies": []}\n'
+    )
+    status_json.collect_semester(COURSE, LIVE, NOW)
+    assert len(gh.calls) == 38 + 1
+    assert (
+        _reads_of(gh, LIVE).count(
+            f"repos/{LIVE}/semester-config/contents/{release_record.PATH}"
+        )
+        == 1
+    )
+
+
+def test_the_divergence_check_reads_nothing_more(counted):
+    # Decision 0043 rule 6: the course and destination trees it compares are the ones the
+    # status reads anyway (each source repo's for the source check, each destination's
+    # for the release states), so a recorded copy costs only the record's one read.
+    gh = counted
+    record = {
+        "copies": [
+            {
+                "entry": "lecture-1",
+                "source": {
+                    "repo": "course-materials-f2026",
+                    "path": "lectures/01_intro",
+                    "commit": "c1",
+                },
+                "dest": {"repo": "materials", "path": "lectures/01_intro"},
+                "first_shipped_at": "2026-09-10T08:00:00Z",
+                "last_shipped_at": "2026-09-10T08:00:00Z",
+                "files": {"notes.md": _sha("as released")},
+            }
+        ]
+    }
+    gh.files[(f"{LIVE}/semester-config", "main")][release_record.PATH] = json.dumps(
+        record
+    )
+    doc = status_json.collect_semester(COURSE, LIVE, NOW)
+    assert len(gh.calls) == 38 + 1
+    kinds = {p["kind"] for p in doc["problems"] if p.get("release") == "lecture-1"}
+    assert kinds == {"DIVERGED_COURSE", "DIVERGED_RELEASED"}
+
+
+def test_a_malformed_release_record_leaves_the_status_to_the_destinations(counted):
+    gh = counted
+    gh.files[(f"{LIVE}/semester-config", "main")][release_record.PATH] = "[]\n"
+    facts = status_json.gather_semester(COURSE, LIVE, NOW)
+    assert facts.recorded == {}
 
 
 def test_the_course_tick_reads_one_file_per_semester(counted):
@@ -357,7 +423,9 @@ def test_the_course_tick_reads_one_file_per_semester(counted):
     doc = status_json.collect_course(COURSE, NOW)
     # origin/main: 18. Decision 0034 adds one status.json read per registered semester
     # (semesters.yml lists names only, so the two archived ones cost theirs too).
-    assert len(gh.calls) == 18 + 3
+    # Decision 0039: course.yml where dsl-course.yml and opencourse.yml were two (-1).
+    # ... and no materials.yml (-1).
+    assert len(gh.calls) == 18 + 3 - 2
     for org in (LIVE, OLD1, OLD2):
         assert _reads_of(gh, org) == [
             f"repos/{org}/semester-config/contents/.system/status.json"

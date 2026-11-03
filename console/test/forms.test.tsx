@@ -113,28 +113,35 @@ describe('pattern previews', () => {
 });
 
 describe('roster tables', () => {
-  const src = '﻿hertie_email,name,role,github_handle,github_id,enrol_code,code_sent_at\nanna@x.org,Anna,enrolled,anna-a,1,CODE1,2026-09-02\nben@x.org,"Baker, Ben",,,,,\n';
-  it('keeps every column, the enrol code included, and quotes what needs it', () => {
+  const src = '﻿email,name,role,team:4\nanna@x.org,Anna,enrolled,geneva\nben@x.org,"Baker, Ben",,\n';
+  it('keeps every column, a team column included, and quotes what needs it', () => {
     const t = readTable(src);
     expect(t.rows[1].name).toBe('Baker, Ben');
     t.rows[0].name = 'Anna Adams';
     const out = writeTable(t);
-    expect(out).toBe('hertie_email,name,role,github_handle,github_id,enrol_code,code_sent_at\nanna@x.org,Anna Adams,enrolled,anna-a,1,CODE1,2026-09-02\nben@x.org,"Baker, Ben",,,,,\n');
+    expect(out).toBe('email,name,role,team:4\nanna@x.org,Anna Adams,enrolled,geneva\nben@x.org,"Baker, Ben",,\n');
   });
   it('numbers each row by its line in the file, blank lines and quoted newlines counted, as the engine does', () => {
-    const t = readTable('hertie_email,name,role\r\nanna@x.org,Anna,\r\n\r\nben@x.org,"Ben\nBaker",\ncarla@x.org,Carla,\n');
-    expect(t.rows.map((r) => r.hertie_email)).toEqual(['anna@x.org', 'ben@x.org', 'carla@x.org']);
+    const t = readTable('email,name,role\r\nanna@x.org,Anna,\r\n\r\nben@x.org,"Ben\nBaker",\ncarla@x.org,Carla,\n');
+    expect(t.rows.map((r) => r.email)).toEqual(['anna@x.org', 'ben@x.org', 'carla@x.org']);
     expect(t.lines).toEqual([2, 5, 6]);
     expect(t.rows[1].name).toBe('Ben\nBaker');
-    expect(parseRoster('hertie_email,name,role\n\nanna@x.org,Anna,\n').rows.map((r) => r.line)).toEqual([3]);
+    expect(parseRoster('email,name,role\n\nanna@x.org,Anna,\n').rows.map((r) => r.line)).toEqual([3]);
   });
-  it('diffs a replacement by email, keeping system columns', () => {
+  it('joins the engine’s roster on email, case aside: handle, id and when the code went out', () => {
+    const system = 'email,github_handle,github_id,enrol_code,code_sent_at\nANNA@x.org,anna-a,1,CODE1,2026-09-02\n';
+    const [anna, ben] = parseRoster(src, system).rows;
+    expect(anna).toMatchObject({ email: 'anna@x.org', handle: 'anna-a', id: '1', sent: '2026-09-02', teams: { 'team:4': 'geneva' } });
+    expect(JSON.stringify(anna)).not.toContain('CODE1');
+    expect(ben).toMatchObject({ handle: '', sent: '', teams: { 'team:4': '' } });
+  });
+  it('diffs a replacement by email, keeping a matched row’s team cells', () => {
     const cur = readTable(src).rows;
-    const up = readTable('hertie_email,name,role\nANNA@x.org,Anna A,auditor\ncarla@x.org,Carla,\n').rows;
+    const up = readTable('email,name,role\nANNA@x.org,Anna A,auditor\ncarla@x.org,Carla,\n').rows;
     const { diff, rows } = diffRoster(cur, up);
-    expect(diff.added.map((r) => r.hertie_email)).toEqual(['carla@x.org']);
-    expect(diff.changed[0].after).toMatchObject({ name: 'Anna A', role: 'auditor', github_handle: 'anna-a', enrol_code: 'CODE1' });
-    expect(diff.removed.map((r) => r.hertie_email)).toEqual(['ben@x.org']);
+    expect(diff.added.map((r) => r.email)).toEqual(['carla@x.org']);
+    expect(diff.changed[0].after).toMatchObject({ name: 'Anna A', role: 'auditor', 'team:4': 'geneva' });
+    expect(diff.removed.map((r) => r.email)).toEqual(['ben@x.org']);
     expect(rows).toHaveLength(2);
   });
   it('suggests instructor titles in grey, as a placeholder that typing replaces', () => {

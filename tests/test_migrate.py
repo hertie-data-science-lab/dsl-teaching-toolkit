@@ -17,31 +17,29 @@ import yaml
 from dsl_course import (
     discovery,
     gh_commits,
-    grades,
+    gh_contents,
+    grading_spec,
     migrate,
     opencourse,
     records,
     repos,
     scaffold,
-    schedule,
-    schedule_plan,
     workflows_render,
 )
+from dsl_course.bootstrap_course import semester_scaffold
 from dsl_course.central import MissingCentralRef
 from dsl_course.course import (
     CONFIG_REPO,
-    INSTRUCTORS_FILE,
     JOIN_REPO,
-    OLD_CONFIG_REPO,
-    OLD_JOIN_REPO,
-    OLD_SEMESTER_TOPIC,
     SEMESTER_TOPIC,
     SUBMIT_VIA,
 )
 from dsl_course.faults import NOT_MIGRATED
-from dsl_course.gh_contents import blob_sha, load_yaml_lines
+from dsl_course.gh_contents import blob_sha
+from dsl_course.legacy import OLD_INSTRUCTORS_FILE as INSTRUCTORS_FILE
+from dsl_course.migrate import OLD_CONFIG_REPO, OLD_JOIN_REPO, OLD_SEMESTER_TOPIC
 from dsl_course.opencourse import OpenCourse
-from dsl_course.welcome import template
+from dsl_course.selection import Selection
 
 SEM, COURSE = "Sem-f2026", "Course-E1"
 WORKFLOW = {".github/workflows/any.yml": b"on: push\n"}
@@ -364,8 +362,10 @@ def fake(monkeypatch):
     # The REAL default_branch / repo_missing, over the same stub: a 404 is a 404.
     monkeypatch.setattr(repos, "gh", f.gh)
     monkeypatch.setattr(gh_commits, "gh", f.gh)
-    # A template's README heading, the name an assignment takes (`grades.readme_heading`).
-    monkeypatch.setattr(grades, "get_file_content", f.get_file_content)
+    # A template's README heading, the name an assignment takes (`grading_spec.readme_heading`).
+    monkeypatch.setattr(grading_spec, "get_file_content", f.get_file_content)
+    # The config files (`config.read`) go through the same stub.
+    monkeypatch.setattr(gh_contents, "get_file_content", f.get_file_content)
     monkeypatch.setattr(migrate, "central_ref_for", lambda org: "main")
     # The checkout is the pinned ref, unless a test says otherwise.
     monkeypatch.setattr(migrate, "git", lambda *a, **k: (0, ""))
@@ -433,7 +433,7 @@ def _migrated_course(fake, monkeypatch):
         ".github",
         {
             "semesters.yml": b"semesters:\n- Sem-f2026\n",
-            "opencourse.yml": b"enabled: false\n",
+            "course.yml": b"course:\n  name: X\nopen_course_site:\n  enabled: false\n",
             **COURSE_WORKFLOWS,
         },
         topics=["dsl-course-hub"],
@@ -579,7 +579,11 @@ def test_a_real_run_migrates_every_step_once_with_actions_off(
     tree = fake.tree(SEM, CONFIG_REPO)
     moved = migrate.fold(set(OLD_RECORDS), migrate.SEMESTER_MOVES)
     assert moved["autograde/a1/_graded.json"] == ".system/autograde/a1/_graded.json"
-    assert moved["cohort-gradebook.csv"] == ".system/semester-gradebook.csv"
+    assert moved["cohort-gradebook.csv"] == ".system/semester-grades.csv"
+    # 0.11.0's rename of the semester grades file is a move like any other.
+    assert migrate.fold({".system/semester-gradebook.csv"}, migrate.SEMESTER_MOVES) == {
+        ".system/semester-gradebook.csv": ".system/semester-grades.csv"
+    }
     assert moved["enrolment/refusals/9.json"] == ".system/enrolment/refusals/9.json"
     for old, new in moved.items():
         assert old not in tree, old
@@ -588,20 +592,29 @@ def test_a_real_run_migrates_every_step_once_with_actions_off(
             assert blob_sha(tree[new]) == markers[old], old
     assert not [p for p in tree if p.endswith(".sample")]
     assert "people.yml" not in tree
-    text = tree[INSTRUCTORS_FILE].decode()
-    instructors = yaml.safe_load(text)["instructors"]
+    # Decision 0039: people.yml became instructors.yml, then folded into semester.yml.
+    assert INSTRUCTORS_FILE not in tree and "assignments.yml" not in tree
+    text = tree["semester.yml"].decode()
+    instructors = yaml.safe_load(text)["people"]
     assert [(p["github_handle"], p["role"]) for p in instructors] == [
         ("prof", "instructor"),
         ("ta", "teaching_assistant"),
     ]
     assert "# a comment faculty wrote" in text
     assert "people.yml.sample" not in text and OLD_CONFIG_REPO not in text
-    assert "example-course/semester-org/instructors.yml" in text
+    assert "example-course/semester-org/semester.yml" in text
     assert f"course: {COURSE}" in tree[records.path("pointer")].decode()
+    assert migrate.OLD_SEMESTER_POINTER not in tree
     assert "dsl-course.yml" not in fake.tree(SEM, ".github")
     schedule = tree["schedule.yml"].decode()
     assert "cohort_dest" not in schedule
-    assert "    kind: lecture" in schedule and "    kind: exam" in schedule
+    # Decision 0038: the schedule shape step leaves one block per kind.
+    plan = yaml.safe_load(schedule)
+    assert plan["lectures"]["s1"]["session"] == 1 and "exam" in plan["exams"]
+    assert plan["assignments"]["a1"]["repo_name"] == "work"
+    # The ruling on decision 0039 rule 2: the zone is the semester's `defaults:` one.
+    assert "timezone" not in plan
+    assert yaml.safe_load(text)["defaults"]["timezone"] == "Europe/Berlin"
     assert fake._repo(SEM, ".github")["topics"] == [SEMESTER_TOPIC]
     # The pause record is written first, while everything still runs; every commit after
     # it - status.json included - landed with Actions off everywhere, until the restore
@@ -669,6 +682,76 @@ def test_a_second_run_finds_every_step_already_migrated(
     assert len(fake.dispatches) == 3  # nothing paused, so nothing was dropped
 
 
+def _zone_again(fake, zone: str, stated: bool) -> dict:
+    """A migrated semester whose schedule.yml names `zone` again (a file migrated before
+    the zone moved), its semester.yml stating the migrated Europe/Berlin or not."""
+    tree = fake.tree(SEM, CONFIG_REPO)
+    tree["schedule.yml"] = f"timezone: {zone}\n".encode() + tree["schedule.yml"]
+    if not stated:
+        text = tree["semester.yml"].decode()
+        tree["semester.yml"] = text.replace(
+            "  timezone: Europe/Berlin", "  # timezone: Europe/Berlin   (institution)"
+        ).encode()
+    return tree
+
+
+@pytest.mark.parametrize(("zone", "stated"), [("UTC", False), ("Europe/Berlin", True)])
+def test_a_migrated_semester_s_schedule_zone_moves_into_its_defaults(
+    fake, semester, monkeypatch, capsys, zone, stated
+):
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    tree = _zone_again(fake, zone, stated)
+    capsys.readouterr()
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    assert "timezone" not in yaml.safe_load(tree["schedule.yml"])
+    defaults = yaml.safe_load(tree["semester.yml"])["defaults"]
+    assert defaults["timezone"] == zone
+    assert "# a comment faculty wrote" in tree["semester.yml"].decode()
+
+
+def test_a_schedule_zone_other_than_the_semester_s_stops_the_step(
+    fake, semester, monkeypatch, capsys
+):
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    tree = _zone_again(fake, "UTC", stated=True)
+    before = dict(tree)
+    capsys.readouterr()
+    assert _main(monkeypatch, SEM, "--no-preview") == 1
+    out = capsys.readouterr()
+    assert "differs from semester.yml `defaults: timezone: Europe/Berlin`" in (
+        out.out + out.err
+    )
+    assert tree == before
+
+
+def test_moving_the_zone_into_semester_yml():
+    skeleton = "people:\n  - a\n\ndefaults:   # c\n  # timezone: X   (institution)\n"
+    assert migrate.with_default(skeleton, "timezone", "UTC") == (
+        "people:\n  - a\n\ndefaults:   # c\n  timezone: UTC\n"
+    )
+    assert migrate.with_default(
+        "defaults:\n  max_team_size: 3\n", "timezone", "UTC"
+    ) == ("defaults:\n  timezone: UTC\n  max_team_size: 3\n")
+    assert migrate.with_default("people: []\n", "timezone", "UTC") == (
+        "people: []\n\ndefaults:\n  timezone: UTC\n"
+    )
+    sched = "# mine\ntimezone: UTC   # ours\nlectures: {}\n"
+    assert migrate.zone_move(sched, None) == ("UTC", "# mine\nlectures: {}\n", [])
+    assert migrate.zone_move(sched, "UTC") == (None, "# mine\nlectures: {}\n", [])
+    assert migrate.zone_move("lectures: {}\n", None) == (None, None, [])
+    # A blank zone is the default: only dropped. Comments around the line stay.
+    blank = "# head\ntimezone:\n\n# my notes\nlectures: {}\n"
+    assert migrate.zone_move(blank, None) == (
+        None,
+        "# head\n\n# my notes\nlectures: {}\n",
+        [],
+    )
+    _, _, stops = migrate.zone_move("timezone: Mars/Base\n", None)
+    assert stops == [
+        "schedule.yml: `timezone: Mars/Base` is not a known zone - correct or delete it"
+    ]
+
+
 def test_a_failed_step_stops_and_says_the_org_is_still_paused(
     fake, semester, monkeypatch, capsys
 ):
@@ -713,6 +796,11 @@ def test_the_rename_brings_an_old_description_to_the_current_wording(
         "- student roster, teams, term schedule, and marking. Students never see it, and "
         "no PII leaves this repo."
     )
+    monkeypatch.setattr(
+        repos,
+        "SUPERSEDED_SEMESTER_DESCRIPTIONS",
+        {old: old.replace("cohort", "semester").replace("term schedule", "schedule")},
+    )
     want = repos.current_description(old, "semester")
     assert want and "semester" in want
     fake._repo(SEM, OLD_CONFIG_REPO)["description"] = old
@@ -723,6 +811,9 @@ def test_the_rename_brings_an_old_description_to_the_current_wording(
 
 
 def test_the_re_render_plan_lists_what_it_deletes(fake, semester, monkeypatch, capsys):
+    monkeypatch.setattr(
+        migrate, "RETIRED_JOIN_FORMS", (".github/ISSUE_TEMPLATE/join.yml",)
+    )
     assert _main(monkeypatch, SEM, "--no-preview") == 0
     fake.tree(SEM, JOIN_REPO)[migrate.RETIRED_JOIN_FORMS[0]] = b"old form"
     capsys.readouterr()
@@ -906,24 +997,6 @@ def test_a_semester_without_a_welcome_repo_still_migrates(
     assert _main(monkeypatch, SEM, "--no-preview") == 0
 
 
-def test_a_schedule_the_rewrite_cannot_fix_fails_the_keys_verify(
-    fake, semester, monkeypatch, capsys
-):
-    # A flow-style entry the line rewrite does not reach: the new engine still refuses
-    # it, so the step must not pass.
-    fake.tree(SEM, OLD_CONFIG_REPO)["schedule.yml"] = (
-        b"assignments:\n  a1: {cohort_dest_repo: m}\n"
-    )
-    # The preview fails where the run would stop; the run stops there before its pause.
-    assert _main(monkeypatch, SEM) == 1
-    out, err = capsys.readouterr()
-    assert "will stop here: schedule.yml would still say NOT_MIGRATED" in out
-    assert "the run would stop at keys" in err and "cohort_dest_repo" in err
-    assert _main(monkeypatch, SEM, "--no-preview") == 1
-    assert "the run would stop at keys" in capsys.readouterr().err
-    assert fake.commits == [] and fake.dispatches == []
-
-
 def test_an_unconvertible_people_yml_stops_before_anything_is_written(
     fake, semester, monkeypatch, capsys
 ):
@@ -1024,15 +1097,15 @@ def test_seeded_text_takes_the_new_names_and_the_instructors_words_are_listed(
 
     assert _main(monkeypatch, SEM, "--no-preview") == 0
     text = fake.tree(SEM, CONFIG_REPO)["schedule.yml"].decode()
-    assert "# This semester's schedule + auto-release plan." in text
-    assert "example-course/semester-org/schedule.yml" in text
-    assert "  title: Semester archived      # optional" in text
-    assert "    This semester is archived on {date}: every repository" in text
-    assert "# Our cohort meets on Tuesdays." in text  # theirs, left
-    instructors = fake.tree(SEM, CONFIG_REPO)[INSTRUCTORS_FILE].decode()
-    assert (
-        "# This semester's own instructors: its instructors and teaching" in instructors
-    )
+    # The seeded wording took the new names, then the schedule shape step moved the
+    # archive block into the `semester:` block (decision 0038 amendment 2), leaving the
+    # comments behind (counted in its notes, never quoted).
+    archive = yaml.safe_load(text)["semester"]["archive"]
+    assert archive["type"] == "archive" and archive["title"] == "Semester archived"
+    assert archive["details"].startswith("This semester is archived on {date}:")
+    # instructors.yml took the new names, then folded into semester.yml (decision 0039).
+    assert INSTRUCTORS_FILE not in fake.tree(SEM, CONFIG_REPO)
+    assert "people:" in fake.tree(SEM, CONFIG_REPO)["semester.yml"].decode()
     join = fake.tree(SEM, JOIN_REPO)["README.md"].decode()
     assert "https://github.com/Sem-f2026/join/issues/new/choose" in join
     assert "The whole cohort reads this." in join
@@ -1065,11 +1138,13 @@ def test_a_course_s_seeded_text_takes_the_new_names(fake, course, monkeypatch, c
     assert "seeded wording rewritten in .github/dsl-course.yml" in out
     assert "rewritten in assignment-1-f2026@solution/grading_config.yml" in out
     assert "-   .github/dsl-course.yml: line(s) 4" in out
+    # The file's own comments are not carried into course.yml: counted, never quoted.
+    assert "comment line(s) of dsl-course.yml are not carried" in out
+    assert "Our cohorts" not in out
     assert _main(monkeypatch, COURSE, "--no-preview") == 0
-    meta = fake.tree(COURSE, ".github")["dsl-course.yml"].decode()
-    assert "it spans many semesters (years). Semesters are" in meta
-    assert "# registered separately in .github/semesters.yml." in meta
-    assert "# Our cohorts are small." in meta
+    tree = fake.tree(COURSE, ".github")
+    assert "dsl-course.yml" not in tree
+    assert yaml.safe_load(tree["course.yml"])["course"]["name"] == "X"
     grading = fake.tree(COURSE, "assignment-1-f2026", "solution")["grading_config.yml"]
     assert grading.decode().splitlines()[0] == scaffold._GRADING_STAMP
     assert (
@@ -1086,10 +1161,10 @@ def test_every_new_seeded_line_is_the_current_templates():
     current = set(
         "\n".join(
             [
-                migrate.semester_scaffold(SEM, "schedule.yml", "main"),
-                migrate.semester_scaffold(SEM, INSTRUCTORS_FILE, "main"),
-                template("course/dsl-course.yml"),
-                template("course/people-cards.yml"),
+                semester_scaffold(SEM, "schedule.yml", "main"),
+                migrate.old_scaffold(SEM, INSTRUCTORS_FILE, "main"),
+                migrate.old_template("course/dsl-course.yml"),
+                migrate.old_template("course/people-cards.yml"),
                 scaffold._GRADING_STAMP,
                 *(
                     scaffold._grading_config(
@@ -1107,9 +1182,18 @@ def test_every_new_seeded_line_is_the_current_templates():
     missing = [
         new for new in migrate.seeded_wording("main").values() if new not in current
     ]
-    assert missing == []
+    # Decision 0038 retired the 0.10 schedule skeleton, and its amendment 2 the top-level
+    # `archive:` block: these lines are reworded only on their way to the schedule shape
+    # step, which rewrites the file whole, so their new side is the 0.10 seed's.
+    retired = [
+        line
+        for line in missing
+        if not line.startswith("# ")
+        and not line.lstrip().startswith(("title:", "show_on_site:", "This semester"))
+    ]
+    assert retired == [], retired
     assert [new for _, new in migrate.seeded_blocks()] == [
-        template("course/people-header.yml")
+        migrate.old_template("course/people-header.yml")
     ] * 2
 
 
@@ -1195,9 +1279,10 @@ def test_the_seeded_skeleton_becomes_the_new_skeleton(fake, semester, monkeypatc
     )
     fake.tree(SEM, OLD_CONFIG_REPO)["people.yml"] = skeleton.encode()
     assert _main(monkeypatch, SEM, "--no-preview") == 0
-    text = fake.tree(SEM, CONFIG_REPO)[INSTRUCTORS_FILE].decode()
-    assert text == migrate.semester_scaffold(SEM, INSTRUCTORS_FILE, "main")
-    assert "# instructors:" in text
+    # The skeleton became the 0.10 skeleton, which folds into semester.yml as the
+    # current one's commented `people:`.
+    text = fake.tree(SEM, CONFIG_REPO)["semester.yml"].decode()
+    assert "# people:" in text and "people" not in yaml.safe_load(text)
 
 
 # ---------------------------------------------------------------- the course org
@@ -1239,7 +1324,6 @@ def course(fake, monkeypatch):
             "SYLLABUS.md.sample": b"s",
             "SYLLABUS.md": b"x",
             "publish.yml": b'public:\n  - "lectures/**"\n',
-            migrate.RELEASE_WORKFLOWS[0]: b"old",
         },
     )
     # The settings an older publish left in the public site repo.
@@ -1307,11 +1391,14 @@ def test_a_course_run_migrates_and_a_second_finds_it_done(
     assert tree[records.path("heartbeat")] == b"2026-09-01\n"
     assert records.path("missing_semesters") in tree
     assert ".github/.last-refresh" not in tree and ".dsl/status.json" not in tree
-    meta = tree["dsl-course.yml"].decode()
-    assert yaml.safe_load(meta)["course_name"] == "X"
+    # Decision 0039: dsl-course.yml and opencourse.yml folded into course.yml.
+    assert "dsl-course.yml" not in tree and "opencourse.yml" not in tree
+    meta = yaml.safe_load(tree["course.yml"])
+    assert meta["course"]["name"] == "X"
     for key in ("org", "org_name", "cohort_defaults", "semester_defaults"):
-        assert key not in yaml.safe_load(meta)
-    assert "  formats: [ipynb]  # the runnable one" in meta
+        assert key not in meta and key not in meta["course"]
+    # `formats` left the cascade (the New assignment wizard asks).
+    assert "formats" not in (meta["defaults"] or {})
     grading = fake.tree(COURSE, "assignment-1-f2026", "solution")["grading_config.yml"]
     # The template starter step writes rule 6's reading: no source marks an answer.
     assert (
@@ -1328,10 +1415,10 @@ def test_a_course_run_migrates_and_a_second_finds_it_done(
         "SYLLABUS.md",
         *migrate.RELEASE_WORKFLOWS,
     }
-    assert opencourse.parse(yaml.safe_load(tree["opencourse.yml"])) == OpenCourse(
-        enabled=True, source_repo="course-materials-f2026"
+    assert opencourse.parse(meta["open_course_site"]) == OpenCourse(
+        True, "course-materials-f2026", Selection(kinds=FOLDED_KINDS, exclude=())
     )
-    assert tree["opencourse.yml"].startswith(b"# INSTRUCTOR-OWNED")
+    assert tree["course.yml"].startswith(b"# INSTRUCTOR-OWNED")
     assert fake._repo(COURSE, "course-materials-f2026")["topics"] == ["dsl-materials"]
     template = fake.tree(COURSE, "assignment-1-f2026")
     assert set(migrate.TEMPLATE_WORKFLOWS) <= set(template)
@@ -1362,7 +1449,7 @@ def test_a_course_run_migrates_and_a_second_finds_it_done(
     course.clear()
     capsys.readouterr()
     assert _main(monkeypatch, COURSE, "--no-preview") == 0
-    assert capsys.readouterr().out.count("already migrated") == 28
+    assert capsys.readouterr().out.count("already migrated") == 30
     assert course == [] and fake.commits == commits and fake.puts == puts
 
 
@@ -1477,6 +1564,9 @@ def test_the_course_re_render_is_checked_in_every_repo_it_writes(
 ):
     # A refresh that re-renders `.github` only: the content repo and the template still
     # differ, and a retired workflow is still in the template - the verify names each.
+    monkeypatch.setattr(
+        migrate, "RETIRED_WORKFLOWS", (".github/workflows/release-code.yml",)
+    )
     fake.tree(COURSE, "assignment-1-f2026")[migrate.RETIRED_WORKFLOWS[0]] = b"old"
     monkeypatch.setattr(
         migrate.seed,
@@ -1486,9 +1576,7 @@ def test_the_course_re_render_is_checked_in_every_repo_it_writes(
     assert _main(monkeypatch, COURSE, "--no-preview") == 1
     err = capsys.readouterr().err
     assert "re-render did not verify" in err
-    assert f"course-materials-f2026/{migrate.RELEASE_WORKFLOWS[0]}" in err
     assert "course-materials-f2026/.system/MAINTAINING.md" in err
-    assert f"assignment-1-f2026/{migrate.TEMPLATE_WORKFLOWS[0]}" in err
     assert (
         f"assignment-1-f2026/{migrate.RETIRED_WORKFLOWS[0]} (retired: deleted)" in err
     )
@@ -1498,6 +1586,7 @@ def test_a_renamed_org_workflow_is_planned_as_a_deletion_and_verified_gone(
     fake, course, monkeypatch, capsys
 ):
     old = ".github/workflows/archive-cohort.yml"
+    monkeypatch.setattr(migrate.seed, "RETIRED_GITHUB_WORKFLOWS", (old,))
     fake.tree(COURSE, ".github")[old] = b"old button"
     assert _main(monkeypatch, COURSE) == 0
     capsys.readouterr()
@@ -1587,14 +1676,18 @@ def test_a_semester_default_that_differs_from_the_policy_stops_before_any_write(
 
 def test_a_semester_default_equal_to_the_policy_is_stripped(fake, course, monkeypatch):
     zone = migrate.policy.defaults()["timezone"]
-    grace = migrate.policy.defaults()["archive"]["grace_days"]
+    grace = migrate.policy.defaults()["archive_grace_days"]
     fake.tree(COURSE, ".github")["dsl-course.yml"] = (
         f"course_name: X\nsemester_defaults:\n  timezone: {zone}\n"
         f"  archive:\n    auto: false\n    grace_days: {grace}\n"
     ).encode()
     assert _main(monkeypatch, COURSE, "--no-preview") == 0
-    meta = yaml.safe_load(fake.tree(COURSE, ".github")["dsl-course.yml"])
-    assert meta == {"course_name": "X"}
+    # Stripped by the keys step; the course.yml it folds into names the course alone.
+    meta = yaml.safe_load(fake.tree(COURSE, ".github")["course.yml"])
+    assert meta["course"] == {"name": "X"}
+    assert (
+        "semester_defaults" not in fake.tree(COURSE, ".github")["course.yml"].decode()
+    )
 
 
 def test_a_registry_already_renamed_but_keyed_the_old_way_is_rewritten(
@@ -1803,7 +1896,7 @@ def test_the_course_config_rewrite_strips_the_retired_keys_and_keeps_the_rest():
         "  max_team_size: 4\n"
     )
     assert migrate.course_config_keys(got) == got
-    assert migrate.retired_course_faults(yaml.safe_load(got)) == []
+    assert not set(yaml.safe_load(got)) & set(migrate.RETIRED_COURSE_KEYS)
 
 
 # ------------------------------------ assignments.yml: the run settings move (WP-B2)
@@ -1880,7 +1973,7 @@ def test_the_old_files_say_what_assignments_yml_must_hold():
 
 def test_a_setting_assignments_yml_already_states_is_left_as_written():
     meta = yaml.safe_load(B1_SCHEDULE)
-    existing = migrate.settings.parse_instance(
+    existing = migrate.settings.parse_legacy_assignments(
         "assignments:\n  a1:\n    late_window_days: 7\n    max_team_size: 4\n"
     )
     want, _ = migrate.instance_additions(
@@ -1954,25 +2047,30 @@ def test_the_keys_step_commits_a_schedule_with_every_entry_where_it_was(
     fake.tree(SEM, OLD_CONFIG_REPO)["schedule.yml"] = INTERIOR_SCHEDULE.encode()
     assert _main(monkeypatch, SEM, "--no-preview") == 0
     meta = yaml.safe_load(fake.tree(SEM, CONFIG_REPO)["schedule.yml"])
-    assert set(meta) == {"assignments", "events", "releases"}
-    assert set(meta["events"]) == {"exam"}
+    # ...and the schedule shape step after it, one block per kind.
+    assert set(meta) == {"assignments", "exams", "lectures"}
+    assert set(meta["exams"]) == {"exam"}
 
 
 def test_the_run_keys_are_written_into_the_skeleton_and_read_back():
-    skeleton = migrate.semester_scaffold(SEM, "assignments.yml", "main")
+    skeleton = migrate.old_scaffold(SEM, "assignments.yml", "main")
     text = migrate.with_instance_keys(
         skeleton,
         {"a1": {"late_window_days": 2, "late_penalty_per_day": "5%"},
          "a2": {"semester_dest_repo": "homework-2"}},
     )  # fmt: skip
-    got = migrate.settings.parse_instance(text)
-    assert got.faults == ()
+    got = migrate.settings.parse_legacy_assignments(text)
+    # Read back as the schedule shape step reads them, to move them inline.
+    assert [f.code for f in got.faults] == ["NOT_MIGRATED"]
     assert got.blocks["a1"] == {"late_window_days": 2, "late_penalty_per_day": "5%"}
     assert got.dests == {"a2": "homework-2"}
     assert text.startswith(skeleton.rstrip("\n"))  # the skeleton's comments kept
     # Into a file with a block of its own: the slug's block gains the key.
     again = migrate.with_instance_keys(text, {"a1": {"max_team_size": 3}})
-    assert migrate.settings.parse_instance(again).blocks["a1"]["max_team_size"] == 3
+    assert (
+        migrate.settings.parse_legacy_assignments(again).blocks["a1"]["max_team_size"]
+        == 3
+    )
 
 
 def test_a_template_loses_its_run_settings_live_or_commented():
@@ -2020,7 +2118,10 @@ def test_a_semester_migrated_before_b2_completes_on_the_next_run(
     assert _main(monkeypatch, SEM, "--no-preview") == 0
     tree = fake.tree(SEM, CONFIG_REPO)
     tree["schedule.yml"] = B1_SCHEDULE.encode()
-    del tree["assignments.yml"]
+    # ... and before decision 0039: instructors.yml and the old pointer, no semester.yml.
+    del tree["semester.yml"]
+    tree[INSTRUCTORS_FILE] = migrate.people_to_instructors(OLD_PEOPLE).encode()
+    tree[migrate.OLD_SEMESTER_POINTER] = tree.pop(records.path("pointer"))
     # The course step has already taken a1's template's run settings out, into its record.
     fake.tree(COURSE, ".github")[migrate.RUN_KEYS_RECORD] = json.dumps(
         {"assignment-1-f2026": A1_RUN_KEYS}
@@ -2032,20 +2133,24 @@ def test_a_semester_migrated_before_b2_completes_on_the_next_run(
     out = capsys.readouterr().out
     assert "  keys:\n" in out and "-    grading_datetime: 2026-10-15" in out
     assert "seed the skeleton, and write what the old files said" in out
-    assert "+    late_window_days: 2" in out and "+# INSTRUCTOR-OWNED" not in out
+    assert "+    late_window_days: 2" in out
+    assert "listed once the keys step has run" in out
     assert fake.commits == []
 
     assert _main(monkeypatch, SEM, "--no-preview") == 0
     tree = fake.tree(SEM, CONFIG_REPO)
-    got = migrate.settings.parse_instance(tree["assignments.yml"].decode())
-    assert got.blocks["a1"] == {
+    # The keys step wrote the blocks; the schedule shape step moved them inline.
+    plan = yaml.safe_load(tree["schedule.yml"])["assignments"]
+    assert {k: plan["a1"][k] for k in A1_RUN_KEYS | {"late_window_days": 0}} == {
         "max_team_size": 3,
         "late_window_days": 2,
         "late_penalty_per_day": "5%",
     }
-    assert got.dests == {"a2": "homework-2"}
-    assert migrate._schedule_clean(tree["schedule.yml"].decode(),
-                                   tree["assignments.yml"].decode())  # fmt: skip
+    assert plan["a2"]["repo_name"] == "homework-2"
+    # ... and the config layers step folded what was left into semester.yml.
+    assert "assignments.yml" not in tree
+    assert migrate.settings.parse_instance(tree["semester.yml"].decode()).faults == ()
+    assert migrate._schedule_clean(tree["schedule.yml"].decode(), None)
     keys = [c for c in fake.commits if c[3] == migrate.KEYS_COMMIT]
     assert keys == [(SEM, CONFIG_REPO, "main", migrate.KEYS_COMMIT)]  # both files, once
     commits = list(fake.commits)
@@ -2409,8 +2514,8 @@ def test_the_ticks_cover_every_rendered_cron():
     rendered = [
         workflows_render.render_scheduler(),
         workflows_render.render_refresh(),
-        workflows_render.render_sync_membership(["S"]),
-        workflows_render.render_sync_site(["S"]),
+        workflows_render.render_sync_membership(),
+        workflows_render.render_sync_site(),
         workflows_render.render_publish_site(),
         *(p.read_text() for p in Path(migrate.ROOT, "templates").rglob("*.yml")),
     ]
@@ -2441,7 +2546,7 @@ def test_the_old_people_header_becomes_the_current_one_as_a_block(repo, eol):
         "\n", eol
     )
     new = migrate.seeded_yaml(text, "main", COURSE)
-    header = template("course/people-header.yml")
+    header = migrate.old_template("course/people-header.yml")
     assert new == (
         "course_name: X\n\n" + header + "people:\n  course_admins: []\n"
     ).replace("\n", eol)
@@ -2543,126 +2648,6 @@ def test_a_catch_up_still_running_at_the_bound_is_said_and_is_no_failure(
     assert f"{SEM} is migrated" in out
 
 
-# ---------------------------------------------------------------- proposed releases
-
-LAYOUTS = Path(__file__).parent / "fixtures" / "layouts"
-
-
-def _nlp(fake):
-    """The nlp semester as it is on 25 Sep 2026: every folder released by hand, none in
-    its plan (paths and dates from the real repos, tests/fixtures/layouts/)."""
-    tree = {
-        p: b"x" for p in (LAYOUTS / "nlp-tree.txt").read_text().split() if p.strip()
-    }
-    fake.repos[(SEM, "materials")]["branches"]["main"] = dict(tree)
-    fake.tree(COURSE, "course-materials-f2026").update(tree)
-    config = fake.tree(SEM, OLD_CONFIG_REPO)
-    config["schedule.yml"] = (LAYOUTS / "nlp-schedule.yml").read_bytes()
-    for line in (LAYOUTS / "nlp-landed.txt").read_text().splitlines():
-        if line and not line.startswith("#"):
-            folder, when = line.split()
-            fake.history[(SEM, "materials", folder)] = when
-
-
-def test_a_preview_proposes_a_releases_plan_for_the_folders_outside_it(
-    fake, semester, monkeypatch, capsys
-):
-    _nlp(fake)
-    before = _state(fake)
-    assert _main(monkeypatch, SEM) == 0
-    out = capsys.readouterr().out
-    assert (
-        f"write {CONFIG_REPO}/{migrate.PROPOSED_RELEASES}: a releases plan for 14 "
-        "folder(s) released outside the plan"
-    ) in out
-    # The plan shows the block itself, as it will be written.
-    assert "-     lecture-01:\n    -       event_datetime: 2026-08-31T22:35\n" in out
-    assert "-           course_source_path: labs/04_session-4\n" in out
-    assert _state(fake) == before
-
-
-def test_the_proposal_is_written_beside_the_schedule_never_into_it(
-    fake, semester, monkeypatch
-):
-    _nlp(fake)
-    assert _main(monkeypatch, SEM, "--no-preview") == 0
-    tree = fake.tree(SEM, CONFIG_REPO)
-    assert "releases" not in yaml.safe_load(tree["schedule.yml"])
-    text = tree[migrate.PROPOSED_RELEASES].decode()
-    assert text.startswith(migrate.PROPOSAL_HEADER)
-    # What faculty paste reads clean with this engine: one entry per folder, kind from
-    # its section, dated by its first commit in the semester's time zone.
-    sched = migrate.schedule.parse(yaml.safe_load(text))
-    assert sched.faults == [] and sched.dropped == []
-    by_label = {r.label: r for r in sched.releases}
-    assert sorted(by_label) == sorted(
-        [f"lecture-0{n}" for n in range(1, 5)]
-        + [f"lab-0{n}" for n in range(1, 5)]
-        + [f"readings-0{n}" for n in range(1, 7)]
-    )
-    lab = by_label["lab-01"]
-    # `01_session-1` only restates the number: no title, so the row reads `Lab 1`.
-    assert (lab.kind, lab.title, lab.show_on_site) == ("lab", "", True)
-    assert lab.when.isoformat() == "2026-09-01T21:26:00+02:00"
-    assert [(d.course_source_repo, d.course_source_path, d.semester_dest_repo)
-            for d in lab.deploy] == [
-        ("course-materials-f2026", "labs/01_session-1", "materials")
-    ]  # fmt: skip
-    # A readings entry has no title; its label's number joins it to its lecture.
-    assert by_label["readings-01"].title == ""
-    rows = migrate.offplan_folders(
-        [d for r in sched.releases for d in r.deploy],
-        {"materials": list(fake.tree(SEM, "materials"))},
-    )
-    assert rows == []  # accepted, the proposal leaves no folder outside the plan
-    # Once the file is there the step is done: a rerun proposes nothing new.
-    commits = list(fake.commits)
-    assert _main(monkeypatch, SEM, "--no-preview") == 0
-    assert fake.commits == commits
-
-
-def test_a_proposal_titles_only_a_folder_whose_name_says_more_than_its_number():
-    landed = datetime(2026, 9, 1, 12, tzinfo=UTC)
-    folders = [
-        ("materials", "lectures/01_session-1", "lecture", landed, "c"),
-        ("materials", "lectures/02_transformers-and-attention", "lecture", landed, "c"),
-        ("materials", "labs/03_Week_3", "lab", landed, "c"),
-        ("materials", "readings/02_readings-2", "readings", landed, "c"),
-    ]
-    text = migrate.proposed_entries(folders, set(), UTC)
-    entries = yaml.safe_load(text)["releases"]
-    assert "title" not in entries["lecture-01"]
-    assert entries["lecture-02"]["title"] == "Transformers and attention"
-    assert "title" not in entries["lab-03"]
-    assert "title" not in entries["readings-02"]
-
-
-def test_a_folder_no_one_course_repo_holds_names_no_source(fake, semester, monkeypatch):
-    _nlp(fake)
-    course = fake.tree(COURSE, "course-materials-f2026")
-    for path in [p for p in course if p.startswith("labs/02_session-2/")]:
-        del course[path]
-    # A label the schedule already uses is never proposed again.
-    fake.tree(SEM, OLD_CONFIG_REPO)["schedule.yml"] += (
-        b"releases:\n  lab-01:\n    event_datetime: 2026-09-01\n"
-    )
-    assert _main(monkeypatch, SEM, "--no-preview") == 0
-    text = fake.tree(SEM, CONFIG_REPO)[migrate.PROPOSED_RELEASES].decode()
-    entries = yaml.safe_load(text)["releases"]
-    assert "lab-01" not in entries and "lab-01-2" in entries
-    assert entries["lab-02"]["deploy"][0]["course_source_repo"] == "CHANGE-ME"
-    assert entries["lab-03"]["deploy"][0]["course_source_repo"] == (
-        "course-materials-f2026"
-    )
-
-
-def test_a_semester_whose_folders_are_all_in_the_plan_proposes_nothing(
-    fake, semester, monkeypatch, capsys
-):
-    assert _main(monkeypatch, SEM) == 0
-    assert "proposed releases: already migrated" in capsys.readouterr().out
-
-
 # ---------------------------------------------------------------- public website
 
 
@@ -2674,8 +2659,10 @@ def test_the_public_website_step_seeds_off_without_earlier_settings(
     assert ".github/opencourse.yml: seeded off" in capsys.readouterr().out
     assert _main(monkeypatch, COURSE, "--no-preview") == 0
     tree = fake.tree(COURSE, ".github")
-    assert opencourse.parse(yaml.safe_load(tree["opencourse.yml"])) == OpenCourse(
-        withhold=opencourse.DEFAULT_WITHHOLD
+    site = yaml.safe_load(tree["course.yml"])["open_course_site"]
+    # A new site's seed: lectures and labs, the open site's default exclusions.
+    assert opencourse.parse(site) == OpenCourse(
+        publish=Selection(kinds=("lectures", "labs"))
     )
 
 
@@ -2686,10 +2673,10 @@ def test_a_website_already_on_is_seeded_with_nothing_extra_withheld(
     # live site at the next publish.
     assert _main(monkeypatch, COURSE, "--no-preview") == 0
     seeded = opencourse.parse(
-        yaml.safe_load(fake.tree(COURSE, ".github")["opencourse.yml"])
+        yaml.safe_load(fake.tree(COURSE, ".github")["course.yml"])["open_course_site"]
     )
     assert seeded.enabled
-    assert seeded.withhold == ()
+    assert seeded.selection.exclude == ()
 
 
 def test_the_public_website_step_on_a_migrated_course_keeps_its_opencourse(
@@ -2697,10 +2684,10 @@ def test_the_public_website_step_on_a_migrated_course_keeps_its_opencourse(
 ):
     # The demo orgs are migrated already: a re-run leaves a publish.yml alone (the semester
     # site's hosted-copy opt-in, decision 0035) and never touches an opencourse.yml
-    # someone has written.
+    # someone has written (folded into course.yml since decision 0039).
     assert _main(monkeypatch, COURSE, "--no-preview") == 0
-    mine = b"enabled: true\nsource_repo: other\n"
-    fake.tree(COURSE, ".github")["opencourse.yml"] = mine
+    mine = b"course:\n  name: X\nopen_course_site:\n  enabled: true\n  source_repo: other\n"
+    fake.tree(COURSE, ".github")["course.yml"] = mine
     fake.tree(COURSE, "course-materials-f2026")["publish.yml"] = b"public:\n"
     capsys.readouterr()
     assert _main(monkeypatch, COURSE, "--no-preview") == 0
@@ -2708,10 +2695,15 @@ def test_the_public_website_step_on_a_migrated_course_keeps_its_opencourse(
     assert "publish.yml" not in out
     assert "opencourse.yml: seeded" not in out
     assert fake.tree(COURSE, "course-materials-f2026")["publish.yml"] == b"public:\n"
-    assert fake.tree(COURSE, ".github")["opencourse.yml"] == mine
+    assert fake.tree(COURSE, ".github")["course.yml"] == mine
     capsys.readouterr()
     assert _main(monkeypatch, COURSE) == 0
     assert "public website: already migrated" in capsys.readouterr().out
+
+
+# What a 0.10 `include_lectures: true` (the default) folds to (decision 0040): every shown
+# kind but readings.
+FOLDED_KINDS = ("lectures", "labs", "exams", "drop-ins", "events")
 
 
 @pytest.mark.parametrize(
@@ -2723,130 +2715,16 @@ def test_the_public_website_step_on_a_migrated_course_keeps_its_opencourse(
         (": not yaml: [", OpenCourse()),
         (
             "source_repo: m\nreadings_mode: actual-readings\ninclude_lectures: false\n",
-            OpenCourse(True, "m", "actual-readings", False),
+            OpenCourse(True, "m", Selection(kinds=("readings",), exclude=()), False),
         ),
-        ("source_repo: m\nreadings_mode: junk\n", OpenCourse(True, "m")),
+        (
+            "source_repo: m\nreadings_mode: junk\n",
+            OpenCourse(True, "m", Selection(kinds=FOLDED_KINDS, exclude=())),
+        ),
     ],
 )
 def test_the_old_publish_settings_become_opencourse(config, expected):
     assert migrate.opencourse_from(config) == expected
-
-
-# ------------------------------------------------------------ explicit numbers (0020)
-
-POSITIONAL = """\
-timezone: Europe/Berlin
-releases:
-  intro:        # the first lecture
-    event_datetime: 2026-09-08T10:00
-    kind: lecture
-  lecture-5:
-    event_datetime: 2026-09-15T10:00
-    kind: lecture
-  setup:
-    event_datetime: 2026-09-16T10:00
-    show_on_site: false
-  wrap-up:
-    kind: lecture
-    event_datetime: 2026-09-22T10:00
-  reading:
-    event_datetime: 2026-09-23T10:00
-    kind: readings
-  flow: {event_datetime: 2026-09-29T10:00, kind: lab}
-assignments:
-  project:
-    course_source_repo: assignment-project
-    due_datetime: 2026-11-01T23:59
-  assignment-1:
-    course_source_repo: assignment-one
-    due_datetime: 2026-10-01T23:59
-"""
-
-
-def _parsed(text: str) -> schedule.Schedule:
-    return schedule.parse(load_yaml_lines(text))
-
-
-def test_position_numbers_are_the_numbers_shown_today_and_only_those():
-    stamps = migrate.position_numbers(_parsed(POSITIONAL), lambda repo: {})
-    # Label-numbered entries, a silent copy and a stand-alone readings row are left.
-    assert stamps == {
-        ("releases", "intro"): 1,
-        ("releases", "wrap-up"): 3,
-        ("releases", "flow"): 1,
-        ("assignments", "project"): 2,
-    }
-
-
-def test_numbers_are_stamped_keeping_every_comment_and_read_done_on_rerun():
-    stamps = migrate.position_numbers(_parsed(POSITIONAL), lambda repo: {})
-    new, declined = migrate.stamp_numbers(POSITIONAL, stamps)
-    assert declined == {"flow": "written as a flow mapping"}
-    assert "  intro:        # the first lecture\n    number: 1\n" in new
-    assert "  wrap-up:\n    number: 3\n    kind: lecture\n" in new
-    assert "  project:\n    number: 2\n" in new
-    # Only lines added: every line of the original is still there, in order.
-    assert [ln for ln in new.splitlines() if "number:" not in ln] == (
-        POSITIONAL.splitlines()
-    )
-    again = migrate.position_numbers(_parsed(new), lambda repo: {})
-    assert again == {("releases", "flow"): 1}
-    # The site shows exactly what it showed before.
-    before = {
-        sr.row.key: sr.number
-        for sr in schedule_plan.site_rows(schedule_plan.planned_rows(_parsed(new)))
-    }
-    assert before["intro"] == 1 and before["wrap-up"] == 3
-
-
-def test_an_empty_entry_is_declined_as_empty_not_as_a_flow_mapping():
-    text = "releases:\n  guest:\n  flow: {kind: lab}\n"
-    stamps = {("releases", "guest"): 1, ("releases", "flow"): 2}
-    new, declined = migrate.stamp_numbers(text, stamps)
-    assert new == text
-    assert declined == {"guest": "empty", "flow": "written as a flow mapping"}
-
-
-UNDATED = POSITIONAL.replace(
-    "assignments:\n",
-    "  later:\n    event_datetime: tbc\n    kind: lecture\n"
-    "  hidden:\n    event_datetime: tbc\n    show_on_site: false\n"
-    "assignments:\n",
-)
-
-
-def test_an_undated_shown_entry_is_listed_apart_from_the_stamps():
-    sched = _parsed(UNDATED)
-    assert migrate.undated_unnumbered(sched, lambda repo: {}) == ["later"]
-    assert ("releases", "later") not in migrate.position_numbers(sched, lambda repo: {})
-
-
-def test_the_numbers_step_previews_each_key_then_stamps_then_reads_done(
-    fake, semester, monkeypatch, capsys
-):
-    assert _main(monkeypatch, SEM, "--no-preview") == 0
-    tree = fake.tree(SEM, CONFIG_REPO)
-    tree["schedule.yml"] = UNDATED.replace(
-        "  flow: {event_datetime: 2026-09-29T10:00, kind: lab}\n", ""
-    ).encode()
-    fake.commits.clear()
-    capsys.readouterr()
-
-    assert _main(monkeypatch, SEM) == 0
-    out = capsys.readouterr().out
-    assert "  intro: 1\n" in out and "  wrap-up: 3\n" in out and "  project: 2\n" in out
-    assert "  later: undated: will show as a problem until dated and numbered\n" in out
-    assert fake.commits == []
-
-    assert _main(monkeypatch, SEM, "--no-preview") == 0
-    text = fake.tree(SEM, CONFIG_REPO)["schedule.yml"].decode()
-    assert "  intro:        # the first lecture\n    number: 1\n" in text
-    assert [c[3] for c in fake.commits].count(migrate.NUMBERS_COMMIT) == 1
-    commits = list(fake.commits)
-    capsys.readouterr()
-    assert _main(monkeypatch, SEM, "--no-preview") == 0
-    assert "  explicit numbers: already migrated" in capsys.readouterr().out
-    assert fake.commits == commits
 
 
 def test_the_old_pointer_at_publish_yml_names_opencourse_yml():
@@ -2938,18 +2816,6 @@ def test_an_entry_the_rewrite_would_lose_stops_the_preview(
     assert "fix by hand" in err
 
 
-def test_an_entry_numbers_cannot_reach_stops_the_preview(
-    fake, semester, monkeypatch, capsys
-):
-    monkeypatch.setattr(migrate.Semester, "numbers_work",
-                        lambda self: ("", "", {}, {"flow": "written as a flow mapping"},
-                                      []))  # fmt: skip
-    assert _main(monkeypatch, SEM) == 1
-    assert "will stop here: schedule.yml flow: add `number:` by hand" in (
-        capsys.readouterr().out
-    )
-
-
 def test_a_course_file_left_not_migrated_stops_the_preview(
     fake, course, monkeypatch, capsys
 ):
@@ -2961,21 +2827,6 @@ def test_a_course_file_left_not_migrated_stops_the_preview(
     out, err = capsys.readouterr()
     assert "will stop here: dsl-course.yml would still say NOT_MIGRATED" in out
     assert "`assignment_defaults.format` is still NOT_MIGRATED" in err
-
-
-def test_a_template_left_not_migrated_stops_the_preview(
-    fake, course, monkeypatch, capsys
-):
-    # A flow mapping the line rewrite cannot reach, with a run key it can strip: the
-    # rewrite has work, and leaves `format` behind for the verify to refuse.
-    fake.tree(COURSE, "assignment-1-f2026", "solution")["grading_config.yml"] = (
-        b"{format: ipynb, autograde: true}\n# late_window_days: 3\n"
-    )
-    assert _main(monkeypatch, COURSE) == 1
-    assert (
-        "will stop here: assignment-1-f2026@solution/grading_config.yml would still "
-        "say NOT_MIGRATED"
-    ) in capsys.readouterr().out
 
 
 # -------------------------------- a stripped title against the template's (MIG-7)
@@ -3080,3 +2931,16 @@ def test_a_course_meta_that_did_not_verify_names_the_key_left(monkeypatch, capsy
     monkeypatch.setattr(course, "meta_text", lambda: (left, "course_name: ML\n"))
     assert course.meta_verified() is False
     assert "assignment_defaults.format" in capsys.readouterr().err
+
+
+def test_an_unmigrated_course_is_compared_with_the_default_ref_and_says_so(
+    monkeypatch, capsys
+):
+    # No course.yml yet: the ref the course runs is unknown, not "release".
+    monkeypatch.setattr(migrate, "checkout_drift", lambda ref: ["dsl_course/x.py"])
+    migrate._warn_drift("C", "release", known=False)
+    err = capsys.readouterr().err
+    assert "C is unmigrated" in err and "the ref it runs is unknown" in err
+    assert "the ref C runs" not in err
+    migrate._warn_drift("C", "release")
+    assert "differs from release, the ref C runs" in capsys.readouterr().err

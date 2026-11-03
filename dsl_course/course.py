@@ -15,47 +15,49 @@ from pathlib import Path
 
 from . import records
 
-# The per-org identity/config file, at the root of every org's `.github` repo: a course
-# org's declares its name and its faculty SSOT, a semester org's is a pointer back to it.
-COURSE_CONFIG = "dsl-course.yml"
-# Its keys that went (decision 0009): the org is the repo owner, the name is `course_name`,
-# and a semester's timezone and archive grace are the semester's own facts with the
-# institution's defaults. Never read: a file still carrying one is NOT_MIGRATED, and
-# `migrate` strips them.
-RETIRED_COURSE_KEYS = ("org", "org_name", "cohort_defaults", "semester_defaults")
+# The course org's one hand-edited file, at the root of its `.github` repo (decision 0039):
+# `course:` (identity, `toolkit_version_ref`, licence), `people:` (course_admins),
+# `defaults:` and `open_course_site:`.
+COURSE_CONFIG = "course.yml"
+# Its blocks.
+COURSE_BLOCK = "course"
+PEOPLE_BLOCK = "people"
+DEFAULTS_BLOCK = "defaults"
+OPEN_SITE_BLOCK = "open_course_site"
+# The key that pins an org to one ref of the toolkit (`course.toolkit_version_ref`).
+TOOLKIT_REF_KEY = "toolkit_version_ref"
+
+
+def course_block(meta: object) -> dict:
+    """`course.yml`'s `course:` block (name, code, description, toolkit_version_ref,
+    licence), or `{}` when the file or the block is absent or not a mapping."""
+    block = meta.get(COURSE_BLOCK) if isinstance(meta, dict) else None
+    return block if isinstance(block, dict) else {}
 
 
 def advertises_console(meta: dict) -> bool:
-    """Whether a course's `dsl-course.yml` sends its students to the student console
-    (`student_console: true`). Off by default: an unset course keeps its semester sites
-    exactly as they were - no banner, team links to the site's own assignment pages, and
-    no student-facing sentence naming the console - and the console, reading it off
-    `student-status.json`, shows a signed-in student the site's link instead of its
-    student screens."""
-    return meta.get("student_console") is True
+    """Whether a course's `course.yml` sends its students to the student console
+    (`course.student_console: true`, undocumented: the parked console). Off by default: an
+    unset course keeps its semester sites exactly as they were - no banner, team links to
+    the site's own assignment pages, and no student-facing sentence naming the console -
+    and the console, reading it off `student-status.json`, shows a signed-in student the
+    site's link instead of its student screens."""
+    return course_block(meta).get("student_console") is True
 
 
 # The private per-semester config repo: roster, teams, schedule, grades, autograde records.
 # Every semester org has exactly one, under exactly this name.
 CONFIG_REPO = "semester-config"
-# Its name before decision 0010. Spelt here and in `migrate` only: the engine never reads a
-# repo under it, and `repos.create_repo` refuses to create one - a migrated semester's old
-# name is a live redirect (every clone, API read and sent link resolves through it) for as
-# long as nothing else takes the name.
-OLD_CONFIG_REPO = "classroom-config"
 # The semester's public front door: the Join course and Join team issue forms and the two
 # workflows that act on them. Its URL is in every enrolment mail (`discovery.join_issue_url`
-# builds it); the ones sent before decision 0010 name `welcome`, which GitHub redirects here
-# for as long as no repo takes that name again.
+# builds it).
 JOIN_REPO = "join"
 # The hidden first line of a Join issue the student console opens through the API. GitHub
 # drops a form's routing label on an issue created that way by an account without push, so
 # each join workflow runs on its marker as well as on the label the web form still applies.
 JOIN_COURSE_MARKER = "<!-- dsl:join-course -->"
 JOIN_TEAM_MARKER = "<!-- dsl:join-team -->"
-OLD_JOIN_REPO = "welcome"
-RETIRED_REPO_NAMES = frozenset({OLD_CONFIG_REPO, OLD_JOIN_REPO})
-# The per-student gradebook repo: grades-<handle> (grades.py creates them, discovery reads
+# The per-student gradebook repo: grades-<handle> (gradebook.py creates them, discovery reads
 # them back). Named here so the reader and the writer cannot drift.
 GRADEBOOK_PREFIX = "grades-"
 # Topics on an org's `.github` repo that say which TIER the org is (bootstrap_course stamps
@@ -63,9 +65,6 @@ GRADEBOOK_PREFIX = "grades-"
 # tell a course org from a semester without another read.
 COURSE_HUB_TOPIC = "dsl-course-hub"
 SEMESTER_TOPIC = "dsl-semester"
-# The semester topic's old spelling (decision 0012). Never read as a tier: an org still
-# carrying it is refused as NOT_MIGRATED, so the migration is what moves it.
-OLD_SEMESTER_TOPIC = "dsl-cohort"
 # How `scaffold_materials` names every materials repo (`course-materials-<tag>`) - the New
 # materials repo workflow takes only the tag, so this prefix is guaranteed by the toolkit
 # rather than a convention faculty could deviate from. Named here because `seed.refresh`
@@ -123,7 +122,7 @@ SANDBOX_USER = "dsl-sandbox"
 
 # The closed vocabularies of `grading_config.yml`. Here rather than beside the parser
 # because three layers spell them: `workflows_render` builds the New assignment dropdowns
-# from them, `scaffold` writes the chosen values into the file, and `grades` reads them
+# from them, `scaffold` writes the chosen values into the file, and `grading_spec` reads them
 # back - and a dropdown offering a word the reader would refuse is a form that lies.
 # Named for where the work LANDS. `assignment_repo` = one repo per unit, pushed to;
 # `external` = handed in off GitHub (Moodle, Kaggle, in class), so no repo is created at
@@ -132,24 +131,6 @@ SANDBOX_USER = "dsl-sandbox"
 # here when the engine can ACT on it, because this same tuple is what the New assignment
 # dropdown offers, and a form offering a word the reader would refuse is a form that lies.
 SUBMIT_VIA = ("assignment_repo", "shared_dropbox_repo", "external")
-# `github` is the LEGACY spelling of `assignment_repo`: live INSTRUCTOR-OWNED
-# `grading_config.yml` files in real course orgs carry it, so it is accepted at every
-# read boundary (`canonical_submit_via` below) and never written again by any generator.
-# The migration rewrites it (`migrate.submit_via_line`); the alias goes once every org
-# has migrated. `shared` was renamed to `shared_dropbox_repo` before it ever shipped to a
-# real org, so it gets no alias - an unrecognised `shared` is simply Dropped.
-LEGACY_SUBMIT_VIA = {"github": "assignment_repo"}
-
-
-def canonical_submit_via(value: object) -> str:
-    """A raw `submit_via` read off the outside world, normalised to its canonical spelling.
-
-    The ONE place every read boundary calls before trusting the value - the
-    `grading_config.yml` reader, the New assignment workflow's argv/env, the e2e harness -
-    so `github` reads as `assignment_repo` everywhere internal code compares against it,
-    and no second copy of the alias can drift from this one."""
-    text = str(value or "").strip().lower()
-    return LEGACY_SUBMIT_VIA.get(text, text)
 
 
 # THE `shared_dropbox_repo` rationale, written down once so the five places that act on it
@@ -183,7 +164,7 @@ STARTER_STATES = (*STARTER_MODES, STARTER_NONE)
 # an INDIVIDUAL assignment gives, which is why the Join-team form can refuse a slug
 # outright, and it is not a value an instructor ever writes.
 SELF_SELECT = "self_select"  # students use the Join-team form in `join`
-ASSIGNED = "assigned"  # the teaching team writes teams.csv; the form refuses
+ASSIGNED = "assigned"  # the teaching team writes the team cells; the form refuses
 TEAM_FORMATIONS = (SELF_SELECT, ASSIGNED)
 NO_TEAMS = "none"
 # Which starter stubs `New assignment` seeds, and nothing else: grading reads whatever
@@ -194,10 +175,13 @@ NO_TEAMS = "none"
 NO_STARTER = "none"
 # The stand-in the scaffold seeds where a setting has no sensible default but a shape worth
 # showing (`submit_url`). Here because two layers have to agree on it: `scaffold` writes it
-# into the file and `grades` refuses to act on a line still carrying it, which is what a
+# into the file and `grading_spec` refuses to act on a line still carrying it, which is what a
 # commented example turning into a live one otherwise costs a semester.
 SETTING_PLACEHOLDER = "CHANGE-ME"
 FORMATS = ("ipynb", "py", "rmd", "qmd", "latex", NO_STARTER)
+# The starters New assignment seeds when nobody chose (decision 0039 rule 2: `formats` is
+# asked by the wizard, never cascaded).
+DEFAULT_FORMATS = ("ipynb",)
 # The answer New assignment's formats and submit_via boxes
 # arrive with when nobody touches them: "use the course's `assignment_defaults:`, else the
 # toolkit's own". Here because two layers spell it: the rendered form offers it and the
@@ -423,10 +407,6 @@ SOLUTION_BEFORE_CUTOFF = (
     "shown on or after it."
 )
 CUTOFF_SENTENCE = "What is on main at the late cutoff is what is marked."
-# GitHub's cap on a repo description. The About line is `<slug> - submission repo. ` plus
-# the cutoff sentence plus the note, so a note that grew past this would be TRUNCATED by
-# GitHub rather than refused, and the warning would lose its second half silently.
-MAX_REPO_DESCRIPTION = 350
 
 
 def shape_note(shape: str) -> str:
@@ -536,7 +516,7 @@ def receipts_issue_body(
 
     There is no variant for an assignment handed in off GitHub: a Submission receipts issue exists
     only where the shape HAS one (`has_receipts_issue`), and no run ever opens one for any
-    other shape (`grades.receipts_thread_policy`), so a body describing one would be words
+    other shape (`receipts.receipts_thread_policy`), so a body describing one would be words
     nobody could reach."""
     lines = [RECEIPTS_ISSUE_MARKS[0], f"**Due:** {due_display}"]
     if late_policy_line:
@@ -585,7 +565,7 @@ def late_rule(
     semester site, and a second spelling of it elsewhere is how one semester comes to read two
     different rules for one deadline.
 
-    NOT `grades.late_policy`, which answers a different question: that is this rule against
+    NOT `receipts.late_policy`, which answers a different question: that is this rule against
     a real cutoff DATE (`accepted until Sunday 11 October 2026, 23:59 ...`), which only an
     assignment with a due date on record can be told."""
     if not collects:
@@ -729,15 +709,13 @@ def coerce_date(value: object) -> date | None:
     return None
 
 
-# A semester's instructors file (decision 0012): ONE `instructors:` list, each entry with
-# a required `role:`. `OLD_PEOPLE_FILE` - a `people:` mapping of role -> list - is never
-# read: a semester that still has it is refused as NOT_MIGRATED (`sync_faculty`).
-INSTRUCTORS_FILE = "instructors.yml"
-# The semester layer of the assignment settings (decision 0010: a `defaults:` block and an
-# `assignments:` map of per-slug deviations), at the root of semester-config beside the
-# schedule. Named now so the console has no literal; the engine reads it from B2.
-ASSIGNMENTS_FILE = "assignments.yml"
-OLD_PEOPLE_FILE = "people.yml"
+# A semester org's one hand-edited settings file, at the root of semester-config beside
+# the schedule (decision 0039): `people:` (ONE list, each entry with a required `role:`),
+# `defaults:` (the semester layer of the cascade) and `student_site:`.
+SEMESTER_FILE = "semester.yml"
+STUDENT_SITE_BLOCK = "student_site"
+# The semester's plan, beside it in `semester-config` (`schedule`).
+SCHEDULE_FILE = "schedule.yml"
 # `role:` value -> the role key every consumer groups by (the old file's own keys).
 INSTRUCTOR_ROLES = {
     "instructor": "instructors",
@@ -746,31 +724,31 @@ INSTRUCTOR_ROLES = {
 
 
 def instructor_role(value: object) -> str | None:
-    """The role key an `instructors.yml` entry's `role:` names, read the way the roster's
-    role is (case and surrounding space ignored), or None when it names no role."""
+    """The role key a `semester.yml` `people:` entry's `role:` names, read the way the
+    roster's role is (case and surrounding space ignored), or None when it names no role."""
     return INSTRUCTOR_ROLES.get(str(value or "").strip().lower())
 
 
-def people_by_role(meta: object, *, semester: bool = False) -> dict | None:
-    """A people block as `{role key: [entries]}`: a semester's `instructors:` list grouped
-    by each entry's `role:` (an entry without a valid one is left out - `sync_faculty`
-    reports it), or a COURSE file's `people:` mapping as it stands. None when `meta`
-    carries neither. A semester's file is read for its list alone: the old `people:`
-    shape there is NOT_MIGRATED, and renders no cards."""
-    if not isinstance(meta, dict):
+def people_by_role(meta: object) -> dict | None:
+    """A semester's `people:` list as `{role key: [entries]}`, grouped by each entry's
+    `role:` (an entry without a valid one is left out - `sync_faculty` reports it). None
+    when `meta` carries no such list."""
+    listed = meta.get(PEOPLE_BLOCK) if isinstance(meta, dict) else None
+    if not isinstance(listed, list):
         return None
-    listed = meta.get("instructors")
-    if isinstance(listed, list):
-        grouped: dict[str, list] = {key: [] for key in INSTRUCTOR_ROLES.values()}
-        for entry in listed:
-            role = instructor_role(entry.get("role") if isinstance(entry, dict) else "")
-            if role:
-                grouped[role].append(entry)
-        return grouped
-    if semester:
-        return None
-    people = meta.get("people")
-    return people if isinstance(people, dict) else None
+    grouped: dict[str, list] = {key: [] for key in INSTRUCTOR_ROLES.values()}
+    for entry in listed:
+        role = instructor_role(entry.get("role") if isinstance(entry, dict) else "")
+        if role:
+            grouped[role].append(entry)
+    return grouped
+
+
+def course_admins(meta: object) -> list:
+    """`course.yml`'s `people.course_admins` list as written, or `[]`."""
+    people = meta.get(PEOPLE_BLOCK) if isinstance(meta, dict) else None
+    admins = people.get("course_admins") if isinstance(people, dict) else None
+    return admins if isinstance(admins, list) else []
 
 
 def active_today(start: str | date | None, end: str | date | None, today: str) -> bool:
@@ -799,6 +777,9 @@ def is_repo_root(path: str) -> bool:
     return path.strip("/").strip() in ("", ".")
 
 
+# WP-P removes (with the open site's rebuild on the schedule, plan 0.11.0 section 2): the
+# `NN_` session-folder rule below is read by `public_site` alone. Nothing on the semester
+# side gives a folder name any meaning (decision 0038).
 # Session directories are named "<ordinal>_<free text>" (e.g. "00_intro",
 # "07_finals-review") - only the leading, zero-padding-tolerant ordinal is meaningful;
 # the rest is whatever the course calls it. No "week"/"session" literal is required.
@@ -821,10 +802,7 @@ def session_dirs(dir_paths: Iterable[str]) -> list[tuple[str, str, int]]:
     ordinal prefix, is not a session folder. A `parent` is therefore exactly a
     releasable section.
 
-    One rule, two transports: the local filesystem (discover_sections here, used by
-    the public-site builder) and the GitHub trees API (dsl_course.discovery) both feed their
-    directory listing through this, so "ordinal-prefixed directory = session folder"
-    is defined once.
+    Read through the local filesystem (`discover_sections`, the public-site builder).
     """
     found = []
     for path in dir_paths:
@@ -871,9 +849,7 @@ def find_session_dir(section_dir: Path, session: str) -> Path | None:
 def discover_local_sessions(repo_root: Path) -> list[str]:
     """The session numbers a CHECKOUT holds, across every discovered section.
 
-    The local-checkout twin of `discovery.discover_sessions`, which asks GitHub for a
-    recursive tree instead. A caller that has already cloned the repo to copy files out of
-    it has the answer on disk, and the API's copy of it can only be the same or staler."""
+    The public-site builder's, which has already cloned the repo."""
     return [
         str(n)
         for n in sorted(
@@ -885,10 +861,7 @@ def discover_local_sessions(repo_root: Path) -> list[str]:
 def discover_sections(repo_root: Path) -> list[str]:
     """Any top-level directory containing at least one ordinal-prefixed subdirectory is
     a releasable section - no declared config, the directory structure is the only
-    source of truth. Sorted for a deterministic order.
-
-    The local-checkout transport of the session_dirs rule; dsl_course.discovery is the
-    API-side one."""
+    source of truth. Sorted for a deterministic order."""
     return sorted(
         {parent for parent, _, _ in session_dirs(_local_dir_paths(repo_root)) if parent}
     )

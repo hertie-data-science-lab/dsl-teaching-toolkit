@@ -30,6 +30,8 @@ export interface OpDef {
   facts?: string[];
   /** Shown under a preview's outcome, read afresh after each preview (who would be emailed). */
   dryExtra?: ComponentChildren;
+  /** Shown under the verb's outcome unless it failed (a released TBC entry's session date). */
+  doneExtra?: ComponentChildren;
   verb: string;
   /** A `?` beside the verb, wherever it shows: its name, and one paragraph per string. */
   verbHint?: { label: string; text: string[] };
@@ -56,6 +58,11 @@ export interface OpDef {
    * preview there is offered, never required.
    */
   confirmInPanel?: boolean;
+  /**
+   * Run before the verb's request is sent (never before a preview), with the request's args:
+   * a setting the run's options change is saved first. A throw stops the run and shows its message.
+   */
+  beforeRun?: (args: Record<string, unknown>) => Promise<void>;
   /** Where on GitHub the verb's change shows (a repo, branch or file): "See on GitHub" once it has run. A function reads the run's args. */
   target?: string | ((args: Record<string, unknown>) => string);
 }
@@ -265,6 +272,8 @@ export class OpsSession {
     this.patch({ phase: 'running', running: kind, error: null, progress: null, handle: null, stopping: false, stopRequested: false, stopped: false, ...(preview ? { dry: null } : { result: null }) });
     let handle: Handle;
     try {
+      if (!preview && def.beforeRun) await def.beforeRun(args);
+      if (gone()) return;
       handle = await this.adapter.submit({ op: def.op, courseOrg: def.courseOrg, cohortOrg: def.cohortOrg, args, preview });
     } catch (e) {
       if (!gone()) this.patch({ phase: 'ready', running: null, stopping: false, error: e instanceof Error ? e.message : String(e) });

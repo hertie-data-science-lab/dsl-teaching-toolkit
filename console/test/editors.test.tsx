@@ -4,7 +4,6 @@
 import { render } from 'preact-render-to-string';
 import { parse } from 'yaml';
 import { describe, expect, it } from 'vitest';
-import SEEDED from '../../templates/semester-config/schedule.yml?raw';
 import { EnvCtx, type Env } from '../src/env';
 import { CONFLICT, saveText, type SaveState } from '../src/edit/save';
 import { YamlText, obj } from '../src/edit/yamlText';
@@ -13,12 +12,9 @@ import { COURSE_FACTS } from '../src/tiers/course';
 import { GitHubClient } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
 import { StaticFiles } from './staticFiles';
-import { POLICY, penaltyRate } from '../src/model/policy';
-import { labelNumber, sessionNumber } from '../src/model/format';
+import { rosterFiles } from './roster';
+import { CONTACTS, POLICY, penaltyRate } from '../src/model/policy';
 import { effectivePenalty, finalGrade, lateChoice, overrideText, overrideValue, penaltyText, questionFile, questionPoints, questionsFromRows, readSheet, scoreTotal } from '../src/model/marks';
-import { assignmentKey, blankDeploy, blankDraft, defaultDeployAt, deployAt, draftErrors, entryKey, freshId, needsNumber, newlyManual, nextNumber, readDraft, sessionBlock, unnumberedId, withNumber, writeDraft, type ArchiveDraft, type AssignmentDraft, type ReleaseDraft } from '../src/model/scheduleEdit';
-import { cutoffOf } from '../src/screens/RunSettings';
-import { validSchedule } from '../src/model/cascade';
 import { StatusStore, type Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
 import { DispatchAdapter } from '../src/ops/adapter';
@@ -29,7 +25,6 @@ import { cohortFlags } from '../src/ui/shell';
 import { DetailsScreen, MaterialsScreen, WebsiteScreen, courseFileAfter, detailsOf, missingAdmin } from '../src/screens/CourseEdit';
 import { AssignmentScreen } from '../src/screens/Assignments';
 import { ScheduleScreen } from '../src/screens/Schedule';
-import { parseHash } from '../src/router';
 import { lateReturn } from '../src/screens/Marking';
 import { InstructorsScreen, StudentsScreen } from '../src/screens/People';
 import type { CohortProps } from '../src/screens/types';
@@ -95,305 +90,6 @@ describe('saving a file', () => {
     const seen: SaveState[] = [];
     await saveText(saveEnv(gh), T, 'x: 1\n', 's', { message: 'm' }, (s) => seen.push(s));
     expect(seen.pop()).toEqual({ kind: 'bad', text: 'Saved, but Validate schedule failed: Session 5 cites a folder that is not there.' });
-  });
-});
-
-// ------------------------------------------------------------------ schedule model
-
-describe('the schedule entry sheet model', () => {
-  it('proposes assignment-<n> for a template joining the schedule: one more than the highest number, past any key taken', () => {
-    expect(nextNumber({}, 'assignment')).toBe(1);
-    expect(nextNumber({ assignments: { 'assignment-1': {}, 'assignment-2': {} } }, 'assignment')).toBe(3);
-    // The highest number decides, not the count: a gap is not filled.
-    expect(nextNumber({ assignments: { 'assignment-4': {} } }, 'assignment')).toBe(5);
-    // An entry's own number: counts too.
-    expect(nextNumber({ assignments: { trees: { number: 6 }, 'assignment-2': {} } }, 'assignment')).toBe(7);
-    // A key with no number adds nothing; one used in another block is stepped past.
-    expect(nextNumber({ assignments: { trees: {}, 'assignment-3d-vision': {} } }, 'assignment')).toBe(1);
-    expect(nextNumber({ assignments: { x: {} }, releases: { 'assignment-1': {} } }, 'assignment')).toBe(2);
-    expect(nextNumber({ assignments: { lab_03: {} } }, 'assignment')).toBe(4);
-    expect(assignmentKey(4)).toBe('assignment-4');
-    const d = { ...blankDraft('handout', { repo: '' }), template: 'assignment-regression' } as AssignmentDraft;
-    const doc = { assignments: { 'assignment-1': {} } };
-    expect(withNumber(d, doc).number).toBe(2);
-    // A number typed (or emptied) stays as it is; a saved entry keeps its key.
-    expect(withNumber({ ...d, number: 7 }, doc).number).toBe(7);
-    expect(withNumber({ ...d, number: '' }, doc).number).toBe('');
-    expect(withNumber({ ...d, id: 'assignment-1' }, doc).number).toBeUndefined();
-    // Supporting files are no row: a new one gets no number, and none is asked of it.
-    const data = { ...blankDraft('lecture', { repo: 'cm' }), number: 3 } as ReleaseDraft;
-    expect(withNumber(data, { releases: {} }, undefined, 'assets').number).toBeUndefined();
-    expect(needsNumber(data, 'assets')).toBe(false);
-    expect(needsNumber(data, 'lecture')).toBe(true);
-    const ok = { ...d, dueDate: '2026-10-01', handoutDate: '2026-09-01' };
-    expect(draftErrors({ ...ok, number: 2 }, { doc })).toEqual({});
-    expect(draftErrors({ ...ok, number: 1 }, { doc }).number).toBe('assignment-1 is already in this schedule.');
-    expect(draftErrors({ ...ok, number: '' }, { doc }).number).toBe('A number is needed.');
-    expect(draftErrors({ ...ok, number: 2.5 }, { doc }).number).toBe('A whole number from 1 to 999.');
-  });
-
-  it('asks about a hand out by hand only when the entry newly has no hand out date', () => {
-    const d = blankDraft('handout', { repo: '' }) as AssignmentDraft;
-    const manual = { ...d, manual: true };
-    expect(newlyManual(manual, null)).toBe(true);
-    expect(newlyManual(manual, d)).toBe(true);
-    expect(newlyManual(manual, manual)).toBe(false);
-    expect(newlyManual(d, null)).toBe(false);
-    expect(newlyManual(blankDraft('lecture', { repo: '' }), null)).toBe(false);
-    // The engine reports it out: its copies exist, nothing to ask.
-    expect(newlyManual(manual, d, 'declared')).toBe(true);
-    expect(newlyManual(manual, d, 'open')).toBe(false);
-  });
-
-  it('adds a release to the seeded file and keeps every comment', () => {
-    const y = new YamlText(SEEDED);
-    const doc = y.toJS() as Record<string, unknown>;
-    const blank = { ...(blankDraft('lecture', { repo: 'course-materials-f2026' }) as ReleaseDraft), title: 'Intro', date: '2026-09-10' };
-    blank.deploys[0].folder = 'lectures/01_intro';
-    // Required, and prefilled with the next lecture's number (decision 0020).
-    expect(draftErrors(blank, { templateUsers: () => 0 }).number).toBe('A number is needed.');
-    const d = withNumber(blank, doc);
-    expect(d.number).toBe(1);
-    expect(draftErrors(d, { templateUsers: () => 0 })).toEqual({});
-    const id = freshId(doc, 'releases', 'lecture-1');
-    expect(id).toBe('lecture-1');
-    writeDraft(y, { ...d, id }, doc);
-    const out = parse(y.text);
-    expect(out.releases['lecture-1']).toEqual({ event_datetime: '2026-09-10T10:00', kind: 'lecture', number: 1, title: 'Intro', deploy: [{ course_source_repo: 'course-materials-f2026', course_source_path: 'lectures/01_intro' }] });
-    expect(y.text.split('\n').filter((l) => l.trim().startsWith('#'))).toEqual(SEEDED.split('\n').filter((l) => l.trim().startsWith('#')));
-  });
-
-  it('keys an unnumbered release with no digit, so a readings pack joins no lecture', () => {
-    const doc = { releases: { readings: {}, 'readings-week': {}, 'lecture-1': {} }, events: { 'readings-week-b': {} } };
-    expect(unnumberedId({}, 'readings', '')).toBe('readings');
-    expect(unnumberedId(doc, 'readings', '')).toBe('readings-b');
-    expect(unnumberedId(doc, 'readings', 'Week 3')).toBe('readings-week-c');
-    expect(unnumberedId(doc, 'readings', 'Week 3, part A')).toBe('readings-week-3-part-a');
-    expect(unnumberedId({}, 'lecture', '')).toBe('lecture');
-    expect(freshId({ releases: { 'lecture-3': {} } }, 'releases', 'lecture-3')).toBe('lecture-3-b');
-    expect(freshId({ events: { 'midterm-exam': {} } }, 'events', 'Midterm exam')).toBe('midterm-exam-b');
-  });
-
-  it('edits an entry in place, keeping the keys the sheet does not show', () => {
-    const src = 'releases:\n  s5:\n    event_datetime: 2026-10-08T10:00   # moved once\n    assignment: assignment-2\n    deploy:\n      - course_source_repo: course-materials-f2026\n        course_source_path: lectures/05_trees\n';
-    const y = new YamlText(src);
-    const doc = y.toJS() as Record<string, unknown>;
-    const d = readDraft(doc, 's5') as ReleaseDraft;
-    expect(d.deploys[0].folder).toBe('lectures/05_trees');
-    writeDraft(y, { ...d, deploys: [{ ...d.deploys[0], folder: 'lectures/05_trees_and_ensembles' }] }, doc);
-    expect(y.text).toBe(src.replace('lectures/05_trees\n', 'lectures/05_trees_and_ensembles\n'));
-  });
-
-  it('edits each line of what to release on its own, keeping untouched lines byte for byte', () => {
-    // Maths-style: the lab files at the session, the solutions days later.
-    const src =
-      'releases:\n  lab-3:\n    event_datetime: 2026-10-08T10:00\n    deploy:\n' +
-      '      - course_source_repo: m   # the lab\n        course_source_path: labs/03\n' +
-      '      - course_source_repo: m\n        course_source_path: labs/03_solutions   # later\n        deploy_datetime: 2026-10-12T18:00\n';
-    const y = new YamlText(src);
-    const doc = y.toJS() as Record<string, unknown>;
-    const d = readDraft(doc, 'lab-3') as ReleaseDraft;
-    expect(d.deploys.map((x) => [x.folder, x.atDate, x.atTime])).toEqual([['labs/03', '', ''], ['labs/03_solutions', '2026-10-12', '18:00']]);
-    // Untouched: nothing changes.
-    writeDraft(y, d, doc);
-    expect(y.text).toBe(src);
-    // Removing the first line leaves the second exactly as written.
-    writeDraft(y, { ...d, deploys: [d.deploys[1]] }, doc);
-    expect(y.text).toBe('releases:\n  lab-3:\n    event_datetime: 2026-10-08T10:00\n    deploy:\n      - course_source_repo: m\n        course_source_path: labs/03_solutions   # later\n        deploy_datetime: 2026-10-12T18:00\n');
-  });
-
-  it('moves a session with nothing left to release to events, and back when it gains a line', () => {
-    const src = 'releases:\n  s5:\n    event_datetime: 2026-10-08T10:00\n    kind: lecture\n    title: Trees\n    deploy:\n      - course_source_repo: m\n        course_source_path: l\n';
-    const y = new YamlText(src);
-    const doc = y.toJS() as Record<string, unknown>;
-    const d = { ...(readDraft(doc, 's5') as ReleaseDraft), deploys: [] };
-    // No number is asked of it: an event takes its key's (s5), as on a release.
-    expect(draftErrors(d, { kind: 'lecture' })).toEqual({});
-    writeDraft(y, d, doc);
-    const out = parse(y.text);
-    expect(out.releases).toEqual({});
-    expect(validSchedule(out)).toBe(true);
-    expect(out.events.s5).toEqual({ event_datetime: '2026-10-08T10:00', kind: 'lecture', title: 'Trees' });
-    // Read back it is the same sheet, with nothing to release; a line moves it back.
-    const doc2 = y.toJS() as Record<string, unknown>;
-    const back = readDraft(doc2, 's5') as ReleaseDraft;
-    expect(back).toEqual({ ...d, block: 'events' });
-    writeDraft(y, { ...back, deploys: [{ ...blankDeploy('m'), folder: 'l' }] }, doc2);
-    const again = parse(y.text);
-    expect(again.events).toEqual({});
-    expect(again.releases.s5).toEqual({ event_datetime: '2026-10-08T10:00', kind: 'lecture', title: 'Trees', deploy: [{ course_source_repo: 'm', course_source_path: 'l' }] });
-  });
-
-  it('numbers a session by the first number in its label, as the engine does', () => {
-    expect(sessionNumber('lab-01-group-2')).toBe(1);
-    expect(labelNumber('lab-01-group-2')).toBe(2);
-    const y = new YamlText('events:\n  lab-01-group-2:\n    event_datetime: 2026-09-17T18:00\n    kind: lab\n');
-    const doc = y.toJS() as Record<string, unknown>;
-    const d = readDraft(doc, 'lab-01-group-2') as ReleaseDraft;
-    expect(d.number).toBe(1);
-    // Its own number is the label's: nothing is written for it.
-    writeDraft(y, { ...d, details: 'Group 2' }, doc);
-    expect(parse(y.text).events['lab-01-group-2']).toEqual({ event_datetime: '2026-09-17T18:00', kind: 'lab', details: 'Group 2' });
-  });
-
-  it('edits the events: session when a release shares its label, and never deletes the release', () => {
-    const src = 'releases:\n  lab-01:\n    event_datetime: 2026-09-16T08:00\n    kind: lab\n    deploy:\n      - course_source_repo: m\n        course_source_path: labs/01\nevents:\n  lab-01:\n    event_datetime: 2026-09-17T18:00\n    kind: lab\n    details: Group 2\n';
-    const y = new YamlText(src);
-    const doc = y.toJS() as Record<string, unknown>;
-    // The events row opens under its own key, and reads the session, not the release.
-    expect(entryKey(doc, 'events', 'lab-01')).toBe('events:lab-01');
-    expect(entryKey(doc, 'releases', 'lab-01')).toBe('lab-01');
-    const d = readDraft(doc, entryKey(doc, 'events', 'lab-01')) as ReleaseDraft;
-    expect([d.id, d.block, d.details, d.deploys]).toEqual(['lab-01', 'events', 'Group 2', []]);
-    // The label under both blocks is refused, either way round.
-    expect(draftErrors(d, { doc, kind: 'lab' }).block).toBe('lab-01 is already a release in schedule.yml. Rename one of them there.');
-    expect(draftErrors(readDraft(doc, 'lab-01') as ReleaseDraft, { doc, kind: 'lab' }).block).toBe('lab-01 is already a session in schedule.yml. Rename one of them there.');
-    // Even written, the session's edit stays under events: and the release is untouched.
-    writeDraft(y, { ...d, details: 'Group 2, room B' }, doc);
-    const out = parse(y.text);
-    expect(out.events['lab-01'].details).toBe('Group 2, room B');
-    expect(out.releases['lab-01'].deploy).toHaveLength(1);
-  });
-
-  it('writes a new session with nothing to release under events: its kind, its number, TBC without a date', () => {
-    const y = new YamlText('releases:\n  lab-1:\n    event_datetime: 2026-09-16T08:00\n    kind: lab\n    title: Intro\n    deploy:\n      - course_source_repo: m\n        course_source_path: labs/01\n');
-    const doc = y.toJS() as Record<string, unknown>;
-    const d = { ...(blankDraft('lab', { repo: 'm' }) as ReleaseDraft), deploys: [], number: 1 as const, details: 'Group 2', date: '2026-09-17', time: '18:00' };
-    expect(draftErrors(d, { kind: 'lab' })).toEqual({});
-    expect(sessionBlock(d)).toBe('events');
-    const id = freshId(doc, sessionBlock(d), 'lab-1');
-    expect(id).toBe('lab-1-b');
-    writeDraft(y, { ...d, id }, doc);
-    expect(parse(y.text).events[id]).toEqual({ event_datetime: '2026-09-17T18:00', kind: 'lab', number: 1, details: 'Group 2' });
-    expect(validSchedule(parse(y.text))).toBe(true);
-    expect(parse(y.text).releases['lab-1'].deploy).toHaveLength(1);
-    // Without a date it is TBC; a release still needs one.
-    const tbc = { ...d, date: '', time: '' };
-    expect(draftErrors(tbc, { kind: 'lab' })).toEqual({});
-    writeDraft(y, { ...tbc, id: 'lab-2' }, doc);
-    expect(parse(y.text).events['lab-2'].event_datetime).toBe('tbc');
-    expect(draftErrors({ ...tbc, deploys: [{ ...blankDeploy('m'), folder: 'l' }] }, { kind: 'lab' }).date).toBe('When is needed.');
-  });
-
-  it('keeps an exam or a special event on its own sheet, and an unknown kind is a special event', () => {
-    const doc = { events: { mid: { kind: 'exam', event_datetime: '2026-11-03' }, clinic: { event_datetime: '2026-11-04' }, odd: { kind: 'assets', event_datetime: '2026-11-05' }, lab: { kind: 'lab', event_datetime: '2026-11-06' }, talk: { kind: 'lecture', event_datetime: '2026-11-07T10:00' } } };
-    expect(readDraft(doc, 'mid')?.kind).toBe('events');
-    // A session kind is a session's sheet, whichever block holds it: a lab, a lecture.
-    expect(readDraft(doc, 'lab')?.kind).toBe('session');
-    expect(readDraft(doc, 'talk')).toMatchObject({ kind: 'session', type: 'lecture', deploys: [] });
-    expect(readDraft(doc, 'clinic')).toMatchObject({ kind: 'events', type: 'special_event' });
-    expect(readDraft(doc, 'odd')?.kind).toBe('events');
-  });
-
-  it('defaults a line’s release time to an hour before a timed session, the day’s start for a whole-day one', () => {
-    expect(defaultDeployAt('2026-10-08', '10:00')).toEqual(['2026-10-08', '09:00']);
-    expect(defaultDeployAt('2026-10-08', '00:30')).toEqual(['2026-10-07', '23:30']);
-    expect(defaultDeployAt('2026-10-08', '')).toEqual(['2026-10-08', '']);
-    expect(defaultDeployAt('', '10:00')).toEqual(['', '']);
-    const session = { date: '2026-10-08', time: '10:00' };
-    // Back at the default, or the date emptied: blank, so nothing is written.
-    expect(deployAt(session, '2026-10-08', '09:00')).toEqual({ atDate: '', atTime: '' });
-    expect(deployAt(session, '', '09:00')).toEqual({ atDate: '', atTime: '' });
-    expect(deployAt(session, '2026-10-08', '08:00')).toEqual({ atDate: '2026-10-08', atTime: '08:00' });
-    expect(deployAt(session, '2026-10-08', '')).toEqual({ atDate: '2026-10-08', atTime: '' });
-  });
-
-  it('writes a line’s own release time only when given; blank ships at the default', () => {
-    const src = 'releases:\n  s5:\n    event_datetime: 2026-10-08T10:00\n    deploy:\n      - course_source_repo: m\n        course_source_path: l\n        deploy_datetime: 2026-10-07T09:00\n';
-    const y = new YamlText(src);
-    const doc = y.toJS() as Record<string, unknown>;
-    const d = readDraft(doc, 's5') as ReleaseDraft;
-    writeDraft(y, { ...d, deploys: [{ ...d.deploys[0], atDate: '', atTime: '' }, { ...blankDeploy('m'), folder: 'l2', atDate: '2026-10-10', atTime: '' }] }, doc);
-    expect(parse(y.text).releases.s5.deploy).toEqual([{ course_source_repo: 'm', course_source_path: 'l' }, { course_source_repo: 'm', course_source_path: 'l2', deploy_datetime: '2026-10-10' }]);
-    expect(draftErrors({ ...d, deploys: [{ ...d.deploys[0], atDate: '', atTime: '09:00' }] }, { kind: 'lecture' })['deploy0.at']).toBe('Give the date too, or clear the time.');
-  });
-
-  it('keeps a moment as the file spells it when only the title changes', () => {
-    const src =
-      'releases:\n  s5:\n    event_datetime: "2026-10-08T10:00:00+01:00"\n    title: Trees\n    deploy:\n      - course_source_repo: m\n        course_source_path: l\n' +
-      'assignments:\n  a2:\n    course_source_repo: assignment-2-f2026\n    handout_datetime: 2026-09-15 10:00\n    due_datetime: 2026-09-27T23:59:00+02:00\n';
-    const y = new YamlText(src);
-    const doc = y.toJS() as Record<string, unknown>;
-    writeDraft(y, { ...(readDraft(doc, 's5') as ReleaseDraft), title: 'Trees and ensembles' }, doc);
-    writeDraft(y, { ...(readDraft(doc, 'a2') as never as object), title: 'Regression' } as never, doc);
-    // An assignment's title is its template's (decision 0009): never written here.
-    expect(y.text).toBe(src.replace('title: Trees\n', 'title: Trees and ensembles\n'));
-  });
-
-  it('turns automatic archiving off by removing the block, and checks an assignment’s dates', () => {
-    const y = new YamlText(SEEDED);
-    const doc = y.toJS() as Record<string, unknown>;
-    writeDraft(y, { ...(readDraft(doc, 'archive') as never as object), kind: 'archive', on: false } as never, doc);
-    expect(parse(y.text)?.archive).toBeUndefined();
-    const a = { ...blankDraft('handout', { repo: '' }), template: 'assignment-2-f2026', handoutDate: '2026-09-15', dueDate: '2026-09-10', solutionOn: true, solutionDate: '2026-09-14' };
-    const e = draftErrors(a as never, { templateUsers: () => 2 });
-    expect(e.due).toBe('Due must come after the hand out.');
-    expect(e.solution).toBe('Must be after the hand out.');
-    // The repo name is assignments.yml's now: nothing here asks for it.
-    expect(e.semesterRepo).toBeUndefined();
-  });
-
-  it('refuses a solution shown before the late cutoff, in the engine’s words', () => {
-    const a = { ...blankDraft('handout', { repo: '' }), id: 'assignment-1', number: 1, template: 'assignment-1-f2026', handoutDate: '2026-09-15', dueDate: '2026-10-13', dueTime: '', solutionOn: true, solutionDate: '2026-10-16', solutionTime: '09:00' };
-    // due + 5 days, a bare due date closing at the end of its day, as the engine reads it
-    expect(draftErrors(a as never, undefined, cutoffOf('2026-10-13', '', 5)).solution).toBe(
-      'The solution for assignment-1 is set to be shown on 2026-10-16 09:00, before its late cutoff on 2026-10-18 23:59. Students can still hand in until the late cutoff, so the solution must be shown on or after it.',
-    );
-    // on or after the cutoff, or with no late window past the date: saved
-    expect(draftErrors({ ...a, solutionDate: '2026-10-18', solutionTime: '23:59' } as never, undefined, cutoffOf('2026-10-13', '23:59', 5))).toEqual({});
-    expect(draftErrors(a as never, undefined, cutoffOf('2026-10-13', '', 2))).toEqual({});
-    // a new entry is named by its number, not its template
-    expect(draftErrors({ ...a, id: '', number: 3 } as never, undefined, cutoffOf('2026-10-13', '', 5)).solution).toMatch(/^The solution for assignment-3 is/);
-  });
-
-  it('leaves a retired key an unmigrated entry still carries exactly as it is', () => {
-    const src = 'assignments:\n  a2:\n    course_source_repo: assignment-2-f2026\n    semester_dest_repo: homework-2\n    title: Regression\n    due_datetime: 2026-09-27T23:59:00+02:00\n    grading_datetime: 2026-10-07\n';
-    const y = new YamlText(src);
-    const doc = y.toJS() as Record<string, unknown>;
-    writeDraft(y, { ...(readDraft(doc, 'a2') as never as object), details: 'Fit it.' } as never, doc);
-    const a2 = (parse(y.text).assignments as Record<string, Record<string, unknown>>).a2;
-    expect(a2).toMatchObject({ semester_dest_repo: 'homework-2', title: 'Regression', grading_datetime: '2026-10-07', details: 'Fit it.' });
-  });
-
-  it('edits the archive grace days, writing the key only once it differs from 60', () => {
-    const y = new YamlText(SEEDED);
-    const doc = y.toJS() as Record<string, unknown>;
-    const d = readDraft(doc, 'archive') as ArchiveDraft;
-    expect(d.graceDays).toBe(60);
-    writeDraft(y, { ...d, title: 'Frozen' }, doc);
-    expect(parse(y.text).archive).not.toHaveProperty('grace_days');
-    writeDraft(y, { ...d, graceDays: 90 }, doc);
-    expect(parse(y.text).archive.grace_days).toBe(90);
-    expect(y.text.split('\n').filter((l) => l.trim().startsWith('#'))).toEqual(SEEDED.split('\n').filter((l) => l.trim().startsWith('#')));
-    const y2 = new YamlText(y.text);
-    const doc2 = y2.toJS() as Record<string, unknown>;
-    const d2 = readDraft(doc2, 'archive') as ArchiveDraft;
-    expect(d2.graceDays).toBe(90);
-    writeDraft(y2, { ...d2, graceDays: '' }, doc2);
-    expect(parse(y2.text).archive).not.toHaveProperty('grace_days');
-    expect(draftErrors({ ...d, graceDays: -1 }, { templateUsers: () => 0 }).graceDays).toBe('A whole number of days, 0 or more.');
-    expect(draftErrors({ ...d, graceDays: 1.5 }, { templateUsers: () => 0 }).graceDays).toBeDefined();
-    expect(draftErrors({ ...d, graceDays: 0 }, { templateUsers: () => 0 })).toEqual({});
-  });
-
-  it('writes only the archive alternative chosen: a date, or the days after the semester ends', () => {
-    const y = new YamlText(SEEDED);
-    const doc = y.toJS() as Record<string, unknown>;
-    const d = readDraft(doc, 'archive') as ArchiveDraft;
-    expect(d.when).toBe('days');
-    writeDraft(y, { ...d, when: 'date', date: '2027-02-15', graceDays: 90 }, doc);
-    const dated = parse(y.text).archive;
-    expect(String(dated.event_datetime)).toContain('2027-02-15');
-    expect(dated).not.toHaveProperty('grace_days');
-    const y2 = new YamlText(y.text);
-    const doc2 = y2.toJS() as Record<string, unknown>;
-    const d2 = readDraft(doc2, 'archive') as ArchiveDraft;
-    expect(d2.when).toBe('date');
-    writeDraft(y2, { ...d2, when: 'days', graceDays: 90 }, doc2);
-    const days = parse(y2.text).archive;
-    expect(days.event_datetime ?? null).toBeNull();
-    expect(days.grace_days).toBe(90);
-    expect(draftErrors({ ...d, when: 'date', date: '' }, { templateUsers: () => 0 }).date).toBeDefined();
   });
 });
 
@@ -537,23 +233,22 @@ const NOW = Date.parse('2026-09-23T10:00:00+02:00');
 const cohort = { org: COHORT_ORG, term: 'f2026', termLabel: 'Fall 2026' };
 const course: Course = {
   org: COURSE_ORG, name: 'Machine Learning', code: 'E1234', description: 'A course.', write: true, admins: ['a-example'], cohorts: [cohort],
-  meta: { assignment_defaults: { late_window_days: 10, late_penalty_per_day: '10%', max_team_size: 5 } },
+  meta: { defaults: { late_window_days: 10, late_penalty_per_day: '10%', max_team_size: 5 } },
 };
 const groupStatus: Status = {
   ...STATUS,
-  assignments: [...(STATUS.assignments ?? []), { slug: 'assignment-3', title: 'Group project', template: 'assignment-3-f2026', state: 'teams_forming', handout: '2026-09-20T10:00:00+02:00', due: '2026-10-20T23:59:00+02:00', grading_cutoff_datetime: '2026-10-30T23:59:00+02:00', solution_shown: null, units: 12, submissions: 0, teams: 1, marks: { filled: 0, total: 12 }, returned: false, problem: true }],
+  assignments: [...(STATUS.assignments ?? []), { slug: 'assignment-3', number: 3, title: 'Group project', template: 'assignment-3-f2026', state: 'teams_forming', handout: '2026-09-20T10:00:00+02:00', due: '2026-10-20T23:59:00+02:00', grading_cutoff_datetime: '2026-10-30T23:59:00+02:00', solution_shown: null, units: 12, submissions: 0, teams: 1, marks: { filled: 0, total: 12 }, returned: false, problem: true, settings: { max_team_size: { value: 3, source: 'entry' }, team_formation: { value: 'self_select', source: 'institution' } } }],
 };
 const ready: Loaded = { kind: 'ready', status: groupStatus, sha: 's', stale: [] };
+const SITE = 'open_course_site:\n  enabled: true   # false: nothing is published\n  source_repo: course-materials-f2026\n  publish:\n    kinds: [lectures, labs]\n    exclude: ["labs/"]\n';
+const COURSE_YML = `# INSTRUCTOR-OWNED\ncourse:\n  name: Machine Learning\n  code: E1234\npeople:\n  course_admins:\n    - github_handle: a-example\n      email: a@staff.example.org\ndefaults:\n  late_window_days: 10\n  late_penalty_per_day: 10%\n${SITE}`;
 const FILES: Record<string, string> = {
-    [`${COHORT_ORG}/semester-config/students.csv`]: 'hertie_email,name,role,github_handle,github_id,enrol_code,code_sent_at\nanna@x.org,Anna Adams,enrolled,anna-a,101,SECRET1,2026-09-02T09:30:00Z\nben@x.org,Ben Baker,enrolled,ben-b,102,SECRET2,2026-09-02T09:30:00Z\ncarla@x.org,Carla Cohen,,carla-c,103,SECRET3,2026-09-02T09:30:00Z\n',
-    [`${COHORT_ORG}/semester-config/instructors.yml`]: 'instructors:\n  - github_handle: a-example\n    role: instructor\n    email: a@staff.example.org\n    name: Dr A. Example\n',
-    [`${COHORT_ORG}/semester-config/teams.csv`]: 'assignment,team,github_handle\nassignment-3,team-alpha,anna-a\nassignment-3,team-alpha,ben-b\n',
+    ...rosterFiles(COHORT_ORG, 'email,name,role,team:3,github_handle,github_id,enrol_code,code_sent_at\nanna@x.org,Anna Adams,enrolled,team-alpha,anna-a,101,SECRET1,2026-09-02T09:30:00Z\nben@x.org,Ben Baker,enrolled,team-alpha,ben-b,102,SECRET2,2026-09-02T09:30:00Z\ncarla@x.org,Carla Cohen,,,carla-c,103,SECRET3,2026-09-02T09:30:00Z\n'),
+    [`${COHORT_ORG}/semester-config/semester.yml`]: 'people:\n  - github_handle: a-example\n    role: instructor\n    email: a@staff.example.org\n    name: Dr A. Example\n',
     [`${COHORT_ORG}/semester-config/grading_sheets/assignment-2.yml`]: '# GRADING SHEET\n# Status: OPEN\nsubmissions:\n  anna-a:\n    info:\n      submitted: 2026-09-27T20:00\n      days_late: 2\n    score_individual:\n      Q1: 14\n      Q2: 20\n    adjustment_individual: 1\n    feedback_individual: |\n      Good.\n    notes_not_shared_with_students:\n',
     [`${COURSE_ORG}/assignment-2-f2026/grading_config.yml`]: 'questions:\n  Q1: 15\n  Q2: 25\n',
     [`${COURSE_ORG}/assignment-3-f2026/grading_config.yml`]: 'type: group\n',
-    [`${COHORT_ORG}/semester-config/assignments.yml`]: 'assignments:\n  assignment-3:\n    max_team_size: 3\n',
-    [`${COURSE_ORG}/.github/dsl-course.yml`]: '# INSTRUCTOR-OWNED\norg: hertie-dsl-demo-course-e1234\ncourse_name: Machine Learning\ncourse_code: E1234\npeople:\n  course_admins:\n    - github_handle: a-example\n      email: a@staff.example.org\nassignment_defaults:\n  late_window_days: 10\n  late_penalty_per_day: 10%\n',
-    [`${COURSE_ORG}/.github/opencourse.yml`]: '# INSTRUCTOR-OWNED\nenabled: true   # false: nothing is published\nsource_repo: course-materials-f2026\nreadings_mode: reading-list\ninclude_lectures: true\nwithhold:\n  - "labs/"\n',
+    [`${COURSE_ORG}/.github/course.yml`]: COURSE_YML,
     [`${COURSE_ORG}/course-materials-f2026/.releaseignore`]: 'solutions/\n',
 };
 const TREES = { [`${COURSE_ORG}/course-materials-f2026`]: ['SYLLABUS.md', 'lectures/01/slides.html', 'labs/01/solutions/a.py'] };
@@ -581,14 +276,14 @@ describe('editing screens', () => {
   });
   it('points every link to a file that does not exist yet at GitHub’s new-file page, never a 404', () => {
     const none = new StaticFiles();
-    for (const [screen, path] of [[<StudentsScreen {...props({ files: none })} />, 'students.csv'], [<InstructorsScreen {...props({ files: none })} />, 'instructors.yml']] as const) {
+    for (const [screen, path] of [[<StudentsScreen {...props({ files: none })} />, 'students.csv'], [<InstructorsScreen {...props({ files: none })} />, 'semester.yml']] as const) {
       const out = html(screen);
       expect(out).toContain(`/new/main?filename=${path}`);
       expect(out).not.toContain(`/edit/main/${path}`);
       expect(out).not.toContain(`/blob/main/${path}`);
     }
   });
-  it('teams shows the window, the team size from assignments.yml and who has no team', () => {
+  it('teams shows the window, the team size status states and who has no team', () => {
     const out = html(<AssignmentScreen {...props({ entry: 'assignment-3', tab: 'teams' })} />);
     expect(out).toContain('<h2 class="h1">Assignment 3: Group project <span class="hint-wrap">');
     expect(out).toContain('2 of 3 joined students in 1 teams; 1 without a team.');
@@ -618,13 +313,12 @@ describe('editing screens', () => {
     expect(out).not.toContain('[object Object]');
   });
   it('the schedule’s archive entry explains archiving and offers Preview and the verb', () => {
-    const withSched = new StaticFiles({ ...FILES, [`${COHORT_ORG}/semester-config/schedule.yml`]: SEEDED }, {}, TREES);
+    const withSched = new StaticFiles({ ...FILES, [`${COHORT_ORG}/semester-config/schedule.yml`]: 'semester:\n  archive: {type: archive, event_datetime: 2027-02-16}\n' }, {}, TREES);
     const out = html(<ScheduleScreen {...props({ entry: 'archive', files: withSched })} />);
     expect(out).toContain('aria-label="About archiving"');
     expect(out).toContain('Students and instructors keep read access; nothing is deleted');
     expect(out).toContain('Archive Fall 2026');
     expect(out).not.toContain('Preview first');
-    expect(parseHash('#archive')).toEqual({ screen: 'schedule', entry: 'archive' });
   });
   it('a semester archived before it had a status counts as archived', () => {
     expect(cohortFlags({ kind: 'absent', archived: true })).toEqual({ problems: null, archived: true });
@@ -633,32 +327,31 @@ describe('editing screens', () => {
   const cp = { course, loaded: { kind: 'absent' } as Loaded, cohortStates: { [COHORT_ORG]: ready }, files, now: NOW };
   it('course details edits admins with emails and the defaults', () => {
     const out = html(<DetailsScreen {...cp} />);
-    expect(out).toContain(`<div class="actions"><a class="btn quiet" href="https://github.com/${COURSE_ORG}/.github/edit/main/dsl-course.yml" target="_blank" rel="noopener" title="${COURSE_ORG}/.github/dsl-course.yml">Edit the file directly`);
+    expect(out).toContain(`<div class="actions"><a class="btn quiet" href="https://github.com/${COURSE_ORG}/.github/edit/main/course.yml" target="_blank" rel="noopener" title="${COURSE_ORG}/.github/course.yml">Edit the file directly`);
     expect(out).not.toContain('New semester');
-    // On .github's own default branch; GitHub's new-file page while dsl-course.yml does not exist.
+    // On .github's own default branch; GitHub's new-file page while course.yml does not exist.
     const trunk = new StaticFiles({}, {}, {}, { [COURSE_ORG]: [{ name: '.github', default_branch: 'trunk' }] });
-    expect(html(<DetailsScreen {...cp} files={trunk} />)).toContain(`href="https://github.com/${COURSE_ORG}/.github/new/trunk?filename=dsl-course.yml"`);
+    expect(html(<DetailsScreen {...cp} files={trunk} />)).toContain(`href="https://github.com/${COURSE_ORG}/.github/new/trunk?filename=course.yml"`);
     expect(out).toContain('value="Machine Learning"');
     expect(out).toContain('value="a@staff.example.org"');
-    expect(out).toMatch(/<details class="fold"><summary>Advanced<\/summary>[^]*Defaults for this course’s assignments[^]*Student site links[^]*<\/details>/);
-    expect(out).not.toContain('Semester defaults'); // the engine reads none from dsl-course.yml
+    expect(out).toMatch(/<details class="fold"><summary>Advanced<\/summary>[^]*Defaults for this course’s semesters[^]*<\/details>/);
+    expect(out).not.toContain('Student site links');
+    expect(out).toContain('id="cdx-late_window_days" value="10"');
   });
   it('course details asks for the contact and licence, with the institution’s in grey', () => {
     const out = html(<DetailsScreen {...cp} />);
-    expect(out).toContain(`placeholder="${POLICY.contact}"`);
+    expect(out).toContain(`placeholder="${CONTACTS[0]}"`);
     expect(out).toContain(`institution default: ${POLICY.licences[0].name}`);
     expect(out).toContain(`<option value="${POLICY.licences[1].name}"`);
     // The website's on/off is a switch here, beside the link to its own tab.
     expect(out).toMatch(/<input type="checkbox" role="switch" id="cd-web" aria-describedby="cd-web-state" checked\/><span>Public OpenCourse website <span class="chip">Beta<\/span><\/span><\/label><span class="footnote" id="cd-web-state" aria-live="polite">On: updates daily<\/span> <a class="textlink" href="#website">Manage<\/a>/);
-    const off = new StaticFiles({ ...FILES, [`${COURSE_ORG}/.github/opencourse.yml`]: 'enabled: false\n' }, {}, TREES);
+    const off = new StaticFiles({ ...FILES, [`${COURSE_ORG}/.github/course.yml`]: COURSE_YML.replace(SITE, 'open_course_site:\n  enabled: false\n') }, {}, TREES);
     expect(html(<DetailsScreen {...cp} files={off} />)).toContain('aria-describedby="cd-web-state"/><span>Public OpenCourse website <span class="chip">Beta</span></span></label><span class="footnote" id="cd-web-state" aria-live="polite">Off</span>');
-    const none = Object.fromEntries(Object.entries(FILES).filter(([k]) => !k.endsWith('opencourse.yml')));
-    expect(html(<DetailsScreen {...cp} files={new StaticFiles(none, {}, TREES)} />)).toContain('aria-live="polite">Off</span>');
-    const broken = new StaticFiles({ ...FILES, [`${COURSE_ORG}/.github/opencourse.yml`]: 'enabled: [\n' }, {}, TREES);
-    expect(html(<DetailsScreen {...cp} files={broken} />)).toMatch(/id="cd-web" aria-describedby="cd-web-state" disabled\/>.*opencourse.yml does not parse; fix it in Manage\./);
+    const none = new StaticFiles({ ...FILES, [`${COURSE_ORG}/.github/course.yml`]: COURSE_YML.replace(SITE, '') }, {}, TREES);
+    expect(html(<DetailsScreen {...cp} files={none} />)).toContain('aria-live="polite">Off</span>');
   });
   it('skips the account check when only a course admin handle’s case changes', async () => {
-    const src = 'course_name: ML\npeople:\n  course_admins:\n    - github_handle: octo\n      email: o@x.edu\n';
+    const src = 'course:\n  name: ML\npeople:\n  course_admins:\n    - github_handle: octo\n      email: o@x.edu\n';
     const meta = obj(new YamlText(src).toJS());
     const before = detailsOf(meta);
     const after = { ...before, admins: [{ ...before.admins[0], github_handle: 'Octo' }] };
@@ -669,24 +362,30 @@ describe('editing screens', () => {
     expect(await missingAdmin(env, before.admins, after.admins)).toBeNull();
     expect(looked).toEqual([]);
   });
-  it('writes a contact and a licence into dsl-course.yml and a file without them still saves', () => {
-    const src = 'course_name: ML\ncourse_code: E1\n';
+  it('writes a contact into open_course_site and a licence into course: in course.yml, and a file without them still saves', () => {
+    const src = 'course:\n  name: ML\n  code: E1\n';
     const meta = obj(new YamlText(src).toJS());
     const before = detailsOf(meta);
     const out = courseFileAfter(src, before, { ...before, about: { ...before.about, contact: 'ml@x.edu', licence: 'CC BY 4.0' } }, meta);
-    expect('text' in out && out.text).toContain('contact: ml@x.edu\nlicence: CC BY 4.0');
+    expect('text' in out && parse(out.text)).toEqual({ course: { name: 'ML', code: 'E1', licence: 'CC BY 4.0' }, open_course_site: { contact: 'ml@x.edu' } });
     const same = courseFileAfter(src, before, { ...before, about: { ...before.about, course_code: 'E2' } }, meta);
-    expect('text' in same && same.text).toBe('course_name: ML\ncourse_code: E2\n');
+    expect('text' in same && same.text).toBe('course:\n  name: ML\n  code: E2\n');
+    // Clearing the contact drops the block it emptied, which the schema would refuse as null.
+    const withContact = 'course:\n  name: ML\nopen_course_site:\n  contact: ml@x.edu\n';
+    const m2 = obj(new YamlText(withContact).toJS());
+    const b2 = detailsOf(m2);
+    const cleared = courseFileAfter(withContact, b2, { ...b2, about: { ...b2.about, contact: undefined } }, m2);
+    expect('text' in cleared && cleared.text).toBe('course:\n  name: ML\n');
     expect(fieldErrors(null, COURSE_FACTS, { contact: 'not-an-email' }).contact).toBe('Write an email address.');
   });
   it('materials settings previews what is withheld, and nothing about the public website', () => {
     const out = html(<MaterialsScreen {...cp} entry="course-materials-f2026" />);
     expect(out).toMatch(/<span class="ft-name">slides.html<\/span><span class="chip ">released to students<\/span>/);
-    // A solution is never copied, whatever the list says: the tree and the last line agree.
-    expect(out).toContain('<span class="ft-name">a.py</span><span class="chip amber">never copied</span>');
-    expect(out).toContain('<span class="ft-name">solutions/</span><span class="chip amber">never copied</span>');
+    // solutions/ is the institution denylist's too (decision 0040): a folder release leaves it behind; only naming it ships it.
+    expect(out).toMatch(/<span class="ft-name">a.py<\/span><span class="chip amber">only if named<\/span>/);
+    expect(out).toContain('<span class="ft-name">solutions/</span><span class="chip amber">only if named</span>');
     expect(out).not.toContain('aria-label="Withhold labs/01/solutions/"');
-    // The panel's last line: a solution is never copied whatever the list says, so it counts there, not as withheld.
+    // The panel's last line: a solution is not copied unless named, so it counts there, not as withheld.
     expect(out).toContain('<p class="footnote">1 never copied (by default) · 0 withheld · 2 released</p>');
     expect(out).toContain('Weekly plan for the syllabus');
     // Copy opens the plan to copy; Write puts it into the syllabus (decision 0031 rule 9).
@@ -695,19 +394,19 @@ describe('editing screens', () => {
     expect(out).not.toContain('>Preview</button>');
     expect(out).toContain('aria-label="About Write"');
     // A syllabus that is not Markdown cannot be written into: Copy alone, and why.
-    const pdf = new StaticFiles({ ...FILES, [`${COURSE_ORG}/course-materials-f2026/materials.yml`]: 'syllabus: E1282.pdf\n' }, {}, TREES);
+    const pdf = new StaticFiles({ ...FILES, [`${COHORT_ORG}/semester-config/semester.yml`]: 'student_site:\n  syllabus: E1282.pdf\n' }, {}, TREES);
     const onlyCopy = html(<MaterialsScreen {...cp} files={pdf} entry="course-materials-f2026" />);
     expect(onlyCopy).toContain('>Copy</button>');
     expect(onlyCopy).not.toContain('>Write</button>');
     expect(onlyCopy).toContain('E1282.pdf is not Markdown, so the plan cannot be written into it: copy it and paste it in.');
     // A Markdown syllabus that is not there yet: nothing to write into either.
-    const absent = new StaticFiles({ ...FILES, [`${COURSE_ORG}/course-materials-f2026/materials.yml`]: 'syllabus: E1282.md\n' }, {}, TREES);
+    const absent = new StaticFiles({ ...FILES, [`${COHORT_ORG}/semester-config/semester.yml`]: 'student_site:\n  syllabus: E1282.md\n' }, {}, TREES);
     const noFile = html(<MaterialsScreen {...cp} files={absent} entry="course-materials-f2026" />);
     expect(noFile).not.toContain('>Write</button>');
     expect(noFile).toContain('There is no E1282.md yet: write the syllabus first, or copy the plan.');
     // No public-website setting here: that list is the Public website tab's.
     expect(out).not.toContain('kept off');
-    expect(out).not.toContain('opencourse.yml');
+    expect(out).not.toContain('open_course_site');
   });
   it('materials settings releases every file when nothing is withheld', () => {
     const none = new StaticFiles({}, {}, { [`${COURSE_ORG}/course-materials-f2026`]: ['SYLLABUS.md', 'lectures/01/slides.html'] });
@@ -717,87 +416,22 @@ describe('editing screens', () => {
     expect(out).not.toContain('class="file-list"');
     expect(out).toContain('0 never copied (by default) · 0 withheld · 2 released');
   });
-  it('the public website edits opencourse.yml and asks for the confirmation the engine’s missing preview needs', () => {
+  it('the public website edits course.yml and asks for the confirmation the engine’s missing preview needs', () => {
     const out = html(<WebsiteScreen {...cp} />);
     expect(out).toContain('Public OpenCourse website <span class="chip">Beta</span>');
     expect(out).toContain('Beta: leave this off for now - work in progress.');
     expect(out).toContain('<button class="btn" type="button">Publish website</button>');
-    expect(out).toContain(`<a class="btn quiet" href="https://github.com/${COURSE_ORG}/.github/edit/main/opencourse.yml" target="_blank" rel="noopener" title="${COURSE_ORG}/.github/opencourse.yml">Edit the file directly`);
+    expect(out).toContain(`<a class="btn quiet" href="https://github.com/${COURSE_ORG}/.github/edit/main/course.yml" target="_blank" rel="noopener" title="${COURSE_ORG}/.github/course.yml">Edit the file directly`);
     expect(out).not.toContain('New semester');
-    // No opencourse.yml yet: Create the file on GitHub opens GitHub's new-file page with the name filled in.
-    expect(html(<WebsiteScreen {...cp} files={new StaticFiles({}, {}, {})} />)).toContain(`href="https://github.com/${COURSE_ORG}/.github/new/main?filename=opencourse.yml"`);
+    // No course.yml yet: Create the file on GitHub opens GitHub's new-file page with the name filled in.
+    expect(html(<WebsiteScreen {...cp} files={new StaticFiles({}, {}, {})} />)).toContain(`href="https://github.com/${COURSE_ORG}/.github/new/main?filename=course.yml"`);
     expect(out).toContain('Source materials');
-    expect(out).toMatch(/<span class="ft-name">labs\/<\/span><span class="chip amber">kept off<\/span>/);
+    // One selection editor: the kind chips, and the tree's lines leave a folder out.
+    expect(out).toMatch(/<span class="ft-name">labs\/<\/span><span class="chip amber">left out<\/span>/);
+    expect(out).toMatch(/Lecture: In · 1/);
+    expect(out).toContain('Reading lists');
     expect(out).toContain('Keep the website updated');
     expect(out).not.toContain('Lives in');
     expect(out).toContain('href="#details"');
-  });
-});
-
-describe('explicit numbers in the entry sheet (decision 0020)', () => {
-  const doc = {
-    releases: {
-      'lecture-1': { kind: 'lecture' },
-      guest: { kind: 'lecture', number: 7 },
-      'lab_03': {},
-      intro: {},
-      reading: { kind: 'readings' },
-    },
-    assignments: { 'assignment-2': {}, project: {} },
-  };
-  const kindOf = (k: string, e: unknown) => ({ lab_03: 'lab' })[k] ?? (((e as { kind?: string }).kind) || 'lecture');
-
-  it('prefills 1 + the highest number of the kind, never a count', () => {
-    expect(nextNumber(doc, 'lecture', kindOf)).toBe(8);
-    expect(nextNumber(doc, 'lab', kindOf)).toBe(4);
-    expect(nextNumber(doc, 'drop-in', kindOf)).toBe(1);
-    // Readings and supporting files carry no number of their own: nothing is proposed.
-    expect(nextNumber(doc, 'readings', kindOf)).toBeNull();
-    expect(nextNumber(doc, 'assets', kindOf)).toBeNull();
-    expect(nextNumber(doc, 'assignment')).toBe(3);
-    const lab = blankDraft('lab', { repo: 'm' }) as ReleaseDraft;
-    expect(withNumber(lab, doc, kindOf).number).toBe(4);
-    // A session with nothing to ship is proposed no number: the next release's is not its own.
-    expect(withNumber({ ...lab, deploys: [] }, doc, kindOf).number).toBeUndefined();
-    expect(withNumber({ ...lab, deploys: [], number: 2 }, doc, kindOf).number).toBe(2);
-    // Readings are numbered only to join a lecture: nothing is proposed.
-    expect(withNumber(blankDraft('readings', { repo: 'm' }) as ReleaseDraft, doc, kindOf).number).toBeUndefined();
-    // A draft whose kind is inferred takes that kind's number; readings keep only one typed in.
-    const inferred = { ...(blankDraft('lecture', { repo: 'm' }) as ReleaseDraft), type: '' };
-    expect(withNumber(inferred, doc, kindOf, 'lab').number).toBe(4);
-    expect(withNumber({ ...inferred, number: 3 }, doc, kindOf, 'readings').number).toBe(3);
-    expect(withNumber({ ...inferred, number: '' }, doc, kindOf, 'readings').number).toBe('');
-  });
-
-  it('shows a saved entry its number, and requires one where the site shows the row', () => {
-    expect((readDraft(doc, 'guest') as ReleaseDraft).number).toBe(7);
-    expect((readDraft(doc, 'lab_03') as ReleaseDraft).number).toBe(3);
-    const intro = readDraft(doc, 'intro') as ReleaseDraft;
-    expect(intro.number).toBe('');
-    const ok = { ...intro, date: '2026-09-10', deploys: [{ ...blankDeploy('m'), folder: 'l' }] };
-    expect(draftErrors(ok, { kind: 'lecture' }).number).toBe('A number is needed.');
-    // With nothing to release it is an `events:` session: no number is asked of it.
-    expect(draftErrors({ ...ok, deploys: [] }, { kind: 'lecture' }).number).toBeUndefined();
-    expect(draftErrors({ ...ok, show: false }, { kind: 'lecture' }).number).toBeUndefined();
-    expect(draftErrors(ok, { kind: 'readings' }).number).toBeUndefined();
-    // A readings key that carries a number joins that lecture: clearing the field cannot undo it.
-    expect(draftErrors({ ...ok, id: 'readings-3', number: '' }, { kind: 'readings' }).number).toBe('The key readings-3 carries the number 3. Rename the key in schedule.yml to make this a row of its own.');
-    expect((readDraft(doc, 'project') as AssignmentDraft).number).toBe('');
-  });
-
-  it('writes number: when typed, and leaves a label-numbered entry as it is written', () => {
-    const copy = '    deploy:\n      - course_source_repo: m\n        course_source_path: l\n';
-    const src = `releases:\n  intro:\n    event_datetime: 2026-09-10T10:00\n    kind: lecture\n${copy}  lecture-2:\n    event_datetime: 2026-09-17T10:00\n${copy}`;
-    const y = new YamlText(src);
-    const d0 = y.toJS() as Record<string, unknown>;
-    writeDraft(y, { ...(readDraft(d0, 'intro') as ReleaseDraft), number: 1 }, d0);
-    writeDraft(y, { ...(readDraft(d0, 'lecture-2') as ReleaseDraft), title: 'Two' }, d0);
-    const out = parse(y.text);
-    expect(out.releases.intro.number).toBe(1);
-    expect(out.releases['lecture-2'].number).toBeUndefined();
-    const y2 = new YamlText(y.text);
-    const d1 = y2.toJS() as Record<string, unknown>;
-    writeDraft(y2, { ...(readDraft(d1, 'lecture-2') as ReleaseDraft), number: 3 }, d1);
-    expect(parse(y2.text).releases['lecture-2'].number).toBe(3);
   });
 });

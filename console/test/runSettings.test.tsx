@@ -8,12 +8,13 @@ import { render } from 'preact-render-to-string';
 import { describe, expect, it } from 'vitest';
 import type { Course } from '../src/model/discovery';
 import { StaticFiles } from './staticFiles';
+import { rosterFiles } from './roster';
 import type { Loaded } from '../src/model/status';
 import type { Assignment, Status } from '../src/model/types';
 import * as defs from '../src/ops/defs';
 import { AssignmentScreen, AssignmentsScreen } from '../src/screens/Assignments';
 import { cardsDone } from '../src/screens/NewCohort';
-import { defaultsLine, semesterLayers } from '../src/screens/RunSettings';
+import { defaultsLine } from '../src/screens/RunSettings';
 import { ScheduleScreen } from '../src/screens/Schedule';
 import type { CohortProps } from '../src/screens/types';
 import { assignmentArgs } from '../src/wizards/model';
@@ -27,27 +28,41 @@ const STATUS = example as unknown as Status;
 const cohort = { org: COHORT_ORG, term: 'f2026', termLabel: 'Fall 2026' };
 const course: Course = { org: COURSE_ORG, name: 'Machine Learning', code: 'E1234', description: '', write: true, admins: [], cohorts: [cohort], meta: {} };
 
-// The semester sets a 5% late penalty; status states each assignment's effective settings.
-const solo: Assignment = { ...STATUS.assignments![0], settings: { late_penalty_per_day: { value: '5%', source: 'semester' } } };
+// status.json carries every effective value with its source (decision 0039): the course sets
+// teams of 4, the semester a 5-day window at 5%, the institution the rest.
+const E = (value: string | number | boolean | null, source: 'entry' | 'semester' | 'course' | 'institution') => ({ value, source });
+const COURSE_DEFAULTS = {
+  max_team_size: E(4, 'course'), late_window_days: E(10, 'institution'), late_penalty_per_day: E('10%', 'institution'),
+  team_formation: E('self_select', 'institution'), assignment_repo_visibility: E('private', 'institution'), marks_per_question: E(true, 'institution'),
+};
+const SEMESTER_DEFAULTS = { ...COURSE_DEFAULTS, late_window_days: E(5, 'semester'), late_penalty_per_day: E('5%', 'semester') };
+const solo: Assignment = { ...STATUS.assignments![0], settings: { ...SEMESTER_DEFAULTS, submit_url: E(null, 'institution') } };
 const team: Assignment = { ...solo, slug: 'assignment-3', title: 'Group project', template: 'assignment-3-f2026', state: 'marking', units: 1, submissions: 1, teams: 1, marks: { filled: 0, total: 1 } };
-const status: Status = { ...STATUS, assignments: [solo, team] };
+const status: Status = {
+  ...STATUS,
+  course: { ...STATUS.course!, defaults: COURSE_DEFAULTS },
+  semester: { ...STATUS.semester!, defaults: SEMESTER_DEFAULTS },
+  assignments: [solo, team],
+};
 const ready: Loaded = { kind: 'ready', status, sha: 's', stale: [] };
 
 const SCHEDULE = [
   'timezone: Europe/Berlin',
   'assignments:',
   '  assignment-2:',
-  '    course_source_repo: assignment-2-f2026',
+  '    number: 2',
+  '    template: assignment-2-f2026',
   '    handout_datetime: 2026-09-15T10:00',
   '    due_datetime: 2026-09-27T23:59',
   '  assignment-3:',
-  '    course_source_repo: assignment-3-f2026',
+  '    number: 3',
+  '    template: assignment-3-f2026',
   '    handout_datetime: 2026-09-16T10:00',
   '    due_datetime: 2026-09-20T23:59',
   '',
 ].join('\n');
-const ASSIGNMENTS = '# INSTRUCTOR-OWNED\ndefaults:\n  late_window_days: 5\n  late_penalty_per_day: 5%\n';
-const COURSE_FILE = 'course_name: Machine Learning\nassignment_defaults:\n  max_team_size: 4\n';
+const SEMESTER = '# INSTRUCTOR-OWNED\ndefaults:\n  late_window_days: 5\n  late_penalty_per_day: 5%\n';
+const COURSE_FILE = 'course:\n  name: Machine Learning\ndefaults:\n  max_team_size: 4\n';
 const TEAM_SHEET = [
   'teams:',
   '  team-alpha:',
@@ -76,8 +91,8 @@ const SOLO_SHEET = 'submissions:\n  carla-c:\n    info:\n      submitted: 2026-0
 
 const base: Record<string, string> = {
   [`${COHORT_ORG}/semester-config/schedule.yml`]: SCHEDULE,
-  [`${COHORT_ORG}/semester-config/assignments.yml`]: ASSIGNMENTS,
-  [`${COURSE_ORG}/.github/dsl-course.yml`]: COURSE_FILE,
+  [`${COHORT_ORG}/semester-config/semester.yml`]: SEMESTER,
+  [`${COURSE_ORG}/.github/course.yml`]: COURSE_FILE,
   [`${COURSE_ORG}/assignment-2-f2026/grading_config.yml`]: 'type: individual\nsubmit_via: assignment_repo\nquestions:\n  Q1: 10\n',
   [`${COURSE_ORG}/assignment-3-f2026/grading_config.yml`]: 'type: group\nquestions:\n  Q1: 5\n  Q2: {points: 5, file: report.tex}\n',
   [`${COHORT_ORG}/semester-config/grading_sheets/assignment-3.yml`]: TEAM_SHEET,
@@ -87,7 +102,7 @@ const filesWith = (over: Record<string, string> = {}) => new StaticFiles({ ...ba
 const props = (over: Partial<CohortProps> = {}): CohortProps => ({ course, cohort, loaded: ready, files: filesWith(), now: NOW, ...over });
 const html = (v: preact.VNode) => render(v);
 
-describe('the Overview form: schedule entry and assignments.yml block as one', () => {
+describe('the Overview form: the schedule entry, its run settings inline', () => {
   it('shows the timings, the computed late cutoff and each run setting with its value and source', () => {
     const out = html(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'overview' })} />);
     expect(out).toContain('How this semester runs it');
@@ -174,7 +189,7 @@ describe('the Overview form: schedule entry and assignments.yml block as one', (
   });
 
   it('opens the field of a setting this assignment sets, with Use the default', () => {
-    const files = filesWith({ [`${COHORT_ORG}/semester-config/assignments.yml`]: `${ASSIGNMENTS}assignments:\n  assignment-2:\n    visibility: public\n` });
+    const files = filesWith({ [`${COHORT_ORG}/semester-config/schedule.yml`]: SCHEDULE.replace('    due_datetime: 2026-09-27T23:59\n', '    due_datetime: 2026-09-27T23:59\n    assignment_repo_visibility: public\n') });
     const out = html(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'overview', files })} />);
     expect(out).toContain('Public, set for this assignment');
     expect(out).toContain('<option value="public" selected');
@@ -190,7 +205,7 @@ describe('the Overview form: schedule entry and assignments.yml block as one', (
   });
 
   it('names the entry to Update every copy and Collect now, so two entries may share one template', () => {
-    const shared = SCHEDULE.replace('course_source_repo: assignment-3-f2026', 'course_source_repo: assignment-2-f2026');
+    const shared = SCHEDULE.replace('template: assignment-3-f2026', 'template: assignment-2-f2026');
     const out = html(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'overview', files: filesWith({ [`${COHORT_ORG}/semester-config/schedule.yml`]: shared }) })} />);
     expect(out).toContain('>Collect now<');
     const ref = { slug: 'assignment-2', title: 'x', template: 'assignment-2-f2026', units: 1, group: false, when: '' };
@@ -201,7 +216,7 @@ describe('the Overview form: schedule entry and assignments.yml block as one', (
 });
 
 describe('the semester’s defaults', () => {
-  it('open from the Semester defaults button beside New assignment, as a modal with their summary; Escape closes it', async () => {
+  it('open from the Semester defaults button beside New assignment, as the Semester settings modal on Assignments; Escape closes it', async () => {
     const out = html(<AssignmentsScreen {...props()} />);
     expect(out).not.toContain('Defaults: 5 days');
     expect(out).toMatch(/<div class="actions"><button class="btn quiet" type="button" aria-haspopup="dialog">Semester defaults<\/button><a class="btn"[^>]*>New assignment<\/a>/);
@@ -215,16 +230,19 @@ describe('the semester’s defaults', () => {
     await act(() => change.click());
     const dialog = root.querySelector('[role="dialog"]')!;
     expect(dialog.getAttribute('aria-modal')).toBe('true');
-    expect(dialog.textContent).toContain('Defaults for this semester’s assignments');
+    expect(dialog.textContent).toContain('Semester settings');
+    // Opened from here: the Assignments fold open and focused, the other two folded.
+    const folds = [...dialog.querySelectorAll<HTMLDetailsElement>('details.settings-fold')];
+    expect(folds.map((d) => [d.querySelector('summary span')!.textContent, d.open])).toEqual([['Assignments', true], ['Releases', false], ['Semester dates', false]]);
+    expect(dialog.textContent).toContain('Timezone');
     expect(dialog.textContent).toContain('Defaults: 5 days, 5%, teams of 4.');
-    // One submission site may serve every assignment handed in outside GitHub.
-    expect(dialog.querySelector('#sd-submit_url')).not.toBeNull();
-    expect(dialog.textContent).toContain('Submission link (assignments handed in outside GitHub)');
+    // The submit link is each assignment's own (`settings.DEFAULT_KEYS`): no semester default.
+    expect(dialog.querySelector('#sd-submit_url')).toBeNull();
     expect(dialog.querySelector<HTMLInputElement>('#sd-late_window_days')!.value).toBe('5');
     expect(dialog.textContent).toContain('this course’s default: up to 4');
     expect(dialog.textContent).toContain('institution default: Students form their own');
     expect(dialog.textContent).toContain('Change the course’s defaults');
-    expect(document.activeElement).toBe(dialog);
+    expect(document.activeElement).toBe(folds[0].querySelector('summary'));
 
     await act(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); });
     expect(root.querySelector('[role="dialog"]')).toBeNull();
@@ -263,12 +281,16 @@ describe('the semester’s defaults', () => {
   });
 
   it('print the penalty as a percentage however the file writes it', () => {
-    const f = filesWith({ [`${COHORT_ORG}/semester-config/assignments.yml`]: 'defaults:\n  late_window_days: 3\n  late_penalty_per_day: 0.05\n' });
-    expect(defaultsLine(semesterLayers({ files: f, course, cohort }, { defaults: { late_window_days: 3, late_penalty_per_day: 0.05 } }))).toBe('Defaults: 3 days, 5%, teams of 4.');
+    const defaults = { ...SEMESTER_DEFAULTS, late_window_days: E(3, 'semester'), late_penalty_per_day: E('0.05', 'semester') };
+    expect(defaultsLine(defaults)).toBe('Defaults: 3 days, 5%, teams of 4.');
   });
 
   it('are asked once in New semester, as an optional card', () => {
-    expect(cardsDone(filesWith(), COHORT_ORG).defaults).toBe(true);
+    const stated = new StaticFiles({ [`${COHORT_ORG}/semester-config/semester.yml`]: SEMESTER });
+    expect(cardsDone(stated, COHORT_ORG).defaults).toBe(true);
+    // The seeded skeleton states nothing: every key is a comment.
+    const seeded = new StaticFiles({ [`${COHORT_ORG}/semester-config/semester.yml`]: 'defaults:   # skeleton\n  # max_team_size: 5\n' });
+    expect(cardsDone(seeded, COHORT_ORG).defaults).toBe(false);
     expect(cardsDone(new StaticFiles({}), COHORT_ORG).defaults).toBe(false);
   });
 });
@@ -278,14 +300,14 @@ describe('the marks grid: teams > students > questions', () => {
     const out = html(<AssignmentScreen {...props({ entry: 'assignment-3', tab: 'marks' })} />);
     expect(out).toContain('aria-label="Q2 (out of 5) for team-alpha"');
     expect(out).toContain('/ 5 · <code>report.tex</code>');
-    expect(out).toContain('aria-label="Team feedback for team-alpha" data-col="fb">Solid work.</textarea>');
-    // Feedback per question folds until opened; its chip counts the questions with text.
-    expect(out).toContain('aria-expanded="false" aria-label="Show feedback per question for team-alpha">✎ Feedback per question (1)</button>');
+    // Feedback is one line opening the row's side panel; its badge counts the questions with feedback.
+    expect(out).toContain('aria-label="Open team feedback for team-alpha" title="Solid work." data-preview="fb"><span class="md-line">Solid work.</span><span class="chip qfb-count" title="Feedback on 1 question">✎ 1</span></button>');
     expect(out).not.toContain('Feedback on Q1 for team-alpha');
+    expect(out).not.toContain('<textarea');
     for (const h of ['anna-a', 'ben-b']) {
-      expect(out).toContain(`aria-label="Feedback for ${h}"`);
+      expect(out).toContain(`aria-label="Open feedback for ${h}"`);
       expect(out).toContain(`aria-label="Adjustment for ${h}"`);
-      expect(out).toContain(`aria-label="Private notes for ${h}"`);
+      expect(out).toContain(`aria-label="Open private notes for ${h}"`);
     }
     expect(out).toContain('aria-label="Hide the members of team-alpha"');
     // A member carries an adjustment, so the team opens on load, with the amber Adjustment column.
@@ -294,22 +316,22 @@ describe('the marks grid: teams > students > questions', () => {
     expect(out).not.toContain('class="grp">students see');
   });
 
-  it('renders every input even when the sheet is blank, and folds feedback per question until there is some', () => {
+  it('renders every input even when the sheet is blank, feedback per question waiting in the side panel', () => {
     const out = html(<AssignmentScreen {...props({ entry: 'assignment-2', tab: 'marks' })} />);
     expect(out).toContain('aria-label="Q1 (out of 10) for carla-c"');
     // No adjustment saved: the Adjustment column waits behind its chip.
     expect(out).not.toContain('aria-label="Adjustment for carla-c"');
     expect(out).toContain('aria-expanded="false">Adjustments ▸</button>');
-    expect(out).toContain('aria-label="Private notes for carla-c"');
-    expect(out).toContain('aria-expanded="false" aria-label="Show feedback per question for carla-c"');
+    expect(out).toContain('aria-label="Open private notes for carla-c"');
+    expect(out).not.toContain('qfb-count');
     expect(out).not.toContain('Feedback on Q1 for carla-c');
     // The penalty is the one status states (the semester's), not a literal.
-    expect(out).toContain('late penalties (5% of the total per day started)');
+    expect(out).toContain('late penalties (5% of the total per day started, up to 5 days)');
   });
 
   it('reads a renamed entry’s mark sheet by its semester-side name', () => {
     const files = filesWith({
-      [`${COHORT_ORG}/semester-config/assignments.yml`]: `${ASSIGNMENTS}assignments:\n  assignment-2:\n    semester_dest_repo: assignment-2-resit\n`,
+      [`${COHORT_ORG}/semester-config/schedule.yml`]: SCHEDULE.replace('    due_datetime: 2026-09-27T23:59\n', '    due_datetime: 2026-09-27T23:59\n    repo_name: assignment-2-resit\n'),
       [`${COHORT_ORG}/semester-config/grading_sheets/assignment-2.yml`]: 'submissions: {}\n',
       [`${COHORT_ORG}/semester-config/grading_sheets/assignment-2-resit.yml`]: SOLO_SHEET,
     });
@@ -318,13 +340,13 @@ describe('the marks grid: teams > students > questions', () => {
     expect(out).toContain('grading_sheets/assignment-2-resit.yml');
   });
 
-  it('reads a renamed entry’s teams by its semester-side name', () => {
+  it('reads an entry’s teams from its number’s column of students.csv, whatever its repos are called', () => {
     const files = filesWith({
-      [`${COHORT_ORG}/semester-config/assignments.yml`]: `${ASSIGNMENTS}assignments:\n  assignment-3:\n    semester_dest_repo: assignment-3-resit\n`,
-      [`${COHORT_ORG}/semester-config/teams.csv`]: 'assignment,team,github_handle\nassignment-3,team-old,anna-a\nassignment-3-resit,team-resit,ben-b\n',
-      [`${COHORT_ORG}/semester-config/students.csv`]: 'hertie_email,name,role,github_handle\nanna@x.org,Anna Adams,enrolled,anna-a\nben@x.org,Ben Baker,enrolled,ben-b\n',
+      [`${COHORT_ORG}/semester-config/schedule.yml`]: SCHEDULE.replace('    due_datetime: 2026-09-20T23:59', '    due_datetime: 2026-09-20T23:59\n    repo_name: assignment-3-resit'),
+      ...rosterFiles(COHORT_ORG, 'email,name,role,team:2,team:3,github_handle\nanna@x.org,Anna Adams,enrolled,team-old,,anna-a\nben@x.org,Ben Baker,enrolled,,team-resit,ben-b\n'),
     });
-    const out = html(<AssignmentScreen {...props({ entry: 'assignment-3', tab: 'teams', files })} />);
+    const three: Loaded = { ...ready, status: { ...status, assignments: [solo, { ...STATUS.assignments![0], slug: 'assignment-3', number: 3, template: 'assignment-3-f2026', teams: 1 }] } };
+    const out = html(<AssignmentScreen {...props({ entry: 'assignment-3', tab: 'teams', files, loaded: three })} />);
     expect(out).toContain('team-resit');
     expect(out).not.toContain('team-old');
   });
@@ -337,17 +359,18 @@ describe('the marks grid: teams > students > questions', () => {
 
 describe('the wizards', () => {
   it('New assignment sends template keys only', () => {
-    const args = assignmentArgs({ ...initialValues(null), name: 'Trees', number: 4, type: 'group' });
+    const args = assignmentArgs({ ...initialValues(), name: 'Trees', number: 4, type: 'group' });
     for (const k of ['number', 'semester', 'copy_from', 'team_formation', 'max_team_size', 'visibility', 'submit_url', 'late_window_days', 'late_penalty_per_day']) expect(args).not.toHaveProperty(k);
   });
 
-  it('adding it to a semester’s schedule asks the run settings, with defaults from the cascade', () => {
+  it('adding it to a semester’s schedule prewrites the run settings from the cascade (forms mock-up v3)', () => {
     const files = filesWith({ [`${COURSE_ORG}/assignment-4-f2026/grading_config.yml`]: 'type: group\n' });
     const out = html(<ScheduleScreen {...props({ entry: 'new', prefill: 'assignment-4-f2026', files })} />);
     expect(out).toContain('How this semester runs it');
-    expect(out).toContain('Written to assignments.yml with the entry.');
-    expect(out).toContain('Students form their own, institution default');
-    expect(out).toContain('up to 4, this course’s default');
-    expect(out).toContain('Due + 5 days at 5% a day, this semester’s default');
+    expect(out).toContain('(all inherited from the semester’s default config values unless changed here)');
+    expect(out).toMatch(/id="e-ts"[^>]*value="4"/);
+    expect(out).toMatch(/id="e-lw"[^>]*value="5"/);
+    expect(out).toMatch(/id="e-lp"[^>]*value="5"/);
+    expect(out).toMatch(/<option value="self_select" selected/);
   });
 });

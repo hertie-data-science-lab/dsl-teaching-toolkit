@@ -26,13 +26,12 @@ Usage:
 from __future__ import annotations
 
 import hashlib
-import re
 import shutil
 import stat
 import sys
 import tempfile
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from functools import cache
 from pathlib import Path
@@ -40,63 +39,61 @@ from textwrap import indent
 from zoneinfo import ZoneInfo
 
 import yaml
-from pathspec import GitIgnoreSpec
 
-from . import policy, schedule, status, teams
+from . import policy, release_record, run, schedule, selection, status, teams
+from .config import read_semester
 from .course import (
     CONFIG_REPO,
     CUTOFF_SENTENCE,
-    INSTRUCTORS_FILE,
     SELF_SELECT,
+    SEMESTER_FILE,
+    STUDENT_SITE_BLOCK,
     advertises_console,
+    course_block,
     identifier,
     late_rule,
     pages_repo,
     row_name,
     semester_label,
     semester_of,
-    session_number,
     shape_note,
     shared_repo,
     submission_repo,
 )
 from .discovery import (
     SEMESTERS_PATH,
-    discover_release_sources,
     discover_semesters,
     handed_out_assignments,
     join_issue_url,
     list_org_repos,
     live_semesters,
+    org_meta,
     semester_content_repos,
     semester_is_live,
 )
 from .faults import Unusable
-from .gh_commits import first_landed
 from .gh_contents import get_file_content, repo_tree
 from .ghcli import clone
-from .grades import load_grading_spec, spoken_day, team_cap, total_points
+from .gradebook import spoken_day
+from .grading_spec import load_grading_spec, total_points
 from .log import CLIParser, log, log_err, log_step, log_withheld
-from .materials import ASSETS_KIND, Declared, publishable
-from .materials import read as read_materials
-from .opencourse import read as read_opencourse
+from .materials import semester_syllabus
 from .public_site import publish as publish_public_site
 from .readings import demote_headings
-from .releaseignore import listed
-from .releaseignore import parse as parse_patterns
 from .repos import (
     default_branch,
 )
 from .schedule_plan import (
-    Aliases,
+    READINGS_KIND,
     PlannedRow,
     declared_syllabus,
     deploy_dest,
-    deploy_section,
-    offplan_folders,
+    dest_section,
     planned_rows,
     site_rows,
+    within,
 )
+from .selection import Selection, exact_pattern, publishable
 from .site_repo import (
     DECK_EXTENSIONS,
     RENDERED_EXTENSIONS,
@@ -112,23 +109,21 @@ from .site_repo import (
     iso_when,
     kinds_yaml,
     landed_links,
-    link_extensions,
     links_block,
     liquid_raw,
     nav_yaml,
     people_yaml,
     q,
     retired_kind_pages,
-    row_file,
     row_tabs,
     site_readme,
     site_templates,
     slug,
     sync_site_repo,
     theme_pages,
-    yaml_file,
 )
 from .student_status import _brief as read_brief
+from .team_formation import team_cap
 
 
 def _semester_start(semester_org: str) -> date:
@@ -140,9 +135,9 @@ def _semester_start(semester_org: str) -> date:
 
 
 def _instructors_meta(semester_org: str) -> tuple[dict, str]:
-    """A semester's `instructors.yml` and its path. The old `people.yml` is never read
-    (decision 0012): a semester that has not migrated gets the instructors-team cards."""
-    return yaml_file(semester_org, CONFIG_REPO, INSTRUCTORS_FILE), INSTRUCTORS_FILE
+    """A semester's `semester.yml` (its `people:` are the cards) and its path. A semester
+    that has not migrated gets the instructors-team cards."""
+    return read_semester(semester_org).semester.meta(), SEMESTER_FILE
 
 
 def _semester_label(semester_org: str) -> str:
@@ -150,7 +145,7 @@ def _semester_label(semester_org: str) -> str:
     return semester_label(semester_of(semester_org)) or ""
 
 
-@cache
+@run.per_run(lambda org, repo: run.scope(org, repo))
 def _repo_tree(org: str, repo: str) -> tuple[str, tuple[str, ...]]:
     """(default branch, every blob path in it) for a repo - one recursive tree fetch,
     memoised for the run. A semester site asks for the files of EVERY released session, and
@@ -172,110 +167,96 @@ def _repo_tree(org: str, repo: str) -> tuple[str, tuple[str, ...]]:
 
 # ---------------------------------------------------------------- publicly hosted copies
 
-# A course's declaration of what its semester sites may host, in the source repo faculty
-# edit (one file per course, applying to every semester of it).
-PUBLISH_FILE = "publish.yml"
-
 # GitHub refuses a file over 100 MB on a push, so one carried into the site repo fails the
 # sync's own push rather than the release that put it in the materials repo.
 _MAX_PUBLIC_FILE_BYTES = 100 * 1024 * 1024
+HOST_KEY = "host"
 
 
-@cache
-def _publish_policy(course_org: str, source_repo: str) -> GitIgnoreSpec | None:
-    """What `publish.yml` in `source_repo` declares public, or None when it declares
-    nothing.
+def host_selection(semester_org: str) -> Selection:
+    """`semester.yml student_site.host` (decision 0040), each key it leaves out taken from
+    `selection.host_default`: every shown kind but readings, as html and pdf.
 
-    The policy is COURSE-level and lives in the source repo faculty actually edit, not in
-    each semester's copy. Memoised for the run because `--all-semesters` asks the same
-    course the same question once per semester: `sync_site` leaves the memo alone, and
-    `main` clears it once the run's last semester is built. Patterns go through the
-    parser faculty's `.releaseignore` goes through, so one syntax covers both directions
-    of the question.
-
-    A file that is absent or empty is "nothing public", and the mirror may then delete
-    what an earlier sync copied. A file that does not PARSE, or whose `public:` is not a
-    list of patterns, stops the sync and reports: read as "nothing public" it would
-    unpublish a whole course's rendered decks over a typo, on a green run. The second is
-    a `RuntimeError`, the faculty-fixable config fault every caller of `sync_site` (a
-    hand-out, the CLI) reports in one line and survives."""
-    # Optional, so not confirmed: absent on most courses, and asking every sync again
-    # costs more than a mirror unpublished for one sync and restored on the next.
-    declared = yaml_file(course_org, source_repo, PUBLISH_FILE, False).get("public")
-    if declared is None:
-        return None
-    if not isinstance(declared, list) or not all(isinstance(x, str) for x in declared):
-        raise RuntimeError(
-            f"{course_org}/{source_repo}/{PUBLISH_FILE}: `public:` must be a list of "
-            "patterns"
-        )
-    return parse_patterns("\n".join(declared)) if declared else None
+    A file that does not parse, or a `host:` that does not validate, stops the sync and
+    reports (a `RuntimeError`, the faculty-fixable config fault every caller of
+    `sync_site` reports in one line and survives): read as "host the default" it would
+    publish what somebody wrote to keep off, on a green run."""
+    where = (
+        f"{semester_org}/{CONFIG_REPO}/{SEMESTER_FILE} {STUDENT_SITE_BLOCK}.{HOST_KEY}"
+    )
+    try:
+        meta = read_semester(semester_org).semester.mapping() or {}
+        block = meta.get(STUDENT_SITE_BLOCK) or {}
+        if not isinstance(block, dict):
+            raise Unusable(f"{where}: `{STUDENT_SITE_BLOCK}:` is not a mapping")
+        written = selection.parse(block.get(HOST_KEY), where)
+    except (yaml.YAMLError, Unusable) as exc:
+        raise RuntimeError(f"{where} could not be read: {exc}") from exc
+    return selection.with_defaults(written, selection.host_default())
 
 
-def _publish_policies(
-    course_org: str, sched: schedule.Schedule, content_repos: list[str]
-) -> dict[str, tuple[GitIgnoreSpec, ...]]:
-    """Each semester content repo the schedule releases into, mapped to the policies of
-    the source repos that feed it.
-
-    Keyed on the DESTINATION, because that is the repo whose files the site links and
-    whose bytes the mirror copies. Several sources may feed one destination, so a path is
-    public if ANY of their policies says so. A repo with no policies at all is still a key:
-    that is the instruction to delete what an earlier sync copied for it.
-
-    The schedule's declared destinations, not discovery's findings: this decides what gets
-    CLONED and copied into a public site repo, so it reads a faculty declaration rather
-    than a heuristic over an org listing (the same argument `_indexable_repos` makes)."""
-    sources: dict[str, set[str]] = {}
-    for release in sched.releases:
-        for d in release.deploy:
-            if d.semester_dest_repo in content_repos and d.course_source_repo:
-                sources.setdefault(d.semester_dest_repo, set()).add(
-                    d.course_source_repo
-                )
-    return {
-        repo: tuple(
-            spec
-            for source in sorted(source_repos)
-            if (spec := _publish_policy(course_org, source)) is not None
-        )
-        for repo, source_repos in sources.items()
-    }
+def _hosted_repos(sched: schedule.Schedule, content_repos: list[str]) -> list[str]:
+    """The semester content repos the schedule releases into: the only ones whose files
+    the site may host. The schedule's declared destinations, not discovery's findings:
+    this decides what gets CLONED and copied into a public site repo."""
+    return sorted(
+        {
+            d.semester_dest_repo
+            for release in sched.releases
+            for d in release.deploy
+            if d.course_source_repo
+        }
+        & set(content_repos)
+    )
 
 
-# A destination repo's copies as (path in the semester copy, path in the course source)
-# pairs, one per deploy into it (`_deploy_sources`).
-Renames = dict[str, tuple[tuple[str, str], ...]]
+# One semester repo's landed copies: (path in the repo, the entry's kind, public: true).
+Landings = tuple[tuple[str, str, bool], ...]
 
 
-def _deploy_sources(sched: schedule.Schedule) -> Renames:
+def _landings(sched: schedule.Schedule) -> dict[str, Landings]:
     """Each semester repo the schedule releases into, mapped to where each copy into it
-    came from: `(semester_dest_path, course_source_path)`, the destination as
-    `deploy_dest` resolves it. What turns a path in the semester copy back into the
-    path faculty wrote a pattern against, when a deploy renamed it on the way."""
-    out: dict[str, list[tuple[str, str]]] = {}
+    landed (`deploy_dest`), the kind of the entry that landed it (its block, `lectures`)
+    and whether the copy says `public: true`."""
+    out: dict[str, list[tuple[str, str, bool]]] = {}
     for release in sched.releases:
+        kind = release.block or policy.plural_of(release.kind)
         for d in release.deploy:
-            pair = (deploy_dest(d), d.course_source_path.strip("/"))
-            out.setdefault(d.semester_dest_repo, []).append(pair)
-    return {repo: tuple(pairs) for repo, pairs in out.items()}
+            out.setdefault(d.semester_dest_repo, []).append(
+                (deploy_dest(d), kind, d.public)
+            )
+    return {repo: tuple(rows) for repo, rows in out.items()}
 
 
-def _source_paths(path: str, renames: tuple[tuple[str, str], ...]) -> set[str]:
-    """Where `path` of a semester copy came from in the course source, through every
-    deploy that landed it (a copy may land inside another, so there can be several)."""
-    out = set()
-    for dest, source in renames:
-        if not dest:
-            rest = path
-        elif path == dest:
-            rest = ""
-        elif path.startswith(f"{dest}/"):
-            rest = path[len(dest) + 1 :]
-        else:
+def _landing(path: str, landings: Landings) -> tuple[str, bool] | None:
+    """The copy that landed `path`: the deepest one whose destination holds it, as (kind,
+    public), or None for a path no entry landed (released by hand)."""
+    best: tuple[int, str, bool] | None = None
+    for dest, kind, public in landings:
+        if within(dest, path) is None:
             continue
-        out.add("/".join(p for p in (source, rest) if p))
-    return out
+        if best is None or len(dest) > best[0]:
+            best = (len(dest), kind, public)
+    return None if best is None else (best[1], best[2])
+
+
+def kind_of_landed(landings: Landings) -> selection.KindOf:
+    """`selection`'s `kind_of` over one repo's landings."""
+
+    def kind_of(path: str) -> str | None:
+        hit = _landing(path, landings)
+        return hit[0] if hit else None
+
+    return kind_of
+
+
+def _with_public(host: Selection, landings: Landings) -> Selection:
+    """`host` with every `public: true` copy's destination included (decision 0040: a
+    readings file made public is hosted whatever `kinds` says)."""
+    public = tuple(exact_pattern(dest) for dest, _kind, pub in landings if pub and dest)
+    if not public:
+        return host
+    return replace(host, include=(*(host.include or ()), *public))
 
 
 def _bundle_prefix(path: str) -> str:
@@ -283,86 +264,46 @@ def _bundle_prefix(path: str) -> str:
     return f"{path.rsplit('.', 1)[0]}_files/"
 
 
-def _matched(
-    paths: tuple[str, ...],
-    specs: tuple[GitIgnoreSpec, ...],
-    allowed: Callable[[str], bool],
-) -> set[str]:
-    """The paths a policy makes public and `allowed` lets through: rendered formats, plus
-    each matched deck's bundle (`_public_selection`)."""
+def _hostable(paths: tuple[str, ...], host: Selection, landings: Landings) -> set[str]:
+    """The paths the selection hosts (`selection.select`: the denylist, `host` with the
+    public copies included, the institution's floor), only where a link will open the
+    copy - a file a browser renders (`RENDERED_EXTENSIONS`) - plus the `<stem>_files/`
+    bundle beside each hosted deck, without which it loads with no figures and no
+    styles. A bundle is the deck's, whatever its own kind or type; only the denylist,
+    `exclude` and the floor hold for it."""
+    use = _with_public(host, landings)
+    kind_of = kind_of_landed(landings)
+    limit = selection.floor(selection.HOST)
     matched = {
-        path
-        for path in paths
-        if file_ext(path) in RENDERED_EXTENSIONS
-        and any(spec.check_file(path).include for spec in specs)
-        and allowed(path)
+        p
+        for p in selection.select(paths, kind_of, use=use, limit=limit)
+        if file_ext(p) in RENDERED_EXTENSIONS
     }
+    bundle_rule = Selection(exclude=host.exclude)
     for path in list(matched):
         if file_ext(path) in DECK_EXTENSIONS:
             prefix = _bundle_prefix(path)
-            matched |= {a for a in paths if a.startswith(prefix) and allowed(a)}
+            matched |= {
+                a
+                for a in paths
+                if a.startswith(prefix)
+                and selection.kept(a, kind_of, use=bundle_rule, limit=limit)
+            }
     return matched
 
 
-def _prune(served: Path, keep: set[str]) -> None:
-    """Delete every file under `served` that is not in `keep`, and the directories that
-    leaves empty."""
-    if not served.is_dir():
-        return
-    for path in sorted(served.rglob("*"), reverse=True):
-        if path.is_dir() and not path.is_symlink():
-            if not any(path.iterdir()):
-                path.rmdir()
-        elif path.relative_to(served).as_posix() not in keep:
-            path.unlink()
-    if not any(served.iterdir()):
-        served.rmdir()
-
-
 def _public_selection(
-    src: Path,
-    repo: str,
-    paths: tuple[str, ...],
-    specs: tuple[GitIgnoreSpec, ...],
-    withhold: tuple[str, ...] = (),
-    renames: tuple[tuple[str, str], ...] = (),
+    src: Path, repo: str, paths: tuple[str, ...], host: Selection, landings: Landings
 ) -> frozenset[str]:
-    """Which paths of `repo` the site can host, out of its released tree.
-
-    What a policy matches - last match wins WITHIN one policy, which is what makes
-    `!lectures/09_*/**` carve a session back out - and only where a link will open the
-    copy: a file a browser renders (`RENDERED_EXTENSIONS`, html/htm/pdf), plus the
-    `<stem>_files/` bundle beside each matched deck, without which it loads with no
-    figures and no styles. A matched `.ipynb`, `.md` or `.csv` is not copied: GitHub
-    already renders it, and nothing would link the copy.
-
-    Two deny filters gate every candidate, bundles included, and cannot be written
-    around: the denylist (`materials.publishable`), and `opencourse.yml`'s `withhold`
-    (`withhold`) - a file kept off the open-courseware site is never hosted publicly here
-    either. `withhold` is written against SOURCE repo paths, so it is matched against the
-    path in this copy AND every source path a deploy landed it from (`renames`, this
-    repo's `_deploy_sources`): a deploy that renames a withheld folder hosts nothing.
+    """Which paths of `repo` the site can host, out of its released tree (`_hostable`).
 
     A file GitHub would refuse on a push is dropped with a warning rather than failing the
     sync. So is anything that is not a regular file - `lstat`, so a symlink is judged as
     the link it is rather than as what it points at - and anything the clone does not
     have. Judged over the same tree the links are built from (`_repo_tree`); the clone is
     only where the bytes and the sizes come from."""
-
-    ignore = listed(withhold) if withhold else None
-
-    def withheld(path: str) -> bool:
-        # Every name above a released blob is a directory, and the blob itself is not.
-        return any(
-            ignore.excludes(p, lambda rel, p=p: rel != p)
-            for p in {path, *_source_paths(path, renames)}
-        )
-
-    def allowed(path: str) -> bool:
-        return publishable(path) and not (ignore and withheld(path))
-
     keep = set()
-    for path in _matched(paths, specs, allowed):
+    for path in _hostable(paths, host, landings):
         try:
             st = (src / path).lstat()
         except OSError:
@@ -382,53 +323,45 @@ def _public_selection(
 def _mirror_public(
     site_wd: Path,
     semester_org: str,
-    policies: dict[str, tuple[GitIgnoreSpec, ...]],
-    withhold: tuple[str, ...] | None = (),
-    renames: Renames | None = None,
+    repos: list[str],
+    host: Selection,
+    landings: dict[str, Landings],
 ) -> Hosted:
-    """Copy every publicly declared file of this semester's content repos into the site's
-    own `files/<repo>/` tree, and say what actually landed there.
+    """Copy every hosted file of this semester's content repos into the site's own
+    `files/<repo>/` tree, and say what actually landed there.
 
     The copy source is the RELEASED semester repo, never the course-org source: one
     release boundary for the whole toolkit, so a `.releaseignore` that held a file back
     from the semester holds it back from the public site too. The clone is shallow.
 
-    Deleted and rebuilt per repo on every sync, which is what makes unpublishing work:
-    removing a pattern removes the copy. Only ever AFTER a successful clone - a site
+    Deleted and rebuilt per repo on every sync, which is what makes unhosting work:
+    narrowing `host:` removes the copy. Only ever AFTER a successful clone - a site
     republished with every rendered deck deleted because one clone failed is a worse
-    outage than a copy one sync stale. A `files/<repo>/` whose repo is no longer a key of
-    `policies` (the plan stopped releasing into it) goes too.
+    outage than a copy one sync stale. A `files/<repo>/` whose repo is not in `repos`
+    (the plan stopped releasing into it) goes too, and so does every copy when `host:`
+    selects nothing at all.
 
-    `withhold` is `opencourse.yml`'s list and `renames` the plan's `_deploy_sources`
-    (`_public_selection`). `withhold=None` is an `opencourse.yml` that could not be read:
-    then only the deletion half runs - stale repos, repos with nothing declared, and every
-    copy the policy no longer matches go, with no clone - and nothing is copied or linked,
-    because what the file would withhold is unknown.
-
-    Logs name repos and paths only: `policies` covers the release plan's declared
+    Logs name repos and paths only: `repos` are the release plan's declared
     destinations, never a student's repo."""
     hosted: dict[str, frozenset[str]] = {}
     root = site_wd / SITE_FILES_DIR
+    nothing = (
+        not host.kinds
+        and not host.include
+        and not any(pub for rows in landings.values() for _d, _k, pub in rows)
+    )
     if root.is_dir():
         for stale in sorted(root.iterdir()):
-            if stale.name not in policies:
+            if stale.name not in repos or nothing:
                 if stale.is_dir():
                     shutil.rmtree(stale)
                 else:
                     stale.unlink()
-    for repo in sorted(policies):
+    if nothing:
+        return hosted
+    for repo in repos:
         served = root / repo
-        if not policies[repo]:
-            # Nothing declared public: an earlier sync's copy has to go.
-            if served.exists():
-                shutil.rmtree(served)
-            continue
         _branch, paths = _repo_tree(semester_org, repo)
-        if withhold is None:
-            # A superset of what a readable file would keep: whatever is outside it was
-            # unpublished, and has to go now rather than when the file is fixed.
-            _prune(served, _matched(paths, policies[repo], publishable))
-            continue
         with tempfile.TemporaryDirectory() as work:
             src = Path(work) / repo
             if not clone(semester_org, repo, src, shallow=True):
@@ -437,14 +370,7 @@ def _mirror_public(
                     "site are left as the last sync made them"
                 )
                 continue
-            keep = _public_selection(
-                src,
-                repo,
-                paths,
-                policies[repo],
-                withhold,
-                (renames or {}).get(repo, ()),
-            )
+            keep = _public_selection(src, repo, paths, host, landings.get(repo, ()))
             if served.exists():
                 shutil.rmtree(served)
             if not keep:
@@ -461,12 +387,13 @@ def _mirror_public(
 @dataclass
 class _Landed:
     """What one copy of a row has landed in the semester, found in its repo's tree: the
-    links the row shows, and (on a readings row) the reading-list overlays it inlines."""
+    links the row shows."""
 
     repo: str
     section: str
     links: list[Link]
-    overlays: list[str] = field(default_factory=list)
+    # The copy, as the release record keys it (`release_record.key_of`).
+    key: release_record.Key
     # A single file at the repo's root - a course document (the syllabus, a README),
     # which is what the home page shows rather than a row.
     root_file: bool = False
@@ -478,26 +405,27 @@ def _landed(
     semester_org: str,
     deploy: schedule.Deploy,
     allow: frozenset[str],
-    readings: bool,
-    aliases: Aliases,
     hosted: Hosted,
 ) -> _Landed | None:
     """What `deploy` has landed, or None while nothing has (`site_repo.landed_links`),
     read off the destination repo's memoised tree (`_repo_tree`), so a released folder
-    whose name carries no ordinal is as linked as one that does. Its section is the one
-    the status gives it: through its source repo's `aliases`. A file the site hosts a
+    whose name carries no ordinal is as linked as one that does. A file the site hosts a
     copy of (`hosted`) links that copy too."""
     repo, path = deploy.semester_dest_repo, deploy_dest(deploy)
     branch, blobs = _repo_tree(semester_org, repo)
-    found = landed_links(
-        semester_org, repo, branch, blobs, path, allow, readings, hosted
-    )
+    found = landed_links(semester_org, repo, branch, blobs, path, allow, False, hosted)
     if found is None:
         return None
-    links, overlays = found
+    links, _ = found
     root_file = bool(path) and path in blobs and "/" not in path
-    section = deploy_section(deploy, aliases(deploy.course_source_repo))
-    return _Landed(repo, section, links, overlays, root_file, path)
+    return _Landed(
+        repo,
+        dest_section(deploy),
+        links,
+        release_record.key_of(deploy),
+        root_file,
+        path,
+    )
 
 
 def _row_landed(
@@ -505,8 +433,6 @@ def _row_landed(
     deploys: tuple[schedule.Deploy, ...],
     allow: frozenset[str],
     live_repos: frozenset[str],
-    readings: bool,
-    aliases: Aliases,
     hosted: Hosted,
 ) -> list[_Landed]:
     """Everything these copies have landed, in plan order. A copy into a repo the semester
@@ -524,66 +450,39 @@ def _row_landed(
     for deploy, (repo, path) in zip(deploys, dests, strict=True):
         if repo not in live_repos or inside(repo, path):
             continue
-        landed = _landed(semester_org, deploy, allow, readings, aliases, hosted)
+        landed = _landed(semester_org, deploy, allow, hosted)
         if landed is not None:
             out.append(landed)
     return out
 
 
-def _reading_list(semester_org: str, landed: list[_Landed]) -> str:
-    """The prose a readings row inlines: the text of every overlay its copies landed,
-    headings demoted to nest under the row's.
-
-    Prose ONLY: every other file is already a download beside it. Reads the released
-    SEMESTER copy, so a reading list appears on the same gate as every other material.
-    `get_file_content` raises on anything but a 404 - a rate-limited read must not
-    republish the row with the reading list silently emptied."""
-    parts = []
-    for item in landed:
-        for path in item.overlays:
-            # A landed overlay is there: a 404 is spurious, and would publish the row
-            # with its reading list emptied.
-            text = get_file_content(semester_org, item.repo, path, confirm_absent=True)
-            text = (text or "").strip()
-            if text:
-                parts.append(demote_headings(text))
-    return "\n\n".join(parts)
+def _reading_list(rows: list[PlannedRow]) -> str:
+    """The reading list a row inlines: the `reading_list:` of each readings entry it
+    shows (its own, or those attached to it), headings demoted to nest under the row's
+    (decision 0038 rule 5: the schedule's text replaces READINGS.md)."""
+    return "\n\n".join(
+        demote_headings(r.reading_list.strip()) for r in rows if r.reading_list.strip()
+    )
 
 
-def _indexable_repos(
-    sched: schedule.Schedule, release_sources: list[tuple[str, str, str, int]]
-) -> set[str]:
+def _indexable_repos(sched: schedule.Schedule) -> set[str]:
     """Which semester repos the site's rows, All Materials index and syllabus lookup are
-    allowed to read.
+    allowed to read: the repos the release plan names as a destination.
 
     A POSITIVE allowlist, deliberately. `discover_semester_repos` works by exclusion - a repo
     is content unless it carries an infra topic - and that topic is written once, on
     creation, with its result ignored (`assign.py`), so a submission repo whose tag failed
-    is content forever. That was survivable while a repo only reached the site by holding
-    `NN_` session folders; the off-plan rows read whole trees, and the site repo they write
-    into is PUBLIC, so the same slip would publish a student's private folder names.
-
-    Two positive signals, both faculty declarations: a repo the release plan names as a
-    destination, and a repo discovery actually found a released session in (which covers a
-    manual release into a repo the plan never mentions). Non-ordinal material - a root
-    `SYLLABUS.md`, a flat `datasets/` - is still read, because the signal is the REPO, not
-    the folder shape inside it."""
-    planned = {d.semester_dest_repo for r in sched.releases for d in r.deploy}
-    return planned | {repo for repo, _sub, _folder, _n in release_sources}
+    is content forever. The site repo these are read into is PUBLIC, so the same slip
+    would publish a student's private folder names. The signal is the REPO, not the
+    folder shape inside it: a root `SYLLABUS.md` or a flat `datasets/` is still read."""
+    return {d.semester_dest_repo for r in sched.releases for d in r.deploy}
 
 
-def _section_boundary(repo: str, path: str) -> tuple[str, str]:
+def _section_boundary(path: str) -> tuple[str, str]:
     """(section, the prefix of `path` that names it) for one released blob already known
-    to hold a "/" - a root file is handled separately by the caller.
-
-    The ordinal decides only the LEVEL a section is read at, never whether a file shows up:
-    a repo whose top-level directories are session folders (`01_intro/...`) IS one section,
-    the repo's own name; a repo holding `lectures/`, `labs/`, `datasets/` gives one section
-    EACH, named after the top directory, which is stripped so its own children become the
-    section's nodes."""
+    to hold a "/" - a root file is handled separately by the caller: the top directory
+    names the section, and is stripped so its own children become the section's nodes."""
     head, _sep, _rest = path.partition("/")
-    if session_number(head) is not None:
-        return repo, ""
     return head, f"{head}/"
 
 
@@ -704,7 +603,7 @@ def _materials_index(
                     )
                 )
                 continue
-            section, prefix = _section_boundary(repo, path)
+            section, prefix = _section_boundary(path)
             _insert_released_path(
                 found.setdefault(section, {}),
                 semester_org,
@@ -801,8 +700,8 @@ class _Row:
     kind: str
     subtitle: str = ""
     details: str = ""
-    when: date | datetime | None = None  # None: dateless, or an off-plan folder
-    sort_at: date | datetime | None = None  # None: an off-plan folder, on its tab only
+    when: date | datetime | None = None  # None: dateless (`tbc`)
+    sort_at: date | datetime | None = None
     number: int | None = None
     tbc: bool = False
     dateless: bool = False  # `event_datetime: tbc`: printed TBC, sorts on `sort_at`
@@ -811,7 +710,13 @@ class _Row:
     readings: list[_Landed] = field(default_factory=list)
     readings_pending: bool = False
     dests: list[str] = field(default_factory=list)
-    order: str = ""  # an off-plan row's place on its tab
+    location: str = ""
+    # The reading list it inlines (its own, on a readings row, or its unit's).
+    reading_list: str = ""
+    # Its unit has readings: the row carries the readings chip (decision 0038 rule 5).
+    chip: bool = False
+    # An entry's second (third, ...) slot: the same files, so never news again.
+    repeat: bool = False
 
     @property
     def tabs(self) -> list[str]:
@@ -820,43 +725,41 @@ class _Row:
 
     @property
     def no_materials(self) -> bool:
-        """It ships nothing - no copies, no readings, landed or not: an `events:` session,
-        or a release with an empty `deploy:`."""
+        """It ships nothing - no copies, no readings, landed or not: a session with no
+        `files`."""
         return not (self.landed or self.readings or self.readings_pending or self.dests)
 
 
-@cache
-def _first_landed(org: str, repo: str, path: str) -> datetime | None:
-    """When `path` first landed in `org/repo` (`gh_commits.first_landed`), memoised for
-    the run; None when nothing touches it or GitHub cannot say - logged, naming the path
-    only, since that leaves a released TBC row out of the Updates box."""
+@run.per_run(
+    lambda org: run.scope(org, release_record.CONFIG_REPO, release_record.PATH)
+)
+def _release_copies(org: str) -> dict[release_record.Key, dict]:
+    """The semester's release record (`release_record.load`), read once for the run;
+    empty when there is none yet, or when it is not the record - logged, since that dates
+    a released row by its destination's history alone. A read GitHub fails raises, as a
+    tree read does: a passing error must not re-date (and recommit) every row."""
     try:
-        when = first_landed(org, repo, path)
-    except (RuntimeError, ValueError) as e:  # ValueError: a date that does not parse
-        log(f"  could not tell when {repo}/{path} first landed ({e})")
-        return None
-    if when is None:
-        log(f"  no commit in {repo} touches {path}")
-    return when
+        return release_record.load(org).copies
+    except ValueError as e:
+        log(f"  the release record is unreadable ({e})")
+        return {}
 
 
 def _released_at(semester_org: str, row: _Row) -> datetime | None:
-    """When a released `dateless` row first reached students: the earliest first-landing
-    commit over the paths its OWN copies landed - its attached readings only when none of
-    its copies has landed (a readings-only row), since readings often land weeks before
-    the session they belong to - in the timezone the row sorts in. None when no path can
-    say. A copy into the repo's root is skipped: the oldest commit of the whole repo is
-    not when this row landed."""
-    found = [
-        when
-        for item in row.landed or row.readings
-        if item.path
-        and (when := _first_landed(semester_org, item.repo, item.path)) is not None
-    ]
-    if not found:
+    """When a released row first reached students (`release_record.released_at`), over
+    its OWN copies that landed - its attached readings only when none of them has (a
+    readings-only row), since readings often land weeks before the session they belong
+    to - in the timezone the row sorts in. None when nothing can say."""
+    when = release_record.released_at(
+        _release_copies(semester_org),
+        [item.key for item in row.landed or row.readings],
+        row.dateless,
+        lambda k: release_record.landed_at(semester_org, k[2], k[3]),
+    )
+    if when is None:
         return None
     tz = getattr(row.sort_at, "tzinfo", None) or ZoneInfo(schedule.DEFAULT_TZ)
-    return min(found).astimezone(tz)
+    return when.astimezone(tz)
 
 
 def _row_entry(
@@ -866,33 +769,39 @@ def _row_entry(
 
     `title` is the kind's label and the row's number ("Lecture 3", "Lab 9"; the label
     alone when unnumbered); `subtitle` and `details` are the entry's `title:` and
-    `details:`, omitted when empty. `kind` names it. `tabs` are the kind tabs that list it: a lecture
-    carrying its week's readings is on the Readings tab too, under the same name.
+    `details:`, `location` its (or its slot's) `location:`, omitted when empty. `kind`
+    names it. `tabs` are the kind tabs that list it: a row carrying its unit's readings is
+    on the Readings tab too, under the same name.
 
     Nothing landed (its own copies or its readings) is the not-yet-released row:
     `unreleased: true` and a line naming where the copies will land. `readings_pending`:
-    readings attached to it that have not landed yet. `off_schedule`: a `show_on_site: false`
-    row, left off the schedule and the Updates box. `undated`: an off-plan folder.
-    `dateless`: an `event_datetime: tbc` entry - on the schedule and its tab, printed
-    "TBC". Unreleased, it has no `date:`; released, its `date:` is when its files first
-    landed (`_released_at`) and `announce: true` puts it in the Updates box at that
-    moment - no `date:` and no flag when GitHub cannot say. `no_materials`: a row
-    that ships nothing (`_Row.no_materials`) - never "not yet released", never in the
-    Updates box. `hide_time`: a whole-day row (its date has no time), so the site and the
-    student console print no placeholder 09:00. `sort_at` is where every dated or dateless row sorts
+    readings attached to it that have not landed yet. `readings_chip`: its unit has
+    readings. `repeat`: an entry's later slot, never in the Updates box (its files
+    shipped once). `off_schedule`: a `show_on_site: false` row, left off the schedule
+    and the Updates box. `released_at`: when a released row first reached students
+    (`_released_at`), absent when nothing can say - the student console's Updates box
+    sorts by it. `dateless`: a `tbc` row - on the schedule and its tab, printed "TBC".
+    Unreleased, it has no `date:`; released, its `date:` is that same moment and
+    `announce: true` puts it in the Updates box at it - no `date:` and no flag when
+    nothing can say. `no_materials`: a row that
+    ships nothing (`_Row.no_materials`) - never "not yet released", never in the Updates
+    box. `hide_time`: a whole-day row (its date has no time), so the site prints no
+    placeholder 09:00. `sort_at` is where every row sorts
     (`schedule_plan.planned_rows`; the date itself on a dated row): the templates order
     by it and show only `date:`."""
     title = policy.numbered_title(row.kind, row.number)
     # `row_name`, so an entry that declares `title: Lab 1` renders "Lab 1" and not
     # "Lab 1 / Lab 1" - faculty repeat the identifier as readily in the plan as in a README.
     subtitle, details = row_name(row.subtitle, title), row.details
-    own = row.landed if row.kind == "readings" else []
-    reading_list = _reading_list(semester_org, [*own, *row.readings])
+    # Filed by what they are, never by the folder they land in (decision 0038: the block
+    # says what an entry is): the row's own files under its kind, the readings attached
+    # to its unit under readings - so a kind tab lists the row's own files only.
     links = links_block(
-        [(item.section, item.links) for item in row.landed]
+        [(policy.plural_of(row.kind), item.links) for item in row.landed]
         + [(READINGS_LINKS, item.links) for item in row.readings]
     )
     flags, body, when = "", "", row.when
+    shipped = _released_at(semester_org, row)
     if row.no_materials:
         flags = "no_materials: true\n"
     elif not row.landed and not row.readings:
@@ -911,19 +820,20 @@ def _row_entry(
         flags += "tbc: true\n"
     if row.dateless:
         flags += "dateless: true\n"
-        # Released (something of it landed): announced at the moment it first landed.
-        if row.landed or row.readings:
-            when = _released_at(semester_org, row)
-            if when is not None:
-                flags += "announce: true\n"
+        # Released (something of it landed): announced at the moment it first shipped.
+        when = shipped
+        if when is not None:
+            flags += "announce: true\n"
     if row.off_schedule:
         flags += "off_schedule: true\n"
     if row.readings_pending:
         flags += "readings_pending: true\n"
-    if row.sort_at is None:
-        flags += f'undated: true\norder: "{q(row.order)}"\n'
-    # A whole-day row (a bare date - an `events:` session written without a time) has no
-    # clock: `iso_when` fills in 09:00 and the theme would print it as an appointment.
+    if row.chip:
+        flags += "readings_chip: true\n"
+    if row.repeat:
+        flags += "repeat: true\n"
+    # A whole-day row (a bare date) has no clock: `iso_when` fills in 09:00 and the theme
+    # would print it as an appointment.
     if isinstance(row.when, date) and not isinstance(row.when, datetime):
         flags += "hide_time: true\n"
     return (
@@ -932,81 +842,30 @@ def _row_entry(
         + (f"number: {row.number}\n" if row.number is not None else "")
         + (f"date: {iso_when(when)}\n" if when is not None else "")
         + (f"sort_at: {iso_when(row.sort_at)}\n" if row.sort_at is not None else "")
+        + (f"released_at: {iso_when(shipped)}\n" if shipped is not None else "")
         + f'title: "{q(title)}"\n'
         + (f'subtitle: "{q(subtitle)}"\n' if subtitle else "")
+        + (f'location: "{q(row.location)}"\n' if row.location else "")
         + _details(details)
         + f"tabs: [{', '.join(row.tabs)}]\n"
         + flags
-        + (block("reading_list", reading_list) if reading_list else "")
+        + (block("reading_list", row.reading_list) if row.reading_list else "")
         + f"{links}\n"
         f"---\n"
         f"{body}\n"
     )
 
 
-def _row_filename(row: _Row, key: str, taken: dict[str, str]) -> str:
-    """The row's file: `row_file` when numbered (`session-03.md`, `lab-09.md`), else
-    named for its entry or folder; a number two entries share gets the second's key."""
-    prefix = row_file(1, row.kind).rsplit("-", 1)[0]
-    name = (
-        row_file(row.number, row.kind)
-        if row.number is not None
-        else f"{prefix}-{slug(key)}.md"
-    )
-    if name in taken:
-        name = f"{name[:-3]}-{slug(key)}.md"
+def _row_filename(key: str, slot: int, taken: dict[str, str]) -> str:
+    """The row's file, named by its entry's KEY (decision 0038 amendment rule 1: the key
+    names the row file, so moving or renumbering an entry keeps its page): `<key>.md`,
+    `<key>-2.md` for its second slot, and on."""
+    stem = slug(key)
+    name = f"{stem}.md" if slot == 0 else f"{stem}-{slot + 1}.md"
+    n = slot + 2
+    while name in taken:
+        name, n = f"{stem}-{n}.md", n + 1
     return name
-
-
-def _offplan_rows(
-    semester_org: str,
-    rows: list[PlannedRow],
-    allow: frozenset[str],
-    live_repos: frozenset[str],
-    aliases: Aliases,
-    hosted: Hosted,
-) -> list[tuple[str, _Row]]:
-    """`(key, row)` for each off-plan folder (`schedule_plan.offplan_folders`; decision
-    0013: it keeps a row, on its kind's tab): unnumbered, undated, named for its folder. A
-    readings folder joins the lecture folder of the same `NN_` ordinal, as such folders
-    always did; a supporting-files folder is no row (decision 0026); the rest are rows of
-    their own."""
-
-    def land(repo: str, folder: str, readings: bool) -> list[_Landed]:
-        deploy = schedule.Deploy("", folder, repo)
-        return _row_landed(
-            semester_org, (deploy,), allow, live_repos, readings, aliases, hosted
-        )
-
-    folders = offplan_folders(
-        (d for r in rows for d in r.deploys),
-        {repo: _repo_tree(semester_org, repo)[1] for repo in live_repos},
-    )
-    lectures = {
-        session_number(f.rsplit("/", 1)[-1]): (repo, f)
-        for repo, f, kind in folders
-        if kind == "lecture" and session_number(f.rsplit("/", 1)[-1]) is not None
-    }
-    joined: dict[tuple[str, str], list[_Landed]] = {}
-    out = []
-    for repo, folder, kind in folders:
-        if kind == ASSETS_KIND:
-            continue
-        n = session_number(folder.rsplit("/", 1)[-1])
-        if kind == "readings" and n in lectures:
-            joined.setdefault(lectures[n], []).extend(land(repo, folder, True))
-            continue
-        name = re.sub(r"^0*\d+_", "", folder.rsplit("/", 1)[-1])
-        row = _Row(
-            kind,
-            subtitle=name.replace("-", " ").replace("_", " ").strip().capitalize(),
-            landed=land(repo, folder, kind == "readings"),
-            order=f"{repo}/{folder}",
-        )
-        out.append(((repo, folder), row))
-    for key, row in out:
-        row.readings = joined.get(key, [])
-    return [(folder.rsplit("/", 1)[-1], row) for (_repo, folder), row in out]
 
 
 def _site_rows(
@@ -1014,28 +873,18 @@ def _site_rows(
     rows: list[PlannedRow],
     allow: frozenset[str],
     live_repos: frozenset[str],
-    aliases: Aliases,
     hosted: Hosted,
 ) -> tuple[dict[str, str], list[str]]:
-    """The `_lectures` collection - one file per site row (`schedule_plan.site_rows`,
-    the `events:` sessions among them), plus the off-plan folders' rows - and the kind
-    tabs it needs.
+    """The `_lectures` collection - one file per site row (`schedule_plan.site_rows`) -
+    and the kind tabs it needs.
 
     Every row the schedule shows is written, released or not, so the whole term reads as
     a syllabus from the day it is written. A silent readings row is written only once
     something has landed, and never when all it landed is root files."""
-    built: list[tuple[str, _Row, bool]] = []  # (key, row, an `events:` session)
+    built: list[tuple[str, int, _Row]] = []
     for sr in site_rows(rows):
         r = sr.row
-        landed = _row_landed(
-            semester_org,
-            r.deploys,
-            allow,
-            live_repos,
-            r.kind == "readings",
-            aliases,
-            hosted,
-        )
+        landed = _row_landed(semester_org, r.deploys, allow, live_repos, hosted)
         if not r.shown and all(item.root_file for item in landed):
             continue
         readings = []
@@ -1044,13 +893,14 @@ def _site_rows(
         # sentence names them beside the row's own copies.
         pending_dests: list[str] = []
         for attached in sr.readings:
-            got = _row_landed(
-                semester_org, attached.deploys, allow, live_repos, True, aliases, hosted
-            )
+            if not attached.deploys:
+                continue
+            got = _row_landed(semester_org, attached.deploys, allow, live_repos, hosted)
             readings += got
             if not got:
                 pending = True
                 pending_dests += attached.dests
+        own = [r] if r.kind == READINGS_KIND else []
         row = _Row(
             r.kind,
             subtitle=r.subtitle,
@@ -1065,42 +915,34 @@ def _site_rows(
             readings=readings,
             readings_pending=pending,
             dests=list(dict.fromkeys([*r.dests, *pending_dests])),
+            location=r.location,
+            reading_list=_reading_list([*own, *sr.readings]),
+            chip=sr.chip,
+            repeat=r.slot > 0,
         )
-        built.append((r.key, row, r.session))
-    built += [
-        (key, row, False)
-        for key, row in _offplan_rows(
-            semester_org, rows, allow, live_repos, aliases, hosted
-        )
-    ]
+        built.append((r.key, r.slot, row))
     out: dict[str, str] = {}
-    # Sessions name their files last, whatever their date: a session never takes the row
-    # file of the release it shares a number with (`lab-01.md` stays the release's).
-    for key, row, _session in sorted(built, key=lambda b: b[2]):
-        out[_row_filename(row, key, out)] = _row_entry(semester_org, row, live_repos)
-    tabs = dict.fromkeys(tab for _key, row, _session in built for tab in row.tabs)
+    for key, slot, row in built:
+        out[_row_filename(key, slot, out)] = _row_entry(semester_org, row, live_repos)
+    tabs = dict.fromkeys(tab for _key, _slot, row in built for tab in row.tabs)
     return out, list(tabs)
 
 
 # Files an older toolkit wrote into every semester site that nothing writes or includes
-# any more: 0.9.0's lab row include.
-RETIRED_SITE_FILES = ("_includes/schedule_row_lab.html",)
-
-
-@cache
-def _materials(course_org: str, repo: str) -> Declared | None:
-    """`repo`'s `materials.yml`, or None when it cannot be used - said once per run, naming
-    the file. The site then infers kinds from the built-in folder names and looks for the
-    default syllabus, as the scheduler and deploy do (`materials.kinds_reader`): one
-    faculty file must not freeze every semester's site, nor red every release run."""
-    try:
-        return read_materials(course_org, repo)
-    except Unusable as exc:
-        log_err(
-            f"{course_org}/{exc} - the site uses the built-in folder kinds and the "
-            "default syllabus until it is fixed"
-        )
-        return None
+# any more: 0.9.0's lab row include, and the per-kind row includes `schedule_row.html`
+# replaced (0.11.0).
+RETIRED_SITE_FILES = tuple(
+    f"_includes/schedule_row_{kind}.html"
+    for kind in (
+        "lab",
+        "lecture",
+        "assignment",
+        "due",
+        "exam",
+        "special_event",
+        "term_date",
+    )
+)
 
 
 def _declared_syllabus(
@@ -1117,7 +959,7 @@ def _declared_syllabus(
         sched,
         live_repos,
         lambda repo: _repo_tree(semester_org, repo)[1],
-        lambda repo: _materials(course_org, repo) or Declared(),
+        semester_syllabus(_instructors_meta(semester_org)[0]),
     )
     if found is None:
         return None
@@ -1139,20 +981,22 @@ def member_digest(semester_org: str, handle: str) -> str:
 FormedTeams = Callable[[str], list[tuple[str, list[str]]]]
 
 
-def _formed_teams(semester_org: str) -> FormedTeams:
+def _formed_teams(
+    semester_org: str, sched: schedule.Schedule | None = None
+) -> FormedTeams:
     """A reader of `(team, member handles)` for every team formed for an assignment key
     so far, by name - the same reader (`teams.teams_for`) the student console's team list
-    uses. teams.csv is loaded once, on the first ask, however many assignments list
+    uses. the roster is loaded once, on the first ask, however many assignments list
     teams, and never when none does.
 
-    Never fatal: teams.csv is student-written, and a row somebody broke must not take down
+    Never fatal: a team cell is student-written, and a row somebody broke must not take down
     the render of a semester's whole website. The callout still goes out; only the table
     is missing."""
 
     @cache
     def loaded() -> dict[str, dict[str, list[str]]] | None:
         try:
-            return teams.load(semester_org)
+            return teams.load(semester_org, sched=sched)
         except RuntimeError as exc:
             log_err(f"could not read {semester_org}'s teams: {exc}")
             return None
@@ -1169,13 +1013,14 @@ def _assignment_entry(
     course_org: str,
     semester_org: str,
     repo: str,
-    when: date | datetime,
+    when: date | datetime | None,
     handout: datetime | None = None,
     found: tuple[str, schedule.AssignmentEntry] | None = None,
     handed_out: frozenset[str] = frozenset(),
     now: datetime | None = None,
     sched: schedule.Schedule | None = None,
     formed_teams: FormedTeams | None = None,
+    undated_at: date | None = None,
 ) -> str:
     """An assignment's page (`_layouts/assignment.html`), plus the two schedule rows it
     drives: the entry's own `date:` is the hand-out ("Assignment out") row and its
@@ -1184,6 +1029,10 @@ def _assignment_entry(
     The page's rule sentences are the same helpers the student console's assignment
     reads (`student_status.render_assignments`): `course.late_rule`, `CUTOFF_SENTENCE`,
     `course.shape_note`, `grades.total_points`, `grades.team_cap`, `teams.teams_for`.
+
+    `when` None: no due date yet (TBC). Nothing fires for it, so both rows are `dateless`
+    TBC rows sorted at `undated_at` (end of term), as an undated session is: no `date:`,
+    no repo, no links, no team invitation - the not-yet-released sentence only.
 
     `when` is the due date (a real one from schedule.yml, or a synthesised fallback);
     `handout` the scheduled provisioning moment when there is one. A handout dates the
@@ -1208,15 +1057,20 @@ def _assignment_entry(
     carries `team_salt` and `teams:` once any has formed: each team's name, headcount
     (and, while the window is open, its cap), its members as salted digests
     (`member_digest`, never a handle) and its repo's URL. `formed_teams` is the sync's one
-    reader of teams.csv (`_formed_teams`), shared by every page."""
+    reader of the team cells (`_formed_teams`), shared by every page."""
     slug = schedule.semester_name(*found) if found else repo
-    # An unscheduled assignment's synthesised fallback date is due end-of-day.
-    due = iso_when(when, "23:59:00")
-    released = iso_when(handout) if handout is not None else due
-    pinned_out = handout is not None and handout <= (
-        now or datetime.now(handout.tzinfo)
-    )
-    out = slug in handed_out or pinned_out
+    undated = when is None
+    if undated:
+        due = released = iso_when(undated_at or date.today())
+        out = False
+    else:
+        # An unscheduled assignment's synthesised fallback date is due end-of-day.
+        due = iso_when(when, "23:59:00")
+        released = iso_when(handout) if handout is not None else due
+        pinned_out = handout is not None and handout <= (
+            now or datetime.now(handout.tzinfo)
+        )
+        out = slug in handed_out or pinned_out
     spec = load_grading_spec(
         course_org,
         repo,
@@ -1231,7 +1085,9 @@ def _assignment_entry(
     subtitle = row_name(spec.title, title)
     details = found[1].details if found else ""
     # Display-only: a deadline that says "(TBC)" still closes when it says.
-    tbc_fm = "tbc: true\n" if found and found[1].tbc else ""
+    tbc_fm = "tbc: true\n" if (found and found[1].tbc) or undated else ""
+    if undated:
+        tbc_fm += "dateless: true\n"
     tbc_due = indent(tbc_fm, "    ")
     external = spec.submit_external
     window, shuts = (
@@ -1242,7 +1098,7 @@ def _assignment_entry(
         else ("closed", None)
     )
     self_select = found is not None and spec.team_formation_resolved == SELF_SELECT
-    forming = window == "open" and self_select and shuts is not None
+    forming = window == "open" and self_select and shuts is not None and not undated
     # Where the work goes, on the due row: the SHAPE in one word, and the address once
     # there is something at the other end of it.
     repo_lines = [f'submit_shape: "{spec.submit_shape}"']
@@ -1310,7 +1166,9 @@ def _assignment_entry(
 
         listed = "".join(
             team_entry(name, handles)
-            for name, handles in (formed_teams or _formed_teams(semester_org))(found[0])
+            for name, handles in (formed_teams or _formed_teams(semester_org, sched))(
+                found[0]
+            )
         )
         if forming:
             closes = spoken_day(schedule.in_semester_zone(sched, shuts))
@@ -1325,6 +1183,8 @@ def _assignment_entry(
             )
     # Written at BOTH levels: the due row is a sub-hash the theme reaches through
     # `map: "due_event"`, so it cannot see its parent's fields.
+    # No due date yet: no repo, so nothing to submit to (no actions on a TBC row).
+    repo_lines = [] if undated else repo_lines
     repo_fm = "".join(f"{ln}\n" for ln in repo_lines)
     repo_due = "".join(f"    {ln}\n" for ln in repo_lines)
     if out:
@@ -1340,7 +1200,9 @@ def _assignment_entry(
         flags = "handout_pending: true\n"
         # Word for word the shape of an unreleased session's line (`_row_entry`).
         born = "private" if spec.visibility_is_students else spec.visibility
-        if external:
+        if undated:
+            coming = "its dates are still to be confirmed"
+        elif external:
             coming = "the brief appears here when it is"
         elif spec.submit_shared:
             coming = f"the `{repo_name}` drop box appears when it is"
@@ -1353,10 +1215,11 @@ def _assignment_entry(
     # through `map: "due_event"`, so it cannot see its parent's.
     details_fm = _details(details)
     details_due = indent(details_fm, "    ")
+    nl = "\n"
     return (
         f"---\n"
         f"kind: assignment\n"
-        f"date: {released}\n"
+        f"{'' if undated else 'date: ' + released + nl}"
         f"sort_at: {released}\n"
         f'title: "{q(title)}"\n'
         f"{sub_fm}"
@@ -1371,7 +1234,7 @@ def _assignment_entry(
         f"{team_fm}"
         f"due_event:\n"
         f"    kind: due\n"
-        f"    date: {due}\n"
+        f"{'' if undated else '    date: ' + due + nl}"
         f"    sort_at: {due}\n"
         f'    title: "{q(title)}"\n'
         f"{sub_due}"
@@ -1384,14 +1247,11 @@ def _assignment_entry(
 
 
 def _assignment_dates(
-    found: tuple[str, schedule.AssignmentEntry] | None, fallback: date
-) -> tuple[date | datetime, datetime | None]:
-    """(due, handout) for an assignment, off the plan entry the caller resolved. An
-    assignment the plan does not name is due on `fallback` and has no handout; a scheduled
-    one has a handout only when the plan pins (or the manual release workflow recorded)
-    one."""
-    if found is None:
-        return fallback, None
+    found: tuple[str, schedule.AssignmentEntry],
+) -> tuple[date | datetime | None, datetime | None]:
+    """(due, handout) for an assignment, off the plan entry the caller resolved: a
+    handout only when the plan pins (or the manual release workflow recorded) one. Every
+    page is a plan entry (`schedule.assignment_pages`): no date is ever made up."""
     return found[1].due_datetime, found[1].handout_datetime
 
 
@@ -1407,10 +1267,11 @@ def _event_row(
     tbc: bool = False,
     dateless: bool = False,
     details: str = "",
+    location: str = "",
 ) -> str:
-    """A display-only schedule row - `kind='exam'` for the red exam row the theme styles
-    (schedule_row_exam.html), `kind='special_event'` for the generic one
-    (schedule_row_special_event.html): a clinic, a guest lecture, a review session.
+    """A display-only schedule row - `kind='exam'` for the exam row, `kind='special_event'`
+    for the generic one (labelled as the policy's `other` kind): a clinic, a guest lecture,
+    a review session.
     Nothing is released; the site simply shows it. ONE renderer, because the two rows
     differ in the word and in nothing else - the templates differ, the front matter does
     not, and two copies of it is how a key added to one row type misses the other.
@@ -1445,7 +1306,8 @@ def _event_row(
         + f"sort_at: {iso_when(when)}\n"
         f"{flags}"
         f'title: "{q(title)}"\n'
-        f"{_details(details)}"
+        + (f'location: "{q(location)}"\n' if location else "")
+        + f"{_details(details)}"
         f"---\n"
     )
 
@@ -1465,6 +1327,7 @@ def _event_entry(event: schedule.Event, fallback: date) -> str:
         event.tbc,
         event.when is None,
         event.details,
+        event.location,
     )
 
 
@@ -1537,10 +1400,11 @@ def _archive_entry(archive: schedule.ArchiveRow, today: date) -> str:
     )
 
 
-def _term_date_entry(name: str, when: date) -> str:
-    """A semester-boundary row (the theme's schedule_row_term_date.html).
+def _semester_entry(name: str, when: date, details: str = "") -> str:
+    """A semester-boundary row (the `semester` kind of the theme's schedule_row.html).
 
-    `name` ("Semester starts" / "Semester ends") is the row's TITLE. It used to be written to
+    `name` (the entry's `title:`, else "Semester starts" / "Semester ends") is the row's
+    TITLE, and `details` its Details cell. It used to be written to
     `name:`, which the theme prints in the Event column, beside a `description: ""` that
     left the Title cell permanently blank - so the one row type on the schedule read its
     name out of a different column from every other. The Event column now says "Semester",
@@ -1548,13 +1412,34 @@ def _term_date_entry(name: str, when: date) -> str:
     clock time - a term boundary is a whole day, not a 09:00 appointment."""
     return (
         f"---\n"
-        f"kind: term_date\n"
+        f"kind: semester\n"
         f"date: {iso_when(when)}\n"
         f"sort_at: {iso_when(when)}\n"
         f"hide_time: true\n"
         f'title: "{q(name)}"\n'
+        f"{_details(details)}"
         f"---\n"
     )
+
+
+def _break_entry(brk: schedule.Break) -> str:
+    """A `semester:` entry of `type: break` (decision 0038 amendment 2): one grey band on
+    the schedule from its first day to its last - `date:` and `until:`, whole days, its
+    `title:` (else "Break") and `details:`. Never a tab and never news."""
+    return (
+        f"---\n"
+        f"kind: break\n"
+        f"date: {iso_when(brk.start)}\n"
+        f"until: {iso_when(brk.end)}\n"
+        f"sort_at: {iso_when(brk.start)}\n"
+        f"hide_time: true\n"
+        f'title: "{q(brk.title or BREAK_TITLE)}"\n'
+        f"{_details(brk.details)}"
+        f"---\n"
+    )
+
+
+BREAK_TITLE = "Break"
 
 
 def sync_site(course_org: str, semester_org: str) -> int:
@@ -1573,18 +1458,17 @@ def sync_site(course_org: str, semester_org: str) -> int:
         # listing from before assign.py created the template it is syncing the site for.
         semester_repos = list_org_repos(semester_org)
         content_repos = semester_content_repos(semester_repos)
-        release_sources = discover_release_sources(semester_org, content_repos)
         # Which of them this semester has actually been given - what gates their briefs. Read
         # from the semester org rather than inferred from the plan, since the manual workflow
         # hands out with no `handout_datetime` pinned at all.
         handed_out = handed_out_assignments(semester_repos)
 
         # Course identity comes from the course org metadata, semester from the semester tag.
-        meta = yaml_file(course_org, ".github", "dsl-course.yml")
+        meta = org_meta(course_org)
         # Schedule is semester-specific (it varies by year), so it comes from the semester's
         # own semester-config/schedule.yml. So do this semester's instructors/TAs - read
-        # from its own semester-config/instructors.yml below, NOT the course org (whose
-        # dsl-course.yml carries only the multi-year instructor cards).
+        # from its own semester-config/semester.yml below, NOT the course org (whose
+        # course.yml carries only the multi-year instructor cards).
         sched = schedule.load(semester_org)
         # Every datetime on `sched` is already the semester's wall clock (the parser converts
         # a written offset into the semester timezone), so the renderers below just print it.
@@ -1607,60 +1491,33 @@ def sync_site(course_org: str, semester_org: str) -> int:
             nowhere to say otherwise, so it shows."""
             return hit is None or hit[1].show_on_site
 
-        # What a row LINKS, out of everything it released - the default
-        # folder-shaped listing unless this course declared an extension allowlist.
-        allow = link_extensions(meta)
+        # What a row LINKS, out of everything it released: the folder-shaped listing
+        # (decision 0039 dropped the course's `site_link_extensions` allowlist).
+        allow: frozenset[str] = frozenset()
         # The repos this semester actually releases into - the only ones the index and
         # the syllabus lookup may read (see `_indexable_repos`).
-        indexable = sorted(
-            set(content_repos) & _indexable_repos(sched, release_sources)
-        )
+        indexable = sorted(set(content_repos) & _indexable_repos(sched))
 
-        # The rows: one per `releases:` entry, in date order, kind declared or inferred
-        # once from where its first copy lands (the source repo's `materials.yml` aliases,
-        # else the built-in ones).
-        # An off-plan folder's copy names no source repo, and so no aliases.
-        # A file that cannot be used names no aliases, as in `materials.kinds_reader`.
-        def kinds(repo: str) -> Mapping[str, str] | None:
-            declared = _materials(course_org, repo) if repo else None
-            return declared.kinds if declared else None
-
-        planned = planned_rows(sched, kinds)
-        # The repos the release plan names or a released session was found in: never a
-        # student's repo, whose folder names would reach this public site.
+        # The rows: one per slot of each content entry, in date order, of the kind its
+        # block names (decision 0038).
+        planned = planned_rows(sched)
+        # The repos the release plan names: never a student's repo, whose folder names
+        # would reach this public site.
         live = frozenset(indexable)
-        # What this course declares PUBLIC, per release destination (`publish.yml` in the
-        # source repo the plan names). Copied before a single row is rendered, so every
-        # page that links a hosted copy links one that exists.
-        # `opencourse.yml`'s `withhold` is a deny filter here too: what the course keeps
-        # off its open-courseware site is never hosted publicly on this one. Read only
-        # when something is declared public, and a file that cannot be read stops the
-        # copying (the last sync's copies stand, linked from nothing), never the sync -
-        # nor the deletions: an unpublished file still leaves `files/`.
-        policies = _publish_policies(course_org, sched, content_repos)
-        hosted: Hosted = {}
-        if any(policies.values()):
-            try:
-                opencourse = read_opencourse(course_org)
-            except RuntimeError as exc:
-                log_err(
-                    f"{course_org}/.github/opencourse.yml could not be read, so no copy "
-                    f"is hosted on this sync: {exc}"
-                )
-                _mirror_public(site_wd, semester_org, policies, None)
-            else:
-                hosted = _mirror_public(
-                    site_wd,
-                    semester_org,
-                    policies,
-                    opencourse.withhold if opencourse else (),
-                    _deploy_sources(sched),
-                )
-        else:
-            hosted = _mirror_public(site_wd, semester_org, policies)
-        rows, present = _site_rows(semester_org, planned, allow, live, kinds, hosted)
-        # ONE read of teams.csv for every self-select group assignment (`_formed_teams`).
-        formed_teams = _formed_teams(semester_org)
+        # What the semester hosts publicly (`student_site.host`, decision 0040), per
+        # release destination. Copied before a single row is rendered, so every page
+        # that links a hosted copy links one that exists. A `host:` that cannot be read
+        # stops the sync (`host_selection`).
+        hosted = _mirror_public(
+            site_wd,
+            semester_org,
+            _hosted_repos(sched, content_repos),
+            host_selection(semester_org),
+            _landings(sched),
+        )
+        rows, present = _site_rows(semester_org, planned, allow, live, hosted)
+        # ONE read of the team cells for every self-select group assignment (`_formed_teams`).
+        formed_teams = _formed_teams(semester_org, sched)
         log_step(
             f"Syncing {semester_org}/{pages_repo(semester_org)}: {len(rows)} row(s) "
             f"({sum('unreleased: true' in text for text in rows.values())} not released "
@@ -1668,17 +1525,18 @@ def sync_site(course_org: str, semester_org: str) -> int:
         )
 
         config = {}
-        if meta.get("course_name"):
-            config["course_name"] = str(meta["course_name"])
+        identity = course_block(meta)
+        if identity.get("name"):
+            config["course_name"] = str(identity["name"])
         if _semester_label(semester_org):
             config["course_semester"] = _semester_label(semester_org)
-        if meta.get("course_code"):
-            config["course_code"] = str(meta["course_code"])
-        # The site's blurb. Declared once in the course org's dsl-course.yml and pushed to
+        if identity.get("code"):
+            config["course_code"] = str(identity["code"])
+        # The site's blurb. Declared once in the course org's course.yml and pushed to
         # every semester site; left as the site repo has it when the course doesn't declare
         # one. Written as a single line whatever the source shape (see q).
-        if meta.get("course_description"):
-            config["course_description"] = str(meta["course_description"])
+        if identity.get("description"):
+            config["course_description"] = str(identity["description"])
         # The footer's GitHub link (the site's only click-back). This is the SEMESTER site,
         # so it links the semester org - where this year's materials and the students' own
         # repos live - never the course org (faculty-side) or the template's default.
@@ -1695,20 +1553,6 @@ def sync_site(course_org: str, semester_org: str) -> int:
             for i, e in enumerate(sched.events)
             if e.show_on_site
         }
-        # Every course has exams, so a schedule that names none still gets stub mid/end
-        # dates of a ~15-week semester (bounded by semester_end when set) - a placeholder
-        # faculty replace, rather than a schedule page with no exams on it at all.
-        #
-        # Counted over EVERY event, hidden ones included: a semester that wrote its exams and
-        # then took them off the site has said what its exams are, and answering that with
-        # two invented ones would put back exactly what it asked to remove.
-        if not any(e.kind == "exam" for e in sched.events):
-            event_entries |= {
-                "midterm.md": _event_row(
-                    "exam", "MidTerm Exam", start + timedelta(weeks=8)
-                ),
-                "final.md": _event_row("exam", "Final Exam", end),
-            }
         # When the whole semester is frozen read-only. Off the same date the scheduler
         # acts on, so what students are told and what happens are one date.
         if sched.archive and sched.archive.when and sched.archive.show_on_site:
@@ -1730,20 +1574,28 @@ def sync_site(course_org: str, semester_org: str) -> int:
                 )
         # The term's own boundaries, when the schedule pins them.
         if sched.semester_start:
-            event_entries["term-start.md"] = _term_date_entry(
-                "Semester starts", sched.semester_start
+            event_entries["term-start.md"] = _semester_entry(
+                sched.semester_start_title,
+                sched.semester_start,
+                sched.semester_start_details,
             )
         if sched.semester_end:
-            event_entries["term-end.md"] = _term_date_entry(
-                "Semester ends", sched.semester_end
+            event_entries["term-end.md"] = _semester_entry(
+                sched.semester_end_title,
+                sched.semester_end,
+                sched.semester_end_details,
             )
+        # Its breaks: a grey band each, named by key like every row file.
+        for brk in sched.breaks:
+            if brk.show_on_site:
+                event_entries[f"break-{slug(brk.key)}.md"] = _break_entry(brk)
 
         instructors_meta, instructors_path = _instructors_meta(semester_org)
         return SitePlan(
             config=config,
-            # People: this semester's own semester-config/instructors.yml (instructors AND TAs -
+            # People: this semester's own semester-config/semester.yml (instructors AND TAs -
             # the per-semester teaching team; schema in
-            # templates/semester-config/instructors.yml), else its instructors team.
+            # templates/semester-config/semester.yml), else its instructors team.
             files={
                 "README.md": site_readme(semester_org, semester=True),
                 "_data/people.yml": people_yaml(
@@ -1774,8 +1626,7 @@ def sync_site(course_org: str, semester_org: str) -> int:
                 # writes its front matter before any site sees it.
                 **site_templates(),
             },
-            # Assignment handout/due dates come from schedule.yml when set (keyed on the
-            # assignment slug), else a synthesised fortnightly cadence.
+            # Assignment handout/due dates come from schedule.yml.
             collections={
                 "_lectures": rows,
                 # Named by the number and the semester-side name (the name alone
@@ -1788,10 +1639,9 @@ def sync_site(course_org: str, semester_org: str) -> int:
                         course_org,
                         semester_org,
                         page.repo,
-                        *_assignment_dates(
-                            page.hit, start + timedelta(days=(page.number or 0) * 14)
-                        ),
+                        *_assignment_dates(page.hit),
                         found=page.hit,
+                        undated_at=end,
                         handed_out=handed_out,
                         sched=sched,
                         formed_teams=formed_teams,
@@ -1831,7 +1681,7 @@ def main() -> int:
     ps.add_argument(
         "--all-semesters",
         action="store_true",
-        help="Sync every registered semester (a course-level change, e.g. dsl-course.yml)",
+        help="Sync every registered semester (a course-level change, e.g. course.yml)",
     )
     pp = sub.add_parser("public-sync")
     pp.add_argument("--course-org", required=True)
@@ -1846,7 +1696,7 @@ def main() -> int:
         log_err("pass --semester-org or --all-semesters.")
         return 1
     # A read helper that couldn't reach the API raises RuntimeError; a config file with
-    # one bad indent raises yaml.YAMLError out of load_yaml_config (instructors.yml is
+    # one bad indent raises yaml.YAMLError out of load_yaml_config (semester.yml is
     # web-editable, so faculty author that fault directly). In an Actions log a one-line
     # error beats a traceback either way, and the run still goes red.
     try:
@@ -1855,7 +1705,7 @@ def main() -> int:
         if args.all_semesters:
             rc = 0
             for semester in live_semesters(args.course_org):
-                # One semester's raised failure (an unreachable API, a instructors.yml that
+                # One semester's raised failure (an unreachable API, a semester.yml that
                 # doesn't parse) must not skip every LATER semester's site on the 06:00
                 # cron - log it, mark the batch failed, and carry on. The same per-semester
                 # isolation PR #151/#146 applied to the nightly refresh and the scheduler.
@@ -1898,9 +1748,6 @@ def main() -> int:
     except (RuntimeError, yaml.YAMLError) as exc:
         log_err(str(exc))
         return 1
-    finally:
-        # The end of the build: every semester of this run has read the course's policy.
-        _publish_policy.cache_clear()
 
 
 if __name__ == "__main__":

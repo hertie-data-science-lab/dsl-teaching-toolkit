@@ -11,7 +11,7 @@ import pytest
 import yaml
 
 from dsl_course import faults, roster, sync_membership
-from dsl_course.grades import LockWrite
+from dsl_course.team_formation import LockWrite
 
 
 def _stub_course_admins(monkeypatch, rv: int = 0):
@@ -312,7 +312,7 @@ def test_a_clean_multi_semester_run_reports_no_errors(monkeypatch):
 
 def test_every_semesters_sync_refreshes_the_team_formation_lock(monkeypatch):
     # The Join-team form reads `assignments.lock.yml` and nothing else, and this sync is
-    # what a push to schedule.yml wakes (semester-config/dispatch-sync.yml). Without the
+    # what a push to schedule.yml wakes (semester-config/dispatch.yml). Without the
     # write here, adding an assignment left the form answering off the previous list.
     locked: list[tuple[str, str]] = []
     monkeypatch.setattr(
@@ -393,7 +393,7 @@ def _semicolon_roster_fault() -> Exception:
     """The exception a `;`-delimited students.csv really raises, taken from the reader the
     sync actually calls - not a hand-built stand-in whose type could drift from it."""
     with pytest.raises(faults.Unusable) as caught:
-        roster.parse("hertie_email;name;github_handle\na;b;c\n")
+        roster.parse("email;name;role\na;b;c\n")
     return caught.value
 
 
@@ -445,7 +445,7 @@ def test_a_roster_nobody_can_read_skips_its_semester_and_leaves_the_run_green(
 
 def test_a_people_yml_that_is_not_yaml_skips_its_semester_too(monkeypatch, capsys):
     # The other half of the same rule, and the other exception a content fault arrives as:
-    # `load_yaml_config` raises the loader's own error for a instructors.yml that does not
+    # `load_yaml_config` raises the loader's own error for a semester.yml that does not
     # parse. Reconciling from what a half-read file says would prune every instructor the
     # parse dropped.
     def instructors(course, org, *a, **k):
@@ -594,7 +594,7 @@ def test_a_dispatch_from_a_closed_out_semester_reconciles_nothing(monkeypatch):
 def test_a_dispatched_semester_sync_refreshes_that_semesters_status(
     monkeypatch, extra, expected
 ):
-    # A push to one semester's roster, teams or instructors.yml dispatches this with its name:
+    # A push to one semester's roster, teams or semester.yml dispatches this with its name:
     # the status follows. A preview writes nothing, and the nightly sweep leaves status
     # to the nightly refresh.
     monkeypatch.setattr(sync_membership, "acting_login", lambda: "bot")

@@ -21,14 +21,16 @@ from dsl_course import (
     derive,
     gh_contents,
     ghcli,
-    grades,
+    grading_spec,
     policy,
     releaseignore,
     repos,
     scaffold,
+    selection,
     settings,
     workflows_place,
 )
+from tests.conftest import run_settings
 
 
 class FakeRepo:
@@ -40,10 +42,10 @@ class FakeRepo:
         self.deletes: list[tuple[str, str]] = []
         self.skips: list[str] = []
 
-    def get_file_content(self, org, repo, path, confirm_absent=False):
+    def get_file_content(self, org, repo, path, confirm_absent=False, **_kw):
         return self.files.get((repo, path))
 
-    def put_file(self, org, repo, path, content, message):
+    def put_file(self, org, repo, path, content, message, **_kw):
         self.files[(repo, path)] = content.decode()
         self.writes.append((repo, path))
         return True
@@ -112,12 +114,11 @@ def test_fresh_materials_repo_gets_the_full_skeleton(fake):
         # SYSTEM-owned like MAINTAINING.md, so a repo scaffolded before it existed picks it
         # up on the next Refresh.
         ".system/SYLLABUS.md.sample",
-        "lectures/01_session-1/.gitkeep",
-        # Readings get a stub rather than a .gitkeep: the folder's files are listed
-        # automatically, but an empty folder gave no sign of that, nor that this file is
-        # where an online reading goes.
-        "readings/01_session-1/READINGS.md",
-        "labs/01_session-1/.gitkeep",
+        # Empty folders named for nothing the toolkit reads (decision 0038): no `NN_`
+        # session folder, no READINGS.md stub (a reading list is `reading_guide:`).
+        "lectures/.gitkeep",
+        "labs/.gitkeep",
+        "readings/.gitkeep",
         # Seeded inert, purely so faculty find out the withhold list exists.
         ".releaseignore",
     }
@@ -139,11 +140,11 @@ def test_rerun_never_overwrites_a_faculty_authored_readme(fake):
 def test_rerun_does_not_resurrect_a_deleted_section_directory(fake):
     # Faculty deleted labs/ (no labs this year). A re-run must not re-create its .gitkeep,
     # which would resurrect the directory. The other absent scaffolds are still seeded.
-    fake.files[("course-materials-f2026", "labs/01_session-1/.gitkeep")] = ""
+    fake.files[("course-materials-f2026", "labs/.gitkeep")] = ""
 
     scaffold.scaffold_materials("Org", "f2026")
-    assert "labs/01_session-1/.gitkeep" not in fake.written("course-materials-f2026")
-    assert "lectures/01_session-1/.gitkeep" in fake.written("course-materials-f2026")
+    assert "labs/.gitkeep" not in fake.written("course-materials-f2026")
+    assert "lectures/.gitkeep" in fake.written("course-materials-f2026")
 
 
 def test_maintaining_refreshes_on_rerun_while_readme_stays_create_only(fake):
@@ -310,7 +311,7 @@ def test_the_definition_records_every_starter_the_first_runnable(fake, monkeypat
 
     assert scaffold.scaffold_assignment("Org", "Assignment 1", ["rmd", "ipynb"]) == 0
 
-    spec = grades.parse_grading_spec(written["grading_config.yml"])
+    spec = grading_spec.parse_grading_spec(written["grading_config.yml"])
     assert spec.dropped == ()
     assert spec.formats == ("rmd", "ipynb")
     assert spec.format == "rmd"
@@ -344,37 +345,6 @@ def test_a_fresh_assignment_gets_the_hand_out_button_and_nothing_else(
 
     assert scaffold.scaffold_assignment("Org", "Assignment 1", ["py"]) == 0
     assert asked == [("assignment-1", workflows_place.TEMPLATE_WORKFLOWS)]
-
-
-def test_a_new_templates_button_pre_selects_it_before_the_listing_catches_up(
-    fake, monkeypatch
-):
-    # A default that is not among the dropdown's options is dropped, and the org listing
-    # GitHub answers a moment after create_repo need not carry the repo it has just made -
-    # so a listing that has not caught up left the one button whose whole point is THIS
-    # template pre-selected on the newest other assignment.
-    pushed: dict[str, bytes] = {}
-    monkeypatch.setattr(
-        scaffold, "push_content_workflows", workflows_place.push_content_workflows
-    )
-    monkeypatch.setattr(scaffold, "discover_semesters", lambda org: ["Semester-f2026"])
-    monkeypatch.setattr(
-        scaffold, "discover_assignments", lambda org: ["assignment-1-f2026"]
-    )
-    monkeypatch.setattr(scaffold, "central_ref_for", lambda org: "release")
-    monkeypatch.setattr(
-        workflows_place,
-        "put_files",
-        lambda org, repo, files, message, **k: pushed.update(files) or True,
-    )
-    _clone_ok(monkeypatch, _git_ok)
-
-    assert scaffold.scaffold_assignment("Org", "Assignment 2", ["py"]) == 0
-
-    assert (
-        _hand_out_default(pushed[workflows_place.RELEASE_ASSIGNMENT].decode())
-        == "assignment-2"
-    )
 
 
 def test_a_template_without_its_button_is_not_reported_ready(fake, monkeypatch):
@@ -540,7 +510,7 @@ def test_an_external_brief_carries_no_repo_shaped_furniture(fake, monkeypatch):
     assert "Commit the notebook" not in brief
     assert "`submit_url:`" in brief  # and it says where the address goes instead
     # A run setting: written in grading_config.yml it would make the template NOT_MIGRATED.
-    assert "`assignments.yml`" in brief and "grading_config.yml" not in brief
+    assert "`schedule.yml`" in brief and "grading_config.yml" not in brief
 
 
 def test_the_brief_stub_has_the_two_headings_and_no_more(fake, monkeypatch):
@@ -667,7 +637,7 @@ def test_the_generated_definition_carries_the_answers_and_the_course_defaults(
         )
         == 0
     )
-    spec = grades.parse_grading_spec(written["grading_config.yml"])
+    spec = grading_spec.parse_grading_spec(written["grading_config.yml"])
     assert spec.dropped == ()
     assert (
         spec.title == "Neural networks: from scratch"
@@ -675,35 +645,34 @@ def test_the_generated_definition_carries_the_answers_and_the_course_defaults(
     assert spec.type == "group"
     assert (spec.submit_via, spec.format, spec.autograde) == ("external", "ipynb", True)
     # No run setting is written at all, live or commented: they are each semester's
-    # assignments.yml, and the cascade answers them at read time.
+    # schedule.yml entry, and the cascade answers them at read time.
     text = written["grading_config.yml"]
     assert not any(
         line.lstrip("# ").startswith(f"{key}:")
         for line in text.splitlines()
         for key in settings.RUN_KEYS
     )
-    assert "semester-config/assignments.yml" in text
-    resolved = grades.with_run_settings(spec, "Org")
+    assert "semester-config/schedule.yml entry" in text
+    resolved = grading_spec.with_run_settings(spec, "Org")
     assert (resolved.max_team_size, resolved.late_window_days) == (3, 7)
     assert dict(resolved.sources)["late_window_days"] == "course"
     assert text.startswith("# INSTRUCTOR-OWNED")
 
 
 def test_an_unasked_run_setting_leaves_the_semester_layer_to_answer(fake, monkeypatch):
-    # No box answered: nothing the scaffold writes may hide `assignments.yml`.
+    # No box answered: nothing the scaffold writes may hide the semester layers.
     written = _solution_files(monkeypatch)
     assert scaffold.scaffold_assignment("Org", "Assignment 1", ["ipynb"], "group") == 0
     text = written["grading_config.yml"]
-    monkeypatch.setattr(
-        settings,
-        "_assignments_text",
+    run_settings(
+        monkeypatch,
         lambda org: (
             "defaults:\n  late_window_days: 3\n  late_penalty_per_day: 5%\n"
             "  visibility: public\n  team_formation: assigned\n  max_team_size: 2\n"
         ),
     )
-    monkeypatch.setattr(grades, "_grading_text", lambda org, template: text)
-    spec = grades.load_grading_spec("Org", "t", semester_org="Sem", slug="a1")
+    monkeypatch.setattr(grading_spec, "_grading_text", lambda org, template: text)
+    spec = grading_spec.load_grading_spec("Org", "t", semester_org="Sem", slug="a1")
     assert (spec.late_window_days, spec.late_penalty_per_day) == (3, "5%")
     assert (spec.visibility, spec.team_formation, spec.max_team_size) == (
         "public",
@@ -711,7 +680,7 @@ def test_an_unasked_run_setting_leaves_the_semester_layer_to_answer(fake, monkey
         2,
     )
     sources = dict(spec.sources)
-    del sources["submit_url"]  # nobody states one
+    del sources["submit_url"], sources["marks_per_question"]  # nobody states them
     assert set(sources.values()) == {"semester"}
 
 
@@ -724,7 +693,7 @@ def test_the_default_shape_is_seeded_as_assignment_repo_never_github(fake, monke
     text = written["grading_config.yml"]
     assert "\nsubmit_via: assignment_repo" in text
     assert "github" not in text
-    spec = grades.parse_grading_spec(text)
+    spec = grading_spec.parse_grading_spec(text)
     assert spec.submit_via == "assignment_repo" and spec.dropped == ()
 
 
@@ -746,7 +715,7 @@ def test_a_shared_drop_box_is_seeded_hand_marked_and_parses_clean(fake, monkeypa
         == 0
     )
     text = written["grading_config.yml"]
-    spec = grades.parse_grading_spec(text)
+    spec = grading_spec.parse_grading_spec(text)
     assert spec.dropped == ()
     assert not spec.autograde and not spec.grader_pdf
     assert not spec.runs_completion_check
@@ -813,7 +782,7 @@ def test_the_cutoff_switches_are_written_out_with_their_defaults(fake, monkeypat
     for fmt, notebook in (("ipynb", True), ("py", False)):
         assert scaffold.scaffold_assignment("Org", "Assignment 1", [fmt]) == 0
         text = written["grading_config.yml"]
-        spec = grades.parse_grading_spec(text)
+        spec = grading_spec.parse_grading_spec(text)
         assert spec.dropped == ()
         assert (spec.completion_check, spec.grader_pdf) == (notebook, False)
         assert f"completion_check: {str(notebook).lower()}" in text
@@ -826,8 +795,8 @@ def test_a_course_with_no_defaults_gets_the_institution_late_policy(fake, monkey
     written = _solution_files(monkeypatch)
     monkeypatch.setattr(settings, "course_defaults", lambda org: {})
     assert scaffold.scaffold_assignment("Org", "Assignment 1", ["py"]) == 0
-    spec = grades.with_run_settings(
-        grades.parse_grading_spec(written["grading_config.yml"]), "Org"
+    spec = grading_spec.with_run_settings(
+        grading_spec.parse_grading_spec(written["grading_config.yml"]), "Org"
     )
     assert (spec.late_window_days, spec.late_penalty_per_day) == (
         policy.defaults()["late_window_days"],
@@ -1276,13 +1245,6 @@ def test_a_source_that_opens_on_its_solution_branch_is_not_copied(origins, capsy
     assert course.SOLUTION_BRANCH in capsys.readouterr().err
 
 
-def _hand_out_default(text: str) -> str:
-    """Which template the rendered Release assignment button opens on."""
-    loaded = yaml.safe_load(text)
-    trigger = loaded.get("on", loaded.get(True))
-    return trigger["workflow_dispatch"]["inputs"]["course_source_repo"]["default"]
-
-
 def test_a_copy_into_a_repo_that_already_has_content_lands_no_branch(origins, capsys):
     # `create_repo` reports an existing repo as success, so a re-run - or a tag already
     # spent on something else - copies into a repo git will not fast-forward. The rejected
@@ -1362,10 +1324,8 @@ def test_no_system_file_is_ever_released_to_students():
     # toolkit wrote about itself - into a semester. Asserted over the whole manifest because
     # the nightly refresh back-fills these into repos that have been running for months:
     # the exclusion is the precondition that makes creating them there safe.
-    from dsl_course import deploy
-
     for path in scaffold.materials_system_files("Org", "course-materials-f2026"):
-        assert path.split("/")[0] in deploy.ROOT_RELEASE_EXCLUDED, path
+        assert selection.denied(path), path
 
 
 def test_a_stub_faculty_have_written_over_is_never_touched_again(fake):
@@ -1557,3 +1517,54 @@ def test_a_fresh_materials_repo_has_no_publish_file(fake):
     # until a materials repo's publish.yml names it; the public website reads opencourse.yml.
     assert scaffold.scaffold_materials("Org", "f2026") == 0
     assert "publish.yml" not in fake.written("course-materials-f2026")
+
+
+# ------------------------------------------------- confirming the withheld patterns
+
+
+def _confirm(monkeypatch, text, *, ok=True):
+    written = []
+    monkeypatch.setattr(
+        scaffold,
+        "get_file_with_sha",
+        lambda org, repo, path, **_kw: None if text is None else (text, "sha1"),
+    )
+    monkeypatch.setattr(
+        scaffold,
+        "put_file",
+        lambda org, repo, path, content, message, sha=None: (
+            written.append((path, content.decode(), sha)) or ok
+        ),
+    )
+    return scaffold.confirm_withheld("Org", "cm"), written
+
+
+def test_confirm_marks_the_seeded_list_reviewed_and_changes_nothing_else(monkeypatch):
+    # Plan 0.11.0 9b ruling 6: the checklist's Confirm writes the marker, no edit.
+    seeded = "# Withhold from students:\n# solutions/\n"
+    summary, written = _confirm(monkeypatch, seeded)
+    assert int(summary) == 0
+    assert written == [
+        (
+            releaseignore.RELEASEIGNORE,
+            f"{seeded}{releaseignore.REVIEWED_MARK}\n",
+            "sha1",
+        )
+    ]
+    assert releaseignore.reviewed(written[0][1])
+
+
+def test_confirm_on_a_reviewed_list_writes_nothing(monkeypatch):
+    summary, written = _confirm(monkeypatch, "solutions/\n")
+    assert int(summary) == 0 and written == []
+    assert "already reviewed" in summary.text
+
+
+def test_confirm_creates_an_absent_file(monkeypatch):
+    _, written = _confirm(monkeypatch, None)
+    assert written[0][1] == f"{releaseignore.REVIEWED_MARK}\n"
+
+
+def test_a_confirm_that_cannot_write_says_so(monkeypatch):
+    summary, _ = _confirm(monkeypatch, "", ok=False)
+    assert int(summary) == 1 and summary.reasons[0]["code"] == "WRITE_FAILED"

@@ -9,7 +9,7 @@ import { act } from 'preact/test-utils';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Course } from '../src/model/discovery';
 import { StaticFiles } from './staticFiles';
-import { inWeeks, parseSchedule, scheduleRows, termOf, weekGroups, weekOf } from '../src/model/schedule';
+import { parseSchedule, scheduleRows, termOf, weekGroups, weekOf } from '../src/model/schedule';
 import type { Status } from '../src/model/types';
 import { CohortScreen, headerLine } from '../src/screens/Cohort';
 import example from './fixtures/status.example.json';
@@ -24,30 +24,32 @@ const cohort = { org: COHORT_ORG, term: 'f2026', termLabel: 'Fall 2026' };
 const course: Course = { org: COURSE_ORG, name: 'Machine Learning', code: 'E1234', description: '', write: true, admins: [], cohorts: [cohort], meta: {} };
 
 const SCHEDULE = `timezone: Europe/Berlin
-semester_start: 2026-09-07
-semester_end: 2026-12-18
-releases:
+semester:
+  start: {type: start, event_datetime: 2026-09-07}
+  end: {type: end, event_datetime: 2026-12-18}
+lectures:
   s5:
+    session: 5
     event_datetime: 2026-10-08T10:00
     title: Trees and ensembles
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: lectures/05_trees
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: lectures/05_trees
 assignments:
   assignment-2:
-    course_source_repo: assignment-2-f2026
+    number: 2
+    template: assignment-2-f2026
     handout_datetime: 2026-09-15T10:00
     due_datetime: 2026-09-27T23:59
 events:
   orientation:
     title: Orientation
     event_datetime: 2026-09-01T09:00
+exams:
   midterm:
-    kind: exam
     title: Midterm
     event_datetime: 2026-10-22T10:00
   final:
-    kind: exam
     title: Final
     event_datetime: 2026-12-15T10:00
 `;
@@ -80,11 +82,6 @@ describe('term weeks', () => {
     expect(weekGroups(rows, (r) => r.when, term, TZ, [7, 3, 4]).map((g) => g.key)).toEqual([3, 7]);
   });
 
-  it('keep undated items apart from the dated ones in the selected weeks', () => {
-    const items = [{ w: '2026-10-08T10:00:00+02:00' }, { w: '2026-09-22T10:00' }, { w: undefined }];
-    expect(inWeeks(items, (i) => i.w, [3], term, TZ)).toEqual({ dated: [items[1]], undated: [items[2]] });
-    expect(inWeeks(items, (i) => i.w, [], term, TZ).dated).toHaveLength(2);
-  });
 });
 
 describe('the header line', () => {

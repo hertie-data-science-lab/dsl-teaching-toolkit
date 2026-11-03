@@ -1,7 +1,7 @@
 """Decision 0010: the semester's repos and files have ONE spelling each, declared once.
 
-The engine knows only the new names (no dual reading); the old ones live in `course.py`
-(the retired list) and `migrate.py` (the tool that renames a live org) and nowhere else.
+The engine knows only the new names (no dual reading); the old ones live in `legacy.py`
+and `migrate.py` (the tool that renames a live org) reads them from there.
 """
 
 from __future__ import annotations
@@ -13,20 +13,22 @@ import pytest
 
 from dsl_course import (
     access,
-    bootstrap_course,
     course,
     discovery,
+    gradebook,
     profile_readme,
     records,
-    repos,
+    team_formation,
     teardown,
     welcome,
 )
-from dsl_course.course import CONFIG_REPO, JOIN_REPO, OLD_CONFIG_REPO, OLD_JOIN_REPO
+from dsl_course.course import CONFIG_REPO, JOIN_REPO
+from dsl_course.migrate import OLD_CONFIG_REPO, OLD_JOIN_REPO
+from tests.conftest import fake_config
 
 ROOT = Path(__file__).resolve().parents[1]
-# The two files allowed to spell a retired name: the declaration and the migration.
-SPELLS_OLD_NAMES = {"dsl_course/course.py", "dsl_course/migrate.py"}
+# The two files allowed to spell a retired name: the registry and the migration.
+SPELLS_OLD_NAMES = {"dsl_course/legacy.py", "dsl_course/migrate.py"}
 
 
 def _shipped_files():
@@ -78,28 +80,9 @@ def test_the_shipped_scripts_carry_the_config_repo_substituted():
         assert f"const CONFIG = '{CONFIG_REPO}'" in text
         assert "__CONFIG_REPO__" not in text
     files = welcome.config_system_files("main")
-    dispatcher = files[".github/workflows/dispatch-scheduled-release.yml"].decode()
+    dispatcher = files[".github/workflows/dispatch.yml"].decode()
     assert f"client_payload[driver]={CONFIG_REPO}" in dispatcher
     assert not any(b"__CONFIG_REPO__" in body for body in files.values())
-
-
-@pytest.mark.parametrize("name", sorted(course.RETIRED_REPO_NAMES))
-def test_a_retired_name_is_never_created(name, monkeypatch):
-    calls = []
-    monkeypatch.setattr(repos, "gh", lambda *a, **k: calls.append(a) or (0, ""))
-    assert repos.create_repo("org", name) is False
-    assert calls == []
-
-
-def test_bootstrap_refuses_a_semester_the_migration_has_not_reached(monkeypatch):
-    monkeypatch.setattr(
-        discovery, "gh", lambda *a, **k: (0, f"{course.OLD_SEMESTER_TOPIC}\n")
-    )
-    assert bootstrap_course.refuses_unmigrated("sem-f2026") is True
-    monkeypatch.setattr(
-        discovery, "gh", lambda *a, **k: (0, f"{course.SEMESTER_TOPIC}\n")
-    )
-    assert bootstrap_course.refuses_unmigrated("sem-f2026") is False
 
 
 # ------------------------------------------------------------------ .system/ (item 3)
@@ -109,7 +92,7 @@ def test_the_pointer_lives_in_the_config_repo_and_the_dispatchers_read_it_there(
     files = welcome.config_system_files("main")
     pointer = f"{CONFIG_REPO}/contents/{records.path('pointer')}"
     for path, body in files.items():
-        if path.startswith(".github/workflows/dispatch-"):
+        if path == ".github/workflows/dispatch.yml":
             assert pointer in body.decode(), path
             assert "__POINTER__" not in body.decode(), path
 
@@ -121,43 +104,20 @@ def test_a_semester_is_found_through_the_pointer_in_its_config_repo(monkeypatch)
         reads.append((org, repo, path))
         return {"course": "Course-Org", "org": org}
 
-    monkeypatch.setattr(discovery, "load_yaml_config", load)
+    fake_config(monkeypatch, load)
     assert discovery.course_org_for_semester("Sem-f2026") == "Course-Org"
-    assert reads == [("Sem-f2026", CONFIG_REPO, ".system/dsl-course.yml")]
+    assert reads == [("Sem-f2026", CONFIG_REPO, ".system/course.yml")]
 
 
-def test_a_semester_archived_before_the_rename_is_never_written_into(monkeypatch):
-    # No semester-config under its new name, and the old topic: frozen or unmigrated.
+def test_a_semester_without_its_config_repo_or_topic_is_never_written_into(monkeypatch):
+    # No semester-config under its name, and no semester topic: not set up (or never renamed).
     monkeypatch.setattr(discovery, "repo_missing", lambda org, name: True)
-    monkeypatch.setattr(
-        discovery, "gh", lambda *a, **k: (0, f"{course.OLD_SEMESTER_TOPIC}\n")
-    )
+    monkeypatch.setattr(discovery, "gh", lambda *a, **k: (0, "dsl-cohort\n"))
     assert discovery.semester_is_live("Old-f2025") is False
     monkeypatch.setattr(
         discovery, "gh", lambda *a, **k: (0, f"{course.SEMESTER_TOPIC}\n")
     )
     assert discovery.semester_is_live("New-f2026") is True
-
-
-def test_the_refresh_skips_a_frozen_pre_rename_semester_without_a_fault(
-    monkeypatch, capsys
-):
-    from test_bootstrap_seeding import _stub_refresh
-
-    from dsl_course import seed
-
-    _stub_refresh(monkeypatch)
-    frozen = [
-        {"name": ".github", "topics": [course.OLD_SEMESTER_TOPIC], "archived": True},
-        {"name": OLD_CONFIG_REPO, "topics": [], "archived": True},
-    ]
-    monkeypatch.setattr(
-        seed, "list_org_repos", lambda org: frozen if org == "Semester-f2026" else []
-    )
-    assert seed.refresh("Course-Org") == 0
-    out = capsys.readouterr()
-    assert "Semester-f2026 (archived semester - left frozen)" in out.out
-    assert "NOT_MIGRATED" not in out.out + out.err
 
 
 def test_the_record_paths_all_sit_under_one_folder():
@@ -172,7 +132,7 @@ def test_the_record_paths_all_sit_under_one_folder():
 
 
 def test_every_record_is_written_and_read_at_its_one_path():
-    from dsl_course import assign, collect, grades, team_formation
+    from dsl_course import assign, collect, team_formation
 
     assert collect.snapshot_path("a1") == records.path("snapshots", "a1.csv")
     assert collect.autograde_path("a1") == records.path("autograde", "a1")
@@ -180,16 +140,15 @@ def test_every_record_is_written_and_read_at_its_one_path():
         ".system/autograde/a1/_graded.json"
     )
     assert assign.solution_record_path("a1") == records.path("solutions", "a1.json")
-    assert grades.DISTRIBUTED_PATH == records.path("distributed")
-    assert grades.TEAM_LOCK_PATH == records.path("lock")
-    assert grades.SEMESTER_CSV_NAME == records.path("semester_gradebook")
+    assert gradebook.DISTRIBUTED_PATH == records.path("distributed")
+    assert team_formation.TEAM_LOCK_PATH == records.path("lock")
+    assert gradebook.SEMESTER_CSV_NAME == records.path("semester_gradebook")
     assert team_formation.MAILED_PATH == records.path("team_formation", "mailed.csv")
     assert teardown.RECORD_PATH == records.path("archive")
 
 
 def test_the_join_team_script_reads_the_lock_at_its_moved_path():
-    from dsl_course import grades
 
     text = welcome.join_workflow("join/team-formation.yml")
-    assert f"const LOCK = '{grades.TEAM_LOCK_PATH}';" in text
+    assert f"const LOCK = '{team_formation.TEAM_LOCK_PATH}';" in text
     assert "__LOCK__" not in text

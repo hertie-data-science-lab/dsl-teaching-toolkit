@@ -2,7 +2,7 @@
 used as a list item (`- {a: 1, b: 2}`).
 
 Flow and block parse identically, so this is a teaching/readability standard rather than a
-correctness one: `schedule.yml`, `instructors.yml`, `dsl-course.yml`, `grading_config.yml` and the docs
+correctness one: `schedule.yml`, `semester.yml`, `course.yml`, `grading_config.yml` and the docs
 that mirror them are read and hand-edited by course teams, and one shape everywhere is what
 makes them copyable. The guard matters most for the SEEDED templates - a flow item left in
 `templates/semester-config/schedule.yml` is `.format()`ed into every new semester org, so the
@@ -27,18 +27,14 @@ import pytest
 import yaml
 
 from dsl_course import bootstrap_course, welcome
-from dsl_course.grades import (
-    SheetSpec,
-    build_gradebooks,
-    dump_sheet,
-    new_sheet,
-    render_yaml,
-)
+from dsl_course.gradebook import build_gradebooks, render_yaml
+from dsl_course.grading_sheet import SheetSpec, dump_sheet
 from dsl_course.scaffold import _grading_config
+from tests.conftest import new_sheet
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# `#` allowed: the seeded schedule.yml/instructors.yml scaffolds are commented-out YAML, which
+# `#` allowed: the seeded schedule.yml/semester.yml scaffolds are commented-out YAML, which
 # is exactly where the last flow item hid.
 FLOW_ITEM = re.compile(r"^\s*(?:#\s*)?-\s*\{")
 
@@ -48,16 +44,13 @@ EXCLUDED = {
     "templates/join/team-formation.yml",
     "templates/join/ISSUE_TEMPLATE/01-join-course.yml",
     "templates/join/ISSUE_TEMPLATE/02-join-team.yml",
-    "templates/semester-config/dispatch-sync.yml",
-    "templates/semester-config/dispatch-sync-site.yml",
-    "templates/semester-config/dispatch-scheduled-release.yml",
-    "templates/semester-config/dispatch-send-codes.yml",
+    "templates/semester-config/dispatch.yml",
 }
 
 FIX = (
     "flow-style mapping used as a list item. The faculty-facing YAML in this repo is block "
     "style (indent-only): rewrite `- {a: 1, b: 2}` as `- a: 1` / `  b: 2`, one key per line. "
-    "Machine infrastructure (.github/workflows, templates/welcome, dispatch-*) is exempt "
+    "Machine infrastructure (.github/workflows, templates/welcome, dispatch.yml) is exempt "
     "- see EXCLUDED in this file."
 )
 
@@ -107,7 +100,7 @@ PY_FILES = sorted((ROOT / "dsl_course").glob("*.py"))
 
 
 def _gradebook() -> str:
-    """One student's `grades.yml` - the `yaml.safe_dump` path (grades.render_yaml)."""
+    """One student's `grades.yml` - the `yaml.safe_dump` path (gradebook.render_yaml)."""
     sources = {
         slug: (
             SheetSpec(slug=slug, title=slug, is_group=False),
@@ -120,7 +113,7 @@ def _gradebook() -> str:
 
 
 def _grading_sheet_dump() -> str:
-    """One assignment's grading sheet - the `_SheetDumper` path (grades.dump_sheet). It has
+    """One assignment's grading sheet - the `_SheetDumper` path (grading_sheet.dump_sheet). It has
     its own dumper, so PyYAML's default is not what keeps this one block style."""
     spec = SheetSpec(
         slug="assignment-1",
@@ -159,10 +152,10 @@ def _semester_registry_dump() -> str:
 # them passes it explicitly. Flow style at the document root is a single braced line with
 # no `- ` at all, so FLOW_ITEM can't see it - assert on the braces/brackets instead.
 DUMPED = {
-    "grades-<handle>/grades.yml (grades.render_yaml)": _gradebook,
+    "grades-<handle>/grades.yml (gradebook.render_yaml)": _gradebook,
     "list_orgs --yaml inventory": _inventory_dump,
     "semesters.yml (discovery)": _semester_registry_dump,
-    "grading_sheets/<slug>.yml (grades.dump_sheet)": _grading_sheet_dump,
+    "grading_sheets/<slug>.yml (grading_sheet.dump_sheet)": _grading_sheet_dump,
 }
 
 # Every runtime-generated faculty-facing artefact rendered from templates or string
@@ -173,16 +166,16 @@ SEEDED = {
     "semester-config/schedule.yml (seeded)": lambda: welcome.template(
         "semester-config/schedule.yml"
     ).format(tag="f2026", year=2026, timezone="Europe/Berlin", grace_days=60),
-    "semester-config/instructors.yml (seeded)": lambda: welcome.template(
-        "semester-config/instructors.yml"
-    ).format(year=2026, year_next=2027),
-    "course/dsl-course.yml (seeded, commented)": lambda: (
-        bootstrap_course._course_metadata("Course", "CODE")
+    "semester-config/semester.yml (seeded)": lambda: bootstrap_course.semester_scaffold(
+        "x-f2026", "semester.yml", "release"
     ),
-    "course/dsl-course.yml (seeded, --admins)": lambda: (
-        bootstrap_course._course_metadata("Course", "CODE", admins=["adminhandle"])
+    "course/course.yml (seeded, commented)": lambda: bootstrap_course.course_seed(
+        "Course", "CODE"
     ),
-    "semester/dsl-course.yml (seeded)": lambda: bootstrap_course._semester_metadata(
+    "course/course.yml (seeded, --admins)": lambda: bootstrap_course.course_seed(
+        "Course", "CODE", admins=["adminhandle"]
+    ),
+    "semester/course.yml (seeded)": lambda: bootstrap_course._semester_metadata(
         "Course"
     ),
     "grading_config.yml (scaffolded, group)": lambda: _grading_config(

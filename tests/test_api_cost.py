@@ -21,6 +21,7 @@ import hashlib
 import json
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -29,12 +30,14 @@ from conftest import clear_process_memos
 
 from dsl_course import (
     central,
+    collect,
     discovery,
     gh_contents,
     ghcli,
     issues,
     log,
     migrate,
+    release_record,
     repos,
     scheduler,
     settings,
@@ -43,7 +46,7 @@ from dsl_course import (
 )
 from dsl_course.discovery import ASSIGNMENT_TEMPLATE_TOPIC, TEMPLATE_TOPIC
 
-FIXTURES = Path(__file__).parent / "fixtures" / "layouts"
+FIXTURES = Path(__file__).parent / "fixtures" / "schedule-shape"
 COURSE = "Course-e1234"
 SEMESTER = "Course-f2026"
 STUDENTS = ("octo-one", "octo-two")
@@ -75,7 +78,8 @@ def _schedule() -> str:
     text = (FIXTURES / "demo-schedule.yml").read_text()
     blocks = "".join(
         f"  {slug}:\n"
-        f"    course_source_repo: {slug}-f2026\n"
+        f"    number: {i + 1}\n"
+        f"    template: {slug}-f2026\n"
         f"    handout_datetime: 2026-09-{8 + 7 * i:02d}T10:00\n"
         f"    due_datetime: 2026-09-{15 + 7 * i:02d}T23:59\n"
         # The second with a solution date still held at NOW (inside its late window), so
@@ -117,31 +121,35 @@ class FakeGitHub:
         # `pushed`: students who pushed since the sheets last looked. `gone`: handles off
         # the roster whose submission repos are still in the org.
         self.students, self.pushed = students, pushed
-        roster = "hertie_email,name,role,github_handle"
+        roster = "email,name,role"
+        system = "email,github_handle"
         self.files: dict[tuple[str, str, str], str] = {
             (
                 COURSE,
                 ".github",
-                "dsl-course.yml",
-            ): "course_name: Deep Learning\ncourse_code: E1234\n",
+                "course.yml",
+            ): "course:\n  name: Deep Learning\n  code: E1234\n",
             (COURSE, ".github", "semesters.yml"): f"semesters:\n- {SEMESTER}\n",
             (
                 SEMESTER,
                 "semester-config",
-                ".system/dsl-course.yml",
+                ".system/course.yml",
             ): f"course: {COURSE}\n",
             (SEMESTER, "semester-config", "schedule.yml"): _schedule(),
             (SEMESTER, "semester-config", "students.csv"): roster
             + "\n"
-            + "".join(f"{h}@example.org,{h},enrolled,{h}\n" for h in students),
+            + "".join(f"{h}@example.org,{h},enrolled\n" for h in students),
+            (SEMESTER, "semester-config", ".system/roster.csv"): system
+            + "\n"
+            + "".join(f"{h}@example.org,{h}\n" for h in students),
             (
                 SEMESTER,
                 "semester-config",
                 "teams.csv",
             ): "assignment,team,github_handle\n",
-            (SEMESTER, "semester-config", "instructors.yml"): "instructors: []\n",
+            (SEMESTER, "semester-config", "semester.yml"): "people: []\n",
         }
-        materials = (FIXTURES / "demo-tree.txt").read_text().splitlines()
+        materials = (FIXTURES / "demo-course-tree.txt").read_text().splitlines()
         self.trees: dict[tuple[str, str], list[str]] = {
             (COURSE, "course-materials-f2026"): materials,
             (COURSE, "lecture-code-f2026"): [
@@ -470,8 +478,11 @@ _REAL = [
     (discovery, "repo_is_archived", discovery.repo_is_archived),
     (discovery, "repo_missing", discovery.repo_missing),
     (settings, "org_meta", settings.org_meta),
-    (settings, "_assignments_text", settings._assignments_text),
+    (settings, "_semester_text", settings._semester_text),
     (settings, "course_org_for_semester", settings.course_org_for_semester),
+    (release_record, "get_file_with_sha", gh_contents.get_file_with_sha),
+    (scheduler, "repo_blob_shas", gh_contents.repo_blob_shas),
+    (release_record, "put_file_as_read", gh_contents.put_file_as_read),
 ]
 
 
@@ -548,7 +559,9 @@ def test_the_memos_change_what_a_tick_costs_and_nothing_it_says(
 def test_a_preview_tick_stays_under_its_ceiling(github, monkeypatch):
     # Measured 2026-09-26: 51 here before the read-once memos, 32 after them, 31 once the
     # grading leg reads its markers off one tree. The same preview tick against the
-    # demo's f2026 semester: 115, 59 (54 with `--skip-autograde`), then 54.
+    # demo's f2026 semester: 115, 59 (54 with `--skip-autograde`), then 54. 2026-11-03:
+    # 33 - a semester with no release record yet reads for it, and the dest tree its due
+    # copies would be seeded from (decision 0043).
     _tick(monkeypatch)
     assert len(github.calls) <= 40
     assert _reads_twice(github.calls) == []
@@ -623,8 +636,12 @@ OPERATIONS = {
     "tick: list the semesters": (("scheduler", *_C, "--list-semesters"), 3, 0),
     # Re-measured 2026-09-30 at 42 (was 36): one call is the bot's pending-invitation
     # read, the other five are fixture drift since the 2026-09-26 measurement.
-    "tick: release (real)": ((*_TICK, "--no-preview"), 42, 0),
-    "tick: release (preview)": ((*_TICK, "--preview"), 31, 0),
+    # Re-measured 2026-11-03 at 37 (40 before decision 0043): the release record is read
+    # once (+1), and every due copy is in it, so nothing is cloned or converged (-4). The
+    # tick that first writes the record pays its read, one dest tree read and the write.
+    "tick: release (real)": ((*_TICK, "--no-preview"), 37, 0),
+    # 2026-11-03: 32 (31 before decision 0043), the release record read.
+    "tick: release (preview)": ((*_TICK, "--preview"), 32, 0),
     "tick: autograde leg": (
         ("scheduler", *_C, *_S, "--autograde-only", "--now", NOW, "--preview"),
         12,
@@ -660,10 +677,12 @@ OPERATIONS = {
         13,
         0,
     ),
-    "propagate (preview)": (("propagate", *_C, *_S, "--preview"), 3, 0),
+    # A schedule read also reads the course's pointer and course.yml: the plan is read in
+    # the zone, archive grace and default repo the cascade gives (decision 0039).
+    "propagate (preview)": (("propagate", *_C, *_S, "--preview"), 5, 0),
     "team formation (preview)": (
         ("team_formation", *_C, *_S, "--assignment", "assignment-1", "--preview"),
-        6,
+        8,
         0,
     ),
     "enrol codes: resend (preview)": (
@@ -676,8 +695,10 @@ OPERATIONS = {
         ("deploy", *_C, "--course-source-repo", "course-materials-f2026", *_S)
         + ("--course-source-path", "lectures", "--semester-dest-repo", "materials")
         + ("--semester-dest-path", "lectures", "--preview"),
-        # The schedule and its run settings: a copy of an unnumbered entry is refused.
-        3,
+        # The schedule and its run settings, and each materials repo's materials.yml (a
+        # fresh run reads them; this was 3 while the materials memo leaked between runs):
+        # a copy of an unnumbered entry is refused.
+        5,
         0,
     ),
     "assign: hand out now (preview)": (
@@ -685,7 +706,7 @@ OPERATIONS = {
         8,
         0,
     ),
-    "archive (preview)": (("archive", *_C, *_S, "--preview"), 5, 0),
+    "archive (preview)": (("archive", *_C, *_S, "--preview"), 7, 0),
 }
 # Not covered: the real runs of a hand-out, a release now and an archive, and New
 # assignment / New materials (`scaffold`). Each is a button pressed once per assignment,
@@ -717,12 +738,27 @@ def test_every_operation_stays_under_its_ceiling(
     fake.calls.clear()
     _drive(monkeypatch, argv)
     capsys.readouterr()
-    assert len(fake.calls) <= 1.25 * (base + per_student * students), fake.calls
+    assert len(fake.calls) <= 1.25 * (base + per_student * students), (
+        len(fake.calls),
+        [c[:3] for c in fake.calls],
+    )
     if "--preview" in argv:
         assert _reads_twice(fake.calls) == []
 
 
+class _StoppedClock(datetime):
+    """`collect`'s wall clock, stopped: a sheet's `info.checked` is stamped to the minute,
+    so two ticks either side of a minute's turn differ by a sheet write that has nothing
+    to do with the term being compared (CI, 2026-11-03: 43 - 37)."""
+
+    @classmethod
+    def now(cls, tz=None):
+        at = datetime(2026, 9, 26, 12, 0, tzinfo=timezone.utc)
+        return at.astimezone(tz) if tz else at
+
+
 def _cost_in_a_term(monkeypatch, argv, **term) -> int:
+    monkeypatch.setattr(collect, "datetime", _StoppedClock)
     fake = FakeGitHub(**term)
     monkeypatch.setattr(subprocess, "run", fake.run)
     _drive(monkeypatch, (*_TICK, "--no-preview"))

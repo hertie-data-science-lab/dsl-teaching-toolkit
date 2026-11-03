@@ -202,6 +202,40 @@ export class YamlText {
     this.splice(start, end, '');
   }
 
+  /** Rename the key at `path` to `to`, keeping its value, comments and place byte for byte. */
+  renameKey(path: Path, to: string): void {
+    const parent = this.node(path.slice(0, -1));
+    if (!isMap(parent) || parent.flow) return;
+    const pair = (parent as YAMLMap).items.find((p) => keyOf(p) === String(path[path.length - 1]));
+    const k = pair?.key as Node | undefined;
+    if (!k?.range) return;
+    this.splice(k.range[0], k.range[1], scalarText(to));
+  }
+
+  /**
+   * Put the pairs of the block mapping at `path` in `order` (keys it does not name keep their
+   * places after those it does, in their own order). Each pair moves with the comment lines
+   * above it; nothing else changes, and a mapping already in that order is not touched.
+   */
+  sortMap(path: Path, order: string[]): void {
+    const map = this.node(path);
+    if (!isMap(map) || map.flow) return;
+    const items = (map as YAMLMap).items as Pair<Node, Node | null>[];
+    if (items.length < 2 || items.some((p) => !(p.key as Node | null)?.range)) return;
+    const keys = items.map(keyOf);
+    const rank = (k: string) => (order.includes(k) ? order.indexOf(k) : order.length + keys.indexOf(k));
+    const want = [...keys].sort((a, b) => rank(a) - rank(b));
+    if (want.every((k, i) => k === keys[i])) return;
+    const endOf = (p: Pair<Node, Node | null>) => this.nextLine(p.value?.range ? p.value.range[2] : (p.key as Node).range![2]);
+    const starts = items.map((p, i) => (i === 0 ? this.lineStart((p.key as Node).range![0]) : endOf(items[i - 1])));
+    const end = endOf(items[items.length - 1]);
+    const chunks = new Map(keys.map((k, i) => {
+      const c = this.text.slice(starts[i], i + 1 < items.length ? starts[i + 1] : end);
+      return [k, c.endsWith('\n') ? c : `${c}\n`];
+    }));
+    this.splice(starts[0], end, want.map((k) => chunks.get(k)!).join(''));
+  }
+
   // ------------------------------------------------------------------ splices
 
   private block(value: unknown, indent: number): string {

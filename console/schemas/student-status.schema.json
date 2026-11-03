@@ -246,12 +246,16 @@
           "label": {
             "type": "string"
           },
+          "plural": {
+            "type": "string"
+          },
           "tab": {
             "type": "boolean"
           }
         },
         "required": [
           "label",
+          "plural",
           "colour",
           "background",
           "tab"
@@ -385,6 +389,15 @@
           "released": {
             "type": "boolean"
           },
+          "released_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "repeat": {
+            "type": "boolean"
+          },
           "sort_at": {
             "type": [
               "string",
@@ -424,6 +437,7 @@
           "details",
           "assignment",
           "released",
+          "released_at",
           "tbc",
           "dateless",
           "off_schedule",
@@ -432,7 +446,8 @@
           "reading_list",
           "readings_pending",
           "tabs",
-          "no_materials"
+          "no_materials",
+          "repeat"
         ],
         "type": "object"
       },

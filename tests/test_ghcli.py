@@ -272,6 +272,19 @@ def test_a_read_truncated_mid_json_is_retried(monkeypatch):
     assert len(calls) == 2
 
 
+def test_a_read_answered_with_an_html_page_is_retried(monkeypatch, capsys):
+    # A migration dry run met this beside the 500s: GitHub sent its HTML error page for a
+    # contents read, and `--jq` failed on the first `<`. The same fault class as the 500.
+    calls = _canned_gh(
+        monkeypatch,
+        _Canned(1, "", "invalid character '<' looking for beginning of value"),
+        _Canned(0, "abc", ""),
+    )
+    assert ghcli.gh("api", "repos/O/R/contents/f", "--jq", ".content") == (0, "abc")
+    assert len(calls) == 2
+    assert "[wait] transient invalid character '<'" in capsys.readouterr().err
+
+
 def test_a_write_that_hits_a_500_is_never_retried(monkeypatch):
     # A POST that came back 5xx may still have APPLIED; repeating it would apply it twice.
     # Straight to the ladder, so the write governor's shared window stays untouched.

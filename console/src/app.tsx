@@ -13,7 +13,6 @@ import { semesterOver } from './model/catalogue';
 import { LiveFiles } from './model/files';
 import { forgetMine, forgetMyTeams } from './model/mine';
 import { forgetStudentPrefs } from './model/prefs';
-import { courseLeftovers, semesterLeftovers, type Leftover } from './model/migration';
 import { loadHeartbeat, type Heartbeat } from './model/heartbeat';
 import { StatusStore, type Loaded } from './model/status';
 import { DispatchAdapter, outcomePath } from './ops/adapter';
@@ -36,7 +35,6 @@ import { NewAssignmentScreen } from './screens/NewAssignment';
 import { NewCohortScreen } from './screens/NewCohort';
 import { NewCourseScreen } from './screens/NewCourse';
 import { NewMaterialsScreen } from './screens/NewMaterials';
-import { MigrationUnknownScreen, NotMigratedScreen } from './screens/NotMigrated';
 import { CourseWebsiteScreen, StudentBanner, StudentScreen, StudentSideNav, forgetStudentData, studentData, studentScreen } from './screens/Student';
 import { JoinCourseScreen } from './screens/StudentJoin';
 import type { CohortProps, CourseProps } from './screens/types';
@@ -69,6 +67,20 @@ export function createDeps(): AppDeps {
   return { auth, client };
 }
 
+/**
+ * The console route a click follows in place (`?...` links), or null to leave it to the
+ * browser: a link with a target (`View here` opens a new tab), and a modifier or non-primary
+ * click (new tab or window), keep the browser's own behaviour.
+ */
+export function inAppHref(e: MouseEvent): string | null {
+  const a = (e.target as Element)?.closest?.('a');
+  const href = a?.getAttribute('href');
+  if (!a || !href || !href.startsWith('?')) return null;
+  if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return null;
+  const target = a.getAttribute('target');
+  return target && target !== '_self' ? null : href;
+}
+
 export function App({ state: s }: { state: AppState }) {
   const auth = s.auth;
 
@@ -78,9 +90,8 @@ export function App({ state: s }: { state: AppState }) {
       s.search.value = location.search;
     };
     const onClick = (e: MouseEvent) => {
-      const a = (e.target as Element)?.closest?.('a');
-      const href = a?.getAttribute('href');
-      if (!a || !href || !href.startsWith('?') || e.metaKey || e.ctrlKey || e.shiftKey) return;
+      const href = inAppHref(e);
+      if (!href) return;
       e.preventDefault();
       history.pushState(null, '', href);
       sync();
@@ -98,14 +109,9 @@ export function App({ state: s }: { state: AppState }) {
     };
   }, []);
 
-  // A semester's student screens rename their own old hashes (`#join` to Assignments; `#marks` goes there in both).
-  // Until discovery answers, a `?semester=` URL is taken as the student screens' (nothing is
-  // rewritten yet); after, only when the person holds a role in that semester.
-  const asked = parseSearch(s.search.value);
-  const studentHash = !!asked.semester && (!s.estate.value || !!studentContext(s.estate.value, asked));
-  const route = parseHash(s.hash.value, studentHash);
-  // An old `#teams-<slug>` / `#marks-<slug>` link: show the tab, and write its new hash.
-  const moved = movedHash(s.hash.value, studentHash);
+  const route = parseHash(s.hash.value);
+  // A hash that is not canonical (a tab the screen does not have): write the one it shows.
+  const moved = movedHash(s.hash.value);
   useEffect(() => {
     if (moved) {
       replaceHash(moved);
@@ -218,39 +224,22 @@ export function App({ state: s }: { state: AppState }) {
   const r = { ...route, screen };
   const ctx = resolveContext(courses, sel, r);
   const wiz = wizardOf(screen);
-  // An org still on retired names gets one screen, before anything of it is read. Only the
-  // orgs the page is about are checked: a semester only when one of its screens opens.
-  const nav = s.search.value + s.hash.value;
-  const aboutCourse = !!ctx.course && !APP_SCREENS.includes(screen) && wiz?.name !== 'new-course';
+  // A page about the open semester: the side nav shows its pages.
   const semesterPage = !!ctx.cohort && !!ctx.course?.write && !wiz && !APP_SCREENS.includes(screen) && !(screen in COURSE_SCREENS);
-  const courseLeft = aboutCourse ? s.leftovers('course', ctx.course!.org, nav) : [];
-  // The course's names are current: what a save to its files (Set aside, details) waits for.
-  const courseMigrated = Array.isArray(courseLeft) && !courseLeft.length;
-  const semLeft = semesterPage ? s.leftovers('semester', ctx.cohort!.org, nav) : [];
-  const failed = courseLeft === 'failed' ? { what: 'course' as const, org: ctx.course!.org } : semLeft === 'failed' ? { what: 'semester' as const, org: ctx.cohort!.org } : null;
-  const pending = courseLeft === undefined || semLeft === undefined;
-  const unmigrated = Array.isArray(courseLeft) && courseLeft.length ? { what: 'course' as const, org: ctx.course!.org, list: courseLeft } : Array.isArray(semLeft) && semLeft.length ? { what: 'semester' as const, org: ctx.cohort!.org, list: semLeft } : null;
-  const blocked = !!unmigrated || !!failed || pending;
   const cohortStates: Record<string, Loaded> = {};
-  const wanted = blocked ? [] : screen === 'home' ? courses.filter((c) => c.write).flatMap((c) => c.cohorts) : ctx.course?.write ? ctx.course.cohorts : [];
+  const wanted = screen === 'home' ? courses.filter((c) => c.write).flatMap((c) => c.cohorts) : ctx.course?.write ? ctx.course.cohorts : [];
   // Only the open semester's pages show staleness: every other semester read skips the tree.
   for (const k of wanted) cohortStates[k.org] = s.statuses.cohort(k.org, k.org === ctx.cohort?.org).value;
-  const cohortLoaded = ctx.cohort && ctx.course?.write && !blocked ? s.statuses.cohort(ctx.cohort.org).value : undefined;
+  const cohortLoaded = ctx.cohort && ctx.course?.write ? s.statuses.cohort(ctx.cohort.org).value : undefined;
   const navKey = COHORT_SCREENS[screen] ?? COURSE_SCREENS[screen] ?? (wiz ? WIZARD_NAV[wiz.name] : undefined) ?? screen;
-  const navCourse = !blocked && !APP_SCREENS.includes(screen) ? ctx.course : undefined;
+  const navCourse = !APP_SCREENS.includes(screen) ? ctx.course : undefined;
   const sub = navCourse ? (wanted: SubWanted) => subPages(navCourse, s.statuses.course(navCourse.org).value, cohortStates, s.files, { ...wanted, titles: !ctx.cohort }) : undefined;
 
   let body;
   let banner = null;
   // The banner's crumbs follow the tree: All courses › Course (› Semester); the open page's is plain.
   const home = { t: root, href: '?#home' };
-  if (unmigrated) {
-    body = <NotMigratedScreen what={unmigrated.what} org={unmigrated.org} leftovers={unmigrated.list} />;
-  } else if (failed) {
-    body = <MigrationUnknownScreen what={failed.what} org={failed.org} />;
-  } else if (pending) {
-    body = <Loading what="Opening" />;
-  } else if (wiz?.name === 'new-course') {
+  if (wiz?.name === 'new-course') {
     body = <NewCourseScreen files={s.files} step={wiz.step} />;
   } else if (screen === 'help') {
     body = <HelpScreen />;
@@ -269,7 +258,7 @@ export function App({ state: s }: { state: AppState }) {
         name={ctx.course.name} semester={ctx.cohort ? { org: ctx.cohort.org, termLabel: ctx.cohort.termLabel } : undefined} />
     );
   } else if (wiz || screen in COURSE_SCREENS || !ctx.cohort) {
-    const cp: CourseProps = { migrated: courseMigrated, course: ctx.course, loaded: s.statuses.course(ctx.course.org).value, cohortStates, files: s.files, now: s.now.value, entry: route.entry, folder: sel.folder, cohort: ctx.cohort?.org };
+    const cp: CourseProps = { course: ctx.course, loaded: s.statuses.course(ctx.course.org).value, cohortStates, files: s.files, now: s.now.value, entry: route.entry, folder: sel.folder, file: sel.file, cohort: ctx.cohort?.org };
     body = wiz?.name === 'new-semester' ? <NewCohortScreen {...cp} step={wiz.step} />
       : wiz?.name === 'new-assignment' ? <NewAssignmentScreen {...cp} step={wiz.step} />
       : wiz?.name === 'new-materials' ? <NewMaterialsScreen {...cp} />
@@ -289,10 +278,11 @@ export function App({ state: s }: { state: AppState }) {
   } else {
     const cp: CohortProps = {
       course: ctx.course, cohort: ctx.cohort, loaded: cohortLoaded ?? { kind: 'loading' }, files: s.files, now: s.now.value, entry: route.entry, tab: route.tab, open: route.open,
-      heartbeat: s.heartbeat(ctx.course.org), prefill: sel.template, courseMigrated, courseLoaded: s.statuses.course(ctx.course.org).value,
+      heartbeat: s.heartbeat(ctx.course.org), prefill: sel.template, courseLoaded: s.statuses.course(ctx.course.org).value,
     };
     const screens: Record<string, () => preact.JSX.Element> = {
       dashboard: () => <CohortScreen {...cp} />,
+      settings: () => <CohortScreen {...cp} settings />,
       schedule: () => <ScheduleScreen {...cp} />,
       release: () => <ReleaseScreen {...cp} />,
       assignments: () => <AssignmentsScreen {...cp} />,
@@ -376,14 +366,16 @@ export function subPages(course: Course, loaded: Loaded, cohortStates: Record<st
 export type AppState = ReturnType<typeof createState>;
 
 /**
- * What a finished run leaves stale, read again: the semester's status and the run's outcome file,
- * the course's status, and after Return marks the "last told" record(s) it rewrote - its sheet's,
+ * What a finished run leaves stale, read again: the semester's status, the run's outcome file and
+ * schedule.yml (a release or hand-out writes the moment it went out back into it, decision 0043
+ * rule 3 - held at the old sha, the next save there would always conflict), the course's status, and after Return marks the "last told" record(s) it rewrote - its sheet's,
  * or every one held for an unscoped run - so the Marks tab's count of who it would email is fresh.
  */
 export function refreshAfterRun(def: OpDef, statuses: Pick<StatusStore, 'reload'>, files: Pick<LiveFiles, 'refresh' | 'refreshUnder'>): void {
   if (def.cohortOrg) {
     void statuses.reload(def.cohortOrg, CONFIG_REPO);
     files.refresh(def.cohortOrg, CONFIG_REPO, outcomePath(def.op));
+    files.refresh(def.cohortOrg, CONFIG_REPO, 'schedule.yml');
     if (def.op === 'grades.return') {
       const sheet = def.args.assignment;
       if (typeof sheet === 'string' && sheet) files.refresh(def.cohortOrg, CONFIG_REPO, toldPath(sheet));
@@ -403,7 +395,6 @@ export function createState({ auth, client }: AppDeps) {
   const beats = new Map<string, ReturnType<typeof signal<Heartbeat | null | undefined>>>();
   const archived = new Map<string, ReturnType<typeof signal<boolean | undefined>>>();
   const gates = new Map<string, ReturnType<typeof signal<{ on: boolean; courseName: string } | undefined>>>();
-  const left = new Map<string, { sig: ReturnType<typeof signal<Leftover[] | 'failed' | undefined>>; nav: string }>();
   let env: Env | null = null;
   const ops = new OpsSession(new DispatchAdapter(client, () => st.user.value?.login ?? ''), {
     onFinished: (def) => refreshAfterRun(def, statuses, files),
@@ -482,22 +473,6 @@ export function createState({ auth, client }: AppDeps) {
       }
       return a.value;
     },
-    /**
-     * What an org still carries under a retired name; undefined until it answers. An answer is
-     * kept; a check that failed is 'failed' until the next navigation (`nav` changes), which
-     * asks again. A failure is never taken for "migrated".
-     */
-    leftovers(kind: 'course' | 'semester', org: string, nav: string): Leftover[] | 'failed' | undefined {
-      const k = `${kind}:${org.toLowerCase()}`;
-      let l = left.get(k);
-      if (!l || (l.sig.value === 'failed' && l.nav !== nav)) {
-        const sig = signal<Leftover[] | 'failed' | undefined>(undefined);
-        l = { sig, nav };
-        left.set(k, l);
-        void (kind === 'course' ? courseLeftovers(client, org) : semesterLeftovers(client, org)).then((v) => (sig.value = v), () => (sig.value = 'failed'));
-      }
-      return l.sig.value;
-    },
     async rediscover() {
       try {
         st.estate.value = await st.discover();
@@ -529,7 +504,6 @@ export function createState({ auth, client }: AppDeps) {
       beats.clear();
       archived.clear();
       gates.clear();
-      left.clear();
       ops.reset();
       env = null;
       st.user.value = null;

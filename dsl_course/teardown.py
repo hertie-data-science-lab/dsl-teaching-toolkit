@@ -2,9 +2,9 @@
 module keeps the frozen name `teardown`, which every org's Archive semester workflow ran).
 
 Runs on the semester's own archive date, fired by the scheduler - and only for a semester
-whose `schedule.yml` writes an `archive:` block (its `event_datetime:` defaults to `semester_end` +
-60 days). Archiving is opt-in, so the Archive semester button is for closing one out early,
-and the only way to close out a semester that wrote no block. Six steps, in this order, and
+whose `schedule.yml` `semester:` block has a `type: archive` entry (its `event_datetime:`
+defaults to the semester's end + 60 days). Archiving is opt-in, so the `semester.archive`
+op is for closing one out early, and the only way to close out a semester without one. Six steps, in this order, and
 the order is the whole design:
 
 0. PROPAGATE: offer the semester's edits to its released material back to the course org as
@@ -65,8 +65,9 @@ from .discovery import (
     is_student_repo,
     list_org_repos,
 )
+from .distribute import PREVIEW_TITLE
 from .gh_contents import get_file_content, put_file, read_csv
-from .grades import PREVIEW_TITLE, SEMESTER_CSV_NAME
+from .gradebook import SEMESTER_CSV_NAME
 from .issues import close_issues_titled, open_titles
 from .log import (
     CLIParser,
@@ -96,10 +97,10 @@ _RECORD_BANNER = (
 # toolkit; this list is the only place that says, in one breath, that together they ARE the
 # semester's record of assessment.
 _RETENTION_NOTE = f"""This repository is the semester's private record and is now read-only.
-It holds the roster (`students.csv`), the project teams (`teams.csv`), the instructors
-(`instructors.yml`), the semester plan (`schedule.yml`), every grading sheet (`grading_sheets/`),
+It holds the roster (`students.csv`, with the project teams), the instructors
+(`semester.yml`), the semester plan (`schedule.yml`), every grading sheet (`grading_sheets/`),
 the autograde detail (`.system/autograde/`), what was sent to whom (`.system/gradebook/distributed.csv`),
-the enrolment refusals and account relinks (`.system/enrolment/`) and the registrar export
+the enrolment refusals and account relinks (`.system/enrolment/`) and the semester grades file
 (`{SEMESTER_CSV_NAME}`). Together those are this semester's record of
 assessment: delete the repository when your institution's retention period for that record
 expires, and the archived student repos with it."""
@@ -177,9 +178,9 @@ class Closed(NamedTuple):
 def archive_due(sched: schedule.Schedule, today: date) -> bool:
     """Whether this semester's archive date has arrived.
 
-    A semester that writes no `archive:` block has no such date and is never due: archiving
+    A semester with no `type: archive` entry has no such date and is never due: archiving
     is opt-in, so closing it out is `--force`, which is a person taking the decision
-    instead. Where the block is written, the sixty-day grace after `semester_end` is the
+    instead. Where the entry is written, the sixty-day grace after the end is the
     whole point (`schedule.ARCHIVE_GRACE`), because a term goes on being pushed to for
     weeks after its last class."""
     when = sched.archive.when if sched.archive else None
@@ -226,17 +227,20 @@ def freeze_order(semester_org: str, repos: list[dict]) -> list[dict]:
 
 
 def registrar_summary(semester_org: str, confirm_absent: bool = False) -> str:
-    """One plain-text line for the record: what the registrar export holds, or that there
-    is none. A ROW COUNT, never a row - this string is printed to the run log too, and the
-    log of a course org's `.github` is world-readable. `confirm_absent` for the real run,
-    whose record is permanent: a spurious 404 must not say no grade was ever sent."""
-    text = get_file_content(
-        semester_org, CONFIG_REPO, SEMESTER_CSV_NAME, confirm_absent=confirm_absent
-    )
-    if text is None:
-        return f"{SEMESTER_CSV_NAME} is NOT here - no grade was ever sent"
-    rows = len(list(read_csv(text, (), SEMESTER_CSV_NAME)))
-    return f"{SEMESTER_CSV_NAME}, {rows} student row(s)"
+    """One plain-text line for the record: what the semester grades file holds, or that
+    there is none. A ROW COUNT, never a row - this string is printed to the run log too, and
+    the log of a course org's `.github` is world-readable. A semester that returned no marks
+    since 0.11.0 still has the file under `records.RETIRED_SEMESTER_GRADES`.
+    `confirm_absent` for the real run, whose record is permanent: a spurious 404 must not
+    say no grade was ever sent."""
+    for path in (SEMESTER_CSV_NAME, records.RETIRED_SEMESTER_GRADES):
+        text = get_file_content(
+            semester_org, CONFIG_REPO, path, confirm_absent=confirm_absent
+        )
+        if text is not None:
+            rows = len(list(read_csv(text, (), path)))
+            return f"{path}, {rows} student row(s)"
+    return f"{SEMESTER_CSV_NAME} is NOT here - no grade was ever sent"
 
 
 def render_record(
@@ -269,7 +273,7 @@ Archived on **{sealed_on}** (UTC). {due}
 | --- | --- |
 | Repositories archived | {len(frozen)} ({len(closed.already)} already were) |
 | Semester edits carried back | {propagated} |
-| Registrar export | {registrar} |
+| Semester grades file | {registrar} |
 
 **Nobody was revoked.** An archived repository is read-only for everyone, so archiving IS
 the withdrawal of write access - and everyone who could read this semester still can, which
@@ -312,7 +316,7 @@ def _carry_back(course_org: str, semester_org: str, dry_run: bool) -> tuple[str,
     if not course_org:
         log(
             "  [skip] no --course-org given, so this semester's edits are NOT being "
-            "carried back. Run Propagate semester edits before un-archiving anything."
+            "carried back. Run Keep for future semesters before un-archiving anything."
         )
         return "not offered - no course org was named", 0
     try:
@@ -332,7 +336,7 @@ def _carry_back(course_org: str, semester_org: str, dry_run: bool) -> tuple[str,
         said.append(
             f"NOT read: {', '.join(f'`{r}`' for r in done.behind)} - behind its latest "
             f"release. Merge the open `{UPSTREAM_BRANCH}` pull request there and re-run "
-            f"Propagate semester edits before un-archiving anything"
+            f"Keep for future semesters before un-archiving anything"
         )
     unread = 1 if done.behind else 0
     return "; ".join(said) or "nothing had been edited", done.errors + unread
@@ -474,8 +478,8 @@ def close_out(
         declared = (
             f"archives on {archives}"
             if archives
-            else "names no archive date - it has no `archive:` block, or none with a "
-            "date anything can be derived from"
+            else "names no archive date - it has no `type: archive` entry, or none with "
+            "a date anything can be derived from"
         )
         not_due = (
             f"{semester_org} is not due to be archived: {CONFIG_REPO}/"
@@ -494,7 +498,7 @@ def close_out(
         log(f"  {not_due} A real run would need --force.")
 
     registrar = registrar_summary(semester_org, confirm_absent=not dry_run)
-    log(f"  registrar export: {registrar}")
+    log(f"  semester grades file: {registrar}")
     propagated, errors = _carry_back(course_org, semester_org, dry_run)
     errors += _close_notices(semester_org, dry_run)
     errors += _final_sync(course_org, semester_org, dry_run)

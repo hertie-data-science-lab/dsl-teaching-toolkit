@@ -325,7 +325,7 @@ def converge_topics(org: str, repos: list[dict], tier: str | None) -> Converged:
     """Stamp the machinery topics missing from a SEMESTER org's per-student repos.
 
     `submission` (plus the template's own name) on `<template>-<handle>`, `gradebook` on
-    `grades-<handle>` - exactly what assign.py and grades.py stamp at creation. That stamp
+    `grades-<handle>` - exactly what assign.py and gradebook.py stamp at creation. That stamp
     is a separate PATCH after the create, so any repo whose stamp failed, or that predates
     the topic, is permanently untagged; nothing ever revisited it. Untagged matters: the
     topics are what keep a student's submission repo and a private gradebook off the org

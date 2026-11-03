@@ -5,11 +5,12 @@ name: Onboard student
 # Seed this into a semester's public `join` repo as
 # .github/workflows/onboard.yml. Students open a "Join course" issue here; the issue AUTHOR is
 # the authenticated GitHub handle (unspoofable). We match the typed ENROLMENT CODE (a
-# random, non-PII token the bot emailed to each student) against the PRIVATE
-# semester-config/students.csv, reject non-enrolees, record the handle + immutable GitHub
-# id (building the email <-> GH-id mapping), then grant org membership + the role team the
-# matched row's `role` column names: `students` (enrolled) or `auditors` (read-only - same
-# released materials, no assignment repos). A roster with no `role` column is all-enrolled.
+# random, non-PII token the bot emailed to each student) against the PRIVATE, SYSTEM-OWNED
+# semester-config/.system/roster.csv, reject non-enrolees (a code whose email has no row in
+# students.csv any more), record the handle + immutable GitHub id there (building the
+# email <-> GH-id mapping), then grant org membership + the role team the student's
+# students.csv `role` names: `students` (enrolled) or `auditors` (read-only - same released
+# materials, no assignment repos). A blank `role` is enrolled.
 #
 # Existing org ADMINS (owners - e.g. a course admin testing the student flow) get the roster
 # link but no access change: granting them `member` would demote the owner.
@@ -68,7 +69,7 @@ jobs:
             const issue  = context.payload.issue;
             const handle = issue.user.login;              // authenticated identity
             const userId = issue.user.id;                 // immutable - key on this
-            const CONFIG = '__CONFIG_REPO__', FILE = 'students.csv';
+            const CONFIG = '__CONFIG_REPO__', FILE = '__ROSTER__', STUDENTS = '__STUDENTS__';
 
             // {shared_script}
 
@@ -124,12 +125,19 @@ jobs:
                   'needs-review');
               }
 
-              // Read the PRIVATE roster. Columns (dsl_course.roster.FIELDS):
-              // hertie_email,name,role,github_handle,github_id,enrol_code
+              // Read the PRIVATE, engine-written roster file. Columns
+              // (dsl_course.roster.SYSTEM_FIELDS): email,github_handle,github_id,enrol_code,code_sent_at
               // Re-readable, because the write below retries on a 409 (another student's Join
-              // issue landed a row first) and must re-apply this row's edit to the fresh file.
+              // issue landed first) and must re-apply this row's edit to the fresh file.
+              // Absent until the first code is sent, which is no code to match: read as empty.
               const readRoster = async () => {
-                const got = await github.rest.repos.getContent({ owner: org, repo: CONFIG, path: FILE });
+                let got;
+                try {
+                  got = await github.rest.repos.getContent({ owner: org, repo: CONFIG, path: FILE });
+                } catch (e) {
+                  if (e.status !== 404) throw e;
+                  return { sha: null, header: ['email', 'github_handle', 'github_id', 'enrol_code', 'code_sent_at'], rows: [] };
+                }
                 const table = parseCsv(Buffer.from(got.data.content, 'base64').toString('utf8'));
                 const head = (table[0] || []).map(h => h.trim());
                 const width = head.length;
@@ -144,14 +152,22 @@ jobs:
               const iHandle = header.indexOf('github_handle');
               const iId = header.indexOf('github_id');
               const iCode = header.indexOf('enrol_code');
-              // `role` is OPTIONAL - a roster seeded before the column existed has none, and a
-              // missing/blank cell means `enrolled` (dsl_course.roster.normalise_role). Never
-              // required, so an older semester's roster keeps onboarding.
-              const iRole = header.indexOf('role');
-              if (iHandle < 0 || iId < 0 || iCode < 0) return fail(
+              const iEmail = header.indexOf('email');
+              if (iHandle < 0 || iId < 0 || iCode < 0 || iEmail < 0) return fail(
                 `Thanks @${handle} - the enrolment roster file's header is missing a required column ` +
-                `(\`github_handle\`, \`github_id\`, \`enrol_code\`). Contact the instructor(s) for this course.`,
+                `(\`email\`, \`github_handle\`, \`github_id\`, \`enrol_code\`). Contact the instructor(s) for this course.`,
                 'needs-review');
+              // The student's own row in students.csv (faculty's file), by email: it says the
+              // `role`, and a code whose student has been taken off it binds nobody. Read once:
+              // nothing below writes it. `role` is OPTIONAL - a missing/blank cell means
+              // `enrolled` (dsl_course.roster.normalise_role).
+              const studentsGot = await github.rest.repos.getContent({ owner: org, repo: CONFIG, path: STUDENTS });
+              const studentsTable = parseCsv(Buffer.from(studentsGot.data.content, 'base64').toString('utf8'));
+              const studentsHeader = (studentsTable[0] || []).map(h => h.trim());
+              const iStudentEmail = studentsHeader.indexOf('email');
+              const iRole = studentsHeader.indexOf('role');
+              const studentRow = (email) => iStudentEmail < 0 ? undefined : studentsTable.slice(1).find(
+                r => (r[iStudentEmail] || '').trim().toLowerCase() === (email || '').trim().toLowerCase());
 
               // Match the code to a registrar-seeded row - reject non-enrolees. ONE message for
               // "no such code" and "code already bound to another account": telling them apart
@@ -168,8 +184,8 @@ jobs:
               const boundElsewhere = (r) =>
                 r[iHandle] && r[iHandle].toLowerCase() !== handle.toLowerCase() &&
                 (r[iId] || '').trim() !== String(userId);
-              // ...but such a row is NOT rewritten here. Their repos, gradebook, teams.csv
-              // rows and sheet keys are all named after the OLD login, and the hourly relink
+              // ...but such a row is NOT rewritten here. Their repos, gradebook, team repos
+              // and sheet keys are all named after the OLD login, and the hourly relink
               // (dsl_course.relink) moves every one of them, keyed on that old login being
               // gone. Writing the new login into the cell first would hide the rename from
               // it for good: the next handout makes fresh, empty repos under the new name.
@@ -210,7 +226,7 @@ jobs:
                 }
               };
               const row = rows.find(r => r[iCode].trim().toLowerCase() === code.toLowerCase());
-              if (!row) return fail(NO_MATCH, 'needs-review');
+              if (!row || !studentRow(row[iEmail])) return fail(NO_MATCH, 'needs-review');
               if (boundElsewhere(row)) {
                 await recordRefusal(row);
                 return fail(NO_MATCH, 'needs-review');
@@ -317,7 +333,8 @@ jobs:
               // read on released repos - only `students` gets assignment repos + a gradebook.
               // Read off `matched` - the row of the LAST snapshot read - not the first read's
               // copy, which a retry has already thrown away.
-              const isAuditor = iRole >= 0 && (matched[iRole] || '').trim().toLowerCase() === 'auditor';
+              const mine = studentRow(matched[iEmail]) || [];
+              const isAuditor = iRole >= 0 && (mine[iRole] || '').trim().toLowerCase() === 'auditor';
               const team = isAuditor ? 'auditors' : 'students';
 
               // Grant access: org membership (invites if needed) + the role team.

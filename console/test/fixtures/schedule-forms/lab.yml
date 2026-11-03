@@ -1,0 +1,16 @@
+timezone: Europe/Berlin
+labs:
+  lab-2:
+    session: 3
+    number: 2
+    title: Backprop by hand
+    event_datetime:
+      - at: 2026-09-16T08:00
+        location: Lab 2.30
+        details: Group 1
+      - at: 2026-09-17T18:00
+        location: Lab 2.32
+        details: Group 2
+    files:
+      - from_course_repo: course-materials-f2026
+        from_path: labs/02_backprop

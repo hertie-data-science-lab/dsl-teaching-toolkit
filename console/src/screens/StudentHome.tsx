@@ -4,18 +4,19 @@
 // instructors and teaching assistants in two columns. The Updates box's files and the syllabus
 // are file links (`FileLinkItem`), each with its menu.
 
-import { DEFAULT_TIMEZONE } from '../model/policy';
+import { DEFAULT_TIMEZONE, SYSTEM_KINDS } from '../model/policy';
 import type { Setup } from '../model/open';
-import { ARCHIVE_ROWS, instant, startOfDay, type Announcement, type ScheduleRow, type SemesterAssignment, type SemesterFacts } from '../model/student';
+import { ARCHIVE_ROW, instant, startOfDay, type Announcement, type ScheduleRow, type SemesterAssignment, type SemesterFacts } from '../model/student';
 import { assignmentHref } from '../router';
 import { Md } from '../ui/bits';
 import { Ext } from '../ui/icons';
 import { GhMd } from '../ui/rendered';
-import { FileLinkItem, fileHref, useYourSetup } from './StudentFiles';
+import { useYourSetup } from '../ui/FileRow';
+import { FileLinkItem, fileHref } from './StudentFiles';
 import { PersonCard } from './StudentInstructors';
 
-/** Display-only rows (the site's `_events`): never news, and on a kind tab only as the kind's own event. */
-const EVENT_KINDS = ['assignment', 'due', 'exam', 'special_event', 'term_date'];
+/** Display-only rows (the site's `_events`, and the rows the engine makes): never news, and on a kind tab only as the kind's own event. */
+const EVENT_KINDS = [...SYSTEM_KINDS, 'due', 'exam', 'special_event'];
 export const isEventRow = (r: ScheduleRow) => EVENT_KINDS.includes(r.kind);
 
 /** The archive row's ids: the status file's, and an old site's. */
@@ -32,20 +33,25 @@ export type Update =
 
 /**
  * The Updates box's bullets, as the site's `announcements.html` picks them: sessions whose
- * files shipped (dated, on the schedule; a session with nothing to ship is never news), assignments handed out, the archive row's text in the
- * fortnight before it, and the instructors' announcements; newest first, seven.
+ * files shipped (on the schedule; a session with nothing to ship, or an entry's later slot, is never news), assignments handed out, the archive row's text in the
+ * fortnight before it, and the instructors' announcements; newest first, seven. A session is
+ * placed at its date, as the site places it; a released TBC session (no date) at the moment it
+ * reached students (`releasedAt`, decision 0043), and left out when nothing says.
  */
 export function homeUpdates(facts: SemesterFacts, now: number): Update[] {
   const tz = facts.timezone || DEFAULT_TIMEZONE;
   const out: Update[] = [];
-  for (const row of facts.rows) if (!isEventRow(row) && row.released && !row.noMaterials && row.when) out.push({ at: instant(row.when, tz), row });
+  for (const row of facts.rows) {
+    const at = row.when ?? row.releasedAt;
+    if (!isEventRow(row) && row.released && !row.noMaterials && !row.repeat && at) out.push({ at: instant(at, tz), row });
+  }
   // Dated as the site dates it (site.py `_assignment_entry`): the hand-out, else, for an
   // assignment handed out by hand with no scheduled hand-out, the due date, the only one known.
   for (const a of facts.assignments) {
     const when = a.handout ?? a.due;
     if (a.handedOut && when) out.push({ at: instant(when, tz), assignment: a });
   }
-  const archived = facts.rows.find((r) => ARCHIVE_ROWS.includes(r.id) && r.details);
+  const archived = facts.rows.find((r) => r.id === ARCHIVE_ROW && r.details);
   if (facts.archive && archived) {
     const at = instant(facts.archive, tz), today = startOfDay(now, tz);
     if (at >= today && at - today <= ARCHIVE_NOTICE_DAYS * 864e5) out.push({ at, archive: archived.details });

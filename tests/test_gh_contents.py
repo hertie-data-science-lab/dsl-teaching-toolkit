@@ -9,10 +9,7 @@ import json
 
 import pytest
 
-from dsl_course import gh_contents, repos, settings
-
-# The real reader, taken before `tests/conftest.py` answers it with "nothing declared".
-_ASSIGNMENTS_TEXT = settings._assignments_text
+from dsl_course import gh_contents, repos
 
 # What `GET repos/{org}/{name}` answers. `repos._repo` reads the whole object once and
 # every question about the repo - default branch included - is asked of that.
@@ -147,7 +144,7 @@ def test_put_files_seeds_a_repo_that_has_no_commits_yet(monkeypatch):
     # one. This test used to assert the opposite (that omitting base_tree was enough), with
     # a stub that let the POST succeed - so the real 409 went unnoticed until the first
     # semester org bootstrapped after the semester-config scaffolds were batched, whose
-    # roster, schedule and instructors.yml never landed at all.
+    # roster, schedule and semester.yml never landed at all.
     calls = []
 
     def fake_gh(*args, **kwargs):
@@ -318,36 +315,36 @@ def test_load_yaml_config_distinguishes_absent_empty_and_malformed(monkeypatch):
     # ABSENT (404 -> get_file_content None) -> None: pruning callers must not treat this
     # as an empty desired set.
     monkeypatch.setattr(gh_contents, "get_file_content", lambda *a, **k: None)
-    assert gh_contents.load_yaml_config("Org", ".github", "dsl-course.yml") is None
+    assert gh_contents.load_yaml_config("Org", ".github", "course.yml") is None
 
     # present but empty -> {} (a legitimate "empty the team")
     monkeypatch.setattr(gh_contents, "get_file_content", lambda *a, **k: "")
-    assert gh_contents.load_yaml_config("Org", ".github", "dsl-course.yml") == {}
+    assert gh_contents.load_yaml_config("Org", ".github", "course.yml") == {}
 
     # present with content -> the parsed mapping
     monkeypatch.setattr(
         gh_contents, "get_file_content", lambda *a, **k: "people:\n  x: 1\n"
     )
-    assert gh_contents.load_yaml_config("Org", ".github", "dsl-course.yml") == {
+    assert gh_contents.load_yaml_config("Org", ".github", "course.yml") == {
         "people": {"x": 1}
     }
 
     # malformed YAML -> logged + raised, never silently {}
     monkeypatch.setattr(gh_contents, "get_file_content", lambda *a, **k: "a: b: c\n")
     with pytest.raises(yaml.YAMLError):
-        gh_contents.load_yaml_config("Org", ".github", "dsl-course.yml")
+        gh_contents.load_yaml_config("Org", ".github", "course.yml")
 
     # a non-mapping top level (list/scalar) -> raised, naming the file
     monkeypatch.setattr(gh_contents, "get_file_content", lambda *a, **k: "- a\n- b\n")
     with pytest.raises(RuntimeError, match="not a YAML mapping"):
-        gh_contents.load_yaml_config("Org", ".github", "dsl-course.yml")
+        gh_contents.load_yaml_config("Org", ".github", "course.yml")
 
 
 def test_a_malformed_config_is_logged_by_its_problem_not_by_its_contents(
     monkeypatch, capsys
 ):
     # These log lines land in a PUBLIC course-org Actions log, and the line that breaks a
-    # instructors.yml is as often as not the one carrying somebody's address - which is what
+    # semester.yml is as often as not the one carrying somebody's address - which is what
     # PyYAML renders into `str(exc)`.
     import yaml
 
@@ -357,10 +354,10 @@ def test_a_malformed_config_is_logged_by_its_problem_not_by_its_contents(
         lambda *a, **k: "people:\n  - email: jan@x.edu: typo\n",
     )
     with pytest.raises(yaml.YAMLError):
-        gh_contents.load_yaml_config("Org", "semester-config", "instructors.yml")
+        gh_contents.load_yaml_config("Org", "semester-config", "semester.yml")
     err = capsys.readouterr().err
     assert "jan@x.edu" not in err
-    assert "malformed YAML in Org/semester-config/instructors.yml: " in err
+    assert "malformed YAML in Org/semester-config/semester.yml: " in err
     assert "ScannerError: mapping values are not allowed here (line 2)" in err
 
 
@@ -374,11 +371,11 @@ def test_load_yaml_config_propagates_a_non_404_read_error(monkeypatch):
     # get_file_content raises on any non-404 failure; load_yaml_config must not swallow it
     # into None/{}, or a transient error reads as "not configured".
     def boom(*a, **k):
-        raise RuntimeError("could not read Org/.github/dsl-course.yml: HTTP 403")
+        raise RuntimeError("could not read Org/.github/course.yml: HTTP 403")
 
     monkeypatch.setattr(gh_contents, "get_file_content", boom)
     with pytest.raises(RuntimeError, match="HTTP 403"):
-        gh_contents.load_yaml_config("Org", ".github", "dsl-course.yml")
+        gh_contents.load_yaml_config("Org", ".github", "course.yml")
 
 
 # ------------------------- a read-modify-write must not clobber a concurrent commit
@@ -570,7 +567,7 @@ def test_a_handout_is_recorded_into_the_plan_through_a_spurious_404(monkeypatch)
 
     plan = "assignments:\n  a1:\n    due_datetime: 2026-10-01T09:00\n"
     calls = _record_gh(monkeypatch, [_NOT_FOUND, (0, "abc123\n" + _b64(plan))])
-    schedule.record_handout("S", "a1", "2026-09-01T09:00")
+    schedule.record_handout("S", "a1", "2026-09-01T09:00", tz_name="Europe/Berlin")
     (put,) = [c for c in calls if "PUT" in c]
     assert "sha=abc123" in put
 
@@ -583,23 +580,13 @@ def test_the_semester_registry_is_read_through_a_spurious_404(monkeypatch):
 
 
 def test_a_handout_confirms_an_absent_definition(monkeypatch):
-    from dsl_course import grades
+    from dsl_course import grading_spec
 
     group = (0, _b64("type: group\n"))
     _record_gh(monkeypatch, [_NOT_FOUND, _NOT_FOUND, group, group])
-    assert grades._grading_text("C", "t") is None  # an ordinary read takes one 404
-    grades.confirm_grading_text("C", "t")
-    assert grades._grading_text("C", "t") == "type: group\n"
-
-
-def test_a_handout_confirms_an_absent_semester_settings_file(monkeypatch):
-    monkeypatch.setattr(settings, "_assignments_text", _ASSIGNMENTS_TEXT)
-    _ASSIGNMENTS_TEXT.cache_clear()
-    late = (0, _b64("defaults: {}\n"))
-    _record_gh(monkeypatch, [_NOT_FOUND, _NOT_FOUND, late, late])
-    assert settings._assignments_text("S") is None
-    settings.confirm_assignments_text("S")
-    assert settings._assignments_text("S") == "defaults: {}\n"
+    assert grading_spec._grading_text("C", "t") is None  # one 404, as an ordinary read
+    assert grading_spec.confirm_grading_text("C", "t") is True
+    assert grading_spec._grading_text("C", "t") == "type: group\n"
 
 
 def test_a_seed_written_on_a_404_never_overwrites(monkeypatch):
@@ -620,11 +607,35 @@ def test_the_teardown_record_reads_the_registrar_export_through_a_404(monkeypatc
     assert "1 student row(s)" in summary
 
 
-def test_a_site_config_is_read_through_a_spurious_404(monkeypatch):
-    from dsl_course import site_repo
+def test_a_config_file_is_read_through_a_spurious_404(monkeypatch):
+    # course.yml, semester.yml and the pointer all come through `config.read`.
+    from dsl_course import config
 
-    _record_gh(monkeypatch, [_NOT_FOUND, (0, _b64("public: [decks]\n"))])
-    assert site_repo.yaml_file("C", "materials", "publish.yml") == {"public": ["decks"]}
+    _record_gh(monkeypatch, [_NOT_FOUND, (0, _b64("name: NLP\n"))])
+    assert config.read_course("C").mapping() == {"name": "NLP"}
+
+
+def test_a_prune_confirms_an_absent_system_roster(monkeypatch):
+    # Absent is nobody onboarded, and a prune off it takes everyone's access away.
+    from dsl_course import roster
+
+    found = (0, _b64("email,github_handle\n"))
+    _record_gh(monkeypatch, [_NOT_FOUND, _NOT_FOUND, found, found])
+    assert roster._system_text("S") is None  # one 404, as an ordinary read
+    assert roster.confirm_system_text("S") is True
+    assert roster._system_text("S") == "email,github_handle\n"
+
+
+def test_confirming_the_withheld_list_never_writes_over_it(monkeypatch):
+    # Read as absent, the file would be written as the mark alone, every pattern gone.
+    from dsl_course import scaffold
+
+    calls = _record_gh(
+        monkeypatch, [_NOT_FOUND, (0, "abc123\n" + _b64("# to review\n")), (0, "")]
+    )
+    scaffold.confirm_withheld("C", "materials")
+    (put,) = [c for c in calls if "PUT" in c]
+    assert "sha=abc123" in put
 
 
 # ------------------------- a truncated tree listing is not a smaller repo

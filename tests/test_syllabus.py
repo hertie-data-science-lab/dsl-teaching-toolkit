@@ -1,18 +1,20 @@
 """The syllabus weekly plan: schedule.yml + readings entries -> a block written between
-markers in the syllabus (decision 0031 rule 9). These pin the mapping (which entry names a
-session, and which readings entries sit under it), the heading nesting, and that a write
-touches nothing outside the markers.
+markers in the syllabus (decision 0031 rule 9). These pin the mapping (a session is a
+teaching unit, every entry sharing a `session:`, decision 0038; its readings are the
+readings entries of the unit), the heading nesting, and that a write touches nothing
+outside the markers.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
 
 from dsl_course import syllabus
-from dsl_course.materials import PLAN_END, PLAN_START, Declared
+from dsl_course.materials import PLAN_END, PLAN_START
 from dsl_course.schedule import Deploy, Release, Schedule
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -27,9 +29,17 @@ READING = (
 TREE = (
     "SYLLABUS.md",
     "lectures/01_intro/deck.html",
-    "readings/01_week-1/READINGS.md",
     "readings/01_week-1/blitzstein.pdf",
 )
+
+
+def _semester_file(monkeypatch, meta: dict) -> None:
+    """The semester's `semester.yml`, parsed, as `syllabus` reads it."""
+    monkeypatch.setattr(
+        syllabus,
+        "read_semester",
+        lambda org: SimpleNamespace(semester=SimpleNamespace(meta=lambda: meta)),
+    )
 
 
 @pytest.fixture
@@ -38,15 +48,20 @@ def wired(monkeypatch):
         releases=[
             # A week ahead of its lecture, silent, as the demo ships them.
             Release(
-                "readings-1",
+                "readings-week-1",
                 datetime(2026, 8, 25, 9, 0, tzinfo=BERLIN),
                 deploy=[Deploy("cm", "readings/01_week-1", "materials", None)],
-                show_on_site=False,
+                kind="readings",
+                session="1",
+                reading_list=READING,
             ),
             Release(
                 "lecture-2",
                 datetime(2026, 9, 8, 10, 0, tzinfo=BERLIN),
                 deploy=[Deploy("cm", "lectures/02_x", "materials", None)],
+                kind="lecture",
+                number=2,
+                session="2",
                 title="Random Variables",
                 details="Distributions, expectation\nand variance.",
             ),
@@ -54,20 +69,27 @@ def wired(monkeypatch):
                 "lecture-1",
                 datetime(2026, 9, 1, 10, 0, tzinfo=BERLIN),
                 deploy=[Deploy("cm", "lectures/01_intro", "materials", None)],
+                kind="lecture",
+                number=1,
+                session="1",
                 title="Probability Theory",
                 details="Sample spaces and Bayes' rule.",
+            ),
+            # Lab 1 is in unit 1 too: one session, headed by its first row (lecture 1).
+            Release(
+                "lab-1",
+                datetime(2026, 9, 3, 10, 0, tzinfo=BERLIN),
+                kind="lab",
+                number=1,
+                session="1",
+                title="Bayes by hand",
             ),
         ]
     )
     monkeypatch.setattr(syllabus.schedule, "load", lambda org: sched)
-    monkeypatch.setattr(syllabus, "read_materials", lambda org, repo: Declared())
+    _semester_file(monkeypatch, {})
     monkeypatch.setattr(syllabus, "default_branch", lambda o, r: "main")
     monkeypatch.setattr(syllabus, "repo_tree", lambda o, r, b, k: TREE)
-    monkeypatch.setattr(
-        syllabus,
-        "get_file_content",
-        lambda o, r, p, **_kw: READING if p.endswith("READINGS.md") else "",
-    )
     return lambda: syllabus.build("Course", "Semester-f2026")[0]
 
 
@@ -95,21 +117,29 @@ def test_readings_nest_under_their_session_heading(wired):
 
 
 def test_a_session_without_readings_still_appears(wired):
-    # No readings entry falls before session 2; it must not vanish from the syllabus.
+    # No readings entry is in unit 2; it must not vanish from the syllabus.
     out = wired()
     assert "### Session 2: Random Variables" in out
     assert out.count("Required Readings") == 1
 
 
-def test_uploaded_files_are_named_alongside_the_overlay(wired):
-    # The overlay's prose leads, and the files follow by NAME - never their bytes. Listing
-    # them is what stops a session whose readings are PDFs coming out as a bare heading.
+def test_a_unit_is_one_session_whatever_its_entries(wired):
+    # Lecture 1 and lab 1 share `session: 1`: one heading, the first row's name.
     out = wired()
-    assert "- Blitzstein & Hwang, ch. 1-2." in out  # the prose
+    assert [line for line in out.splitlines() if line.startswith("### ")] == [
+        "### Session 1: Probability Theory",
+        "### Session 2: Random Variables",
+    ]
+
+
+def test_uploaded_files_are_named_after_the_reading_list(wired):
+    # The entry's `reading_guide:` leads, and the files follow by NAME - never their
+    # bytes. Listing them is what stops a session whose readings are PDFs coming out as a
+    # bare heading.
+    out = wired()
+    assert "- Blitzstein & Hwang, ch. 1-2." in out  # the list
     assert "- blitzstein.pdf" in out  # ...and the file beside it
     assert out.index("Blitzstein & Hwang") < out.index("- blitzstein.pdf")
-    # The overlay is never ALSO listed as a file - its content is already on the page.
-    assert "- READINGS.md" not in out
 
 
 def test_a_pdf_only_session_is_not_invisible(monkeypatch, wired):
@@ -122,7 +152,8 @@ def test_a_pdf_only_session_is_not_invisible(monkeypatch, wired):
         "repo_tree",
         lambda o, r, b, k: ("lectures/01_intro/deck.html", "readings/01_week-1/x.pdf"),
     )
-    monkeypatch.setattr(syllabus, "get_file_content", lambda o, r, p, **_kw: "")
+    sched = syllabus.schedule.load("Semester-f2026")
+    sched.releases[0].reading_list = ""
     out = wired()
     assert "- x.pdf" in out
     assert "### Session 1: Probability Theory" in out
@@ -335,9 +366,7 @@ def test_preview_and_write_both_hand_the_block_to_the_outcome(monkeypatch, wired
 def test_write_goes_between_the_markers_of_the_declared_syllabus(monkeypatch, wired):
     # Decision 0031 rule 9: the faculty's own words stay; only the marked block changes,
     # and the write is refused if the file moved on since it was read.
-    monkeypatch.setattr(
-        syllabus, "read_materials", lambda o, r: Declared("E1282.md", {}, True)
-    )
+    _semester_file(monkeypatch, {"student_site": {"syllabus": "E1282.md"}})
     written = _writable(monkeypatch)
     _argv(monkeypatch, "--no-preview")
     out = syllabus.main()
@@ -426,20 +455,27 @@ def test_a_syllabus_too_large_or_not_utf8_is_refused(monkeypatch, wired):
     assert [r["code"] for r in out.reasons] == ["NOT_UTF8"]
 
 
-def test_a_broken_materials_yml_is_a_refusal_not_a_traceback(monkeypatch, wired):
-    def unusable(o, r):
-        raise syllabus.Unusable("cm/materials.yml is not valid YAML")
+def test_a_broken_semester_yml_is_a_refusal_not_a_traceback(monkeypatch, wired):
+    def unusable():
+        raise syllabus.Unusable("semester-config/semester.yml is not valid YAML")
 
-    monkeypatch.setattr(syllabus, "read_materials", unusable)
+    monkeypatch.setattr(
+        syllabus,
+        "read_semester",
+        lambda org: SimpleNamespace(semester=SimpleNamespace(meta=unusable)),
+    )
     written = _writable(monkeypatch)
-    for extra in ((), ("--no-preview",)):
-        _argv(monkeypatch, *extra)
-        out = syllabus.main()
-        assert out == 1 and written == {}
-        assert [r["code"] for r in out.reasons] == ["MATERIALS_UNUSABLE"]
-        assert (
-            out.text == "cm/materials.yml is not valid YAML. Fix it and run this again."
-        )
+    # The plan reads only the schedule, so the preview builds; the write needs the
+    # semester's `student_site.syllabus` (decision 0039) and refuses.
+    _argv(monkeypatch)
+    assert syllabus.main() == 0
+    _argv(monkeypatch, "--no-preview")
+    out = syllabus.main()
+    assert out == 1 and written == {}
+    assert [r["code"] for r in out.reasons] == ["MATERIALS_UNUSABLE"]
+    assert out.text == (
+        "semester-config/semester.yml is not valid YAML. Fix it and run this again."
+    )
 
 
 def test_a_titleless_entry_does_not_blank_a_session_the_site_names(wired, monkeypatch):
@@ -447,10 +483,10 @@ def test_a_titleless_entry_does_not_blank_a_session_the_site_names(wired, monkey
     sched = syllabus.schedule.load("Semester-f2026")
     sched.releases.append(
         Release(
-            "course-intro",
+            "assets-course-intro",
             datetime(2026, 8, 20, 9, 0, tzinfo=BERLIN),
             deploy=[Deploy("cm", "SYLLABUS.md", "materials", None)],
-            show_on_site=False,
+            kind="assets",
         )
     )
     monkeypatch.setattr(syllabus.schedule, "load", lambda org: sched)
@@ -469,21 +505,22 @@ def _with(monkeypatch, *releases, tree=TREE):
     monkeypatch.setattr(syllabus, "repo_tree", lambda o, r, b, k: tree)
 
 
-def test_readings_come_from_any_repo_and_any_folder_of_the_readings_kind(
+def test_readings_come_from_any_repo_and_any_folder_by_their_session(
     monkeypatch, wired
 ):
     _with(
         monkeypatch,
         Release(
-            "papers-2",
+            "readings-papers-2",
             datetime(2026, 9, 5, 9, 0, tzinfo=BERLIN),
             deploy=[Deploy("nlp-literature", "week-2/vaswani.pdf", "readings", None)],
             kind="readings",
+            session="2",
         ),
         tree=(*TREE, "week-2/vaswani.pdf"),
     )
     out = wired()
-    # Between lecture 1 (1 Sep) and lecture 2 (8 Sep): listed under session 2.
+    # `session: 2`, whatever its date or folder: listed under session 2.
     assert out.index("### Session 2") < out.index("- vaswani.pdf")
 
 
@@ -491,9 +528,10 @@ def test_readings_after_the_last_lecture_close_the_list(monkeypatch, wired):
     _with(
         monkeypatch,
         Release(
-            "further",
+            "readings-further",
             datetime(2026, 12, 1, 9, 0, tzinfo=BERLIN),
             deploy=[Deploy("cm", "literature/week-12", "materials", None)],
+            kind="readings",
         ),
         tree=(*TREE, "literature/week-12/extra.pdf"),
     )

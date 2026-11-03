@@ -21,8 +21,6 @@ export interface CohortProps {
   heartbeat?: Heartbeat | null;
   /** A template for the schedule editor's new entry (`?template=`, from New assignment). */
   prefill?: string;
-  /** The course's names were checked and are current (`CourseProps.migrated`): course-file saves wait for it. Absent in render tests. */
-  courseMigrated?: boolean;
   /** The course's public status, read for the side nav anyway: its template list is fresher than the semester's copy. Absent in render tests. */
   courseLoaded?: Loaded;
 }
@@ -33,8 +31,6 @@ export interface ReadyProps extends CohortProps {
 }
 
 export interface CourseProps {
-  /** The course's names were checked and are current; saves wait for it. Absent in render tests. */
-  migrated?: boolean;
   course: Course;
   loaded: Loaded; // the course's public status
   cohortStates: Record<string, Loaded>;
@@ -43,6 +39,8 @@ export interface CourseProps {
   entry?: string;
   /** A folder to open on the course materials index (`?folder=<repo>/<path>`). */
   folder?: string;
+  /** A file open in the viewer on the course materials index (`?file=<repo>/<path>`). */
+  file?: string;
   /** The semester the page was opened from (`?cohort=`): New assignment's choice of schedule. */
   cohort?: string;
 }

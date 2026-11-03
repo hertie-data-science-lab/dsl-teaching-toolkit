@@ -26,6 +26,7 @@ import json
 import re
 from typing import NamedTuple
 
+from . import run
 from .ghcli import ALL, ISSUES, forget_written, gh, gh_json, on_write
 from .log import log_err, on_cli_start
 
@@ -68,8 +69,8 @@ _listings: dict[str, list[dict] | None] | None = None
 
 
 def list_once(on: bool) -> None:
-    """Turn the per-process issue-listing memo on (empty) or off. `tests/conftest.py`
-    turns it off between tests."""
+    """Turn the per-process issue-listing memo on (empty) or off. `run.reset`
+    turns it off."""
     global _listings
     _listings = {} if on else None
 
@@ -81,6 +82,7 @@ def _forget(kind: str, targets: frozenset[str]) -> None:
 
 on_write(_forget)
 on_cli_start(lambda parser: list_once(parser.read_once))
+run.on_reset(lambda: list_once(False))
 
 
 def _list(repo: str, *query: str) -> list[dict]:

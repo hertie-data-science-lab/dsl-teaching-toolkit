@@ -10,10 +10,17 @@ export interface Names {
   join_repo: string;
   /** Where the engine writes, in every repo it writes to. */
   system_dir: string;
-  instructors_file: string;
-  assignments_file: string;
-  /** The public website's settings, in the course's `.github` (decision 0016). */
-  opencourse_file: string;
+  /** The course org's one hand-edited file and the semester's (decision 0039). */
+  course_file: string;
+  semester_file: string;
+  /** The starters New assignment offers when nobody chose (`course.DEFAULT_FORMATS`). */
+  default_formats: string[];
+  /** The `defaults:` keys of every level, in the order the seeded skeleton writes them (decision 0039 rule 2). */
+  default_keys: string[];
+  /** The syllabus `semester.yml student_site.syllabus` names when it names none. */
+  default_syllabus: string;
+  /** The topic on a semester org's `.github` that marks it as one. */
+  semester_topic: string;
   /** The course's list of its semesters, in its `.github`. */
   registry_file: string;
   /** Engine-written records, as paths inside the repo that holds them (`records.path` in the engine). */
@@ -22,24 +29,34 @@ export interface Names {
   join_markers: { join_course: string; join_team: string };
   /** A semester site's `_config.yml`: the keys every sync rewrites, and the institution keys it leaves to the site (`site_repo` in the engine). */
   site_config: { synced: string[]; institution: string[] };
+  /** The old names the engine still recognises (`legacy.py`): the console spells none of them. */
+  legacy: { old: string; new: string; where: string; since: string; fault_code: string | null; cost: string }[];
 }
 
 export const NAMES: Names = names;
 
 export const CONFIG_REPO = NAMES.config_repo;
 export const JOIN_REPO = NAMES.join_repo;
-export const INSTRUCTORS_FILE = NAMES.instructors_file;
-/** The semester's run settings for its assignments (decision 0010 rule 5). */
-export const ASSIGNMENTS_FILE = NAMES.assignments_file;
+export const SEMESTER_TOPIC = NAMES.semester_topic;
 export const REGISTRY_FILE = NAMES.registry_file;
-export const OPENCOURSE_FILE = NAMES.opencourse_file;
+/** The course org's one hand-edited file (decision 0039), `.github/course.yml`. */
+export const COURSE_FILE = NAMES.course_file;
+/** The semester's one hand-edited settings file, `semester-config/semester.yml`. */
+export const SEMESTER_FILE = NAMES.semester_file;
+/** The `defaults:` keys, as the files spell them, in skeleton order. */
+export const DEFAULT_KEYS = NAMES.default_keys;
+/** The syllabus a semester pins when `student_site.syllabus` names none. */
+export const DEFAULT_SYLLABUS = NAMES.default_syllabus;
+/** The semester's roster: INSTRUCTOR-OWNED `students.csv` and the engine's `.system/roster.csv` (decision 0039 rule 4). */
+export const STUDENTS_FILE = 'students.csv';
+export const ROSTER_PATH = NAMES.records.roster;
 export const STATUS_PATH = NAMES.records.status;
 /** A semester's public facts for its students, in the semester org's `.github`. */
 export const STUDENT_STATUS_PATH = NAMES.records.student_status;
 export const JOIN_MARKERS = NAMES.join_markers;
 export const SITE_CONFIG = NAMES.site_config;
 export const OUTCOMES_DIR = NAMES.records.outcomes;
-/** What each unit of a sheet was last told by Return marks (`grades.returned_record`), one file per sheet. */
+/** What each unit of a sheet was last told by Return marks (`distribute.returned_record`), one file per sheet. */
 export const RETURNED_DIR = NAMES.records.returned;
 /** The semester's pointer to its course, in its config repo. */
 export const POINTER_PATH = NAMES.records.pointer;
