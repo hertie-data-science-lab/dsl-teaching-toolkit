@@ -357,7 +357,9 @@ def test_the_semester_tick_costs_what_it_did(counted):
     # semester.yml where instructors.yml and assignments.yml were two, and teams.csv folded
     # into students.csv (.system/roster.csv is the one new read): -2.
     # The materials repo's materials.yml is not read since 0.11.0 (-1).
-    assert len(gh.calls) == 40
+    # Decision 0043 rule 6: a source repo's tree is read with its shas, so an assignment
+    # template's source check and its starter check share one read (-2).
+    assert len(gh.calls) == 38
     assert doc["semester"]["template_moments"]["assignment-a2"] == (
         "2026-10-20T10:00:00+02:00"
     )
@@ -371,13 +373,43 @@ def test_a_semester_with_a_release_record_reads_it_once(counted):
         '{"copies": []}\n'
     )
     status_json.collect_semester(COURSE, LIVE, NOW)
-    assert len(gh.calls) == 40 + 1
+    assert len(gh.calls) == 38 + 1
     assert (
         _reads_of(gh, LIVE).count(
             f"repos/{LIVE}/semester-config/contents/{release_record.PATH}"
         )
         == 1
     )
+
+
+def test_the_divergence_check_reads_nothing_more(counted):
+    # Decision 0043 rule 6: the course and destination trees it compares are the ones the
+    # status reads anyway (each source repo's for the source check, each destination's
+    # for the release states), so a recorded copy costs only the record's one read.
+    gh = counted
+    record = {
+        "copies": [
+            {
+                "entry": "lecture-1",
+                "source": {
+                    "repo": "course-materials-f2026",
+                    "path": "lectures/01_intro",
+                    "commit": "c1",
+                },
+                "dest": {"repo": "materials", "path": "lectures/01_intro"},
+                "first_shipped_at": "2026-09-10T08:00:00Z",
+                "last_shipped_at": "2026-09-10T08:00:00Z",
+                "files": {"notes.md": _sha("as released")},
+            }
+        ]
+    }
+    gh.files[(f"{LIVE}/semester-config", "main")][release_record.PATH] = json.dumps(
+        record
+    )
+    doc = status_json.collect_semester(COURSE, LIVE, NOW)
+    assert len(gh.calls) == 38 + 1
+    kinds = {p["kind"] for p in doc["problems"] if p.get("release") == "lecture-1"}
+    assert kinds == {"DIVERGED_COURSE", "DIVERGED_RELEASED"}
 
 
 def test_a_malformed_release_record_leaves_the_status_to_the_destinations(counted):

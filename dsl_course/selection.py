@@ -74,6 +74,14 @@ CLUTTER = frozenset(
 )
 _CLUTTER_FOLDED = frozenset(n.casefold() for n in CLUTTER)
 
+# Skipped when the WHOLE repo is released (`course_source_path: /`), and only at the repo
+# root: `.github` holds the Release workflows and their bot-token wiring - the toolkit's
+# plumbing, never released. Naming a path inside it explicitly still releases it: that is
+# what "give me everything" means, not a ban. (`.system/`, `.git` and clutter are the
+# institution denylist's, at every depth: `selection`.)
+ROOT_RELEASE_EXCLUDED = (".github",)
+
+
 # The uses that take a floor, by their `institution.yml selection_floor` key.
 HOST = "student_site_host"
 PUBLISH = "open_course_site_publish"

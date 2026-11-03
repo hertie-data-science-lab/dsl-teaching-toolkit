@@ -25,6 +25,7 @@ than overwrite it. Nothing is written when nothing changed.
 from __future__ import annotations
 
 import json
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -172,12 +173,22 @@ class Record:
         files: dict[str, str],
         at: datetime,
         refresh: bool,
+        removed: Collection[str] = (),
     ) -> None:
         """Record a copy that has landed. An entry already there is left alone when its
         manifest is unchanged, unless `refresh` (a deliberate release: Release again, a
-        hand release) - an automatic re-ship of identical files is no change."""
+        hand release) - an automatic re-ship of identical files is no change.
+
+        A copy only ever adds, so a file the earlier manifest lists and this copy did not
+        carry (deleted in the course since) is still at the destination and stays in the
+        manifest - unless this release removed it (`removed`, decision 0043 rule 6)."""
         k = key_of(d)
         old = self.copies.get(k)
+        if old is not None:
+            kept = {
+                p: s for p, s in (old.get("files") or {}).items() if p not in removed
+            }
+            files = {**kept, **files}
         if old is not None and not refresh and old.get("files") == files:
             return
         self._change(False, k, _entry(label, k, commit, stamp(at), stamp(at), files))

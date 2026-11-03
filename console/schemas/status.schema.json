@@ -904,6 +904,75 @@
             ],
             "type": "string"
           },
+          "diverged": {
+            "items": {
+              "properties": {
+                "added": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "changed": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "deleted": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "dest": {
+                  "properties": {
+                    "branch": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "repo": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "repo",
+                    "path"
+                  ],
+                  "type": "object"
+                },
+                "source": {
+                  "properties": {
+                    "branch": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "repo": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "repo",
+                    "path"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "source",
+                "dest",
+                "added",
+                "changed",
+                "deleted"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
           "fix": {
             "properties": {
               "entry": {

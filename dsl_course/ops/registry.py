@@ -210,7 +210,10 @@ def _deploy(request: Request) -> list[str]:
     if _a(request, "entry") and not _a(request, "course_source_repo"):
         # A schedule entry by its key: deploy reads every copy off the plan and releases
         # them in one batch with one site sync, however many source repos they draw on.
-        return [*_course_semester(request), "--entry", _a(request, "entry")]
+        # `remove_deleted`: Release again's "also remove the files deleted from the course
+        # copy" (decision 0043 rule 6).
+        remove = ["--remove-deleted"] if _a(request, "remove_deleted") else []
+        return [*_course_semester(request), "--entry", _a(request, "entry"), *remove]
     return [
         "--course-org",
         request.course_org,
@@ -390,7 +393,13 @@ def _open_window(request: Request) -> list[str]:
 # ------------------------------------------------------------------ the registry
 
 _RELEASE_ENTRY_ARGS = _args(
-    {"entry": _string(KEY_PATTERN, "The schedule.yml entry key"), **_DEPLOY_FIELDS},
+    {
+        "entry": _string(KEY_PATTERN, "The schedule.yml entry key"),
+        **_DEPLOY_FIELDS,
+        "remove_deleted": _boolean(
+            "Also remove the released files the course copy no longer has"
+        ),
+    },
     required=("entry",),
 )
 _RELEASE_COUNTS = "Copied paths per destination, as deploy reports them."

@@ -77,6 +77,7 @@ import json
 import os
 import re
 import sys
+from collections.abc import Collection
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
@@ -116,7 +117,7 @@ from .gh_contents import (
     line_of,
     load_yaml_lines,
     put_file_as_read,
-    repo_tree,
+    repo_path_shas,
     take_lines,
     yaml_mark_line,
 )
@@ -2435,9 +2436,10 @@ def load_file(path: str) -> tuple[Schedule | None, str | None]:
 
 
 @run.per_run(lambda course_org, repo: run.scope(course_org, repo))
-def _repo_paths(course_org: str, repo: str) -> set[str] | None:
-    """Every path in a course-org repo, files and directories alike, in ONE tree fetch.
-    An empty set is a repo with nothing in it; `None` is "could not tell".
+def _repo_shas(course_org: str, repo: str) -> dict[str, str] | None:
+    """`{path: sha}` for every path in a course-org repo, files and directories alike, in
+    ONE tree fetch at its default branch. An empty dict is a repo with nothing in it;
+    `None` is "could not tell".
 
     Memoised per process, like `repos._repo`: a repo's tree does not change under a run,
     and the commit-time validator and the hourly pre-flight each ask about the same
@@ -2447,12 +2449,21 @@ def _repo_paths(course_org: str, repo: str) -> set[str] | None:
     because the two want opposite handling: an absent repo is a fault worth naming, an
     unreadable one must be passed over in silence. `default_branch` is the fail-loud twin
     on purpose - `default_branch(fallback="main")` guesses when it cannot read the repo,
-    `repo_tree` then 404s on the guess and reports `()`, and every deploy in the plan comes
-    back as "no such repo": the exact cry-wolf this check exists to avoid."""
+    the tree read then 404s on the guess and reports nothing, and every deploy in the plan
+    comes back as "no such repo": the exact cry-wolf this check exists to avoid.
+
+    With the shas, so the status's divergence check (decision 0043) compares a released
+    copy with its course copy off this same read, at no cost of its own."""
     try:
-        return set(repo_tree(course_org, repo, default_branch(course_org, repo)))
+        return repo_path_shas(course_org, repo, default_branch(course_org, repo))
     except RuntimeError:
         return None
+
+
+def _repo_paths(course_org: str, repo: str) -> set[str] | None:
+    """Every path in a course-org repo (`_repo_shas`), or `None` when it could not be read."""
+    shas = _repo_shas(course_org, repo)
+    return None if shas is None else set(shas)
 
 
 def source_repo_paths(course_org: str, repo: str) -> set[str] | None:
@@ -2472,6 +2483,32 @@ def source_repo_paths(course_org: str, repo: str) -> set[str] | None:
     if repo_missing(course_org, repo):
         return set()
     return _repo_paths(course_org, repo)
+
+
+def source_repo_shas(course_org: str, repo: str) -> dict[str, str] | None:
+    """`source_repo_paths` with each path's sha: `{}` when the repo is absent or empty,
+    `None` when it could not be read. The same one tree read."""
+    if repo_missing(course_org, repo):
+        return {}
+    return _repo_shas(course_org, repo)
+
+
+def source_withheld(
+    course_org: str, repo: str, paths: Collection[str]
+) -> frozenset[str]:
+    """Which of a source repo's `paths` (its tree) its `.releaseignore` files withhold, a
+    withheld folder as each of its paths. Only a `.releaseignore` the tree lists is read
+    (each read once a run). Empty when an ignore file cannot be read: a repo that cannot
+    be READ is passed over, and a missing source is still reported where it is checked."""
+    try:
+        return frozenset(
+            excluded_in_tree(
+                paths,
+                lambda p: get_file_content(course_org, repo, p, confirm_absent=True),
+            )
+        )
+    except RuntimeError:
+        return frozenset()
 
 
 def _window_blurb() -> str:
@@ -2588,27 +2625,10 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
             )
             continue
         # Which of this repo's paths a `.releaseignore` withholds - computed once per
-        # repo, off the tree already fetched above, and `read` is called only for the
-        # ignore files themselves. A repo without one costs nothing.
-        try:
-            withheld = set(
-                excluded_in_tree(
-                    paths,
-                    # `repo` bound now, not looked up later: the read is eager, but a
-                    # lambda over a loop variable is one edit away from not being.
-                    # Only a `.releaseignore` the tree lists is read: a 404 is spurious.
-                    lambda p, _r=repo: get_file_content(
-                        course_org, _r, p, confirm_absent=True
-                    ),
-                )
-            )
-        except RuntimeError:
-            # `get_file_content` raises on any non-404 read failure, and this function
-            # promises that a repo it cannot READ is passed over in silence - its one
-            # caller that matters here is the commit-time validator, where a transient 429
-            # would otherwise be a traceback on faculty's own push. Degrade to "no
-            # withheld paths known": a missing source is still reported below.
-            withheld = set()
+        # repo, off the tree already fetched above (`source_withheld`). A read failure
+        # degrades to "no withheld paths known": the commit-time validator must not
+        # traceback on faculty's own push over a transient 429.
+        withheld = source_withheld(course_org, repo, paths)
         for w in wanted[repo]:
             # "" is the assignment case: the repo IS the source, so its existence is all
             # there is to check. `/` and `.` mean the whole repo, likewise - and which

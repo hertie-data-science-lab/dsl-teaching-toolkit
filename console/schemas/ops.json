@@ -51,6 +51,10 @@
             "pattern": "^(?!-)[A-Za-z0-9_.-]{1,100}$",
             "type": "string"
           },
+          "remove_deleted": {
+            "description": "Also remove the released files the course copy no longer has",
+            "type": "boolean"
+          },
           "semester_dest_path": {
             "description": "Destination path(s), comma-separated",
             "pattern": "^(?!-)[^\\x00-\\x1f]{1,1024}$",

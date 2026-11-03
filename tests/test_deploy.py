@@ -116,7 +116,7 @@ def test_cli_builds_one_deploy_per_pair_and_one_batch(monkeypatch):
     # through ONE deploy_many call - so each repo is cloned once for the whole batch.
     seen = {}
 
-    def fake_deploy_many(course_org, semester_org, deploys, sync=True):
+    def fake_deploy_many(course_org, semester_org, deploys, sync=True, remove=None):
         seen.update(
             course_org=course_org, semester_org=semester_org, deploys=deploys, sync=sync
         )
@@ -191,7 +191,7 @@ def test_an_entry_is_released_in_one_batch_with_one_sync(monkeypatch):
     monkeypatch.setattr(
         deploy,
         "deploy_many",
-        lambda org, sem, deploys, sync=True: (
+        lambda org, sem, deploys, sync=True, remove=None: (
             calls.append((deploys, sync)) or deploy.Batch(0, True, [])
         ),
     )
