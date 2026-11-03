@@ -35,7 +35,7 @@ const solo = STATUS.assignments![0];
 const team: Assignment = { ...solo, slug: 'assignment-3', title: 'Group project', template: 'assignment-3-f2026', state: 'marking', units: 1, submissions: 1, teams: 1, marks: { filled: 0, total: 1 } };
 const ready: Loaded = { kind: 'ready', status: { ...STATUS, assignments: [solo, team] }, sha: 's', stale: [] };
 
-const SCHEDULE = 'timezone: Europe/Berlin\nassignments:\n  assignment-2:\n    number: 2\n    template: assignment-2-f2026\n    handout_datetime: 2026-09-15T10:00\n    due_datetime: 2026-09-27T23:59\n';
+const SCHEDULE = 'assignments:\n  assignment-2:\n    number: 2\n    template: assignment-2-f2026\n    handout_datetime: 2026-09-15T10:00\n    due_datetime: 2026-09-27T23:59\n';
 const TEAM_SHEET = 'teams:\n  team-alpha:\n    info:\n      submitted: 2026-09-20T20:00\n      days_late: 0\n    feedback_group:\n    members:\n      anna-a:\n        adjustment_individual:\n        feedback_individual:\n        notes_not_shared_with_students:\n    score_group:\n      Q1:\n    feedback_per_question:\n      Q1:\n';
 
 function files(over: Record<string, string> = {}) {
@@ -174,7 +174,7 @@ describe('Save on the Overview form', () => {
 });
 
 describe('the schedule editor’s forms, clicked through (forms mock-up v3)', () => {
-  const sched = 'timezone: Europe/Berlin\nlectures:\n  lecture-1:\n    session: 1\n    event_datetime: 2026-09-08T10:00\nlabs:\n  lab-2:\n    session: 2\n    event_datetime: 2026-09-15T10:00\n    files:\n      - from_course_repo: course-materials-f2026\n        from_path: labs/02_x\n';
+  const sched = 'lectures:\n  lecture-1:\n    session: 1\n    event_datetime: 2026-09-08T10:00\nlabs:\n  lab-2:\n    session: 2\n    event_datetime: 2026-09-15T10:00\n    files:\n      - from_course_repo: course-materials-f2026\n        from_path: labs/02_x\n';
   const saved = async (gh: FakeGitHub) => {
     await settle(() => puts(gh, 'schedule.yml').length > 0);
     return parse(body(puts(gh, 'schedule.yml')[0]));

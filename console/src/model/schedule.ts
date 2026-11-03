@@ -24,7 +24,6 @@ export interface SchedBreak extends SchedEntry {
 }
 
 export interface Schedule {
-  timezone: string | null;
   start: string | null;
   end: string | null;
   /** Every content entry by its key, whatever its block. */
@@ -79,7 +78,6 @@ export function parseSchedule(text: string | null | undefined): Schedule | null 
   const day = (type: string) => entry(sem.find(([, e]) => obj(e).type === type)?.[1]).when;
   const arch = sem.find(([, e]) => obj(e).type === 'archive');
   return {
-    timezone: s(doc.timezone) || null,
     start: day('start'),
     end: day('end'),
     entries,

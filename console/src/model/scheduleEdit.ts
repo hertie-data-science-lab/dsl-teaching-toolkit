@@ -135,12 +135,11 @@ export interface AssignmentDraft {
   repoName?: string;
 }
 
-/** The semester's dates sheet: its start, end and timezone. */
+/** The semester's dates sheet: its start and end. Its timezone is semester.yml's `defaults:` one (decision 0039). */
 export interface SemesterDraft {
   kind: 'semester';
   start: string;
   end: string;
-  tz: string;
 }
 
 /** One entry of the `semester:` block. */
@@ -292,7 +291,7 @@ export function semesterEntryOf(doc: Raw, type: SemesterType): [string, Raw] | n
 export function readDraft(doc: Raw, key: string): Draft | null {
   if (key === 'semester') {
     const day = (t: SemesterType) => splitWhen(semesterEntryOf(doc, t)?.[1].event_datetime)[0];
-    return { kind: 'semester', start: day('start'), end: day('end'), tz: s(doc.timezone) };
+    return { kind: 'semester', start: day('start'), end: day('end') };
   }
   const b = blockOf(doc, key);
   if (!b) return null;
@@ -547,9 +546,8 @@ export function blockFor(d: EntryDraft | AssignmentDraft | SemesterEntryDraft): 
   return d.kind === 'assignments' ? ASSIGNMENTS_BLOCK : d.kind === 'semesterEntry' ? SEMESTER_BLOCK : pluralOf(d.type);
 }
 
-/** Write the semester's dates sheet: its start and end entries and the timezone. */
+/** Write the semester's dates sheet: its start and end entries. */
 function writeDates(y: YamlText, d: SemesterDraft, doc: Raw): void {
-  y.assign(['timezone'], text(d.tz));
   for (const [type, day] of [['start', d.start], ['end', d.end]] as const) {
     const hit = semesterEntryOf(doc, type);
     if (!day && !hit) continue;

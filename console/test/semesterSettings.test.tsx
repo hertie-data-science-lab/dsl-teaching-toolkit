@@ -4,6 +4,7 @@
 // released TBC entry offers on its release page, and the to-do that points there.
 
 import { render } from 'preact';
+import { render as html } from 'preact-render-to-string';
 import { act } from 'preact/test-utils';
 import { afterEach, describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
@@ -16,7 +17,7 @@ import type { Release, Status } from '../src/model/types';
 import { DispatchAdapter } from '../src/ops/adapter';
 import { OpsSession } from '../src/ops/session';
 import { CohortScreen, semesterItems } from '../src/screens/Cohort';
-import { ReleaseScreen } from '../src/screens/Schedule';
+import { ReleaseScreen, SemesterForm } from '../src/screens/Schedule';
 import { settingsLines } from '../src/screens/SemesterSettings';
 import { withSessionDate } from '../src/screens/SessionDate';
 import { StaticFiles } from './staticFiles';
@@ -41,7 +42,6 @@ const status: Status = {
 const loaded: Loaded = { kind: 'ready', status, sha: 's', stale: [] };
 const SCHEDULE = [
   '# INSTRUCTOR-OWNED',
-  'timezone: Europe/Berlin',
   'semester:',
   '  start: {type: start, event_datetime: 2026-09-07}',
   '  end: {type: end, event_datetime: 2026-12-18}',
@@ -115,11 +115,17 @@ describe('Semester settings', () => {
     expect(q('[role="dialog"]').textContent).toContain('Semester settings');
   });
 
-  it('asks for the timezone once: the defaults one, not schedule.yml’s', async () => {
+  it('asks for the timezone once: the defaults one (schedule.yml names none, decision 0039)', async () => {
     await mount((f) => <CohortScreen {...props(f)} settings />);
     const dialog = q('[role="dialog"]');
     expect(dialog.querySelector('#sd-timezone')).not.toBeNull();
     expect(dialog.querySelector('#e-tz')).toBeNull();
+  });
+
+  it('the Schedule screen’s dates sheet asks for no timezone', () => {
+    const out = html(<SemesterForm d={{ kind: 'semester', start: '2026-09-07', end: '2026-12-18' }} set={() => {}} errors={{}} />);
+    expect(out).not.toContain('e-tz');
+    expect(out).not.toContain('Timezone');
   });
 
   it('checks only what was edited: a fault in a fold left alone never blocks the save', async () => {

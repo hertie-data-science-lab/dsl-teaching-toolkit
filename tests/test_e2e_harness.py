@@ -354,8 +354,6 @@ def test_only_unfinished_runs_count_as_busy():
 # ----------------------------------------------------------- the fenced schedule edit
 
 SCHEDULE = """\
-timezone: Europe/Berlin
-
 assignments:
   assignment-1:
     number: 1
@@ -423,7 +421,7 @@ def test_the_round_trip_leaves_the_file_byte_for_byte_as_it_was(schedule):
 
 def test_a_schedule_with_no_assignments_key_is_refused():
     with pytest.raises(ValueError, match="assignments:"):
-        schedule_edit.insert_block("timezone: Europe/Berlin\n", "e2eab12cd", BLOCK)
+        schedule_edit.insert_block("semester: {}\n", "e2eab12cd", BLOCK)
 
 
 # ------------------------------------------------------------- what cleanup may delete
@@ -802,7 +800,7 @@ def test_the_block_the_harness_really_inserts_is_valid_yaml(monkeypatch):
     block = module._schedule_block("assignment-90-e2eab12cd", when, when, shape, 90)
     text = schedule_edit.insert_block(SCHEDULE, "e2eab12cd", block)
     doc = yaml.safe_load(text)
-    assert set(doc) == {"timezone", "assignments", "events"}
+    assert set(doc) == {"assignments", "events"}
     entry = doc["assignments"]["assignment-90-e2eab12cd"]
     assert entry["template"] == "assignment-90-e2eab12cd" and "repo_name" not in entry
     assert set(entry) <= schedule.KNOWN_ASSIGNMENT
@@ -1372,7 +1370,7 @@ def test_the_run_puts_one_schedule_entry_per_shape_in_one_fence(monkeypatch):
     due = datetime(2026, 9, 4, 15, 0)
     blocks = module._schedule_blocks("e2eab12cd", when, due)
     doc = yaml.safe_load(schedule_edit.insert_block(SCHEDULE, "e2eab12cd", blocks))
-    assert set(doc) == {"timezone", "assignments", "events"}
+    assert set(doc) == {"assignments", "events"}
     mine = set(doc["assignments"]) - {"assignment-1"}
     assert mine == {shapes.slug("e2eab12cd", s) for s in shapes.SHAPES}
     for slug in mine:

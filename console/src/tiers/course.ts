@@ -45,7 +45,7 @@ function semesterWideTiers(fallback: (k: string) => Effective, saved: Values): T
   const sync = fallback('autosync_released_edits');
   return {
     timezone: {
-      tier: 'default', label: 'Timezone', widget: 'select', reason: 'The semester’s dates and times are read in it; a schedule’s own timezone wins.', defaultLabel: grey('timezone'),
+      tier: 'default', label: 'Timezone', widget: 'select', reason: 'The semester’s dates and times are read in it.', defaultLabel: grey('timezone'),
       options: defaultFirst(tz.value, String(tz.value ?? DEFAULT_TIMEZONE), TIMEZONES.map((t) => opt(t, t)), saved.timezone),
     },
     archive_grace_days: {

@@ -337,13 +337,13 @@ An entry that is valid YAML but not a valid *schedule* entry is **dropped**: it 
 | a `files` item missing `from_course_repo` or `from_path` | that one copy never ships |
 | a key used in two blocks | the second entry is dropped |
 
-Kept rather than dropped - the entry still runs on its documented fallback, and the fallback is reported alongside the drops (so `--validate` catches it): a malformed `due_datetime` (the assignment is TBC: nothing fires), a malformed `handout_datetime` (**nothing is ever handed out**), `marks_return_datetime` (marks go back by hand) or `release_datetime` (the copy ships at its default); one unreadable slot of several (the others stand); a typo'd or unknown key at any level; and an unknown `timezone:` (falls back to `Europe/Berlin`).
+Kept rather than dropped - the entry still runs on its documented fallback, and the fallback is reported alongside the drops (so `--validate` catches it): a malformed `due_datetime` (the assignment is TBC: nothing fires), a malformed `handout_datetime` (**nothing is ever handed out**), `marks_return_datetime` (marks go back by hand) or `release_datetime` (the copy ships at its default); one unreadable slot of several (the others stand); and a typo'd or unknown key at any level. A `timezone:` here is an old name, ignored: the zone is `semester.yml`'s.
 
 `solution_datetime` is the exception that is **dropped, not kept**: malformed, missing its `handout_datetime`, not after it, or (in the schedule check on a push) before the late cutoff, the value is discarded and the model solution waits for a human. Honouring a bad one could ship the answers with the questions, and nothing undoes that.
 
 ## Timezones and bare dates
 
-- Everything naive is read in the semester's `timezone:` (default `Europe/Berlin`).
+- Everything naive is read in the semester's timezone: `semester.yml` `defaults: timezone`, else the course's, else the institution's (`Europe/Berlin`). `schedule.yml` names none.
 - An explicit offset (`2026-09-15T14:00+00:00`) names that exact instant; it fires then, and the site shows it on the semester's own clock (`16:00` for a `Europe/Berlin` semester in September).
 - A **bare date** with no time means **00:00** on an entry that ships files and on `release_datetime` (the day opens), **23:59:59** on an assignment `due_datetime` (the day closes), and a whole day on an `exams:` or `events:` entry.
 

@@ -490,7 +490,6 @@ def _scaffold_text(
         tag=tag,
         year=year,
         year_next=year + 1,
-        timezone=ours["timezone"],
         grace_days=ours["archive_grace_days"],
         defaults=settings.defaults_skeleton(inherited),
     )

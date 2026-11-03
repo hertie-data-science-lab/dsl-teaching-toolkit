@@ -200,7 +200,6 @@ class FakeGitHub:
 
 COURSE, LIVE, OLD1, OLD2 = "c-org-e1", "c-org-f2026", "c-org-f2025", "c-org-s2025"
 SCHEDULE = """\
-timezone: Europe/Berlin
 semester:
   start: {type: start, event_datetime: 2026-09-07}
   end: {type: end, event_datetime: 2026-12-18}

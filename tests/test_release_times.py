@@ -33,7 +33,6 @@ def _plan(event: str, release_datetime: str | None = None) -> str:
     """A labs entry with two copies; the first may state its own `release_datetime`."""
     own = f"\n        release_datetime: {release_datetime}" if release_datetime else ""
     return (
-        "timezone: Europe/Berlin\n"
         "labs:\n"
         "  lab-08:\n"
         "    session: 8\n"
@@ -343,29 +342,41 @@ def _handout(planned: str) -> str:
 
 def test_a_handout_earlier_than_planned_moves_the_plan_once(monkeypatch):
     file = File(_handout("2026-10-01T09:00")).install(monkeypatch)
-    schedule.record_handout("S", "assignment-1", "2026-09-22T14:05")
+    schedule.record_handout(
+        "S", "assignment-1", "2026-09-22T14:05", tz_name="Europe/Berlin"
+    )
     ((new, _msg),) = file.writes
     entry = yaml.safe_load(new)["assignments"]["assignment-1"]
     assert entry["handout_datetime"] == "2026-09-22T14:05"
     assert entry["due_datetime"].isoformat() == "2026-10-13"
     # The same moment again, or a later one, never moves it.
-    schedule.record_handout("S", "assignment-1", "2026-09-22T14:05")
-    schedule.record_handout("S", "assignment-1", "2026-09-23T09:00")
+    schedule.record_handout(
+        "S", "assignment-1", "2026-09-22T14:05", tz_name="Europe/Berlin"
+    )
+    schedule.record_handout(
+        "S", "assignment-1", "2026-09-23T09:00", tz_name="Europe/Berlin"
+    )
     assert len(file.writes) == 1
 
 
 @pytest.mark.parametrize("planned", ["2026-09-22T14:05", "2026-09-01T09:00"])
 def test_a_handout_at_or_after_its_plan_leaves_it(monkeypatch, planned):
     file = File(_handout(planned)).install(monkeypatch)
-    schedule.record_handout("S", "assignment-1", "2026-09-22T14:05")
+    schedule.record_handout(
+        "S", "assignment-1", "2026-09-22T14:05", tz_name="Europe/Berlin"
+    )
     assert file.writes == []
 
 
 def test_a_whole_day_handout_counts_from_the_days_start(monkeypatch):
     file = File(_handout("2026-09-23")).install(monkeypatch)
-    schedule.record_handout("S", "assignment-1", "2026-09-23T08:00")
+    schedule.record_handout(
+        "S", "assignment-1", "2026-09-23T08:00", tz_name="Europe/Berlin"
+    )
     assert file.writes == []
-    schedule.record_handout("S", "assignment-1", "2026-09-22T23:00")
+    schedule.record_handout(
+        "S", "assignment-1", "2026-09-22T23:00", tz_name="Europe/Berlin"
+    )
     assert "handout_datetime: 2026-09-22T23:00" in file.text
 
 
@@ -375,7 +386,9 @@ def test_there_is_no_solution_write_back(monkeypatch):
         "    due_datetime: 2026-10-13\n    solution_datetime: 2026-10-30T09:00\n"
     )
     file = File(text).install(monkeypatch)
-    schedule.record_handout("S", "assignment-1", "2026-09-22T14:05")
+    schedule.record_handout(
+        "S", "assignment-1", "2026-09-22T14:05", tz_name="Europe/Berlin"
+    )
     assert file.writes == [] and "solution_datetime: 2026-10-30T09:00" in file.text
 
 

@@ -48,7 +48,6 @@ BERLIN = ZoneInfo("Europe/Berlin")
 NOW = datetime(2026, 9, 23, 9, 0, tzinfo=UTC)
 
 SCHEDULE = """\
-timezone: Europe/Berlin
 semester:
   start: {type: start, event_datetime: 2026-09-07}
   end: {type: end, event_datetime: 2026-12-18}
@@ -765,7 +764,6 @@ def test_an_archived_semester_is_not_live_and_asks_for_no_archive_date():
 def test_this_week_runs_from_local_midnight_for_seven_days():
     sched = _sched(
         """\
-timezone: Europe/Berlin
 events:
   e0:
     title: starts the week
@@ -1116,7 +1114,7 @@ def test_semester_weeks_before_during_and_after_the_semester():
 def test_the_semester_block_carries_its_start_and_end():
     semester = _render()["semester"]
     assert (semester["start"], semester["end"]) == ("2026-09-07", "2026-12-18")
-    bare = _render(semester=_semester(sched=_sched("timezone: Europe/Berlin\n")))
+    bare = _render(semester=_semester(sched=_sched("")))
     assert (bare["semester"]["start"], bare["semester"]["end"]) == (None, None)
 
 
@@ -1433,7 +1431,7 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
 def test_every_render_validates_against_the_exported_schema():
     # WP1's `console/schemas/status.schema.json` is what the console reads the file by.
     healthy = _render(semester=_semester(students=[_student("ada"), _student("bob")]))
-    archived = _semester(sched=_sched("timezone: Europe/Berlin\n"), people=None)
+    archived = _semester(sched=_sched(""), people=None)
     archived.listing["semester-config"] = repo_row("semester-config", archived=True)
     for doc in (
         _render(*_contract_scenario()),
@@ -1481,7 +1479,7 @@ def _many_faults() -> list[ConfigFault]:
         faults,
     )
     faults += _sched(
-        "timezone: Europe/Berlin\nlectures:\n  s1:\n    event_datetime: someday\n"
+        "lectures:\n  s1:\n    event_datetime: someday\n"
         "    files:\n      - from_course_repo: x\n        from_path: y\n"
     ).faults
     faults.append(header_fault("students.csv", ["github_handle"]))
@@ -1899,7 +1897,6 @@ def test_students_without_a_team_are_a_problem_only_once_the_window_shuts():
 # ------------------------------------------------------------ explicit numbers (0020)
 
 UNNUMBERED = """\
-timezone: Europe/Berlin
 lectures:
   lecture-3:
     session: 3
@@ -1959,7 +1956,7 @@ def test_an_entry_with_no_number_is_a_problem_dated_at_what_it_stops():
     assert guest["fix"]["path"] == "schedule.yml"
     assert guest["fix"]["entry"] == "guest"
     assert guest["fix"]["screen"] == "schedule"
-    assert guest["fix"]["line"] == 10
+    assert guest["fix"]["line"] == 9
     project = problems["number:assignment:project"]
     assert project["when"] == "2026-10-20T10:00:00+02:00"
     assert project["stops"] == "The hand out on Tue 20 Oct will be skipped."
@@ -3030,7 +3027,6 @@ if __name__ == "__main__":
 # ------------------------------------------------------------------ empty weeks
 
 THREE_WEEKS = """\
-timezone: Europe/Berlin
 semester:
   start: {type: start, event_datetime: 2026-10-05}
   end: {type: end, event_datetime: 2026-10-23}
@@ -3076,7 +3072,6 @@ def test_the_weeks_are_the_semesters_own_counted_from_its_first_day():
     # A Wednesday start: week 1 is Wed 7 to Tue 13 Oct, which the Monday release falls in;
     # week 2, Wed 14 to Tue 20, has nothing. The id names that week's Monday.
     text = """\
-timezone: Europe/Berlin
 semester:
   start: {type: start, event_datetime: 2026-10-07}
   end: {type: end, event_datetime: 2026-10-20}
@@ -3099,7 +3094,6 @@ def test_a_week_already_begun_is_not_raised():
 
 
 WEEKLY = """\
-timezone: Europe/Berlin
 semester:
   start: {type: start, event_datetime: 2026-10-05}
   end: {type: end, event_datetime: 2026-10-16}
@@ -3154,7 +3148,7 @@ def _twelve_weeks(readings_weeks: int) -> list[str]:
         for n in range(1, readings_weeks + 1)
     )
     text = (
-        "timezone: Europe/Berlin\nsemester:\n"
+        "semester:\n"
         "  start: {type: start, event_datetime: 2026-10-05}\n"
         f"  end: {{type: end, event_datetime: 2026-12-25}}\nlectures:\n{lectures}"
         + (f"readings:\n{readings}" if readings else "")
@@ -3212,7 +3206,6 @@ def test_a_set_aside_empty_week_is_not_raised():
 # ------------------------------------------------------------ no files yet
 
 NO_FILES = """\
-timezone: Europe/Berlin
 semester:
   start: {type: start, event_datetime: 2026-10-05}
   end: {type: end, event_datetime: 2026-12-18}
@@ -3348,7 +3341,6 @@ def test_an_assignment_carries_its_semester_side_name():
 # ------------------------------------------------------------------ slots
 
 SLOTS = """\
-timezone: Europe/Berlin
 semester:
   start: {type: start, event_datetime: 2026-10-05}
   end: {type: end, event_datetime: 2026-10-16}

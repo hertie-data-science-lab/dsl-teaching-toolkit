@@ -6,7 +6,6 @@ One block per kind (decision 0038), named by the institution's kinds (`lectures:
 map whose KEY names what the toolkit makes for the entry (its site row file, its problem
 ids; an assignment's repos and mark sheet) and is never read for a number:
 
-    timezone: Europe/Berlin          # optional (default Europe/Berlin)
     semester_start: 2026-09-07
     semester_end: 2026-12-18
     lectures:
@@ -46,9 +45,10 @@ whatever that cell already generates), a `*_datetime:`, `show_on_site:` and `tbc
 Every field is optional - a semester with no schedule.yml (or a blank one) behaves exactly
 as before everywhere that reads it (releases are skipped, dates synthesised).
 
-Times are timezone-aware: a naive datetime/date is interpreted in `timezone`; an explicit
-offset (e.g. `...T14:00+02:00`) names the same instant and is converted into `timezone`,
-so every parsed datetime is already the semester's own wall clock (what the site shows, and
+Times are timezone-aware: a naive datetime/date is interpreted in the semester's zone - its
+`semester.yml` `defaults: timezone`, cascaded (decision 0039 rule 2; the file itself names
+none); an explicit offset (e.g. `...T14:00+02:00`) names the same instant and is converted
+into that zone, so every parsed datetime is already the semester's own wall clock (what the site shows, and
 what it fires at, are then the same number).
 
 Parsing is total but never silent: an entry that is valid YAML yet not a valid schedule
@@ -751,7 +751,7 @@ SEMESTER_TYPES = ("start", "end", "break", "archive")
 # One block per content kind, named by the kind's policy plural (decision 0038 rule 1):
 # `lectures:`, `labs:`, `readings:`, `exams:`, `events:`, `assets:` at Hertie.
 BLOCKS = {policy.plural_of(kind): kind for kind in policy.content_kinds()}
-KNOWN_TOP_LEVEL = frozenset({"timezone", SEMESTER_BLOCK, "assignments", *BLOCKS})
+KNOWN_TOP_LEVEL = frozenset({SEMESTER_BLOCK, "assignments", *BLOCKS})
 # The kinds whose entries make a teaching unit: `session` is required on them (decision
 # 0038 amendment, rule 2); optional on readings (absent: a standalone row).
 SESSION_KINDS = ("lecture", "lab")
@@ -1865,15 +1865,8 @@ def parse(meta: dict, instance: settings.Instance | None = None) -> Schedule:
         "",
         "nothing it contains is scheduled or shown",
     )
-    tz_name = meta.get("timezone") or instance.timezone
-    tz = _tz(tz_name)
-    if tz_name and str(tz_name).strip() != str(tz):
-        drops.note(
-            "",
-            "timezone",
-            f"`{tz_name}` is not a known zone - falling back to {DEFAULT_TZ}, so every "
-            f"naive time below is read in {DEFAULT_TZ}",
-        )
+    # The semester's zone is its `defaults:` one (decision 0039 rule 2), already read.
+    tz = _tz(instance.timezone)
     semester_start, semester_end, breaks, archive, labels = _parse_semester(
         meta.get(SEMESTER_BLOCK), drops, timedelta(days=instance.archive_grace_days)
     )
@@ -3031,7 +3024,9 @@ def _put_handout(
     )
 
 
-def record_handout(semester_org: str, slug: str, stamp: str | None = None) -> None:
+def record_handout(
+    semester_org: str, slug: str, stamp: str | None = None, *, tz_name: str
+) -> None:
     """Record a manual handout back into schedule.yml (`assignments.<slug>.handout_datetime`),
     so the schedule stays the one record of when every assignment went out - whether
     the cron released it or a person ran the workflow. A blank is filled; an existing
@@ -3039,7 +3034,8 @@ def record_handout(semester_org: str, slug: str, stamp: str | None = None) -> No
     hand-out ran EARLIER than it, to the actual moment - once, since every later run's
     moment is at or after it (decision 0043 rule 3). There is no `solution_datetime`
     write-back: a solution released by hand before the late cutoff would make the file
-    invalid (`refuse_early_solutions`); `.system/solutions/` is that record. Best
+    invalid (`refuse_early_solutions`); `.system/solutions/` is that record. `tz_name`
+    is the semester's zone (`Schedule.timezone`), the one `stamp` is told in. Best
     effort - a failure here must never fail the release itself, but it is never silent
     either: a file this can't edit means the handout happened and is on record nowhere.
 
@@ -3059,11 +3055,7 @@ def record_handout(semester_org: str, slug: str, stamp: str | None = None) -> No
     _parsed.cache_clear()
     # the release moment, in the semester's own timezone (naive, like every other
     # schedule datetime - the parser reads it back in that same zone)
-    try:
-        tz_name = (yaml.safe_load(text) or {}).get("timezone")
-    except yaml.YAMLError:
-        tz_name = None
-    tz = _tz(tz_name if isinstance(tz_name, str) else None)
+    tz = _tz(tz_name)
     if stamp is None:
         stamp = datetime.now(tz).strftime(_STAMP)
     new = _insert_handout(text, slug, stamp, tz)

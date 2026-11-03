@@ -628,7 +628,7 @@ def instance_additions(
       due date plus the window: the cutoff is computed now, rounded to whole days;
     - `semester_dest_repo`, moved out of the schedule.
     A setting the file already states is left as written."""
-    tz = schedule._tz(meta.get("timezone"))
+    tz = schedule._tz(meta.get(OLD_TIMEZONE))
     named = dict(lower)
     course = named.get("course", {})
     toolkit = {
@@ -1446,7 +1446,7 @@ def schedule_shape(
             old.get("assignments") if isinstance(old.get("assignments"), dict) else {}
         )
         return _shape_text(text, old, shaped, assignments, notes), None, notes, stops
-    tz = schedule._tz(old.get("timezone"))
+    tz = schedule._tz(old.get(OLD_TIMEZONE))
     releases = old.get("releases") if isinstance(old.get("releases"), dict) else {}
     events = old.get("events") if isinstance(old.get("events"), dict) else {}
     blocks: dict[str, dict[str, dict]] = {b: {} for b in schedule.BLOCKS}
@@ -1681,11 +1681,12 @@ def schedule_shape(
 def _shape_text(
     text: str, old: dict, blocks: dict, assignments: dict, notes: list[str]
 ) -> str:
-    """The rewritten schedule.yml: the header, `timezone`, the `semester:` block, one
-    block per kind and `assignments:`; `notes` gains the count of comments left behind."""
+    """The rewritten schedule.yml: the header, `timezone` (the config layers step moves
+    it), the `semester:` block, one block per kind and `assignments:`; `notes` gains the
+    count of comments left behind."""
     out = [SHAPE_HEADER]
-    if "timezone" in old:
-        out.append(_emit({"timezone": old["timezone"]}))
+    if OLD_TIMEZONE in old:
+        out.append(_emit({OLD_TIMEZONE: old[OLD_TIMEZONE]}))
     semester = _semester_block(old)
     if semester:
         out.append(_emit({schedule.SEMESTER_BLOCK: semester}))
@@ -1808,6 +1809,9 @@ OLD_TEAMS_PATH = legacy.old_name(
     "students.csv `team:<number>` columns", legacy.ROSTER_FILES
 )
 OLD_SEMESTER_FILES = (INSTRUCTORS_FILE, ASSIGNMENTS_FILE, OLD_TEAMS_PATH)
+# schedule.yml's own zone (`legacy.SCHEDULE_TOP`): the config layers step moves it into
+# `semester.yml` `defaults:` (decision 0039 rule 2), so the steps before read past it.
+OLD_TIMEZONE = legacy.old_name(legacy.SEMESTER_TIMEZONE, legacy.SCHEDULE_TOP)
 
 
 def _old_defaults(raw: object) -> tuple[dict, list[str]]:
@@ -2021,6 +2025,64 @@ def carried_defaults(course: Mapping, semester: Mapping) -> dict:
     ):
         return {"team_formation": value}
     return {}
+
+
+def without_timezone(text: str) -> str:
+    """`schedule.yml` without its top-level `timezone:` line."""
+    return re.sub(rf"(?m)^{OLD_TIMEZONE}:.*(\n|$)", "", text)
+
+
+def with_default(text: str, key: str, value: object) -> str:
+    """`semester.yml` (`text`) with `defaults: <key>: value` live: the key's commented
+    skeleton line replaced, else the key added first under `defaults:`, else a `defaults:`
+    block appended - comments and layout kept. Assumes the skeleton's two-space layout;
+    the caller re-reads the result."""
+    row = f"  {key}: {_scalar(value)}"
+    lines = text.split("\n")
+    at = next(
+        (i for i, ln in enumerate(lines) if re.match(rf"^{DEFAULTS_BLOCK}:", ln)), None
+    )
+    if at is None:
+        return text.rstrip("\n") + f"\n\n{DEFAULTS_BLOCK}:\n{row}\n"
+    for i in range(at + 1, len(lines)):
+        if lines[i] and not lines[i].startswith(" "):
+            break  # the next top-level block
+        if re.match(rf"^\s+#\s*{key}:", lines[i]):
+            lines[i] = row
+            return "\n".join(lines)
+    lines.insert(at + 1, row)
+    return "\n".join(lines)
+
+
+def zone_move(
+    schedule_text: str | None, stated: str | None
+) -> tuple[str | None, str | None, list[str]]:
+    """`(zone, schedule.yml rewritten, stops)` for moving schedule.yml's top-level
+    `timezone:` into `semester.yml` `defaults:` (decision 0039 rule 2). `zone` is the
+    name to state there, None when `semester.yml` already says it (`stated`: its
+    `defaults: timezone`, or the folded one) or the schedule names none; the rewrite is
+    None when there is no line to drop. A zone that is not one, or a `semester.yml` that
+    states another, stops the step: the semester's times would move. Pure."""
+    old = _yaml(schedule_text)
+    if OLD_TIMEZONE not in old:
+        return None, None, []
+    name = str(old[OLD_TIMEZONE] or "").strip()
+    where = f"{schedule.SCHEDULE_PATH}: `{OLD_TIMEZONE}: {old[OLD_TIMEZONE]}`"
+    if not name or str(schedule._tz(name)) != name:
+        return None, None, [f"{where} is not a known zone - correct or delete it"]
+    if stated and stated != name:
+        return (
+            None,
+            None,
+            [
+                f"{where} differs from {SEMESTER_FILE} `{DEFAULTS_BLOCK}: timezone: "
+                f"{stated}` - keep one by hand, then run again"
+            ],
+        )
+    new = without_timezone(schedule_text or "")
+    if _yaml(new) != {k: v for k, v in old.items() if k != OLD_TIMEZONE}:
+        return None, None, [f"{where} cannot be removed safely - move it by hand"]
+    return (None if stated else name), new, []
 
 
 def semester_layer(
@@ -3039,17 +3101,27 @@ RERUN_NOTE = "run it again: the pause record says the migration has not finished
 
 
 def _schedule_clean(
-    text: str | None, instance: str | None = None, *, quiet: bool = False
+    text: str | None,
+    instance: str | None = None,
+    *,
+    quiet: bool = False,
+    zone_ok: bool = False,
 ) -> bool:
     """`schedule.yml` (beside its `assignments.yml`, `instance`) read by this engine with
-    no NOT_MIGRATED fault; each one found is named (unless `quiet`), for a person to fix
-    by hand."""
+    no NOT_MIGRATED fault - but, with `zone_ok`, its top-level `timezone:`, which the
+    config layers step moves; each one found is named (unless `quiet`), for a person to
+    fix by hand."""
     if text is None:
         return True
     sched = schedule.parse(
         load_yaml_lines(text) or {}, settings.parse_legacy_assignments(instance)
     )
-    bad = [f for f in sched.faults if f.code == NOT_MIGRATED]
+    bad = [
+        f
+        for f in sched.faults
+        if f.code == NOT_MIGRATED
+        and not (zone_ok and not f.where and f.field == OLD_TIMEZONE)
+    ]
     bad += [d for d in sched.dropped if NOT_MIGRATED in d]
     for fault in [] if quiet else bad:
         log_err(
@@ -3619,7 +3691,7 @@ class Semester:
         stops)`; nothing to rewrite (None) once the schedule reads clean."""
         text = get_file_content(self.org, self.config(), schedule.SCHEDULE_PATH)
         instance = self.instance_text()
-        if text is None or _schedule_clean(text, instance, quiet=True):
+        if text is None or _schedule_clean(text, instance, quiet=True, zone_ok=True):
             return text, None, None, [], []
         new, after, notes, stops = schedule_shape(
             text, instance, self._aliases, self._reading_list
@@ -3664,7 +3736,7 @@ class Semester:
         if new is None or stops:
             return stops
         if not _schedule_clean(
-            new, after if after is not None else self.instance_text()
+            new, after if after is not None else self.instance_text(), zone_ok=True
         ):
             return [f"{schedule.SCHEDULE_PATH} would still say NOT_MIGRATED"]
         return []
@@ -3705,7 +3777,8 @@ class Semester:
 
     def layers_work(self) -> dict:
         """Everything the step reads and would write: the old texts, `files` (path ->
-        bytes), `delete`, `notes` and `stops`. Empty `files` and `delete` = done."""
+        bytes), `delete`, `notes` and `stops`. Empty `files`, `delete` and `stops` =
+        done."""
         repo = self.config()
         live = _files(self.org, repo)
         old = {
@@ -3727,6 +3800,9 @@ class Semester:
             after = self._assignments_after()
             if after is not None:
                 old[ASSIGNMENTS_FILE] = after
+        # schedule.yml as the schedule shape step leaves it: its `timezone:` moves here.
+        text, shaped, *_ = self.shape_work()
+        shaped = text if shaped is None else shaped
         if INSTRUCTORS_FILE in old or ASSIGNMENTS_FILE in old:
             if SEMESTER_FILE in live:
                 stops.append(
@@ -3738,15 +3814,17 @@ class Semester:
             inherited = settings.layers(self.course)[2:]
             host, more = publish_host(self.publish_texts())
             stops += more
-            carried = carried_defaults(
-                inherited[0][1],
-                settings.parse_legacy_assignments(old.get(ASSIGNMENTS_FILE)).defaults,
-            )
+            folded = settings.parse_legacy_assignments(old.get(ASSIGNMENTS_FILE))
+            carried = carried_defaults(inherited[0][1], folded.defaults)
             notes += [
                 f"{SEMESTER_FILE} `{DEFAULTS_BLOCK}:` states `{key}: {value}`: the 0.10 "
                 f"institution default this semester ran on (decision 0039 rule 2)"
                 for key, value in carried.items()
             ]
+            zone, shaped, more = zone_move(shaped, folded.defaults.get("timezone"))
+            stops += more
+            if zone:
+                carried = {**carried, "timezone": zone}
             text, more = semester_layer(
                 self.org,
                 central_ref_for(self.course),
@@ -3768,6 +3846,34 @@ class Semester:
             )
             stops += [f"{SEMESTER_FILE} would lose {what}" for what in lost]
             files[SEMESTER_FILE] = text.encode()
+        elif SEMESTER_FILE in live:
+            current = get_file_content(self.org, repo, SEMESTER_FILE) or ""
+            stated = settings.parse_instance(current).defaults.get("timezone")
+            zone, shaped, more = zone_move(shaped, stated)
+            stops += more
+            if zone:
+                text = with_default(current, "timezone", zone)
+                if settings.parse_instance(text).defaults.get("timezone") != zone:
+                    stops.append(
+                        f"{SEMESTER_FILE}: `{DEFAULTS_BLOCK}: timezone: {zone}` cannot "
+                        f"be written safely - add it by hand"
+                    )
+                old[SEMESTER_FILE] = current
+                files[SEMESTER_FILE] = text.encode()
+        else:
+            _, shaped, more = zone_move(shaped, None)
+            stops += more
+            if shaped is not None:
+                stops.append(
+                    f"{schedule.SCHEDULE_PATH} states a `{OLD_TIMEZONE}:` and there is "
+                    f"no {SEMESTER_FILE} to move it into - add one by hand"
+                )
+        if shaped is not None:
+            files[schedule.SCHEDULE_PATH] = shaped.encode()
+            notes.append(
+                f"{schedule.SCHEDULE_PATH}: `{OLD_TIMEZONE}:` moves to {SEMESTER_FILE} "
+                f"`{DEFAULTS_BLOCK}:` (decision 0039 rule 2)"
+            )
         students = old.get(roster.STUDENTS_PATH)
         legacy_roster = students is not None and (
             roster.LEGACY_EMAIL in (students.lstrip("﻿").split("\n", 1)[0])
@@ -3803,7 +3909,7 @@ class Semester:
             )
         if OLD_SEMESTER_POINTER in old:
             files[records.path("pointer")] = self.pointer()
-        if not files and not delete:
+        if not files and not delete and not stops:
             return {}
         return {
             "old": old,
@@ -3855,7 +3961,9 @@ class Semester:
         for path, new in work["files"].items():
             if path in (roster.STUDENTS_PATH, roster.SYSTEM_PATH):
                 continue  # per-person: counted in the notes, never printed
-            out += _diff(path, "", new.decode())
+            if path == schedule.SCHEDULE_PATH:
+                continue  # faculty's own words: its one change is in the notes
+            out += _diff(path, old.get(path, ""), new.decode())
         out += [f"  {note}" for note in work["notes"]]
         out += [f"  delete {path}" for path in work["delete"]]
         if (
@@ -3891,7 +3999,8 @@ class Semester:
         bad = settings.parse_instance(text).faults
         for fault in bad:
             log_err(f"{SEMESTER_FILE} {fault.label}: {fault.what}")
-        return not bad
+        sched = get_file_content(self.org, self.config(), schedule.SCHEDULE_PATH)
+        return not bad and _schedule_clean(sched)
 
     # topic -------------------------------------------------------------------
     def topics(self) -> set[str]:

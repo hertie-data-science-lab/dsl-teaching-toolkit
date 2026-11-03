@@ -731,7 +731,8 @@ block, and `settings.resolve` returns `(value, source)`:
 | `institution` | `institution.yml` | `defaults.<key>` |
 
 The semester-wide keys (`settings.SEMESTER_KEYS`: timezone, archive grace, default materials
-repo) have no entry layer, and neither has `autosync_released_edits` (decision 0043;
+repo) have no entry layer - the zone a semester's schedule is read in (`Schedule.timezone`)
+is its effective `timezone`, and `schedule.yml` states none - and neither has `autosync_released_edits` (decision 0043;
 institution `false`): whether an edit to an already-released course folder re-ships on the
 next scheduler tick. Its reader takes only what YAML loads as a boolean, and the release engine
 reads it with `settings.effective(semester_org, "autosync_released_edits", course_org=...)`. The late pair is one rule: a layer stating either half answers both,
@@ -1249,7 +1250,10 @@ text into `reading_guide:`, the term's dates into the `semester:` block, `templa
 assignment; comments are not carried, and the preview prints only the new lines - one
 `migrate: schedule shape` commit), config layers (decision 0039: `instructors.yml` and
 `assignments.yml` `defaults:` folded into `semester.yml` - faculty's `people:` lines kept as
-written, every other default commented with what it inherits; `students.csv` + `teams.csv`
+written, every other default commented with what it inherits; `schedule.yml`'s top-level
+`timezone:` (an old name since 0.11.0, kept by the schedule shape step) moved into
+`semester.yml` `defaults: timezone`, also on a semester already folded - a zone that is not one
+or that differs from the one `semester.yml` states stops the step; `students.csv` + `teams.csv`
 split into `students.csv` with `team:` columns and `.system/roster.csv`; the pointer moved to
 `.system/course.yml`; the old files deleted - one `migrate: config layers` commit; a key with
 no new home, a value a reader refuses or a value the fold would lose stops the step; the old

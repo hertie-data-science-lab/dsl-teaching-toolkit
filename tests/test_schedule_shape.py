@@ -126,7 +126,8 @@ def test_a_live_semester_migrates_and_renders_the_rows_it_did(
     text, notes, stops = _migrated(name)
     # Only the fixture's own two-line header is a comment to say is not carried over.
     assert (notes, stops) == ([migrate_comments(2)], [])
-    sched = schedule.parse(load_yaml_lines(text))
+    # Any zone stays for the config layers step to move; read as that step leaves it.
+    sched = schedule.parse(load_yaml_lines(migrate.without_timezone(text)))
     assert sched.dropped == [] and sched.faults == []
     _TREE = _tree(name)
     new = _render(monkeypatch, tmp_path, sched)
@@ -281,7 +282,8 @@ def test_the_term_s_dates_become_the_semester_block():
         },
     }
     assert {"semester_start", "semester_end", "archive"}.isdisjoint(data)
-    sched = schedule.parse(load_yaml_lines(text))
+    assert data["timezone"] == "Europe/Berlin"  # the config layers step moves it
+    sched = schedule.parse(load_yaml_lines(migrate.without_timezone(text)))
     assert sched.dropped == [] and sched.archive.when.isoformat() == "2027-02-16"
 
 
