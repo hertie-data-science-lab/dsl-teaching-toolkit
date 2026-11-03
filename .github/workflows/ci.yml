@@ -98,11 +98,31 @@ jobs:
             --source "$RUNNER_TEMP/fixture" \
             --destination "$RUNNER_TEMP/build"
 
+      - name: Build it again with the github-pages gem (Jekyll 3.10, Liquid 4.0.4)
+        # Most live sites still carry the instructor-owned Gemfile they were seeded with,
+        # which bundles github-pages rather than the Jekyll 4 the seed now names - and
+        # Liquid 4.0.4 refuses syntax Jekyll 4 accepts (a boolean `or` inside `where_exp`
+        # took the demo site down). The checks below read the Jekyll 4 build; this one has
+        # to build, and render no Liquid error.
+        working-directory: tests/fixtures/site
+        env:
+          JEKYLL_ENV: production
+          BUNDLE_GEMFILE: ${{ github.workspace }}/tests/fixtures/site/Gemfile.github-pages
+          BUNDLE_DEPLOYMENT: "false"
+          BUNDLE_FROZEN: "false"
+        run: |
+          bundle install --jobs 4
+          bundle exec jekyll build \
+            --strict_front_matter \
+            --config "$RUNNER_TEMP/fixture/_config.yml,$RUNNER_TEMP/fixture/_config.offline.yml" \
+            --source "$RUNNER_TEMP/fixture" \
+            --destination "$RUNNER_TEMP/build-pages"
+
       - name: Fail on a Liquid error rendered into a page
-        # A syntax error fails the build above, but an unknown filter or a bad argument is
+        # A syntax error fails the builds above, but an unknown filter or a bad argument is
         # written INTO the output instead, where a green build would ship it.
         run: |
-          if grep -rn "Liquid error\|Liquid Exception\|Liquid Warning" "$RUNNER_TEMP/build"; then
+          if grep -rn "Liquid error\|Liquid Exception\|Liquid Warning" "$RUNNER_TEMP/build" "$RUNNER_TEMP/build-pages"; then
             echo "::error::a Liquid error was rendered into the built site"
             exit 1
           fi
