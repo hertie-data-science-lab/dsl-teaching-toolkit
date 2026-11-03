@@ -65,10 +65,8 @@ def _path(path: str) -> str:
 def overlaps(a: Key, b: Key) -> bool:
     """Whether two copies land in one place: the same destination repo, and one's path at,
     inside or above the other's (the root is above everything)."""
-    if a[2] != b[2]:
-        return False
     x, y = a[3], b[3]
-    return not x or not y or x == y or x.startswith(f"{y}/") or y.startswith(f"{x}/")
+    return a[2] == b[2] and (within(x, y) is not None or within(y, x) is not None)
 
 
 def stamp(at: datetime) -> str:
@@ -94,16 +92,17 @@ def _entry(
     label: str,
     k: Key,
     commit: str | None,
-    first: str | None,
-    last: str | None,
+    shipped: str | None,
     files: dict[str, str],
 ) -> dict:
+    """A copy's record entry; `shipped` None for a seeded one (time unknown). `_apply`
+    keeps an existing entry's `first_shipped_at`."""
     return {
         "entry": label,
         "source": {"repo": k[0], "path": k[1], "commit": commit},
         "dest": {"repo": k[2], "path": k[3]},
-        "first_shipped_at": first,
-        "last_shipped_at": last,
+        "first_shipped_at": shipped,
+        "last_shipped_at": shipped,
         "files": dict(sorted(files.items())),
     }
 
@@ -170,7 +169,7 @@ class Record:
         """Record a copy found already at its destination, without shipping it."""
         k = key_of(d)
         if k not in self.copies:
-            self._change(True, k, _entry(label, k, None, None, None, files))
+            self._change(True, k, _entry(label, k, None, None, files))
 
     def ship(
         self,
@@ -197,7 +196,7 @@ class Record:
             files = {**kept, **files}
         if old is not None and not refresh and old.get("files") == files:
             return
-        self._change(False, k, _entry(label, k, commit, stamp(at), stamp(at), files))
+        self._change(False, k, _entry(label, k, commit, stamp(at), files))
 
     def _rebuild(self, text: str | None) -> str | None:
         """This run's changes over a fresh read of the file (`put_file_as_read`)."""
@@ -266,12 +265,10 @@ def landed_at(org: str, repo: str, path: str) -> datetime | None:
     return when
 
 
-def undated(copies: dict[Key, dict], landed: list[Key], dateless: bool) -> list[Key]:
-    """The copies of a released row `released_at` dates by their history: on a
-    `dateless` row, each landed copy the record does not date, but a copy into the
-    repo's root (the whole repo's oldest commit is not when this row landed)."""
-    if not dateless:
-        return []
+def undated(copies: dict[Key, dict], landed: list[Key]) -> list[Key]:
+    """The copies of a `dateless` released row `released_at` dates by their history:
+    each landed copy the record does not date, but a copy into the repo's root (the
+    whole repo's oldest commit is not when this row landed)."""
     return [k for k in landed if k[3] and first_shipped(copies, k) is None]
 
 
@@ -294,5 +291,6 @@ def released_at(
     if not dateless and None in recorded:
         return None
     found = [at for at in recorded if at is not None]
-    found += [at for k in undated(copies, landed, dateless) if (at := history(k))]
+    if dateless:
+        found += [at for k in undated(copies, landed) if (at := history(k))]
     return min(found) if found else None

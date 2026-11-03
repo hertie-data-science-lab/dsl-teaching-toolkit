@@ -111,7 +111,9 @@ def source_present(src_path: str, blobs: Mapping[str, str]) -> bool:
     return src in blobs or any(p.startswith(f"{src}/") for p in blobs)
 
 
-def _outside(files: Mapping[str, str], nested: Collection[str]) -> dict[str, str]:
+def outside(files: Mapping[str, str], nested: Collection[str]) -> dict[str, str]:
+    """`files` without what sits at or under one of the `nested` sub-paths (`nested_in`):
+    those are another copy's."""
     return {
         p: s
         for p, s in files.items()
@@ -129,20 +131,20 @@ def compare(
     course now (`source_files`), `dest` the files under the copy in the branch students
     read (relative to it); None for a side that could not be read, whose kinds are not
     judged. `nested` are the sub-paths other copies land at, left out everywhere."""
-    m = _outside(manifest, nested)
+    m = outside(manifest, nested)
     out: dict[str, Drift] = {}
     if source is not None:
-        s = _outside(source, nested)
+        s = outside(source, nested)
         out[COURSE] = _edits(m, s)
         if dest is not None:
             gone = tuple(sorted(p for p in m if p not in s and p in dest))
             out[DELETED] = Drift(deleted=gone, side=tuple((p, "") for p in gone))
     if dest is not None:
-        d = _outside(dest, nested)
+        d = outside(dest, nested)
         edits = _edits(m, d)
         # Gone from the released copy, and still in the course (when that side is read):
         # a file gone from both leaves nothing for Release again to put back.
-        kept = m if source is None else _outside(source, nested)
+        kept = m if source is None else outside(source, nested)
         removed = tuple(sorted(p for p in m if p not in d and p in kept))
         out[RELEASED] = edits._replace(
             removed=removed, side=edits.side + tuple((p, "") for p in removed)

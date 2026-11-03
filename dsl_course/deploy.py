@@ -805,16 +805,19 @@ def parse_path_pairs(
     return list(zip(sources, dests))
 
 
-def _entry_deploys(sched: schedule.Schedule, label: str) -> list[Deploy] | str:
-    """Every copy of the schedule entry `label`, or the refusal to say instead."""
+def _entry_of(sched: schedule.Schedule, label: str) -> schedule.Release | str:
+    """The schedule entry `label`, or the refusal to say instead."""
     found = next((r for r in sched.releases if r.label == label), None)
     if found is None:
         return f"{label} is not an entry in this semester's schedule.yml."
-    return list(found.deploy)
+    return found
 
 
 def _record(
-    semester_org: str, sched: schedule.Schedule, entry: str, copies: list[Copied]
+    semester_org: str,
+    sched: schedule.Schedule,
+    entry: schedule.Release | None,
+    copies: list[Copied],
 ) -> int:
     """Record every copy that landed (`release_record`): each copy of `entry`, or - for a
     release of paths - each schedule copy those paths made (`covered_copies`) whose time
@@ -834,12 +837,11 @@ def _record(
         log_err(f"could not read {release_record.PATH} ({exc}) - not recorded")
         return 1
     before = set(record.copies)
-    first: list[tuple[schedule.Release, Deploy, datetime]] = []
+    first: dict[release_record.Key, tuple[schedule.Release, Deploy, datetime]] = {}
     at = datetime.now(UTC)
-    found = next((r for r in sched.releases if r.label == entry), None)
     for c in landed:
-        if entry:
-            made = [(found, c.deploy, c.files)]
+        if entry is not None:
+            made = [(entry, c.deploy, c.files)]
         else:
             made = []
             for release, planned, sub in covered_copies(sched, c.deploy):
@@ -849,10 +851,8 @@ def _record(
                 if files := release_record.inside(c.files, sub):
                     made.append((release, planned, files))
         for release, d, files in made:
-            if release_record.key_of(d) not in before and not any(
-                (r, c) == (release, d) for r, c, _at in first
-            ):
-                first.append((release, d, at))
+            if (k := release_record.key_of(d)) not in before:
+                first.setdefault(k, (release, d, at))
             # Only Release again's "also remove" removes anything (`deploy_many`).
             record.ship(
                 release.label, d, c.commit, files, at, refresh=True, removed=c.removed
@@ -860,7 +860,7 @@ def _record(
     if not record.save(semester_org):
         log_err(f"could not write {release_record.PATH} - this release is not recorded")
         return 1
-    schedule.record_release_times(semester_org, sched.timezone, first)
+    schedule.record_release_times(semester_org, sched.timezone, list(first.values()))
     return 0
 
 
@@ -920,10 +920,11 @@ def main() -> int:
         log_err("--remove-deleted goes with --entry.")
         return 1
     if args.entry:
-        deploys = _entry_deploys(sched, args.entry)
-        if isinstance(deploys, str):
-            log_err(deploys)
+        entry = _entry_of(sched, args.entry)
+        if isinstance(entry, str):
+            log_err(entry)
             return 1
+        deploys = list(entry.deploy)
     else:
         if not (args.course_source_repo and args.course_source_path):
             log_err("give --entry, or --course-source-repo and --course-source-path.")
@@ -1008,7 +1009,7 @@ def main() -> int:
             return 1
         # Never a path another copy of the plan lands at inside this one (a lab's
         # `solutions/`): those files are that copy's.
-        dests = [
+        landings = [
             (d.semester_dest_repo, deploy_dest(d))
             for r in sched.releases
             for d in r.deploy
@@ -1017,12 +1018,10 @@ def main() -> int:
         for k in map(release_record.key_of, deploys):
             if k not in record.copies:
                 continue
-            nested = divergence.nested_in((k[2], k[3]), dests)
-            remove[k] = [
-                p
-                for p in record.copies[k].get("files") or {}
-                if not any(p == n or p.startswith(f"{n}/") for n in nested)
-            ]
+            nested = divergence.nested_in((k[2], k[3]), landings)
+            remove[k] = list(
+                divergence.outside(record.copies[k].get("files") or {}, nested)
+            )
     # ONE batch, whatever the entry draws from: each repo clones once and the site syncs
     # once, as the scheduler's own release pass does.
     try:
@@ -1032,7 +1031,7 @@ def main() -> int:
     except RuntimeError as e:
         log_err(str(e))
         return 1
-    errors += _record(args.semester_org, sched, args.entry, copies)
+    errors += _record(args.semester_org, sched, entry if args.entry else None, copies)
     if errors:
         return 1
     log("done")
