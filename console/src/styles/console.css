@@ -467,6 +467,8 @@ table.grid td input:hover, table.grid td select:hover { border-color: var(--rule
 .field .hint { font-size: 12.5px; color: var(--muted); }
 .why { display: none; font-size: 12.5px; color: var(--ink-2); background: var(--sunk); border-radius: 6px; padding: 5px 9px; }
 .field:focus-within > .why { display: block; }
+/* In the op drawer a reason always shows: hiding it as focus leaves would lift the verb from under the pointer mid-click. */
+.drawer .why { display: block; }
 .row-2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
 @media (max-width: 480px) { .row-2 { grid-template-columns: minmax(0, 1fr); } }
 /* In the entry sheet each pair shares one grid: the labels on one row, sat on their boxes, the
