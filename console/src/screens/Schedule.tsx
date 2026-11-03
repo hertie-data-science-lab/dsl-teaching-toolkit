@@ -15,7 +15,7 @@ import {
 import type { Assignment, Release } from '../model/types';
 import { archive, keepFuture, releaseAdhoc, releaseAgain, releaseEarly, releaseNow, scheduledPreview } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
-import { TIMEZONES } from '../tiers/course';
+import type { OpDef } from '../ops/session';
 import { RUN_REASON } from '../tiers/runSettings';
 import { CheckLine, DueSubmit, EditFile, Md, ProblemCards, ReleaseMarks, ghUrl } from '../ui/bits';
 import { FilePicker, pathVerdict } from '../ui/FilePicker';
@@ -27,10 +27,15 @@ import { NotFound } from './Assignments';
 import { CheckNow, WithStatus, cohortScope, gradingConfig, todayOf, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 import { CONFIG_REPO } from '../model/names';
-import { RUN_KEYS, TEAM_FORMATION, TEAM_FORMATIONS, VISIBILITIES, VISIBILITY, effectiveOf, validSchedule } from '../model/settings';
+import { RUN_KEYS, TEAM_FORMATION, TEAM_FORMATIONS, VISIBILITIES, VISIBILITY, effectiveOf, validSchedule, yamlBoolean } from '../model/settings';
 import { HandOutDialog, HandOutNow, ManualWaiting, NO_LATE_WINDOW, SolutionNote, canHoldSolution, cutoffOf, draftHandout, entryBelow, forcedVisibility, waitingHandOut, waitsByHand, windowDays } from './RunSettings';
-import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO, DEFAULT_TIMEZONE, KINDS, SUBMIT_VIA_DEFAULT, penaltyError, pluralOf } from '../model/policy';
+import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO, KINDS, SUBMIT_VIA_DEFAULT, penaltyError, pluralOf } from '../model/policy';
 import { otherRepos } from './CourseIndex';
+import { DivergencePanel, releaseAgainDrift } from './Divergence';
+import { useSetAside } from './SetAside';
+import { divergenceOf, isDiverged } from '../model/divergence';
+import { gapLabel } from '../model/format';
+import { SessionDate, releasedTbc } from './SessionDate';
 
 const LABELS: Record<Block, string> = { releases: 'Releases', assignments: 'Assignments', events: 'Events' };
 
@@ -83,8 +88,8 @@ export function useSchedFile(p: CohortProps): SchedFile | null | 'loading' {
   return { text: f.text, sha: f.sha, ...parsed! };
 }
 
-/** schedule.yml after the semester's dates sheet (`drafts`), or why it would not be valid. */
-export function scheduleAfter(sf: SchedFile, drafts: SemesterDraft[]): { text: string } | { error: string } {
+/** schedule.yml after `drafts` (the semester's dates sheet, one entry), or why it would not be valid. */
+export function scheduleAfter(sf: SchedFile, drafts: Draft[]): { text: string } | { error: string } {
   const y = new YamlText(sf.text);
   for (const d of drafts) writeDraft(y, d, sf.doc);
   return validSchedule(y.toJS()) ? { text: y.text } : { error: invalidText('the schedule', validSchedule) };
@@ -469,7 +474,7 @@ function AssignmentForm({ p, d, set, errors, consoleOn, templates, tiered, hande
   const tplRoute = typeof cfg.submit_via === 'string' && cfg.submit_via in ROUTE_LABEL ? cfg.submit_via : SUBMIT_VIA_DEFAULT;
   const group = (d.group || tplGroup) === 'group';
   const route = d.submitVia || tplRoute;
-  const auto = cfg.autograde === true || String(cfg.autograde ?? '').toLowerCase() === 'yes';
+  const auto = yamlBoolean(cfg.autograde);
   // What the entry falls back to: the semester's effective defaults, as the engine resolved them (status.json).
   const below = entryBelow(p);
   const inherited: Record<string, unknown> = Object.fromEntries(RUN_KEYS.map((k) => [k, effectiveOf(below, k).value]));
@@ -566,6 +571,7 @@ function AssignmentForm({ p, d, set, errors, consoleOn, templates, tiered, hande
   );
 }
 
+/** The semester dates sheet. The timezone is the `defaults:` one (decision 0039), set in Semester settings. */
 export function SemesterForm({ d, set, errors }: { d: SemesterDraft; set: Set_<SemesterDraft>; errors: Record<string, string> }) {
   return (
     <>
@@ -573,14 +579,6 @@ export function SemesterForm({ d, set, errors }: { d: SemesterDraft; set: Set_<S
         <div class="field"><Lbl for="e-ts" hint="Everything on the site’s calendar hangs off these.">Semester starts</Lbl><input id="e-ts" type="date" value={d.start} onInput={(e) => set({ start: val(e) })} /></div>
         <div class="field"><Lbl for="e-te">Semester ends</Lbl><input id="e-te" type="date" value={d.end} onInput={(e) => set({ end: val(e) })} /><Err e={errors.end} /></div>
       </div>
-      <Fold summary="Advanced" open={!!d.tz && d.tz !== DEFAULT_TIMEZONE}>
-        <div class="field"><Lbl for="e-tz" hint="Every date in this schedule is in this timezone.">Timezone</Lbl>
-          <select id="e-tz" onChange={(e) => set({ tz: val(e) })}>
-            <option value="" selected={!d.tz}>{DEFAULT_TIMEZONE} (default)</option>
-            {[...new Set([...TIMEZONES, d.tz].filter(Boolean))].map((t) => <option value={t} selected={t === d.tz}>{t}</option>)}
-          </select>
-        </div>
-      </Fold>
     </>
   );
 }
@@ -876,7 +874,7 @@ function View(p: ReadyProps) {
       </div>
       <div class="term-meta">
         {sched?.start && sched?.end ? <span>Semester <b>{fmtDay(sched.start, tz, year)} to {fmtDay(sched.end, tz)}</b></span> : null}
-        <span>Timezone <b>{sched?.timezone ?? tz}</b></span>
+        <span>Timezone <b>{tz}</b></span>
         <span>Archive <b>{archived ? 'done: every repo is read-only' : archiveWhen ?? 'never'}</b> <ArchiveHelp org={p.cohort.org} /></span>
         <a class="textlink" href="#schedule-semester">Edit semester dates</a>
         <a class="textlink" href={archiveKey ? `#schedule-${archiveKey}` : '#schedule-new'} onClick={() => { if (!archiveKey) setDraft('new', { ...(newDraft('semester', doc) as SemesterEntryDraft), type: 'archive' }); }}>Archive settings</a>
@@ -938,6 +936,7 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
   const st = rel.state;
   const scope = cohortScope(p);
   const ref = releaseRef(rel, tz, year);
+  const aside = useSetAside({ org: p.course.org, files: p.files, write: p.course.write });
   if (!ref) {
     return (
       <>
@@ -952,9 +951,13 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
     );
   }
   // The problems that hold it back, joined on `release` (a placeholder stub's fix names its repo, not the entry).
-  const problems = releaseProblems(status, rel);
+  // A divergence holds nothing back: it has its own panel below (decision 0043).
+  const problems = releaseProblems(status, rel).filter((x) => !isDiverged(x));
+  const drift = divergenceOf(status, rel.id).filter((x) => !aside.list?.includes(x.id));
   const last = (status.operations ?? []).find((o) => o.op.startsWith('release.') && o.summary.includes(`${ident}:`));
   const dest = rel.dest?.repo || DEFAULT_DEST_REPO, destPath = rel.dest?.path || ref.source.path;
+  // A TBC entry's console release offers its session date in the result panel (decision 0043 rule 5).
+  const dated = (def: OpDef): OpDef => (rel.when === null ? { ...def, doneExtra: <SessionDate p={p} rel={rel} id="op-sd" /> } : def);
   return (
     <>
       <div class="page-head">
@@ -968,6 +971,7 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
         </div>
         <div class="actions"><a class="btn quiet" href={`#schedule-${rel.id}`}>Edit entry</a></div>
       </div>
+      {releasedTbc(rel) ? <section class="panel section"><SessionDate p={p} rel={rel} id="rd-sd" /></section> : null}
       <div class="grid-2">
         <section class="panel section">
           <h2>From and to</h2>
@@ -982,12 +986,22 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
           {problems.length ? <ProblemCards list={problems} /> : last ? <p class="o-say">{last.summary}</p> : st === 'released' ? <p>Released {fmtWhen(rel.when, tz, year)}.</p> : <p>Not released yet. It goes out {fmtDay(rel.when, tz, year)} at {fmtTime(rel.when, tz)} without you.</p>}
         </section>
       </div>
+      <div ref={aside.ref}>
+        <DivergencePanel
+          list={drift} courseOrg={p.course.org} cohortOrg={p.cohort.org}
+          onSetAside={aside.onCircle ? (x) => aside.onCircle!({ id: x.id, label: gapLabel(x.id) ?? x.text }) : undefined}
+          again={<OpButtons def={dated(releaseAgain(scope, ref, releaseAgainDrift(drift)))} label="Release again" />}
+          keep={<OpOpen def={keepFuture(scope)} cls="btn quiet" label="Keep for future semesters" />}
+        />
+        {aside.after}
+      </div>
       <section class="panel section" style="margin-top:20px">
         <h2>Actions</h2>
         <div class="actions">
-          {st === 'planned' ? <OpButtons def={releaseEarly(scope, ref)} label="Release early" />
-            : st === 'released' ? <><OpButtons def={releaseAgain(scope, ref)} label="Release again" /><OpOpen def={keepFuture(scope)} cls="btn quiet" label="Keep for future semesters" /></>
-            : st === 'late' ? <OpButtons def={releaseNow(scope, ref)} label="Release now" />
+          {st === 'planned' ? <OpButtons def={dated(releaseEarly(scope, ref))} label="Release early" />
+            : st === 'released' && drift.length ? <span class="footnote">Release again or keep the edits from Differs from the course copy, above.</span>
+            : st === 'released' ? <><OpButtons def={dated(releaseAgain(scope, ref))} label="Release again" /><OpOpen def={keepFuture(scope)} cls="btn quiet" label="Keep for future semesters" /></>
+            : st === 'late' ? <OpButtons def={dated(releaseNow(scope, ref))} label="Release now" />
             : <span class="footnote">Nothing to run until the problem above is fixed.</span>}
         </div>
         <div class="savebar"><span class="footnote">After changing the course copy, the student site may need an update.</span><a class="btn small quiet" href="#site">Update site on the Site page</a></div>

@@ -7,11 +7,15 @@ to, the source commit it was copied from, when it first and last shipped, and th
 manifest of what was copied - each file's path relative to the copy, and its blob sha.
 Repo, path and sha only: nothing here names a person.
 
+Who reads it: the scheduler and Release materials (above), the status, and the student site
+and student status, which date a released row by its copies' `first_shipped_at`
+(`released_at`).
+
 Who writes it:
 
 - the scheduled release (`scheduler`), for every copy it ships, and for a due copy that
-  has no entry but whose destination is already there - SEEDED from the destination tree,
-  `first_shipped_at: null`, and not copied (this is what upgrades a semester released into
+  has no entry but whose destination is already there - SEEDED from the destination tree
+  (for a folder, the files the course copy also has), `first_shipped_at: null`, and not copied (this is what upgrades a semester released into
   before the record existed, on its first tick, with nothing re-shipped);
 - Release materials (`deploy.main`): `--entry` (the console's Release early / now / again)
   for every copy of the entry, and a release of paths for each schedule copy those paths
@@ -25,12 +29,16 @@ than overwrite it. Nothing is written when nothing changed.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from . import records, schedule
+from . import records, run, schedule
 from .course import is_repo_root
+from .faults import parse_moment
+from .gh_commits import first_landed
 from .gh_contents import get_file_with_sha, put_file_as_read
+from .log import log
 from .schedule_plan import deploy_dest, within
 
 PATH = records.path("releases")
@@ -57,10 +65,8 @@ def _path(path: str) -> str:
 def overlaps(a: Key, b: Key) -> bool:
     """Whether two copies land in one place: the same destination repo, and one's path at,
     inside or above the other's (the root is above everything)."""
-    if a[2] != b[2]:
-        return False
     x, y = a[3], b[3]
-    return not x or not y or x == y or x.startswith(f"{y}/") or y.startswith(f"{x}/")
+    return a[2] == b[2] and (within(x, y) is not None or within(y, x) is not None)
 
 
 def stamp(at: datetime) -> str:
@@ -86,16 +92,17 @@ def _entry(
     label: str,
     k: Key,
     commit: str | None,
-    first: str | None,
-    last: str | None,
+    shipped: str | None,
     files: dict[str, str],
 ) -> dict:
+    """A copy's record entry; `shipped` None for a seeded one (time unknown). `_apply`
+    keeps an existing entry's `first_shipped_at`."""
     return {
         "entry": label,
         "source": {"repo": k[0], "path": k[1], "commit": commit},
         "dest": {"repo": k[2], "path": k[3]},
-        "first_shipped_at": first,
-        "last_shipped_at": last,
+        "first_shipped_at": shipped,
+        "last_shipped_at": shipped,
         "files": dict(sorted(files.items())),
     }
 
@@ -162,7 +169,7 @@ class Record:
         """Record a copy found already at its destination, without shipping it."""
         k = key_of(d)
         if k not in self.copies:
-            self._change(True, k, _entry(label, k, None, None, None, files))
+            self._change(True, k, _entry(label, k, None, None, files))
 
     def ship(
         self,
@@ -172,15 +179,24 @@ class Record:
         files: dict[str, str],
         at: datetime,
         refresh: bool,
+        removed: Collection[str] = (),
     ) -> None:
         """Record a copy that has landed. An entry already there is left alone when its
         manifest is unchanged, unless `refresh` (a deliberate release: Release again, a
-        hand release) - an automatic re-ship of identical files is no change."""
+        hand release) - an automatic re-ship of identical files is no change.
+
+        A copy only ever adds, so a file the earlier manifest lists and this copy did not
+        carry (deleted in the course since) is still at the destination and stays in the
+        manifest - unless this release removed it (`removed`, decision 0043 rule 6)."""
         k = key_of(d)
         old = self.copies.get(k)
+        if old is not None:
+            gone = set(removed)
+            kept = {p: s for p, s in (old.get("files") or {}).items() if p not in gone}
+            files = {**kept, **files}
         if old is not None and not refresh and old.get("files") == files:
             return
-        self._change(False, k, _entry(label, k, commit, stamp(at), stamp(at), files))
+        self._change(False, k, _entry(label, k, commit, stamp(at), files))
 
     def _rebuild(self, text: str | None) -> str | None:
         """This run's changes over a fresh read of the file (`put_file_as_read`)."""
@@ -223,3 +239,58 @@ def load(semester_org: str) -> Record:
         return Record()
     text, sha = read
     return Record(parse(text), sha)
+
+
+def first_shipped(copies: dict[Key, dict], k: Key) -> datetime | None:
+    """When copy `k` first shipped, as the record says (a stamp with no offset, as a hand
+    repair may write, is UTC); None when it holds no entry for it, or a seeded one
+    (`first_shipped_at: null`: found already there, time unknown)."""
+    at = parse_moment((copies.get(k) or {}).get("first_shipped_at"))
+    return at.replace(tzinfo=UTC) if at is not None and at.tzinfo is None else at
+
+
+@run.per_run(lambda org, repo, path: run.scope(org, repo, path))
+def landed_at(org: str, repo: str, path: str) -> datetime | None:
+    """When `path` first landed in `org/repo` (`gh_commits.first_landed`), memoised for
+    the run: a copy the record does not date. None when nothing touches it or GitHub
+    cannot say - logged, naming the path only, since that leaves a released TBC row out
+    of the Updates box."""
+    try:
+        when = first_landed(org, repo, path)
+    except (RuntimeError, ValueError) as e:  # ValueError: a date that does not parse
+        log(f"  could not tell when {repo}/{path} first landed ({e})")
+        return None
+    if when is None:
+        log(f"  no commit in {repo} touches {path}")
+    return when
+
+
+def undated(copies: dict[Key, dict], landed: list[Key]) -> list[Key]:
+    """The copies of a `dateless` released row `released_at` dates by their history:
+    each landed copy the record does not date, but a copy into the repo's root (the
+    whole repo's oldest commit is not when this row landed)."""
+    return [k for k in landed if k[3] and first_shipped(copies, k) is None]
+
+
+def released_at(
+    copies: dict[Key, dict],
+    landed: list[Key],
+    dateless: bool,
+    history: Callable[[Key], datetime | None],
+) -> datetime | None:
+    """When a released row first reached students: the earliest `first_shipped_at` over
+    the copies of it that have `landed` (decision 0043 rule 4).
+
+    A copy the record does not date (seeded, or made off the record) is dated by
+    `history` (its destination's first commit, `landed_at`) on a `dateless` row only,
+    where nothing else dates it, and never for a copy into the repo's root (the whole
+    repo's oldest commit is not when this row landed). On a dated row such a copy leaves
+    the moment unknown - None, and the row's own date stands - rather than spend a
+    history read per copy on every row of a semester released before the record."""
+    recorded = [first_shipped(copies, k) for k in landed]
+    if not dateless and None in recorded:
+        return None
+    found = [at for at in recorded if at is not None]
+    if dateless:
+        found += [at for k in undated(copies, landed) if (at := history(k))]
+    return min(found) if found else None

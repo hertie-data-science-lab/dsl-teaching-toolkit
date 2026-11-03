@@ -399,7 +399,7 @@ def teaching_contacts(faculty: dict[str, list[dict]], today: str) -> list[Contac
 def course_admin_emails(faculty: dict[str, list[dict]], today: str) -> list[str]:
     """The usable `email:` of every course admin active on `today`, in declaration order.
 
-    What `mailer.course_admin_addresses` prefers over the org secret. Never log the
+    What `mailer.course_admin_addresses` mails a course's own faults to. Never log the
     return value - an address is personal data; log a count."""
     return [
         email

@@ -12,6 +12,7 @@
     "assignment_repo_visibility",
     "archive_grace_days",
     "materials_repo",
+    "autosync_released_edits",
     "marks_per_question",
     "team_formation"
   ],
@@ -67,6 +68,14 @@
       "fault_code": "NOT_MIGRATED",
       "new": "a `semester:` entry of `type: archive`",
       "old": "archive",
+      "since": "0.11.0",
+      "where": "schedule.yml top level"
+    },
+    {
+      "cost": "its times are read in the semester's `defaults:` timezone",
+      "fault_code": "NOT_MIGRATED",
+      "new": "semester.yml defaults.timezone",
+      "old": "timezone",
       "since": "0.11.0",
       "where": "schedule.yml top level"
     },

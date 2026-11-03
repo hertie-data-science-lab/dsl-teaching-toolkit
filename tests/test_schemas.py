@@ -345,6 +345,15 @@ def test_student_console_is_an_optional_course_flag():
     assert validate({"course": {"student_console": "yes"}}, schema) != []
 
 
+@pytest.mark.parametrize("schema", ["course_schema", "semester_schema"])
+def test_autosync_is_a_boolean_default_at_course_and_semester(schema):
+    # Decision 0043 rule 2, as the console validates a save.
+    check = getattr(schemas, schema)()
+    for value, ok in ((True, True), (False, True), ("yes", False)):
+        doc = {"defaults": {"autosync_released_edits": value}}
+        assert (validate(doc, check) == []) is ok, value
+
+
 def test_the_validator_catches_what_the_schemas_forbid():
     bad = {**CONTRACT_OUTCOME, "conclusion": "maybe", "extra": 1}
     problems = validate(bad, schemas.outcome_schema())

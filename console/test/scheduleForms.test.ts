@@ -185,14 +185,15 @@ readings:
     expect(parse(save(BASE, ar).text).semester).toEqual({ archive: { type: 'archive', event_datetime: '2027-02-16' } });
   });
 
-  it('the dates sheet writes the start and end entries and the timezone', () => {
-    const t = `timezone: Europe/Berlin\nsemester:\n  start:   {type: start, event_datetime: 2026-09-07}\n  end:     {type: end,   event_datetime: 2026-12-18}\n`;
+  it('the dates sheet writes the start and end entries and no timezone (semester.yml’s, decision 0039)', () => {
+    const t = `semester:\n  start:   {type: start, event_datetime: 2026-09-07}\n  end:     {type: end,   event_datetime: 2026-12-18}\n`;
     const d = readDraft(doc(t), 'semester') as SemesterDraft;
-    expect(d).toEqual({ kind: 'semester', start: '2026-09-07', end: '2026-12-18', tz: 'Europe/Berlin' });
+    expect(d).toEqual({ kind: 'semester', start: '2026-09-07', end: '2026-12-18' });
     const y = new YamlText(t);
     writeDraft(y, { ...d, end: '2026-12-19' }, doc(t));
     expect(parse(y.text).semester.end).toEqual({ type: 'end', event_datetime: '2026-12-19' });
     expect(y.text).toContain('start:   {type: start, event_datetime: 2026-09-07}');
+    expect(y.text).not.toContain('timezone');
   });
 });
 

@@ -336,8 +336,8 @@ fan-out. A typo'd or squatted handle is an error, not an invitation into the pri
 ## The schedule
 
 Each semester's `semester-config/schedule.yml` is the single home for its timed plan. Three
-top-level blocks, each encoding a **behaviour**, plus `timezone`, `semester_start`,
-`semester_end`.
+top-level blocks, each encoding a **behaviour**, plus `semester_start`, `semester_end`. Its
+timezone is `semester.yml`'s `defaults: timezone`.
 
 ```mermaid
 flowchart LR
@@ -376,8 +376,8 @@ exam · special_event`"]
   Free private repos have no branch protection, so it cannot block the commit: instead it goes
   red and opens (or comments on) an issue assigned to the pusher, auto-closed by the next clean
   push. CI gates the same parser centrally.
-- **Times are normalised at parse.** A naive datetime is read in `timezone` (default
-  `Europe/Berlin`); an explicit offset names the same instant and is *converted into* it - so
+- **Times are normalised at parse.** A naive datetime is read in the semester's `defaults:`
+  `timezone` (default `Europe/Berlin`); an explicit offset names the same instant and is *converted into* it - so
   every datetime downstream is already the semester's own wall clock, and what the site shows is
   what it fires at.
 - **`tbc`**: `event_datetime: tbc` gives a dateless site row that can never fire; `tbc: true`

@@ -4,20 +4,19 @@
 // run setting shows its effective value and where it comes from; a save writes only the keys
 // the instructor set.
 
-import { useRef, useState } from 'preact/hooks';
+import { useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import { invalidText, useSave } from '../edit/save';
 import { YamlText, compact, deepEqual } from '../edit/yamlText';
-import { Field, SchemaForm, fieldErrors } from '../forms/Form';
+import { Field } from '../forms/Form';
 import { MODAL_TEXT_ID, Modal } from '../ui/Modal';
 import {
-  LATE_PAIR, REPO_NAME_RE, RUN_KEYS, semesterName, SOURCE_WORD, courseDefaults, effectiveOf, effectiveWord, lateWord, over, scheduleFile, semesterDefaults, semesterFile, usableBlock,
+  LATE_PAIR, REPO_NAME_RE, RUN_KEYS, semesterName, SOURCE_WORD, courseDefaults, effectiveOf, effectiveWord, lateWord, over, scheduleFile, semesterDefaults, usableBlock,
   fileValue, validSchedule, validSemesterBlocks, validSemesterFile, valueWord, type Block, type Effectives, type RunKey, type YamlFile,
 } from '../model/settings';
-import { defaultsOf, semesterInheritance, statedDefaults, withDefaults } from '../model/config';
+import { semesterInheritance, statedDefaults, withDefaults } from '../model/config';
 import { addDays, assignmentTitle, fmtDay, fmtWhen } from '../model/format';
 import { CONFIG_REPO, SEMESTER_FILE } from '../model/names';
-import { defaultsTiers } from '../tiers/course';
 import { draftErrors, newlyManual, readDraft, writeDraft, type AssignmentDraft, type Draft } from '../model/scheduleEdit';
 import { handout, type AsgRef } from '../ops/defs';
 import type { OpDef } from '../ops/session';
@@ -29,7 +28,7 @@ import { penaltyRate } from '../model/policy';
 import { round } from '../model/marks';
 import { RUN_LABEL, lateError, runTier } from '../tiers/runSettings';
 import type { FieldTier, Values } from '../tiers/types';
-import { CheckLine, EditFile, Loading } from '../ui/bits';
+import { CheckLine, Loading } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveBar } from '../ui/edit';
 import { cohortScope, gradingConfig, tzOf, yearOf } from './common';
@@ -39,11 +38,6 @@ import type { ReadyProps } from './types';
 
 /** What an assignment's own settings fall back to: the semester's effective defaults (status.json). */
 export const entryBelow = (p: Pick<ReadyProps, 'status'>): Effectives => semesterDefaults(p.status);
-
-/** An assignment's effective run settings, each with its source, as the engine resolved them (status.json). */
-export function assignmentSettings(p: Pick<ReadyProps, 'status'>, key: string): Effectives | null {
-  return p.status.assignments?.find((a) => a.slug === key)?.settings ?? null;
-}
 
 /** The semester-side name of the assignment with schedule key `key` (`schedule.semester_name`): what its mark
  *  sheet and Return marks key on. The schedule entry's `repo_name`, else the key while the schedule is read. */
@@ -109,7 +103,8 @@ export function HandOutDialog({ one, onSave, onClose }: { one: boolean; onSave: 
   );
 }
 
-const toValues = (b: Block): Values => Object.fromEntries(Object.entries(b).map(([k, v]) => [k, v === null ? undefined : v]));
+/** A `defaults:` block as form values: a null (stated empty) is unset. */
+export const toValues = (b: Block): Values => Object.fromEntries(Object.entries(b).map(([k, v]) => [k, v === null ? undefined : v]));
 
 // ------------------------------------------------------------------ the semester's defaults
 
@@ -123,30 +118,6 @@ export function defaultsLine(defaults: Effectives): string {
   return `Defaults: ${[...late, ...(size ? [`teams of ${String(size)}`] : [])].join(', ')}.`;
 }
 
-/** The Assignments page's Semester defaults button: it opens the semester's defaults, their summary as the lede, in a modal. */
-export function SemesterDefaults({ p }: { p: ReadyProps }) {
-  const f = semesterFile(p.files, p.cohort.org);
-  const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState<Values | null>(null);
-  const opener = useRef<HTMLButtonElement>(null);
-  const close = () => {
-    setOpen(false);
-    opener.current?.focus();
-  };
-  return (
-    <>
-      <button class="btn quiet" type="button" ref={opener} aria-haspopup="dialog" onClick={() => setOpen(true)}>Semester defaults</button>
-      {open ? (
-        <Modal title="Defaults for this semester" onClose={close}>
-          {f === 'loading' ? <Loading what={`Reading ${SEMESTER_FILE}`} />
-            : f === null ? <CheckLine cls="bad">Could not read {SEMESTER_FILE}.</CheckLine>
-            : <><p class="lede">{defaultsLine(entryBelow(p))}</p><DefaultsForm p={p} f={f} draft={draft} setDraft={setDraft} /></>}
-        </Modal>
-      ) : null}
-    </>
-  );
-}
-
 /** What this semester's own defaults fall back to: the course's effective values (the status's course block), else the semester's answer where it is not the semester's own. */
 export const semesterInherited = (p: Pick<ReadyProps, 'status'>): Effectives => semesterInheritance(courseDefaults(p.status), semesterDefaults(p.status));
 
@@ -154,38 +125,6 @@ export const semesterInherited = (p: Pick<ReadyProps, 'status'>): Effectives => 
 export function semesterDefaultsAfter(f: YamlFile, after: Values, inherited: Effectives): { text: string } | { error: string } {
   const text = withDefaults(f.text, statedDefaults(after), inherited);
   return validSemesterBlocks(new YamlText(text).toJS(), ['defaults']) ? { text } : { error: invalidText(SEMESTER_FILE, validSemesterFile) };
-}
-
-function DefaultsForm({ p, f, draft, setDraft }: { p: ReadyProps; f: YamlFile; draft: Values | null; setDraft: (v: Values | null) => void }) {
-  // Absent, the form edits the stub, and the edit link goes to GitHub's new-file page.
-  const exists = p.files.file(p.cohort.org, CONFIG_REPO, SEMESTER_FILE).kind !== 'absent';
-  const env = useEnv();
-  const [save, runSave, setSave] = useSave(env);
-  const before = toValues(defaultsOf(f.doc));
-  const inherited = semesterInherited(p);
-  const tiers = defaultsTiers(inherited, before);
-  const cur = draft ?? before;
-  const errors = fieldErrors(null, tiers, cur);
-  const dirty = draft !== null && !deepEqual(compact(draft), compact(before));
-  const doSave = async () => {
-    if (f.error) return;
-    if (Object.keys(errors).length) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
-    const out = semesterDefaultsAfter(f, cur, inherited);
-    if ('error' in out) return setSave({ kind: 'bad', text: out.error });
-    if (await runSave({ owner: p.cohort.org, repo: CONFIG_REPO, path: SEMESTER_FILE }, out.text, f.sha, { message: 'semester: edit the semester’s defaults, from the DSL Teaching Console', statusRepo: [p.cohort.org, CONFIG_REPO] })) setDraft(null);
-  };
-  return (
-    <>
-      <p class="footnote">Every assignment this semester runs on these unless its own page says otherwise. Left empty, the value in grey applies: the course’s default, else the institution’s. <a class="textlink" href={`?course=${p.course.org}#details`}>Change the course’s defaults</a></p>
-      {f.error ? <CheckLine cls="bad">{SEMESTER_FILE} does not parse ({f.error}); fix it with Edit the file directly.</CheckLine> : (
-        <>
-          <SchemaForm id="sd" schema={null} tiers={tiers} values={cur} onChange={(v) => { setDraft(v); setSave({ kind: 'idle' }); }} />
-          <SaveBar state={save} onSave={() => void doSave()} disabled={!dirty} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: SEMESTER_FILE, exists }} />
-        </>
-      )}
-      {f.error ? <div class="savebar"><EditFile org={p.cohort.org} repo={CONFIG_REPO} path={SEMESTER_FILE} exists={exists} /></div> : null}
-    </>
-  );
 }
 
 // ------------------------------------------------------------------ one assignment's run settings

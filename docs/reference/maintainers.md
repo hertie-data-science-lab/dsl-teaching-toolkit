@@ -100,6 +100,46 @@ Things whose *literal spelling* is depended on from outside Python:
   predates the window keeps forming teams.
   `tests/test_join_templates.py` runs the SHIPPED scanner over the writer's real output;
   keep that pairing.
+- **`release_record`'s SHAPE** (decision 0043). `semester-config/.system/releases.json` is
+  `{"copies": [...]}`, one entry per copy, keyed by `source.repo` + `source.path` +
+  `dest.repo` + `dest.path` (root = `""`): `entry` (the schedule key), `source.commit`,
+  `first_shipped_at` / `last_shipped_at` (UTC `Z`; `null` on a copy SEEDED from its
+  destination), and `files` - each copied file's path relative to the copy (a single-file
+  copy by its own name) and its blob sha, after `.releaseignore`, the denylist and a
+  withheld stub. A copy is recorded when its dest's merge moved the branch students read
+  or found it already there; never when it is held at a conflict pull request. The
+  scheduler ships a recorded copy again only under `autosync_released_edits: true`, and
+  seeds (does not ship) a due copy with no entry whose destination is present and is its
+  alone - no other due or recorded copy lands at, inside or above it
+  (`release_record.overlaps`); an overlapping one ships, a no-op merge where nothing
+  changed. That is the one upgrade path, no migration. Release materials records every
+  copy of `--entry` (Release again refreshes `files` and `last_shipped_at`) and each
+  schedule copy a release of paths made (`schedule_plan.covered_copies`), whatever its
+  planned moment - a hand release ahead of schedule is that copy's release, and its ship
+  time is written back like Release early's. `status_json._shipped` reads it first, the
+  destination tree second; the site still reads the destination for links. Readers of
+  `first_shipped_at`: the site and `student_status` date a released row by it
+  (`release_record.released_at`: the earliest over the row's own landed copies, its readings'
+  only when none landed); a copy it does not date falls back to its destination's first
+  commit (`release_record.landed_at`) on a TBC row only - a dated row then has no
+  `released_at`. Repo, path and sha only.
+  A copy only adds, so a re-copy KEEPS in `files` each earlier file it did not carry (it is
+  still at the destination) unless it removed it: `deploy_many(remove={key: [paths]})`
+  (paths relative to the copy; `deploy --entry X --remove-deleted`, the console's
+  `release.entry` `remove_deleted`) deletes, before the merge, only a path the copy's fresh
+  manifest lacks - never one the course still releases, nor one under another plan copy's destination, and never a symlink's target - and the record drops it
+  (`Copied.removed`).
+- **The engine's writes to `schedule.yml`** (faculty-owned; line surgery, never a re-dump, at
+  the sha a fresh read gave). Two writers, both in `schedule.py`: `record_handout` fills a
+  blank `handout_datetime` and moves one only to an EARLIER actual hand-out (once: a later
+  run is never earlier); `record_release_times` writes `release_datetime` on a `files:` item
+  when Release materials released the copy for the first time before its effective plan
+  (explicit, else the parse default) or with no plan (`tbc`) - one commit per run, since each
+  push to the file fans out a scoped tick, Validate schedule and a status rewrite. A flow
+  mapping is declined and logged with the line to add by hand. No `solution_datetime`
+  write-back (it would precede the late cutoff; `.system/solutions/` is the record). The
+  scheduler never writes back: a due copy is on time or late by construction. Cadence's late
+  delivery skips a copy whose record says it first shipped by its moment + `GAP_SLO`.
 - **`distribute.returned_record`'s SHAPE.** `semester-config/.system/returned/<sheet>.yml` is
   each unit's block, under the sheet's own `submissions:` / `teams:`, exactly as the sheet
   held it when the last real Return marks left every person in the unit told
@@ -208,6 +248,10 @@ Things whose *literal spelling* is depended on from outside Python:
   in `console/schemas/selection.json` and to the demo fixture's hosting
   (`console/test/fixtures/demo-hosting.json`, both checked by `tests/test_selection.py`).
   `propagate` keeps its own plumbing filter: it carries edits IN, so the denylist is not its.
+  An assignment's copies are outside it too (decision 0040 amendment): the template copy
+  (`assign.withhold_from_template`) and the solution push (`assign.push_solution`) carry exactly
+  the template's files, `tests/` and grading files included, less only what the template's own
+  `.releaseignore` names and the toolkit's release buttons (`workflows_place.NEVER_IN_STUDENT_REPOS`) - no denylist, no use-site selection, no floor.
 - **`course.UPSTREAM_BRANCH`** (`upstream`) is the toolkit's branch in every release dest,
   and the dest's DEFAULT branch is what students, the website and `propagate` read. The
   release commits onto `upstream` and merges it into the default one; a conflict aborts the
@@ -452,10 +496,12 @@ Decision 0034 (need, time, verdict), all computed by the engine so the console h
   written with `files: []` is the suggested to-do `schedule:files:<key>` (`check` `files`),
   dated by the entry. A template's brief and starter are
   needed. The semester's suggested to-dos (`semester.todo[]`) are `site:home`,
-  `schedule:archive_date` and `instructors:email` (a count, never a handle); the course
+  `schedule:archive_date`, `instructors:email` (a count, never a handle) and
+  `schedule:released_tbc:<key>` (a shown `tbc` entry whose copies have all gone out; its
+  screen is the release's, which offers the session date - decision 0043 rule 5); the course
   description is the course to-do `course:description`. Every to-do names its `check`
   (`files`, `syllabus`, `withheld`, `brief`, `starter`, `description`, `home`,
-  `archive_date`, `email`). K5 is done once the roster has a row (codes sent is the Students
+  `archive_date`, `email`, `released_tbc`). K5 is done once the roster has a row (codes sent is the Students
   tab's meter), K6 once the site repo exists.
 - **Time.** `horizon` (both files) is `{days}`, the rolling window's length, off the one
   constant `status_json.PROBLEM_HORIZON` (7 days); no tick time, so an unchanged state
@@ -478,8 +524,22 @@ Decision 0034 (need, time, verdict), all computed by the engine so the console h
   an assignment set to hand out by hand and still `declared` is
   `assignment:<key>:NOT_HANDED_OUT` at its due date (fix: the assignment's page; it
   leaves the row's `problem` flag alone, since the row's state already says it);
-  `open_course_site:` that does not parse is a `now` problem while the website is on. The
-  digest's mail ladder is a separate clock and unchanged.
+  `open_course_site:` that does not parse is a `now` problem while the website is on.
+  Decision 0043 rule 6, the divergence check (`divergence.compare`, `status_json.divergence_problems`):
+  per recorded copy the plan makes, against its `files`, `schedule:<entry>:DIVERGED_COURSE`
+  (a course blob differs or a course file was added; not raised under
+  `autosync_released_edits`), `:DIVERGED_DELETED` (a file the course no longer carries,
+  still at the destination) and `:DIVERGED_RELEASED` (a destination blob differs, a file
+  was added there, or a manifest file still in the course is gone from it: `removed`), each with `:<fp8>` = 8 hex of sha1 over the changed side's sorted
+  `(path, blob)` pairs so a set-aside id (0032) returns when that side changes again.
+  `later`, undated, `aside: true`, `fix.screen: release`, and `diverged[]` (per copy:
+  source, dest, `added` / `changed` / `deleted` / `removed`) in the private semester file only. The
+  course side is filtered as a copy is; another copy's destination inside it is left out;
+  a copy sharing its destination gets no released-side kind; a root destination's own `.github/`, denylisted paths and uncarried root stubs are not released files; a copy whose source path has gone is its source problem; an orphan record (no plan
+  copy) is logged once and not checked. The trees are the ones the status reads anyway
+  (`schedule._repo_shas`, shared with the source check; each destination's
+  `repo_path_shas`): no read of its own. The digest's mail ladder is a separate clock and
+  unchanged.
 - **Verdict.** `course.verdict` / `semester.verdict`: `fixing` (a `now`/`soon` problem;
   `problems` counts them), else `not_ready` (a needed stage open; `missing` is its
   sentence), else `ready`; `suggestions` counts open suggested items not set aside. The
@@ -510,7 +570,9 @@ level (`console/schemas/student-status.schema.json`, `tests/test_student_status.
 reads the file loosely and validates nothing against it): no roster,
 marks, handles, enrol codes or team membership (a team is its name, headcount and cap), an
 email only where `show_email: true`, a brief and shape note only once handed out, and no
-assignment with `show_on_site: false`. A key added to it is added to the allow-list first.
+assignment with `show_on_site: false`. A key added to it is added to the allow-list first
+(`rows[].released_at`, decision 0043: when a released row first reached students, the same
+moment the site writes as `released_at:`, null when nothing can say).
 Unlike `status.json` it carries one moment, `generated_at`, for the student's "Updated <age>":
 `student_status.settle` keeps the published file's moment when nothing else changed, so an
 unchanged semester still makes no commit. The console reads `/1` files too (no dates, no age).
@@ -538,7 +600,7 @@ layers above its own:
 | 2 | `central` (which ref an org runs), `repos` (existence, creation, topics, descriptions), `gh_teams` (an org's settings and its teams), `issues` (one self-updating issue, found by its EXACT title), `pulls` (one pull request per HEAD BRANCH, created or adopted), `invitations` (the bot accepts its own org invitations, from registered course orgs only) |
 | 3 | `gh_contents` (file reads and writes, seeded stubs), `workflows_render` |
 | 4 | `selection` (the one Selection rule, above `releaseignore` and `policy`), `config` (one reader per hand-edited config file: `read_course`, `read_semester`), `discovery`, `roster`/`teams`/`schedule`, `workflows_place` |
-| 5 and up | `access` (team permissions and the faculty floor), `materials` (the semester's `student_site.syllabus`, a folder's kind in the institution's kinds; the old aliases only for `migrate`), `opencourse` (the public website's `open_course_site:` block), `schedule_plan` (the rows a plan declares: one per slot of each entry, readings attached to their session's first row), `cadence` (the scheduler's driver-health and late-delivery alarms, read off its own run history), `join`, `profile_readme`, `scaffold`, `site_repo` (the Jekyll site repo both websites publish into), `site`, then the CLIs |
+| 5 and up | `access` (team permissions and the faculty floor), `materials` (the semester's `student_site.syllabus`, a folder's kind in the institution's kinds; the old aliases only for `migrate`), `opencourse` (the public website's `open_course_site:` block), `schedule_plan` (the rows a plan declares: one per slot of each entry, readings attached to their session's first row), `release_record` (the semester's record of every copy released), `cadence` (the scheduler's driver-health and late-delivery alarms, read off its own run history), `join`, `profile_readme`, `scaffold`, `site_repo` (the Jekyll site repo both websites publish into), `site`, then the CLIs |
 | grading, each above the one before | `grading_sheet` (the sheet file: shape, load and dump, merge, mark arithmetic, what holds a mark), `grading_spec` (`grading_config.yml`, its faults, the `SheetSpec` it gives), `gradebook` (the `grades-<handle>` repos, what a student is shown, the semester grades file, `distributed.csv`), `receipts` (the Submission receipts issue), `distribute` (sending marks); `team_formation` (and its lock file) sits above `grading_spec` and `gradebook`, and `grades` is only the CLI over `distribute` |
 
 `legacy` is the one module that knows old names: every parser and `migrate` reads them from
@@ -659,9 +721,9 @@ drop it; the public website neither hosts nor links its files, since it hosts by
 
 One hand-edited file per level (decision 0039), each with the same fixed `defaults:` key set:
 `timezone`, `late_window_days`, `late_penalty_per_day`, `max_team_size`,
-`assignment_repo_visibility`, `archive_grace_days`, `materials_repo`, `marks_per_question`, and
-`team_formation` from the course level down (none at the institution: absent everywhere is
-`none`, no team forms, `settings.TEAM_FORMATION_FALLBACK`).
+`assignment_repo_visibility`, `archive_grace_days`, `materials_repo`, `autosync_released_edits`,
+`marks_per_question`, and `team_formation` from the course level down (none at the institution:
+absent everywhere is `none`, no team forms, `settings.TEAM_FORMATION_FALLBACK`).
 `formats` is not a default: New assignment asks. A key resolves nearest first, per key never per
 block, and `settings.resolve` returns `(value, source)`:
 
@@ -673,7 +735,11 @@ block, and `settings.resolve` returns `(value, source)`:
 | `institution` | `institution.yml` | `defaults.<key>` |
 
 The semester-wide keys (`settings.SEMESTER_KEYS`: timezone, archive grace, default materials
-repo) have no entry layer. The late pair is one rule: a layer stating either half answers both,
+repo) have no entry layer - the zone a semester's schedule is read in (`Schedule.timezone`)
+is its effective `timezone`, and `schedule.yml` states none - and neither has `autosync_released_edits` (decision 0043;
+institution `false`): whether an edit to an already-released course folder re-ships on the
+next scheduler tick. Its reader takes only what YAML loads as a boolean, and the release engine
+reads it with `settings.effective(semester_org, "autosync_released_edits", course_org=...)`. The late pair is one rule: a layer stating either half answers both,
 the other half none. Seeds write every key, commented, with the inherited value and its source
 (`settings.defaults_skeleton`). A template's `grading_config.yml` states no run setting: one
 written there refuses the whole file as `RUN_SETTING_IN_TEMPLATE` (`grading_spec.TEMPLATE_KEYS`
@@ -716,7 +782,9 @@ Four places, in order - miss the last and every org keeps two buttons for one jo
 ## The clean break in `schedule.yml`
 
 (History. Since decision 0009, `team_formation` and `max_team_size` are each semester's
-(since 0039 on its `schedule.yml` entry), not the template's - see [Migration](#migration).)
+(since 0039 on its `schedule.yml` entry), not the template's - see [Migration](#migration).
+Since decision 0038 amendment 2 an entry may again override the template's `type` and
+`submit_via`; the paragraphs below are the 0.10 break.)
 
 `type:` and `max_team_size:` were accepted on an assignment entry and BEAT the template's
 own `grading_config.yml`. They are gone from `KNOWN_ASSIGNMENT` and from `AssignmentEntry`:
@@ -730,7 +798,7 @@ never rewrites an instructor's file - and step 1 goes BEFORE the release ships:
 
 1. **Before the promote**, add `type:` to each template's `grading_config.yml`, on its
    `solution` branch (and `team_formation:` / `max_team_size:`, where the assignment is a
-   group one, to the semester's `assignments.yml` - a template refuses run settings). On
+   group one, to the semester's run settings, then `assignments.yml` - a template refuses run settings). On
    the shipping release the schedule still wins, so this changes nothing; leave
    it until afterwards and every semester that declared `group` only in `schedule.yml` hands
    out one repo per STUDENT and its Join-team form refuses every request, so the teams
@@ -1186,7 +1254,10 @@ text into `reading_guide:`, the term's dates into the `semester:` block, `templa
 assignment; comments are not carried, and the preview prints only the new lines - one
 `migrate: schedule shape` commit), config layers (decision 0039: `instructors.yml` and
 `assignments.yml` `defaults:` folded into `semester.yml` - faculty's `people:` lines kept as
-written, every other default commented with what it inherits; `students.csv` + `teams.csv`
+written, every other default commented with what it inherits; `schedule.yml`'s top-level
+`timezone:` (an old name since 0.11.0, kept by the schedule shape step) moved into
+`semester.yml` `defaults: timezone`, also on a semester already folded - a zone that is not one
+or that differs from the one `semester.yml` states stops the step; `students.csv` + `teams.csv`
 split into `students.csv` with `team:` columns and `.system/roster.csv`; the pointer moved to
 `.system/course.yml`; the old files deleted - one `migrate: config layers` commit; a key with
 no new home, a value a reader refuses or a value the fold would lose stops the step; the old
@@ -1351,7 +1422,10 @@ live semesters; in semester `s`, `A` assignments and `R` repos (about `(A + 1) x
   is what a real release adds to its preview per semester (the dest, its grants, digests,
   re-reads after writes): 40 measured before WP-H5 (an isolated tick, 149 for a preview of
   66); the fake puts it at 5 after, an extrapolation not yet measured live. Each student who
-  pushed to an assignment whose sheet is still open adds 2.
+  pushed to an assignment whose sheet is still open adds 2. A semester with due copies
+  reads its release record once (decision 0043); a copy not in it costs one tree read of
+  its destination repo, and a tick that ships or seeds writes the record once. A tick
+  whose due copies are all recorded clones nothing.
 - A Sync membership run: `12 + sum_s (20 + stale + 2 ceil(R / 100))`, `stale` being the
   repos of students who left the roster (their invitations are read per repo).
 - A status write (a config push, a Console run, the nightly refresh): 48.

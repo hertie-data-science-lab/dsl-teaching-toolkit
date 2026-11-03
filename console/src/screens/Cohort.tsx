@@ -20,6 +20,7 @@ import { Hint } from '../ui/Hint';
 import { MoreMenu, WithStatus, cohortScope, todayOf, tzOf, useOperations, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 import { CONFIG_REPO } from '../model/names';
+import { SemesterSettingsPanel } from './SemesterSettings';
 
 export function readSchedule(p: CohortProps): Schedule | null {
   const f = p.files.file(p.cohort.org, CONFIG_REPO, 'schedule.yml');
@@ -321,7 +322,7 @@ export function semesterItems(status: Status, tiered: Tiered[], list: string[] |
       aside: todoAside(t, list),
     };
   });
-  // A set-aside gap (an empty week, decision 0032, or a release with nothing to release) has no row of its own once set aside: list it here so it can be brought back.
+  // A set-aside gap (an empty week, decision 0032, a release with nothing to release, or a released folder's divergence, decision 0043) has no row of its own once set aside: list it here so it can be brought back.
   const weeks: SetupItem[] = (list ?? []).flatMap((id) => {
     const label = gapLabel(id);
     return label ? [{ id, label, kind: 'todo' as const, need: 'suggested' as const, state: 'open' as const, aside: true }] : [];
@@ -440,7 +441,7 @@ export function AutomationHead({ heartbeat, now }: { heartbeat: CohortProps['hea
   );
 }
 
-function Overview(p: ReadyProps) {
+function Overview(p: ReadyProps & { settings?: boolean }) {
   const { status, now } = p;
   const tz = tzOf(status), year = yearOf(now, tz), today = todayOf(now, tz);
   const sched = readSchedule(p);
@@ -545,15 +546,17 @@ function Overview(p: ReadyProps) {
             <OpsList list={ops.slice(0, 3)} now={now} runRepo={`${p.course.org}/.github`} />
           </section>
         </div>
+        <SemesterSettingsPanel p={p} open={p.settings} />
       </div>
     </>
   );
 }
 
-export function CohortScreen(p: CohortProps) {
+/** The semester's Dashboard; `settings` (the `#settings` route) opens its Semester settings. */
+export function CohortScreen(p: CohortProps & { settings?: boolean }) {
   return (
     <WithStatus props={p} title="Dashboard">
-      {(r) => <Overview {...r} />}
+      {(r) => <Overview {...r} settings={p.settings} />}
     </WithStatus>
   );
 }

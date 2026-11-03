@@ -91,7 +91,7 @@ from .schedule import (
 )
 from .settings import (
     DEFAULT_FILE_KEYS,
-    INLINE_NAMES,
+    FILE_NAMES,
     RUN_KEYS,
     SOURCES,
 )
@@ -432,6 +432,20 @@ def status_schema(*, closed: bool = True) -> dict:
         },
         ("org", "stages", "stage_need", "live"),
     )
+    side = obj({"repo": _str(), "path": _str(), "branch": _str()}, ("repo", "path"))
+    paths = {"type": "array", "items": _str()}
+    diverged_copy = obj(
+        {
+            "source": side,
+            "dest": side,
+            "added": paths,
+            "changed": paths,
+            "deleted": paths,
+            # Released-side only: manifest files gone from the released copy.
+            "removed": paths,
+        },
+        ("source", "dest", "added", "changed", "deleted"),
+    )
     problem = obj(
         {
             "id": _str(),
@@ -454,6 +468,9 @@ def status_schema(*, closed: bool = True) -> dict:
             # Decision 0034: `now` (passed, or no moment), `soon` (inside `horizon`),
             # `later` (beyond it, or a deliberately undated entry).
             "bites": _enum(BITES),
+            # Decision 0043 rule 6, a DIVERGED_* problem only (the semester file's): per
+            # copy, where it is copied from and to, and its files relative to the copy.
+            "diverged": {"type": "array", "items": diverged_copy},
         },
         ("id", "scope", "stage", "text", "bites"),
     )
@@ -512,9 +529,7 @@ def status_schema(*, closed: bool = True) -> dict:
             # Where the work is handed in, in the site's one word (`course.submit_shape`).
             "submit_shape": _enum(SUBMIT_SHAPES),
             # Each run setting's effective value and the layer that gave it (`settings`).
-            "settings": obj(
-                {INLINE_NAMES.get(key, key): effective for key in RUN_KEYS}
-            ),
+            "settings": obj({FILE_NAMES.get(key, key): effective for key in RUN_KEYS}),
         },
         # The four moments are always present (null when unset), so the console can move
         # an assignment from open to late window to marking on its own clock.
@@ -602,7 +617,7 @@ def schedule_schema() -> dict:
     entry = _obj(_keys(KNOWN_ENTRY, shared))
     readings = _obj(_keys(KNOWN_READINGS, shared))
     marks_row = _obj({"event_datetime": _str(), "show_on_site": {"type": "boolean"}})
-    run = {INLINE_NAMES.get(k, k): v for k, v in _SPEC_TYPES.items() if k in RUN_KEYS}
+    run = {FILE_NAMES.get(k, k): v for k, v in _SPEC_TYPES.items() if k in RUN_KEYS}
     assignment = _obj(
         _keys(
             KNOWN_ASSIGNMENT,
@@ -736,6 +751,7 @@ def _defaults(keys) -> dict:
         "timezone": _str(),
         "archive_grace_days": {"type": "integer"},
         "materials_repo": {"type": "string", "pattern": r"^[\w.-]+$"},
+        "autosync_released_edits": {"type": "boolean"},
     }
     out = _obj(_keys(keys, types))
     out["type"] = ["object", "null"]

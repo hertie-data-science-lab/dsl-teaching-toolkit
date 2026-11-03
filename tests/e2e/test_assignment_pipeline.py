@@ -76,6 +76,7 @@ from dsl_course import (
     repos,
     roster,
     seed,
+    settings,
     team_formation,
 )
 from dsl_course.gh_teams import acting_login
@@ -176,12 +177,7 @@ class Pipeline:
 
 
 def _semester_timezone() -> ZoneInfo:
-    text = gh_contents.get_file_content(
-        SEMESTER_ORG, course.CONFIG_REPO, "schedule.yml"
-    )
-    return ZoneInfo(
-        (yaml.safe_load(text or "") or {}).get("timezone") or "Europe/Berlin"
-    )
+    return ZoneInfo(settings.instance(SEMESTER_ORG).timezone)
 
 
 def _declared_tier() -> str:

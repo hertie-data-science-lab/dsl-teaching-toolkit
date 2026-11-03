@@ -48,11 +48,13 @@ import yaml
 
 from . import (
     distribute,
+    divergence,
     gradebook,
     grading_sheet,
     grading_spec,
     policy,
     records,
+    release_record,
     roster,
     run,
     schedule,
@@ -104,12 +106,11 @@ from .gh_contents import (
     is_untouched_stub,
     line_of,
     repo_path_shas,
-    repo_tree,
     root_stub_unwritten,
     top_level,
 )
 from .gh_teams import get_team_members
-from .log import log_err, plural
+from .log import log, log_err, plural
 from .materials import (
     DEFAULT_SYLLABUS,
     PLAN_START,
@@ -274,7 +275,19 @@ class SemesterFacts:
     # `{semester-side name: when its grading sheet last changed}`; None = not known.
     sheet_changed: dict[str, datetime | None] = field(default_factory=dict)
     dest_paths: dict[str, set[str]] = field(default_factory=dict)  # release dest trees
+    # The release record's copies, by `release_record.key_of`: shipped, whatever their
+    # destination holds now; each entry's `first_shipped_at` dates its row.
+    recorded: dict[release_record.Key, dict] = field(default_factory=dict)
     dest_branches: dict[str, str] = field(default_factory=dict)  # and their branches
+    # Decision 0043 rule 6, the divergence check's inputs: each recorded copy's manifest,
+    # the files of each dest tree above, and of each source repo a recorded copy of the
+    # plan draws on (None: it could not be read), what its `.releaseignore` withholds
+    # and its default branch.
+    manifests: dict[release_record.Key, dict[str, str]] = field(default_factory=dict)
+    dest_blobs: dict[str, dict[str, str]] = field(default_factory=dict)
+    source_blobs: dict[str, dict[str, str] | None] = field(default_factory=dict)
+    source_withheld: dict[str, frozenset[str]] = field(default_factory=dict)
+    source_branches: dict[str, str] = field(default_factory=dict)
     # `{(source repo, root stub path): still the placeholder}` for every copy the plan
     # makes of a root SYLLABUS.md / README.md: the release leaves such a copy out.
     stubs: dict[tuple[str, str], bool] = field(default_factory=dict)
@@ -976,7 +989,7 @@ def number_problems(facts: SemesterFacts, now: datetime) -> list[dict]:
     released = {
         r.label
         for r in facts.sched.releases
-        if r.deploy and all(_dest_present(facts, d) for d in r.deploy)
+        if r.deploy and all(_shipped(facts, d) for d in r.deploy)
     }
     out = []
     for m in unnumbered(facts.sched):
@@ -1200,6 +1213,36 @@ def no_due_date_todo(
         )
         for key, entry in facts.sched.assignments.items()
         if entry.due_datetime is None
+    ]
+
+
+# Decision 0043 rule 5: a TBC entry released (by hand, from Actions or the CLI, or early
+# from the console) still has no session date: a quiet to-do on its release screen.
+RELEASED_STILL_TBC = "released_tbc"
+
+
+def released_tbc_todo(
+    releases: list[dict], aside: frozenset[str] = frozenset()
+) -> list[dict]:
+    """`schedule:released_tbc:<label>` for each `event_datetime: tbc` entry whose copies
+    have all gone out (`releases`: the rendered rows, state `released`): "Lab 8 is
+    released; its session date is still TBC." Its screen is the release's own, which
+    offers the date. A `show_on_site: false` entry has no session row, so no date to ask."""
+    return [
+        _todo(
+            SUGGESTED,
+            aside,
+            id=f"schedule:{RELEASED_STILL_TBC}:{r['id']}",
+            kind="schedule",
+            check=RELEASED_STILL_TBC,
+            repo=schedule.CONFIG_REPO,
+            text=f"{policy.numbered_title(r['kind'], r['number']) if r['number'] else r['id']}"
+            " is released; its session date is still TBC.",
+            screen="release",
+            entry=r["id"],
+        )
+        for r in releases
+        if r["when"] is None and r["state"] == "released" and r["show_on_site"]
     ]
 
 
@@ -1678,6 +1721,14 @@ def _dest_present(facts: SemesterFacts, d: schedule.Deploy) -> bool:
     return bool(paths) if is_repo_root(dest) else dest in paths
 
 
+def _shipped(facts: SemesterFacts, d: schedule.Deploy) -> bool:
+    """Whether copy `d` has gone out (decision 0043): the release record says so, else
+    its destination is there (a copy made before the record, or by hand off the plan).
+    A recorded copy whose destination was deleted since is still shipped: releasing it
+    again is a choice (Release again), not something the engine decides."""
+    return release_record.key_of(d) in facts.recorded or _dest_present(facts, d)
+
+
 def release_state(
     release: schedule.Release,
     facts: SemesterFacts,
@@ -1687,15 +1738,16 @@ def release_state(
 ) -> str:
     """`planned | will_be_skipped | released | late` (lifecycle, per scheduled release).
 
-    released - every copy is on the destination's default branch (whenever it got there:
-    an early release is released); late - a copy whose moment has passed is not there (a
+    released - every copy has shipped (`_shipped`: recorded, else on the destination's
+    default branch; whenever it got there: an early release is released); late - a copy
+    whose moment has passed has not shipped (a
     copy that landed and another still to come is not late); will_be_skipped - automation
     cannot perform it as written (a source not found or held back, or an entry that needs
     a number and has none); planned otherwise. An entry with nothing to copy is released
     once its moment has passed."""
-    if release.deploy and all(_dest_present(facts, d) for d in release.deploy):
+    if release.deploy and all(_shipped(facts, d) for d in release.deploy):
         return "released"
-    if any(not _dest_present(facts, d) for d in release.due_deploys(now)):
+    if any(not _shipped(facts, d) for d in release.due_deploys(now)):
         return "late"
     if faults or (release.deploy and not numbered):
         return "will_be_skipped"
@@ -1835,22 +1887,16 @@ def run_settings(spec: grading_spec.GradingSpec) -> dict[str, dict]:
     return out
 
 
-def effective_defaults(
-    course_org: str, semester_org: str = "", zone: str | None = None
-) -> dict[str, dict]:
+def effective_defaults(course_org: str, semester_org: str = "") -> dict[str, dict]:
     """Every `defaults:` key's effective value and its source (`settings.effective_defaults`)
     at the semester level, or the course level with no semester: what each settings input
-    shows as its placeholder (decision 0039 rule 2). `zone` is the zone the semester's
-    schedule is read in: one other than the cascade's is its schedule.yml's own
-    `timezone:`, the semester's word written where the dates are. `{}` when a layer
-    cannot be read: its own fault says so."""
+    shows as its placeholder (decision 0039 rule 2). `{}` when a layer cannot be read: its
+    own fault says so."""
     try:
         out = settings.effective_defaults(course_org, semester_org)
     except (Unusable, yaml.YAMLError) as exc:
         log_err(f"  ! the effective defaults could not be worked out: {exc}")
         return {}
-    if zone and zone != out["timezone"]["value"]:
-        out["timezone"] = {"value": zone, "source": "semester"}
     return out
 
 
@@ -2266,7 +2312,7 @@ def late_problems(
         moment = min(
             d.deploy_datetime or r.when
             for d in r.due_deploys(now)
-            if not _dest_present(facts, d)
+            if not _shipped(facts, d)
         )
         out.append(
             {
@@ -2296,7 +2342,7 @@ def unwritten_problems(
             path = d.course_source_path.strip("/")
             if not facts.stubs.get((d.course_source_repo, path)):
                 continue
-            if _dest_present(facts, d):
+            if _shipped(facts, d):
                 continue
             when = d.deploy_datetime or r.when
             if when is None:
@@ -2329,6 +2375,184 @@ def unwritten_problems(
             else:
                 problem[UNDATED_LATER] = True
             out.append(problem)
+    return out
+
+
+# Decision 0043 rule 6: a released copy that differs from what was released. Each kind is
+# its own problem, with its card word; the remedies are the release screen's.
+AUTOSYNC = "autosync_released_edits"
+_DIVERGED_LABEL = {
+    divergence.COURSE: "Course copy changed",
+    divergence.DELETED: "Deleted in course",
+    divergence.RELEASED: "Released copy edited",
+}
+
+
+def _files_word(n_changed: int, n_added: int, n_removed: int = 0) -> str:
+    """ "2 files changed and 1 added", "1 file added", "1 file changed, 2 added and 1
+    removed"."""
+    parts = []
+    for n, verb in ((n_changed, "changed"), (n_added, "added"), (n_removed, "removed")):
+        if n:
+            parts.append(f"{n} {verb}" if parts else f"{plural(n, 'file')} {verb}")
+    if not parts:
+        return ""
+    return ", ".join(parts[:-1]) + (" and " if len(parts) > 1 else "") + parts[-1]
+
+
+def _diverged_words(
+    kind: str, label: str, changed: int, added: int, deleted: int, removed: int = 0
+) -> tuple[str, str]:
+    """`(text, stops)` of one divergence problem."""
+    files = _files_word(changed, added, removed)
+    if kind == divergence.COURSE:
+        text = f"{label} has changed in the course since it was released: {files}."
+        stops = (
+            "Students still have the version released; release it again to give them "
+            "the change."
+        )
+        return text, stops
+    if kind == divergence.DELETED:
+        one = deleted == 1
+        text = (
+            f"{plural(deleted, 'file')} of {label} {'is' if one else 'are'} no longer "
+            f"released from the course copy (deleted, or now withheld) and "
+            f"{'is' if one else 'are'} still in the released copy."
+        )
+        them = "it" if one else "them"
+        stops = (
+            f"Students still see {them}; release it again and choose to remove {them}."
+        )
+        return text, stops
+    text = f"The released copy of {label} was edited in the semester: {files}."
+    stops = (
+        "Future semesters will not get these edits unless you keep them for future "
+        "semesters."
+    )
+    if removed:
+        stops = (
+            f"Students lack {'a file' if removed == 1 else f'{removed} files'} they "
+            f"were given; release it again to put "
+            f"{'it' if removed == 1 else 'them'} back. {stops}"
+        )
+    return text, stops
+
+
+def divergence_problems(
+    facts: SemesterFacts, autosync: bool, aside: Collection[str] = frozenset()
+) -> list[dict]:
+    """`schedule:<label>:DIVERGED_{COURSE,DELETED,RELEASED}:<fp8>` (decision 0043 rule 6),
+    one per release and kind, for each recorded copy the plan makes (`divergence.compare`
+    against its manifest). The fingerprint is over the changed side's files
+    (`divergence.fingerprint`), so a problem set aside (decision 0032: `aside`) comes back
+    only when that side changes again. Not raised: a course change when the semester
+    autosyncs released edits (it ships on the next tick); a copy whose course source has
+    no files (its source problem says so); the released-side kind for a copy that shares
+    its destination with another copy (their files cannot be told apart).
+
+    Undated and `later`: a suggestion, never a red problem. Each carries `diverged`, one
+    entry per copy with its files (relative to the copy) - repo, path and sha only. The
+    course org's public status never sees these: it carries course problems only."""
+    plan = [(r, d) for r in facts.sched.releases for d in r.deploy]
+    keys = {release_record.key_of(d) for _r, d in plan} | set(facts.manifests)
+    dests = [(k[2], k[3]) for k in keys]
+    shared = {dest for dest, n in Counter(dests).items() if n > 1}
+    found: dict[str, dict[str, list[tuple[schedule.Deploy, divergence.Drift]]]] = {}
+    seen: set[release_record.Key] = set()
+    for r, d in plan:
+        k = release_record.key_of(d)
+        if k in seen or k not in facts.manifests:
+            continue
+        seen.add(k)
+        blobs = facts.source_blobs.get(k[0])
+        unwritten = {p for (repo, p), un in facts.stubs.items() if repo == k[0] and un}
+        source = (
+            None
+            if blobs is None
+            or not divergence.source_present(d.course_source_path, blobs)
+            else divergence.source_files(
+                d.course_source_path,
+                k[3],
+                blobs,
+                facts.source_withheld.get(k[0], frozenset()),
+                unwritten,
+            )
+        )
+        dest_blobs = facts.dest_blobs.get(k[2])
+        dest = (
+            None
+            if dest_blobs is None
+            else divergence.dest_files(dest_blobs, k[3], facts.manifests[k])
+        )
+        drifts = divergence.compare(
+            facts.manifests[k], source, dest, divergence.nested_in((k[2], k[3]), dests)
+        )
+        if autosync:
+            drifts.pop(divergence.COURSE, None)
+        if (k[2], k[3]) in shared:
+            drifts.pop(divergence.RELEASED, None)
+        for kind, drift in drifts.items():
+            found.setdefault(r.label, {}).setdefault(kind, []).append((d, drift))
+    out = []
+    for label, kinds in found.items():
+        for kind in divergence.KINDS:
+            if kind not in kinds:
+                continue
+            copies = kinds[kind]
+            sides = [
+                (f"{d.semester_dest_repo}/{deploy_dest(d)}:{p}", sha)
+                for d, drift in copies
+                for p, sha in drift.side
+            ]
+            pid = f"schedule:{_slugify(label)}:{kind}:{divergence.fingerprint(sides)}"
+            if pid in aside:
+                continue
+            changed = sum(len(x.changed) for _d, x in copies)
+            added = sum(len(x.added) for _d, x in copies)
+            deleted = sum(len(x.deleted) for _d, x in copies)
+            removed = sum(len(x.removed) for _d, x in copies)
+            text, stops = _diverged_words(kind, label, changed, added, deleted, removed)
+            out.append(
+                {
+                    "id": pid,
+                    "scope": "semester",
+                    "stage": "K4",
+                    "kind": kind,
+                    "label": _DIVERGED_LABEL[kind],
+                    "release": label,
+                    "aside": True,
+                    "text": text,
+                    "stops": stops,
+                    "fix": {
+                        **_schedule_fix(facts.org, label, None),
+                        "screen": "release",
+                    },
+                    "diverged": [
+                        {
+                            "source": {
+                                "repo": d.course_source_repo,
+                                "path": release_record.key_of(d)[1],
+                                "branch": facts.source_branches.get(
+                                    d.course_source_repo, "main"
+                                ),
+                            },
+                            "dest": {
+                                "repo": d.semester_dest_repo,
+                                "path": deploy_dest(d),
+                                "branch": facts.dest_branches.get(
+                                    d.semester_dest_repo, "main"
+                                ),
+                            },
+                            "added": list(drift.added),
+                            "changed": list(drift.changed),
+                            "deleted": list(drift.deleted),
+                            "removed": list(drift.removed),
+                        }
+                        for d, drift in copies
+                    ],
+                    UNDATED_LATER: True,
+                }
+            )
     return out
 
 
@@ -2420,6 +2644,9 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
     # A late release another problem already holds back is not told twice.
     held = {p["release"] for p in problems if "release" in p}
     problems += late_problems(facts, releases, held, now)
+    defaults = effective_defaults(course.org, facts.org)
+    autosync = (defaults.get(AUTOSYNC) or {}).get("value") is True
+    problems += divergence_problems(facts, autosync, aside)
     assignments = render_assignments(facts, now)
     problems += not_handed_out_problems(facts, assignments, now)
     problems = _unique_ids(_tier(problems, now))
@@ -2437,6 +2664,7 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
     todo = semester_todo(facts, today, set_aside_ids(course.meta))
     todo += no_files_todo(facts, now, set_aside_ids(course.meta))
     todo += no_due_date_todo(facts, set_aside_ids(course.meta))
+    todo += released_tbc_todo(releases, set_aside_ids(course.meta))
     week, weeks = semester_weeks(sched.semester_start, sched.semester_end, today)
     tag = semester_of(facts.org)
     assignments = flag_assignments(assignments, problems)
@@ -2470,7 +2698,7 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
             "verdict": semester_verdict(stages, why, todo, problems),
             "todo": todo,
             "archive_date": _iso(sched.archive.when if sched.archive else None),
-            "defaults": effective_defaults(course.org, facts.org, sched.timezone),
+            "defaults": defaults,
             # Decision 0034: each cited template's first hand-out still to come here,
             # which the course tick reads to date its template problems (`gather_moments`).
             "template_moments": {repo: _iso(m.when) for repo, m in moments.items()},
@@ -2652,6 +2880,43 @@ def _returned_at(semester_org: str) -> dict[str, datetime]:
     return out
 
 
+def _gather_sources(course_org: str, facts: SemesterFacts) -> None:
+    """The course side of the divergence check (decision 0043 rule 6), for each source
+    repo a recorded copy of the plan draws on: its files, off the same one tree read the
+    source check made (`schedule.source_repo_shas`), what its `.releaseignore` withholds,
+    its default branch, and - for a whole-repo copy - whether each root stub it has left
+    out is still the placeholder. A recorded copy the plan no longer makes is listed once
+    here, repo and path only, and not checked."""
+    plan = {release_record.key_of(d) for r in facts.sched.releases for d in r.deploy}
+    orphans = sorted(k for k in facts.manifests if k not in plan)
+    if orphans:
+        log(
+            f"  release record: {plural(len(orphans), 'copy', 'copies')} no longer in "
+            f"the plan, not checked: "
+            + ", ".join(f"{k[2]}/{k[3] or '(repo root)'}" for k in orphans)
+        )
+    for repo in sorted({k[0] for k in facts.manifests if k in plan}):
+        shas = schedule.source_repo_shas(course_org, repo)
+        if shas is None:
+            facts.source_blobs[repo] = None
+            continue
+        blobs = facts.source_blobs[repo] = divergence.blobs_of(shas)
+        facts.source_withheld[repo] = schedule.source_withheld(course_org, repo, shas)
+        facts.source_branches[repo] = default_branch(course_org, repo, fallback="main")
+        for k, files in facts.manifests.items():
+            if k[0] != repo or k[1] or k not in plan:
+                continue
+            for stub in WITHHELD_ROOT_STUBS:
+                if (
+                    stub in blobs
+                    and stub not in files
+                    and (repo, stub) not in facts.stubs
+                ):
+                    facts.stubs[(repo, stub)] = root_stub_unwritten(
+                        course_org, repo, stub
+                    )
+
+
 def gather_semester(course_org: str, semester_org: str, now: datetime) -> SemesterFacts:
     """Read one semester, through the same loaders its digest issues are built by, so a
     problem here is the fault that issue lists, except an open team-formation window's
@@ -2727,7 +2992,22 @@ def gather_semester(course_org: str, semester_org: str, now: datetime) -> Semest
         if repo in facts.listing:
             branch = default_branch(semester_org, repo, fallback="main")
             facts.dest_branches[repo] = branch
-            facts.dest_paths[repo] = set(repo_tree(semester_org, repo, branch))
+            # One read for both: which paths are there, and each file's blob.
+            shas = repo_path_shas(semester_org, repo, branch)
+            facts.dest_paths[repo] = set(shas)
+            facts.dest_blobs[repo] = divergence.blobs_of(shas)
+    # The release record, off the tree already read: no read at all before the first one.
+    # A record that is not the record leaves every copy to its destination tree: the
+    # status still renders, and the scheduler's own read refuses to release on it.
+    if release_record.PATH in facts.config_paths:
+        try:
+            copies = release_record.load(semester_org).copies
+        except ValueError as exc:
+            log_err(f"  ! {semester_org}'s release record is unreadable ({exc})")
+        else:
+            facts.recorded = copies
+            facts.manifests = {k: dict(e.get("files") or {}) for k, e in copies.items()}
+            _gather_sources(course_org, facts)
     # The root stubs the plan copies, each read once: a placeholder is left out.
     for repo, path in sorted(
         {

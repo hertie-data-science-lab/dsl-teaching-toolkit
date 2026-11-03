@@ -502,6 +502,11 @@ input[aria-invalid="true"] { border-color: var(--bad); background: var(--bad-sof
 .fold > summary .cnt { font-weight: 400; color: var(--muted); font-family: var(--font-body); font-size: 13px; }
 .fold > summary .cnt.changed { color: var(--amber-ink); font-weight: 600; }
 .fold .fold-body { display: grid; gap: 14px; padding-top: 12px; }
+/* Semester settings (decision 0043): a fold's heading carries its one-line summary; the Dashboard panel lists the same lines. */
+.fold > summary .fold-line { font-weight: 400; color: var(--muted); font-family: var(--font-body); font-size: 13px; }
+.settings-lines { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 14.5px; }
+/* A released TBC entry's session date (Release detail, the run's result panel). */
+.session-date-line { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0; }
 .pts { border-collapse: collapse; font-size: 14px; width: 100%; max-width: 360px; }
 .pts td, .pts th { padding: 4px 8px 4px 0; text-align: left; }
 .pts th { font-weight: 600; font-size: 12.5px; color: var(--muted); }
@@ -524,6 +529,8 @@ input[aria-invalid="true"] { border-color: var(--bad); background: var(--bad-sof
 .upload { border: 1.5px dashed var(--rule-strong); border-radius: 10px; padding: 14px 16px; display: grid; gap: 10px; margin-bottom: 14px; background: var(--surface); }
 .diff { font-size: 13.5px; display: grid; gap: 4px; }
 .diff .plus { color: var(--ok); } .diff .chg { color: var(--amber-ink); }
+/* A released folder that differs from the course copy (decision 0043): one block per kind. */
+.divergence .div-kind { display: grid; gap: 6px; justify-items: start; margin-bottom: 12px; }
 
 /* ================= assignment ================= */
 .lifeline { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); }

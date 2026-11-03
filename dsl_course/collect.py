@@ -659,8 +659,8 @@ def local_deadline(deadline: str, tz: str | None = None) -> datetime:
     "the 15th" ran until 01:59 on the 16th in Berlin summer time: two hours of late work
     graded as on time, and the snapshot froze at the wrong instant to match.
 
-    `tz` is the schedule's `timezone` (`schedule._tz` supplies the default and tolerates an
-    unknown zone). A deadline that already carries an offset names an instant and is only
+    `tz` is the semester's zone (`Schedule.timezone`; `schedule._tz` supplies the default
+    and tolerates an unknown zone). A deadline that already carries an offset names an instant and is only
     re-expressed, never moved."""
     raw = deadline if ("T" in deadline or ":" in deadline) else f"{deadline}T23:59:59"
     dt = datetime.fromisoformat(raw)
@@ -3368,7 +3368,7 @@ def refresh_assignment_sheet(
 
 
 def _today_in_semester_tz(sched: schedule.Schedule) -> str:
-    """Today's date in the SEMESTER's timezone (schedule.yml `timezone`, default
+    """Today's date in the SEMESTER's timezone (its `defaults: timezone`, default
     Europe/Berlin) - the last-resort grading pin for an unscheduled assignment. The
     Actions runner is UTC, so its own `date.today()` can be a day behind Berlin
     (00:00-02:00 local) and pin the grading to the wrong day."""

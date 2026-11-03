@@ -7,7 +7,7 @@
 
 import { YamlText, deepEqual, isObj, obj, type Path } from '../edit/yamlText';
 import type { FileState, Files } from './files';
-import { CONFIG_REPO, COURSE_FILE, COURSE_REPO, SEMESTER_FILE } from './names';
+import { CONFIG_REPO, SEMESTER_FILE } from './names';
 import courseFileSchema from '../../schemas/course.schema.json';
 import gradingSchema from '../../schemas/grading_config.schema.json';
 import scheduleSchema from '../../schemas/schedule.schema.json';
@@ -19,6 +19,8 @@ import { validator } from './validate';
 
 export const RUN_KEYS = ['team_formation', 'max_team_size', 'late_window_days', 'late_penalty_per_day', 'visibility', 'submit_url', 'marks_per_question'] as const;
 export type RunKey = (typeof RUN_KEYS)[number];
+/** The `defaults:` keys with no entry layer (`settings.SEMESTER_KEYS`, and `autosync_released_edits`). */
+export type SemesterWideKey = 'timezone' | 'archive_grace_days' | 'materials_repo' | 'autosync_released_edits';
 export const LATE_PAIR: RunKey[] = ['late_window_days', 'late_penalty_per_day'];
 
 /** Where an effective value comes from (`settings.SOURCES`). */
@@ -65,6 +67,9 @@ export function hostOf(url: string): string {
   }
 }
 
+/** `setting_readers._boolean`: true, yes, on or 1 is on; anything else is off. */
+export const yamlBoolean = (v: unknown): boolean => (typeof v === 'boolean' ? v : ['true', 'yes', 'on', '1'].includes(String(v ?? '').trim().toLowerCase()));
+
 /**
  * The value the engine's reader for `key` reads from `v` (`setting_readers.READERS`), or
  * undefined for a value it refuses or a blank one: either states nothing, and the next layer
@@ -93,8 +98,13 @@ export function readSetting(key: string, v: unknown): unknown {
       return t.toLowerCase().startsWith('https://') && hostOf(t) && !t.includes(SETTING_PLACEHOLDER) ? t : undefined;
     }
     case 'marks_per_question':
-      // `setting_readers._boolean`: true, yes, on or 1 is on; anything else is off.
-      return typeof v === 'boolean' ? v : ['true', 'yes', 'on', '1'].includes(String(v).trim().toLowerCase());
+      return yamlBoolean(v);
+    case 'autosync_released_edits': {
+      // `settings._autosync`: what PyYAML (YAML 1.1) loads as a boolean, which takes the bare words this parser leaves as text.
+      if (typeof v === 'boolean') return v;
+      const t = String(v).trim().toLowerCase();
+      return ['true', 'yes', 'on'].includes(t) ? true : ['false', 'no', 'off'].includes(t) ? false : undefined;
+    }
     default:
       return v;
   }
@@ -102,7 +112,10 @@ export function readSetting(key: string, v: unknown): unknown {
 
 /** A form's value as the file writes it: a yes/no setting chosen from a select is a boolean, not text. */
 export function fileValue(key: string, v: unknown): unknown {
-  return key === 'marks_per_question' && typeof v === 'string' && v !== '' ? readSetting(key, v) : v;
+  if (typeof v !== 'string' || v === '') return v;
+  if (key === 'marks_per_question') return readSetting(key, v);
+  // A select's 'true' / 'false'; any other text (a hand-written `yes`) is kept as written.
+  return key === 'autosync_released_edits' && (v === 'true' || v === 'false') ? v === 'true' : v;
 }
 
 /** Whether the engine reads `v` for `key`. */
@@ -163,8 +176,8 @@ export const SOURCE_WORD: Record<Source, string> = {
   institution: 'institution default',
 };
 
-/** A run setting's value in words: "<n> days", "Students form their own". */
-export function valueWord(key: RunKey, v: unknown): string {
+/** A `defaults:` setting's value in words: "<n> days", "Students form their own". */
+export function valueWord(key: RunKey | SemesterWideKey, v: unknown): string {
   if (v === null || v === undefined || v === '') return key === 'late_penalty_per_day' ? 'no penalty' : key === 'late_window_days' ? 'no late work' : 'not set';
   switch (key) {
     case 'team_formation':
@@ -178,6 +191,7 @@ export function valueWord(key: RunKey, v: unknown): string {
     case 'max_team_size':
       return `up to ${String(v)}`;
     case 'marks_per_question':
+    case 'autosync_released_edits':
       return readSetting(key, v) ? 'on' : 'off';
     default:
       return String(v);
@@ -214,11 +228,6 @@ export function yamlFile(f: FileState, stub: string | null): YamlFile | 'loading
   const text = f.kind === 'ready' ? f.text : (stub ?? '');
   const y = new YamlText(text);
   return { text, sha: f.kind === 'ready' ? f.sha : null, doc: y.errors.length ? {} : obj(y.toJS()), error: y.errors[0] ?? null };
-}
-
-/** The course's `.github/course.yml`: there is no course without one, so a missing file is unreadable. */
-export function courseFile(files: Files, courseOrg: string): YamlFile | 'loading' | null {
-  return yamlFile(files.file(courseOrg, COURSE_REPO, COURSE_FILE), null);
 }
 
 /** The semester's `semester.yml`; a missing one reads as the stub, so the first save creates it. */

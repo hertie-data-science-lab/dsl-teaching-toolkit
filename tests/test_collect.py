@@ -115,7 +115,7 @@ def _instance_faults(block: str) -> list[str]:
     entry (`settings.inline_settings`; `visibility` spelt `assignment_repo_visibility`
     there)."""
     data = yaml.safe_load(f"a:\n{block}")["a"] or {}
-    data = {settings.INLINE_NAMES.get(k, k): v for k, v in data.items()}
+    data = {settings.FILE_NAMES.get(k, k): v for k, v in data.items()}
     dropped: list = []
     settings.inline_settings(data, "assignments.a", dropped)
     return [getattr(d, "what", str(d)) for d in dropped]

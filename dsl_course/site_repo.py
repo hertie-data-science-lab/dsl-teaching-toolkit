@@ -30,7 +30,6 @@ from .course import (
     people_by_role,
 )
 from .discovery import course_org_for_semester, list_org_repos
-from .gh_contents import load_yaml_config
 from .gh_teams import acting_login
 from .ghcli import GIT_ENV, clone, gh, git, is_missing_resource
 from .log import Summary, log, log_err, log_ok, log_step, plural
@@ -584,18 +583,6 @@ def seed_templates() -> dict[str, str]:
         for path in sorted(root.rglob("*"))
         if path.is_file()
     }
-
-
-def yaml_file(org: str, repo: str, path: str) -> dict:
-    """A YAML config file from a repo as a mapping - `{}` when it is genuinely absent or
-    empty (nothing declared: the site renders its defaults, which is correct).
-
-    A file that exists but does NOT parse - or parses to a list/scalar - raises out of
-    here (via load_yaml_config), to the per-semester isolation the callers already have. It
-    used to be coerced to `{}`, so one bad indent in a semester's semester.yml republished the
-    site with the whole teaching team's cards wiped, green - exactly the failure
-    `_team_people` next door is hardened against."""
-    return load_yaml_config(org, repo, path) or {}
 
 
 def _team_people(course_org: str, team: str) -> list[tuple[str, str, str]]:

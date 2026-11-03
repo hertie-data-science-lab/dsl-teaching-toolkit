@@ -106,7 +106,6 @@ def _parse(meta: dict, *args) -> schedule.Schedule:
 
 def test_parse_full_schedule():
     meta = {
-        "timezone": "Europe/Berlin",
         "semester_start": "2026-09-07",
         "semester_end": "2026-12-18",
         "lectures": {
@@ -279,12 +278,7 @@ def test_event_yaml_native_date_and_datetime_objects():
 
 
 def test_event_explicit_offset_keeps_its_instant_and_is_stored_in_the_semester_tz():
-    sched = parse(
-        {
-            "timezone": "Europe/Berlin",
-            "events": {"remote": {"event_datetime": "2026-12-15T14:00+00:00"}},
-        }
-    )
+    sched = parse({"events": {"remote": {"event_datetime": "2026-12-15T14:00+00:00"}}})
     when = sched.events[0].when
     assert when == datetime(2026, 12, 15, 14, 0, tzinfo=ZoneInfo("UTC"))  # same instant
     assert when.hour == 15 and when.tzinfo == BERLIN  # ...on the semester's clock (CET)
@@ -292,12 +286,25 @@ def test_event_explicit_offset_keeps_its_instant_and_is_stored_in_the_semester_t
 
 def test_event_timezone_comes_from_the_semester_setting():
     sched = parse(
+        {"events": {"e": {"event_datetime": "2026-12-15T14:00"}}},
+        settings.Instance(timezone="Pacific/Niue"),
+    )
+    assert sched.events[0].when.tzinfo == ZoneInfo("Pacific/Niue")
+
+
+def test_a_schedule_timezone_is_an_old_name_and_never_read():
+    # The ruling on decision 0039 rule 2: the zone is the semester's `defaults:` one.
+    sched = parse(
         {
             "timezone": "Pacific/Niue",
             "events": {"e": {"event_datetime": "2026-12-15T14:00"}},
         }
     )
-    assert sched.events[0].when.tzinfo == ZoneInfo("Pacific/Niue")
+    assert sched.timezone == "Europe/Berlin"
+    assert sched.events[0].when.tzinfo == BERLIN  # the event itself survives
+    (fault,) = sched.faults
+    assert (fault.field, fault.code) == ("timezone", faults_module.NOT_MIGRATED)
+    assert "semester.yml defaults.timezone" in fault.what
 
 
 def test_event_without_a_usable_date_is_dropped():
@@ -854,6 +861,17 @@ assignments:
     assert "assignments:" in out and "handout_datetime: 2026-09-22T14:05" in out
 
 
+@pytest.mark.parametrize("written", ["", " tbc", " TBC  # to fix"])
+def test_insert_handout_fills_a_blank_or_tbc_handout(written):
+    # Decision 0043 rule 3: "blank fills" - a key with no plan is filled, in place.
+    from dsl_course.schedule import _insert_handout
+
+    base = f"assignments:\n  a1:\n    handout_datetime:{written}\n    due_datetime: 2026-10-13\n"
+    out = _insert_handout(base, "a1", "2026-09-22T14:05")
+    assert out is not None and "handout_datetime: 2026-09-22T14:05" in out
+    assert out.count("handout_datetime") == 1
+
+
 def test_record_handout_round_trips_through_the_parser(monkeypatch):
     import yaml
 
@@ -877,7 +895,9 @@ def test_record_handout_round_trips_through_the_parser(monkeypatch):
             writes.append(content.decode()) or True
         ),
     )
-    S.record_handout("Semester-f2026", "assignment-1", "2026-09-22T14:05")
+    S.record_handout(
+        "Semester-f2026", "assignment-1", "2026-09-22T14:05", tz_name="Europe/Berlin"
+    )
     (new,) = writes
     sched = S.parse(yaml.safe_load(new))
     assert (
@@ -887,7 +907,9 @@ def test_record_handout_round_trips_through_the_parser(monkeypatch):
     )
     # second call sees the recorded value and is a no-op
     store["text"] = new
-    S.record_handout("Semester-f2026", "assignment-1", "2026-09-23T09:00")
+    S.record_handout(
+        "Semester-f2026", "assignment-1", "2026-09-23T09:00", tz_name="Europe/Berlin"
+    )
     assert len(writes) == 1
 
 
@@ -915,7 +937,9 @@ def test_the_plan_is_read_once_per_semester_and_a_handout_reopens_it(monkeypatch
     monkeypatch.setattr(
         gh_contents, "get_file_with_sha", lambda org, repo, path, **_kw: ("", "sha0")
     )
-    schedule.record_handout("Semester-f2026", "assignment-1", "2026-09-22T14:05")
+    schedule.record_handout(
+        "Semester-f2026", "assignment-1", "2026-09-22T14:05", tz_name="Europe/Berlin"
+    )
     schedule.load("Semester-f2026")
     assert len(reads) == 3, "the memo survived a write to schedule.yml"
 
@@ -977,7 +1001,6 @@ def test_a_wellformed_schedule_is_untouched_by_the_yaml_guard(monkeypatch, capsy
     from dsl_course import schedule as S
 
     good = (
-        "timezone: Europe/Berlin\n"
         "semester:\n"
         "  start: {type: start, event_datetime: 2026-09-07}\n"
         "labs:\n"
@@ -1160,11 +1183,11 @@ def test_the_repos_are_repo_name_else_assignment_and_the_number():
 
 
 def test_an_unknown_timezone_is_reported_rather_than_silently_swapped():
-    sched = parse(
-        {"timezone": "Europe/Berlyn", "events": {"e": {"event_datetime": "2026-11-03"}}}
-    )
+    instance = settings.parse_instance("defaults:\n  timezone: Europe/Berlyn\n")
+    sched = parse({"events": {"e": {"event_datetime": "2026-11-03"}}}, instance)
     assert len(sched.dropped) == 1
-    assert "Europe/Berlyn" in sched.dropped[0] and "Europe/Berlin" in sched.dropped[0]
+    assert "Europe/Berlyn" in sched.dropped[0]
+    assert sched.timezone == "Europe/Berlin"  # the next layer answers
     assert sched.events[0].when == date(2026, 11, 3)  # the event itself survives
 
 
@@ -1174,7 +1197,8 @@ def test_a_fallen_back_timezone_is_the_zone_the_plan_keeps(written):
     # builds a ZoneInfo from `timezone` (status.json, student-status.json, the console's
     # Intl zone) raised on it - so a semester's status stopped updating with no reason
     # given. A YAML int or list raised in `parse` itself, redding every tick.
-    sched = parse({"timezone": written})
+    text = yaml.safe_dump({"defaults": {"timezone": written}})
+    sched = parse({}, settings.parse_instance(text))
     assert sched.timezone == "Europe/Berlin"
     ZoneInfo(sched.timezone)  # what every reader does with it
     assert len(sched.dropped) == (0 if written == "Europe/Berlin " else 1)
@@ -1850,7 +1874,9 @@ def test_record_handout_says_so_loudly_when_the_file_shape_defeats_the_edit(
         lambda *a, **k: pytest.fail("must not write into a shape it cannot parse"),
     )
 
-    S.record_handout("Semester-f2026", "assignment-1", "2026-09-22T14:05")
+    S.record_handout(
+        "Semester-f2026", "assignment-1", "2026-09-22T14:05", tz_name="Europe/Berlin"
+    )
 
     err = capsys.readouterr().err
     assert "could NOT record the assignment-1 handout" in err
@@ -1873,7 +1899,9 @@ def test_record_handout_says_so_loudly_when_the_write_itself_fails(monkeypatch, 
     )
     monkeypatch.setattr("dsl_course.gh_contents.put_file", lambda *a, **k: False)
 
-    S.record_handout("Semester-f2026", "assignment-1", "2026-09-22T14:05")
+    S.record_handout(
+        "Semester-f2026", "assignment-1", "2026-09-22T14:05", tz_name="Europe/Berlin"
+    )
 
     err = capsys.readouterr().err
     assert "could NOT record the assignment-1 handout" in err
@@ -1924,7 +1952,9 @@ def test_record_handout_never_reverts_an_edit_made_while_it_ran(monkeypatch):
     monkeypatch.setattr(S, "get_file_with_sha", moving_read)
     monkeypatch.setattr(gh_contents, "get_file_with_sha", moving_read)
 
-    S.record_handout("Semester-f2026", "assignment-1", "2026-09-22T14:05")
+    S.record_handout(
+        "Semester-f2026", "assignment-1", "2026-09-22T14:05", tz_name="Europe/Berlin"
+    )
 
     (final,) = writes
     assert "assignment-2" in final, "a concurrent edit was reverted"
@@ -1976,8 +2006,8 @@ def _org(monkeypatch, trees: dict[str, list[str]]):
     monkeypatch.setattr(schedule, "default_branch", lambda org, repo: "main")
     monkeypatch.setattr(
         schedule,
-        "repo_tree",
-        lambda org, repo, branch, kind="": tuple(trees.get(repo, [])),
+        "repo_path_shas",
+        lambda org, repo, branch: dict.fromkeys(trees.get(repo, []), "0" * 40),
     )
 
 
@@ -2119,10 +2149,10 @@ def test_an_unreadable_repo_is_never_reported_as_missing(monkeypatch, capsys):
     monkeypatch.setattr(schedule, "repo_missing", lambda org, repo: False)
     monkeypatch.setattr(schedule, "default_branch", lambda org, repo: "main")
 
-    def boom(org, repo, branch, kind="", **_kw):
+    def boom(org, repo, branch):
         raise RuntimeError("API rate limit exceeded")
 
-    monkeypatch.setattr(schedule, "repo_tree", boom)
+    monkeypatch.setattr(schedule, "repo_path_shas", boom)
     s = Schedule(releases=[_release("lecture-1", "lectures/01_a")])
     assert [f.line() for f in schedule.source_faults(s, "Course-Org")] == []
     # ...and it says so, so a silent tick is not mistaken for a clean one.
@@ -2136,10 +2166,10 @@ def test_only_a_404_says_the_repo_is_not_there(monkeypatch):
     monkeypatch.setattr(schedule, "repo_missing", lambda org, repo: False)
     monkeypatch.setattr(schedule, "default_branch", lambda org, repo: "main")
 
-    def unreadable(org, repo, branch, kind=""):
+    def unreadable(org, repo, branch):
         raise RuntimeError("HTTP 403: rate limit")
 
-    monkeypatch.setattr(schedule, "repo_tree", unreadable)
+    monkeypatch.setattr(schedule, "repo_path_shas", unreadable)
     s = Schedule(releases=[_release("lecture-1", "lectures/01_a", repo="gone")])
     assert schedule.source_faults(s, "Course-Org") == []
     # A positive 404, and the same plan reports the repo.
@@ -2154,11 +2184,11 @@ def test_one_tree_fetch_per_repo_however_many_deploys(monkeypatch):
     monkeypatch.setattr(schedule, "repo_missing", lambda org, repo: False)
     monkeypatch.setattr(schedule, "default_branch", lambda org, repo: "main")
 
-    def counting(org, repo, branch, kind=""):
+    def counting(org, repo, branch):
         calls.append(repo)
-        return ("lectures", "lectures/01_a")
+        return {"lectures": "t", "lectures/01_a": "b"}
 
-    monkeypatch.setattr(schedule, "repo_tree", counting)
+    monkeypatch.setattr(schedule, "repo_path_shas", counting)
     s = Schedule(releases=[_release(f"lecture-{i}", "lectures/01_a") for i in range(6)])
     schedule.source_faults(s, "Course-Org")
     # ONE fetch for the whole repo: files and folders come back together, and six deploys
@@ -2201,7 +2231,7 @@ def test_the_severity_ladder_scales_with_distance_to_the_fire_time(monkeypatch):
 # a comment between entries, and a release with TWO deploys - which is the case a scan of
 # the text got wrong, giving the second one the first one's line.
 _LOCATABLE = """\
-timezone: Europe/Berlin
+# the plan
 
 lectures:
   # week one

@@ -125,7 +125,7 @@ export function parseSearch(search: string): Selection {
 
 /** Screens that need a semester, and the nav key each lights up. */
 export const COHORT_SCREENS: Record<string, string> = {
-  dashboard: 'dashboard', schedule: 'schedule', release: 'schedule', assignments: 'assignments', assignment: 'assignments',
+  dashboard: 'dashboard', settings: 'dashboard', schedule: 'schedule', release: 'schedule', assignments: 'assignments', assignment: 'assignments',
   students: 'students', roster: 'students', instructors: 'instructors', site: 'site', operations: 'operations',
 };
 /** Screens about the course. */

@@ -2,7 +2,7 @@
 its effective value comes from.
 
 Every value is read by its key's reader (`setting_readers`, and `_SEMESTER_READERS` for
-the three semester-wide keys).
+the semester-wide keys).
 
 The cascade (decision 0039): a key of the fixed `defaults:` set resolves nearest-first,
 per key never per block, through four layers -
@@ -15,7 +15,8 @@ per key never per block, through four layers -
 and `effective` says which layer answered. A RUN setting (`RUN_KEYS`: how teams form, the
 team cap, the late pair, the repo visibility, the external submit link, whether returned
 marks show each question) has all four; a SEMESTER-WIDE one (`SEMESTER_KEYS`: timezone,
-archive grace, the default materials repo) has no entry layer. `team_formation` has no
+archive grace, the default materials repo; and `autosync_released_edits`, which the release
+engine reads through `effective`) has no entry layer. `team_formation` has no
 institution layer (decision 0039 rule 2). The late pair is ONE rule: whichever layer
 states either half states both, the other half absent meaning none (`_late_pair`). The
 files spell `visibility` as `assignment_repo_visibility` (`FILE_NAMES`). A template's
@@ -72,13 +73,13 @@ RUN_KEYS = (
     "marks_per_question",
 )
 LATE_PAIR = ("late_window_days", "late_penalty_per_day")
-# The defaults that hold for a whole semester: no entry states them.
+# The defaults that hold for a whole semester, which the semester's plan is read with: no
+# entry states them.
 SEMESTER_KEYS = ("timezone", "archive_grace_days", "materials_repo")
 # A setting as the files spell it: `visibility` says whose the repos are, so a file writes
 # `assignment_repo_visibility` (decision 0038 rule 9, 0039 rule 2).
 FILE_NAMES = {"visibility": "assignment_repo_visibility"}
-INLINE_NAMES = FILE_NAMES
-INLINE_KEYS = tuple(INLINE_NAMES.get(key, key) for key in RUN_KEYS)
+INLINE_KEYS = tuple(FILE_NAMES.get(key, key) for key in RUN_KEYS)
 # What a course's or a semester's `defaults:` block may state, by setting: the fixed key
 # set (`policy.DEFAULT_KEYS`) and `team_formation`. The submit link is one assignment's.
 DEFAULT_KEYS = (
@@ -89,6 +90,7 @@ DEFAULT_KEYS = (
     "visibility",
     "archive_grace_days",
     "materials_repo",
+    "autosync_released_edits",
     "marks_per_question",
     "team_formation",
 )
@@ -99,7 +101,7 @@ DEFAULT_FILE_KEYS = tuple(FILE_NAMES.get(key, key) for key in DEFAULT_KEYS)
 # migration writes the old institutional `self_select` into each semester that relied on it.
 TEAM_FORMATION_FALLBACK = NO_TEAMS
 
-_REPO_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
+REPO_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
 # `semester.yml`'s blocks (decision 0039).
 SEMESTER_BLOCKS = (PEOPLE_BLOCK, DEFAULTS_BLOCK, STUDENT_SITE_BLOCK)
 
@@ -132,7 +134,7 @@ def _grace_days(value: object, where: str, dropped: list[str]) -> int | None:
 
 def _materials_repo(value: object, where: str, dropped: list[str]) -> str | None:
     name = str(value or "").strip()
-    if _REPO_NAME.match(name):
+    if REPO_NAME.match(name):
         return name
     dropped.append(
         Dropped(
@@ -145,10 +147,30 @@ def _materials_repo(value: object, where: str, dropped: list[str]) -> str | None
     return None
 
 
+def _autosync(value: object, where: str, dropped: list[str]) -> bool | None:
+    """`autosync_released_edits` (decision 0043): true = an edit to an already-released
+    course folder re-ships on the next scheduler tick; false = a release is one copy at its
+    time. Strictly what the YAML loader gives as a boolean (it reads an unquoted `yes` / `on`
+    as one); any other value - a quoted `"yes"`, `1` - states nothing, unlike
+    `setting_readers._boolean`, which would switch re-shipping on a guess. No entry layer:
+    the release engine reads `effective(semester_org, key, course_org=...)`."""
+    if isinstance(value, bool):
+        return value
+    dropped.append(
+        Dropped(
+            where,
+            "autosync_released_edits",
+            f"`autosync_released_edits: {value}` is not true or false - ignored",
+        )
+    )
+    return None
+
+
 _SEMESTER_READERS = {
     "timezone": _timezone,
     "archive_grace_days": _grace_days,
     "materials_repo": _materials_repo,
+    "autosync_released_edits": _autosync,
 }
 
 
@@ -183,24 +205,11 @@ def inline_settings(entry: Mapping, where: str, dropped: list) -> dict:
     """The run settings written on one schedule.yml assignment entry, each through its
     reader, keyed by setting (`visibility`, not its inline spelling). A value its reader
     refuses is None (the next layer answers) and is recorded in `dropped`."""
-    spelt = {inline: key for key, inline in INLINE_NAMES.items()}
+    spelt = {inline: key for key, inline in FILE_NAMES.items()}
     raw = {
         spelt.get(str(k), str(k)): v for k, v in entry.items() if str(k) in INLINE_KEYS
     }
     return read_settings(raw, RUN_KEYS, where, dropped)
-
-
-def inline_blocks(assignments: object) -> dict[str, dict]:
-    """`{schedule key: its inline run settings}` out of a schedule.yml `assignments:`
-    block as YAML gives it; values a reader refuses are left out (the schedule's own parse
-    reports them)."""
-    if not isinstance(assignments, dict):
-        return {}
-    return {
-        str(key): _usable(inline_settings(entry, f"assignments.{key}", []))
-        for key, entry in assignments.items()
-        if isinstance(entry, dict)
-    }
 
 
 SOURCES = ("entry", "semester", "course", "institution")
@@ -499,7 +508,7 @@ def parse_legacy_assignments(text: str | None) -> Instance:
         values, extra = block(raw, where, RUN_KEYS, block_lines.get(str(slug)))
         blocks[str(slug)] = values
         dest = str(extra.get("semester_dest_repo") or "").strip()
-        if dest and _REPO_NAME.match(dest):
+        if dest and REPO_NAME.match(dest):
             dests[str(slug)] = dest
         elif "semester_dest_repo" in extra and extra["semester_dest_repo"] is not None:
             faults.append(

@@ -10,14 +10,20 @@ A `Selection` is four optional keys, the same wherever one is written:
 
 Three uses: the materials repo's `.releaseignore` (exclude only: what students never get),
 `semester.yml student_site.host` (viewable copies on the PUBLIC semester site) and
-`course.yml open_course_site.publish` (the open-courseware site). Every outbound copy asks
-`select` (a path list) or `deny` (a `copytree` walk), which compose the same layers in a
-fixed order:
+`course.yml open_course_site.publish` (the open-courseware site). Every outbound copy of
+materials - a release, a hosted copy, the open site - asks `select` (a path list) or `deny`
+(a `copytree` walk), which compose the same layers in a fixed order:
 
     1. the institution denylist (`DENYLIST`, `CLUTTER`): never copied anywhere
     2. the repo's `.releaseignore` files
     3. the use-site selection
     4. `institution.yml selection_floor` for that use: a hard limit, applied last
+
+An assignment's copies are outside the Selection (decision 0040 amendment): the template
+copy (`assign.withhold_from_template`) and the solution push (`assign.push_solution`) carry
+exactly the template's files, tests and grading files included, less only what the
+template's own `.releaseignore` names and the toolkit's own release buttons
+(`workflows_place.NEVER_IN_STUDENT_REPOS`). No denylist, use-site selection or floor applies.
 
 A key left out is "no filter on that key"; a use fills its own defaults in first
 (`with_defaults`). A path with no kind matches no `kinds:` list: it is still released, but
@@ -73,6 +79,14 @@ CLUTTER = frozenset(
     }
 )
 _CLUTTER_FOLDED = frozenset(n.casefold() for n in CLUTTER)
+
+# Skipped when the WHOLE repo is released (`course_source_path: /`), and only at the repo
+# root: `.github` holds the Release workflows and their bot-token wiring - the toolkit's
+# plumbing, never released. Naming a path inside it explicitly still releases it: that is
+# what "give me everything" means, not a ban. (`.system/`, `.git` and clutter are the
+# institution denylist's, at every depth: `selection`.)
+ROOT_RELEASE_EXCLUDED = (".github",)
+
 
 # The uses that take a floor, by their `institution.yml selection_floor` key.
 HOST = "student_site_host"
@@ -369,6 +383,25 @@ def swept(path: str) -> bool:
     """Whether a path BELOW the one a copy names has a denylisted component (clutter
     aside): what a folder copy leaves behind (`schedule`'s warning)."""
     return any(is_denied(p) for p in path.split("/") if p)
+
+
+def release_use(whole_repo: bool, stubs: Iterable[str] = ()) -> Selection:
+    """A release's use-site selection (decision 0040 rule 3): nothing more for a subpath
+    copy; for a WHOLE-repo copy, the root `.github/` and each root stub still carrying the
+    scaffold placeholder (`stubs`, decided per release).
+
+    Skipping the COPY rather than deleting the result afterwards is what keeps a withheld
+    stub from touching the destination: a delete-after-copy stages a deletion of whatever
+    the semester repo already had there. `divergence` filters a tree listing through the
+    same selection, so what it compares is what a copy would take."""
+    if not whole_repo:
+        return Selection()
+    return Selection(
+        exclude=(
+            *(f"/{name}/" for name in ROOT_RELEASE_EXCLUDED),
+            *(f"/{stub}" for stub in sorted(stubs)),
+        )
+    )
 
 
 # ------------------------------------------------------------------------ the defaults

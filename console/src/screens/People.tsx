@@ -8,8 +8,8 @@ import { saveSteps, useSave, type SaveState, type Step } from '../edit/save';
 import { YamlText, render } from '../edit/yamlText';
 import { placeBlock } from '../model/config';
 import { Field, SchemaForm, fieldErrors } from '../forms/Form';
-import { assignmentTitle, fmtShort } from '../model/format';
-import { ROLE_WORD, ROSTER_HEADER, ROSTER_SAVE_NOTE, SYSTEM_HEADER, TEAM_PREFIX, parseInstructors, pendingSummary, roleSplit, sameHandle, systemByEmail, teamColumn, type Person } from '../model/people';
+import { assignmentTitle, fmtShort, plural } from '../model/format';
+import { ROLE_WORD, ROSTER_HEADER, ROSTER_SAVE_NOTE, SYSTEM_HEADER, TEAM_PREFIX, instructorsOf, pendingSummary, roleSplit, sameHandle, systemByEmail, teamColumn, type Person } from '../model/people';
 import { checkAccess, sendCodes, syncMembershipUrl } from '../ops/defs';
 import { OpOpen } from '../ops/Panel';
 import { PERSON, PHOTO_DIR, displayOnly, photoError, photoName } from '../tiers/people';
@@ -226,9 +226,9 @@ function Students(p: ReadyProps) {
               <>
                 <div class="diff">
                   <b>{upload.pending.name} against the current roster</b>
-                  <span class="plus">+ {d.added.length} row{d.added.length === 1 ? '' : 's'} added{d.added.length ? ': each gets a code on save' : ''}</span>
-                  <span class="chg">~ {d.changed.length} row{d.changed.length === 1 ? '' : 's'} changed (name or role)</span>
-                  <span class={d.removed.length ? 'chg' : ''}>− {d.removed.length} row{d.removed.length === 1 ? '' : 's'} removed{d.removed.length ? `, ${d.removed.filter((r) => sysOf(r).github_handle).length} of them joined` : ''}</span>
+                  <span class="plus">+ {plural(d.added.length, 'row')} added{d.added.length ? ': each gets a code on save' : ''}</span>
+                  <span class="chg">~ {plural(d.changed.length, 'row')} changed (name or role)</span>
+                  <span class={d.removed.length ? 'chg' : ''}>− {plural(d.removed.length, 'row')} removed{d.removed.length ? `, ${d.removed.filter((r) => sysOf(r).github_handle).length} of them joined` : ''}</span>
                   <span>{d.unchanged} unchanged.</span>
                 </div>
                 <div class="actions">
@@ -344,10 +344,10 @@ function Instructors(p: ReadyProps) {
   const file = p.files.file(p.cohort.org, CONFIG_REPO, SEMESTER_FILE);
   // A semester with no semester.yml yet edits the stub: the first person added creates it.
   const sf = semesterFile(p.files, p.cohort.org);
-  const text = sf && sf !== 'loading' ? sf.text : null;
-  const people = text !== null ? parseInstructors(text) : [];
-  const y = text !== null ? new YamlText(text) : null;
-  const doc = (y && !y.errors.length ? y.toJS() : null) as { people?: Record<string, unknown>[] } | null;
+  // Parsed once, by `semesterFile`: this renders on every keystroke in the person modal.
+  const y = sf && sf !== 'loading' ? sf : null;
+  const doc = (y && !y.error ? y.doc : null) as { people?: Record<string, unknown>[] } | null;
+  const people = instructorsOf(doc?.people);
   // By position, not handle: display-only entries have none.
   const rawOf = (i: number) => ((Array.isArray(doc?.people) ? doc.people : [])[i] ?? {}) as Record<string, unknown>;
   const st = status.staff;
@@ -358,12 +358,12 @@ function Instructors(p: ReadyProps) {
   const target = { owner: p.cohort.org, repo: CONFIG_REPO, path: SEMESTER_FILE };
 
   const write = async (mutate: (t: YamlText) => void, what: string) => {
-    if (!y || y.errors.length || !sf || sf === 'loading') return false;
-    const t = new YamlText(sf.text);
+    if (!y || y.error) return false;
+    const t = new YamlText(y.text);
     // Not checked against the exported schema: a display-only person (a name, no handle) is one
     // the schema's required keys refuse, and the engine reads it (`displayOnly`).
     mutate(t);
-    return runSave(target, t.text, sf.sha, { message: `instructors: ${what}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] });
+    return runSave(target, t.text, y.sha, { message: `instructors: ${what}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] });
   };
   const saveForm = async () => {
     if (!editing || !env) return;
@@ -414,7 +414,7 @@ function Instructors(p: ReadyProps) {
         {file.kind === 'loading' ? <Loading what={`Reading ${SEMESTER_FILE}`} /> : null}
         {file.kind === 'absent' ? <p class="footnote">There is no {SEMESTER_FILE} yet: adding a person creates it.</p> : null}
         {file.kind === 'error' ? <CheckLine cls="bad">Could not read {SEMESTER_FILE}: {file.message}</CheckLine> : null}
-        {y && y.errors.length ? <CheckLine cls="bad">{SEMESTER_FILE} does not parse ({y.errors[0]}); fix it with Edit the file directly.</CheckLine> : null}
+        {y && y.error ? <CheckLine cls="bad">{SEMESTER_FILE} does not parse ({y.error}); fix it with Edit the file directly.</CheckLine> : null}
         {people.length ? (
           <div class="table-wrap">
             <table class="grid" style="min-width:880px">

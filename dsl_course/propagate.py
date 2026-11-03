@@ -53,7 +53,7 @@ from typing import NamedTuple
 
 from . import pulls, schedule
 from .course import PROPOSAL_BRANCH_PREFIX, UPSTREAM_BRANCH, is_repo_root
-from .deploy import ROOT_RELEASE_EXCLUDED, _resolve_within
+from .deploy import _resolve_within
 from .fs import Deny, copy_tree
 from .ghcli import GIT_ENV, clone, git
 from .log import (
@@ -69,7 +69,7 @@ from .log import (
 from .records import SYSTEM_DIR
 from .schedule import Deploy
 from .schedule_plan import deploy_dest
-from .selection import is_clutter
+from .selection import ROOT_RELEASE_EXCLUDED, is_clutter
 
 
 def branch_for(semester_org: str) -> str:
@@ -128,7 +128,7 @@ def due_deploys(semester_org: str, now: datetime) -> list[Deploy]:
 
 def _deny(path: Path, clone_root: Path) -> Deny:
     """The copy filter for one end of a propagate: `.git` and clutter at every depth, and
-    for a WHOLE repo the root's plumbing (`deploy.ROOT_RELEASE_EXCLUDED` and `.system/`),
+    for a WHOLE repo the root's plumbing (`selection.ROOT_RELEASE_EXCLUDED` and `.system/`),
     so what a release refuses to ship as plumbing a propagate refuses to carry back. The
     `.github` a semester repo has holds nothing but toolkit workflows, and `.system/` is
     the course org describing itself.

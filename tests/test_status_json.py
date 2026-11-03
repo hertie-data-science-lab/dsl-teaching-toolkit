@@ -22,6 +22,7 @@ from dsl_course import (
     ghcli,
     grading_sheet,
     grading_spec,
+    release_record,
     releaseignore,
     roster,
     scaffold,
@@ -47,7 +48,6 @@ BERLIN = ZoneInfo("Europe/Berlin")
 NOW = datetime(2026, 9, 23, 9, 0, tzinfo=UTC)
 
 SCHEDULE = """\
-timezone: Europe/Berlin
 semester:
   start: {type: start, event_datetime: 2026-09-07}
   end: {type: end, event_datetime: 2026-12-18}
@@ -576,6 +576,78 @@ def test_release_states_follow_the_destination():
     )
 
 
+def _recorded(label: str) -> dict:
+    """The release record holding every copy of entry `label` (decision 0043)."""
+    release = next(r for r in _sched().releases if r.label == label)
+    return {release_record.key_of(d): {} for d in release.deploy}
+
+
+def test_a_recorded_copy_has_shipped_whatever_its_destination_holds_now():
+    # Fire-once: a copy the record holds was released, even if its folder was deleted from
+    # the semester repo since. Releasing it again is somebody's choice (Release again).
+    after_s5 = datetime(2026, 10, 9, 9, 0, tzinfo=UTC)
+    doc = _render(
+        semester=_semester(dest_paths={"materials": set()}, recorded=_recorded("s3")),
+        now=after_s5,
+    )
+    states = {r["id"]: r["state"] for r in doc["releases"]}
+    assert states == {"s3": "released", "s5": "late"}
+    late = [p["release"] for p in doc["problems"] if p["kind"] == "LATE"]
+    assert late == ["s5"]
+
+
+def test_a_released_tbc_entry_is_a_suggested_todo_on_its_release_screen():
+    # Decision 0043 rule 5: released by hand (Actions, the CLI) with its session still
+    # TBC - a quiet to-do that opens the release, which offers the date.
+    sched = _sched(
+        SCHEDULE.replace(
+            "    event_datetime: 2026-09-24T10:00\n", "    event_datetime: tbc\n"
+        )
+    )
+    doc = _render(semester=_semester(sched=sched, recorded=_recorded("s3")))
+    (todo,) = [t for t in doc["semester"]["todo"] if t.get("check") == "released_tbc"]
+    assert todo["id"] == "schedule:released_tbc:s3"
+    assert todo["text"] == "Lecture 3 is released; its session date is still TBC."
+    assert (todo["screen"], todo["entry"], todo["need"]) == (
+        "release",
+        "s3",
+        "suggested",
+    )
+    # A TBC entry not released yet, or a dated one released, is no such to-do.
+    plain = _render(semester=_semester(sched=sched, dest_paths={"materials": set()}))
+    assert not [
+        t for t in plain["semester"]["todo"] if t.get("check") == "released_tbc"
+    ]
+    dated = _render(semester=_semester(recorded=_recorded("s3")))
+    assert not [
+        t for t in dated["semester"]["todo"] if t.get("check") == "released_tbc"
+    ]
+    # Off the site (`show_on_site: false`): no session row, so no date to ask for.
+    silent = _sched(
+        SCHEDULE.replace(
+            "    event_datetime: 2026-09-24T10:00\n",
+            "    event_datetime: tbc\n    show_on_site: false\n",
+        )
+    )
+    off = _render(semester=_semester(sched=silent, recorded=_recorded("s3")))
+    assert not [t for t in off["semester"]["todo"] if t.get("check") == "released_tbc"]
+
+
+def test_a_copy_with_no_record_has_shipped_when_its_destination_is_there():
+    doc = _render(now=datetime(2026, 9, 25, 9, 0, tzinfo=UTC))
+    assert next(r for r in doc["releases"] if r["id"] == "s3")["state"] == "released"
+
+
+def test_an_entry_with_no_session_whose_copy_is_recorded_holds_nothing_back():
+    sched = _sched(SCHEDULE.replace("    session: 3\n", ""))
+    facts = _semester(sched=sched, dest_paths={}, recorded=_recorded("s3"))
+    (problem,) = [
+        p for p in status_json.number_problems(facts, NOW) if p["kind"] == "NO_SESSION"
+    ]
+    assert "release" not in problem
+    assert problem["stops"] == "Its rows show no number until then."
+
+
 def test_a_release_with_one_copy_landed_and_one_to_come_is_not_late():
     sched = _sched(
         SCHEDULE.replace(
@@ -692,7 +764,6 @@ def test_an_archived_semester_is_not_live_and_asks_for_no_archive_date():
 def test_this_week_runs_from_local_midnight_for_seven_days():
     sched = _sched(
         """\
-timezone: Europe/Berlin
 events:
   e0:
     title: starts the week
@@ -1043,7 +1114,7 @@ def test_semester_weeks_before_during_and_after_the_semester():
 def test_the_semester_block_carries_its_start_and_end():
     semester = _render()["semester"]
     assert (semester["start"], semester["end"]) == ("2026-09-07", "2026-12-18")
-    bare = _render(semester=_semester(sched=_sched("timezone: Europe/Berlin\n")))
+    bare = _render(semester=_semester(sched=_sched("")))
     assert (bare["semester"]["start"], bare["semester"]["end"]) == (None, None)
 
 
@@ -1293,6 +1364,9 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
         lambda org, repo, branch: (
             {"course.yml": "c0ffee"}
             if repo == ".github"
+            # A release destination: one read answers its paths and its files.
+            else {"lectures": "7ree"}
+            if repo == "materials"
             else {"schedule.yml": "5c4ed", ".system/outcomes/release.entry.json": "0u7"}
         ),
     )
@@ -1320,9 +1394,6 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
     )
     monkeypatch.setattr(
         status_json.teams, "load", lambda org, faults=None, known=None: {}
-    )
-    monkeypatch.setattr(
-        status_json, "repo_tree", lambda org, repo, branch: ("lectures",)
     )
     # A materials repo is read by its top and its top folders' tops, never its whole
     # tree.
@@ -1360,7 +1431,7 @@ def test_collect_semester_walks_every_read_end_to_end(monkeypatch):
 def test_every_render_validates_against_the_exported_schema():
     # WP1's `console/schemas/status.schema.json` is what the console reads the file by.
     healthy = _render(semester=_semester(students=[_student("ada"), _student("bob")]))
-    archived = _semester(sched=_sched("timezone: Europe/Berlin\n"), people=None)
+    archived = _semester(sched=_sched(""), people=None)
     archived.listing["semester-config"] = repo_row("semester-config", archived=True)
     for doc in (
         _render(*_contract_scenario()),
@@ -1408,7 +1479,7 @@ def _many_faults() -> list[ConfigFault]:
         faults,
     )
     faults += _sched(
-        "timezone: Europe/Berlin\nlectures:\n  s1:\n    event_datetime: someday\n"
+        "lectures:\n  s1:\n    event_datetime: someday\n"
         "    files:\n      - from_course_repo: x\n        from_path: y\n"
     ).faults
     faults.append(header_fault("students.csv", ["github_handle"]))
@@ -1826,7 +1897,6 @@ def test_students_without_a_team_are_a_problem_only_once_the_window_shuts():
 # ------------------------------------------------------------ explicit numbers (0020)
 
 UNNUMBERED = """\
-timezone: Europe/Berlin
 lectures:
   lecture-3:
     session: 3
@@ -1886,7 +1956,7 @@ def test_an_entry_with_no_number_is_a_problem_dated_at_what_it_stops():
     assert guest["fix"]["path"] == "schedule.yml"
     assert guest["fix"]["entry"] == "guest"
     assert guest["fix"]["screen"] == "schedule"
-    assert guest["fix"]["line"] == 10
+    assert guest["fix"]["line"] == 9
     project = problems["number:assignment:project"]
     assert project["when"] == "2026-10-20T10:00:00+02:00"
     assert project["stops"] == "The hand out on Tue 20 Oct will be skipped."
@@ -2957,7 +3027,6 @@ if __name__ == "__main__":
 # ------------------------------------------------------------------ empty weeks
 
 THREE_WEEKS = """\
-timezone: Europe/Berlin
 semester:
   start: {type: start, event_datetime: 2026-10-05}
   end: {type: end, event_datetime: 2026-10-23}
@@ -3003,7 +3072,6 @@ def test_the_weeks_are_the_semesters_own_counted_from_its_first_day():
     # A Wednesday start: week 1 is Wed 7 to Tue 13 Oct, which the Monday release falls in;
     # week 2, Wed 14 to Tue 20, has nothing. The id names that week's Monday.
     text = """\
-timezone: Europe/Berlin
 semester:
   start: {type: start, event_datetime: 2026-10-07}
   end: {type: end, event_datetime: 2026-10-20}
@@ -3026,7 +3094,6 @@ def test_a_week_already_begun_is_not_raised():
 
 
 WEEKLY = """\
-timezone: Europe/Berlin
 semester:
   start: {type: start, event_datetime: 2026-10-05}
   end: {type: end, event_datetime: 2026-10-16}
@@ -3081,7 +3148,7 @@ def _twelve_weeks(readings_weeks: int) -> list[str]:
         for n in range(1, readings_weeks + 1)
     )
     text = (
-        "timezone: Europe/Berlin\nsemester:\n"
+        "semester:\n"
         "  start: {type: start, event_datetime: 2026-10-05}\n"
         f"  end: {{type: end, event_datetime: 2026-12-25}}\nlectures:\n{lectures}"
         + (f"readings:\n{readings}" if readings else "")
@@ -3139,7 +3206,6 @@ def test_a_set_aside_empty_week_is_not_raised():
 # ------------------------------------------------------------ no files yet
 
 NO_FILES = """\
-timezone: Europe/Berlin
 semester:
   start: {type: start, event_datetime: 2026-10-05}
   end: {type: end, event_datetime: 2026-12-18}
@@ -3275,7 +3341,6 @@ def test_an_assignment_carries_its_semester_side_name():
 # ------------------------------------------------------------------ slots
 
 SLOTS = """\
-timezone: Europe/Berlin
 semester:
   start: {type: start, event_datetime: 2026-10-05}
   end: {type: end, event_datetime: 2026-10-16}

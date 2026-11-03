@@ -20,6 +20,7 @@ from dsl_course import (
     discovery,
     ghcli,
     grading_spec,
+    release_record,
     roster,
     selection,
     settings,
@@ -1615,7 +1616,7 @@ def test_a_released_tbc_row_is_announced_when_its_files_first_landed(
     }
     asked: list[tuple[str, str, str]] = []
     monkeypatch.setattr(
-        site,
+        release_record,
         "first_landed",
         lambda org, repo, path: asked.append((org, repo, path)) or landed[path],
     )
@@ -1646,7 +1647,7 @@ def test_an_unreleased_tbc_row_asks_no_history_and_is_not_announced(
     def never(*_a):
         raise AssertionError("an unreleased row has no landing to ask about")
 
-    monkeypatch.setattr(site, "first_landed", never)
+    monkeypatch.setattr(release_record, "first_landed", never)
     plan = _plan(monkeypatch, tmp_path, _tbc_lecture("lectures/09_week-9"))
     row = plan.collections["_lectures"]["lecture-9.md"]
     assert "unreleased: true\n" in row and "dateless: true\n" in row
@@ -1664,7 +1665,7 @@ def test_a_released_tbc_row_github_cannot_date_stays_out_of_the_box(
     def fails(org, repo, path):
         raise error
 
-    monkeypatch.setattr(site, "first_landed", fails)
+    monkeypatch.setattr(release_record, "first_landed", fails)
     plan = _plan(
         monkeypatch,
         tmp_path,
@@ -1696,7 +1697,9 @@ def test_a_released_tbc_row_is_dated_by_its_own_copies_before_its_readings(
         "lectures/09_week-9": datetime(2026, 10, 26, 9, 0, tzinfo=ZoneInfo("UTC")),
         "readings/09_week-9": datetime(2026, 10, 4, 8, 0, tzinfo=ZoneInfo("UTC")),
     }
-    monkeypatch.setattr(site, "first_landed", lambda org, repo, path: landed[path])
+    monkeypatch.setattr(
+        release_record, "first_landed", lambda org, repo, path: landed[path]
+    )
     sched = _tbc_lecture("lectures/09_week-9")
     sched.releases.append(
         Release(
@@ -1711,6 +1714,122 @@ def test_a_released_tbc_row_is_dated_by_its_own_copies_before_its_readings(
     row = plan.collections["_lectures"]["lecture-9.md"]
     assert "announce: true\n" in row and "dateless: true\n" in row
     assert date_line in row
+
+
+def _recorded(monkeypatch, *copies: tuple[Deploy, str | None]) -> None:
+    """The semester's release record holds `copies`, each with its first ship time
+    (None: seeded, found already there)."""
+    text = release_record.dump(
+        {
+            k: {
+                "entry": "x",
+                "source": {"repo": k[0], "path": k[1], "commit": None},
+                "dest": {"repo": k[2], "path": k[3]},
+                "first_shipped_at": at,
+                "last_shipped_at": at,
+                "files": {},
+            }
+            for d, at in copies
+            for k in [release_record.key_of(d)]
+        }
+    )
+    monkeypatch.setattr(
+        release_record,
+        "get_file_with_sha",
+        lambda org, repo, path: (text, "s") if path == release_record.PATH else None,
+    )
+
+
+def _no_history(*_a):
+    raise AssertionError("the record dates this row: no history read")
+
+
+def test_a_released_tbc_row_is_dated_by_the_record_before_any_history(
+    monkeypatch, tmp_path
+):
+    # Decision 0043 rule 4: the copy's recorded ship time is the row's moment - the
+    # Updates box's `date:` and the student console's `released_at` - with no history read.
+    monkeypatch.setattr(release_record, "first_landed", _no_history)
+    sched = _tbc_lecture("lectures/09_week-9")
+    _recorded(monkeypatch, (sched.releases[0].deploy[0], "2026-11-05T08:00:00Z"))
+    plan = _plan(
+        monkeypatch,
+        tmp_path,
+        sched,
+        trees={"materials": ("lectures/09_week-9/slides.pdf",)},
+    )
+    row = plan.collections["_lectures"]["lecture-9.md"]
+    assert "date: 2026-11-05T09:00:00\n" in row
+    assert "released_at: 2026-11-05T09:00:00\n" in row
+    assert "dateless: true\n" in row and "announce: true\n" in row
+
+
+def test_a_seeded_tbc_copy_falls_back_to_when_its_files_first_landed(
+    monkeypatch, tmp_path
+):
+    # Seeded (`first_shipped_at: null`: released before the record): the history dates it.
+    landed = datetime(2026, 10, 27, 13, 49, tzinfo=ZoneInfo("UTC"))
+    monkeypatch.setattr(release_record, "first_landed", lambda org, repo, path: landed)
+    sched = _tbc_lecture("lectures/09_week-9")
+    _recorded(monkeypatch, (sched.releases[0].deploy[0], None))
+    plan = _plan(
+        monkeypatch,
+        tmp_path,
+        sched,
+        trees={"materials": ("lectures/09_week-9/slides.pdf",)},
+    )
+    row = plan.collections["_lectures"]["lecture-9.md"]
+    assert "date: 2026-10-27T14:49:00\n" in row and "announce: true\n" in row
+    assert "released_at: 2026-10-27T14:49:00\n" in row
+
+
+@pytest.mark.parametrize(
+    ("at", "released_at"),
+    [
+        # Recorded: the moment it shipped, beside its own date.
+        ("2026-10-30T09:00:00Z", "released_at: 2026-10-30T10:00:00\n"),
+        # Not dated by the record: no history read for a dated row, and no `released_at` -
+        # the student console sorts it by its own date.
+        (None, None),
+    ],
+)
+def test_a_released_dated_row_carries_its_recorded_ship_time(
+    monkeypatch, tmp_path, at, released_at
+):
+    monkeypatch.setattr(release_record, "first_landed", _no_history)
+    sched = Schedule(
+        releases=[
+            Release(
+                "lecture-8",
+                datetime(2026, 11, 2, 10, 0),
+                deploy=[_copy("lectures/08_week-8")],
+                kind="lecture",
+                number=8,
+            )
+        ]
+    )
+    _recorded(monkeypatch, (sched.releases[0].deploy[0], at))
+    plan = _plan(
+        monkeypatch,
+        tmp_path,
+        sched,
+        trees={"materials": ("lectures/08_week-8/slides.pdf",)},
+    )
+    row = plan.collections["_lectures"]["lecture-8.md"]
+    assert "date: 2026-11-02T10:00:00\n" in row and "announce" not in row
+    if released_at:
+        assert released_at in row
+    else:
+        assert "released_at" not in row
+
+
+def test_an_unreleased_row_has_no_released_at(monkeypatch, tmp_path):
+    sched = _tbc_lecture("lectures/09_week-9")
+    _recorded(monkeypatch, (sched.releases[0].deploy[0], "2026-11-05T08:00:00Z"))
+    row = _plan(monkeypatch, tmp_path, sched).collections["_lectures"]["lecture-9.md"]
+    # Recorded, but nothing in the semester: not released, so neither moment.
+    assert "unreleased: true\n" in row
+    assert "released_at" not in row and "\ndate:" not in row
 
 
 def test_events_render_as_their_declared_types(monkeypatch, tmp_path):
@@ -2051,26 +2170,6 @@ def _bad_indent_error() -> yaml.YAMLError:
     except yaml.YAMLError as exc:
         return exc
     raise AssertionError("expected that YAML to be malformed")
-
-
-def test_yaml_file_raises_on_a_malformed_file_rather_than_wiping_what_it_feeds(
-    monkeypatch,
-):
-    # A semester's semester.yml with one bad indent used to parse to `{}` - "nothing declared" -
-    # and republish the site with every teaching-team card gone, green.
-    err = _bad_indent_error()
-    monkeypatch.setattr(
-        site_repo, "load_yaml_config", lambda *a, **_kw: (_ for _ in ()).throw(err)
-    )
-    with pytest.raises(yaml.YAMLError):
-        site_repo.yaml_file("Semester-f2026", "semester-config", "semester.yml")
-
-
-def test_yaml_file_reads_an_absent_file_as_nothing_declared(monkeypatch):
-    monkeypatch.setattr(site_repo, "load_yaml_config", lambda *a, **_kw: None)
-    assert (
-        site_repo.yaml_file("Semester-f2026", "semester-config", "semester.yml") == {}
-    )
 
 
 def test_main_reports_a_malformed_config_as_one_line_not_a_traceback(

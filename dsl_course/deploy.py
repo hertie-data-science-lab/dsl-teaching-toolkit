@@ -43,11 +43,12 @@ from __future__ import annotations
 import shutil
 import sys
 import tempfile
+from collections.abc import Collection, Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import NamedTuple
 
-from . import pulls, release_record, schedule, site
+from . import divergence, pulls, release_record, schedule, site
 from .access import (
     COURSE_TEAM_ACCESS,
     grant_faculty,
@@ -91,15 +92,8 @@ from .schedule_plan import (
     refuse_unnumbered,
     unnumbered_release,
 )
-from .selection import Selection
 from .selection import deny as selection_deny
-
-# Skipped when the WHOLE repo is released (`course_source_path: /`), and only at the repo
-# root: `.github` holds the Release workflows and their bot-token wiring - the toolkit's
-# plumbing, never released. Naming a path inside it explicitly still releases it: that is
-# what "give me everything" means, not a ban. (`.system/`, `.git` and clutter are the
-# institution denylist's, at every depth: `selection`.)
-ROOT_RELEASE_EXCLUDED = (".github",)
+from .selection import release_use
 
 
 def _warn_withheld_stub(course_org: str, repo: str, path: str) -> None:
@@ -148,24 +142,6 @@ def _resolve_within(base: Path, rel: str) -> Path | None:
         return base_r
     target = (base / rel.strip("/")).resolve()
     return target if target.is_relative_to(base_r) else None
-
-
-def _release_use(whole_repo: bool, stubs: frozenset[str] = frozenset()) -> Selection:
-    """A release's use-site selection (decision 0040 rule 3): nothing more for a subpath
-    copy; for a WHOLE-repo copy, the root `.github/` and each root stub still carrying the
-    scaffold placeholder (`stubs`, decided per release).
-
-    Skipping the COPY rather than deleting the result afterwards is what keeps a withheld
-    stub from touching the destination: a delete-after-copy stages a deletion of whatever
-    the semester repo already had there."""
-    if not whole_repo:
-        return Selection()
-    return Selection(
-        exclude=(
-            *(f"/{name}/" for name in ROOT_RELEASE_EXCLUDED),
-            *(f"/{stub}" for stub in sorted(stubs)),
-        )
-    )
 
 
 class Dest(NamedTuple):
@@ -472,12 +448,14 @@ class Copied(NamedTuple):
     """One copy `deploy_many` made: the Deploy, the source commit it was copied from, its
     manifest (each copied file's path relative to the copy - a single file by its
     destination name - and blob sha: what `.releaseignore`, the denylist and a withheld
-    stub left), and its dest's outcome (`_merge_and_push`)."""
+    stub left), its dest's outcome (`_merge_and_push`), and the files it removed from
+    the destination (`deploy_many`'s `remove`)."""
 
     deploy: Deploy
     commit: str
     files: dict[str, str]
     outcome: str
+    removed: tuple[str, ...] = ()
 
     @property
     def landed(self) -> bool:
@@ -519,11 +497,34 @@ def _copy_listed(srcp: Path, destp: Path, deny) -> dict[str, str]:
     return files
 
 
+def _remove_dropped(
+    destp: Path, files: dict[str, str], paths: Iterable[str]
+) -> list[str]:
+    """Delete from a folder copy's destination each of `paths` (relative to the copy) that
+    the copy no longer carries - never one in its fresh manifest `files`, never one outside
+    the destination. The path itself is unlinked, never what a symlink there points at.
+    Answers the paths removed, which the commit on `upstream` stages."""
+    removed = []
+    base = destp.resolve()
+    for rel in sorted(set(paths)):
+        parts = rel.split("/")
+        if rel in files or not rel or rel.startswith("/") or ".." in parts:
+            continue
+        target = destp / rel
+        if not target.parent.resolve().is_relative_to(base):
+            continue
+        if target.is_symlink() or target.is_file():
+            target.unlink()
+            removed.append(rel)
+    return removed
+
+
 def deploy_many(
     course_org: str,
     semester_org: str,
     deploys: list[Deploy],
     sync: bool = True,
+    remove: Mapping[release_record.Key, Collection[str]] | None = None,
 ) -> Batch:
     """Apply a batch of Deploy copies, cloning each unique source and dest repo ONCE.
 
@@ -536,7 +537,12 @@ def deploy_many(
     `copies` says, per copy applied, what it copied and its dest's outcome - a copy that
     could not be applied, or was withheld whole, is not among them. `sync` runs a single
     website sync at the end when `changed` (callers batching several release kinds pass
-    sync=False and sync once themselves)."""
+    sync=False and sync once themselves).
+
+    `remove` (decision 0043 rule 6, Release again's "also remove"): per copy, by its record
+    key, paths relative to the copy to delete from its destination before the merge - each
+    only when the copy no longer carries it (`_remove_dropped`), so a file the course still
+    releases is never removed. A folder copy only."""
     deploys = [d for d in deploys if d]
     if not deploys:
         return Batch(0, False, [])
@@ -544,7 +550,7 @@ def deploy_many(
     errors = 0
     changed = False
     # Per copy applied: (deploy, source commit, manifest); its outcome comes from its dest.
-    applied: list[tuple[Deploy, str, dict[str, str]]] = []
+    applied: list[tuple[Deploy, str, dict[str, str], tuple[str, ...]]] = []
     outcomes: dict[str, str] = {}
     with tempfile.TemporaryDirectory() as work:
         root = Path(work)
@@ -669,7 +675,7 @@ def deploy_many(
                         srcp,
                         destp,
                         selection_deny(
-                            src_root, use=_release_use(srcp == src_root, withheld)
+                            src_root, use=release_use(srcp == src_root, withheld)
                         ),
                     )
                 elif is_withheld_stub(
@@ -696,8 +702,17 @@ def deploy_many(
                 errors += 1
                 continue
             log_ok(f"+ {d.semester_dest_repo}/{dest_rel or '(repo root)'}")
+            removed: list[str] = []
+            if remove and destp.is_dir():
+                removed = _remove_dropped(
+                    destp, files, remove.get(release_record.key_of(d), ())
+                )
+                for rel in removed:
+                    log_ok(
+                        f"- {d.semester_dest_repo}/{dest_rel}/{rel}".replace("//", "/")
+                    )
             touched.add(d.semester_dest_repo)
-            applied.append((d, commits[d.course_source_repo], files))
+            applied.append((d, commits[d.course_source_repo], files, tuple(removed)))
 
         # 4. one commit on `upstream` per dest, then merge it into the branch students
         # read. Every CLONED dest, not just the ones this run copied into: a run whose
@@ -741,21 +756,27 @@ def deploy_many(
             changed = changed or outcomes[repo] == RELEASED
 
     if sync and changed:
-        # site.sync_site RAISES on a genuine tree/team read failure - one semester's
-        # site-sync failure must be logged and counted (making the release non-zero), not
-        # an unhandled traceback that aborts the batch.
-        try:
-            if site.sync_site(course_org, semester_org) != 0:
-                log_err("site sync incomplete after release")
-                errors += 1
-        except Exception as exc:
-            log_err(f"site sync failed after release: {exc}")
-            errors += 1
+        errors += _sync_site(course_org, semester_org)
     copies = [
-        Copied(d, commit, files, outcomes.get(d.semester_dest_repo, FAILED))
-        for d, commit, files in applied
+        Copied(d, commit, files, outcomes.get(d.semester_dest_repo, FAILED), removed)
+        for d, commit, files, removed in applied
     ]
     return Batch(errors, changed, copies)
+
+
+def _sync_site(course_org: str, semester_org: str) -> int:
+    """The website sync after a release, as an error count. site.sync_site RAISES on a
+    genuine tree/team read failure - one semester's site-sync failure must be logged and
+    counted (making the release non-zero), not an unhandled traceback that aborts the
+    batch."""
+    try:
+        if site.sync_site(course_org, semester_org) != 0:
+            log_err("site sync incomplete after release")
+            return 1
+    except Exception as exc:
+        log_err(f"site sync failed after release: {exc}")
+        return 1
+    return 0
 
 
 def _items(spec: str) -> list[str]:
@@ -790,23 +811,29 @@ def parse_path_pairs(
     return list(zip(sources, dests))
 
 
-def _entry_deploys(sched: schedule.Schedule, label: str) -> list[Deploy] | str:
-    """Every copy of the schedule entry `label`, or the refusal to say instead."""
+def _entry_of(sched: schedule.Schedule, label: str) -> schedule.Release | str:
+    """The schedule entry `label`, or the refusal to say instead."""
     found = next((r for r in sched.releases if r.label == label), None)
     if found is None:
         return f"{label} is not an entry in this semester's schedule.yml."
-    return list(found.deploy)
+    return found
 
 
 def _record(
-    semester_org: str, sched: schedule.Schedule, entry: str, copies: list[Copied]
+    semester_org: str,
+    sched: schedule.Schedule,
+    entry: schedule.Release | None,
+    copies: list[Copied],
 ) -> int:
     """Record every copy that landed (`release_record`): each copy of `entry`, or - for a
-    release of paths - each schedule copy those paths made (`covered_copies`) whose time
-    has come or is TBC; a path the schedule does not copy, and a copy still due later,
-    stay unrecorded (the scheduler ships that one at its time, with what is current
-    then). A deliberate release, so each recorded copy's manifest and `last_shipped_at`
-    are refreshed. Returns the error count."""
+    release of paths - each schedule copy those paths made (`covered_copies`), whatever
+    its planned moment: a hand release ahead of schedule IS that copy's release (decision
+    0043 rule 1), so the scheduler does not copy it again at its time. A path the
+    schedule does not copy stays unrecorded. A deliberate release, so each recorded
+    copy's manifest and `last_shipped_at` are refreshed. A copy recorded here for the
+    first time that beat its plan, or had none, has its ship time written into
+    schedule.yml (`schedule.record_release_times`); one the record already had is a
+    Release again and writes nothing. Returns the error count."""
     landed = [c for c in copies if c.landed]
     if not landed:
         return 0
@@ -815,20 +842,29 @@ def _record(
     except (RuntimeError, ValueError) as exc:
         log_err(f"could not read {release_record.PATH} ({exc}) - not recorded")
         return 1
+    before = set(record.copies)
+    first: dict[release_record.Key, tuple[schedule.Release, Deploy, datetime]] = {}
     at = datetime.now(UTC)
     for c in landed:
-        if entry:
-            record.ship(entry, c.deploy, c.commit, c.files, at, refresh=True)
-            continue
-        for release, planned, sub in covered_copies(sched, c.deploy):
-            moment = planned.deploy_datetime or release.when
-            if moment is not None and moment > at:
-                continue  # its own time still to come: the schedule ships it then
-            if files := release_record.inside(c.files, sub):
-                record.ship(release.label, planned, c.commit, files, at, refresh=True)
+        if entry is not None:
+            made = [(entry, c.deploy, c.files)]
+        else:
+            made = [
+                (release, planned, files)
+                for release, planned, sub in covered_copies(sched, c.deploy)
+                if (files := release_record.inside(c.files, sub))
+            ]
+        for release, d, files in made:
+            if (k := release_record.key_of(d)) not in before:
+                first.setdefault(k, (release, d, at))
+            # Only Release again's "also remove" removes anything (`deploy_many`).
+            record.ship(
+                release.label, d, c.commit, files, at, refresh=True, removed=c.removed
+            )
     if not record.save(semester_org):
         log_err(f"could not write {release_record.PATH} - this release is not recorded")
         return 1
+    schedule.record_release_times(semester_org, sched.timezone, list(first.values()))
     return 0
 
 
@@ -865,6 +901,12 @@ def main() -> int:
         help="A schedule.yml releases key: release every copy it lists, from every "
         "source repo, in one batch with one site sync (instead of the four fields above)",
     )
+    parser.add_argument(
+        "--remove-deleted",
+        action="store_true",
+        help="With --entry: also remove from each copy's destination the files the "
+        "release record lists that the course copy no longer has",
+    )
     add_preview_flag(
         parser,
         "Print the resolved source -> dest path pairs and exit without cloning or copying anything (default).",
@@ -878,11 +920,15 @@ def main() -> int:
     except RuntimeError as exc:
         log_err(str(exc))
         return 1
+    if args.remove_deleted and not args.entry:
+        log_err("--remove-deleted goes with --entry.")
+        return 1
     if args.entry:
-        deploys = _entry_deploys(sched, args.entry)
-        if isinstance(deploys, str):
-            log_err(deploys)
+        entry = _entry_of(sched, args.entry)
+        if isinstance(entry, str):
+            log_err(entry)
             return 1
+        deploys = list(entry.deploy)
     else:
         if not (args.course_source_repo and args.course_source_path):
             log_err("give --entry, or --course-source-repo and --course-source-path.")
@@ -956,16 +1002,43 @@ def main() -> int:
         f"Releasing {len(deploys)} path(s) from {args.course_org}/{sources} -> "
         f"{args.semester_org}/{dests}"
     )
+    remove = None
+    if args.remove_deleted:
+        # Every file the record lists for each copy: `deploy_many` removes only those the
+        # copy no longer carries.
+        try:
+            record = release_record.load(args.semester_org)
+        except (RuntimeError, ValueError) as exc:
+            log_err(f"could not read {release_record.PATH} ({exc}) - nothing removed")
+            return 1
+        # Never a path another copy of the plan lands at inside this one (a lab's
+        # `solutions/`): those files are that copy's.
+        landings = [
+            (d.semester_dest_repo, deploy_dest(d))
+            for r in sched.releases
+            for d in r.deploy
+        ]
+        remove = {}
+        for k in map(release_record.key_of, deploys):
+            if k not in record.copies:
+                continue
+            nested = divergence.nested_in((k[2], k[3]), landings)
+            remove[k] = list(
+                divergence.outside(record.copies[k].get("files") or {}, nested)
+            )
     # ONE batch, whatever the entry draws from: each repo clones once and the site syncs
-    # once, as the scheduler's own release pass does.
+    # once, as the scheduler's own release pass does - after the record is written, so
+    # the render dates the rows this release shipped (`released_at`).
     try:
         errors, changed, copies = deploy_many(
-            args.course_org, args.semester_org, deploys
+            args.course_org, args.semester_org, deploys, sync=False, remove=remove
         )
     except RuntimeError as e:
         log_err(str(e))
         return 1
-    errors += _record(args.semester_org, sched, args.entry, copies)
+    errors += _record(args.semester_org, sched, entry if args.entry else None, copies)
+    if changed:
+        errors += _sync_site(args.course_org, args.semester_org)
     if errors:
         return 1
     log("done")

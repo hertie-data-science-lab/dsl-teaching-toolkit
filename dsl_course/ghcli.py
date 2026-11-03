@@ -34,7 +34,9 @@ RATE_LIMIT_MARKERS = (
 # own words. Two families:
 #
 #   - GitHub answered badly: the 5xx family (`gh: Internal Server Error (HTTP 500)`,
-#     `HTTP 502: Bad Gateway`) and the body that ended mid-JSON.
+#     `HTTP 502: Bad Gateway`), the body that ended mid-JSON, and an HTML error page where
+#     JSON was due (Go's decoder, under `--jq`: `invalid character '<' looking for
+#     beginning of value`).
 #   - The request never got there: the connection failed client-side, in Go's net/http
 #     wording, which is what `gh` prints (`net/http: TLS handshake timeout`,
 #     `dial tcp 140.82.121.6:443: connect: connection refused`). A read that never reached
@@ -49,6 +51,7 @@ TRANSIENT_MARKERS = (
     "http 503",
     "http 504",
     "unexpected end of json input",
+    "invalid character '<' looking for beginning of value",
     "tls handshake timeout",
     "connection reset by peer",
     "connection refused",

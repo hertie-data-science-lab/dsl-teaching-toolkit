@@ -1605,7 +1605,9 @@ def test_a_group_handout_with_no_teams_records_the_moment_it_went_out(
     recorded: list[tuple[str, str]] = []
     monkeypatch.setattr(
         "dsl_course.schedule.record_handout",
-        lambda semester_org, slug, stamp=None: recorded.append((semester_org, slug)),
+        lambda semester_org, slug, stamp=None, **k: recorded.append(
+            (semester_org, slug)
+        ),
     )
     path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
     assert assign.provision_all(
@@ -1691,7 +1693,9 @@ def _press_with_no_teams(monkeypatch, via: str) -> list[tuple[str, str]]:
     recorded: list[tuple[str, str]] = []
     monkeypatch.setattr(
         "dsl_course.schedule.record_handout",
-        lambda semester_org, slug, stamp=None: recorded.append((semester_org, slug)),
+        lambda semester_org, slug, stamp=None, **k: recorded.append(
+            (semester_org, slug)
+        ),
     )
     return recorded
 
@@ -2874,7 +2878,7 @@ def _external(monkeypatch, tmp_path, *, rows=(), group="", scheduled=True, **kwa
         monkeypatch.setattr("dsl_course.schedule.load", lambda org: Schedule())
     monkeypatch.setattr(
         "dsl_course.schedule.record_handout",
-        lambda org, slug, stamp=None: effects["handout"].append(slug),
+        lambda org, slug, stamp=None, **k: effects["handout"].append(slug),
     )
     monkeypatch.setattr(
         "dsl_course.site.sync_site",
@@ -3394,7 +3398,7 @@ def drop_box(monkeypatch):
     }
     monkeypatch.setattr(
         "dsl_course.schedule.record_handout",
-        lambda org, slug, stamp=None: seen["handout"].append(slug),
+        lambda org, slug, stamp=None, **k: seen["handout"].append(slug),
     )
     monkeypatch.setattr(
         "dsl_course.site.sync_site",

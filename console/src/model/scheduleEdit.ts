@@ -5,7 +5,7 @@
 // file, so keys a form does not show are kept, and a default is written only when the file
 // already spelt it.
 
-import { YamlText, obj } from '../edit/yamlText';
+import { YamlText, deepEqual, obj } from '../edit/yamlText';
 import { kebab } from './format';
 import { solutionBeforeCutoff } from './labels';
 import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO, EVENT_KIND, KINDS, pluralOf } from './policy';
@@ -135,12 +135,11 @@ export interface AssignmentDraft {
   repoName?: string;
 }
 
-/** The semester's dates sheet: its start, end and timezone. */
+/** The semester's dates sheet: its start and end. Its timezone is semester.yml's `defaults:` one (decision 0039). */
 export interface SemesterDraft {
   kind: 'semester';
   start: string;
   end: string;
-  tz: string;
 }
 
 /** One entry of the `semester:` block. */
@@ -292,7 +291,7 @@ export function semesterEntryOf(doc: Raw, type: SemesterType): [string, Raw] | n
 export function readDraft(doc: Raw, key: string): Draft | null {
   if (key === 'semester') {
     const day = (t: SemesterType) => splitWhen(semesterEntryOf(doc, t)?.[1].event_datetime)[0];
-    return { kind: 'semester', start: day('start'), end: day('end'), tz: s(doc.timezone) };
+    return { kind: 'semester', start: day('start'), end: day('end') };
   }
   const b = blockOf(doc, key);
   if (!b) return null;
@@ -547,9 +546,8 @@ export function blockFor(d: EntryDraft | AssignmentDraft | SemesterEntryDraft): 
   return d.kind === 'assignments' ? ASSIGNMENTS_BLOCK : d.kind === 'semesterEntry' ? SEMESTER_BLOCK : pluralOf(d.type);
 }
 
-/** Write the semester's dates sheet: its start and end entries and the timezone. */
+/** Write the semester's dates sheet: its start and end entries. */
 function writeDates(y: YamlText, d: SemesterDraft, doc: Raw): void {
-  y.assign(['timezone'], text(d.tz));
   for (const [type, day] of [['start', d.start], ['end', d.end]] as const) {
     const hit = semesterEntryOf(doc, type);
     if (!day && !hit) continue;
@@ -594,13 +592,12 @@ export function changesOf(drafts: Draft[], bases: (Draft | null)[]): Change[] {
       const bt = base?.kind === 'entry' ? base.twin ?? null : null;
       // The twin follows its session's unit.
       const twin = { ...d.twin, session: d.session };
-      if (!deepSame(twin, bt)) out.push({ from: twin.id, d: twin, base: bt });
+      if (!deepEqual(twin, bt)) out.push({ from: twin.id, d: twin, base: bt });
     }
   });
   return out;
 }
 
-const deepSame = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 /** Sort keys of a numbered block by number (then by key), each entry's number as its row shows it. */
 function numberOrder(block: Raw): string[] {

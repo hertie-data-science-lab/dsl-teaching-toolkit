@@ -1147,12 +1147,6 @@
         "type": "object"
       },
       "type": "object"
-    },
-    "timezone": {
-      "type": [
-        "string",
-        "null"
-      ]
     }
   },
   "title": "semester-config/schedule.yml",

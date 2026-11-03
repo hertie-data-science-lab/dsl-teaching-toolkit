@@ -16,6 +16,9 @@
           ],
           "type": "string"
         },
+        "autosync_released_edits": {
+          "type": "boolean"
+        },
         "late_penalty_per_day": {
           "pattern": "^(?:(?:100|[0-9]{1,2})(?:\\.[0-9]+)?%|0?\\.[0-9]+|0)$",
           "type": "string"
@@ -45,6 +48,7 @@
         "assignment_repo_visibility",
         "archive_grace_days",
         "materials_repo",
+        "autosync_released_edits",
         "marks_per_question"
       ],
       "type": "object"

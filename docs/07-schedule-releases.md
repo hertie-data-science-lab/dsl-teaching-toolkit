@@ -37,7 +37,7 @@ Each block is a map. The **key** of an entry (`lecture-3`, `lab-2b`) is its id: 
 
 Each kind gets its own tab on the site, and its rows are named by the kind and the number (`Lecture 3`). Two shown entries of one kind with the same number are a problem. A lecture or lab without `session:` is a problem too (*Give lecture-3 a session*), and its files wait until it has one.
 
-**A row appears as soon as you write it, not when it ships.** Until its files land the row says so (*"Materials for lecture 3 are not yet released"*), then links what landed: a file as itself, a folder as GitHub shows it. An entry with `event_datetime: tbc` is a **TBC** row after the dated rows of its kind, and nothing ships until it has a date. If you ship its files by hand, Updates announces it at the moment they first landed.
+**A row appears as soon as you write it, not when it ships.** Until its files land the row says so (*"Materials for lecture 3 are not yet released"*), then links what landed: a file as itself, a folder as GitHub shows it. An entry with `event_datetime: tbc` is a **TBC** row after the dated rows of its kind, and nothing ships until it has a date. If you ship its files by hand, Updates announces it at the moment they shipped (the release record's time, else when they first landed), and the console's release page asks for the session date.
 
 ### Slots: one entry, several times
 
@@ -70,7 +70,7 @@ Each slot is a row on the Schedule; the files ship once, an hour before the firs
 | `from_path` | **yes** | - | the folder or file to copy, or `/` for the whole repo |
 | `to_semester_repo` | no | `materials` | the semester repo to copy into - created on first release |
 | `to_path` | no | `from_path` | where it lands in `to_semester_repo` |
-| `release_datetime` | no | an hour before the first slot (a whole-day slot: the day's start) | ship this copy at another time |
+| `release_datetime` | no | an hour before the first slot (a whole-day slot: the day's start) | ship this copy at another time. After a release it is the time the copy actually went out, when that beat the plan |
 
 ```yaml
 lectures:
@@ -234,9 +234,21 @@ A newly bootstrapped org raises neither of the first two until it has seen its f
 
 Just commit the edit to `semester-config/schedule.yml` on `main` - the **GitHub web UI is the recommended way** (or edit a local clone → commit → push). The push fires the scheduler itself, so the change takes effect within minutes; there is nothing to re-arm or re-deploy. 
 
-The one caveat: already-fired **one-shot** actions don't rewind. A deadline snapshot, an autograde and a model-solution push each happen once, and re-doing one means deleting its marker - `.system/snapshots/<slug>.csv`, `.system/solutions/<slug>.json`, or the `_graded.json` / `_skipped.json` record in `.system/autograde/<slug>/` (deleting the whole folder works too). A `handout_datetime` the scheduler recorded is likewise never rewritten.
+The one caveat: already-fired **one-shot** actions don't rewind. A deadline snapshot, an autograde and a model-solution push each happen once, and re-doing one means deleting its marker - `.system/snapshots/<slug>.csv`, `.system/solutions/<slug>.json`, or the `_graded.json` / `_skipped.json` record in `.system/autograde/<slug>/` (deleting the whole folder works too). A `handout_datetime` is never moved later; a hand-out run **earlier** than it (Hand out now) writes the actual moment over it, once.
 
 A material release is **fire-once**: each `files:` item is copied once, at its time, and recorded in `semester-config/.system/releases.json`. An edit to the course copy afterwards does not reach students by itself - release the entry again (**Release again** in the console, or `release.entry`). A semester whose `autosync_released_edits` is `true` re-ships such edits on every tick instead. A release already shipped stays shipped, even if its folder is later deleted from the semester repo: releasing it again is your call.
+
+**When a released folder differs from what was released.** The console's Dashboard (Coming up) and the release's page say so, one line per kind, against the record's file list:
+
+| What happened | What to do |
+|---|---|
+| **Course copy changed** - a released file was edited in the course, or a file added under the folder (not said when `autosync_released_edits` is on: it ships on the next tick) | **Release again** |
+| **Deleted in course** - a released file is gone from the course copy (deleted, or now withheld by `.releaseignore`) but still in the released copy | **Release again** and tick *Also remove the N files deleted from the course copy* (a release otherwise only adds) |
+| **Released copy edited** - a released file was edited in the semester repo, a file added there, or a released file removed from it (students lack a file they were given) | **Keep for future semesters**, to propose the edits back to the course; **Release again** puts a removed file back |
+
+Each can be **set aside**; it comes back when that side changes again. A folder another entry releases into (a lab's `solutions/`) is that entry's, never counted as an edit. From the CLI: `python -m dsl_course.deploy ... --entry <key> --remove-deleted`.
+
+A copy released **before** its time (Release early / now, or a `release.adhoc` of a path the entry copies), or from a `tbc` entry, gets `release_datetime: <when it went out>` written on its `files:` item, in one bot commit per release. On time, late, or released again: nothing is written. There is no such write for `solution_datetime`.
 
 Everything else is **cumulative**: assignment handouts, the site sync and the source digest are re-applied at every tick, so a late or lost tick heals itself.
 
@@ -325,13 +337,13 @@ An entry that is valid YAML but not a valid *schedule* entry is **dropped**: it 
 | a `files` item missing `from_course_repo` or `from_path` | that one copy never ships |
 | a key used in two blocks | the second entry is dropped |
 
-Kept rather than dropped - the entry still runs on its documented fallback, and the fallback is reported alongside the drops (so `--validate` catches it): a malformed `due_datetime` (the assignment is TBC: nothing fires), a malformed `handout_datetime` (**nothing is ever handed out**), `marks_return_datetime` (marks go back by hand) or `release_datetime` (the copy ships at its default); one unreadable slot of several (the others stand); a typo'd or unknown key at any level; and an unknown `timezone:` (falls back to `Europe/Berlin`). An assignment's `type` or `max_team_size` is noted with where it lives now.
+Kept rather than dropped - the entry still runs on its documented fallback, and the fallback is reported alongside the drops (so `--validate` catches it): a malformed `due_datetime` (the assignment is TBC: nothing fires), a malformed `handout_datetime` (**nothing is ever handed out**), `marks_return_datetime` (marks go back by hand) or `release_datetime` (the copy ships at its default); one unreadable slot of several (the others stand); and a typo'd or unknown key at any level. A `timezone:` here is an old name, ignored: the zone is `semester.yml`'s.
 
 `solution_datetime` is the exception that is **dropped, not kept**: malformed, missing its `handout_datetime`, not after it, or (in the schedule check on a push) before the late cutoff, the value is discarded and the model solution waits for a human. Honouring a bad one could ship the answers with the questions, and nothing undoes that.
 
 ## Timezones and bare dates
 
-- Everything naive is read in the semester's `timezone:` (default `Europe/Berlin`).
+- Everything naive is read in the semester's timezone: `semester.yml` `defaults: timezone`, else the course's, else the institution's (`Europe/Berlin`). `schedule.yml` names none.
 - An explicit offset (`2026-09-15T14:00+00:00`) names that exact instant; it fires then, and the site shows it on the semester's own clock (`16:00` for a `Europe/Berlin` semester in September).
 - A **bare date** with no time means **00:00** on an entry that ships files and on `release_datetime` (the day opens), **23:59:59** on an assignment `due_datetime` (the day closes), and a whole day on an `exams:` or `events:` entry.
 

@@ -153,6 +153,10 @@
         "value": "materials",
         "source": "institution"
       },
+      "autosync_released_edits": {
+        "value": false,
+        "source": "institution"
+      },
       "marks_per_question": {
         "value": true,
         "source": "institution"
@@ -225,6 +229,10 @@
       },
       "materials_repo": {
         "value": "materials",
+        "source": "institution"
+      },
+      "autosync_released_edits": {
+        "value": false,
         "source": "institution"
       },
       "marks_per_question": {

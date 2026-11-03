@@ -612,6 +612,9 @@ def test_a_real_run_migrates_every_step_once_with_actions_off(
     plan = yaml.safe_load(schedule)
     assert plan["lectures"]["s1"]["session"] == 1 and "exam" in plan["exams"]
     assert plan["assignments"]["a1"]["repo_name"] == "work"
+    # The ruling on decision 0039 rule 2: the zone is the semester's `defaults:` one.
+    assert "timezone" not in plan
+    assert yaml.safe_load(text)["defaults"]["timezone"] == "Europe/Berlin"
     assert fake._repo(SEM, ".github")["topics"] == [SEMESTER_TOPIC]
     # The pause record is written first, while everything still runs; every commit after
     # it - status.json included - landed with Actions off everywhere, until the restore
@@ -677,6 +680,76 @@ def test_a_second_run_finds_every_step_already_migrated(
     assert out.count("already migrated") == 20
     assert fake.commits == commits and fake.puts == puts and semester == []
     assert len(fake.dispatches) == 3  # nothing paused, so nothing was dropped
+
+
+def _zone_again(fake, zone: str, stated: bool) -> dict:
+    """A migrated semester whose schedule.yml names `zone` again (a file migrated before
+    the zone moved), its semester.yml stating the migrated Europe/Berlin or not."""
+    tree = fake.tree(SEM, CONFIG_REPO)
+    tree["schedule.yml"] = f"timezone: {zone}\n".encode() + tree["schedule.yml"]
+    if not stated:
+        text = tree["semester.yml"].decode()
+        tree["semester.yml"] = text.replace(
+            "  timezone: Europe/Berlin", "  # timezone: Europe/Berlin   (institution)"
+        ).encode()
+    return tree
+
+
+@pytest.mark.parametrize(("zone", "stated"), [("UTC", False), ("Europe/Berlin", True)])
+def test_a_migrated_semester_s_schedule_zone_moves_into_its_defaults(
+    fake, semester, monkeypatch, capsys, zone, stated
+):
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    tree = _zone_again(fake, zone, stated)
+    capsys.readouterr()
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    assert "timezone" not in yaml.safe_load(tree["schedule.yml"])
+    defaults = yaml.safe_load(tree["semester.yml"])["defaults"]
+    assert defaults["timezone"] == zone
+    assert "# a comment faculty wrote" in tree["semester.yml"].decode()
+
+
+def test_a_schedule_zone_other_than_the_semester_s_stops_the_step(
+    fake, semester, monkeypatch, capsys
+):
+    assert _main(monkeypatch, SEM, "--no-preview") == 0
+    tree = _zone_again(fake, "UTC", stated=True)
+    before = dict(tree)
+    capsys.readouterr()
+    assert _main(monkeypatch, SEM, "--no-preview") == 1
+    out = capsys.readouterr()
+    assert "differs from semester.yml `defaults: timezone: Europe/Berlin`" in (
+        out.out + out.err
+    )
+    assert tree == before
+
+
+def test_moving_the_zone_into_semester_yml():
+    skeleton = "people:\n  - a\n\ndefaults:   # c\n  # timezone: X   (institution)\n"
+    assert migrate.with_default(skeleton, "timezone", "UTC") == (
+        "people:\n  - a\n\ndefaults:   # c\n  timezone: UTC\n"
+    )
+    assert migrate.with_default(
+        "defaults:\n  max_team_size: 3\n", "timezone", "UTC"
+    ) == ("defaults:\n  timezone: UTC\n  max_team_size: 3\n")
+    assert migrate.with_default("people: []\n", "timezone", "UTC") == (
+        "people: []\n\ndefaults:\n  timezone: UTC\n"
+    )
+    sched = "# mine\ntimezone: UTC   # ours\nlectures: {}\n"
+    assert migrate.zone_move(sched, None) == ("UTC", "# mine\nlectures: {}\n", [])
+    assert migrate.zone_move(sched, "UTC") == (None, "# mine\nlectures: {}\n", [])
+    assert migrate.zone_move("lectures: {}\n", None) == (None, None, [])
+    # A blank zone is the default: only dropped. Comments around the line stay.
+    blank = "# head\ntimezone:\n\n# my notes\nlectures: {}\n"
+    assert migrate.zone_move(blank, None) == (
+        None,
+        "# head\n\n# my notes\nlectures: {}\n",
+        [],
+    )
+    _, _, stops = migrate.zone_move("timezone: Mars/Base\n", None)
+    assert stops == [
+        "schedule.yml: `timezone: Mars/Base` is not a known zone - correct or delete it"
+    ]
 
 
 def test_a_failed_step_stops_and_says_the_org_is_still_paused(
@@ -2858,3 +2931,16 @@ def test_a_course_meta_that_did_not_verify_names_the_key_left(monkeypatch, capsy
     monkeypatch.setattr(course, "meta_text", lambda: (left, "course_name: ML\n"))
     assert course.meta_verified() is False
     assert "assignment_defaults.format" in capsys.readouterr().err
+
+
+def test_an_unmigrated_course_is_compared_with_the_default_ref_and_says_so(
+    monkeypatch, capsys
+):
+    # No course.yml yet: the ref the course runs is unknown, not "release".
+    monkeypatch.setattr(migrate, "checkout_drift", lambda ref: ["dsl_course/x.py"])
+    migrate._warn_drift("C", "release", known=False)
+    err = capsys.readouterr().err
+    assert "C is unmigrated" in err and "the ref it runs is unknown" in err
+    assert "the ref C runs" not in err
+    migrate._warn_drift("C", "release")
+    assert "differs from release, the ref C runs" in capsys.readouterr().err

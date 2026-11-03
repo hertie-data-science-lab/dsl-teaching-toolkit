@@ -13,9 +13,9 @@
 #   files           from_course_repo, from_path, to_semester_repo, to_path, release_datetime
 #                   (default: an hour before the first slot)
 # The term's own dates are the `semester:` block. Assignments carry their run settings
-# inline (late_window_days, ..., repo_name).
+# inline (late_window_days, ..., repo_name). Times are in the semester's timezone
+# (semester.yml `defaults: timezone`).
 
-timezone: Europe/Berlin
 semester:                         # the term's own dates, each entry with a `type`
   start:
     type: start

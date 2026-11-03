@@ -203,7 +203,7 @@ def _seeded() -> str:
 def test_the_seeded_skeleton_names_the_institution_s_defaults_and_sets_none():
     text = _seeded()
     ours = policy.defaults()
-    assert f"# timezone: {ours['timezone']}" in text
+    assert "timezone:" not in text  # the zone is semester.yml's (decision 0039)
     assert f"the end + {ours['archive_grace_days']} days" in text
     sched = schedule.parse(yaml.safe_load(text) or {})
     # Nothing copied into the semester: absent means the institution's default.

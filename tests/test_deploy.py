@@ -111,12 +111,12 @@ def test_cli_rejects_a_count_mismatch_with_a_nonzero_exit(monkeypatch, capsys):
     assert "3 course_source_paths but 2 semester_dest_paths" in capsys.readouterr().err
 
 
-def test_cli_builds_one_deploy_per_pair_and_one_batch(monkeypatch):
+def test_cli_builds_one_deploy_per_pair_and_one_batch(monkeypatch, site_syncs):
     # Every pair becomes a Deploy against the SAME source/dest repo, and they all go
     # through ONE deploy_many call - so each repo is cloned once for the whole batch.
     seen = {}
 
-    def fake_deploy_many(course_org, semester_org, deploys, sync=True):
+    def fake_deploy_many(course_org, semester_org, deploys, sync=True, remove=None):
         seen.update(
             course_org=course_org, semester_org=semester_org, deploys=deploys, sync=sync
         )
@@ -173,11 +173,13 @@ def test_cli_builds_one_deploy_per_pair_and_one_batch(monkeypatch):
         ("course-materials-f2026", "lectures/02", "materials", None),
         ("course-materials-f2026", "labs/02", "materials", None),
     ]
-    # The button syncs the site itself (unlike the scheduler, which batches and syncs once).
-    assert seen["sync"] is True
+    # The button syncs the site itself, once, after the release record is written (so the
+    # render dates what this release shipped) - not inside deploy_many.
+    assert seen["sync"] is False
+    assert site_syncs == [("Course", "Semester-f2026")]
 
 
-def test_an_entry_is_released_in_one_batch_with_one_sync(monkeypatch):
+def test_an_entry_is_released_in_one_batch_with_one_sync(monkeypatch, site_syncs):
     # A schedule entry drawing on two source repos was two deploy runs, two clones of
     # the shared dest and two site syncs. Now it is one deploy_many over every copy.
     copies = [
@@ -191,14 +193,15 @@ def test_an_entry_is_released_in_one_batch_with_one_sync(monkeypatch):
     monkeypatch.setattr(
         deploy,
         "deploy_many",
-        lambda org, sem, deploys, sync=True: (
+        lambda org, sem, deploys, sync=True, remove=None: (
             calls.append((deploys, sync)) or deploy.Batch(0, True, [])
         ),
     )
     argv = ["deploy", "--course-org", "Course", "--semester-org", "Semester-f2026"]
     monkeypatch.setattr("sys.argv", [*argv, "--entry", "s5", "--no-preview"])
     out = deploy.main()
-    assert out == 0 and calls == [(copies, True)]
+    assert out == 0 and calls == [(copies, False)]
+    assert site_syncs == [("Course", "Semester-f2026")]
     assert "2 source repos" in out.text
     # An entry the plan does not have is refused, and nothing is copied.
     monkeypatch.setattr("sys.argv", [*argv, "--entry", "s9", "--no-preview"])
@@ -506,7 +509,7 @@ def _release_filter(root: Path, names: list[str], whole: bool, at: Path | None =
             (here / n).mkdir()
         else:
             (here / n).write_text("x")
-    ignore = selection.deny(root, use=deploy._release_use(whole))
+    ignore = selection.deny(root, use=selection.release_use(whole))
     return ignore(str(here), names)
 
 
@@ -558,7 +561,7 @@ def test_a_solution_named_outright_ships_exactly_what_it_names(tmp_path):
     copy_tree(
         src / "solutions/labs/02_lab",
         dest,
-        selection.deny(src, use=deploy._release_use(False)),
+        selection.deny(src, use=selection.release_use(False)),
     )
     assert sorted(
         p.relative_to(dest).as_posix() for p in dest.rglob("*") if p.is_file()

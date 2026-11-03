@@ -25,13 +25,14 @@ institution:
 # The bottom of the cascade: entry > semester.yml > course.yml > this, per key. A course
 # and a semester write the same keys in their own `defaults:`.
 defaults:
-  timezone: Europe/Berlin       # a semester's schedule.yml `timezone:` when it names none
+  timezone: Europe/Berlin       # what a semester's times are read in
   late_window_days: 10          # 0 = nothing after the due date is accepted
   late_penalty_per_day: 10%     # of the earned grade, per day started
   max_team_size: 5
   assignment_repo_visibility: private   # private | public | student_choice: the repos students work in
   archive_grace_days: 60        # archive date = semester_end + this, unless the schedule sets one
   materials_repo: materials     # where a release lands when its entry names no repo
+  autosync_released_edits: false   # true: an edit to a released course folder re-ships on the next run
   marks_per_question: true      # returned marks show each question's mark and feedback
   # team_formation is not an institutional matter: set it in course.yml, semester.yml or
   # on the assignment.

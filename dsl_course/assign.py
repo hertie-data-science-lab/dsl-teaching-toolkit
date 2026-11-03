@@ -1933,7 +1933,7 @@ def provision_all(
                     code=1,
                 ), False
             if not dry_run:
-                schedule.record_handout(semester_org, key)
+                schedule.record_handout(semester_org, key, tz_name=sched.timezone)
             if scheduled:
                 # Teams appear days after the handout datetime either way - and the cron
                 # re-fires every hour until they do. Wait, exactly as an individual
@@ -2165,8 +2165,8 @@ def provision_all(
         if not gspec.creates_repos:
             changed = sheet.created
 
-    # Record the handout moment back into the semester's schedule.yml (write-once - a
-    # handout the schedule already carries is never touched). The schedule is the primary
+    # Record the handout moment back into the semester's schedule.yml (a handout the
+    # schedule already carries moves only to an EARLIER actual one). The schedule is the primary
     # route AND the one record of when each assignment went out; a manual workflow run
     # fills the field the dispatcher didn't. record_handout keys on the schedule KEY, not the
     # semester-side name: when `semester_dest_repo` is set the two differ, and passing the name
@@ -2177,10 +2177,10 @@ def provision_all(
     # records on any tick whose SHEET landed - not only the one that created it. Gating on
     # creation instead meant a manual release whose sheet already existed, or one fired
     # before anybody had onboarded, never recorded the handout at all - and the brief is
-    # published off that record, so it never appeared. `record_handout` is write-once, so
-    # repeating it on every later tick costs one read and changes nothing.
+    # published off that record, so it never appeared. `record_handout` never moves a
+    # handout later, so repeating it on every later tick costs one read and changes nothing.
     if gspec.creates_repos or sheet_written:
-        schedule.record_handout(semester_org, key)
+        schedule.record_handout(semester_org, key, tz_name=sched.timezone)
 
     # ...and refresh the Join-team form's mirror while this run holds the schedule and the
     # spec. A REAL handout is the moment the two can most recently have moved, and the form

@@ -89,7 +89,7 @@ only channel.
 
 `defaults:` is the course layer of the cascade: `timezone`, `late_window_days`,
 `late_penalty_per_day`, `max_team_size`, `assignment_repo_visibility`, `archive_grace_days`,
-`materials_repo`, `marks_per_question` and `team_formation`. Each key resolves nearest first:
+`materials_repo`, `autosync_released_edits`, `marks_per_question` and `team_formation`. Each key resolves nearest first:
 the assignment's `schedule.yml` entry, the semester's `semester.yml`, this block, then the
 institution's `institution.yml`. A late line alone is a whole rule: the other half is then none.
 

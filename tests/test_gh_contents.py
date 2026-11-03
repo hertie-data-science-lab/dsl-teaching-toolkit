@@ -567,7 +567,7 @@ def test_a_handout_is_recorded_into_the_plan_through_a_spurious_404(monkeypatch)
 
     plan = "assignments:\n  a1:\n    due_datetime: 2026-10-01T09:00\n"
     calls = _record_gh(monkeypatch, [_NOT_FOUND, (0, "abc123\n" + _b64(plan))])
-    schedule.record_handout("S", "a1", "2026-09-01T09:00")
+    schedule.record_handout("S", "a1", "2026-09-01T09:00", tz_name="Europe/Berlin")
     (put,) = [c for c in calls if "PUT" in c]
     assert "sha=abc123" in put
 
