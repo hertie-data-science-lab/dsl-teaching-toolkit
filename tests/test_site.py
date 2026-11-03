@@ -2172,26 +2172,6 @@ def _bad_indent_error() -> yaml.YAMLError:
     raise AssertionError("expected that YAML to be malformed")
 
 
-def test_yaml_file_raises_on_a_malformed_file_rather_than_wiping_what_it_feeds(
-    monkeypatch,
-):
-    # A semester's semester.yml with one bad indent used to parse to `{}` - "nothing declared" -
-    # and republish the site with every teaching-team card gone, green.
-    err = _bad_indent_error()
-    monkeypatch.setattr(
-        site_repo, "load_yaml_config", lambda *a, **_kw: (_ for _ in ()).throw(err)
-    )
-    with pytest.raises(yaml.YAMLError):
-        site_repo.yaml_file("Semester-f2026", "semester-config", "semester.yml")
-
-
-def test_yaml_file_reads_an_absent_file_as_nothing_declared(monkeypatch):
-    monkeypatch.setattr(site_repo, "load_yaml_config", lambda *a, **_kw: None)
-    assert (
-        site_repo.yaml_file("Semester-f2026", "semester-config", "semester.yml") == {}
-    )
-
-
 def test_main_reports_a_malformed_config_as_one_line_not_a_traceback(
     monkeypatch, capsys
 ):

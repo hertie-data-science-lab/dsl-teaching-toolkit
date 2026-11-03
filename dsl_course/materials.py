@@ -6,9 +6,8 @@ required, and no folder name means anything to the semester side (decision 0038:
 schedule says what each entry is). The engine reads no `materials.yml` (decision 0039 and
 the maintainer's ruling of 14 Oct 2026): a semester's syllabus is `semester.yml`
 `student_site.syllabus` (`semester_syllabus`), and a folder's kind on the open site is the
-institution's kind model (`folder_kind`). `SCHEMA` and the built-in aliases are still
-exported to the console's Folder kinds panel (`schemas.materials_json`, until WP-C2), and
-`migrate` reads an old `materials.yml` once.
+institution's kind model (`folder_kind`). The built-in aliases are the migration's: it
+reads an old `materials.yml` once.
 """
 
 from __future__ import annotations
@@ -18,7 +17,6 @@ from collections.abc import Mapping
 from . import policy
 
 MATERIALS_TOPIC = "dsl-materials"
-MATERIALS_FILE = "materials.yml"
 DEFAULT_SYLLABUS = "SYLLABUS.md"
 # The weekly plan's block in a Markdown syllabus (`syllabus.place`): a write owns what lies
 # between these two lines and nothing else in the file.
@@ -55,22 +53,6 @@ BUILTIN_ALIASES = {
     "img": "assets",
     "src": "assets",
     "static": "assets",
-}
-# The kinds a folder could be set to (the console's retired Folder kinds dropdown).
-FOLDER_KINDS = tuple(
-    k for k in policy.content_kinds() if k in set(BUILTIN_ALIASES.values())
-)
-
-SCHEMA = {
-    "type": "object",
-    "properties": {
-        "syllabus": {"type": "string"},
-        "kinds": {
-            "type": "object",
-            "additionalProperties": {"type": "string"},
-        },
-    },
-    "additionalProperties": False,
 }
 
 

@@ -601,13 +601,13 @@ def run_settings(monkeypatch, read) -> None:
         blocks = data.pop("assignments", None)
         if isinstance(data.get("defaults"), dict):
             data["defaults"] = {
-                settings.INLINE_NAMES.get(k, k): v for k, v in data["defaults"].items()
+                settings.FILE_NAMES.get(k, k): v for k, v in data["defaults"].items()
             }
         defaults = yaml.safe_dump(data, sort_keys=False) if data else None
         if not isinstance(blocks, dict):
             return defaults, None
         inline = {
-            key: {settings.INLINE_NAMES.get(k, k): v for k, v in (block or {}).items()}
+            key: {settings.FILE_NAMES.get(k, k): v for k, v in (block or {}).items()}
             for key, block in blocks.items()
         }
         return defaults, yaml.safe_dump({"assignments": inline}, sort_keys=False)
@@ -615,7 +615,12 @@ def run_settings(monkeypatch, read) -> None:
     def inline(org, slug):
         text = split(org)[1]
         blocks = (yaml.safe_load(text) or {}).get("assignments") if text else None
-        return settings.inline_blocks(blocks).get(slug, {})
+        entry = (blocks or {}).get(slug)
+        if not isinstance(entry, dict):
+            return {}
+        return settings._usable(
+            settings.inline_settings(entry, f"assignments.{slug}", [])
+        )
 
     monkeypatch.setattr(settings, "_semester_text", lambda org: split(org)[0])
     # The entry's own settings, as the parsed plan carries them (`AssignmentEntry.settings`).

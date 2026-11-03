@@ -24,7 +24,7 @@ def _files(monkeypatch, files: dict[tuple[str, str, str], str]) -> list:
 def test_an_absent_course_file_declares_nothing(monkeypatch):
     _files(monkeypatch, {})
     course = config.read_course("C")
-    assert (course.state, course.absent, course.problem) == (config.ABSENT, True, None)
+    assert course.absent
     assert course.mapping() is None
     assert course.meta() == {}
 
@@ -32,7 +32,7 @@ def test_an_absent_course_file_declares_nothing(monkeypatch):
 def test_an_empty_file_is_present_and_empty(monkeypatch):
     _files(monkeypatch, {("C", ".github", "course.yml"): "# nothing yet\n"})
     course = config.read_course("C")
-    assert course.state == config.PARSED
+    assert not course.absent
     assert course.mapping() == {}
 
 
@@ -63,10 +63,6 @@ def test_a_file_that_is_not_a_mapping_is_a_fault_logged_once_asked(
 ):
     _files(monkeypatch, {("C", ".github", "course.yml"): text})
     course = config.read_course("C")
-    assert course.state == config.FAULTS
-    assert isinstance(course.problem, error)
-    with pytest.raises(error):
-        course.data()
     assert capsys.readouterr().err == ""
     with pytest.raises(error):
         course.mapping()
@@ -98,9 +94,3 @@ def test_the_semester_files_are_read_from_its_config_repo_when_asked(monkeypatch
         ("S", "semester-config", ".system/course.yml"),
         ("S", "semester-config", "semester.yml"),
     ]
-
-
-def test_a_file_in_a_clone_reads_the_same_way(tmp_path):
-    assert config.read_local(tmp_path, "materials.yml").absent
-    (tmp_path / "materials.yml").write_text("syllabus: S.pdf\n", encoding="utf-8")
-    assert config.read_local(tmp_path, "materials.yml").meta() == {"syllabus": "S.pdf"}

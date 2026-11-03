@@ -1659,7 +1659,7 @@ def schedule_shape(
         )
         block = raw_blocks.get(key) if isinstance(raw_blocks.get(key), dict) else {}
         new |= {
-            settings.INLINE_NAMES.get(k, k): v
+            settings.FILE_NAMES.get(k, k): v
             for k, v in block.items()
             if k in settings.RUN_KEYS and v is not None
         }

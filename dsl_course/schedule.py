@@ -801,7 +801,6 @@ KNOWN_ASSIGNMENT = frozenset(
         *settings.INLINE_KEYS,
     }
 )
-_REPO_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
 def _flag_unknown_keys(
@@ -1375,7 +1374,7 @@ def _parse_assignments(
             "the assignment has no number, and is not handed out until it has one",
         )
         written = str(entry.get("repo_name") or "").strip()
-        if written and not _REPO_NAME.match(written):
+        if written and not settings.REPO_NAME.match(written):
             _flag_bad_value(
                 drops,
                 where,
@@ -1440,7 +1439,7 @@ def _parse_assignments(
             name_ = getattr(line, "field", "")
             drops.note(
                 where,
-                settings.INLINE_NAMES.get(name_, name_),
+                settings.FILE_NAMES.get(name_, name_),
                 getattr(line, "what", str(line)),
                 lines,
             )

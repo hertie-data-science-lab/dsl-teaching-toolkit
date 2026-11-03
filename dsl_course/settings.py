@@ -79,8 +79,7 @@ SEMESTER_KEYS = ("timezone", "archive_grace_days", "materials_repo")
 # A setting as the files spell it: `visibility` says whose the repos are, so a file writes
 # `assignment_repo_visibility` (decision 0038 rule 9, 0039 rule 2).
 FILE_NAMES = {"visibility": "assignment_repo_visibility"}
-INLINE_NAMES = FILE_NAMES
-INLINE_KEYS = tuple(INLINE_NAMES.get(key, key) for key in RUN_KEYS)
+INLINE_KEYS = tuple(FILE_NAMES.get(key, key) for key in RUN_KEYS)
 # What a course's or a semester's `defaults:` block may state, by setting: the fixed key
 # set (`policy.DEFAULT_KEYS`) and `team_formation`. The submit link is one assignment's.
 DEFAULT_KEYS = (
@@ -102,7 +101,7 @@ DEFAULT_FILE_KEYS = tuple(FILE_NAMES.get(key, key) for key in DEFAULT_KEYS)
 # migration writes the old institutional `self_select` into each semester that relied on it.
 TEAM_FORMATION_FALLBACK = NO_TEAMS
 
-_REPO_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
+REPO_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
 # `semester.yml`'s blocks (decision 0039).
 SEMESTER_BLOCKS = (PEOPLE_BLOCK, DEFAULTS_BLOCK, STUDENT_SITE_BLOCK)
 
@@ -135,7 +134,7 @@ def _grace_days(value: object, where: str, dropped: list[str]) -> int | None:
 
 def _materials_repo(value: object, where: str, dropped: list[str]) -> str | None:
     name = str(value or "").strip()
-    if _REPO_NAME.match(name):
+    if REPO_NAME.match(name):
         return name
     dropped.append(
         Dropped(
@@ -206,24 +205,11 @@ def inline_settings(entry: Mapping, where: str, dropped: list) -> dict:
     """The run settings written on one schedule.yml assignment entry, each through its
     reader, keyed by setting (`visibility`, not its inline spelling). A value its reader
     refuses is None (the next layer answers) and is recorded in `dropped`."""
-    spelt = {inline: key for key, inline in INLINE_NAMES.items()}
+    spelt = {inline: key for key, inline in FILE_NAMES.items()}
     raw = {
         spelt.get(str(k), str(k)): v for k, v in entry.items() if str(k) in INLINE_KEYS
     }
     return read_settings(raw, RUN_KEYS, where, dropped)
-
-
-def inline_blocks(assignments: object) -> dict[str, dict]:
-    """`{schedule key: its inline run settings}` out of a schedule.yml `assignments:`
-    block as YAML gives it; values a reader refuses are left out (the schedule's own parse
-    reports them)."""
-    if not isinstance(assignments, dict):
-        return {}
-    return {
-        str(key): _usable(inline_settings(entry, f"assignments.{key}", []))
-        for key, entry in assignments.items()
-        if isinstance(entry, dict)
-    }
 
 
 SOURCES = ("entry", "semester", "course", "institution")
@@ -522,7 +508,7 @@ def parse_legacy_assignments(text: str | None) -> Instance:
         values, extra = block(raw, where, RUN_KEYS, block_lines.get(str(slug)))
         blocks[str(slug)] = values
         dest = str(extra.get("semester_dest_repo") or "").strip()
-        if dest and _REPO_NAME.match(dest):
+        if dest and REPO_NAME.match(dest):
             dests[str(slug)] = dest
         elif "semester_dest_repo" in extra and extra["semester_dest_repo"] is not None:
             faults.append(
