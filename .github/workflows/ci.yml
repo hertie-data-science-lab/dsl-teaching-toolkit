@@ -98,11 +98,35 @@ jobs:
             --source "$RUNNER_TEMP/fixture" \
             --destination "$RUNNER_TEMP/build"
 
+      - name: Build it again with the github-pages gem (Jekyll 3.10, Liquid 4.0.4)
+        # Most live sites still carry the instructor-owned Gemfile they were seeded with,
+        # which bundles github-pages rather than the Jekyll 4 the seed now names - and
+        # Liquid 4.0.4 refuses syntax Jekyll 4 accepts (a boolean `or` inside `where_exp`
+        # took the demo site down). The checks below read the Jekyll 4 build; this one has
+        # to build, and render no Liquid error.
+        working-directory: tests/fixtures/site
+        env:
+          JEKYLL_ENV: production
+          BUNDLE_GEMFILE: ${{ github.workspace }}/tests/fixtures/site/Gemfile.github-pages
+          BUNDLE_DEPLOYMENT: "false"
+          BUNDLE_FROZEN: "false"
+          # As a site's own deploy.yml sets them: jekyll-github-metadata refuses to build
+          # without a repo to attribute the site to.
+          JEKYLL_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PAGES_REPO_NWO: ${{ github.repository }}
+        run: |
+          bundle install --jobs 4
+          bundle exec jekyll build \
+            --strict_front_matter \
+            --config "$RUNNER_TEMP/fixture/_config.yml,$RUNNER_TEMP/fixture/_config.offline.yml" \
+            --source "$RUNNER_TEMP/fixture" \
+            --destination "$RUNNER_TEMP/build-pages"
+
       - name: Fail on a Liquid error rendered into a page
-        # A syntax error fails the build above, but an unknown filter or a bad argument is
+        # A syntax error fails the builds above, but an unknown filter or a bad argument is
         # written INTO the output instead, where a green build would ship it.
         run: |
-          if grep -rn "Liquid error\|Liquid Exception\|Liquid Warning" "$RUNNER_TEMP/build"; then
+          if grep -rn "Liquid error\|Liquid Exception\|Liquid Warning" "$RUNNER_TEMP/build" "$RUNNER_TEMP/build-pages"; then
             echo "::error::a Liquid error was rendered into the built site"
             exit 1
           fi
@@ -307,13 +331,14 @@ jobs:
         # one announces the last week of term as "New Lab is up" before week one has
         # happened - which is what two live semester sites showed all term. The fixture holds
         # a released lecture 2 beside an unreleased lecture 3, a silent readings row, an
-        # undated off-plan lab, a TBC lab, and a handed-out assignment 1 beside a pending assignment
-        # 2, so the box is checked in both directions.
+        # undated off-plan lab, a TBC lab not released beside a released one (lab 5,
+        # announced when its files first landed), and a handed-out assignment 1 beside a
+        # pending assignment 2, so the box is checked in both directions.
         run: |
           box=$(sed -n '/<h2>Updates<\/h2>/,/<\/ul>/p' "$RUNNER_TEMP/build/index.html")
           printf '%s\n' "$box"
           missing=0
-          for needle in "Lecture 1" "Lecture 2" "Lab 1" "Assignment 1"; do
+          for needle in "Lecture 1" "Lecture 2" "Lab 1" "Lab 5" "Assignment 1"; do
             if ! printf '%s' "$box" | grep -qF -- "$needle"; then
               echo "::error::the Updates box does not announce $needle, which released"
               missing=1
