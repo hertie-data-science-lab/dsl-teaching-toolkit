@@ -131,7 +131,7 @@ def _facts(
     sched = Schedule(releases=[Release("lab-08", NOW, deploy=list(deploys))])
     facts = SemesterFacts(org="Semester-Org", sched=sched)
     facts.manifests = {KEY: dict(MANIFEST)} if manifests is None else manifests
-    facts.recorded = frozenset(facts.manifests)
+    facts.recorded = {k: {"files": f} for k, f in facts.manifests.items()}
     src = {f"labs/08/{p}": s for p, s in (source or MANIFEST).items()}
     facts.source_blobs = {"cm": src}
     facts.dest_blobs = {

@@ -36,6 +36,8 @@ export interface ScheduleRow {
   assignment?: string;
   /** False for a session whose materials are not out yet. */
   released: boolean;
+  /** When a released session first reached students (the release record's ship time), as `when` is written; absent when the source does not say. The Updates box places a row with no `when` (a released TBC session) at it. */
+  releasedAt?: string;
   /** A session with nothing to ship (an `events:` lab, the site's `no_materials`): no files, never pending, never news. Absent from older engines: false. */
   noMaterials?: boolean;
   /** An entry's later slot (the site's `repeat`): the same files as its first, so never news. Absent from older engines: false. */
@@ -366,6 +368,7 @@ function rowsOf(dir: string, file: string, fm: Record<string, unknown>, org: str
     details: str(fm.details),
     allDay: fm.hide_time === true,
     released: fm.unreleased !== true,
+    ...(fm.released_at ? { releasedAt: str(fm.released_at) } : {}),
     noMaterials: fm.no_materials === true,
     repeat: fm.repeat === true,
     links: [] as FileLink[],
@@ -554,6 +557,7 @@ export function factsFromStatus(doc: Obj): SemesterFacts {
       details: str(r.details),
       assignment: r.assignment ? str(r.assignment) : undefined,
       released: r.released === true,
+      ...(r.released_at ? { releasedAt: str(r.released_at) } : {}),
       noMaterials: r.no_materials === true,
       repeat: r.repeat === true,
       links,

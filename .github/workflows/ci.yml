@@ -331,8 +331,9 @@ jobs:
         # one announces the last week of term as "New Lab is up" before week one has
         # happened - which is what two live semester sites showed all term. The fixture holds
         # a released lecture 2 beside an unreleased lecture 3, a silent readings row, an
-        # undated off-plan lab, a TBC lab not released beside a released one (lab 5,
-        # announced when its files first landed), and a handed-out assignment 1 beside a
+        # undated off-plan lab, a TBC lab not released beside a released one (lab 5: one
+        # copy the release record dates, one seeded and dated by when it first landed;
+        # announced at the earlier), and a handed-out assignment 1 beside a
         # pending assignment 2, so the box is checked in both directions.
         run: |
           box=$(sed -n '/<h2>Updates<\/h2>/,/<\/ul>/p' "$RUNNER_TEMP/build/index.html")

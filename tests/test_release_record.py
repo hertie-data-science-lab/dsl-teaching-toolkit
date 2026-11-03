@@ -545,3 +545,31 @@ def test_a_release_that_stops_still_saves_its_seeds(monkeypatch):
     monkeypatch.setattr(scheduler, "deploy_many", stops)
     assert _tick(_release(seeded, Deploy("cm", "labs/09", "materials", None)))[0] == 1
     assert [c["dest"]["path"] for c in store.copies] == ["lectures/08"]
+
+
+def test_a_ship_time_written_with_no_offset_is_utc_and_dates_beside_an_aware_one():
+    # A hand repair may write `2026-09-01T10:00:00`: read as UTC, never compared naive.
+    from datetime import UTC, datetime
+
+    a = ("cm", "labs/01", "materials", "labs/01")
+    b = ("cm", "labs/02", "materials", "labs/02")
+    copies = {
+        a: {"first_shipped_at": "2026-09-01T10:00:00"},
+        b: {"first_shipped_at": "2026-09-02T10:00:00Z"},
+    }
+    assert release_record.first_shipped(copies, a) == datetime(
+        2026, 9, 1, 10, tzinfo=UTC
+    )
+    assert release_record.released_at(
+        copies, [a, b], False, lambda k: None
+    ) == datetime(2026, 9, 1, 10, tzinfo=UTC)
+    # A dated row with a copy the record does not date: unknown, and no history read.
+    del copies[b]["first_shipped_at"]
+    assert release_record.released_at(copies, [a, b], False, _no_read) is None
+    # A TBC row: that copy is dated by its history instead.
+    later = datetime(2026, 8, 30, tzinfo=UTC)
+    assert release_record.released_at(copies, [a, b], True, lambda k: later) == later
+
+
+def _no_read(_k):
+    raise AssertionError("a dated row reads no history")

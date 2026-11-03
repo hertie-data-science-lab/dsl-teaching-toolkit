@@ -389,6 +389,12 @@
           "released": {
             "type": "boolean"
           },
+          "released_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "repeat": {
             "type": "boolean"
           },
@@ -431,6 +437,7 @@
           "details",
           "assignment",
           "released",
+          "released_at",
           "tbc",
           "dateless",
           "off_schedule",

@@ -15,6 +15,7 @@ import {
 import type { Assignment, Release } from '../model/types';
 import { archive, keepFuture, releaseAdhoc, releaseAgain, releaseEarly, releaseNow, scheduledPreview } from '../ops/defs';
 import { OpButtons, OpOpen } from '../ops/Panel';
+import type { OpDef } from '../ops/session';
 import { TIMEZONES } from '../tiers/course';
 import { RUN_REASON } from '../tiers/runSettings';
 import { CheckLine, DueSubmit, EditFile, Md, ProblemCards, ReleaseMarks, ghUrl } from '../ui/bits';
@@ -35,6 +36,7 @@ import { DivergencePanel, releaseAgainDrift } from './Divergence';
 import { useSetAside } from './SetAside';
 import { divergenceOf, isDiverged } from '../model/divergence';
 import { gapLabel } from '../model/format';
+import { SessionDate, releasedTbc } from './SessionDate';
 
 const LABELS: Record<Block, string> = { releases: 'Releases', assignments: 'Assignments', events: 'Events' };
 
@@ -87,8 +89,8 @@ export function useSchedFile(p: CohortProps): SchedFile | null | 'loading' {
   return { text: f.text, sha: f.sha, ...parsed! };
 }
 
-/** schedule.yml after the semester's dates sheet (`drafts`), or why it would not be valid. */
-export function scheduleAfter(sf: SchedFile, drafts: SemesterDraft[]): { text: string } | { error: string } {
+/** schedule.yml after `drafts` (the semester's dates sheet, one entry), or why it would not be valid. */
+export function scheduleAfter(sf: SchedFile, drafts: Draft[]): { text: string } | { error: string } {
   const y = new YamlText(sf.text);
   for (const d of drafts) writeDraft(y, d, sf.doc);
   return validSchedule(y.toJS()) ? { text: y.text } : { error: invalidText('the schedule', validSchedule) };
@@ -962,6 +964,8 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
   const drift = divergenceOf(status, rel.id).filter((x) => !aside.list?.includes(x.id));
   const last = (status.operations ?? []).find((o) => o.op.startsWith('release.') && o.summary.includes(`${ident}:`));
   const dest = rel.dest?.repo || DEFAULT_DEST_REPO, destPath = rel.dest?.path || ref.source.path;
+  // A TBC entry's console release offers its session date in the result panel (decision 0043 rule 5).
+  const dated = (def: OpDef): OpDef => (rel.when === null ? { ...def, doneExtra: <SessionDate p={p} rel={rel} id="op-sd" /> } : def);
   return (
     <>
       <div class="page-head">
@@ -975,6 +979,7 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
         </div>
         <div class="actions"><a class="btn quiet" href={`#schedule-${rel.id}`}>Edit entry</a></div>
       </div>
+      {releasedTbc(rel) ? <section class="panel section"><SessionDate p={p} rel={rel} id="rd-sd" /></section> : null}
       <div class="grid-2">
         <section class="panel section">
           <h2>From and to</h2>
@@ -993,7 +998,7 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
         <DivergencePanel
           list={drift} courseOrg={p.course.org} cohortOrg={p.cohort.org}
           onSetAside={aside.onCircle ? (x) => aside.onCircle!({ id: x.id, label: gapLabel(x.id) ?? x.text }) : undefined}
-          again={<OpButtons def={releaseAgain(scope, ref, releaseAgainDrift(drift))} label="Release again" />}
+          again={<OpButtons def={dated(releaseAgain(scope, ref, releaseAgainDrift(drift)))} label="Release again" />}
           keep={<OpOpen def={keepFuture(scope)} cls="btn quiet" label="Keep for future semesters" />}
         />
         {aside.after}
@@ -1001,10 +1006,10 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
       <section class="panel section" style="margin-top:20px">
         <h2>Actions</h2>
         <div class="actions">
-          {st === 'planned' ? <OpButtons def={releaseEarly(scope, ref)} label="Release early" />
+          {st === 'planned' ? <OpButtons def={dated(releaseEarly(scope, ref))} label="Release early" />
             : st === 'released' && drift.length ? <span class="footnote">Release again or keep the edits from Differs from the course copy, above.</span>
-            : st === 'released' ? <><OpButtons def={releaseAgain(scope, ref)} label="Release again" /><OpOpen def={keepFuture(scope)} cls="btn quiet" label="Keep for future semesters" /></>
-            : st === 'late' ? <OpButtons def={releaseNow(scope, ref)} label="Release now" />
+            : st === 'released' ? <><OpButtons def={dated(releaseAgain(scope, ref))} label="Release again" /><OpOpen def={keepFuture(scope)} cls="btn quiet" label="Keep for future semesters" /></>
+            : st === 'late' ? <OpButtons def={dated(releaseNow(scope, ref))} label="Release now" />
             : <span class="footnote">Nothing to run until the problem above is fixed.</span>}
         </div>
         <div class="savebar"><span class="footnote">After changing the course copy, the student site may need an update.</span><a class="btn small quiet" href="#site">Update site on the Site page</a></div>

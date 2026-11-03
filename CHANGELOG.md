@@ -2,6 +2,12 @@
 
 ## 0.11.0 (unreleased)
 
+- The Updates box dates a released row by the release record (decision 0043): the site's
+  `released_at:` and the student status's `rows[].released_at` carry when it reached students,
+  which places a released TBC row in both Updates boxes. A released TBC entry offers its session date on its
+  console release page and is a suggested to-do until dated. The semester Dashboard gains a
+  Semester settings panel and one modal for the run defaults, `autosync_released_edits` and the
+  semester dates; the Site page links to it for the dates.
 - Releases are fire-once (decision 0043): each copy ships once, at its time, and is recorded
   in `semester-config/.system/releases.json` with its source commit, ship times and file
   manifest. An edit to a released course folder reaches students on Release again, or on

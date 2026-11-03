@@ -2,8 +2,8 @@
 
 import { useMemo, useState } from 'preact/hooks';
 import { useEnv } from '../env';
-import { invalidText, useSave } from '../edit/save';
-import { YamlText, deepEqual, obj, render } from '../edit/yamlText';
+import { invalidText, useDraftSave, useSave } from '../edit/save';
+import { YamlText, obj, render } from '../edit/yamlText';
 import { Field, SchemaForm, fieldErrors } from '../forms/Form';
 import { ago, fmtWhen, kebab, str } from '../model/format';
 import type { FileState } from '../model/files';
@@ -27,11 +27,11 @@ import { DEFAULT_DEST_REPO } from '../model/policy';
 import { FLOORS, HOST_DEFAULT, kindOfLanded, landings, readSel, withPublic, type Sel } from '../model/selection';
 import { validator } from '../model/validate';
 import { SelectionEditor } from '../ui/SelectionEditor';
-import { draftErrors, readDraft, type SemesterDraft } from '../model/scheduleEdit';
+import { useSchedFile } from './Schedule';
 import { ABOUT } from '../tiers/course';
 import type { FieldTier, Tiers, Values } from '../tiers/types';
 import { detailsOf, saveCourseFile, withSyllabus } from './CourseEdit';
-import { SemesterForm, scheduleAfter, useSchedFile } from './Schedule';
+import { SETTINGS_HASH, settingsLines } from './SemesterSettings';
 
 /** A hand-written announcement's title, date and text, from its front matter (or its body). */
 export function readAnnouncement(text: string): { title?: string; date: string; text: string } {
@@ -76,27 +76,6 @@ function useYaml(f: FileState): { y: YamlText; doc: Record<string, unknown> | nu
 export function syncedValues(course: ReadyProps['course'], cohort: ReadyProps['cohort']): Record<string, string> {
   const from: Record<string, string> = { course_name: course.name, title: course.name, course_code: course.code, course_description: course.description, course_semester: cohort.termLabel, github_org: cohort.org };
   return Object.fromEntries(SITE_CONFIG.synced.map((k) => [k, from[k] ?? '']));
-}
-
-/**
- * A settings group's draft over `base`, and its save: `set` replaces the draft and clears a
- * finished save line, `run` saves and drops the draft once written.
- */
-function useDraftSave<T>(base: T) {
-  const env = useEnv();
-  const [draft, setDraft] = useState<T | null>(null);
-  const [save, runSave, setSave] = useSave(env);
-  const cur = draft ?? base;
-  const set = (v: T) => {
-    setDraft(v);
-    if (save.kind !== 'busy') setSave({ kind: 'idle' });
-  };
-  const run: typeof runSave = async (...a) => {
-    const ok = await runSave(...a);
-    if (ok) setDraft(null);
-    return ok;
-  };
-  return { env, cur, set, save, setSave, run, unchanged: deepEqual(cur, base) };
 }
 
 function Site(p: ReadyProps) {
@@ -296,27 +275,13 @@ function CourseGroup({ p }: { p: ReadyProps }) {
   );
 }
 
-/** The semester's dates and timezone: the sync reads them from schedule.yml, so they are saved there. */
+/** The semester's dates: the sync reads them from schedule.yml; they are edited in the Dashboard's Semester settings. */
 function SemesterGroup({ p }: { p: ReadyProps }) {
-  const sf = useSchedFile(p);
-  const ready = sf && sf !== 'loading' && !sf.error ? sf : null;
-  const before = useMemo(() => (ready ? (readDraft(ready.doc, 'semester') as SemesterDraft) : null), [ready?.doc]);
-  const { cur: d, set, save, setSave, run, unchanged } = useDraftSave(before);
-  const errors = d ? draftErrors(d) : {};
-  const doSave = async () => {
-    if (!ready || !d) return;
-    if (Object.keys(errors).length) return setSave({ kind: 'bad', text: 'Fix the fields marked in red first.' });
-    const out = scheduleAfter(ready, [d]);
-    if ('error' in out) return setSave({ kind: 'bad', text: out.error });
-    await run({ owner: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }, out.text, ready.sha, { message: 'schedule: edit the semester dates, from the DSL Teaching Console', statusRepo: [p.cohort.org, CONFIG_REPO] });
-  };
   return (
     <div class="form-section">
       <h3>Semester dates</h3>
-      {sf === 'loading' ? <Loading what="Reading the schedule" /> : sf === null ? <p class="footnote">No schedule.yml yet.</p> : sf.error ? <CheckLine cls="bad">schedule.yml does not parse ({sf.error}); fix it with Edit the file directly.</CheckLine> : null}
-      {d ? <SemesterForm d={d} set={(patch) => set({ ...d, ...patch })} errors={errors} /> : null}
-      <SavedTo href="#schedule-semester" screen="Schedule" />
-      <SaveBar state={save} onSave={() => void doSave()} small disabled={!d || unchanged} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml', exists: sf !== null }} />
+      <p>{settingsLines(p.status).dates}</p>
+      <p class="footnote">Edited in <a class="textlink" href={SETTINGS_HASH}>Semester settings</a> on the Dashboard; the site updates at the next sync.</p>
     </div>
   );
 }

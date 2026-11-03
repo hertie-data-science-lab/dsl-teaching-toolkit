@@ -109,15 +109,12 @@ describe('Site settings', () => {
     expect(body(w)).toContain('student_site:\n  syllabus: Course.md\n');
   });
 
-  it('saves the semester dates into schedule.yml, pointing at the Schedule', async () => {
-    const gh = await mount();
+  it('shows the semester dates and links to where they are edited, the Dashboard’s Semester settings (decision 0043)', async () => {
+    await mount();
     const sem = section('Semester dates');
-    expect(sem.textContent).toContain('Saved to Schedule; the site updates at the next sync.');
-    expect(sem.querySelector('a.edit-file')!.getAttribute('title')).toBe(`${ORG}/semester-config/schedule.yml`);
-    await type('#e-te', '2026-12-20');
-    await act(() => saveIn(sem).click());
-    await settle(() => puts(gh, 'schedule.yml').length > 0);
-    expect(parse(body(puts(gh, 'schedule.yml')[0])).semester.end).toEqual({ type: 'end', event_datetime: '2026-12-20' });
+    expect(sem.textContent).toContain('Edited in Semester settings on the Dashboard; the site updates at the next sync.');
+    expect(sem.querySelector('a')!.getAttribute('href')).toBe('#settings');
+    expect(sem.querySelector('input')).toBeNull();
   });
 
   it('shows the semester label and org as what they are, not as fields', async () => {
