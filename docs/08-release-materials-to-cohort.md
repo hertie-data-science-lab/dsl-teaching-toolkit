@@ -27,7 +27,7 @@ Two ops, in the console or on the CLI:
 - Root files are just paths too: `SYLLABUS.md`.
 - **The whole repo**: `/` (or `.`), minus `.git`, `.github` and `.system/` (your operating notes `MAINTAINING.md` and the syllabus example - never released).
 
-Re-releasing is safe - copies are additive and idempotent.
+Re-releasing is safe - copies are additive and idempotent. A release made here is recorded like a scheduled one, so the scheduler does not copy it again.
 
 ### Phased code release
 
@@ -42,7 +42,9 @@ Two routes, and both stick.
 
 **In the course org**, then release again - the right one for anything next year's semester
 should also get. A release overwrites the file at that path, so the correction lands; a copy
-is only additive in that it never *deletes* anything.
+is only additive in that it never *deletes* anything. The scheduler ships each copy once, so
+the correction waits for that release again unless the semester sets
+`autosync_released_edits: true`.
 
 **In the semester's copy**, straight into the released repo - the right one when a lab is
 broken during class. Instructors have push there, and the edit survives: a release lands on

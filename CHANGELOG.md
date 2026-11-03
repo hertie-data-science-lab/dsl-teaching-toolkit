@@ -2,6 +2,13 @@
 
 ## 0.11.0 (unreleased)
 
+- Releases are fire-once (decision 0043): each copy ships once, at its time, and is recorded
+  in `semester-config/.system/releases.json` with its source commit, ship times and file
+  manifest. An edit to a released course folder reaches students on Release again, or on
+  every tick where `autosync_released_edits` is true. A due copy already at its destination
+  is recorded without being copied, so no semester re-ships on upgrade. The status reads a
+  recorded copy as released whatever its destination holds; the preview says
+  `ALREADY_DONE` for an entry whose copies are all out.
 - One kind model: the policy's `kinds` gain `plural`, `numbered` and `shown`, the `term` kind is
   `semester`, and every schedule row renders through one `schedule_row.html` (the per-kind row
   includes are retired from each semester site on its next Sync site).
