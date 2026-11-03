@@ -19,6 +19,8 @@ import { validator } from './validate';
 
 export const RUN_KEYS = ['team_formation', 'max_team_size', 'late_window_days', 'late_penalty_per_day', 'visibility', 'submit_url', 'marks_per_question'] as const;
 export type RunKey = (typeof RUN_KEYS)[number];
+/** The `defaults:` keys with no entry layer (`settings.SEMESTER_KEYS`, and `autosync_released_edits`). */
+export type SemesterWideKey = 'timezone' | 'archive_grace_days' | 'materials_repo' | 'autosync_released_edits';
 export const LATE_PAIR: RunKey[] = ['late_window_days', 'late_penalty_per_day'];
 
 /** Where an effective value comes from (`settings.SOURCES`). */
@@ -95,6 +97,12 @@ export function readSetting(key: string, v: unknown): unknown {
     case 'marks_per_question':
       // `setting_readers._boolean`: true, yes, on or 1 is on; anything else is off.
       return typeof v === 'boolean' ? v : ['true', 'yes', 'on', '1'].includes(String(v).trim().toLowerCase());
+    case 'autosync_released_edits': {
+      // `settings._autosync`: what PyYAML (YAML 1.1) loads as a boolean, which takes the bare words this parser leaves as text.
+      if (typeof v === 'boolean') return v;
+      const t = String(v).trim().toLowerCase();
+      return ['true', 'yes', 'on'].includes(t) ? true : ['false', 'no', 'off'].includes(t) ? false : undefined;
+    }
     default:
       return v;
   }
@@ -102,7 +110,10 @@ export function readSetting(key: string, v: unknown): unknown {
 
 /** A form's value as the file writes it: a yes/no setting chosen from a select is a boolean, not text. */
 export function fileValue(key: string, v: unknown): unknown {
-  return key === 'marks_per_question' && typeof v === 'string' && v !== '' ? readSetting(key, v) : v;
+  if (typeof v !== 'string' || v === '') return v;
+  if (key === 'marks_per_question') return readSetting(key, v);
+  // A select's 'true' / 'false'; any other text (a hand-written `yes`) is kept as written.
+  return key === 'autosync_released_edits' && (v === 'true' || v === 'false') ? v === 'true' : v;
 }
 
 /** Whether the engine reads `v` for `key`. */
@@ -163,8 +174,8 @@ export const SOURCE_WORD: Record<Source, string> = {
   institution: 'institution default',
 };
 
-/** A run setting's value in words: "<n> days", "Students form their own". */
-export function valueWord(key: RunKey, v: unknown): string {
+/** A `defaults:` setting's value in words: "<n> days", "Students form their own". */
+export function valueWord(key: RunKey | SemesterWideKey, v: unknown): string {
   if (v === null || v === undefined || v === '') return key === 'late_penalty_per_day' ? 'no penalty' : key === 'late_window_days' ? 'no late work' : 'not set';
   switch (key) {
     case 'team_formation':
@@ -178,6 +189,7 @@ export function valueWord(key: RunKey, v: unknown): string {
     case 'max_team_size':
       return `up to ${String(v)}`;
     case 'marks_per_question':
+    case 'autosync_released_edits':
       return readSetting(key, v) ? 'on' : 'off';
     default:
       return String(v);

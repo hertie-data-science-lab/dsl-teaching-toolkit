@@ -28,3 +28,7 @@
   empty. `reading_list` is `reading_guide`; `assets` entries default off the site; an
   assignment entry may override its template's `type` and `submit_via` (decision 0038
   amendment 2).
+- `autosync_released_edits` joins the `defaults:` cascade (semester > course > institution;
+  institution `false`): whether an edit to an already-released course folder re-ships on the
+  next scheduled run. The console's course and semester defaults offer it as "Send fixes to
+  released files automatically" (decision 0043).

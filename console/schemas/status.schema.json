@@ -365,6 +365,32 @@
               ],
               "type": "object"
             },
+            "autosync_released_edits": {
+              "properties": {
+                "source": {
+                  "enum": [
+                    "entry",
+                    "semester",
+                    "course",
+                    "institution"
+                  ],
+                  "type": "string"
+                },
+                "value": {
+                  "type": [
+                    "string",
+                    "integer",
+                    "boolean",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "source"
+              ],
+              "type": "object"
+            },
             "late_penalty_per_day": {
               "properties": {
                 "source": {
@@ -1086,6 +1112,32 @@
               "type": "object"
             },
             "assignment_repo_visibility": {
+              "properties": {
+                "source": {
+                  "enum": [
+                    "entry",
+                    "semester",
+                    "course",
+                    "institution"
+                  ],
+                  "type": "string"
+                },
+                "value": {
+                  "type": [
+                    "string",
+                    "integer",
+                    "boolean",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "source"
+              ],
+              "type": "object"
+            },
+            "autosync_released_edits": {
               "properties": {
                 "source": {
                   "enum": [
