@@ -70,7 +70,7 @@ Each slot is a row on the Schedule; the files ship once, an hour before the firs
 | `from_path` | **yes** | - | the folder or file to copy, or `/` for the whole repo |
 | `to_semester_repo` | no | `materials` | the semester repo to copy into - created on first release |
 | `to_path` | no | `from_path` | where it lands in `to_semester_repo` |
-| `release_datetime` | no | an hour before the first slot (a whole-day slot: the day's start) | ship this copy at another time |
+| `release_datetime` | no | an hour before the first slot (a whole-day slot: the day's start) | ship this copy at another time. After a release it is the time the copy actually went out, when that beat the plan |
 
 ```yaml
 lectures:
@@ -234,9 +234,11 @@ A newly bootstrapped org raises neither of the first two until it has seen its f
 
 Just commit the edit to `semester-config/schedule.yml` on `main` - the **GitHub web UI is the recommended way** (or edit a local clone → commit → push). The push fires the scheduler itself, so the change takes effect within minutes; there is nothing to re-arm or re-deploy. 
 
-The one caveat: already-fired **one-shot** actions don't rewind. A deadline snapshot, an autograde and a model-solution push each happen once, and re-doing one means deleting its marker - `.system/snapshots/<slug>.csv`, `.system/solutions/<slug>.json`, or the `_graded.json` / `_skipped.json` record in `.system/autograde/<slug>/` (deleting the whole folder works too). A `handout_datetime` the scheduler recorded is likewise never rewritten.
+The one caveat: already-fired **one-shot** actions don't rewind. A deadline snapshot, an autograde and a model-solution push each happen once, and re-doing one means deleting its marker - `.system/snapshots/<slug>.csv`, `.system/solutions/<slug>.json`, or the `_graded.json` / `_skipped.json` record in `.system/autograde/<slug>/` (deleting the whole folder works too). A `handout_datetime` is never moved later; a hand-out run **earlier** than it (Hand out now) writes the actual moment over it, once.
 
 A material release is **fire-once**: each `files:` item is copied once, at its time, and recorded in `semester-config/.system/releases.json`. An edit to the course copy afterwards does not reach students by itself - release the entry again (**Release again** in the console, or `release.entry`). A semester whose `autosync_released_edits` is `true` re-ships such edits on every tick instead. A release already shipped stays shipped, even if its folder is later deleted from the semester repo: releasing it again is your call.
+
+A copy released **before** its time (Release early / now), or from a `tbc` entry, gets `release_datetime: <when it went out>` written on its `files:` item, in one bot commit per release. On time, late, or released again: nothing is written. There is no such write for `solution_datetime`.
 
 Everything else is **cumulative**: assignment handouts, the site sync and the source digest are re-applied at every tick, so a late or lost tick heals itself.
 
