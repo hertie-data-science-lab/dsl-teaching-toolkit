@@ -115,6 +115,13 @@ describe('Semester settings', () => {
     expect(q('[role="dialog"]').textContent).toContain('Semester settings');
   });
 
+  it('asks for the timezone once: the defaults one, not schedule.yml’s', async () => {
+    await mount((f) => <CohortScreen {...props(f)} settings />);
+    const dialog = q('[role="dialog"]');
+    expect(dialog.querySelector('#sd-timezone')).not.toBeNull();
+    expect(dialog.querySelector('#e-tz')).toBeNull();
+  });
+
   it('checks only what was edited: a fault in a fold left alone never blocks the save', async () => {
     // The file's window has no penalty (a fault), but only the dates are edited.
     const gh = await mount((f) => <CohortScreen {...props(f)} settings />, '# INSTRUCTOR-OWNED\ndefaults:\n  late_window_days: 5\n');

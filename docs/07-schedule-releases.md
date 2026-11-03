@@ -337,7 +337,7 @@ An entry that is valid YAML but not a valid *schedule* entry is **dropped**: it 
 | a `files` item missing `from_course_repo` or `from_path` | that one copy never ships |
 | a key used in two blocks | the second entry is dropped |
 
-Kept rather than dropped - the entry still runs on its documented fallback, and the fallback is reported alongside the drops (so `--validate` catches it): a malformed `due_datetime` (the assignment is TBC: nothing fires), a malformed `handout_datetime` (**nothing is ever handed out**), `marks_return_datetime` (marks go back by hand) or `release_datetime` (the copy ships at its default); one unreadable slot of several (the others stand); a typo'd or unknown key at any level; and an unknown `timezone:` (falls back to `Europe/Berlin`). An assignment's `type` or `max_team_size` is noted with where it lives now.
+Kept rather than dropped - the entry still runs on its documented fallback, and the fallback is reported alongside the drops (so `--validate` catches it): a malformed `due_datetime` (the assignment is TBC: nothing fires), a malformed `handout_datetime` (**nothing is ever handed out**), `marks_return_datetime` (marks go back by hand) or `release_datetime` (the copy ships at its default); one unreadable slot of several (the others stand); a typo'd or unknown key at any level; and an unknown `timezone:` (falls back to `Europe/Berlin`).
 
 `solution_datetime` is the exception that is **dropped, not kept**: malformed, missing its `handout_datetime`, not after it, or (in the schedule check on a push) before the late cutoff, the value is discarded and the model solution waits for a human. Honouring a bad one could ship the answers with the questions, and nothing undoes that.
 

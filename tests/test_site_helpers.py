@@ -1067,7 +1067,7 @@ def test_index_reads_a_single_materials_repo_semester(monkeypatch):
     #
     # `.github/` shows up, which is the deliberate cost of filtering by a closed list of
     # names rather than by dots: it cannot normally reach a semester repo at all
-    # (`deploy.ROOT_RELEASE_EXCLUDED` never releases a root `.github`), so if it is here it
+    # (`selection.ROOT_RELEASE_EXCLUDED` never releases a root `.github`), so if it is here it
     # was released on purpose and saying so is right. The `.DS_Store` beside it is not -
     # nobody released that, a file manager wrote it.
     assert got == {

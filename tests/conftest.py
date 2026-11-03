@@ -20,6 +20,7 @@ from dsl_course import (
     bootstrap_course,
     central,
     config,
+    deploy,
     discovery,
     gh_contents,
     gh_teams,
@@ -196,6 +197,18 @@ def _no_semester_is_closed_out(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def site_syncs(request, monkeypatch) -> list[tuple[str, str]]:
+    """Release materials' own site sync after a release (`deploy._sync_site`), recorded,
+    not run; a test marked `real_site_sync` runs it."""
+    calls: list[tuple[str, str]] = []
+    if request.node.get_closest_marker("real_site_sync") is None:
+        monkeypatch.setattr(
+            deploy, "_sync_site", lambda c, s: calls.append((c, s)) or 0
+        )
+    return calls
+
+
+@pytest.fixture(autouse=True)
 def _nothing_is_recorded_as_released(monkeypatch):
     """Answer the release record's read (`release_record`) and the scheduler's destination
     tree read with "no record yet, and nothing at any destination", and accept the write: every due copy ships, as it did
@@ -203,6 +216,8 @@ def _nothing_is_recorded_as_released(monkeypatch):
     after this fixture and win."""
     monkeypatch.setattr(release_record, "get_file_with_sha", lambda *a, **k: None)
     monkeypatch.setattr(scheduler, "repo_blob_shas", lambda *a, **k: {})
+    monkeypatch.setattr(scheduler, "repo_missing", lambda *a, **k: False)
+    monkeypatch.setattr(scheduler, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(
         release_record, "put_file_as_read", lambda org, repo, path, body, *a, **k: body
     )
@@ -601,13 +616,13 @@ def run_settings(monkeypatch, read) -> None:
         blocks = data.pop("assignments", None)
         if isinstance(data.get("defaults"), dict):
             data["defaults"] = {
-                settings.INLINE_NAMES.get(k, k): v for k, v in data["defaults"].items()
+                settings.FILE_NAMES.get(k, k): v for k, v in data["defaults"].items()
             }
         defaults = yaml.safe_dump(data, sort_keys=False) if data else None
         if not isinstance(blocks, dict):
             return defaults, None
         inline = {
-            key: {settings.INLINE_NAMES.get(k, k): v for k, v in (block or {}).items()}
+            key: {settings.FILE_NAMES.get(k, k): v for k, v in (block or {}).items()}
             for key, block in blocks.items()
         }
         return defaults, yaml.safe_dump({"assignments": inline}, sort_keys=False)
@@ -615,7 +630,12 @@ def run_settings(monkeypatch, read) -> None:
     def inline(org, slug):
         text = split(org)[1]
         blocks = (yaml.safe_load(text) or {}).get("assignments") if text else None
-        return settings.inline_blocks(blocks).get(slug, {})
+        entry = (blocks or {}).get(slug)
+        if not isinstance(entry, dict):
+            return {}
+        return settings._usable(
+            settings.inline_settings(entry, f"assignments.{slug}", [])
+        )
 
     monkeypatch.setattr(settings, "_semester_text", lambda org: split(org)[0])
     # The entry's own settings, as the parsed plan carries them (`AssignmentEntry.settings`).

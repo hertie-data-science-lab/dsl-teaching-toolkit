@@ -7,12 +7,11 @@
 // `schemas/materials.json` were answered by the engine and the tests hold this file to them.
 // Never-material names (`.DS_Store`, `.gitkeep`) and the list file itself never leave the repo.
 
-import { clutter, denylisted } from '../model/selection';
+import { clutter, denylisted, parts } from '../model/selection';
 import { compile, compileAll, matchRules, withheldBy, type Rule } from './glob';
 
 export type Badge = 'withheld' | 'released';
 
-const parts = (path: string) => path.split('/').filter(Boolean).map((x) => x.toLowerCase());
 /** Clutter (`selection.CLUTTER`) and the list file itself: never copied anywhere. */
 export const neverMaterial = (path: string) => clutter(path) || parts(path).includes('.releaseignore');
 /** The institution denylist (`selection.DENYLIST`): solutions, tests, grading files, `.env*`, `.git`, `.system`. */

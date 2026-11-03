@@ -39,7 +39,8 @@ const DENYLIST = rules.denylist.map(fnmatch);
 const CLUTTER = new Set(rules.clutter.map((x) => x.toLowerCase()));
 const ALIASES: Record<string, string> = rules.type_aliases;
 
-const parts = (path: string) => path.split('/').filter(Boolean).map((x) => x.toLowerCase());
+/** A path's components, lowercased. */
+export const parts = (path: string) => path.split('/').filter(Boolean).map((x) => x.toLowerCase());
 /** A component that is never course material (`selection.CLUTTER`: `.DS_Store`, `.gitkeep`, ...). */
 export const clutter = (path: string) => parts(path).some((x) => CLUTTER.has(x));
 /** A component on the institution denylist (solutions, tests, grading files, `.env*`, `.git`, `.system`). */

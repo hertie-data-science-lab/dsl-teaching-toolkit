@@ -31,7 +31,7 @@ from .course import is_repo_root
 from .gh_contents import WITHHELD_ROOT_STUBS
 from .release_record import inside
 from .schedule_plan import within
-from .selection import ROOT_RELEASE_EXCLUDED, denied
+from .selection import kept, release_use
 
 COURSE = "DIVERGED_COURSE"
 DELETED = "DIVERGED_DELETED"
@@ -80,14 +80,12 @@ def source_files(
         if src in WITHHELD_ROOT_STUBS and src in unwritten:
             return {}
         return {dest_path.rsplit("/", 1)[-1] or src: blobs[src]}
+    use = release_use(root, unwritten)  # what `deploy` copies through, layer 3
     out = {}
     for path, sha in blobs.items():
         rel = within(src, path)
-        if not rel or path in withheld or denied(rel):
-            continue
-        if root and (rel.split("/", 1)[0] in ROOT_RELEASE_EXCLUDED or rel in unwritten):
-            continue
-        out[rel] = sha
+        if rel and path not in withheld and kept(rel, use=use):
+            out[rel] = sha
     return out
 
 
@@ -100,16 +98,8 @@ def dest_files(
     files = inside(dict(dest_blobs), dest_path)
     if not is_repo_root(dest_path):
         return files
-    return {
-        p: s
-        for p, s in files.items()
-        if p in manifest
-        or not (
-            p.split("/", 1)[0] in ROOT_RELEASE_EXCLUDED
-            or denied(p)
-            or p in WITHHELD_ROOT_STUBS
-        )
-    }
+    use = release_use(True, WITHHELD_ROOT_STUBS)
+    return {p: s for p, s in files.items() if p in manifest or kept(p, use=use)}
 
 
 def source_present(src_path: str, blobs: Mapping[str, str]) -> bool:
@@ -121,7 +111,9 @@ def source_present(src_path: str, blobs: Mapping[str, str]) -> bool:
     return src in blobs or any(p.startswith(f"{src}/") for p in blobs)
 
 
-def _outside(files: Mapping[str, str], nested: Collection[str]) -> dict[str, str]:
+def outside(files: Mapping[str, str], nested: Collection[str]) -> dict[str, str]:
+    """`files` without what sits at or under one of the `nested` sub-paths (`nested_in`):
+    those are another copy's."""
     return {
         p: s
         for p, s in files.items()
@@ -139,20 +131,20 @@ def compare(
     course now (`source_files`), `dest` the files under the copy in the branch students
     read (relative to it); None for a side that could not be read, whose kinds are not
     judged. `nested` are the sub-paths other copies land at, left out everywhere."""
-    m = _outside(manifest, nested)
+    m = outside(manifest, nested)
     out: dict[str, Drift] = {}
     if source is not None:
-        s = _outside(source, nested)
+        s = outside(source, nested)
         out[COURSE] = _edits(m, s)
         if dest is not None:
             gone = tuple(sorted(p for p in m if p not in s and p in dest))
             out[DELETED] = Drift(deleted=gone, side=tuple((p, "") for p in gone))
     if dest is not None:
-        d = _outside(dest, nested)
+        d = outside(dest, nested)
         edits = _edits(m, d)
         # Gone from the released copy, and still in the course (when that side is read):
         # a file gone from both leaves nothing for Release again to put back.
-        kept = m if source is None else _outside(source, nested)
+        kept = m if source is None else outside(source, nested)
         removed = tuple(sorted(p for p in m if p not in d and p in kept))
         out[RELEASED] = edits._replace(
             removed=removed, side=edits.side + tuple((p, "") for p in removed)

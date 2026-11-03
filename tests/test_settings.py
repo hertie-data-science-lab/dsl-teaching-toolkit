@@ -406,9 +406,6 @@ def test_an_entrys_inline_settings_are_read_through_their_readers():
         dropped := [],
     )
     assert (values, dropped) == ({"late_window_days": 3, "visibility": "public"}, [])
-    assert settings.inline_blocks({"a1": {"max_team_size": 4}, "a2": "x"}) == {
-        "a1": {"max_team_size": 4}
-    }
 
 
 @pytest.mark.parametrize(

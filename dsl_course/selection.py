@@ -379,6 +379,25 @@ def swept(path: str) -> bool:
     return any(is_denied(p) for p in path.split("/") if p)
 
 
+def release_use(whole_repo: bool, stubs: Iterable[str] = ()) -> Selection:
+    """A release's use-site selection (decision 0040 rule 3): nothing more for a subpath
+    copy; for a WHOLE-repo copy, the root `.github/` and each root stub still carrying the
+    scaffold placeholder (`stubs`, decided per release).
+
+    Skipping the COPY rather than deleting the result afterwards is what keeps a withheld
+    stub from touching the destination: a delete-after-copy stages a deletion of whatever
+    the semester repo already had there. `divergence` filters a tree listing through the
+    same selection, so what it compares is what a copy would take."""
+    if not whole_repo:
+        return Selection()
+    return Selection(
+        exclude=(
+            *(f"/{name}/" for name in ROOT_RELEASE_EXCLUDED),
+            *(f"/{stub}" for stub in sorted(stubs)),
+        )
+    )
+
+
 # ------------------------------------------------------------------------ the defaults
 
 READINGS = "readings"

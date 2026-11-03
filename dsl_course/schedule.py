@@ -801,7 +801,6 @@ KNOWN_ASSIGNMENT = frozenset(
         *settings.INLINE_KEYS,
     }
 )
-_REPO_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
 def _flag_unknown_keys(
@@ -1375,7 +1374,7 @@ def _parse_assignments(
             "the assignment has no number, and is not handed out until it has one",
         )
         written = str(entry.get("repo_name") or "").strip()
-        if written and not _REPO_NAME.match(written):
+        if written and not settings.REPO_NAME.match(written):
             _flag_bad_value(
                 drops,
                 where,
@@ -1440,7 +1439,7 @@ def _parse_assignments(
             name_ = getattr(line, "field", "")
             drops.note(
                 where,
-                settings.INLINE_NAMES.get(name_, name_),
+                settings.FILE_NAMES.get(name_, name_),
                 getattr(line, "what", str(line)),
                 lines,
             )
@@ -2289,12 +2288,13 @@ def _unreadable_fault(what: str, lineno: int | None = None) -> ConfigFault:
 
 def run_settings_of(semester_org: str, slug: str) -> dict:
     """The run settings written on assignment `slug`'s schedule.yml entry
-    (`AssignmentEntry.settings`), off the plan `load` parses once per run; `{}` with no
+    (`AssignmentEntry.settings`), off the plan parsed once per run (`_parsed`, never a
+    copy, and without `load`'s parse lines again); `{}` with no
     semester or no such entry. The one way a caller holding only a semester and a key
     reaches the cascade's assignment layer - schedule.yml is never read a second time."""
     if not semester_org or not slug:
         return {}
-    entry = load(semester_org).assignments.get(slug)
+    entry = _parsed(semester_org)[0].assignments.get(slug)  # read only: no copy
     return dict(entry.settings) if entry else {}
 
 
@@ -2304,7 +2304,7 @@ def shape_of(semester_org: str, slug: str) -> dict:
     `load` parses once per run; `{}` with no semester, no entry or no override."""
     if not semester_org or not slug:
         return {}
-    entry = load(semester_org).assignments.get(slug)
+    entry = _parsed(semester_org)[0].assignments.get(slug)  # read only: no copy
     if entry is None:
         return {}
     return {
@@ -2871,6 +2871,15 @@ def _earlier(stamp: str, planned: str, tz: ZoneInfo) -> bool:
     return at is not None and then is not None and at < then
 
 
+def _unplanned(value: str) -> bool:
+    """Whether a `handout_datetime:` value as written plans nothing: blank, or `tbc`."""
+    try:
+        loaded = yaml.safe_load(value)
+    except yaml.YAMLError:
+        return False
+    return loaded is None or str(loaded).strip().casefold() == "tbc"
+
+
 def _insert_handout(
     text: str, slug: str, stamp: str, tz: ZoneInfo | None = None
 ) -> str | _Declined | None:
@@ -2955,8 +2964,11 @@ def _insert_handout(
                 # Handed out EARLIER than planned (decision 0043 rule 3): the actual
                 # moment replaces the plan, once - the next run's moment is at or after
                 # it, so it never moves again. A later hand-out leaves the plan alone.
+                # A blank or `tbc` value is no plan: it fills (rule 3, "blank fills").
                 planned = stripped.split(":", 1)[1]
-                if not _earlier(stamp, planned, tz or _tz(None)):
+                if not _unplanned(planned) and not _earlier(
+                    stamp, planned, tz or _tz(None)
+                ):
                     return None
                 eol = _eol(lines[j])
                 lines[j] = (

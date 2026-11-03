@@ -112,7 +112,11 @@ export function parseInstructors(text: string): Person[] {
   } catch {
     return [];
   }
-  const list = (d as { people?: unknown } | null)?.people;
+  return instructorsOf((d as { people?: unknown } | null)?.people);
+}
+
+/** A parsed semester.yml `people:` list as `Person`s; [] for anything that is not a list. */
+export function instructorsOf(list: unknown): Person[] {
   const s = (v: unknown) => (v == null ? '' : String(v));
   return (Array.isArray(list) ? list : []).map((e: Record<string, unknown>) => ({
     handle: s(e?.github_handle), email: s(e?.email), name: s(e?.name), title: s(e?.title), photo: s(e?.photo), url: s(e?.url),

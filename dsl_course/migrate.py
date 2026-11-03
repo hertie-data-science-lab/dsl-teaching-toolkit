@@ -1659,7 +1659,7 @@ def schedule_shape(
         )
         block = raw_blocks.get(key) if isinstance(raw_blocks.get(key), dict) else {}
         new |= {
-            settings.INLINE_NAMES.get(k, k): v
+            settings.FILE_NAMES.get(k, k): v
             for k, v in block.items()
             if k in settings.RUN_KEYS and v is not None
         }
@@ -2171,6 +2171,11 @@ def roster_kept(
         key = (row.get(email) or row.get("email") or "").strip().casefold()
         now = {**by_email.get(key, {}), **system.get(key, {})}
         for column, value in row.items():
+            if column is None:
+                # More cells than the header names (a stray comma): csv hands them over
+                # as a list. Nothing carries them, so each non-blank one is lost.
+                lost += sum(1 for v in value if v.strip())
+                continue
             name = "email" if column == email else column
             if (value or "").strip() and (now.get(name) or "").strip() != value.strip():
                 lost += 1
@@ -5086,10 +5091,19 @@ def checkout_drift(ref: str) -> list[str] | None:
     return [line for line in out.splitlines() if line.strip()]
 
 
-def _warn_drift(course: str, ref: str) -> None:
-    """Say, by file, where the checkout that renders differs from what the org runs."""
+def _warn_drift(course: str, ref: str, known: bool = True) -> None:
+    """Say, by file, where the checkout that renders differs from what the org runs.
+    `known` False: the course has no `course.yml` yet (unmigrated), so the ref it runs is
+    unknown and `ref` is only the default it was compared with."""
     drift = checkout_drift(ref)
-    if drift is None:
+    if drift and not known:
+        log_err(
+            f"{course} is unmigrated (no {NEW_COURSE_FILE} yet): the ref it runs is "
+            f"unknown, so this checkout was compared with the default, {ref}, and differs "
+            f"in {len(drift)} file(s). Check that this checkout is the code the org "
+            f"should run"
+        )
+    elif drift is None:
         log_err(
             f"could not compare this checkout with {ref} (the ref {course} runs) - "
             f"check out {ref} so the migration renders what the org will run"
@@ -5160,11 +5174,15 @@ def main() -> int:
             return 1
         course = target.course if isinstance(target, Semester) else args.org
         ref = central_ref_for(course)
+        known = read_course(course).text is not None
     except RuntimeError as exc:
         log_err(f"preflight could not read {args.org}: {exc}")
         return 1
-    log(f"  central ref of the course: {ref}")
-    _warn_drift(course, ref)
+    log(
+        f"  central ref of the course: {ref}"
+        + ("" if known else " (unmigrated: unknown)")
+    )
+    _warn_drift(course, ref, known)
     return run(args.org, target.steps(), args.preview, target.pause)
 
 

@@ -2858,3 +2858,16 @@ def test_a_course_meta_that_did_not_verify_names_the_key_left(monkeypatch, capsy
     monkeypatch.setattr(course, "meta_text", lambda: (left, "course_name: ML\n"))
     assert course.meta_verified() is False
     assert "assignment_defaults.format" in capsys.readouterr().err
+
+
+def test_an_unmigrated_course_is_compared_with_the_default_ref_and_says_so(
+    monkeypatch, capsys
+):
+    # No course.yml yet: the ref the course runs is unknown, not "release".
+    monkeypatch.setattr(migrate, "checkout_drift", lambda ref: ["dsl_course/x.py"])
+    migrate._warn_drift("C", "release", known=False)
+    err = capsys.readouterr().err
+    assert "C is unmigrated" in err and "the ref it runs is unknown" in err
+    assert "the ref C runs" not in err
+    migrate._warn_drift("C", "release")
+    assert "differs from release, the ref C runs" in capsys.readouterr().err

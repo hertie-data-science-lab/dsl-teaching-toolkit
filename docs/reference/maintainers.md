@@ -491,10 +491,12 @@ Decision 0034 (need, time, verdict), all computed by the engine so the console h
   written with `files: []` is the suggested to-do `schedule:files:<key>` (`check` `files`),
   dated by the entry. A template's brief and starter are
   needed. The semester's suggested to-dos (`semester.todo[]`) are `site:home`,
-  `schedule:archive_date` and `instructors:email` (a count, never a handle); the course
+  `schedule:archive_date`, `instructors:email` (a count, never a handle) and
+  `schedule:released_tbc:<key>` (a shown `tbc` entry whose copies have all gone out; its
+  screen is the release's, which offers the session date - decision 0043 rule 5); the course
   description is the course to-do `course:description`. Every to-do names its `check`
   (`files`, `syllabus`, `withheld`, `brief`, `starter`, `description`, `home`,
-  `archive_date`, `email`). K5 is done once the roster has a row (codes sent is the Students
+  `archive_date`, `email`, `released_tbc`). K5 is done once the roster has a row (codes sent is the Students
   tab's meter), K6 once the site repo exists.
 - **Time.** `horizon` (both files) is `{days}`, the rolling window's length, off the one
   constant `status_json.PROBLEM_HORIZON` (7 days); no tick time, so an unchanged state
@@ -774,7 +776,9 @@ Four places, in order - miss the last and every org keeps two buttons for one jo
 ## The clean break in `schedule.yml`
 
 (History. Since decision 0009, `team_formation` and `max_team_size` are each semester's
-(since 0039 on its `schedule.yml` entry), not the template's - see [Migration](#migration).)
+(since 0039 on its `schedule.yml` entry), not the template's - see [Migration](#migration).
+Since decision 0038 amendment 2 an entry may again override the template's `type` and
+`submit_via`; the paragraphs below are the 0.10 break.)
 
 `type:` and `max_team_size:` were accepted on an assignment entry and BEAT the template's
 own `grading_config.yml`. They are gone from `KNOWN_ASSIGNMENT` and from `AssignmentEntry`:
@@ -788,7 +792,7 @@ never rewrites an instructor's file - and step 1 goes BEFORE the release ships:
 
 1. **Before the promote**, add `type:` to each template's `grading_config.yml`, on its
    `solution` branch (and `team_formation:` / `max_team_size:`, where the assignment is a
-   group one, to the semester's `assignments.yml` - a template refuses run settings). On
+   group one, to the semester's run settings, then `assignments.yml` - a template refuses run settings). On
    the shipping release the schedule still wins, so this changes nothing; leave
    it until afterwards and every semester that declared `group` only in `schedule.yml` hands
    out one repo per STUDENT and its Join-team form refuses every request, so the teams

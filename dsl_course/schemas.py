@@ -91,7 +91,7 @@ from .schedule import (
 )
 from .settings import (
     DEFAULT_FILE_KEYS,
-    INLINE_NAMES,
+    FILE_NAMES,
     RUN_KEYS,
     SOURCES,
 )
@@ -529,9 +529,7 @@ def status_schema(*, closed: bool = True) -> dict:
             # Where the work is handed in, in the site's one word (`course.submit_shape`).
             "submit_shape": _enum(SUBMIT_SHAPES),
             # Each run setting's effective value and the layer that gave it (`settings`).
-            "settings": obj(
-                {INLINE_NAMES.get(key, key): effective for key in RUN_KEYS}
-            ),
+            "settings": obj({FILE_NAMES.get(key, key): effective for key in RUN_KEYS}),
         },
         # The four moments are always present (null when unset), so the console can move
         # an assignment from open to late window to marking on its own clock.
@@ -619,7 +617,7 @@ def schedule_schema() -> dict:
     entry = _obj(_keys(KNOWN_ENTRY, shared))
     readings = _obj(_keys(KNOWN_READINGS, shared))
     marks_row = _obj({"event_datetime": _str(), "show_on_site": {"type": "boolean"}})
-    run = {INLINE_NAMES.get(k, k): v for k, v in _SPEC_TYPES.items() if k in RUN_KEYS}
+    run = {FILE_NAMES.get(k, k): v for k, v in _SPEC_TYPES.items() if k in RUN_KEYS}
     assignment = _obj(
         _keys(
             KNOWN_ASSIGNMENT,

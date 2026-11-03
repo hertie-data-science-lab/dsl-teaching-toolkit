@@ -3,7 +3,8 @@
 // Assignments (the semester's run defaults), Releases (`autosync_released_edits`) and Semester
 // dates - each heading carrying its line. Assignments and Releases are both `defaults:` keys of
 // semester.yml and the dates are schedule.yml's, so a save is at most one commit per file
-// (`saveSteps`). The Assignments page's Semester defaults button opens it on Assignments.
+// (`saveSteps`). The timezone is the `defaults:` one (decision 0039), in the Assignments fold;
+// schedule.yml's own `timezone` stays on the Schedule screen. The Assignments page's Semester defaults button opens it on Assignments.
 
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { useEnv } from '../env';
@@ -163,7 +164,7 @@ export function SemesterSettings({ p, draft, expand, onClose }: { p: ReadyProps;
         <summary><span>Semester dates</span><span class="fold-line">{lines.dates}</span></summary>
         <div class="fold-body">
           {sf === 'loading' ? <Loading what="Reading the schedule" /> : sf === null ? <p class="footnote">No schedule.yml yet.</p> : sf.error ? <CheckLine cls="bad">schedule.yml does not parse ({sf.error}); fix it with Edit the file directly.</CheckLine> : null}
-          {dates ? <SemesterForm d={dates} set={(patch) => setKept({ ...kept, dates: { ...dates, ...patch } })} errors={dateErrors} /> : null}
+          {dates ? <SemesterForm d={dates} set={(patch) => setKept({ ...kept, dates: { ...dates, ...patch } })} errors={dateErrors} tz={false} /> : null}
         </div>
       </details>
       <SaveBar state={save} onSave={() => void doSave()} disabled={!defaultsDirty && !datesDirty} file={{ org, repo: CONFIG_REPO, path: SEMESTER_FILE, exists: semExists }}>

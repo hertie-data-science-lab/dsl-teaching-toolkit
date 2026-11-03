@@ -5,7 +5,7 @@
 // file, so keys a form does not show are kept, and a default is written only when the file
 // already spelt it.
 
-import { YamlText, obj } from '../edit/yamlText';
+import { YamlText, deepEqual, obj } from '../edit/yamlText';
 import { kebab } from './format';
 import { solutionBeforeCutoff } from './labels';
 import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO, EVENT_KIND, KINDS, pluralOf } from './policy';
@@ -594,13 +594,12 @@ export function changesOf(drafts: Draft[], bases: (Draft | null)[]): Change[] {
       const bt = base?.kind === 'entry' ? base.twin ?? null : null;
       // The twin follows its session's unit.
       const twin = { ...d.twin, session: d.session };
-      if (!deepSame(twin, bt)) out.push({ from: twin.id, d: twin, base: bt });
+      if (!deepEqual(twin, bt)) out.push({ from: twin.id, d: twin, base: bt });
     }
   });
   return out;
 }
 
-const deepSame = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 /** Sort keys of a numbered block by number (then by key), each entry's number as its row shows it. */
 function numberOrder(block: Raw): string[] {

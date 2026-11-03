@@ -28,7 +28,7 @@ import { NotFound } from './Assignments';
 import { CheckNow, WithStatus, cohortScope, gradingConfig, todayOf, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 import { CONFIG_REPO } from '../model/names';
-import { RUN_KEYS, TEAM_FORMATION, TEAM_FORMATIONS, VISIBILITIES, VISIBILITY, effectiveOf, validSchedule } from '../model/settings';
+import { RUN_KEYS, TEAM_FORMATION, TEAM_FORMATIONS, VISIBILITIES, VISIBILITY, effectiveOf, validSchedule, yamlBoolean } from '../model/settings';
 import { HandOutDialog, HandOutNow, ManualWaiting, NO_LATE_WINDOW, SolutionNote, canHoldSolution, cutoffOf, draftHandout, entryBelow, forcedVisibility, waitingHandOut, waitsByHand, windowDays } from './RunSettings';
 import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO, DEFAULT_TIMEZONE, KINDS, SUBMIT_VIA_DEFAULT, penaltyError, pluralOf } from '../model/policy';
 import { otherRepos } from './CourseIndex';
@@ -475,7 +475,7 @@ function AssignmentForm({ p, d, set, errors, consoleOn, templates, tiered, hande
   const tplRoute = typeof cfg.submit_via === 'string' && cfg.submit_via in ROUTE_LABEL ? cfg.submit_via : SUBMIT_VIA_DEFAULT;
   const group = (d.group || tplGroup) === 'group';
   const route = d.submitVia || tplRoute;
-  const auto = cfg.autograde === true || String(cfg.autograde ?? '').toLowerCase() === 'yes';
+  const auto = yamlBoolean(cfg.autograde);
   // What the entry falls back to: the semester's effective defaults, as the engine resolved them (status.json).
   const below = entryBelow(p);
   const inherited: Record<string, unknown> = Object.fromEntries(RUN_KEYS.map((k) => [k, effectiveOf(below, k).value]));
@@ -572,21 +572,22 @@ function AssignmentForm({ p, d, set, errors, consoleOn, templates, tiered, hande
   );
 }
 
-export function SemesterForm({ d, set, errors }: { d: SemesterDraft; set: Set_<SemesterDraft>; errors: Record<string, string> }) {
+/** The semester dates sheet. `tz: false` leaves out schedule.yml's `timezone` (the Semester settings modal, whose Assignments fold carries the `defaults:` one, decision 0039). */
+export function SemesterForm({ d, set, errors, tz = true }: { d: SemesterDraft; set: Set_<SemesterDraft>; errors: Record<string, string>; tz?: boolean }) {
   return (
     <>
       <div class="row-2">
         <div class="field"><Lbl for="e-ts" hint="Everything on the site’s calendar hangs off these.">Semester starts</Lbl><input id="e-ts" type="date" value={d.start} onInput={(e) => set({ start: val(e) })} /></div>
         <div class="field"><Lbl for="e-te">Semester ends</Lbl><input id="e-te" type="date" value={d.end} onInput={(e) => set({ end: val(e) })} /><Err e={errors.end} /></div>
       </div>
-      <Fold summary="Advanced" open={!!d.tz && d.tz !== DEFAULT_TIMEZONE}>
+      {tz ? <Fold summary="Advanced" open={!!d.tz && d.tz !== DEFAULT_TIMEZONE}>
         <div class="field"><Lbl for="e-tz" hint="Every date in this schedule is in this timezone.">Timezone</Lbl>
           <select id="e-tz" onChange={(e) => set({ tz: val(e) })}>
             <option value="" selected={!d.tz}>{DEFAULT_TIMEZONE} (default)</option>
             {[...new Set([...TIMEZONES, d.tz].filter(Boolean))].map((t) => <option value={t} selected={t === d.tz}>{t}</option>)}
           </select>
         </div>
-      </Fold>
+      </Fold> : null}
     </>
   );
 }

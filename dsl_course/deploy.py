@@ -92,8 +92,8 @@ from .schedule_plan import (
     refuse_unnumbered,
     unnumbered_release,
 )
-from .selection import ROOT_RELEASE_EXCLUDED, Selection
 from .selection import deny as selection_deny
+from .selection import release_use
 
 
 def _warn_withheld_stub(course_org: str, repo: str, path: str) -> None:
@@ -142,24 +142,6 @@ def _resolve_within(base: Path, rel: str) -> Path | None:
         return base_r
     target = (base / rel.strip("/")).resolve()
     return target if target.is_relative_to(base_r) else None
-
-
-def _release_use(whole_repo: bool, stubs: frozenset[str] = frozenset()) -> Selection:
-    """A release's use-site selection (decision 0040 rule 3): nothing more for a subpath
-    copy; for a WHOLE-repo copy, the root `.github/` and each root stub still carrying the
-    scaffold placeholder (`stubs`, decided per release).
-
-    Skipping the COPY rather than deleting the result afterwards is what keeps a withheld
-    stub from touching the destination: a delete-after-copy stages a deletion of whatever
-    the semester repo already had there."""
-    if not whole_repo:
-        return Selection()
-    return Selection(
-        exclude=(
-            *(f"/{name}/" for name in ROOT_RELEASE_EXCLUDED),
-            *(f"/{stub}" for stub in sorted(stubs)),
-        )
-    )
 
 
 class Dest(NamedTuple):
@@ -693,7 +675,7 @@ def deploy_many(
                         srcp,
                         destp,
                         selection_deny(
-                            src_root, use=_release_use(srcp == src_root, withheld)
+                            src_root, use=release_use(srcp == src_root, withheld)
                         ),
                     )
                 elif is_withheld_stub(
@@ -774,21 +756,27 @@ def deploy_many(
             changed = changed or outcomes[repo] == RELEASED
 
     if sync and changed:
-        # site.sync_site RAISES on a genuine tree/team read failure - one semester's
-        # site-sync failure must be logged and counted (making the release non-zero), not
-        # an unhandled traceback that aborts the batch.
-        try:
-            if site.sync_site(course_org, semester_org) != 0:
-                log_err("site sync incomplete after release")
-                errors += 1
-        except Exception as exc:
-            log_err(f"site sync failed after release: {exc}")
-            errors += 1
+        errors += _sync_site(course_org, semester_org)
     copies = [
         Copied(d, commit, files, outcomes.get(d.semester_dest_repo, FAILED), removed)
         for d, commit, files, removed in applied
     ]
     return Batch(errors, changed, copies)
+
+
+def _sync_site(course_org: str, semester_org: str) -> int:
+    """The website sync after a release, as an error count. site.sync_site RAISES on a
+    genuine tree/team read failure - one semester's site-sync failure must be logged and
+    counted (making the release non-zero), not an unhandled traceback that aborts the
+    batch."""
+    try:
+        if site.sync_site(course_org, semester_org) != 0:
+            log_err("site sync incomplete after release")
+            return 1
+    except Exception as exc:
+        log_err(f"site sync failed after release: {exc}")
+        return 1
+    return 0
 
 
 def _items(spec: str) -> list[str]:
@@ -823,16 +811,19 @@ def parse_path_pairs(
     return list(zip(sources, dests))
 
 
-def _entry_deploys(sched: schedule.Schedule, label: str) -> list[Deploy] | str:
-    """Every copy of the schedule entry `label`, or the refusal to say instead."""
+def _entry_of(sched: schedule.Schedule, label: str) -> schedule.Release | str:
+    """The schedule entry `label`, or the refusal to say instead."""
     found = next((r for r in sched.releases if r.label == label), None)
     if found is None:
         return f"{label} is not an entry in this semester's schedule.yml."
-    return list(found.deploy)
+    return found
 
 
 def _record(
-    semester_org: str, sched: schedule.Schedule, entry: str, copies: list[Copied]
+    semester_org: str,
+    sched: schedule.Schedule,
+    entry: schedule.Release | None,
+    copies: list[Copied],
 ) -> int:
     """Record every copy that landed (`release_record`): each copy of `entry`, or - for a
     release of paths - each schedule copy those paths made (`covered_copies`) whose time
@@ -852,12 +843,11 @@ def _record(
         log_err(f"could not read {release_record.PATH} ({exc}) - not recorded")
         return 1
     before = set(record.copies)
-    first: list[tuple[schedule.Release, Deploy, datetime]] = []
+    first: dict[release_record.Key, tuple[schedule.Release, Deploy, datetime]] = {}
     at = datetime.now(UTC)
-    found = next((r for r in sched.releases if r.label == entry), None)
     for c in landed:
-        if entry:
-            made = [(found, c.deploy, c.files)]
+        if entry is not None:
+            made = [(entry, c.deploy, c.files)]
         else:
             made = []
             for release, planned, sub in covered_copies(sched, c.deploy):
@@ -867,10 +857,8 @@ def _record(
                 if files := release_record.inside(c.files, sub):
                     made.append((release, planned, files))
         for release, d, files in made:
-            if release_record.key_of(d) not in before and not any(
-                (r, c) == (release, d) for r, c, _at in first
-            ):
-                first.append((release, d, at))
+            if (k := release_record.key_of(d)) not in before:
+                first.setdefault(k, (release, d, at))
             # Only Release again's "also remove" removes anything (`deploy_many`).
             record.ship(
                 release.label, d, c.commit, files, at, refresh=True, removed=c.removed
@@ -878,7 +866,7 @@ def _record(
     if not record.save(semester_org):
         log_err(f"could not write {release_record.PATH} - this release is not recorded")
         return 1
-    schedule.record_release_times(semester_org, sched.timezone, first)
+    schedule.record_release_times(semester_org, sched.timezone, list(first.values()))
     return 0
 
 
@@ -938,10 +926,11 @@ def main() -> int:
         log_err("--remove-deleted goes with --entry.")
         return 1
     if args.entry:
-        deploys = _entry_deploys(sched, args.entry)
-        if isinstance(deploys, str):
-            log_err(deploys)
+        entry = _entry_of(sched, args.entry)
+        if isinstance(entry, str):
+            log_err(entry)
             return 1
+        deploys = list(entry.deploy)
     else:
         if not (args.course_source_repo and args.course_source_path):
             log_err("give --entry, or --course-source-repo and --course-source-path.")
@@ -1026,7 +1015,7 @@ def main() -> int:
             return 1
         # Never a path another copy of the plan lands at inside this one (a lab's
         # `solutions/`): those files are that copy's.
-        dests = [
+        landings = [
             (d.semester_dest_repo, deploy_dest(d))
             for r in sched.releases
             for d in r.deploy
@@ -1035,22 +1024,23 @@ def main() -> int:
         for k in map(release_record.key_of, deploys):
             if k not in record.copies:
                 continue
-            nested = divergence.nested_in((k[2], k[3]), dests)
-            remove[k] = [
-                p
-                for p in record.copies[k].get("files") or {}
-                if not any(p == n or p.startswith(f"{n}/") for n in nested)
-            ]
+            nested = divergence.nested_in((k[2], k[3]), landings)
+            remove[k] = list(
+                divergence.outside(record.copies[k].get("files") or {}, nested)
+            )
     # ONE batch, whatever the entry draws from: each repo clones once and the site syncs
-    # once, as the scheduler's own release pass does.
+    # once, as the scheduler's own release pass does - after the record is written, so
+    # the render dates the rows this release shipped (`released_at`).
     try:
         errors, changed, copies = deploy_many(
-            args.course_org, args.semester_org, deploys, remove=remove
+            args.course_org, args.semester_org, deploys, sync=False, remove=remove
         )
     except RuntimeError as e:
         log_err(str(e))
         return 1
-    errors += _record(args.semester_org, sched, args.entry, copies)
+    errors += _record(args.semester_org, sched, entry if args.entry else None, copies)
+    if changed:
+        errors += _sync_site(args.course_org, args.semester_org)
     if errors:
         return 1
     log("done")

@@ -1278,6 +1278,12 @@ describe('after a run finishes', () => {
     expect(other.refresh.mock.calls.map((c) => c[2])).not.toContain(toldPath('assignment-2'));
   });
 
+  it('reads schedule.yml again: a release or hand-out may have written its time back into it', () => {
+    const files = spy();
+    refreshAfterRun(def('release.entry', { entry: 'lab-8' }), statuses, files);
+    expect(files.refresh).toHaveBeenCalledWith(COHORT_ORG, 'semester-config', 'schedule.yml');
+  });
+
   it('drops every file held under a folder, and no other', async () => {
     const getContents = vi.fn(async (_o: string, _r: string, path: string) => ({ text: path, sha: 's' }));
     const live = new LiveFiles({ getContents } as never);

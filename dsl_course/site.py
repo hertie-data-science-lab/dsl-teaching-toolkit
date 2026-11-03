@@ -91,6 +91,7 @@ from .schedule_plan import (
     dest_section,
     planned_rows,
     site_rows,
+    within,
 )
 from .selection import Selection, exact_pattern, publishable
 from .site_repo import (
@@ -232,7 +233,7 @@ def _landing(path: str, landings: Landings) -> tuple[str, bool] | None:
     public), or None for a path no entry landed (released by hand)."""
     best: tuple[int, str, bool] | None = None
     for dest, kind, public in landings:
-        if dest and path != dest and not path.startswith(f"{dest}/"):
+        if within(dest, path) is None:
             continue
         if best is None or len(dest) > best[0]:
             best = (len(dest), kind, public)

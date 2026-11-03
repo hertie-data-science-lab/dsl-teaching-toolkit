@@ -121,7 +121,7 @@ from .collect import (
 from .course import COURSE_ADMIN_TEAM, shared_repo, submission_repo
 from .deploy import deploy_many
 from .distribute import marks_due
-from .faults import ConfigFault, FaultKind, Severity, Unusable, parse_moment
+from .faults import ConfigFault, FaultKind, Severity, Unusable
 from .gh_contents import WITHHELD_ROOT_STUBS, repo_blob_shas, root_stub_unwritten
 from .ghcli import gh, start_budget
 from .grading_sheet import sheet_path
@@ -141,7 +141,7 @@ from .log import (
     log_step,
     plural,
 )
-from .repos import listed_is_private, set_visibility
+from .repos import default_branch, listed_is_private, repo_missing, set_visibility
 from .run import current as current_run
 from .schedule import Release, grading_cutoff_datetime
 from .schedule_plan import deploy_dest
@@ -674,10 +674,11 @@ def _sort_copies(
 ]:
     """`(ship, seed)` of `pairs` (each due copy with its entry), once each. Ship: a copy
     the record does not have, or every one when the semester autosyncs. Seed, with what
-    its destination holds: a copy with no record whose destination is already there
+    its destination holds (`seeded`): a copy with no record whose destination is already there
     (decision 0043 rule 1) - what upgrades a semester released into before the record
     existed, with nothing re-shipped. Each destination tree is read once, and only for an
-    unrecorded copy; one that cannot be read raises.
+    unrecorded copy (with no tick listing, on the branch the repo names); a seeded
+    folder's course tree once per source repo. One that cannot be read raises.
 
     A destination counts as this copy's only when nothing else explains it: no other due
     copy and no recorded one lands at, inside or above it (`release_record.overlaps`) - a
@@ -688,16 +689,41 @@ def _sort_copies(
         name.casefold(): row for name, row in (_listing(semester_org) or {}).items()
     }
     trees: dict[str, dict[str, str]] = {}
+    sources: dict[str, dict[str, str]] = {}
 
     def tree(repo: str) -> dict[str, str]:
         if repo not in trees:
             row = listing.get(repo.casefold())
             if listing and row is None:
                 trees[repo] = {}  # not created yet: nothing has landed in it
+            elif row is not None:
+                branch = row.get("default_branch") or "main"
+                trees[repo] = repo_blob_shas(semester_org, repo, branch)
+            elif repo_missing(semester_org, repo):
+                trees[repo] = {}
             else:
-                branch = (row or {}).get("default_branch") or "main"
+                # No listing this tick: ask the repo its branch rather than guess `main`,
+                # which reads a `master` repo as empty and ships over what is there.
+                branch = default_branch(semester_org, repo)
                 trees[repo] = repo_blob_shas(semester_org, repo, branch)
         return trees[repo]
+
+    def source(repo: str) -> dict[str, str]:
+        if repo not in sources:
+            branch = default_branch(course_org, repo)
+            sources[repo] = repo_blob_shas(course_org, repo, branch)
+        return sources[repo]
+
+    def seeded(d: schedule.Deploy, landed: dict[str, str]) -> dict[str, str]:
+        """A folder copy's seed manifest: what its destination holds that the course copy
+        also has. A file the semester added there itself was never released - it is the
+        released copy's own (an addition), never "deleted in the course"."""
+        if deploy_dest(d) in tree(d.semester_dest_repo):
+            return landed  # a single-file copy, keyed by its destination name
+        course = release_record.inside(
+            source(d.course_source_repo), d.course_source_path
+        )
+        return {p: s for p, s in landed.items() if p in course}
 
     keys = {release_record.key_of(d) for _r, d in pairs} | set(record.copies)
 
@@ -720,7 +746,7 @@ def _sort_copies(
             else release_record.inside(tree(d.semester_dest_repo), deploy_dest(d))
         )
         if landed:
-            seed.append((release, d, landed))
+            seed.append((release, d, seeded(d, landed)))
         else:
             ship.append((release, d))
     return ship, seed
@@ -740,11 +766,11 @@ def _first_shipped(
         if unreadable:
             return None  # asked once: not again for every late moment
         try:
-            copy = read_record().copies.get(release_record.key_of(d))
+            copies = read_record().copies
         except (RuntimeError, ValueError):
             unreadable = True
             return None
-        return parse_moment((copy or {}).get("first_shipped_at"))
+        return release_record.first_shipped(copies, release_record.key_of(d))
 
     return first
 

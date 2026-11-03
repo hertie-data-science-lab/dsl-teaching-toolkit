@@ -908,7 +908,7 @@ def gather(course: CourseFacts, facts: SemesterFacts, now: datetime) -> StudentF
     for sr in site_rows(planned_rows(sched)):
         if sr.row.undated:
             copies = _shipped_copies(facts, sr, extra.link_extensions)
-            for k in release_record.undated(facts.recorded, copies, True):
+            for k in release_record.undated(facts.recorded, copies):
                 extra.landed_at[k] = release_record.landed_at(org, k[2], k[3])
         own = [sr.row] if sr.row.kind == "readings" else []
         for row in [*own, *sr.readings]:

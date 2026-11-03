@@ -491,7 +491,7 @@ export function MarksTab(p: TabProps) {
   const snippetsEdited = snipKey in edits;
   const setSnippets = (list: string[]) => {
     const { [snipKey]: _drop, ...rest } = edits;
-    setEdits(JSON.stringify(list) === JSON.stringify(savedSnippets) ? rest : { ...rest, [snipKey]: list });
+    setEdits(deepEqual(list, savedSnippets) ? rest : { ...rest, [snipKey]: list });
     if (save.kind !== 'busy') setSave({ kind: 'idle' });
   };
   const dirty = changed > 0 || snippetsEdited;

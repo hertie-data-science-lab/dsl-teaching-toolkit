@@ -65,7 +65,7 @@ Live example of every file below: [`example-course/semester-org/`](../example-co
     - The optional `start`/`end` dates **bound when the access is live** - this is how you hand a guest lecturer or a fixed-term TA push access for one semester. 
       - Course-wide admins are declared at the **course** level instead (course org → `.github` → `course.yml` → `course_admins`), not here. 
       - Full guide, including removing people and how quickly changes land: [05 Manage the instructors](05-manage-teaching-team.md).
-    - The same file's `defaults:` overrides the course's defaults for this semester (each key seeded commented, with the value it inherits and from where).
+    - The same file's `defaults:` overrides the course's defaults for this semester (each key seeded commented, with the value it inherits and from where). The console edits it under **Semester settings** on the semester's Dashboard.
 
 6. **Load the student roster.** 
   - Fill `semester-config/students.csv` (seeded header-only) with registrar data (`email, name`)

@@ -189,6 +189,18 @@ def test_a_roster_value_the_split_would_lose_is_counted_never_quoted():
     assert "Ana" not in lost[0]
 
 
+def test_a_roster_row_with_more_cells_than_the_header_counts_them_as_lost():
+    # A stray trailing value: csv hands the extra cells over under no column. It used to
+    # crash the config-layers preview; nothing carries it, so it is a lost value.
+    cols = {"project": "4"}
+    old = OLD_STUDENTS.replace(
+        "Cara Ng,auditor,,,dsl-cccccc,\n", "Cara Ng,auditor,,,dsl-cccccc,,note\n"
+    )
+    students, system = roster.split_legacy(old, OLD_TEAMS, cols)
+    lost = migrate.roster_kept(old, OLD_TEAMS, students, system, cols)
+    assert lost == ["1 roster value(s) would not survive the split"]
+
+
 @pytest.mark.parametrize(
     ("course", "semester"),
     [

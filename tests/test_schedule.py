@@ -854,6 +854,17 @@ assignments:
     assert "assignments:" in out and "handout_datetime: 2026-09-22T14:05" in out
 
 
+@pytest.mark.parametrize("written", ["", " tbc", " TBC  # to fix"])
+def test_insert_handout_fills_a_blank_or_tbc_handout(written):
+    # Decision 0043 rule 3: "blank fills" - a key with no plan is filled, in place.
+    from dsl_course.schedule import _insert_handout
+
+    base = f"assignments:\n  a1:\n    handout_datetime:{written}\n    due_datetime: 2026-10-13\n"
+    out = _insert_handout(base, "a1", "2026-09-22T14:05")
+    assert out is not None and "handout_datetime: 2026-09-22T14:05" in out
+    assert out.count("handout_datetime") == 1
+
+
 def test_record_handout_round_trips_through_the_parser(monkeypatch):
     import yaml
 

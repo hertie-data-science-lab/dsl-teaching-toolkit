@@ -366,14 +366,16 @@ export function subPages(course: Course, loaded: Loaded, cohortStates: Record<st
 export type AppState = ReturnType<typeof createState>;
 
 /**
- * What a finished run leaves stale, read again: the semester's status and the run's outcome file,
- * the course's status, and after Return marks the "last told" record(s) it rewrote - its sheet's,
+ * What a finished run leaves stale, read again: the semester's status, the run's outcome file and
+ * schedule.yml (a release or hand-out writes the moment it went out back into it, decision 0043
+ * rule 3 - held at the old sha, the next save there would always conflict), the course's status, and after Return marks the "last told" record(s) it rewrote - its sheet's,
  * or every one held for an unscoped run - so the Marks tab's count of who it would email is fresh.
  */
 export function refreshAfterRun(def: OpDef, statuses: Pick<StatusStore, 'reload'>, files: Pick<LiveFiles, 'refresh' | 'refreshUnder'>): void {
   if (def.cohortOrg) {
     void statuses.reload(def.cohortOrg, CONFIG_REPO);
     files.refresh(def.cohortOrg, CONFIG_REPO, outcomePath(def.op));
+    files.refresh(def.cohortOrg, CONFIG_REPO, 'schedule.yml');
     if (def.op === 'grades.return') {
       const sheet = def.args.assignment;
       if (typeof sheet === 'string' && sheet) files.refresh(def.cohortOrg, CONFIG_REPO, toldPath(sheet));
