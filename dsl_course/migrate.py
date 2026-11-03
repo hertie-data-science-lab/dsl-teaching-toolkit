@@ -2171,6 +2171,11 @@ def roster_kept(
         key = (row.get(email) or row.get("email") or "").strip().casefold()
         now = {**by_email.get(key, {}), **system.get(key, {})}
         for column, value in row.items():
+            if column is None:
+                # More cells than the header names (a stray comma): csv hands them over
+                # as a list. Nothing carries them, so each non-blank one is lost.
+                lost += sum(1 for v in value if v.strip())
+                continue
             name = "email" if column == email else column
             if (value or "").strip() and (now.get(name) or "").strip() != value.strip():
                 lost += 1
