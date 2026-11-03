@@ -201,7 +201,7 @@ describe('the cohort nav', () => {
     const nav = render(<Sidenav courses={[course]} course={course} cohort={cohort} cohortStates={{ [COHORT_ORG]: ready }} current="assignments" />);
     const first = nav.slice(nav.indexOf('href="#dashboard"') - 9, nav.indexOf('</ul>', nav.indexOf('href="#dashboard"')));
     const names = [...first.matchAll(/<a href="#[a-z]+"[^>]*>([A-Za-z ]+)/g)].map((m) => m[1]);
-    expect(names).toEqual(['Dashboard', 'Schedule', 'Materials', 'Assignments', 'Students', 'Instructors', 'Site', 'Semester defaults', 'Operations']);
+    expect(names).toEqual(['Dashboard', 'Schedule', 'Materials', 'Assignments', 'Students', 'Instructors', 'Site', 'Defaults', 'Operations']);
     expect(nav).toContain('href="#assignments" aria-current="page"');
     expect(nav).not.toContain('href="#marks"');
     expect(nav).not.toContain('href="#teams"');
