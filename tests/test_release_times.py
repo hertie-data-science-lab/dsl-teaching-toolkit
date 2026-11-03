@@ -377,3 +377,21 @@ def test_there_is_no_solution_write_back(monkeypatch):
     file = File(text).install(monkeypatch)
     schedule.record_handout("S", "assignment-1", "2026-09-22T14:05")
     assert file.writes == [] and "solution_datetime: 2026-10-30T09:00" in file.text
+
+
+def test_faculty_comment_on_a_rewritten_line_is_kept():
+    text = _plan("2026-10-27T10:00", "2026-10-30T09:00  # after reading week")
+    new, _done, _ = schedule._stamp_release_times(text, [_want(text)])
+    assert "release_datetime: 2026-10-27T13:49  # after reading week\n" in new
+
+
+def test_a_schedule_that_cannot_be_read_says_so_not_flow_mapping(monkeypatch, capsys):
+    def broken(*a, **k):
+        raise RuntimeError("HTTP 502")
+
+    monkeypatch.setattr(schedule, "get_file_with_sha", broken)
+    lab, d = _copies(_plan("tbc"))
+    schedule.record_release_times("Semester-Org", "Europe/Berlin", [(lab, d, AT)])
+    err = capsys.readouterr().err
+    assert "could not be read (HTTP 502)" in err and "flow mapping" not in err
+    assert "add `release_datetime: 2026-10-27T13:49` to labs.lab-08" in err

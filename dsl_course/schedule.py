@@ -2827,6 +2827,13 @@ class _Declined:
 DECLINED = _Declined()
 
 
+def _own_comment(line: str) -> str:
+    """A key line's trailing `# comment`, with the spaces before it; "" for none. Kept
+    when the engine rewrites the value."""
+    at = line.find(" #")
+    return line[at:].rstrip("\r\n") if at >= 0 else ""
+
+
 def _eol(line: str) -> str:
     """The line ending `line` uses, for a line written beside it."""
     return "\r\n" if line.endswith("\r\n") else "\n"
@@ -2934,7 +2941,7 @@ def _insert_handout(
                 eol = _eol(lines[j])
                 lines[j] = (
                     f"{' ' * indent_of(lines[j])}handout_datetime: {stamp}"
-                    f"{_HANDOUT_COMMENT}{eol}"
+                    f"{_own_comment(lines[j]) or _HANDOUT_COMMENT}{eol}"
                 )
                 return "".join(lines)
         lines.insert(
@@ -3041,7 +3048,7 @@ def record_handout(semester_org: str, slug: str, stamp: str | None = None) -> No
         )
         return
     if new is None:
-        return  # already recorded - write-once, nothing to do
+        return  # already recorded at or before this moment - nothing to do
     if _put_handout(semester_org, slug, stamp, new, sha, tz):
         log(f"  recorded handout in {CONFIG_REPO}/{SCHEDULE_PATH}: {slug} @ {stamp}")
     else:
@@ -3160,8 +3167,9 @@ def _stamp_release_times(
         if (n := keyed.get("release_datetime")) is not None:
             old = lines[n - 1]
             lead = _KEY_LEAD.match(old).group(1)
-            eol = _eol(old)
-            edits.append((n - 1, True, f"{lead}{line}{eol}"))
+            kept = _own_comment(old) or _RELEASE_COMMENT
+            line = f"release_datetime: {want.stamp}{kept}"
+            edits.append((n - 1, True, f"{lead}{line}{_eol(old)}"))
             done.append((want, old.split(":", 1)[1].split("#")[0].strip()))
             continue
         # After the item's last line: its last key, and whatever its value runs on to
@@ -3213,8 +3221,12 @@ def record_release_times(
             semester_org, CONFIG_REPO, SCHEDULE_PATH, confirm_absent=True
         )
     except RuntimeError as exc:
-        log_err(f"could not read {SCHEDULE_PATH} to record release times ({exc})")
-        read = None
+        for want in wanted:
+            log_err(
+                f"could NOT record when {want.release.where} went out: {CONFIG_REPO}/"
+                f"{SCHEDULE_PATH} could not be read ({exc}) - {want.by_hand()}."
+            )
+        return
     text, sha = read if read is not None else ("", None)
     _schedule_text.cache_clear()
     _parsed.cache_clear()
@@ -3242,16 +3254,20 @@ def record_release_times(
         rebuilt, done, _declined = _stamp_release_times(fresh, wanted)
         return rebuilt
 
-    written = put_file_as_read(
-        semester_org,
-        CONFIG_REPO,
-        SCHEDULE_PATH,
-        new,
-        sha,
-        rebuild,
-        lambda: "\n".join([RELEASE_TIMES_COMMIT, "", *said()]),
-        attempts=2,
-    )
+    try:
+        written = put_file_as_read(
+            semester_org,
+            CONFIG_REPO,
+            SCHEDULE_PATH,
+            new,
+            sha,
+            rebuild,
+            lambda: "\n".join([RELEASE_TIMES_COMMIT, "", *said()]),
+            attempts=2,
+        )
+    except RuntimeError as exc:
+        log_err(f"the write of {CONFIG_REPO}/{SCHEDULE_PATH} stopped ({exc})")
+        written = None
     if written is None:
         for w, _old in done:
             log_err(

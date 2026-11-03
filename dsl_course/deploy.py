@@ -834,7 +834,9 @@ def _record(
                 if files := release_record.inside(c.files, sub):
                     made.append((release, planned, files))
         for release, d, files in made:
-            if release_record.key_of(d) not in before:
+            if release_record.key_of(d) not in before and not any(
+                (r, c) == (release, d) for r, c, _at in first
+            ):
                 first.append((release, d, at))
             record.ship(release.label, d, c.commit, files, at, refresh=True)
     if not record.save(semester_org):
