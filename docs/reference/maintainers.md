@@ -109,10 +109,13 @@ Things whose *literal spelling* is depended on from outside Python:
   withheld stub. A copy is recorded when its dest's merge moved the branch students read
   or found it already there; never when it is held at a conflict pull request. The
   scheduler ships a recorded copy again only under `autosync_released_edits: true`, and
-  seeds (does not ship) a due copy with no entry whose destination is present - the one
-  upgrade path, no migration. Release materials records every copy of `--entry` (Release
-  again refreshes `files` and `last_shipped_at`) and each schedule copy a release of paths
-  made (`schedule_plan.covered_copies`). `status_json._shipped` reads it first, the
+  seeds (does not ship) a due copy with no entry whose destination is present and is its
+  alone - no other due or recorded copy lands at, inside or above it
+  (`release_record.overlaps`); an overlapping one ships, a no-op merge where nothing
+  changed. That is the one upgrade path, no migration. Release materials records every
+  copy of `--entry` (Release again refreshes `files` and `last_shipped_at`) and each
+  schedule copy a release of paths made (`schedule_plan.covered_copies`) whose time has
+  come or is TBC - one dated later is left for the scheduler. `status_json._shipped` reads it first, the
   destination tree second; the site still reads the destination. Repo, path and sha only.
 - **`distribute.returned_record`'s SHAPE.** `semester-config/.system/returned/<sheet>.yml` is
   each unit's block, under the sheet's own `submissions:` / `teams:`, exactly as the sheet

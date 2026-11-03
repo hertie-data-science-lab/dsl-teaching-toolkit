@@ -410,7 +410,7 @@ def test_a_hand_release_covers_a_copy_it_made_where_the_plan_puts_it():
     def covered(src, dest=None, repo="materials"):
         made = Deploy("cm", src, repo, dest)
         return [
-            (label, sub) for label, _d, sub in schedule_plan.covered_copies(sched, made)
+            (r.label, sub) for r, _d, sub in schedule_plan.covered_copies(sched, made)
         ]
 
     assert covered("labs/08_session-8") == [("lab-08", "")]
@@ -445,3 +445,101 @@ def test_the_preview_seeds_nothing_and_says_nothing_about_seeding(monkeypatch, c
     Store(None, {"materials": tree}).install(monkeypatch)
     scheduler._release_decisions("Course-Org", "Semester-Org", [_release(LAB)], NOW)
     assert "[seed]" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("due", "recorded"),
+    [
+        # Two entries copying into one folder: the second's folder is the first's.
+        (
+            [Deploy("cm", "lec01/slides", "materials", "slides")],
+            [Deploy("cm", "lec02/slides", "materials", "slides")],
+        ),
+        # A parent copy whose child has shipped.
+        (
+            [Deploy("cm", "lectures", "materials", None)],
+            [Deploy("cm", "lectures/02_intro", "materials", None)],
+        ),
+        # A whole-repo copy into a repo other copies land in.
+        ([Deploy("cm", "/", "materials", None)], [LAB]),
+        # A copy whose source was re-pointed, landing where the old one did.
+        ([Deploy("cm2", "labs/08_session-8", "materials", None)], [LAB]),
+    ],
+)
+def test_a_destination_another_copy_explains_is_not_a_seed(monkeypatch, due, recorded):
+    copies = [
+        _entry(d=d)
+        | {"dest": {"repo": d.semester_dest_repo, "path": release_record.key_of(d)[3]}}
+        for d in recorded
+    ]
+    tree = {
+        "slides/a.pdf": "1",
+        "lectures/02_intro/n.md": "2",
+        "labs/08_session-8/s.pdf": "3",
+    }
+    Store(copies, {"materials": tree}).install(monkeypatch)
+    calls = _shipping(monkeypatch)
+    _tick(_release(*due, label="new"))
+    assert calls == [due]
+
+
+def test_copies_due_together_into_one_place_both_ship(monkeypatch):
+    parent, child = LAB, Deploy("cm", "labs/08_session-8/solutions", "materials", None)
+    Store(None, {"materials": {"labs/08_session-8/solutions/a.py": "1"}}).install(
+        monkeypatch
+    )
+    calls = _shipping(monkeypatch)
+    _tick(_release(parent, child))
+    assert calls == [[parent, child]]
+
+
+def test_the_root_spellings_are_one_key():
+    keys = {release_record.key_of(Deploy("cm", p, "site", p)) for p in ("", "/", ".")}
+    assert keys == {("cm", "", "site", "")}
+    assert schedule_plan.within(".", "labs/08") == "labs/08"
+
+
+def test_a_hand_release_leaves_a_copy_due_later_to_the_schedule(monkeypatch):
+    store = Store([]).install(monkeypatch)
+    later = datetime(2099, 1, 1, tzinfo=UTC)
+    sched = Schedule(releases=[Release("lab-08", later, deploy=[LAB])])
+    monkeypatch.setattr(deploy.schedule, "load", lambda org: sched)
+    monkeypatch.setattr(
+        deploy,
+        "deploy_many",
+        lambda c, s, deploys, sync=True: Batch(
+            0,
+            True,
+            [Copied(d, "c", {"08_session-8/a": "1"}, RELEASED) for d in deploys],
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "deploy",
+            "--course-org",
+            "C",
+            "--semester-org",
+            "S",
+            "--course-source-repo",
+            "cm",
+            "--course-source-path",
+            "labs",
+            "--no-preview",
+        ],
+    )
+    assert deploy.main() == 0
+    assert store.writes == []
+
+
+def test_a_release_that_stops_still_saves_its_seeds(monkeypatch):
+    seeded = Deploy("cm", "lectures/08", "materials", None)
+    store = Store(None, {"materials": {"lectures/08/n.md": "n"}}).install(monkeypatch)
+
+    def stops(*a, **k):
+        raise RuntimeError("could not list the org")
+
+    monkeypatch.setattr(scheduler, "deploy_many", stops)
+    assert _tick(_release(seeded, Deploy("cm", "labs/09", "materials", None)))[0] == 1
+    assert [c["dest"]["path"] for c in store.copies] == ["lectures/08"]

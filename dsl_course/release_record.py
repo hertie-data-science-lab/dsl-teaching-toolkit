@@ -41,13 +41,26 @@ Key = tuple[str, str, str, str]
 
 
 def key_of(d: schedule.Deploy) -> Key:
-    """The copy `d` makes, as the record keys it. A root path is ""."""
+    """The copy `d` makes, as the record keys it. A root path (`""`, `/`, `.`) is ""."""
     return (
         d.course_source_repo,
-        d.course_source_path.strip("/"),
+        _path(d.course_source_path),
         d.semester_dest_repo,
-        deploy_dest(d),
+        _path(deploy_dest(d)),
     )
+
+
+def _path(path: str) -> str:
+    return "" if is_repo_root(path) else path.strip("/")
+
+
+def overlaps(a: Key, b: Key) -> bool:
+    """Whether two copies land in one place: the same destination repo, and one's path at,
+    inside or above the other's (the root is above everything)."""
+    if a[2] != b[2]:
+        return False
+    x, y = a[3], b[3]
+    return not x or not y or x == y or x.startswith(f"{y}/") or y.startswith(f"{x}/")
 
 
 def stamp(at: datetime) -> str:

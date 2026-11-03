@@ -676,7 +676,12 @@ def _sort_copies(
     its destination holds: a copy with no record whose destination is already there
     (decision 0043 rule 1) - what upgrades a semester released into before the record
     existed, with nothing re-shipped. Each destination tree is read once, and only for an
-    unrecorded copy; one that cannot be read raises."""
+    unrecorded copy; one that cannot be read raises.
+
+    A destination counts as this copy's only when nothing else explains it: no other due
+    copy and no recorded one lands at, inside or above it (`release_record.overlaps`) - a
+    folder two entries copy into, a root copy, a parent of a released child, a copy whose
+    source was re-pointed. Such a copy ships, as it did before the record."""
     autosync = _autosync(course_org, semester_org)
     listing = {
         name.casefold(): row for name, row in (_listing(semester_org) or {}).items()
@@ -693,6 +698,11 @@ def _sort_copies(
                 trees[repo] = repo_blob_shas(semester_org, repo, branch)
         return trees[repo]
 
+    keys = {release_record.key_of(d) for _r, d in pairs} | set(record.copies)
+
+    def explained(key: release_record.Key) -> bool:
+        return any(o != key and release_record.overlaps(key, o) for o in keys)
+
     ship, seed, seen = [], [], set()
     for release, d in pairs:
         key = release_record.key_of(d)
@@ -703,7 +713,11 @@ def _sort_copies(
             if autosync:
                 ship.append((release, d))
             continue
-        landed = release_record.inside(tree(d.semester_dest_repo), deploy_dest(d))
+        landed = (
+            {}
+            if explained(key)
+            else release_record.inside(tree(d.semester_dest_repo), deploy_dest(d))
+        )
         if landed:
             seed.append((release, d, landed))
         else:
@@ -744,9 +758,13 @@ def _release_copies(
     errors, changed = 0, False
     if ship:
         entry = {release_record.key_of(d): r.label for r, d in ship}
-        errors, changed, copies = deploy_many(
-            course_org, semester_org, [d for _r, d in ship], sync=False
-        )
+        try:
+            errors, changed, copies = deploy_many(
+                course_org, semester_org, [d for _r, d in ship], sync=False
+            )
+        except RuntimeError as exc:
+            log_err(f"the release stopped ({exc})")
+            errors, copies = 1, []
         for c in copies:
             if c.landed:
                 key = release_record.key_of(c.deploy)

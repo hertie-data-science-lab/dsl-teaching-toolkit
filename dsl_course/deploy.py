@@ -802,9 +802,11 @@ def _record(
     semester_org: str, sched: schedule.Schedule, entry: str, copies: list[Copied]
 ) -> int:
     """Record every copy that landed (`release_record`): each copy of `entry`, or - for a
-    release of paths - each schedule copy those paths made (`covered_copies`); a path the
-    schedule does not copy stays unrecorded. A deliberate release, so each recorded copy's
-    manifest and `last_shipped_at` are refreshed. Returns the error count."""
+    release of paths - each schedule copy those paths made (`covered_copies`) whose time
+    has come or is TBC; a path the schedule does not copy, and a copy still due later,
+    stay unrecorded (the scheduler ships that one at its time, with what is current
+    then). A deliberate release, so each recorded copy's manifest and `last_shipped_at`
+    are refreshed. Returns the error count."""
     landed = [c for c in copies if c.landed]
     if not landed:
         return 0
@@ -818,9 +820,12 @@ def _record(
         if entry:
             record.ship(entry, c.deploy, c.commit, c.files, at, refresh=True)
             continue
-        for label, planned, sub in covered_copies(sched, c.deploy):
+        for release, planned, sub in covered_copies(sched, c.deploy):
+            moment = planned.deploy_datetime or release.when
+            if moment is not None and moment > at:
+                continue  # its own time still to come: the schedule ships it then
             if files := release_record.inside(c.files, sub):
-                record.ship(label, planned, c.commit, files, at, refresh=True)
+                record.ship(release.label, planned, c.commit, files, at, refresh=True)
     if not record.save(semester_org):
         log_err(f"could not write {release_record.PATH} - this release is not recorded")
         return 1

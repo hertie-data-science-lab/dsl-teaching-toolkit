@@ -14,6 +14,7 @@ from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from . import policy, schedule
+from .course import is_repo_root
 from .faults import ConfigFault
 from .gh_contents import line_of
 from .log import Summary, log_err
@@ -389,10 +390,10 @@ def within(wanted: str, path: str) -> str | None:
     itself, its relative path when it is inside the folder (the whole repo holds
     everything), None when the release does not copy it."""
     wanted, path = wanted.strip("/"), path.strip("/")
+    if is_repo_root(wanted):
+        return "" if is_repo_root(path) else path
     if path == wanted:
         return ""
-    if not wanted:
-        return path
     return path[len(wanted) + 1 :] if path.startswith(f"{wanted}/") else None
 
 
@@ -415,7 +416,7 @@ def unnumbered_release(
 
 def covered_copies(
     sched: schedule.Schedule, made: schedule.Deploy
-) -> list[tuple[str, schedule.Deploy, str]]:
+) -> list[tuple[schedule.Release, schedule.Deploy, str]]:
     """The schedule copies a hand release `made` (a path pair, off the plan) has made:
     `(entry, the copy, where it sits inside made)` for each copy of the same source repo
     whose source is `made`'s or inside it, and which lands where `made` put it - a folder
@@ -429,10 +430,8 @@ def covered_copies(
             ):
                 continue
             sub = within(made.course_source_path, d.course_source_path)
-            if sub is not None and deploy_dest(d) == "/".join(
-                p for p in (deploy_dest(made), sub) if p
-            ):
-                out.append((r.label, d, sub))
+            if sub is not None and within(deploy_dest(made), deploy_dest(d)) == sub:
+                out.append((r, d, sub))
     return out
 
 
