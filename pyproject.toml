@@ -6,7 +6,10 @@ testpaths = ["tests"]
 # `tests/e2e` drives real workflows in the demo orgs and is skipped wholesale unless
 # DSL_E2E=1 (tests/e2e/conftest.py). The marker is registered so the suite can be selected
 # or deselected by name, and so `--strict-markers` never turns it into an error.
-markers = ["e2e: live end-to-end run against the demo tier"]
+markers = [
+    "e2e: live end-to-end run against the demo tier",
+    "real_site_sync: run deploy._sync_site rather than the conftest stub",
+]
 
 [tool.ruff]
 target-version = "py310"

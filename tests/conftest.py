@@ -20,6 +20,7 @@ from dsl_course import (
     bootstrap_course,
     central,
     config,
+    deploy,
     discovery,
     gh_contents,
     gh_teams,
@@ -193,6 +194,18 @@ def _no_semester_is_closed_out(monkeypatch):
     is the default answer to that as well."""
     monkeypatch.setattr(discovery, "repo_is_archived", lambda org, name: False)
     monkeypatch.setattr(discovery, "repo_missing", lambda org, name: False)
+
+
+@pytest.fixture(autouse=True)
+def site_syncs(request, monkeypatch) -> list[tuple[str, str]]:
+    """Release materials' own site sync after a release (`deploy._sync_site`), recorded,
+    not run; a test marked `real_site_sync` runs it."""
+    calls: list[tuple[str, str]] = []
+    if request.node.get_closest_marker("real_site_sync") is None:
+        monkeypatch.setattr(
+            deploy, "_sync_site", lambda c, s: calls.append((c, s)) or 0
+        )
+    return calls
 
 
 @pytest.fixture(autouse=True)

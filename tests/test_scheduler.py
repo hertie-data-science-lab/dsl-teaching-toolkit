@@ -1622,6 +1622,7 @@ def test_deploy_many_reports_nothing_new_when_index_is_empty(monkeypatch, capsys
     assert "nothing new to release" in capsys.readouterr().out
 
 
+@pytest.mark.real_site_sync
 def test_deploy_many_counts_a_raised_site_sync(monkeypatch):
     # site.sync_site RAISES on a genuine read failure - deploy_many must catch it, count it,
     # and return non-zero, not let the traceback escape.

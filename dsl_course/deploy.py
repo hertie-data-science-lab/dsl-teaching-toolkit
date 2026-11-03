@@ -756,21 +756,27 @@ def deploy_many(
             changed = changed or outcomes[repo] == RELEASED
 
     if sync and changed:
-        # site.sync_site RAISES on a genuine tree/team read failure - one semester's
-        # site-sync failure must be logged and counted (making the release non-zero), not
-        # an unhandled traceback that aborts the batch.
-        try:
-            if site.sync_site(course_org, semester_org) != 0:
-                log_err("site sync incomplete after release")
-                errors += 1
-        except Exception as exc:
-            log_err(f"site sync failed after release: {exc}")
-            errors += 1
+        errors += _sync_site(course_org, semester_org)
     copies = [
         Copied(d, commit, files, outcomes.get(d.semester_dest_repo, FAILED), removed)
         for d, commit, files, removed in applied
     ]
     return Batch(errors, changed, copies)
+
+
+def _sync_site(course_org: str, semester_org: str) -> int:
+    """The website sync after a release, as an error count. site.sync_site RAISES on a
+    genuine tree/team read failure - one semester's site-sync failure must be logged and
+    counted (making the release non-zero), not an unhandled traceback that aborts the
+    batch."""
+    try:
+        if site.sync_site(course_org, semester_org) != 0:
+            log_err("site sync incomplete after release")
+            return 1
+    except Exception as exc:
+        log_err(f"site sync failed after release: {exc}")
+        return 1
+    return 0
 
 
 def _items(spec: str) -> list[str]:
@@ -1023,15 +1029,18 @@ def main() -> int:
                 divergence.outside(record.copies[k].get("files") or {}, nested)
             )
     # ONE batch, whatever the entry draws from: each repo clones once and the site syncs
-    # once, as the scheduler's own release pass does.
+    # once, as the scheduler's own release pass does - after the record is written, so
+    # the render dates the rows this release shipped (`released_at`).
     try:
         errors, changed, copies = deploy_many(
-            args.course_org, args.semester_org, deploys, remove=remove
+            args.course_org, args.semester_org, deploys, sync=False, remove=remove
         )
     except RuntimeError as e:
         log_err(str(e))
         return 1
     errors += _record(args.semester_org, sched, entry if args.entry else None, copies)
+    if changed:
+        errors += _sync_site(args.course_org, args.semester_org)
     if errors:
         return 1
     log("done")
