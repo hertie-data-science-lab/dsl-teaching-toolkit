@@ -12,12 +12,10 @@ import { rosterFiles } from './roster';
 import type { Loaded } from '../src/model/status';
 import type { Assignment, Status } from '../src/model/types';
 import * as defs from '../src/ops/defs';
-import { parseHash } from '../src/router';
 import { AssignmentScreen, AssignmentsScreen } from '../src/screens/Assignments';
 import { cardsDone } from '../src/screens/NewCohort';
 import { defaultsLine } from '../src/screens/RunSettings';
 import { ScheduleScreen } from '../src/screens/Schedule';
-import { SemesterDefaultsScreen } from '../src/screens/SemesterSettings';
 import type { CohortProps } from '../src/screens/types';
 import { assignmentArgs } from '../src/wizards/model';
 import { initialValues } from '../src/screens/NewAssignment';
@@ -218,27 +216,35 @@ describe('the Overview form: the schedule entry, its run settings inline', () =>
 });
 
 describe('the semester’s defaults', () => {
-  it('open from the Semester defaults link beside New assignment, on the Semester defaults screen with Assignments focused', async () => {
+  it('open from the Semester defaults button beside New assignment, as a modal at Assignments; Escape closes it', async () => {
     const out = html(<AssignmentsScreen {...props()} />);
     expect(out).not.toContain('Defaults: 5 days');
-    expect(out).toMatch(/<div class="actions"><a class="btn quiet" href="#defaults-assignments">Semester defaults<\/a><a class="btn"[^>]*>New assignment<\/a>/);
+    expect(out).toMatch(/<div class="actions"><button class="btn quiet" type="button" aria-haspopup="dialog">Semester defaults<\/button><a class="btn"[^>]*>New assignment<\/a>/);
     expect(out).not.toContain('role="dialog"');
-    expect(parseHash('#defaults-assignments')).toEqual({ screen: 'defaults', entry: 'assignments' });
 
     const root = document.createElement('div');
     document.body.appendChild(root);
-    await act(() => mount(<SemesterDefaultsScreen {...props({ entry: 'assignments' })} />, root));
-    const folds = [...root.querySelectorAll<HTMLDetailsElement>('details.settings-fold')];
-    expect(folds.map((d) => [d.querySelector('summary span')!.textContent, d.open])).toEqual([['Assignments', true], ['Releases', true], ['Semester dates', true]]);
+    await act(() => mount(<AssignmentsScreen {...props()} />, root));
+    const change = [...root.querySelectorAll('button')].find((b) => b.textContent === 'Semester defaults')!;
+    change.focus();
+    await act(() => change.click());
+    const dialog = root.querySelector('[role="dialog"]')!;
+    expect(dialog.querySelector('#modal-title')!.textContent).toBe('Semester defaults');
+    const folds = [...dialog.querySelectorAll<HTMLDetailsElement>('details.settings-fold')];
+    expect(folds.map((d) => [d.querySelector('summary span')!.textContent, d.open])).toEqual([['Assignments', true], ['Releases', false], ['Semester dates', false]]);
     expect(document.activeElement).toBe(folds[0].querySelector('summary'));
-    expect(root.textContent).toContain('Timezone');
-    expect(root.textContent).toContain('Defaults: 5 days, 5%, teams of 4.');
+    expect(dialog.textContent).toContain('Timezone');
+    expect(dialog.textContent).toContain('Defaults: 5 days, 5%, teams of 4.');
     // The submit link is each assignment's own (`settings.DEFAULT_KEYS`): no semester default.
-    expect(root.querySelector('#sd-submit_url')).toBeNull();
-    expect(root.querySelector<HTMLInputElement>('#sd-late_window_days')!.value).toBe('5');
-    expect(root.textContent).toContain('this course’s default: up to 4');
-    expect(root.textContent).toContain('institution default: Students form their own');
-    expect(root.textContent).toContain('Change the course’s defaults');
+    expect(dialog.querySelector('#sd-submit_url')).toBeNull();
+    expect(dialog.querySelector<HTMLInputElement>('#sd-late_window_days')!.value).toBe('5');
+    expect(dialog.textContent).toContain('this course’s default: up to 4');
+    expect(dialog.textContent).toContain('institution default: Students form their own');
+    expect(dialog.textContent).toContain('Change the course’s defaults');
+
+    await act(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); });
+    expect(root.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(change);
     mount(null, root);
     root.remove();
   });

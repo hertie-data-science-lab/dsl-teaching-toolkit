@@ -4,8 +4,9 @@
 // with its effective value and source (status.json). Assignments and Releases are both
 // `defaults:` keys of semester.yml and the dates are schedule.yml's, so a save is at most one
 // commit per file (`saveSteps`). The timezone is the `defaults:` one (decision 0039), in the
-// Assignments fold. `#defaults-<fold>` focuses that fold's heading on arrival (the Assignments
-// page's Semester defaults button, the Site page's dates link); the old `#settings` route lands here.
+// Assignments fold. `#defaults-<fold>` focuses that fold's heading on arrival (New semester's
+// card; the old `#settings` route lands here). The same form also opens in a modal, at the fold
+// that fits where it was opened (the Assignments, Schedule and Site pages), the others folded.
 
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { Hint } from '../ui/Hint';
@@ -21,8 +22,10 @@ import { SOURCE_WORD, effectiveOf, semesterDefaults, semesterFile, valueWord } f
 import type { Status } from '../model/types';
 import { defaultsTiers } from '../tiers/course';
 import type { Tiers, Values } from '../tiers/types';
+import type { RefObject } from 'preact';
 import { CheckLine, EditFile, Loading } from '../ui/bits';
 import { SaveBar } from '../ui/edit';
+import { Modal } from '../ui/Modal';
 import { defaultsLine, semesterDefaultsAfter, semesterInherited, toValues } from './RunSettings';
 import { SemesterForm, scheduleAfter, useSchedFile } from './Schedule';
 import { WithStatus } from './common';
@@ -70,7 +73,7 @@ function DefaultsPage({ p }: { p: ReadyProps }) {
         </div>
       </div>
       <section class="panel section">
-        <DefaultsForm p={p} focusFold={FOLDS.find((f) => f === p.entry)} />
+        <DefaultsForm p={p} at={FOLDS.find((f) => f === p.entry)} />
       </section>
     </>
   );
@@ -80,27 +83,66 @@ export function SemesterDefaultsScreen(p: CohortProps) {
   return <WithStatus props={p} title="Semester defaults">{(r) => <DefaultsPage p={r} />}</WithStatus>;
 }
 
-/** Assignments, Releases and Semester dates, each an open fold, and their SaveBar; `focusFold`'s heading takes the focus on arrival. */
-function DefaultsForm({ p, focusFold }: { p: ReadyProps; focusFold?: Fold }) {
+type DraftState = [Draft, (d: Draft) => void];
+
+/**
+ * The form in a modal at `at`: that fold open and focused, the other two folded. The opener
+ * holds the draft, so an unsaved edit survives closing and reopening the modal. `modal` goes
+ * where the opener can render it outside any styled text (a footnote's type would cascade in).
+ */
+export function useDefaultsModal(p: ReadyProps, at: Fold) {
+  const [shown, setShown] = useState(false);
+  const draft = useState<Draft>(NO_DRAFT);
+  const focus = useRef<HTMLElement>(null);
+  const modal = shown ? (
+    <Modal title="Semester defaults" onClose={() => setShown(false)} initial={focus}>
+      <p class="footnote"><a class="textlink" href={defaultsHref(at)}>Open the full page</a></p>
+      <DefaultsForm p={p} at={at} folded draft={draft} focusRef={focus} />
+    </Modal>
+  ) : null;
+  return { open: () => setShown(true), modal };
+}
+
+/** A Semester defaults button that opens the modal at `at`. */
+export function SemesterDefaultsButton({ p, at }: { p: ReadyProps; at: Fold }) {
+  const m = useDefaultsModal(p, at);
+  return (
+    <>
+      <button class="btn quiet" type="button" aria-haspopup="dialog" onClick={m.open}>Semester defaults</button>
+      {m.modal}
+    </>
+  );
+}
+
+/**
+ * Assignments, Releases and Semester dates, each a fold, and their SaveBar. All open, unless
+ * `folded` (the modal): then only `at` is. `at`'s heading takes the focus on arrival, through
+ * `focusRef` when the caller focuses it (the modal does). `draft`, when given, is held by the
+ * caller so it outlives the form.
+ */
+function DefaultsForm({ p, at, folded = false, draft, focusRef }: { p: ReadyProps; at?: Fold; folded?: boolean; draft?: DraftState; focusRef?: RefObject<HTMLElement> }) {
   const env = useEnv();
   const org = p.cohort.org;
   const f = semesterFile(p.files, org);
   const sf = useSchedFile(p);
   const ready = sf && sf !== 'loading' && !sf.error ? sf : null;
-  const [kept, keep] = useState<Draft>(NO_DRAFT);
+  const own = useState<Draft>(NO_DRAFT);
+  const [kept, keep] = draft ?? own;
   const [save, , setSave] = useSave(env);
   const setKept = (v: Draft) => {
     keep(v);
     setSave({ kind: 'idle' });
   };
   const lines = settingsLines(p.status);
-  const heads = { assignments: useRef<HTMLElement>(null), releases: useRef<HTMLElement>(null), dates: useRef<HTMLElement>(null) };
+  const ownFocus = useRef<HTMLElement>(null);
+  const head = (fold: Fold) => (fold === at ? focusRef ?? ownFocus : undefined);
+  const isOpen = (fold: Fold) => !folded || fold === at;
   useEffect(() => {
-    const at = focusFold && heads[focusFold].current;
-    if (!at) return;
-    at.focus();
-    at.scrollIntoView?.({ block: 'start' });
-  }, [focusFold]);
+    const el = focusRef ? null : ownFocus.current;
+    if (!el) return;
+    el.focus();
+    el.scrollIntoView?.({ block: 'start' });
+  }, [at]);
 
   const yaml = f && f !== 'loading' && !f.error ? f : null;
   const before = yaml ? toValues(defaultsOf(yaml.doc)) : {};
@@ -144,19 +186,19 @@ function DefaultsForm({ p, focusFold }: { p: ReadyProps; focusFold?: Fold }) {
         : f === null ? <CheckLine cls="bad">Could not read {SEMESTER_FILE}.</CheckLine>
         : f.error ? <CheckLine cls="bad">{SEMESTER_FILE} does not parse ({f.error}); fix it with Edit the file directly.</CheckLine>
         : null}
-      <details class="fold settings-fold" open>
-        <summary ref={heads.assignments}><span>Assignments</span><span class="fold-line">{lines.assignments}</span></summary>
+      <details class="fold settings-fold" open={isOpen('assignments')}>
+        <summary ref={head('assignments')}><span>Assignments</span><span class="fold-line">{lines.assignments}</span></summary>
         <div class="fold-body">
           <p class="footnote">Every assignment this semester runs on these unless its own page says otherwise. Left empty, the value in grey applies: the course’s default, else the institution’s. <a class="textlink" href={`?course=${p.course.org}#details`}>Change the course’s defaults</a></p>
           {defaultsForm(pick(tiers, (k) => k !== RELEASE_KEY), 'sd')}
         </div>
       </details>
-      <details class="fold settings-fold" open>
-        <summary ref={heads.releases}><span>Releases</span><span class="fold-line">{lines.releases}</span></summary>
+      <details class="fold settings-fold" open={isOpen('releases')}>
+        <summary ref={head('releases')}><span>Releases</span><span class="fold-line">{lines.releases}</span></summary>
         <div class="fold-body">{defaultsForm(pick(tiers, (k) => k === RELEASE_KEY), 'sr')}</div>
       </details>
-      <details class="fold settings-fold" open>
-        <summary ref={heads.dates}><span>Semester dates</span><span class="fold-line">{lines.dates}</span></summary>
+      <details class="fold settings-fold" open={isOpen('dates')}>
+        <summary ref={head('dates')}><span>Semester dates</span><span class="fold-line">{lines.dates}</span></summary>
         <div class="fold-body">
           {sf === 'loading' ? <Loading what="Reading the schedule" /> : sf === null ? <p class="footnote">No schedule.yml yet.</p> : sf.error ? <CheckLine cls="bad">schedule.yml does not parse ({sf.error}); fix it with Edit the file directly.</CheckLine> : null}
           {dates ? <SemesterForm d={dates} set={(patch) => setKept({ ...kept, dates: { ...dates, ...patch } })} errors={dateErrors} /> : null}
