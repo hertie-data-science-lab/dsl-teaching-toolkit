@@ -302,3 +302,75 @@ def test_the_console_op_spells_the_flag():
     assert (
         op.argv(request(entry="lab-08", remove_deleted=True))[-1] == "--remove-deleted"
     )
+
+
+# ------------------------------------------------------------------ review follow-ups
+
+
+def test_a_root_destination_keeps_its_own_plumbing_out_of_the_released_side():
+    tree = {".github/workflows/x.yml": "g", "README.md": "r", "labs/a.md": "a2"}
+    manifest = {"labs/a.md": "a1"}
+    assert divergence.dest_files(tree, "", manifest) == {"labs/a.md": "a2"}
+    # A root stub the copy DID carry is the copy's.
+    assert "README.md" in divergence.dest_files(tree, "", {"README.md": "r0"})
+
+
+def test_a_folder_now_withheld_whole_is_still_judged_deleted():
+    facts = _facts()
+    facts.source_withheld = {
+        "cm": frozenset({"labs/08", *(f"labs/08/{p}" for p in MANIFEST)})
+    }
+    assert _kinds(status_json.divergence_problems(facts, autosync=False)) == [
+        "DIVERGED_DELETED"
+    ]
+    # Gone from the course altogether: its source problem says so, not this.
+    facts.source_blobs = {"cm": {"other/x.md": "1"}}
+    assert status_json.divergence_problems(facts, autosync=False) == []
+
+
+def test_remove_unlinks_a_symlink_never_its_target(tmp_path):
+    (tmp_path / "handout.md").write_text("kept")
+    (tmp_path / "notes.md").symlink_to("handout.md")
+    removed = deploy._remove_dropped(
+        tmp_path, {"handout.md": "h"}, ["notes.md", "../x"]
+    )
+    assert removed == ["notes.md"]
+    assert (tmp_path / "handout.md").read_text() == "kept"
+    assert not (tmp_path / "notes.md").is_symlink()
+
+
+def test_the_cli_never_removes_what_a_nested_copy_lands(monkeypatch):
+    sched = Schedule(
+        releases=[
+            Release("lab-08", NOW, deploy=[LAB]),
+            Release("sol-08", NOW, deploy=[SOLUTIONS]),
+        ]
+    )
+    monkeypatch.setattr(deploy.schedule, "load", lambda org: sched)
+    files = {**MANIFEST, "solutions/key.md": "k"}
+    record = release_record.Record({KEY: {"files": files}})
+    monkeypatch.setattr(deploy.release_record, "load", lambda org: record)
+    seen = {}
+
+    def fake(c, s, deploys, sync=True, remove=None):
+        seen["remove"] = remove
+        return deploy.Batch(0, True, [])
+
+    monkeypatch.setattr(deploy, "deploy_many", fake)
+    argv = ["deploy", "--course-org", "C", "--semester-org", "S", "--entry", "lab-08"]
+    monkeypatch.setattr(sys, "argv", [*argv, "--remove-deleted", "--no-preview"])
+    deploy.main()
+    assert sorted(seen["remove"][KEY]) == sorted(MANIFEST)
+
+
+def test_the_flag_is_spelt_with_paths_too_so_the_cli_refuses_it():
+    op = REGISTRY["release.entry"]
+    args = {
+        "entry": "lab-08",
+        "course_source_repo": "cm",
+        "course_source_path": "labs/08",
+    }
+    request = Request(
+        "release.entry", "prof", "C", "S", {**args, "remove_deleted": True}, False
+    )
+    assert op.argv(request)[-1] == "--remove-deleted"

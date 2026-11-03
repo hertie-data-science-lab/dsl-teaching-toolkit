@@ -8,7 +8,9 @@ import { deletedCount, fileCount, type DivergedProblem } from '../model/divergen
 import { ghUrl } from '../ui/bits';
 
 /** What Release again needs from the divergence: one fact line per kind, and the count it may remove. */
-export const releaseAgainDrift = (list: DivergedProblem[]) => ({ facts: list.map((p) => p.text), deleted: deletedCount(list) });
+export const releaseAgainDrift = (list: DivergedProblem[]) => ({
+  facts: list.map((p) => p.text), deleted: deletedCount(list), edited: list.some((p) => p.kind === 'DIVERGED_RELEASED'),
+});
 
 function Files({ p }: { p: DivergedProblem }) {
   const copies = p.diverged ?? [];
@@ -43,7 +45,6 @@ export function DivergencePanel({ list, courseOrg, cohortOrg, onSetAside, again,
   if (!list.length) return null;
   const copy = list.find((p) => p.diverged?.length)?.diverged?.[0];
   const released = list.some((p) => p.kind === 'DIVERGED_RELEASED');
-  const course = list.some((p) => p.kind !== 'DIVERGED_RELEASED');
   const files = list.reduce((n, p) => n + (p.diverged ?? []).reduce((m, c) => m + fileCount(c), 0), 0);
   return (
     <section class="panel section divergence" style="margin-top:20px" aria-label="Differs from the course copy">
@@ -62,7 +63,7 @@ export function DivergencePanel({ list, courseOrg, cohortOrg, onSetAside, again,
         </p>
       ) : null}
       <div class="actions">
-        {course ? again : null}
+        {again}
         {released ? keep : null}
       </div>
     </section>

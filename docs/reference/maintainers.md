@@ -121,7 +121,7 @@ Things whose *literal spelling* is depended on from outside Python:
   still at the destination) unless it removed it: `deploy_many(remove={key: [paths]})`
   (paths relative to the copy; `deploy --entry X --remove-deleted`, the console's
   `release.entry` `remove_deleted`) deletes, before the merge, only a path the copy's fresh
-  manifest lacks - never one the course still releases - and the record drops it
+  manifest lacks - never one the course still releases, nor one under another plan copy's destination, and never a symlink's target - and the record drops it
   (`Copied.removed`).
 - **The engine's writes to `schedule.yml`** (faculty-owned; line surgery, never a re-dump, at
   the sha a fresh read gave). Two writers, both in `schedule.py`: `record_handout` fills a
@@ -523,7 +523,7 @@ Decision 0034 (need, time, verdict), all computed by the engine so the console h
   `later`, undated, `aside: true`, `fix.screen: release`, and `diverged[]` (per copy:
   source, dest, `added` / `changed` / `deleted`) in the private semester file only. The
   course side is filtered as a copy is; another copy's destination inside it is left out;
-  a copy sharing its destination gets no released-side kind; an orphan record (no plan
+  a copy sharing its destination gets no released-side kind; a root destination's own `.github/`, denylisted paths and uncarried root stubs are not released files; a copy whose source path has gone is its source problem; an orphan record (no plan
   copy) is logged once and not checked. The trees are the ones the status reads anyway
   (`schedule._repo_shas`, shared with the source check; each destination's
   `repo_path_shas`): no read of its own. The digest's mail ladder is a separate clock and

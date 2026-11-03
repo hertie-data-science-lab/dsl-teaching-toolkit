@@ -2391,9 +2391,9 @@ def _diverged_words(
     if kind == divergence.DELETED:
         one = deleted == 1
         text = (
-            f"{plural(deleted, 'file')} of {label} {'was' if one else 'were'} deleted "
-            f"from the course copy and {'is' if one else 'are'} still in the released "
-            f"copy."
+            f"{plural(deleted, 'file')} of {label} {'is' if one else 'are'} no longer "
+            f"released from the course copy (deleted, or now withheld) and "
+            f"{'is' if one else 'are'} still in the released copy."
         )
         them = "it" if one else "them"
         stops = (
@@ -2439,6 +2439,7 @@ def divergence_problems(
         source = (
             None
             if blobs is None
+            or not divergence.source_present(d.course_source_path, blobs)
             else divergence.source_files(
                 d.course_source_path,
                 k[3],
@@ -2446,10 +2447,13 @@ def divergence_problems(
                 facts.source_withheld.get(k[0], frozenset()),
                 unwritten,
             )
-            or None
         )
         dest_blobs = facts.dest_blobs.get(k[2])
-        dest = None if dest_blobs is None else release_record.inside(dest_blobs, k[3])
+        dest = (
+            None
+            if dest_blobs is None
+            else divergence.dest_files(dest_blobs, k[3], facts.manifests[k])
+        )
         drifts = divergence.compare(
             facts.manifests[k], source, dest, divergence.nested_in((k[2], k[3]), dests)
         )

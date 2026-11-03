@@ -207,12 +207,12 @@ def _scheduler(request: Request) -> list[str]:
 
 
 def _deploy(request: Request) -> list[str]:
+    # `remove_deleted`: Release again's "also remove the files deleted from the course
+    # copy" (decision 0043 rule 6). Spelt on either branch: deploy refuses it with paths.
+    remove = ["--remove-deleted"] if _a(request, "remove_deleted") else []
     if _a(request, "entry") and not _a(request, "course_source_repo"):
         # A schedule entry by its key: deploy reads every copy off the plan and releases
         # them in one batch with one site sync, however many source repos they draw on.
-        # `remove_deleted`: Release again's "also remove the files deleted from the course
-        # copy" (decision 0043 rule 6).
-        remove = ["--remove-deleted"] if _a(request, "remove_deleted") else []
         return [*_course_semester(request), "--entry", _a(request, "entry"), *remove]
     return [
         "--course-org",
@@ -227,6 +227,7 @@ def _deploy(request: Request) -> list[str]:
         _a(request, "semester_dest_repo", policy.defaults()["materials_repo"]),
         "--semester-dest-path",
         _a(request, "semester_dest_path", ""),
+        *remove,
     ]
 
 

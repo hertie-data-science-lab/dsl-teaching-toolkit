@@ -98,3 +98,15 @@ describe('a released folder that differs from the course copy', () => {
     expect(t).toContain('Both copies stay as they are');
   });
 });
+
+describe('review follow-ups', () => {
+  it('offers Release again even when only the released copy was edited, and warns what it does to those edits', () => {
+    const only: Loaded = { kind: 'ready', sha: 's', stale: [], status: { ...released, problems: [DRIFT[0]] } };
+    const t = text(<ReleaseScreen {...props({ loaded: only })} />);
+    expect(t).toContain('Release again');
+    expect(t).toContain('Keep for future semesters');
+    const scope = { courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' };
+    const ref = { id: 's5', ident: 'Lecture 5', title: 'Trees', when: 'Thu 8 Oct', source: { repo: 'course-materials-f2026', path: 'lectures/05_trees' } };
+    expect(releaseAgain(scope, ref, releaseAgainDrift(divergenceOf(only.status, 's5'))).confirm).toContain('waits in a pull request');
+  });
+});

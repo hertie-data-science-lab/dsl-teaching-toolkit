@@ -243,7 +243,7 @@ A material release is **fire-once**: each `files:` item is copied once, at its t
 | What happened | What to do |
 |---|---|
 | **Course copy changed** - a released file was edited in the course, or a file added under the folder (not said when `autosync_released_edits` is on: it ships on the next tick) | **Release again** |
-| **Deleted in course** - a released file is gone from the course copy but still in the released copy | **Release again** and tick *Also remove the N files deleted from the course copy* (a release otherwise only adds) |
+| **Deleted in course** - a released file is gone from the course copy (deleted, or now withheld by `.releaseignore`) but still in the released copy | **Release again** and tick *Also remove the N files deleted from the course copy* (a release otherwise only adds) |
 | **Released copy edited** - a released file was edited in the semester repo, or a file added there | **Keep for future semesters**, to propose the edits back to the course |
 
 Each can be **set aside**; it comes back when that side changes again. A folder another entry releases into (a lab's `solutions/`) is that entry's, never counted as an edit. From the CLI: `python -m dsl_course.deploy ... --entry <key> --remove-deleted`.

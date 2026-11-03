@@ -48,7 +48,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import NamedTuple
 
-from . import pulls, release_record, schedule, site
+from . import divergence, pulls, release_record, schedule, site
 from .access import (
     COURSE_TEAM_ACCESS,
     grant_faculty,
@@ -520,11 +520,16 @@ def _remove_dropped(
 ) -> list[str]:
     """Delete from a folder copy's destination each of `paths` (relative to the copy) that
     the copy no longer carries - never one in its fresh manifest `files`, never one outside
-    the destination. Answers the paths removed, which the commit on `upstream` stages."""
+    the destination. The path itself is unlinked, never what a symlink there points at.
+    Answers the paths removed, which the commit on `upstream` stages."""
     removed = []
+    base = destp.resolve()
     for rel in sorted(set(paths)):
-        target = _resolve_within(destp, rel)
-        if rel in files or target is None or target == destp.resolve():
+        parts = rel.split("/")
+        if rel in files or not rel or rel.startswith("/") or ".." in parts:
+            continue
+        target = destp / rel
+        if not target.parent.resolve().is_relative_to(base):
             continue
         if target.is_symlink() or target.is_file():
             target.unlink()
@@ -1019,11 +1024,23 @@ def main() -> int:
         except (RuntimeError, ValueError) as exc:
             log_err(f"could not read {release_record.PATH} ({exc}) - nothing removed")
             return 1
-        remove = {
-            k: list(record.copies[k].get("files") or {})
-            for k in map(release_record.key_of, deploys)
-            if k in record.copies
-        }
+        # Never a path another copy of the plan lands at inside this one (a lab's
+        # `solutions/`): those files are that copy's.
+        dests = [
+            (d.semester_dest_repo, deploy_dest(d))
+            for r in sched.releases
+            for d in r.deploy
+        ]
+        remove = {}
+        for k in map(release_record.key_of, deploys):
+            if k not in record.copies:
+                continue
+            nested = divergence.nested_in((k[2], k[3]), dests)
+            remove[k] = [
+                p
+                for p in record.copies[k].get("files") or {}
+                if not any(p == n or p.startswith(f"{n}/") for n in nested)
+            ]
     # ONE batch, whatever the entry draws from: each repo clones once and the site syncs
     # once, as the scheduler's own release pass does.
     try:

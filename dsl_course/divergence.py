@@ -28,6 +28,7 @@ from typing import NamedTuple
 
 from .course import is_repo_root
 from .gh_contents import WITHHELD_ROOT_STUBS
+from .release_record import inside
 from .schedule_plan import within
 from .selection import ROOT_RELEASE_EXCLUDED, denied
 
@@ -85,6 +86,36 @@ def source_files(
             continue
         out[rel] = sha
     return out
+
+
+def dest_files(
+    dest_blobs: Mapping[str, str], dest_path: str, manifest: Mapping[str, str]
+) -> dict[str, str]:
+    """The files under a copy's destination, keyed as its manifest is. For a copy into the
+    repo's root, the destination's own plumbing (`.github/`, the denylist) and a root stub
+    the copy never carried are the semester's, not a released file edited or added."""
+    files = inside(dict(dest_blobs), dest_path)
+    if not is_repo_root(dest_path):
+        return files
+    return {
+        p: s
+        for p, s in files.items()
+        if p in manifest
+        or not (
+            p.split("/", 1)[0] in ROOT_RELEASE_EXCLUDED
+            or denied(p)
+            or p in WITHHELD_ROOT_STUBS
+        )
+    }
+
+
+def source_present(src_path: str, blobs: Mapping[str, str]) -> bool:
+    """Whether the course repo still has the copy's own path at all (a file, or a folder
+    with a file in it). One that has gone is its source problem, not a divergence."""
+    src = src_path.strip("/")
+    if is_repo_root(src):
+        return bool(blobs)
+    return src in blobs or any(p.startswith(f"{src}/") for p in blobs)
 
 
 def _outside(files: Mapping[str, str], nested: Collection[str]) -> dict[str, str]:

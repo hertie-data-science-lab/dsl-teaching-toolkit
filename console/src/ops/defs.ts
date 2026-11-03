@@ -89,12 +89,14 @@ export function releaseEarly(s: Scope, r: ReleaseRef): OpDef {
  * kind in `facts`, and - when files were deleted from the course copy - the unticked choice to
  * remove them from the released copy too (`remove_deleted`).
  */
-export function releaseAgain(s: Scope, r: ReleaseRef, drift: { facts: string[]; deleted: number } = { facts: [], deleted: 0 }): OpDef {
+export function releaseAgain(s: Scope, r: ReleaseRef, drift: { facts: string[]; deleted: number; edited?: boolean } = { facts: [], deleted: 0 }): OpDef {
   const def = releaseDef(s, r, {
     name: 'Release again', where: `Released ${r.when}`, intro: `Copies the course’s current version of ${r.ident} to students again, for a fixed file.`,
     verb: `Release ${r.ident} again`, running: `Releasing ${r.ident} again`, cancel: 'Stop before copying',
   });
   if (drift.facts.length) def.facts = drift.facts;
+  // A release merges into the released copy: a file both sides changed waits as a pull request, never overwritten blind.
+  if (drift.edited) def.confirm = 'The released copy has its own edits: they stay, and a file the course also changed waits in a pull request for you to resolve. Keep them for future semesters first if they should last.';
   if (drift.deleted) {
     def.options = {
       remove_deleted: {
