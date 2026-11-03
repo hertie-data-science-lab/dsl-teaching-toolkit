@@ -20,7 +20,6 @@ import { Hint } from '../ui/Hint';
 import { MoreMenu, WithStatus, cohortScope, todayOf, tzOf, useOperations, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
 import { CONFIG_REPO } from '../model/names';
-import { SemesterSettingsPanel } from './SemesterSettings';
 
 export function readSchedule(p: CohortProps): Schedule | null {
   const f = p.files.file(p.cohort.org, CONFIG_REPO, 'schedule.yml');
@@ -441,7 +440,7 @@ export function AutomationHead({ heartbeat, now }: { heartbeat: CohortProps['hea
   );
 }
 
-function Overview(p: ReadyProps & { settings?: boolean }) {
+function Overview(p: ReadyProps) {
   const { status, now } = p;
   const tz = tzOf(status), year = yearOf(now, tz), today = todayOf(now, tz);
   const sched = readSchedule(p);
@@ -546,17 +545,16 @@ function Overview(p: ReadyProps & { settings?: boolean }) {
             <OpsList list={ops.slice(0, 3)} now={now} runRepo={`${p.course.org}/.github`} />
           </section>
         </div>
-        <SemesterSettingsPanel p={p} open={p.settings} />
       </div>
     </>
   );
 }
 
-/** The semester's Dashboard; `settings` (the `#settings` route) opens its Semester settings. */
-export function CohortScreen(p: CohortProps & { settings?: boolean }) {
+/** The semester's Dashboard. */
+export function CohortScreen(p: CohortProps) {
   return (
     <WithStatus props={p} title="Dashboard">
-      {(r) => <Overview {...r} settings={p.settings} />}
+      {(r) => <Overview {...r} />}
     </WithStatus>
   );
 }

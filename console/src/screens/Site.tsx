@@ -31,7 +31,7 @@ import { useSchedFile } from './Schedule';
 import { ABOUT } from '../tiers/course';
 import type { FieldTier, Tiers, Values } from '../tiers/types';
 import { detailsOf, saveCourseFile, withSyllabus } from './CourseEdit';
-import { SETTINGS_HASH, settingsLines } from './SemesterSettings';
+import { defaultsHref, settingsLines } from './SemesterSettings';
 
 /** A hand-written announcement's title, date and text, from its front matter (or its body). */
 export function readAnnouncement(text: string): { title?: string; date: string; text: string } {
@@ -275,13 +275,13 @@ function CourseGroup({ p }: { p: ReadyProps }) {
   );
 }
 
-/** The semester's dates: the sync reads them from schedule.yml; they are edited in the Dashboard's Semester settings. */
+/** The semester's dates: the sync reads them from schedule.yml; they are edited in Semester defaults. */
 function SemesterGroup({ p }: { p: ReadyProps }) {
   return (
     <div class="form-section">
       <h3>Semester dates</h3>
       <p>{settingsLines(p.status).dates}</p>
-      <p class="footnote">Edited in <a class="textlink" href={SETTINGS_HASH}>Semester settings</a> on the Dashboard; the site updates at the next sync.</p>
+      <p class="footnote">Edited in <a class="textlink" href={defaultsHref('dates')}>Semester defaults</a>; the site updates at the next sync.</p>
     </div>
   );
 }

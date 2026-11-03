@@ -109,11 +109,11 @@ describe('Site settings', () => {
     expect(body(w)).toContain('student_site:\n  syllabus: Course.md\n');
   });
 
-  it('shows the semester dates and links to where they are edited, the Dashboard’s Semester settings (decision 0043)', async () => {
+  it('shows the semester dates and links to where they are edited, the Semester defaults screen (decision 0043)', async () => {
     await mount();
     const sem = section('Semester dates');
-    expect(sem.textContent).toContain('Edited in Semester settings on the Dashboard; the site updates at the next sync.');
-    expect(sem.querySelector('a')!.getAttribute('href')).toBe('#settings');
+    expect(sem.textContent).toContain('Edited in Semester defaults; the site updates at the next sync.');
+    expect(sem.querySelector('a')!.getAttribute('href')).toBe('#defaults-dates');
     expect(sem.querySelector('input')).toBeNull();
   });
 

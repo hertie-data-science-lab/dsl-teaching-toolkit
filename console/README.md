@@ -221,17 +221,19 @@ templates the semester's schedule does not use, each with Add to the schedule. I
 meter plus every state, each line opening the Students tab: on the roster with no code sent
 yet, codes sent but not joined yet, and joined (`status.json` does not say who has an org
 invitation still to accept, so that step is not counted); it is hidden once every row has joined.
-At the bottom, below Automation, **Semester settings** (decision 0043) lists one line per setting,
-each with its effective value and source from `status.json`: the run defaults as `defaultsLine`
-words them, "Send fixes to released files automatically", the semester dates. Edit opens one
-modal of three folds, each heading carrying its line: Assignments (semester.yml `defaults:`),
-Releases (`autosync_released_edits`) and Semester dates (schedule.yml's `semester:` block).
-The timezone is asked once, the `defaults:` one in Assignments; schedule.yml's own `timezone`
-stays on the Schedule screen.
-A save is at most one commit per file (`saveSteps`). From the Dashboard all three are folded;
-the Assignments page's Semester defaults button opens it with Assignments open and focused; the
-`#settings` route (the Site page's link, New semester's Semester defaults card) opens it on
-arrival. A released `event_datetime: tbc` entry's Release page offers "Session date: TBC ->
+**Semester defaults** (decision 0043; `#defaults`, in the semester nav between Site and
+Operations) is the one editor for the semester's settings: three open folds, each heading
+carrying its line with the effective value and source from `status.json`: Assignments
+(semester.yml `defaults:`, the run defaults as `defaultsLine` words them), Releases
+(`autosync_released_edits`, "Send fixes to released files automatically") and Semester dates
+(schedule.yml's `semester:` block). The heading's `?` explains the cascade; the late window and
+late penalty each carry a `?` saying they are defaults a marker can waive or override per late
+unit on the Marks tab (a per-key `hint` added to the tiers). The timezone is asked once, the
+`defaults:` one in Assignments; schedule.yml's own `timezone` stays on the Schedule screen. A
+save is at most one commit per file (`saveSteps`). `#defaults-<fold>` focuses that fold on
+arrival: the Assignments page's Semester defaults link and New semester's card open
+`#defaults-assignments`, the Site page's dates link `#defaults-dates`; the old `#settings` route
+is rewritten to `#defaults-assignments`. Unsaved edits are lost on leaving the page. A released `event_datetime: tbc` entry's Release page offers "Session date: TBC ->
 [date] [time]" (Set date writes the entry; Leave as TBC hides it), as does the result panel of
 a console Release early, now or again of such an entry; the Dashboard's suggested to-do
 `schedule:released_tbc:<entry>` opens that page.

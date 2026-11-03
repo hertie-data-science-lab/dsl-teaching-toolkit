@@ -6,9 +6,10 @@
   `tbc` row is announced at the moment it first shipped (the site's `date:` and `released_at:`,
   the student status's `rows[].released_at`), where before every dateless row was dropped. A
   released `tbc` entry offers its session date (`tbc -> [date]`) on its console Release page
-  and is a suggested to-do until dated. The semester Dashboard gains a Semester settings panel
-  and one modal of three folds: the run defaults (with the `defaults:` timezone),
-  `autosync_released_edits` and the semester dates. The Site page links to it for the dates.
+  and is a suggested to-do until dated. A new Semester defaults page in the semester nav (between
+  Site and Operations) edits the run defaults (with the `defaults:` timezone),
+  `autosync_released_edits` and the semester dates; the old `#settings` link lands there. The
+  Site page links to it for the dates.
 - `schedule.yml` names no `timezone:` (decision 0039 rule 2): a semester's times are read in its
   `semester.yml` `defaults: timezone`, cascaded. The migration's config layers step moves a
   schedule's `timezone:` there; left in the file it is NOT_MIGRATED and ignored. The Schedule

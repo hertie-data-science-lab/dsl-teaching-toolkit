@@ -28,6 +28,7 @@ import { MaterialsIndexScreen, TemplatesIndexScreen, otherRepos } from './screen
 import { HomeScreen, Invitations, ReadonlyScreen, SignInScreen } from './screens/Home';
 import { InstructorsScreen, StudentsScreen } from './screens/People';
 import { ReleaseScreen, ScheduleScreen } from './screens/Schedule';
+import { SemesterDefaultsScreen } from './screens/SemesterSettings';
 import { OperationsScreen, SiteScreen } from './screens/Site';
 import { HelpScreen } from './screens/Help';
 import { SetupScreen } from './screens/Setup';
@@ -282,7 +283,6 @@ export function App({ state: s }: { state: AppState }) {
     };
     const screens: Record<string, () => preact.JSX.Element> = {
       dashboard: () => <CohortScreen {...cp} />,
-      settings: () => <CohortScreen {...cp} settings />,
       schedule: () => <ScheduleScreen {...cp} />,
       release: () => <ReleaseScreen {...cp} />,
       assignments: () => <AssignmentsScreen {...cp} />,
@@ -291,6 +291,7 @@ export function App({ state: s }: { state: AppState }) {
       roster: () => <StudentsScreen {...cp} />,
       instructors: () => <InstructorsScreen {...cp} />,
       site: () => <SiteScreen {...cp} />,
+      defaults: () => <SemesterDefaultsScreen {...cp} />,
       operations: () => <OperationsScreen {...cp} />,
     };
     body = (screens[screen] ?? screens.dashboard)();
