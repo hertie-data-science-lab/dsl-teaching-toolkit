@@ -64,6 +64,10 @@ describe('the manifest', () => {
       'README.md→README.mdbehind',
     ]);
     expect(el.querySelectorAll('.mf-rows li.mf-out')).toHaveLength(2);
+    // Why a file is left out: a muted chip beside its name, the rule in code, not a footnote below.
+    const out = el.querySelectorAll('.mf-rows li.mf-out')[1];
+    expect(out.querySelector('.footnote')).toBeNull();
+    expect(out.querySelector('.chip.muted.rule-chip code')!.textContent).toBe('labs/notes.md');
     expect(el.querySelector('.sub-h')).toBeNull();
   });
 

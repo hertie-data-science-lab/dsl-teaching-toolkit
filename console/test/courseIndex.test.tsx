@@ -15,6 +15,7 @@ import type { Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
 import { CourseScreen, MaterialsChecklist } from '../src/screens/Course';
 import { materialsReadiness } from '../src/model/readiness';
+import { effectiveDestRepo } from '../src/model/releaseState';
 import { HomeScreen } from '../src/screens/Home';
 import { MaterialsScreen, WebsiteScreen, withSyllabus } from '../src/screens/CourseEdit';
 import { MaterialsIndexScreen, TemplatesIndexScreen, otherRepos } from '../src/screens/CourseIndex';
@@ -141,6 +142,22 @@ describe('index screens', () => {
     const row = render(<MaterialsIndexScreen {...cp()} />).split('<li>').find((li) => li.includes(`>${MAT}</a>`))!;
     expect(row).toContain(`<span class="r-title"><a class="textlink" href="#materials-${MAT}">${MAT}</a>`);
     expect(row).toContain(`href="#materials-${MAT}">Settings</a>`);
+  });
+  it('counts each materials repo’s files the newest live semester edited, linking its settings', () => {
+    const dest = effectiveDestRepo(ready);
+    const PATHS = ['SYLLABUS.md', 'lectures/05_trees/slides.html', 'lectures/05_trees/notes.pdf'];
+    // The semester edited SYLLABUS.md (ahead) and slides.html (diverged: the course changed it too); notes.pdf as released.
+    const edits = (live: Record<string, string>, course: Record<string, string> = {}): Files => {
+      const up = new StaticFiles({}, {}, { [`${COHORT_ORG}/${dest}`]: PATHS });
+      const now = new StaticFiles({}, {}, { [`${COHORT_ORG}/${dest}`]: PATHS, [`${COURSE_ORG}/${MAT}`]: PATHS }, { [COURSE_ORG]: [{ name: MAT }] }, {}, { ...live, ...course });
+      return Object.assign(Object.create(now), { tree: (o: string, r: string, ref?: string) => (ref ? up.tree(o, r) : now.tree(o, r)) });
+    };
+    const f = edits({ [`${COHORT_ORG}/${dest}/SYLLABUS.md`]: 'e1', [`${COHORT_ORG}/${dest}/lectures/05_trees/slides.html`]: 'e2' }, { [`${COURSE_ORG}/${MAT}/lectures/05_trees/slides.html`]: 'c2' });
+    const row = render(<MaterialsIndexScreen {...cp({ files: f })} />).split('<li>').find((li) => li.includes(`>${MAT}</a>`))!;
+    expect(row).toContain(`<a class="chip muted" href="#materials-${MAT}">2 files edited in Fall 2026</a>`);
+    // Nothing edited, or the trees unread: no chip.
+    expect(render(<MaterialsIndexScreen {...cp({ files: edits({}) })} />)).not.toContain('edited in');
+    expect(render(<MaterialsIndexScreen {...cp()} />)).not.toContain('edited in');
   });
   it('says why a materials repo is not ready: its first missing needed check, and counts its suggestions', () => {
     const m = STATUS.course!.materials[0];

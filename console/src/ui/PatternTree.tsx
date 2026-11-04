@@ -94,9 +94,9 @@ function Control({ n, dir, s, c }: { n: TreeNode; dir: boolean; s: Standing; c: 
 
 /** Why a row stands as it does: the broader line that withholds it, the content default, or the `!` line that re-includes it. */
 function Why({ s, word }: { s: Standing; word: string }) {
-  if (s.kind === 'broader') return <span class="footnote">{word} by <code>{s.rule}</code></span>;
-  if (s.kind === 'default') return <span class="footnote">{word} by default</span>;
-  if (s.kind === 'overridden' && s.rule) return <span class="footnote">released by <code>{s.rule}</code></span>;
+  if (s.kind === 'broader') return <span class="chip muted rule-chip">{word} by <code>{s.rule}</code></span>;
+  if (s.kind === 'default') return <span class="chip muted rule-chip">{word} by default</span>;
+  if (s.kind === 'overridden' && s.rule) return <span class="chip muted rule-chip">released by <code>{s.rule}</code></span>;
   return null;
 }
 

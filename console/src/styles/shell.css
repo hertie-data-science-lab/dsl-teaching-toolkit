@@ -2,8 +2,9 @@
 
 /* ================= side nav handle (materials-release decision 9) =================
    A slim pill on the nav/content boundary, vertically centred. Pressed, the nav hides and the
-   content spans the shell; the handle sits at the left edge and the top bar's Menu opens the nav
-   as the narrow-screen drawer does. The reduced-motion rule in console.css stills the transitions. */
+   content spans the shell; the handle sits at the left edge and the top bar's Menu shows the nav
+   again in place, as the handle does. Below 860px the collapsed state does nothing: the nav is the
+   Menu's drawer there. The reduced-motion rule in console.css stills the transitions. */
 .shell { transition: grid-template-columns 150ms ease, gap 150ms ease; }
 .sidenav { transition: opacity 150ms ease; }
 .nav-handle { --shell-left: max(0px, calc((100vw - 1320px) / 2)); position: fixed; top: 50vh; transform: translateY(-50%); left: calc(var(--shell-left) + 16px + 228px + 16px - 10px); width: 20px; height: 64px; padding: 0; border: 0; background: none; cursor: pointer; z-index: 15; display: grid; place-items: center; transition: left 150ms ease; }
@@ -16,14 +17,13 @@
 .nav-handle:hover::after, .nav-handle:focus-visible::after { opacity: 1; }
 body.nav-collapsed .nav-handle { left: calc(var(--shell-left) + 2px); }
 body.nav-collapsed .nh-chev { transform: rotate(-135deg); margin-left: -1px; }
-body.nav-collapsed .shell { grid-template-columns: 0px minmax(0, 1fr); gap: 0; padding-left: 24px; }
-body.nav-collapsed .sidenav { visibility: hidden; opacity: 0; overflow: hidden; }
-body.nav-collapsed .menu-btn { display: inline-flex; align-items: center; }
-body.nav-collapsed.nav-open .shell { grid-template-columns: minmax(0, 1fr); gap: 16px; }
-body.nav-collapsed.nav-open .sidenav { visibility: visible; opacity: 1; position: static; max-height: none; background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 12px; }
+@media (min-width: 861px) {
+  body.nav-collapsed .shell { grid-template-columns: 0px minmax(0, 1fr); gap: 0; padding-left: 24px; }
+  body.nav-collapsed .sidenav { visibility: hidden; opacity: 0; overflow: hidden; }
+  body.nav-collapsed .menu-btn { display: inline-flex; align-items: center; }
+}
 @media (max-width: 860px) {
   .nav-handle { display: none; }
-  body.nav-collapsed .shell { grid-template-columns: minmax(0, 1fr); padding-left: 16px; gap: 16px; }
 }
 
 /* ================= inline PDF (materials-release decision 10) ================= */

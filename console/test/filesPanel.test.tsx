@@ -122,14 +122,15 @@ const click = (x: Element) => act(() => (x as HTMLElement).click());
 /** A file row by its path's last part, and a folder's summary by its name. */
 const fileRow = (el: HTMLElement, name: string) => [...el.querySelectorAll<HTMLElement>('.file-tree li.ft-file')].find((li) => li.querySelector('.ft-name')?.textContent === name)!;
 const folder = (el: HTMLElement, name: string) => [...el.querySelectorAll<HTMLElement>('.file-tree li.ft-dir')].find((li) => li.querySelector(':scope > details > summary .ft-name')?.textContent === `${name}/`)!;
-const chips = (li: HTMLElement) => [...li.querySelectorAll(':scope > .chip, :scope > .chip-hint > .chip, :scope > details > summary > .chip, :scope > details > summary > .chip-hint > .chip')].map((c) => c.textContent);
+const chips = (li: HTMLElement) => [...li.querySelectorAll(':scope > .chip:not(.rule-chip), :scope > .chip-hint > .chip, :scope > details > summary > .chip:not(.rule-chip), :scope > details > summary > .chip-hint > .chip')].map((c) => c.textContent);
 /** Text as drawn: a closed popover waits hidden in place. */
 const shown = (x: HTMLElement) => {
   const c = x.cloneNode(true) as HTMLElement;
   c.querySelectorAll('.hint-pop').forEach((h) => h.remove());
   return c.textContent;
 };
-const note = (li: HTMLElement) => li.querySelector(':scope > .footnote, :scope > details > summary > .footnote')?.textContent ?? null;
+/** Why a row stands as it does: its muted rule chip on the name's line. */
+const note = (li: HTMLElement) => li.querySelector(':scope > .chip.muted.rule-chip, :scope > details > summary > .chip.muted.rule-chip')?.textContent ?? null;
 const tick = (li: HTMLElement) => li.querySelector<HTMLInputElement>(':scope > input.ft-tick, :scope > details > summary > input.ft-tick');
 
 describe('the Files panel', () => {
@@ -190,10 +191,43 @@ describe('the Files panel', () => {
     expect(onSaveIgnore).toHaveBeenCalledWith('drafts/\n/README.md\n');
   });
 
+  it('Release: says how many released files the semester edited, PR into source, and See which narrows the tree to them', async () => {
+    const onKeep = vi.fn();
+    const { el } = await mount({ onKeep });
+    expect(el.querySelector('.edited-note')).toBeNull();
+    await click(tab(el, 'Release'));
+    const note = el.querySelector<HTMLElement>('.edited-note')!;
+    // 01 notes edited in the semester (ahead), 02 notes on both sides (diverged).
+    expect(note.querySelector('.step-bang')!.textContent).toBe('!');
+    expect(note.querySelector('span:not(.step-bang)')!.textContent).toBe('Fall 2026 has edited 2 released files from this repo.');
+    await click([...note.querySelectorAll('button')].find((b) => b.textContent === 'PR into source')!);
+    expect(onKeep).toHaveBeenCalledWith(semester);
+    const which = () => note.querySelector<HTMLButtonElement>('button.textlink')!;
+    const files = () => [...el.querySelectorAll('.file-tree li.ft-file .ft-name')].map((x) => x.textContent);
+    expect(files()).toContain('README.md');
+    expect(which().textContent).toBe('See which');
+    await click(which());
+    expect(files()).toEqual(['notes.md', 'notes.md']);
+    expect(which().textContent).toBe('Show all');
+    await click(which());
+    expect(files()).toContain('README.md');
+  });
+
+  it('Release: no edited-files notice when the semester edited nothing of this repo', async () => {
+    const plain: TreeState = { kind: 'ready', truncated: false, paths: [] };
+    const { el } = await mount({ files: new RefFiles({ [`${SEM}/materials@upstream`]: plain }, ['README.md']) });
+    await click(tab(el, 'Release'));
+    expect(el.querySelector('.edited-note')).toBeNull();
+  });
+
   it('Release: the chips against the semester, disabled ticks, and folder roll-ups', async () => {
     const { el } = await mount();
     await click(tab(el, 'Release'));
-    expect(chips(fileRow(el, 'README.md'))).toEqual(['up to date']);
+    // Up to date: greyed with a muted `released`, and left out of a folder's roll-up.
+    expect(chips(fileRow(el, 'README.md'))).toEqual(['released']);
+    expect(fileRow(el, 'README.md').querySelector('.chip.muted')!.getAttribute('data-kind')).toBe('up_to_date');
+    expect(el.querySelector('.files-panel .hint-pop')!.textContent).toContain('released (greyed): the semester already has this version; nothing to release.');
+    expect(el.querySelector('.file-tree')!.textContent).not.toContain('up to date');
     expect(tick(fileRow(el, 'README.md'))!.disabled).toBe(true);
     expect(chips(fileRow(el, 'slides.pdf'))).toEqual(['behind']);
     expect(chips(fileRow(el, 'lab.ipynb'))).toEqual(['not released']);
@@ -340,8 +374,9 @@ describe('the Files panel', () => {
     // The ? right after the link: the placeholder wording, or the caller's.
     expect(lede().querySelector('a.textlink + .hint-wrap .hint-pop')!.textContent).toBe(SCHEDULE_LINK_HINT);
     expect(lede().querySelector('a')!.getAttribute('href')).toBe(`?cohort=${SEM}#schedule-0`);
-    // Before the tree and its heads, not in the footer.
-    expect(lede().nextElementSibling!.querySelector('.file-tree')).not.toBeNull();
+    // Before the tree and its heads (the edited-files notice between), not in the footer.
+    expect(lede().nextElementSibling!.classList.contains('edited-note')).toBe(true);
+    expect(lede().nextElementSibling!.nextElementSibling!.querySelector('.file-tree')).not.toBeNull();
     expect(el.querySelector('.rh-foot .rh-sched')).toBeNull();
     await click(fileRow(el, 'slides.pdf'));
     expect(lede().querySelector('a')!.getAttribute('href')).toBe(`?cohort=${SEM}#schedule-1`);

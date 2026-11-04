@@ -258,16 +258,31 @@ describe('the side nav’s handle (materials-release decision 9)', () => {
     await act(() => handle(el).click());
     expect(collapsed()).toBe(true);
     expect([handle(el).getAttribute('aria-label'), handle(el).dataset.tip, handle(el).getAttribute('aria-expanded')]).toEqual(['Show navigation', 'Show navigation', 'false']);
-    // The Menu pill is there to open the nav as the drawer.
+    // On a wide screen the Menu pill shows the nav again in place, as the handle does: no drawer.
     const menu = el.querySelector<HTMLButtonElement>('.topbar .menu-btn')!;
     await act(() => menu.click());
-    expect(document.body.classList.contains('nav-open')).toBe(true);
-    expect(menu.getAttribute('aria-expanded')).toBe('true');
-    // Showing the nav again closes the drawer.
-    await act(() => handle(el).click());
     expect(collapsed()).toBe(false);
     expect(document.body.classList.contains('nav-open')).toBe(false);
-    expect(menu.getAttribute('aria-expanded')).toBe('false');
+    expect(localStorage.getItem('console-nav')).toBe('open');
+    expect(handle(el).getAttribute('aria-label')).toBe('Hide navigation');
+  });
+
+  it('opens the drawer from the Menu pill below 860px, collapsed or not', async () => {
+    const real = window.matchMedia;
+    window.matchMedia = ((q: string) => ({ matches: q === '(max-width: 860px)', media: q })) as unknown as typeof window.matchMedia;
+    try {
+      const el = await mount(`/?cohort=${cohort.org}#dashboard`);
+      await act(() => handle(el).click());
+      const menu = el.querySelector<HTMLButtonElement>('.topbar .menu-btn')!;
+      await act(() => menu.click());
+      expect(document.body.classList.contains('nav-open')).toBe(true);
+      expect(menu.getAttribute('aria-expanded')).toBe('true');
+      expect(collapsed()).toBe(true);
+      await act(() => menu.click());
+      expect(document.body.classList.contains('nav-open')).toBe(false);
+    } finally {
+      window.matchMedia = real;
+    }
   });
 
   it('keeps the choice in this browser, for a student too', async () => {
@@ -310,7 +325,9 @@ describe('the side nav’s handle (materials-release decision 9)', () => {
       expect(look(nav).visibility).toBe('hidden');
       expect(look(el.querySelector('.shell')!).gridTemplateColumns).toBe('0px minmax(0, 1fr)');
       await act(() => menu.click());
-      expect(look(nav).visibility).toBe('visible');
+      expect(look(nav).visibility).not.toBe('hidden');
+      expect(collapsed()).toBe(false);
+      expect(look(el.querySelector('.shell')!).gridTemplateColumns).not.toBe('0px minmax(0, 1fr)');
     } finally {
       style.remove();
     }

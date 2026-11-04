@@ -63,7 +63,7 @@ describe('the pattern tree', () => {
   it('badges from the draft and names the broader rule', () => {
     const out = html(['labs/']);
     expect(out).toMatch(/<span class="ft-name">labs\/<\/span><span class="chip amber">withheld<\/span>/);
-    expect(out).toMatch(/<span class="ft-name">lab.pdf<\/span><span class="chip amber">withheld<\/span><span class="footnote">withheld by <code>labs\/<\/code><\/span>/);
+    expect(out).toMatch(/<span class="ft-name">lab.pdf<\/span><span class="chip amber">withheld<\/span><span class="chip muted rule-chip">withheld by <code>labs\/<\/code><\/span>/);
     expect(out).toMatch(/<span class="ft-name">a.pdf<\/span><span class="chip ">released to students<\/span>/);
     expect(out).toContain('aria-label="Include labs/"');
     expect(out).toContain('aria-label="Withhold lectures/"');

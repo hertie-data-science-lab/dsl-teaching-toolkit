@@ -150,8 +150,8 @@ courses the nodes (each a link to its Home, the open one expanded to its tabs, e
 site's Font Awesome glyph drawn inline; its kind tabs once its `student-status.json` is read),
 another live term under them, and Past semesters below, each expanding to its courses as
 links. A Student view's tree is that one semester's. A slim handle on the nav's edge hides it in both consoles
-(materials-release decision 9): the content then spans the page, the top bar's Menu opens the
-nav as on a phone, and the choice is kept in this browser (`console-nav` in local storage).
+(materials-release decision 9): the content then spans the page, the top bar's Menu shows it again
+in place (`menuPress`; below 860px Menu is the drawer), and the choice is kept in this browser (`console-nav` in local storage).
 
 The top bar carries the Hertie mark before the console's name in both consoles (decision 0035
 rule 2), drawn as inline SVG in the bar's text colour. Every course and semester page, in either console, opens with the **course banner**: crumbs
@@ -235,12 +235,17 @@ files (its chip counts the differing files): each released folder
 (`status.json` `releases`, the last release per destination) whose files differ, worked out
 three-way in the page (`outOfStep`: the release's folder copy as `groupPicks` takes it, then
 `fileStates`, plus `semesterOnly`: a file only the semester copy has counts ahead, "added in the
-semester"; `folderStep` ahead / behind / diverged), filtered by step (`.seg`), each with
-Release again (`releaseAgain`), Keep for future semesters (`keepFuture`) and its differing files
-(the semester copy's `FileRow`, Compare on GitHub `compare/upstream...<default>#diff-<sha256 of
-the path>` for ahead and diverged, and a Diff fold: `ui/FileDiff.tsx`, the course blob against the
-semester's default-branch blob as a unified diff, the `diff` package imported on first open,
-text only, capped at 2000 lines); the engine's `DIVERGED_RELEASED` lines stay on the Dashboard. Below it, for those who can change the course, the Release by hand fold: the Files
+semester"; `folderStep` ahead / behind / diverged), its files filtered by step (`.seg`, counts of
+files; a file the course added is behind), beside one PR into source (`keepFuture`, greyed when
+nothing is ahead or diverged). Each folder is a fold, open at first, headed by its path alone;
+under it each differing file is a row: its name, chip, a muted "+A −D" once its diff is read
+(`useDiff`; "binary" for a document or image), Re-release (`releasePicked` of that one file onto
+its released copy; greyed for ahead and for a file only the semester has), the Open split button
+(`ui/OpenSplit.tsx`: the semester copy on GitHub, its arrow `useMenu` with GitHub, github.dev and
+the editor from Profile) and a Diff toggle drawing `ui/FileDiff.tsx` under the row (the course
+blob against the semester's default-branch blob as a unified diff, the `diff` package imported on
+first open, text only, capped at 2000 lines; headed by the path, what it compares, and Compare on
+GitHub `compare/upstream...<default>#diff-<sha256 of the path>` for ahead and diverged); the engine's `DIVERGED_RELEASED` lines stay on the Dashboard. Below it, for those who can change the course, the Release by hand fold: the Files
 panel's Release view (`ui/FilesPanel.tsx`) from the course's materials repos and Other repos
 (Add a course repo sets the `dsl-materials` topic, as Treat as course materials does); its
 lede, "Want to automate these releases? Schedule on the calendar →" with its `?`
@@ -268,10 +273,14 @@ post-order pass (`treeModel`); the Withhold summary counts the same standings (`
 students (no strike-through, no note why, `PatternTree` `plain`); Withhold chips what a release
 leaves behind; Release shows each file's state against the run's destination, three-way
 (`model/releaseState.ts` `fileStates`: the course blob against the semester repo's `upstream`
-branch and its default branch; two-way with no `upstream`): up to date, behind, ahead, diverged,
-not released, plus withheld. Behind, ahead and diverged open a popover with one action (tick the
-row; Keep for future semesters, `release.propagate_back`; the open pull request). A folder
-rolls its rows up in the same words. The manifest groups picks by immediate parent folder in
+branch and its default branch; two-way with no `upstream`): released (up to date: the name
+greyed, a muted chip), behind, ahead, diverged, not released, plus withheld. Behind, ahead and
+diverged open a popover with one action (tick the row; PR into source, `release.propagate_back`;
+the open pull request). A folder rolls its rows up in the same words, up to date left out (a
+folder all released has no chip). On the course page, when the chosen semester edited released
+files of the repo (ahead or diverged), a notice over the tree counts them, with PR into source and
+See which (the tree narrowed to them; Show all). The Course materials index chips each repo with
+the files the newest live semester edited (`editedIn`). The manifest groups picks by immediate parent folder in
 tree order (`groupPicks`); each group's Edit destination sets its To repo (the run's, the
 semester's `release_destinations`, the repos its releases wrote to, or Choose a repo…,
 `ui/RepoPickerModal.tsx`, which refuses the engine's reserved names (`schemas/selection.json`
@@ -286,8 +295,9 @@ default repo is the semester's effective `materials_repo` from `status.json`, ne
 constant. The semester's panel is drawn only for those who can change the course; on the repo
 settings page a read-only viewer gets Browse alone (no view control, no ticks). Decision B's
 words: a row a `.releaseignore` line or the institution's content default keeps off is
-`withheld`, its footnote naming why ("withheld by `solutions/`", "withheld by default"); a `!`
-line's row reads as released, footnoted "released by `!solutions/`"; the never-released names
+`withheld`, a muted chip on its line naming why ("withheld by `solutions/`", "withheld by
+default", `.rule-chip`, in the manifest too); a `!` line's row reads as released, chipped
+"released by `!solutions/`"; the never-released names
 have their own `never released` chip. Above the pattern box a folded Withheld by default lists
 the institution's names from the export (the content names as chips that write their `!name/`
 line); a tick on a file inside a default-withheld folder writes that folder's `!` line (inside a

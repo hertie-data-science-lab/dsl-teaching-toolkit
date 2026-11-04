@@ -10,7 +10,7 @@ import { LiveFiles, type TreeState } from '../src/model/files';
 import { DEFAULT_DEST_REPO } from '../src/model/policy';
 import {
   assignmentStems, COMMA_TITLE, countsWords, destPathOf, destRepos, effectiveDestRepo, eligibleDestination, entryDestRepos, fileStates, foldersCopied, groupPicks, LIST_MAX,
-  releaseBlocked, requestOf, toArgs, TOO_MANY, type FileState, type Group, folderStep, semesterOnly, stepWords,
+  releaseBlocked, requestOf, toArgs, TOO_MANY, type FileState, type Group, folderStep, semesterOnly,
 } from '../src/model/releaseState';
 
 describe('a released folder’s step', () => {
@@ -22,9 +22,6 @@ describe('a released folder’s step', () => {
     expect(folderStep(['diverged'])).toBe('diverged');
     expect(folderStep(['up_to_date'])).toBeNull();
     expect(folderStep(['ahead', 'unknown'])).toBeNull();
-    expect(stepWords(['behind', 'ahead', 'not_released', 'up_to_date'])).toBe('2 changed, 1 added in the course');
-    expect(stepWords(['not_released'])).toBe('1 added in the course');
-    expect(stepWords(['ahead', 'behind'], 156)).toBe('2 changed, 156 added in the semester');
   });
 
   it('finds the files only the semester copy has under a folder, clutter aside', () => {
@@ -100,8 +97,10 @@ describe('a folder’s roll-up', () => {
     // The withheld file and the never-material one.
     expect(n.withheld).toBe(2);
     expect(countsWords(n.states)).toBe('2 behind · 1 ahead · 1 not released');
-    expect(countsWords({ up_to_date: 3, diverged: 1, unknown: 2 })).toBe('1 diverged · 3 up to date');
+    expect(countsWords({ up_to_date: 3, diverged: 1, unknown: 2 })).toBe('1 diverged');
     expect(countsWords({})).toBe('');
+    // A folder all up to date: no roll-up.
+    expect(countsWords({ up_to_date: 4 })).toBe('');
   });
 });
 

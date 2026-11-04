@@ -8,13 +8,15 @@
 import { STATE_WORDS, type FileState as ReleaseState } from '../model/releaseState';
 import { Hint } from './Hint';
 
-export type ChipKind = Exclude<ReleaseState, 'unknown'> | 'withheld' | 'never_copied' | 'never_released';
+/** `released`: an up to date file in a Release tree (greyed, its own word); `up_to_date` keeps its word in the manifest. */
+export type ChipKind = Exclude<ReleaseState, 'unknown'> | 'released' | 'withheld' | 'never_copied' | 'never_released';
 
 /** The title on a never-released row, its chip and its disabled tick. */
 export const NEVER_RELEASED_TITLE = 'Never released: on the institution’s list.';
 
 const CHIPS: Record<ChipKind, { word: string; cls: string; title: string }> = {
   up_to_date: { word: STATE_WORDS.up_to_date, cls: 'muted', title: 'The semester has this version.' },
+  released: { word: 'released', cls: 'muted', title: 'The semester already has this version; nothing to release.' },
   behind: { word: STATE_WORDS.behind, cls: 'amber', title: 'The course copy changed since the release; a release updates the semester.' },
   ahead: { word: STATE_WORDS.ahead, cls: 'semester', title: 'Edited in the semester since the release; a release merges onto that edit.' },
   diverged: { word: STATE_WORDS.diverged, cls: 'bad', title: 'Changed in both the course and the semester; a release opens a pull request for the instructors.' },
@@ -28,7 +30,7 @@ export interface StateChipProps {
   kind: ChipKind;
   /** behind: ticks the row ("Tick it to release the course version."). */
   onTick?: () => void;
-  /** ahead: opens Keep for future semesters (`release.propagate_back`). */
+  /** ahead: opens PR into source (`keepFuture`, `release.propagate_back`). */
   onKeep?: () => void;
   /** diverged: the open pull request, when known. */
   prUrl?: string;
@@ -50,7 +52,7 @@ export function StateChip({ kind, onTick, onKeep, prUrl }: StateChipProps) {
     return (
       <Hint label={label} trigger={{ text: c.word, cls }}>
         A release merges the course version onto the semester’s edit.{' '}
-        {onKeep ? <><button class="textlink" type="button" onClick={onKeep}>Keep for future semesters</button> <span class="footnote">carries the semester’s edit back to the course</span></> : null}
+        {onKeep ? <><button class="textlink" type="button" onClick={onKeep}>PR into source</button> <span class="footnote">carries the semester’s edit back to the course</span></> : null}
       </Hint>
     );
   }
@@ -63,15 +65,15 @@ export function StateChip({ kind, onTick, onKeep, prUrl }: StateChipProps) {
     );
   }
   // `data-kind`: an up to date row greys its name (CSS).
-  return <span class={cls} title={c.title} data-kind={kind}>{c.word}</span>;
+  return <span class={cls} title={c.title} data-kind={kind === 'released' ? 'up_to_date' : kind}>{c.word}</span>;
 }
 
 /** Every chip word and what it means, one paragraph each, for a panel's `?`. */
 export function ChipMeanings() {
-  const order: ChipKind[] = ['up_to_date', 'behind', 'ahead', 'diverged', 'not_released'];
+  const order: ChipKind[] = ['released', 'behind', 'ahead', 'diverged', 'not_released'];
   return (
     <>
-      {order.map((k) => <span class="para"><b>{CHIPS[k].word}</b>: {CHIPS[k].title}</span>)}
+      {order.map((k) => <span class="para"><b>{CHIPS[k].word}</b>{k === 'released' ? ' (greyed)' : ''}: {k === 'released' ? 'the semester already has this version; nothing to release.' : CHIPS[k].title}</span>)}
       <span class="para"><b>withheld</b>: a .releaseignore line keeps it from students (“withheld by” that line), or the institution’s default for solutions and tests (“withheld by default”): a ! line in .releaseignore releases those with their folder (“released by” that line), and a release that names one outright ships it.</span>
       <span class="para"><b>never released</b>: secrets, git metadata, grading files and .system/; no release carries one, even one that names it.</span>
       <span class="para"><b>never copied</b>: clutter such as .DS_Store, never course material.</span>

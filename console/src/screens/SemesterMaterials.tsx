@@ -4,9 +4,10 @@
 // with its tree from the index (`RepoFiles`, `MaterialsTree`: the file row both consoles share),
 // every file opening in the viewer both consoles use (`Split`, `RepoFile`). The released folders
 // whose files differ from the course copy sit in their own folded panel ("Released materials
-// that differ from their source files", worked out here three-way, `outOfStep`), each with its two ways to settle it (Release
-// again, Keep for future semesters) and its differing files; the engine's `DIVERGED_RELEASED`
-// lines stay on the Dashboard.
+// that differ from their source files", worked out here three-way, `outOfStep`), each
+// folder a fold of its own, headed by its two ways to settle it (Release again, Keep for
+// future semesters), its differing files listed beneath, each with Open and an inline Diff; the
+// engine's `DIVERGED_RELEASED` lines stay on the Dashboard.
 // Below, for those who can change the course, Release by hand: the Files panel's Release view
 // (`FilesPanel`, plan 2026-11-04 decision 2). Withheld files are the course's concern, so nothing
 // here edits them.
@@ -15,29 +16,30 @@ import { useEffect, useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import type { CohortRef } from '../model/discovery';
 import { ago, fmtDay, plural } from '../model/format';
-import { destPathOf, effectiveDestRepo, fileStates, folderStep, groupPicks, semesterOnly, stepWords, type FileState as ReleaseFileState, type FolderStep } from '../model/releaseState';
+import { destPathOf, effectiveDestRepo, fileStates, folderStep, groupPicks, semesterOnly, TOP_LEVEL, type FileState as ReleaseFileState, type Group, type FolderStep } from '../model/releaseState';
 import { effectiveOf, semesterDefaults } from '../model/settings';
 import type { Loaded } from '../model/status';
 import type { Release, Status } from '../model/types';
 import type { Files } from '../model/files';
 import { compileAll } from '../edit/glob';
-import { profileHref } from '../model/open';
+import { editableFile, profileHref, type Setup } from '../model/open';
+import { extOf, viewKind } from '../model/viewer';
 import { scheduleNewHref } from '../router';
 import { FilesPanel, type SemesterRef } from '../ui/FilesPanel';
 import { CheckLine, ghUrl } from '../ui/bits';
-import { FileDiff, diffAnchor } from '../ui/FileDiff';
-import { FileRow, useYourSetup } from '../ui/FileRow';
-import { fileViewHref } from '../ui/MaterialsTree';
+import { DiffView, diffAnchor, lineCounts, useDiff, type Side } from '../ui/FileDiff';
+import { useYourSetup } from '../ui/FileRow';
+import { OpenSplit } from '../ui/OpenSplit';
 import { StateChip, type ChipKind } from '../ui/StateChip';
 import { Hint } from '../ui/Hint';
 import { OpenButton } from '../ui/OpenButton';
 import { RepoFile, Split } from '../ui/Viewer';
 import { RepoFiles, addMaterialsTopic, fileIn, focusIn, repoOf } from './CourseIndex';
-import { releaseRef } from './Cohort';
 import { newestRepo } from './CourseEdit';
 import { sourceRepos } from './Schedule';
-import { WithStatus, cohortScope, tzOf, yearOf } from './common';
-import { keepFuture, releaseAgain } from '../ops/defs';
+import { WithStatus, cohortScope } from './common';
+import { keepFuture, releasePicked, type Scope } from '../ops/defs';
+import type { OpDef } from '../ops/session';
 import { OpOpen } from '../ops/Panel';
 import type { CohortProps, ReadyProps } from './types';
 
@@ -199,13 +201,45 @@ const STEP_HINT_ITEMS = [
   <><b>Edited in semester</b> (ahead): the semester’s copy was changed after the release.</>,
   <><b>Edited in course</b> (behind): the course copy changed since the release, additions included.</>,
   <><b>Both</b> (diverged): changed on both sides.</>,
-  <><b>Release again</b> copies the course version over, merged onto the semester’s edit; a conflict opens a pull request for the instructors.</>,
-  <><b>Keep for future semesters</b> opens a pull request carrying the semester’s edit back into the course.</>,
+  <><b>Re-release</b> copies one file’s course version over, merged onto the semester’s edit; a conflict opens a pull request for the instructors.</>,
+  <><b>PR into source</b> opens a pull request carrying the semester’s edits back into the course.</>,
 ];
 
 const STEP_TABS: [FolderStep | 'all', string][] = [['all', 'All'], ['ahead', 'Edited in semester'], ['behind', 'Edited in course'], ['diverged', 'Both']];
 
-/** Released materials that differ from their source files (`outOfStep`), folded, with a filter by step; not drawn when there are none. */
+/** A differing file's step, the filter's key: a file the course added counts as edited in the course. */
+const fileStep = (s: ReleaseFileState): FolderStep => (s === 'ahead' || s === 'diverged' ? s : 'behind');
+
+/** What a file's diff compares, by its step. */
+const DIFF_WHAT: Record<FolderStep, string> = {
+  ahead: 'as released → the semester’s copy',
+  behind: 'as released → the course’s copy now',
+  diverged: 'as released → course and semester edits',
+};
+
+export const NO_LINE_DIFF = 'A binary file: no line diff. Open it to compare.';
+export const NOTHING_TO_RERELEASE = 'The semester already has the course version; re-releasing changes nothing.';
+export const ONLY_IN_SEMESTER = 'Only in the semester: nothing in the course to release.';
+const PR_HINT = 'Opens one pull request per course repo carrying every edit listed under Edited in semester and Both, so next semester starts from them. Nothing per file: the pull request holds all of the semester’s edits.';
+
+/** Re-release: `release.adhoc` of exactly one course file (`from` in `srcRepo`) onto its released copy (`to` in `destRepo`). */
+function reRelease(scope: Scope, srcRepo: string, from: string, destRepo: string, to: string) {
+  const parent = (x: string) => (x.includes('/') ? x.slice(0, x.lastIndexOf('/')) : '');
+  const folder = parent(from);
+  const g: Group = { repo: srcRepo, head: folder ? `${folder}/` : TOP_LEVEL, folder, kind: 'partial', files: 1, of: 1, sources: [from], ship: [from], withheld: [], destRepo, destPath: parent(to) };
+  return releasePicked(scope, [g], { defaultDestRepo: destRepo });
+}
+
+/** A file no line diff is drawn for, by its name: documents and archives (`editableFile`) and images but svg. */
+const binaryName = (path: string) => !editableFile(path) || (viewKind(path) === 'image' && extOf(path) !== 'svg');
+
+/**
+ * Released materials that differ from their source files (`outOfStep`), folded, with a filter by
+ * step, and one PR into source for every semester edit; not drawn when there are none. Inside,
+ * each folder a fold, open at first, headed by its path alone, its differing files beneath, each
+ * with Re-release (that one file), its Open split button and a Diff toggle drawing the file's diff
+ * under the row.
+ */
 function OutOfStepPanel(p: ReadyProps & { def: string }) {
   const env = useEnv();
   const setup = useYourSetup();
@@ -214,60 +248,97 @@ function OutOfStepPanel(p: ReadyProps & { def: string }) {
   const rows = outOfStep(p.status, p.files, p.course.org, org, p.def);
   if (!rows.length) return null;
   const scope = cohortScope(p);
-  const tz = tzOf(p.status), year = yearOf(p.now, tz);
   const repos = p.files.repos(org);
   const branchOf = (repo: string) => (repos.kind === 'ready' ? repos.repos.find((x) => x.name === repo)?.default_branch : undefined) ?? 'main';
   const keep = () => env?.ops.open(keepFuture(scope));
+  const all = rows.flatMap((x) => x.files);
+  const edited = all.some((f) => f.state === 'ahead' || f.state === 'diverged');
   // Every differing file of the listed folders, the semester-only ones included.
-  const differing = rows.reduce((n, x) => n + x.files.length, 0);
-  const count = (k: FolderStep | 'all') => (k === 'all' ? rows.length : rows.filter((x) => x.step === k).length);
+  const count = (k: FolderStep | 'all') => (k === 'all' ? all.length : all.filter((f) => fileStep(f.state) === k).length);
+  const shown = (f: OutOfStep['files'][number]) => show === 'all' || fileStep(f.state) === show;
   return (
     <details class="panel section panel-fold out-of-step">
       {/* The ? inside the summary must not fold the panel. */}
       <summary>
-        <h2>Released materials that differ from their source files <span class="step-bang" aria-hidden="true">!</span> <span class="chip amber">{plural(differing, 'released file differs', 'released files differ')}</span>{' '}
+        <h2>Released materials that differ from their source files <span class="step-bang" aria-hidden="true">!</span> <span class="chip amber">{plural(all.length, 'released file differs', 'released files differ')}</span>{' '}
           <span onClick={(e) => e.preventDefault()}><Hint label="About released materials that differ" items={STEP_HINT_ITEMS}>{STEP_HINT}</Hint></span></h2>
       </summary>
-      <div class="seg" role="tablist" aria-label="Show">
-        {STEP_TABS.map(([k, label]) => (
-          <button type="button" role="tab" aria-selected={show === k} onClick={() => setShow(k)}>{label} <span class="cnt">{count(k)}</span></button>
-        ))}
+      <div class="dif-top">
+        <div class="seg" role="tablist" aria-label="Show">
+          {STEP_TABS.map(([k, label]) => (
+            <button type="button" role="tab" aria-selected={show === k} onClick={() => setShow(k)}>{label} <span class="cnt">{count(k)}</span></button>
+          ))}
+        </div>
+        <span class="dif-pr">
+          <button class="btn small quiet" type="button" disabled={!edited} title={edited ? undefined : 'Nothing edited in the semester.'} onClick={keep}>PR into source</button>
+          <Hint label="About PR into source">{PR_HINT}</Hint>
+        </span>
       </div>
-      <ul class="rows">
-        {rows.filter((x) => show === 'all' || x.step === show).map((x) => {
-          const ref = releaseRef(x.r, tz, year);
+      <ul class="dif-list">
+        {rows.filter((x) => x.files.some(shown)).map((x) => {
           const pulls = `${ghUrl(org, x.repo)}/pulls`;
           const compare = `${ghUrl(org, x.repo)}/compare/upstream...${branchOf(x.repo)}`;
+          const src = x.r.source!.repo;
           return (
-            <li>
-              <span class="r-title"><code>{x.repo === p.def ? '' : `${x.repo}: `}{x.path}/</code> <StateChip kind={x.step} onKeep={keep} prUrl={x.step === 'diverged' ? pulls : undefined} /></span>
-              <span class="r-sub footnote">{stepWords(x.files.filter((f) => !f.added).map((f) => f.state), x.files.filter((f) => f.added).length)}</span>
-              <span class="r-side">
-                {ref ? <OpOpen def={releaseAgain(scope, ref)} cls="btn small quiet" label="Release again" /> : null}
-                <OpOpen def={keepFuture(scope)} cls="btn small quiet" label="Keep for future semesters" />
-              </span>
-              <details class="fold step-files">
-                <summary aria-label={`The files of ${x.path}/ that differ`}>{plural(x.files.length, 'file')}</summary>
-                <ul>
-                  {x.files.map((f) => {
-                    const name = <code>{f.path.slice(x.path.length + 1) || f.path}</code>;
-                    return (
-                      <li>
-                        {f.state === 'not_released' ? name
-                          : <FileRow org={org} link={{ name: f.path.split('/').pop() ?? f.path, repo: x.repo, path: f.path, url: ghUrl(org, x.repo, f.path, 'HEAD') }} here={fileViewHref(org, x.repo, f.path, 'cohort')} setup={setup} profile={profileHref(org)} cls="ft-name" label={name} />}
-                        {' '}<StateChip kind={f.state as ChipKind} onKeep={keep} prUrl={f.state === 'diverged' ? pulls : undefined} />
-                        {f.state === 'ahead' || f.state === 'diverged' ? <>{' '}<CompareLink base={compare} path={f.path} /></> : null}
-                        <DiffFold files={p.files} course={f.from ? [p.course.org, x.r.source!.repo, f.from] : null} semester={f.state === 'not_released' ? null : [org, x.repo, f.path]} />
-                      </li>
-                    );
-                  })}
-                </ul>
-              </details>
-            </li>
+            <li class="dif-folder"><details class="fold" open>
+              <summary class="dif-fhead"><code class="dif-path">{x.repo === p.def ? '' : `${x.repo}: `}{x.path}/</code></summary>
+              <ul class="dif-files">
+                {x.files.filter(shown).map((f) => (
+                  <DiffFile key={f.path} files={p.files} org={org} repo={x.repo} folder={x.path} f={f} setup={setup} onKeep={keep} pulls={pulls} compare={compare}
+                    course={f.from ? [p.course.org, src, f.from] : null} again={f.from ? reRelease(scope, src, f.from, x.repo, f.path) : null} />
+                ))}
+              </ul>
+            </details></li>
           );
         })}
       </ul>
     </details>
+  );
+}
+
+/** One differing file: its name, chip and line counts (once its diff is read), Open, and Diff, which draws the diff under the row. */
+function DiffFile(p: {
+  files: Files; org: string; repo: string; folder: string; f: OutOfStep['files'][number]; setup: Setup | null;
+  onKeep: () => void; pulls: string; compare: string; course: Side | null;
+  /** Re-release: that one file, or null for a file only the semester has. */
+  again: OpDef | null;
+}) {
+  const { f } = p;
+  const [open, setOpen] = useState(false);
+  // Read once first opened, so the row keeps its counts after Diff folds it again.
+  const [seen, setSeen] = useState(false);
+  const binary = binaryName(f.path);
+  const inSemester = f.state !== 'not_released';
+  const d = useDiff(p.files, p.course, inSemester ? [p.org, p.repo, f.path] : null, seen && !binary);
+  const sum = binary ? 'binary' : d.kind === 'ready' ? lineCounts(d) : d.kind === 'not_diffable' ? 'binary or too large' : '';
+  const step = fileStep(f.state);
+  return (
+    <li class="dif-file">
+      <div class="dif-row">
+        <code class="dif-name">{f.path.slice(p.folder.length + 1) || f.path}</code>
+        <StateChip kind={f.state as ChipKind} onKeep={p.onKeep} prUrl={f.state === 'diverged' ? p.pulls : undefined} />
+        <span class="dif-sum">{sum}</span>
+        <span class="dif-right">
+          {p.again && (f.state === 'behind' || f.state === 'diverged' || f.state === 'not_released')
+            ? <OpOpen def={p.again} cls="btn small quiet" label="Re-release" />
+            : <button class="btn small quiet" type="button" disabled title={p.again ? NOTHING_TO_RERELEASE : ONLY_IN_SEMESTER}>Re-release</button>}
+          {inSemester ? <OpenSplit org={p.org} repo={p.repo} path={f.path} setup={p.setup} profile={profileHref(p.org)} /> : null}
+          {binary
+            ? <button class="btn small quiet" type="button" disabled title={NO_LINE_DIFF}>Diff</button>
+            : <button class="btn small quiet" type="button" aria-expanded={open} aria-pressed={open} aria-label={`Diff ${f.path}`} onClick={() => { setOpen(!open); setSeen(true); }}>Diff</button>}
+        </span>
+      </div>
+      {open && !binary ? (
+        <div class="dif-diff">
+          <div class="dif-diff-head">
+            <code>{f.path}</code>
+            <span class="footnote">{DIFF_WHAT[step]}</span>
+            {step !== 'behind' ? <CompareLink base={p.compare} path={f.path} /> : null}
+          </div>
+          <DiffView d={d} />
+        </div>
+      ) : null}
+    </li>
   );
 }
 
@@ -280,17 +351,6 @@ function CompareLink({ base, path }: { base: string; path: string }) {
     return () => void (live = false);
   }, [path]);
   return <a class="textlink" href={anchor ? `${base}#${anchor}` : base} target="_blank" rel="noopener">Compare on GitHub</a>;
-}
-
-/** A file's diff, folded: read and drawn only once opened. */
-function DiffFold(p: { files: Files; course: [string, string, string] | null; semester: [string, string, string] | null }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <details class="fold file-diff-fold" onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}>
-      <summary>Diff</summary>
-      {open ? <FileDiff {...p} /> : null}
-    </details>
-  );
 }
 
 /** Release by hand (decision 2): the Files panel's Release view from the course's repos into this semester; drawn only for those who can change the course. */

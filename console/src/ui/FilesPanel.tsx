@@ -10,11 +10,16 @@
 //
 // Chips per view (decision 3): Browse shows one muted withheld chip on every row that does not
 // reach students (no strike-through, no note why); Withhold shows withheld, never released and
-// never copied; Release each file's state against the run's destination (three-way, `fileStates`) and withheld.
+// never copied; Release each file's state against the run's destination (three-way, `fileStates`; an up to date
+// file greyed with a muted `released`, left out of its folder's roll-up) and withheld.
 // Release ticks follow the saved `.releaseignore`, as the engine does. One `rowState` per row,
 // from its standing (`.releaseignore` compiled with the institution's defaults) and, in Release,
 // its state, draws the chip, the tick and the folder roll-up in every view; the Withhold summary
 // counts the same standings.
+//
+// On the course page, Release: when the chosen semester edited released files of this repo (ahead
+// or diverged), a notice over the tree says how many, with PR into source and "See which", which
+// narrows the tree to those files ("Show all" undoes it).
 //
 // Decision B (2026-11-04): the institution's names in two groups. Never released (`.env`, `.git`,
 // grading files, `.system`): no tick in any view, "never released". Content (`solutions`,
@@ -207,6 +212,7 @@ function repoOf(files: Files, org: string, repo: string) {
 }
 
 const NO_STATES: Record<string, ReleaseState> = {};
+const NO_PATHS: string[] = [];
 const NO_FOLDERS = new Set<string>();
 const pickKey = (repo: string, path: string, dir: boolean) => `${repo}\0${dir ? 'd' : 'f'}\0${path}`;
 /** The folders above a path, nearest last. */
@@ -237,6 +243,8 @@ function Panel(p: FilesPanelProps) {
   const [runPick, setRunPick] = useState<{ org: string; repo: string } | null>(null);
   const [overrides, setOverrides] = useState<Record<string, { destRepo?: string; destPath?: string }>>({});
   const [chosen, setChosen] = useState<string[]>([]);
+  // Course Release view: the tree narrowed to the files the semester edited ("See which").
+  const [onlyEdited, setOnlyEdited] = useState(false);
   // Read-only: Browse alone, whatever view was last picked.
   const view = p.write ? picked : 'browse';
   const release = view === 'release';
@@ -284,7 +292,7 @@ function Panel(p: FilesPanelProps) {
     const out = bucket(s) === 'withheld';
     const state = !dir && !never && !out ? states[path] : undefined;
     // Browse: whatever does not reach students reads withheld, nothing more.
-    const chip: ChipKind | null = view === 'browse' ? (never || out ? 'withheld' : null) : never ?? (out ? 'withheld' : state && state !== 'unknown' ? state : null);
+    const chip: ChipKind | null = view === 'browse' ? (never || out ? 'withheld' : null) : never ?? (out ? 'withheld' : state === 'up_to_date' ? 'released' : state && state !== 'unknown' ? state : null);
     if (!release) return { chip, row, tick: 'none' };
     // Withheld by a line, or never material: no tick. A content name withheld by default ships when ticked (named outright).
     if (s.kind === 'own' || s.kind === 'broader' || s.kind === 'never_copied') return { chip, row, tick: 'gap' };
@@ -303,10 +311,26 @@ function Panel(p: FilesPanelProps) {
       <>
         {r.chip ? <StateChip kind={r.chip} onTick={r.chip === 'behind' && !isPicked(path, false) && !inPicked(path) ? () => togglePick(path, false) : undefined} onKeep={keep} prUrl={r.chip === 'diverged' ? prOf(runRepo, path) : undefined} /> : null}
         {dir && r.chip === null && r.row.withheld ? <span class="chip muted">{r.row.withheld} withheld</span> : null}
-        {words ? <span class={`chip${Object.keys(r.row.states).every((k) => k === 'up_to_date') ? ' muted' : ''}`}>{words}</span> : null}
+        {words ? <span class="chip">{words}</span> : null}
       </>
     );
   };
+  // Course Release view: the files this repo released that the semester edited (ahead or diverged), as their chips say.
+  const edited = course && release && live ? here.paths.filter((f) => {
+    const c = rowState(f, false).chip;
+    return c === 'ahead' || c === 'diverged';
+  }) : NO_PATHS;
+  const narrowed = onlyEdited && edited.length > 0;
+  const editedKey = edited.join('\n');
+  const shownTree = useMemo(() => (narrowed ? buildTree(edited) : tree), [narrowed, editedKey, tree]);
+  const editedNote = edited.length && into ? (
+    <p class="edited-note" role="status">
+      <span class="step-bang" aria-hidden="true">!</span>
+      <span>{into.termLabel} has edited {plural(edited.length, 'released file')} from this repo.</span>
+      {keep ? <button class="btn small quiet" type="button" onClick={keep}>PR into source</button> : null}
+      <button class="textlink" type="button" aria-pressed={narrowed} onClick={() => setOnlyEdited(!narrowed)}>{narrowed ? 'Show all' : 'See which'}</button>
+    </p>
+  ) : null;
   const pickControl = (path: string, dir: boolean) => {
     const t = rowState(path, dir).tick;
     if (typeof t !== 'object') return <span class="ft-gap" />;
@@ -346,10 +370,10 @@ function Panel(p: FilesPanelProps) {
     : here.tree.kind !== 'ready' ? <p class="footnote">Could not read the repo’s files.</p>
     : (
       <PatternTree
-        files={here.paths}
+        files={narrowed ? edited : here.paths}
         patterns={lines}
         rules={rules}
-        model={{ tree, rows: model }}
+        model={{ tree: shownTree, rows: model }}
         onChange={view === 'withhold' ? fromTree : () => undefined}
         mode={view === 'browse' ? 'exclude' : 'select'}
         releasedWord=""
@@ -420,6 +444,7 @@ function Panel(p: FilesPanelProps) {
   const rows = into ? requestOf(groups, { defaultDestRepo: runRepo }) : [];
   const body = (
     <>
+      {editedNote}
       <SplitPanes label={repo} left={treeView} right={right} heads={release ? [fromRow, toRow] : undefined} />
       {partial && !release ? <CheckLine cls="bad">GitHub returned only part of this repo’s file list; badges may be incomplete.</CheckLine> : null}
       {view === 'withhold' ? (

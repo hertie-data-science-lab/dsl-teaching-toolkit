@@ -4,7 +4,7 @@
 // heading every course and semester page, the footer.
 
 import type { ComponentChildren } from 'preact';
-import { useLayoutEffect, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useState } from 'preact/hooks';
 import { readText, safeStorage, writeText } from '../auth/types';
 import type { GhUser } from '../github/client';
 import type { Course, CohortRef, Semester } from '../model/discovery';
@@ -51,12 +51,24 @@ function useTheme(): [boolean, () => void] {
 
 const NAV_KEY = 'console-nav';
 
+/** The handle's Show navigation while the nav is collapsed, else null. */
+let showNav: (() => void) | null = null;
+
+/**
+ * The top bar's Menu: on a wide screen with the nav collapsed, the handle's Show navigation (the
+ * nav back in place, the choice kept); otherwise, below 860px, `drawer` (the drawer).
+ */
+export const menuPress = (drawer: () => void) => () => {
+  if (showNav && !globalThis.matchMedia?.('(max-width: 860px)').matches) showNav();
+  else drawer();
+};
+
 /**
  * The side nav's handle (materials-release decision 9): a slim pill on the nav/content
  * boundary. Pressed, the nav hides (`body.nav-collapsed`) and the content spans the shell; the
- * handle moves to the left edge to bring it back, and the top bar's Menu opens the nav as the
- * narrow-screen drawer does. The choice is kept in this browser. Below 860px the drawer applies
- * and the handle is hidden (styles/shell.css). `onToggle` closes an open drawer.
+ * handle moves to the left edge to bring it back, and the top bar's Menu (`menuPress`) brings it
+ * back in place too. The choice is kept in this browser. Below 860px the drawer applies and the
+ * handle is hidden (styles/shell.css). `onToggle` closes an open drawer.
  */
 export function NavHandle({ onToggle }: { onToggle: () => void }) {
   const [collapsed, setCollapsed] = useState(() => readText(safeStorage('local'), NAV_KEY) === 'collapsed');
@@ -72,6 +84,10 @@ export function NavHandle({ onToggle }: { onToggle: () => void }) {
     onToggle();
     setCollapsed(next);
   };
+  useEffect(() => {
+    showNav = collapsed ? toggle : null;
+    return () => void (showNav = null);
+  });
   return (
     <button class="nav-handle" type="button" aria-controls="sidenav-wrap" aria-expanded={!collapsed} aria-label={word} data-tip={word} onClick={toggle}>
       <span class="nh-pill" aria-hidden="true"><span class="nh-chev" /></span>
@@ -83,8 +99,8 @@ export function NavHandle({ onToggle }: { onToggle: () => void }) {
  * The app-level bar (decision 0021): the Hertie mark and the product name (a Home link,
  * decision 0035 rule 2) with the view, the person
  * (a link to Profile), Guide, theme, Sign out. Nothing course- or semester-specific; the Menu
- * button only where there is a side nav to open: shown on a narrow screen, or with the nav hidden
- * by its handle. Its links start `?`: app-level pages are about
+ * button only where there is a side nav to open: shown on a narrow screen (the drawer), or with
+ * the nav hidden by its handle (it shows the nav again, `menuPress`). Its links start `?`: app-level pages are about
  * no course or semester, so they clear the query. With `titleHref` (an instructor previewing a
  * semester's Student view, decision 0025) the view is a link of its own, back to that semester.
  * Guide only for a person with an instructor role (`guide`): it explains the instructor console

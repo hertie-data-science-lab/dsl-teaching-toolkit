@@ -6,7 +6,9 @@ import { YamlText, obj } from '../edit/yamlText';
 import type { GhRepo, GitHubClient } from '../github/client';
 import { TEMPLATE_TOPIC, termOf } from '../model/discovery';
 import type { Files } from '../model/files';
-import { ago, fmtDay, templateName } from '../model/format';
+import { ago, fmtDay, plural, templateName } from '../model/format';
+import { effectiveDestRepo, fileStates } from '../model/releaseState';
+import type { Loaded } from '../model/status';
 import { MATERIALS_TOPIC } from '../model/materialsRepo';
 import { formatWord, formatsList } from '../tiers/grading';
 import { CheckLine, Loading } from '../ui/bits';
@@ -15,7 +17,7 @@ import { Ext } from '../ui/icons';
 import { MaterialsTree } from '../ui/MaterialsTree';
 import { OpenButton } from '../ui/OpenButton';
 import { RepoFile, Split } from '../ui/Viewer';
-import { courseOf, useCourseView } from './Course';
+import { courseOf, liveSemesters, useCourseView } from './Course';
 import { RepoChip, RepoWhy, TemplateSub } from '../ui/SetupPanel';
 import { materialsReadiness, templateReadinessIn } from '../model/readiness';
 import type { CourseProps } from './types';
@@ -48,6 +50,18 @@ export function repoOf(files: Files, org: string, name: string): GhRepo | undefi
 }
 
 // --------------------------------------------------------------------------- materials
+
+/**
+ * How many of `repo`'s files the semester `semOrg` edited since their release (ahead or diverged,
+ * three-way at the same paths in its default destination, as the Files panel's Release view
+ * reads them), or null while a tree is unread.
+ */
+export function editedIn(files: Files, courseOrg: string, repo: string, semOrg: string, loaded: Loaded): number | null {
+  const dest = effectiveDestRepo(loaded);
+  const course = files.tree(courseOrg, repo), live = files.tree(semOrg, dest), up = files.tree(semOrg, dest, 'upstream');
+  if (course.kind !== 'ready' || live.kind !== 'ready' || up.kind === 'loading') return null;
+  return Object.values(fileStates(course.paths.filter((x) => !x.dir), up, live)).filter((s) => s === 'ahead' || s === 'diverged').length;
+}
 
 /** Adds the `dsl-materials` topic to `repo`'s topics as GitHub has them now: the repo list may be old, and a PUT replaces them all. */
 export async function addMaterialsTopic(client: GitHubClient, org: string, repo: string): Promise<void> {
@@ -144,6 +158,8 @@ export function MaterialsIndexScreen(p: CourseProps) {
   const repos = files.repos(course.org);
   const known = [...materials.map((m) => m.repo), ...(c?.templates ?? []).map((t) => t.repo)];
   const others = repos.kind === 'ready' ? otherRepos(course.org, repos.repos, known) : [];
+  // The newest live semester, whose edits each repo row counts.
+  const live = liveSemesters(p)[0]?.ref;
   return (
     <>
       <div class="page-head">
@@ -159,9 +175,11 @@ export function MaterialsIndexScreen(p: CourseProps) {
                 const gh = repoOf(files, course.org, m.repo);
                 const term = termLabel(m.repo);
                 const r = materialsReadiness(m);
+                const edits = live ? editedIn(files, course.org, m.repo, live.org, p.cohortStates[live.org]!) : null;
                 return (
                   <li>
-                    <span class="r-title"><a class="textlink" href={`#materials-${m.repo}`}>{m.repo}</a> <RepoChip r={r} />{term ? <span class="chip term">{term}</span> : null}</span>
+                    <span class="r-title"><a class="textlink" href={`#materials-${m.repo}`}>{m.repo}</a> <RepoChip r={r} />{term ? <span class="chip term">{term}</span> : null}
+                      {edits ? <> <a class="chip muted" href={`#materials-${m.repo}`}>{plural(edits, 'file')} edited in {live!.termLabel}</a></> : null}</span>
                     <RepoWhy r={r} />
                     {gh?.pushed_at ? <span class="r-sub">Last change {fmtDay(gh.pushed_at)} ({ago(gh.pushed_at, p.now)}).</span> : null}
                     <span class="r-side"><OpenButton org={course.org} repo={m.repo} small quiet /><a class="btn small quiet" href={`#materials-${m.repo}`}>Settings</a></span>

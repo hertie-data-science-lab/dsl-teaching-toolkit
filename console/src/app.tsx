@@ -44,7 +44,7 @@ import { Loading, ghUrl } from './ui/bits';
 import { ScreenBoundary } from './ui/boundary';
 import { forgetRendered } from './ui/rendered';
 import { forgetShown } from './model/materials';
-import { CourseBanner, Footer, NavHandle, Sidenav, Topbar, type CourseSubPages, type SubWanted } from './ui/shell';
+import { CourseBanner, Footer, NavHandle, Sidenav, Topbar, menuPress, type CourseSubPages, type SubWanted } from './ui/shell';
 import { fmtDay } from './model/format';
 import { DEFAULT_TIMEZONE } from './model/policy';
 import { destRepos, effectiveDestRepo, entryDestRepos } from './model/releaseState';
@@ -205,7 +205,7 @@ export function App({ state: s }: { state: AppState }) {
     const back = `?cohort=${stu.semester.org}#dashboard`;
     return (
       <EnvCtx.Provider value={s.env(user)}>
-        <Topbar user={user} title={stu.studentView ? 'Student view (preview)' : title} titleHref={stu.studentView ? back : undefined} onSignOut={s.signOut} navOpen={s.navOpen.value} onMenu={s.toggleNav} guide={guide} />
+        <Topbar user={user} title={stu.studentView ? 'Student view (preview)' : title} titleHref={stu.studentView ? back : undefined} onSignOut={s.signOut} navOpen={s.navOpen.value} onMenu={menuPress(s.toggleNav)} guide={guide} />
         <div class="shell">
           <NavHandle onToggle={s.closeNav} />
           <aside class="sidenav" id="sidenav-wrap" aria-label="Semester navigation">
@@ -310,7 +310,7 @@ export function App({ state: s }: { state: AppState }) {
   const appLevel = FULL_WIDTH.includes(screen);
   return (
     <EnvCtx.Provider value={s.env(user)}>
-      <Topbar user={user} title={title} onSignOut={s.signOut} navOpen={s.navOpen.value} onMenu={appLevel ? undefined : s.toggleNav} guide={guide} />
+      <Topbar user={user} title={title} onSignOut={s.signOut} navOpen={s.navOpen.value} onMenu={appLevel ? undefined : menuPress(s.toggleNav)} guide={guide} />
       <div class="shell" style={appLevel ? 'grid-template-columns:minmax(0,1fr)' : undefined}>
         {appLevel ? null : <NavHandle onToggle={s.closeNav} />}
         {appLevel ? null : (

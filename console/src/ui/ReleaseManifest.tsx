@@ -83,7 +83,8 @@ function GroupRows({ g, p }: { g: Group; p: ManifestProps }) {
       {g.withheld.map((w) => (
         <li class="mf-out">
           <code class="mf-src">{w.path}</code>
-          <span class="footnote">{w.never ? 'never released' : w.rule === null ? 'withheld by default' : <>withheld by <code>{w.rule}</code></>}</span>
+          {w.never ? <span class="chip muted">never released</span>
+            : <span class="chip muted rule-chip">{w.rule === null ? 'withheld by default' : <>withheld by <code>{w.rule}</code></>}</span>}
         </li>
       ))}
     </ul>

@@ -92,17 +92,6 @@ export function folderStep(states: FileState[]): FolderStep | null {
 }
 
 /**
- * "2 changed, 1 added in the course, 156 added in the semester": a released folder's differing
- * files, from its course files' states and the number of files only the semester copy has
- * (`semesterOnly`, each counted `ahead` in `folderStep`).
- */
-export function stepWords(states: FileState[], semesterAdded = 0): string {
-  const changed = states.filter((x) => x === 'behind' || x === 'ahead' || x === 'diverged').length;
-  const added = states.filter((x) => x === 'not_released').length;
-  return [changed ? `${changed} changed` : '', added ? `${added} added in the course` : '', semesterAdded ? `${semesterAdded} added in the semester` : ''].filter(Boolean).join(', ');
-}
-
-/**
  * The files under a released `folder` that only the semester copy has (`landed`: where the
  * course's files land), clutter aside: added in the semester, `ahead` as the engine's divergence
  * reads a released-only file. Empty while the semester tree cannot be read.
@@ -114,10 +103,10 @@ export function semesterOnly(students: TreeState, folder: string, landed: Set<st
 
 export type Counts = Partial<Record<FileState, number>>;
 
-/** "2 behind · 1 ahead · 3 not released": zero parts and `unknown` left out. */
+/** "2 behind · 1 ahead · 3 not released": zero parts, up to date and `unknown` left out, so a folder all up to date reads ''. */
 export function countsWords(counts: Counts): string {
   return (Object.keys(STATE_WORDS) as (keyof typeof STATE_WORDS)[])
-    .filter((k) => counts[k])
+    .filter((k) => k !== 'up_to_date' && counts[k])
     .map((k) => `${counts[k]} ${STATE_WORDS[k]}`)
     .join(' · ');
 }
