@@ -322,7 +322,7 @@ describe('S6 schedule and S11 release', () => {
     const withTree = (tree: TreeState): Files => Object.assign(Object.create(files), { tree: () => tree });
     const failed = html(<ScheduleScreen {...props({ entry: 's5', files: withTree({ kind: 'error', message: 'HTTP 502' }) })} />);
     expect(failed).not.toContain('file-chip bad');
-    const part = html(<ScheduleScreen {...props({ entry: 's5', files: withTree({ kind: 'ready', paths: [{ path: 'lectures', dir: true }], truncated: true }) })} />);
+    const part = html(<ScheduleScreen {...props({ entry: 's5', files: withTree({ kind: 'ready', paths: [{ path: 'lectures', dir: true, sha: 't' }], truncated: true }) })} />);
     expect(part).not.toContain('file-chip bad');
   });
   it('the picker lists the materials repos and the Other repos, marks withheld files, and takes a typed path', () => {

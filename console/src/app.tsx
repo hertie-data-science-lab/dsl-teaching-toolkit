@@ -46,7 +46,8 @@ import { forgetRendered } from './ui/rendered';
 import { forgetShown } from './model/materials';
 import { CourseBanner, Footer, Sidenav, Topbar, type CourseSubPages, type SubWanted } from './ui/shell';
 import { fmtDay } from './model/format';
-import { DEFAULT_TIMEZONE } from './model/policy';
+import { DEFAULT_DEST_REPO, DEFAULT_TIMEZONE } from './model/policy';
+import { destRepos, effectiveDestRepo } from './model/releaseState';
 import type { SemesterStatus } from './model/types';
 import type { Files } from './model/files';
 import type { Course } from './model/discovery';
@@ -373,9 +374,18 @@ export type AppState = ReturnType<typeof createState>;
  * schedule.yml (a release or hand-out writes the moment it went out back into it, decision 0043
  * rule 3 - held at the old sha, the next save there would always conflict), the course's status, and after Return marks the "last told" record(s) it rewrote - its sheet's,
  * or every one held for an unscoped run - so the Marks tab's count of who it would email is fresh.
+ * After a release, the trees of the repos it wrote to (`args`' destinations, blank being the semester's `defaultDest`).
  */
-export function refreshAfterRun(def: OpDef, statuses: Pick<StatusStore, 'reload'>, files: Pick<LiveFiles, 'refresh' | 'refreshUnder'>): void {
+export function refreshAfterRun(
+  def: OpDef,
+  statuses: Pick<StatusStore, 'reload'>,
+  files: Pick<LiveFiles, 'refresh' | 'refreshUnder' | 'refreshTree'>,
+  args: Record<string, unknown> = def.args,
+  defaultDest: string = DEFAULT_DEST_REPO,
+): void {
   if (def.cohortOrg) {
+    // A release rewrote its destination repos: their trees (and so the state chips) are read again.
+    if (def.op.startsWith('release.')) for (const repo of destRepos(args, defaultDest)) files.refreshTree(def.cohortOrg, repo);
     void statuses.reload(def.cohortOrg, CONFIG_REPO);
     files.refresh(def.cohortOrg, CONFIG_REPO, outcomePath(def.op));
     files.refresh(def.cohortOrg, CONFIG_REPO, 'schedule.yml');
@@ -400,7 +410,7 @@ export function createState({ auth, client }: AppDeps) {
   const gates = new Map<string, ReturnType<typeof signal<{ on: boolean; courseName: string } | undefined>>>();
   let env: Env | null = null;
   const ops = new OpsSession(new DispatchAdapter(client, () => st.user.value?.login ?? ''), {
-    onFinished: (def) => refreshAfterRun(def, statuses, files),
+    onFinished: (def, args) => refreshAfterRun(def, statuses, files, args, def.cohortOrg ? effectiveDestRepo(statuses.cohort(def.cohortOrg, false).value) : DEFAULT_DEST_REPO),
   });
   const estate = signal<Estate | null>(null);
   // Back from installing the console app: drop GitHub's two parameters and reopen the wizard's

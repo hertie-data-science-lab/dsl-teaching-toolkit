@@ -95,8 +95,8 @@ export interface SessionOptions {
   /** Tests: the pause between polls (default: poll's own, cut short when the tab comes back). */
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
-  /** Called after a run (not a preview) finishes, to refresh what the screens show. */
-  onFinished?: (def: OpDef) => void;
+  /** Called after a run (not a preview) finishes, with the args it was sent, to refresh what the screens show. */
+  onFinished?: (def: OpDef, args: Record<string, unknown>) => void;
   /** How many times to re-read a finished run whose outcome is not there yet. */
   outcomeTries?: number;
   /** How many polls in a row may fail before the panel stops following the run (default 20, a minute at 3 s). */
@@ -336,7 +336,7 @@ export class OpsSession {
       const ended = { running: null, stopping: false, stopped, error: null };
       this.patch(preview ? { ...ended, phase: 'ready', dry: result } : { ...ended, phase: 'done', result });
     }
-    if (!preview) this.opts.onFinished?.(def);
+    if (!preview) this.opts.onFinished?.(def, args);
   }
 }
 

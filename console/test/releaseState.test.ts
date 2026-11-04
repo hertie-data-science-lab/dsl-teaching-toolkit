@@ -1,0 +1,212 @@
+// Release by hand's model (plan 2026-11-04 decisions 3-7): each file's three-way state, the
+// folder roll-ups, the manifest's groups, the paired request, the disabled ticks, the refused
+// destination names, the op def, and the trees read again after a release.
+
+import { describe, expect, it, vi } from 'vitest';
+import { refreshAfterRun } from '../src/app';
+import { buildTree, neverMaterial } from '../src/edit/badges';
+import { compileAll } from '../src/edit/glob';
+import { LiveFiles, type TreeState } from '../src/model/files';
+import { DEFAULT_DEST_REPO } from '../src/model/policy';
+import {
+  countsWords, destPathOf, destRepos, disabledTick, effectiveDestRepo, eligibleDestination, fileStates, folderCounts, groupPicks, requestOf, type Group,
+} from '../src/model/releaseState';
+import type { Loaded } from '../src/model/status';
+import { releaseAdhoc, releasePicked } from '../src/ops/defs';
+import { StaticFiles } from './staticFiles';
+
+const ORG = 'hertie-dsl-demo-f2026';
+const tree = (shas: Record<string, string>): TreeState => ({ kind: 'ready', truncated: false, paths: Object.entries(shas).map(([path, sha]) => ({ path, sha, dir: false })) });
+
+describe('each file’s state', () => {
+  const course = [
+    { path: 'same', sha: 'a' },
+    { path: 'behind', sha: 'new' },
+    { path: 'ahead', sha: 'a' },
+    { path: 'diverged', sha: 'new' },
+    { path: 'missing', sha: 'a' },
+  ];
+  const upstream = tree({ same: 'a', behind: 'a', ahead: 'a', diverged: 'a' });
+  const students = tree({ same: 'a', behind: 'a', ahead: 'edited', diverged: 'edited' });
+
+  it('is three-way against the upstream branch and the branch students read', () => {
+    expect(fileStates(course, upstream, students)).toEqual({ same: 'up_to_date', behind: 'behind', ahead: 'ahead', diverged: 'diverged', missing: 'not_released' });
+  });
+
+  it('is two-way on a semester with no upstream branch: equal or behind', () => {
+    const two = { same: 'up_to_date', behind: 'behind', ahead: 'behind', diverged: 'behind', missing: 'not_released' };
+    expect(fileStates(course, null, students)).toEqual(two);
+    expect(fileStates(course, { kind: 'absent' }, students)).toEqual(two);
+  });
+
+  it('judges a path the upstream branch lacks two-way', () => {
+    expect(fileStates([{ path: 'x', sha: 'a' }, { path: 'y', sha: 'b' }], tree({}), tree({ x: 'a', y: 'c' }))).toEqual({ x: 'up_to_date', y: 'behind' });
+  });
+
+  it('is unknown while the semester copy loads or cannot be read, and not released when the repo does not exist', () => {
+    expect(fileStates(course, upstream, { kind: 'loading' }).same).toBe('unknown');
+    expect(fileStates(course, upstream, { kind: 'error', message: 'HTTP 502' }).same).toBe('unknown');
+    expect(fileStates(course, { kind: 'loading' }, students).same).toBe('unknown');
+    expect(fileStates(course, upstream, { kind: 'absent' }).same).toBe('not_released');
+  });
+
+  it('compares at the destination path it is given', () => {
+    const s = fileStates([{ path: 'labs/l1.ipynb', sha: 'a' }], null, tree({ 'materials/labs/l1.ipynb': 'a' }), { destPath: (p) => `materials/${p}` });
+    expect(s).toEqual({ 'labs/l1.ipynb': 'up_to_date' });
+  });
+
+  it('reads shas from the trees StaticFiles serves', () => {
+    const f = new StaticFiles({}, {}, { 'c/r': ['a.md', 'b.md'], [`${ORG}/materials`]: ['a.md', 'b.md'] }, {}, {}, { [`${ORG}/materials/b.md`]: 'edited' });
+    const c = f.tree('c', 'r');
+    const paths = c.kind === 'ready' ? c.paths.filter((p) => !p.dir) : [];
+    expect(fileStates(paths, null, f.tree(ORG, 'materials'))).toEqual({ 'a.md': 'up_to_date', 'b.md': 'behind' });
+  });
+});
+
+describe('a folder’s roll-up', () => {
+  const files = ['lectures/a.md', 'lectures/b.md', 'lectures/c.md', 'lectures/.DS_Store', 'lectures/d.md', 'lectures/e.md'];
+  const [node] = buildTree(files);
+  const states = { 'lectures/a.md': 'behind', 'lectures/b.md': 'behind', 'lectures/c.md': 'ahead', 'lectures/d.md': 'not_released', 'lectures/e.md': 'not_released', 'lectures/.DS_Store': 'not_released' } as const;
+
+  it('counts the files left in, in the short words, zero parts omitted', () => {
+    const n = folderCounts(node, states, (p) => neverMaterial(p) || p === 'lectures/e.md');
+    expect(n).toEqual({ behind: 2, ahead: 1, not_released: 1 });
+    expect(countsWords(n)).toBe('2 behind · 1 ahead · 1 not released');
+    expect(countsWords({ up_to_date: 3, diverged: 1, unknown: 2 })).toBe('1 diverged · 3 up to date');
+    expect(countsWords({})).toBe('');
+  });
+});
+
+describe('the manifest’s groups', () => {
+  const FILES = ['labs/lab-1.ipynb', 'labs/lab-2.ipynb', 'labs/solutions/s1.ipynb', 'labs/draft.md', 'labs/.DS_Store',
+    'lectures/01_intro/notes.md', 'lectures/01_intro/slides.pdf', 'lectures/01_intro/extra.md', 'lectures/02_trees/notes.md',
+    'README.md', 'SYLLABUS.md', 'tests/check.py'];
+  const trees = { 'course-materials-f2026': { files: FILES, rules: compileAll(['/labs/draft.md']) }, other: { files: ['x/a.md', 'b.md'], rules: [] } };
+  const pick = (path: string, dir = false, repo = 'course-materials-f2026') => ({ repo, path, dir });
+
+  it('groups by immediate parent in tree order: a picked folder whole, sibling files n of m, top level last', () => {
+    const g = groupPicks([pick('SYLLABUS.md'), pick('lectures/01_intro/slides.pdf'), pick('labs', true), pick('lectures/01_intro/notes.md')], trees);
+    expect(g.map((x) => [x.head, x.kind, x.files, x.of])).toEqual([
+      ['labs/', 'all', 2, undefined],
+      ['lectures/01_intro/', 'partial', 2, 3],
+      ['(top level)', 'partial', 1, 2],
+    ]);
+    expect(g[1].ship).toEqual(['lectures/01_intro/notes.md', 'lectures/01_intro/slides.pdf']);
+  });
+
+  it('lists what a picked folder leaves out, with the rule (null: only if named), never-material names absent', () => {
+    const [labs] = groupPicks([pick('labs', true)], trees);
+    expect(labs.ship).toEqual(['labs/lab-1.ipynb', 'labs/lab-2.ipynb']);
+    expect(labs.withheld).toEqual([{ path: 'labs/solutions/s1.ipynb', rule: null }, { path: 'labs/draft.md', rule: '/labs/draft.md' }]);
+    expect(labs.sources).toEqual(['labs']);
+  });
+
+  it('implies a pick under a picked folder, and ships a denylisted file named outright but not a withheld one', () => {
+    const g = groupPicks([pick('labs', true), pick('labs/lab-1.ipynb'), pick('tests/check.py'), pick('labs/draft.md')], trees);
+    expect(g.map((x) => x.head)).toEqual(['labs/', 'tests/']);
+    expect(g[1].ship).toEqual(['tests/check.py']);
+    const draft = groupPicks([pick('labs/draft.md')], trees)[0];
+    expect(draft.ship).toEqual([]);
+    expect(draft.withheld).toEqual([{ path: 'labs/draft.md', rule: '/labs/draft.md' }]);
+  });
+
+  it('keeps each repo’s picks together, in the order the repos were first picked', () => {
+    const g = groupPicks([pick('b.md', false, 'other'), pick('README.md'), pick('x', true, 'other')], trees);
+    expect(g.map((x) => `${x.repo}:${x.head}`)).toEqual(['other:x/', 'other:(top level)', 'course-materials-f2026:(top level)']);
+  });
+
+  it('pairs every path with its destination, a group’s own repo and path overriding the run default', () => {
+    const g = groupPicks([pick('labs', true), pick('lectures/01_intro/notes.md'), pick('lectures/01_intro/slides.pdf'), pick('b.md', false, 'other')], trees);
+    g[1] = { ...g[1], destRepo: 'slides', destPath: 'week1/' };
+    expect(destPathOf(g[1], 'lectures/01_intro/notes.md')).toBe('week1/notes.md');
+    expect(requestOf(g, { defaultDestRepo: 'materials' })).toEqual({
+      course_source_repo: 'course-materials-f2026,course-materials-f2026,course-materials-f2026,other',
+      course_source_path: 'labs,lectures/01_intro/notes.md,lectures/01_intro/slides.pdf,b.md',
+      semester_dest_repo: 'materials,slides,slides,materials',
+      semester_dest_path: 'labs,week1/notes.md,week1/slides.pdf,b.md',
+    });
+  });
+
+  it('builds the Release by hand op: one run, the groups as facts, no Options', () => {
+    const g: Group[] = groupPicks([pick('labs', true), pick('lectures/01_intro/notes.md'), pick('b.md', false, 'other')], trees);
+    const def = releasePicked({ courseOrg: 'c', cohortOrg: ORG, where: 'Fall 2026' }, g, { defaultDestRepo: 'materials' });
+    expect(def).toMatchObject({ op: 'release.adhoc', name: 'Release by hand', title: '3 paths from 2 repos', verb: 'Release 3 paths', cancel: 'Stop before copying' });
+    expect(def.options).toBeUndefined();
+    expect(def.facts).toEqual(['labs/ · all 2 files → materials/labs/', 'lectures/01_intro/ · 1 of 3 files → materials/lectures/01_intro/', '(top level) · 1 of 1 file → materials/']);
+    expect(def.args.semester_dest_repo).toBe('materials,materials,materials');
+    expect(def.target).toBe(`https://github.com/${ORG}/materials/tree/main/labs`);
+    const one = releasePicked({ courseOrg: 'c', cohortOrg: ORG, where: 'Fall 2026' }, g.slice(0, 1), { defaultDestRepo: 'materials' });
+    expect(one.title).toBe('1 path from course-materials-f2026');
+  });
+});
+
+describe('a disabled tick', () => {
+  const files = ['labs/a.md', 'only/solutions/s.md', 'only/.DS_Store', 'tests/t.py'];
+  it('is an up-to-date file, or a folder holding only files never copied', () => {
+    expect(disabledTick('labs/a.md', false, 'up_to_date', files)).toBe(true);
+    expect(disabledTick('labs/a.md', false, 'behind', files)).toBe(false);
+    expect(disabledTick('only', true, undefined, files)).toBe(true);
+    expect(disabledTick('tests', true, undefined, files)).toBe(true);
+    expect(disabledTick('labs', true, undefined, files)).toBe(false);
+  });
+});
+
+describe('a destination name', () => {
+  const known = { org: ORG, students: ['assignment-1-octocat'] };
+  it('refuses the semester’s reserved names and student repos', () => {
+    expect(eligibleDestination('semester-config', known)).toBe('That name is reserved for the semester’s config.');
+    expect(eligibleDestination('.github', known)).toMatch(/^That name is reserved for /);
+    expect(eligibleDestination(`${ORG}.github.io`, known)).toBe('That name is reserved for the semester’s website.');
+    expect(eligibleDestination('join', known)).toBe('That name is reserved for the enrolment page.');
+    expect(eligibleDestination('grades-octocat', known)).toBe('That name is reserved for students’ marks.');
+    expect(eligibleDestination('Assignment-1-Octocat', known)).toBe('That name is reserved for a student’s repo.');
+    expect(eligibleDestination('has space', known)).toMatch(/letters, digits/);
+    expect(eligibleDestination('slides', known)).toBeNull();
+  });
+});
+
+describe('after a release', () => {
+  const ready = (materials_repo: unknown): Loaded => ({ kind: 'ready', sha: 's', stale: [], status: { semester: { defaults: { materials_repo: { value: materials_repo, source: 'course' } } } } as never });
+
+  it('names the semester’s effective default destination, else the institution’s', () => {
+    expect(effectiveDestRepo(ready('course-files'))).toBe('course-files');
+    expect(effectiveDestRepo(ready(null))).toBe(DEFAULT_DEST_REPO);
+    expect(effectiveDestRepo({ kind: 'loading' })).toBe(DEFAULT_DEST_REPO);
+    expect(destRepos({ semester_dest_repo: 'a,b,a' }, 'x')).toEqual(['a', 'b']);
+    expect(destRepos({}, 'x')).toEqual(['x']);
+  });
+
+  it('reads again the trees of every repo it wrote to, and none after another op', () => {
+    const files = { refresh: vi.fn(), refreshUnder: vi.fn(), refreshTree: vi.fn() };
+    const statuses = { reload: vi.fn(async () => {}) };
+    const def = releaseAdhoc({ courseOrg: 'c', cohortOrg: ORG, where: 'Fall 2026' }, ['course-materials-f2026']);
+    refreshAfterRun(def, statuses, files, { semester_dest_repo: 'materials,slides' }, 'materials');
+    expect(files.refreshTree.mock.calls).toEqual([[ORG, 'materials'], [ORG, 'slides']]);
+    files.refreshTree.mockClear();
+    refreshAfterRun(def, statuses, files, { course_source_path: 'labs' }, 'course-files');
+    expect(files.refreshTree.mock.calls).toEqual([[ORG, 'course-files']]);
+    files.refreshTree.mockClear();
+    refreshAfterRun({ ...def, op: 'semester.check' }, statuses, files, {}, 'materials');
+    expect(files.refreshTree).not.toHaveBeenCalled();
+  });
+
+  it('LiveFiles reads a held tree again at every ref, into the same state, with its shas', async () => {
+    let n = 0;
+    const listTree = vi.fn(async () => ({ sha: 't', truncated: false, tree: [{ path: 'a.md', mode: '100644', type: 'blob' as const, sha: `v${n}` }] }));
+    const live = new LiveFiles({ listTree } as never);
+    const flush = async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); };
+    live.tree(ORG, 'materials');
+    live.tree(ORG, 'materials', 'upstream');
+    live.tree(ORG, 'other');
+    await flush();
+    expect(live.tree(ORG, 'materials')).toEqual({ kind: 'ready', truncated: false, paths: [{ path: 'a.md', dir: false, sha: 'v0' }] });
+    n = 1;
+    live.refreshTree(ORG, 'materials');
+    // The old tree stands until the new one answers.
+    expect(live.tree(ORG, 'materials').kind).toBe('ready');
+    await flush();
+    expect(listTree).toHaveBeenCalledTimes(5);
+    expect(live.tree(ORG, 'materials', 'upstream')).toMatchObject({ paths: [{ sha: 'v1' }] });
+    expect(live.tree(ORG, 'other')).toMatchObject({ paths: [{ sha: 'v0' }] });
+  });
+});
