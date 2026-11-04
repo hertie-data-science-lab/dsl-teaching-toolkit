@@ -196,7 +196,7 @@ function Released(p: ReadyProps) {
 const STEP_HINT =
   'For each released folder the toolkit compares the course copy with the semester’s and lists every file that differs. A folder is listed when the two differ: edited in the semester (ahead), changed in the course since the release (behind), or both (diverged). Release again copies the course version over, merged onto the semester’s edit; a conflict opens a pull request for the instructors. Keep for future semesters opens a pull request carrying the semester’s edit back into the course. Nothing changes until you choose.';
 
-const STEP_TABS: [FolderStep | 'all', string][] = [['all', 'All'], ['ahead', 'Edited in the semester'], ['behind', 'Changed in the course'], ['diverged', 'Both']];
+const STEP_TABS: [FolderStep | 'all', string][] = [['all', 'All'], ['ahead', 'Edited in semester'], ['behind', 'Edited in course'], ['diverged', 'Both']];
 
 /** Released materials that differ from their source files (`outOfStep`), folded, with a filter by step; not drawn when there are none. */
 function OutOfStepPanel(p: ReadyProps & { def: string }) {

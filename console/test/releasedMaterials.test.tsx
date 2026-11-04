@@ -210,7 +210,7 @@ describe('Released materials', () => {
     // The engine's DIVERGED_RELEASED line is the Dashboard's, not this page's.
     expect(el.textContent).not.toContain('The released copy of Lecture 5 was edited');
     const tabs = [...panel.querySelectorAll<HTMLButtonElement>('.seg[role="tablist"] button[role="tab"]')];
-    expect(tabs.map((t) => t.textContent)).toEqual(['All 2', 'Edited in the semester 1', 'Changed in the course 1', 'Both 0']);
+    expect(tabs.map((t) => t.textContent)).toEqual(['All 2', 'Edited in semester 1', 'Edited in course 1', 'Both 0']);
     const rows = () => [...panel.querySelectorAll<HTMLElement>('ul.rows > li')];
     expect(rows().map((li) => li.querySelector('.r-title code')!.textContent)).toEqual(['lectures/05_trees/', 'labs/lab-1/']);
     expect(rows().map((li) => li.querySelector('.r-title .chip')!.textContent)).toEqual(['ahead', 'behind']);
