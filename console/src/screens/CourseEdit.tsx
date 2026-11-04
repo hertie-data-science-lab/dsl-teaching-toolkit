@@ -618,7 +618,7 @@ export function MaterialsScreen(p: CourseProps) {
           {semFile && semFile !== 'loading' && semFile.error ? <CheckLine cls="bad">{SEMESTER_FILE} does not parse; fix it with Edit the file directly.</CheckLine> : null}
           {semFile === null && scope ? <CheckLine cls="bad">Could not read {SEMESTER_FILE}.</CheckLine> : null}
           {semRef ? <SaveBar state={sylSave} onSave={() => void saveSyl()} small disabled={syl === null || syl === savedSyl || !semReady} file={semRef} /> : null}
-          <h3>Weekly plan for the syllabus <Hint label="About the weekly plan">Built from the semester schedule: every session with its date and readings. Copy shows it to paste anywhere; Write puts it into your syllabus file.</Hint></h3>
+          <h3>Weekly plan for the syllabus <Hint label="About the weekly plan">Built from the semester schedule: every session with its date and readings. Write opens it: Copy there shows it to paste anywhere, Write puts it into your syllabus file.</Hint></h3>
           {scope ? (
             <div class="actions">
               {noWrite === null ? (

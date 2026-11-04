@@ -44,7 +44,7 @@ import { Loading, ghUrl } from './ui/bits';
 import { ScreenBoundary } from './ui/boundary';
 import { forgetRendered } from './ui/rendered';
 import { forgetShown } from './model/materials';
-import { CourseBanner, Footer, Sidenav, Topbar, type CourseSubPages, type SubWanted } from './ui/shell';
+import { CourseBanner, Footer, NavHandle, Sidenav, Topbar, type CourseSubPages, type SubWanted } from './ui/shell';
 import { fmtDay } from './model/format';
 import { DEFAULT_DEST_REPO, DEFAULT_TIMEZONE } from './model/policy';
 import { destRepos, effectiveDestRepo } from './model/releaseState';
@@ -122,8 +122,7 @@ export function App({ state: s }: { state: AppState }) {
     }
   }, [moved]);
   useEffect(() => {
-    document.body.classList.remove('nav-open');
-    s.navOpen.value = false;
+    s.closeNav();
     const el = route.screen === 'schedule' && route.entry ? document.querySelector('.trow.current') : null;
     if (el) el.scrollIntoView({ block: route.screen === 'schedule' ? 'center' : 'start' });
     else window.scrollTo(0, 0);
@@ -208,6 +207,7 @@ export function App({ state: s }: { state: AppState }) {
       <EnvCtx.Provider value={s.env(user)}>
         <Topbar user={user} title={stu.studentView ? 'Student view (preview)' : title} titleHref={stu.studentView ? back : undefined} onSignOut={s.signOut} navOpen={s.navOpen.value} onMenu={s.toggleNav} guide={guide} />
         <div class="shell">
+          <NavHandle onToggle={s.closeNav} />
           <aside class="sidenav" id="sidenav-wrap" aria-label="Semester navigation">
             <StudentSideNav root={root} semesters={semesters} semester={stu.semester} current={studentNavKey(key)} studentView={stu.studentView} now={s.now.value} />
           </aside>
@@ -312,6 +312,7 @@ export function App({ state: s }: { state: AppState }) {
     <EnvCtx.Provider value={s.env(user)}>
       <Topbar user={user} title={title} onSignOut={s.signOut} navOpen={s.navOpen.value} onMenu={appLevel ? undefined : s.toggleNav} guide={guide} />
       <div class="shell" style={appLevel ? 'grid-template-columns:minmax(0,1fr)' : undefined}>
+        {appLevel ? null : <NavHandle onToggle={s.closeNav} />}
         {appLevel ? null : (
           <aside class="sidenav" id="sidenav-wrap" aria-label="Console navigation">
             <Sidenav courses={courses} course={ctx.course} cohort={semesterPage ? ctx.cohort : undefined} site={ctx.cohort} cohortStates={cohortStates} current={navKey} sub={sub} entry={route.entry} now={s.now.value} />
@@ -526,6 +527,10 @@ export function createState({ auth, client }: AppDeps) {
     toggleNav() {
       st.navOpen.value = !st.navOpen.value;
       document.body.classList.toggle('nav-open', st.navOpen.value);
+    },
+    closeNav() {
+      st.navOpen.value = false;
+      document.body.classList.remove('nav-open');
     },
   };
   auth.onLost = () => st.signOut();

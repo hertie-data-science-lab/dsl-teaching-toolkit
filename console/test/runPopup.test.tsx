@@ -321,6 +321,31 @@ describe('Preview buttons', () => {
     expect(ops.current.value?.mode).toBe('direct');
   });
 
+  it('shows only the verb on the page, which opens the panel where Preview is offered, never required (materials-release decision 11)', async () => {
+    const adapter = new Scripted();
+    const ops = session(adapter);
+    const def = defs.sendCodes(scope, 3);
+    expect(modeOf(def.op)).toBe('preview');
+    await mount(envOf(ops), <><OpButtons def={def} small /><OpPanel /></>);
+    // The verb and its `?`: no Preview beside it.
+    expect(buttons().map((b) => b.textContent)).toEqual([def.verb, '?']);
+    expect(buttons()[0].className).toBe('btn small');
+    await act(() => buttons()[0].click());
+    // Open, not running: the panel's own verb runs it, with Preview beside it.
+    expect(ops.current.value?.phase).toBe('ready');
+    expect(adapter.submitted).toBe(0);
+    expect([...root!.querySelectorAll('.drawer-foot button.btn')].map((b) => b.textContent)).toEqual(['Preview', def.verb]);
+  });
+
+  it('keeps a preview-only op’s single button, which previews', async () => {
+    const ops = session(new Scripted());
+    const def = defs.previewNext(scope);
+    await mount(envOf(ops), <OpButtons def={def} />);
+    expect(buttons().map((b) => b.textContent)).toEqual([def.verb]);
+    await act(() => buttons()[0].click());
+    expect(ops.current.value?.mode).toBe('previewOnly');
+  });
+
   it('keeps the gate’s Preview and drops the ones nobody acts on', () => {
     // Publishing has no engine preview at all: it asks for a tick instead.
     for (const def of ALL.filter((d) => d.confirmInPanel)) expect(modeOf(def.op), def.op).toBe(opSpec(def.op).preview && !PREVIEW_NOT_OFFERED.has(def.op) ? 'preview' : 'direct');

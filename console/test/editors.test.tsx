@@ -389,9 +389,10 @@ describe('editing screens', () => {
     // The panel's last line: a solution is not copied unless named, so it counts there, not as withheld.
     expect(out).toContain('<p class="footnote">1 never copied (by default) · 0 withheld · 2 released</p>');
     expect(out).toContain('Weekly plan for the syllabus');
-    // Copy opens the plan to copy; Write puts it into the syllabus (decision 0031 rule 9).
-    expect(out).toContain('>Copy</button>');
-    expect(out).toContain('>Write</button>');
+    // Write alone on the page (materials-release decision 11): it opens the panel, where Copy
+    // shows the plan to copy and Write puts it into the syllabus (decision 0031 rule 9).
+    expect(out).not.toContain('>Copy</button>');
+    expect(out).toContain('<button class="btn small" type="button">Write</button>');
     expect(out).not.toContain('>Preview</button>');
     expect(out).toContain('aria-label="About Write"');
     // A syllabus that is not Markdown cannot be written into: Copy alone, and why.

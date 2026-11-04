@@ -1,7 +1,9 @@
 // @vitest-environment happy-dom
 // The shell mounted on a real URL (decision 0021): Profile opens whatever semester the query
 // names, `#setup` becomes `#profile` for both, and a student's `#marks` and `#join` become `#assignments`.
+// The side nav's handle hides and shows the nav, kept in this browser (materials-release decision 9).
 
+import { readFileSync } from 'node:fs';
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -25,6 +27,8 @@ afterEach(() => {
   root?.remove();
   root = null;
   history.replaceState(null, '', '/');
+  localStorage.clear();
+  document.body.className = '';
 });
 
 /** A fake whose NLP semester has opted in to the student console (`student_console: true`). */
@@ -240,5 +244,75 @@ describe('the course nav’s sub-pages', () => {
     root!.remove();
     const idx = show('templates');
     expect(group(idx, 'Assignment templates').querySelector(':scope > .row > a')!.getAttribute('aria-current')).toBe('page');
+  });
+});
+
+describe('the side nav’s handle (materials-release decision 9)', () => {
+  const handle = (el: HTMLElement) => el.querySelector<HTMLButtonElement>('.nav-handle')!;
+  const collapsed = () => document.body.classList.contains('nav-collapsed');
+
+  it('hides the nav and shows it again, saying which it does', async () => {
+    const el = await mount(`/?cohort=${cohort.org}#dashboard`);
+    expect(collapsed()).toBe(false);
+    expect([handle(el).getAttribute('aria-label'), handle(el).dataset.tip, handle(el).getAttribute('aria-expanded'), handle(el).getAttribute('aria-controls')]).toEqual(['Hide navigation', 'Hide navigation', 'true', 'sidenav-wrap']);
+    await act(() => handle(el).click());
+    expect(collapsed()).toBe(true);
+    expect([handle(el).getAttribute('aria-label'), handle(el).dataset.tip, handle(el).getAttribute('aria-expanded')]).toEqual(['Show navigation', 'Show navigation', 'false']);
+    // The Menu pill is there to open the nav as the drawer.
+    const menu = el.querySelector<HTMLButtonElement>('.topbar .menu-btn')!;
+    await act(() => menu.click());
+    expect(document.body.classList.contains('nav-open')).toBe(true);
+    expect(menu.getAttribute('aria-expanded')).toBe('true');
+    // Showing the nav again closes the drawer.
+    await act(() => handle(el).click());
+    expect(collapsed()).toBe(false);
+    expect(document.body.classList.contains('nav-open')).toBe(false);
+    expect(menu.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('keeps the choice in this browser, for a student too', async () => {
+    let el = await mount(`/?cohort=${cohort.org}#dashboard`);
+    await act(() => handle(el).click());
+    expect(localStorage.getItem('console-nav')).toBe('collapsed');
+    render(null, el);
+    el.remove();
+    expect(collapsed()).toBe(false);
+    el = await mount(`/?semester=${NLP.org}#home`);
+    expect(collapsed()).toBe(true);
+    expect(handle(el).getAttribute('aria-label')).toBe('Show navigation');
+    await act(() => handle(el).click());
+    expect(localStorage.getItem('console-nav')).toBe('open');
+    expect(collapsed()).toBe(false);
+  });
+
+  it('has no handle where there is no side nav, and leaves no collapsed shell there', async () => {
+    localStorage.setItem('console-nav', 'collapsed');
+    const el = await mount(`/?cohort=${cohort.org}#profile`);
+    expect(el.querySelector('.nav-handle')).toBeNull();
+    expect(collapsed()).toBe(false);
+  });
+
+  it('shows the Menu pill while the nav is hidden, and spans the content across the shell', async () => {
+    const style = document.createElement('style');
+    style.textContent = ['console.css', 'shell.css'].map((f) => readFileSync(`${__dirname}/../src/styles/${f}`, 'utf8')).join('\n');
+    document.head.appendChild(style);
+    // happy-dom keeps an element's computed style across a class change on <body>; a change on
+    // the element itself makes it read afresh.
+    let n = 0;
+    const look = (e: Element) => (e.setAttribute('data-look', String(n++)), getComputedStyle(e));
+    try {
+      const el = await mount(`/?cohort=${cohort.org}#dashboard`);
+      const menu = el.querySelector<HTMLElement>('.topbar .menu-btn')!;
+      const nav = el.querySelector<HTMLElement>('.sidenav')!;
+      expect(look(menu).display).toBe('none');
+      await act(() => handle(el).click());
+      expect(look(menu).display).toBe('inline-flex');
+      expect(look(nav).visibility).toBe('hidden');
+      expect(look(el.querySelector('.shell')!).gridTemplateColumns).toBe('0px minmax(0, 1fr)');
+      await act(() => menu.click());
+      expect(look(nav).visibility).toBe('visible');
+    } finally {
+      style.remove();
+    }
   });
 });

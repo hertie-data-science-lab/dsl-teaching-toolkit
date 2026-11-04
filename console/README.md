@@ -82,7 +82,8 @@ settings (General, Post installation):
 
 The build writes a Content-Security-Policy meta into `index.html` (`src/csp.ts`): scripts from
 the console's own origin, calls to `api.github.com`, `github.com` and the relay's origin,
-images from GitHub's avatars, fonts from Google Fonts, no frames, and no `'unsafe-eval'`: the
+images from GitHub's avatars, fonts from Google Fonts, frames from blob: URLs only (the
+viewer's PDF frame), and no `'unsafe-eval'`: the
 schema validators are compiled at build time (`virtual:validators` in `vite.config.ts`, Ajv
 standalone, from every schema under `schemas/` and each op's `args_schema`), so a schema the
 console validates against must live there. The relay URL must be https. `npm run dev` leaves
@@ -148,7 +149,9 @@ inverted, since a student takes each course once: the open semester's term is th
 courses the nodes (each a link to its Home, the open one expanded to its tabs, each with the
 site's Font Awesome glyph drawn inline; its kind tabs once its `student-status.json` is read),
 another live term under them, and Past semesters below, each expanding to its courses as
-links. A Student view's tree is that one semester's.
+links. A Student view's tree is that one semester's. A slim handle on the nav's edge hides it in both consoles
+(materials-release decision 9): the content then spans the page, the top bar's Menu opens the
+nav as on a phone, and the choice is kept in this browser (`console-nav` in local storage).
 
 The top bar carries the Hertie mark before the console's name in both consoles (decision 0035
 rule 2), drawn as inline SVG in the bar's text colour. Every course and semester page, in either console, opens with the **course banner**: crumbs
@@ -347,7 +350,7 @@ allows, the screen; Escape or the button leaves): markdown and notebooks through
 GitHub's markdown endpoint (one call; its HTML is sanitised by GitHub), notebook outputs as
 text and images; an HTML page with its `<stem>_files/` bundle inlined (stylesheets as
 `<style>`, images and fonts as data: URLs) in a frame sandboxed with no permissions. The
-page's policy (no inline scripts, no `'unsafe-eval'`, no frames other than srcdoc) is inherited by every
+page's policy (no inline scripts, no `'unsafe-eval'`, no frames other than srcdoc and blob:) is inherited by every
 document made from the console page, so a deck that needs its scripts (reveal.js, Quarto) opens in
 the **deck viewer** instead: `deck.html`, a second document in the build with its own policy
 (`default-src 'none'; script-src 'unsafe-inline' blob:; style-src 'unsafe-inline'; img-src
@@ -356,8 +359,11 @@ console opens it with `noopener` and hands it the inlined deck over a `Broadcast
 by a random id in its URL fragment (`src/model/deckTab.ts`); the viewer clears its session
 storage, drops the fragment and shows the deck in a frame sandboxed to `allow-scripts` only (an
 opaque origin: no storage, no cookies, `top.opener` null). The deck also downloads as one
-self-contained file. PDFs open in
-a new tab or download; anything else downloads. Files over 1 MB come from the blob API; the
+self-contained file. A PDF draws inline (materials-release decision 10) in an unsandboxed
+frame over a blob: URL whose type the console forces to `application/pdf`, whatever the file's
+own type, so only the browser's PDF viewer loads there (Chrome refuses it in a sandboxed frame);
+"Open in a new tab" and Download sit under it (iOS draws only the first page). Anything else
+downloads. Files over 1 MB come from the blob API; the
 API serves nothing over 100 MB.
 
 **Join** opens the issue itself, as the student, through the API: the seeded form's body
@@ -438,9 +444,10 @@ a first visit, mostly free 304s after).
   ref `main`, one `request` input; contracts section 1). `src/ops/adapter.ts` dispatches with
   `return_run_details`, polls the run's job listing alone (`src/github/poll.ts`, the one poll loop: every 3 s, every
   10 s after 30 s, nothing while the tab is hidden), and reads the public `dsl-outcome` annotation and the
-  private outcome file. Return marks, archive, update every copy and send new codes
-  offer a preview beside the verb, never required: the page's verb opens the panel and the
-  panel's verb runs, behind the op's confirmation box where it has one; publishing the public website, which has no
+  private outcome file. A page shows only an op's verb (materials-release decision 11,
+  `OpButtons`): it opens the panel, where the op runs; the panel offers a preview beside its
+  own verb where the op has one, never required, behind the op's confirmation box where it has
+  one (return marks, archive, update every copy, send new codes); publishing the public website, which has no
   engine preview, asks for a confirmation. Other previews are offered only where they
   show something you act on (`PREVIEW_NOT_OFFERED` in `src/ops/registry.ts` lists the ones
   that are not). Hand out now is one button whose panel verb confirms; its panel offers the

@@ -2,14 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { cspPolicy, relayOrigin, withCsp } from '../src/csp';
 
 describe('Content-Security-Policy', () => {
-  it('allows GitHub and the relay origin only, with no frames', () => {
+  it('allows GitHub and the relay origin only, with frames from blob: URLs only (a PDF in the viewer)', () => {
     const p = cspPolicy('https://dsl-console-auth.example.workers.dev/exchange');
     expect(p).toContain("connect-src 'self' https://api.github.com https://github.com https://dsl-console-auth.example.workers.dev;");
     expect(p).toContain("default-src 'self'");
     expect(p).toContain("img-src 'self' https://avatars.githubusercontent.com https://github.com data:");
     expect(p).toContain("style-src 'self' 'unsafe-inline' https://fonts.googleapis.com");
     expect(p).toContain('font-src https://fonts.gstatic.com');
-    expect(p).toContain("frame-src 'none'");
+    expect(p).toContain('frame-src blob:;');
+    expect(p).not.toContain("frame-src 'none'");
     expect(cspPolicy('')).toContain("connect-src 'self' https://api.github.com https://github.com;");
     expect(relayOrigin('not a url')).toBe('');
     expect(relayOrigin('javascript:alert(1)')).toBe('');

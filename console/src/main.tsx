@@ -3,6 +3,7 @@ import { App, createDeps, createState } from './app';
 import { savedTheme } from './ui/shell';
 import './styles/tokens.css';
 import './styles/console.css';
+import './styles/shell.css';
 import './styles/open.css';
 
 const theme = savedTheme();

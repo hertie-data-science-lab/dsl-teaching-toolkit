@@ -1,8 +1,8 @@
 // S13 the operation panel: a non-modal drawer that minimises to a bar, and the buttons
-// that open it. Preview is the filled button beside the verb; the verb never waits for a
-// preview (a confirmation box still holds it where the op has one). The outcome sentence is the engine's summary, verbatim. Stop
-// cancels the workflow run; the drawer is resized by its bottom-left grip; once a run
-// ends, "See on GitHub" opens the op's `target`.
+// that open it. A page shows only the verb (materials-release decision 11): it opens the panel,
+// where the op runs; the panel offers a preview where the op has one, never requires it. The
+// outcome sentence is the engine's summary, verbatim. Stop cancels the workflow run; the drawer
+// is resized by its bottom-left grip; once a run ends, "See on GitHub" opens the op's `target`.
 
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { useEnv } from '../env';
@@ -312,24 +312,13 @@ export function OpPanel() {
 }
 
 /**
- * The buttons a screen shows for an operation: Preview (filled) and the verb, which is never
- * held back for want of a preview; a direct op shows only the verb. The verb's `?`, if any, follows it.
+ * The button a screen shows for an operation: the verb alone (materials-release decision 11).
+ * It opens the panel, where the op runs; the panel offers a preview where the op has one,
+ * never required. The verb's `?`, if any, follows it.
  */
-export function OpButtons({ def, small, label, previewLabel = def.previewLabel ?? 'Preview', verbCls }: { def: OpDef; small?: boolean; label?: string; previewLabel?: string; verbCls?: string }) {
+export function OpButtons({ def, small, label, verbCls }: { def: OpDef; small?: boolean; label?: string; verbCls?: string }) {
   const env = useEnv();
-  const ops = env?.ops;
-  const mode = modeOf(def.op);
-  const sz = small ? ' small' : '';
-  const verb = label ?? def.verb;
-  if (mode === 'direct' || mode === 'previewOnly')
-    return <><button class={verbCls ?? `btn${sz}`} type="button" onClick={() => ops?.open(def)}>{verb}</button><VerbHint def={def} /></>;
-  return (
-    <>
-      <button class={`btn${sz}`} type="button" onClick={() => ops?.open(def, 'preview')}>{previewLabel}</button>
-      <button class={verbCls ?? `btn${sz} outline`} type="button" onClick={() => ops?.open(def, 'run')}>{verb}</button>
-      <VerbHint def={def} />
-    </>
-  );
+  return <><button class={verbCls ?? `btn${small ? ' small' : ''}`} type="button" onClick={() => env?.ops.open(def)}>{label ?? def.verb}</button><VerbHint def={def} /></>;
 }
 
 /** A single button that opens the panel on `def` (no preview shortcut); `disabled` greys it out. */

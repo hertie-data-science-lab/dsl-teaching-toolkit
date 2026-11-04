@@ -1,9 +1,10 @@
 // The frame every screen sits in: the app-level top bar, the side nav (one tree, decision 0031
-// rule 11: course-anchored for an instructor, semester-anchored for a student), the course
-// banner heading every course and semester page, the footer.
+// rule 11: course-anchored for an instructor, semester-anchored for a student) with its handle
+// (materials-release decision 9: hide it, and the content spans the shell), the course banner
+// heading every course and semester page, the footer.
 
 import type { ComponentChildren } from 'preact';
-import { useState } from 'preact/hooks';
+import { useLayoutEffect, useState } from 'preact/hooks';
 import { readText, safeStorage, writeText } from '../auth/types';
 import type { GhUser } from '../github/client';
 import type { Course, CohortRef, Semester } from '../model/discovery';
@@ -48,11 +49,43 @@ function useTheme(): [boolean, () => void] {
   ];
 }
 
+const NAV_KEY = 'console-nav';
+
+/**
+ * The side nav's handle (materials-release decision 9): a slim pill on the nav/content
+ * boundary. Pressed, the nav hides (`body.nav-collapsed`) and the content spans the shell; the
+ * handle moves to the left edge to bring it back, and the top bar's Menu opens the nav as the
+ * narrow-screen drawer does. The choice is kept in this browser. Below 860px the drawer applies
+ * and the handle is hidden (styles/shell.css). `onToggle` closes an open drawer.
+ */
+export function NavHandle({ onToggle }: { onToggle?: () => void }) {
+  const [collapsed, setCollapsed] = useState(() => readText(safeStorage('local'), NAV_KEY) === 'collapsed');
+  // Before paint, so a collapsed nav never flashes open on load.
+  useLayoutEffect(() => {
+    document.body.classList.toggle('nav-collapsed', collapsed);
+    return () => document.body.classList.remove('nav-collapsed');
+  }, [collapsed]);
+  const word = collapsed ? 'Show navigation' : 'Hide navigation';
+  const toggle = () => {
+    const next = !collapsed;
+    writeText(safeStorage('local'), NAV_KEY, next ? 'collapsed' : 'open');
+    document.body.classList.remove('nav-open');
+    onToggle?.();
+    setCollapsed(next);
+  };
+  return (
+    <button class="nav-handle" type="button" aria-controls="sidenav-wrap" aria-expanded={!collapsed} aria-label={word} data-tip={word} onClick={toggle}>
+      <span class="nh-pill" aria-hidden="true"><span class="nh-chev" /></span>
+    </button>
+  );
+}
+
 /**
  * The app-level bar (decision 0021): the Hertie mark and the product name (a Home link,
  * decision 0035 rule 2) with the view, the person
  * (a link to Profile), Guide, theme, Sign out. Nothing course- or semester-specific; the Menu
- * button only where there is a side nav to open. Its links start `?`: app-level pages are about
+ * button only where there is a side nav to open: shown on a narrow screen, or with the nav hidden
+ * by its handle. Its links start `?`: app-level pages are about
  * no course or semester, so they clear the query. With `titleHref` (an instructor previewing a
  * semester's Student view, decision 0025) the view is a link of its own, back to that semester.
  * Guide only for a person with an instructor role (`guide`): it explains the instructor console
