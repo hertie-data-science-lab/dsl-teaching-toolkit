@@ -23,6 +23,14 @@ export function releaseAdhoc(repos: string[]): Tiers {
   };
 }
 
+/** Re-release and Release again: take the course version of the copied paths instead of merging onto the semester's edits (`replace`). */
+export const REPLACE: Tiers = {
+  replace: {
+    tier: 'advanced', label: 'Overwrite the semester’s copy, discarding its edits', widget: 'checkbox', default: false,
+    reason: 'A conflict then cannot happen; the semester’s edit to this file is lost.',
+  },
+};
+
 export const HANDOUT: Tiers = {
   solution_datetime: {
     tier: 'advanced', label: 'Solution shown', widget: 'select', default: '', defaultLabel: 'default: not now',

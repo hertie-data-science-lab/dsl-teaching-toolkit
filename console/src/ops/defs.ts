@@ -8,11 +8,12 @@ import { plural } from '../model/format';
 import { COURSE_REPO } from '../model/names';
 import { ghUrl } from '../ui/bits';
 import { DEFAULT_DEST_REPO } from '../model/policy';
-import { HANDOUT, RETURN_MARKS, RETURN_MARKS_ABOUT, RETURN_MARKS_ALWAYS, SEND_CODES_ABOUT, releaseAdhoc as adhocTiers, returnMarksTiers, updateCopies as copiesTiers } from '../tiers/ops';
+import { HANDOUT, REPLACE, RETURN_MARKS, RETURN_MARKS_ABOUT, RETURN_MARKS_ALWAYS, SEND_CODES_ABOUT, releaseAdhoc as adhocTiers, returnMarksTiers, updateCopies as copiesTiers } from '../tiers/ops';
 import type { Source } from '../model/settings';
 import { destPathOf, requestOf, toArgs, type Group } from '../model/releaseState';
 import type { ComponentChildren } from 'preact';
 import type { OpDef } from './session';
+import type { Tiers } from '../tiers/types';
 
 export interface Scope {
   courseOrg: string;
@@ -60,6 +61,18 @@ export function keepFuture(s: Scope): OpDef {
   };
 }
 
+/**
+ * PR into source for exactly `paths` (semester-side, `<dest repo>/<path>`, or `<path>` in the
+ * semester's default materials repo): `release.propagate_back` carrying only those back.
+ */
+export function keepFuturePaths(s: Scope, paths: string[]): OpDef {
+  return {
+    ...keepFuture(s), key: `paths:${paths.join(',')}`, name: 'PR into source', title: paths.join(', '),
+    intro: 'Opens a pull request carrying this file’s semester edit back into the course repo, so next semester starts from it.',
+    args: { paths: paths.join(',') },
+  };
+}
+
 export interface ReleaseRef {
   id: string;
   ident: string; // "Session 5"
@@ -70,9 +83,10 @@ export interface ReleaseRef {
   dest?: { repo: string; path: string } | null;
 }
 
-// One engine op, `release.entry`, in three wordings: early, again, now. No Options: the
-// engine rebuilds a schedule entry's source and destination from schedule.yml
-// (`console.entry_requests`), so a destination typed here would be dropped.
+// One engine op, `release.entry`, in three wordings: early, again, now. No destination
+// options: the engine rebuilds a schedule entry's source and destination from schedule.yml
+// (`console.entry_requests`), so a destination typed here would be dropped. Release again
+// alone offers Overwrite (`replace`).
 function releaseDef(s: Scope, r: ReleaseRef, copy: Pick<OpDef, 'name' | 'intro' | 'verb' | 'running' | 'cancel' | 'where'>): OpDef {
   const target = destUrl(s.cohortOrg ?? s.courseOrg, r.dest?.repo || DEFAULT_DEST_REPO, r.dest?.path ?? '');
   return { ...base(s, 'release.entry', r.id), ...copy, title: `${r.ident}: ${r.title}`, args: { entry: r.id }, previewProposed: false, target };
@@ -87,8 +101,8 @@ export function releaseEarly(s: Scope, r: ReleaseRef): OpDef {
 
 /**
  * Release again, with what differs from the course copy (decision 0043 rule 6): one line per
- * kind in `facts`, and - when files were deleted from the course copy - the unticked choice to
- * remove them from the released copy too (`remove_deleted`).
+ * kind in `facts`, the advanced Overwrite (`replace`, off), and - when files were deleted from
+ * the course copy - the unticked choice to remove them from the released copy too (`remove_deleted`).
  */
 export function releaseAgain(s: Scope, r: ReleaseRef, drift: { facts: string[]; deleted: number; edited?: boolean } = { facts: [], deleted: 0 }): OpDef {
   const def = releaseDef(s, r, {
@@ -98,15 +112,16 @@ export function releaseAgain(s: Scope, r: ReleaseRef, drift: { facts: string[]; 
   if (drift.facts.length) def.facts = drift.facts;
   // A release merges into the released copy: a file both sides changed waits as a pull request, never overwritten blind.
   if (drift.edited) def.confirm = 'The released copy has its own edits: they stay, and a file the course also changed waits in a pull request for you to resolve. Keep them for future semesters first if they should last.';
-  if (drift.deleted) {
-    def.options = {
+  def.options = {
+    ...(drift.deleted ? {
       remove_deleted: {
         tier: 'ask', widget: 'checkbox', default: false,
         label: `Also remove the ${plural(drift.deleted, 'file')} deleted from the course copy`,
         reason: 'Off: they stay in the released copy, as a release only ever adds.',
       },
-    };
-  }
+    } : {}),
+    ...REPLACE,
+  } as Tiers;
   return def;
 }
 

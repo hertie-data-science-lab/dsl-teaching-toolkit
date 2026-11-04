@@ -159,6 +159,9 @@ main { min-width: 0; }
 .dif-sum { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .dif-right { margin-left: auto; display: flex; gap: 6px; align-items: center; }
 .dif-right .btn[aria-pressed="true"] { background: var(--sunk); border-color: var(--ink-2); }
+/* A file whose re-release waits in a pull request: Open PR and Overwrite in place of Re-release. */
+.dif-pending { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0 0 8px; padding: 6px 10px; border-radius: 8px; background: var(--amber-soft); color: var(--amber-ink); font-size: 13.5px; font-weight: 600; }
+.dif-pending .btn { background: var(--surface); }
 .dif-diff { border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; margin: 2px 0 10px; background: var(--surface); }
 .dif-diff-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 6px 10px; background: var(--surface-2); border-bottom: 1px solid var(--rule); font-size: 13px; }
 .dif-diff-head code { font-family: var(--font-code); font-size: 12.5px; }
@@ -318,6 +321,9 @@ button.wk { font: inherit; text-align: left; cursor: pointer; align-content: sta
 .file-tree .ft-toggle { min-height: 0; padding: 1px 8px; font-size: 12px; }
 .file-tree .ft-file .ft-toggle { margin-left: auto; }
 .file-tree .ft-tick { margin: 0; }
+.file-tree .ft-rollup { display: contents; }
+/* A folder's roll-up chips describe its contents: once open, its children carry them instead. */
+.file-tree details[open] > summary .ft-rollup { display: none; }
 .file-tree .ft-note { flex-basis: 100%; font-size: 12.5px; color: var(--amber-ink); }
 table.kinds { max-width: 720px; }
 table.kinds td:first-child { white-space: nowrap; }
@@ -1365,3 +1371,6 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .withhold-defaults ul { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 10px; }
 .withhold-defaults .defaults-hard code { color: var(--muted); background: none; }
 .withhold-defaults .defaults-content .chip { cursor: pointer; font-family: var(--font-code); }
+/* A file row's chevron opens the Open split button's menu (ui/OpenSplit.tsx `caretOnly`): from the chevron, rightwards. */
+.file-menu .open-menu { left: 0; right: auto; top: calc(100% + 6px); width: 300px; max-width: calc(100vw - 32px); }
+.open-menu .pm-off { cursor: default; }

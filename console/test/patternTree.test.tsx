@@ -102,14 +102,24 @@ describe('the withheld tree’s folder counts', () => {
   it('says how many files a folder withholds, and not how many are released', () => {
     const out = render(<PatternTree files={files} patterns={patterns} onChange={() => {}} />);
     // Withheld: labs/02/lab.pdf, labs/02/key.pdf, the never-material .DS_Store and the denylisted solutions/a.py.
-    expect(out).toContain('<span class="ft-name">labs/</span><span class="chip amber">4 withheld</span>');
+    expect(out).toContain('<span class="ft-name">labs/</span><span class="ft-rollup"><span class="chip amber">4 withheld</span></span>');
     // A folder no list can release says so, with no toggle.
     expect(out).toContain('<span class="ft-name">solutions/</span><span class="chip amber">never copied</span>');
     expect(out).not.toContain('aria-label="Withhold labs/solutions/"');
-    expect(out).toContain('<span class="ft-name">02/</span><span class="chip amber">2 withheld</span>');
+    expect(out).toContain('<span class="ft-name">02/</span><span class="ft-rollup"><span class="chip amber">2 withheld</span></span>');
     expect(out).not.toContain('· 2 released');
     // A folder with nothing withheld says nothing.
-    expect(render(<PatternTree files={files} patterns={[]} onChange={() => {}} />)).not.toContain('<span class="ft-name">01/</span><span class="chip amber">');
+    expect(render(<PatternTree files={files} patterns={[]} onChange={() => {}} />)).not.toContain('<span class="ft-name">01/</span><span class="ft-rollup">');
+  });
+
+  it('shows a folder’s roll-up only while it is closed, its own chip either way', () => {
+    // A withheld folder's own `withheld` chip is about the folder: never in the roll-up.
+    const out = render(<PatternTree files={files} patterns={['labs/02/']} onChange={() => {}} />);
+    expect(out).toContain('<span class="ft-name">02/</span><span class="chip amber">withheld</span>');
+    expect(out).toContain('<span class="ft-name">labs/</span><span class="ft-rollup"><span class="chip amber">');
+    // CSS hides the roll-up of an open folder, so a toggle needs no re-render.
+    const css = readFileSync(new URL('../src/styles/console.css', import.meta.url), 'utf8');
+    expect(css).toContain('.file-tree details[open] > summary .ft-rollup { display: none; }');
   });
 
   it('counts the whole repo three ways under the institution’s defaults: never leaving, withheld, released', () => {

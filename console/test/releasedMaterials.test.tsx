@@ -250,7 +250,8 @@ describe('Released materials', () => {
     expect(diffBtn.textContent).toBe('Diff');
     expect(notes.querySelector('.dif-diff')).toBeNull();
     await act(() => diffBtn.click());
-    for (let i = 0; i < 6; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    // The `diff` package is imported on first open: under a loaded run that takes more than a few ticks.
+    for (let i = 0; i < 200 && !notes.querySelector('pre.file-diff .fd-add'); i++) await act(async () => { await new Promise((r) => setTimeout(r, 5)); });
     expect(diffBtn.getAttribute('aria-expanded')).toBe('true');
     const box = notes.querySelector('.dif-diff')!;
     expect(box.querySelector('.dif-diff-head code')!.textContent).toBe('lectures/05_trees/notes.md');
@@ -282,7 +283,7 @@ describe('Released materials', () => {
     expect(lab.querySelector('.dif-diff-head a')).toBeNull();
   });
 
-  it('re-releases one file, and opens one PR into source for every semester edit', async () => {
+  it('re-releases one file, with Overwrite in its Options, and opens a PR into source for one file or every semester edit', async () => {
     const open = vi.fn();
     root = document.createElement('div');
     document.body.appendChild(root);
@@ -301,15 +302,86 @@ describe('Released materials', () => {
     await act(() => again('lab.ipynb').click());
     // Exactly that file: the course path from the release, onto the released copy.
     expect(open.mock.calls[0][0]).toMatchObject({ op: 'release.adhoc', args: { course_source_repo: 'course-materials-f2026', course_source_path: 'labs/lab-1/lab.ipynb', semester_dest_repo: 'materials', semester_dest_path: 'labs/lab-1/lab.ipynb' } });
-    // One panel-level PR into source, beside the filter, with its ?.
+    // Its Options: the advanced Overwrite, off, so a plain Re-release merges.
+    expect(open.mock.calls[0][0].args.replace).toBeUndefined();
+    expect(open.mock.calls[0][0].options).toEqual({
+      replace: { tier: 'advanced', widget: 'checkbox', default: false, label: 'Overwrite the semester’s copy, discarding its edits', reason: 'A conflict then cannot happen; the semester’s edit to this file is lost.' },
+    });
+    // PR into source per file, beside Re-release: for a file edited in the semester (added there included), not for one edited in the course.
+    const prFile = (name: string) => [...[...panel.querySelectorAll<HTMLElement>('li.dif-file')].find((li) => li.querySelector('.dif-name')!.textContent === name)!
+      .querySelectorAll<HTMLButtonElement>('.dif-right > button.btn')].find((b) => b.textContent === 'PR into source')!;
+    expect(prFile('notes.md').disabled).toBe(false);
+    expect(prFile('extra.md').disabled).toBe(false);
+    expect([prFile('lab.ipynb').disabled, prFile('lab.ipynb').title]).toEqual([true, 'Nothing edited in the semester for this file.']);
+    expect([prFile('new.md').disabled, prFile('new.md').title]).toEqual([true, 'Nothing edited in the semester for this file.']);
+    await act(() => prFile('notes.md').click());
+    // That one path, in the semester's default materials repo: no repo prefix.
+    expect(open.mock.calls[1][0]).toMatchObject({
+      op: 'release.propagate_back', name: 'PR into source', title: 'lectures/05_trees/notes.md', args: { paths: 'lectures/05_trees/notes.md' },
+      intro: 'Opens a pull request carrying this file’s semester edit back into the course repo, so next semester starts from it.',
+    });
+    // One panel-level PR into source (all), beside the filter, with its ?: the full run.
     const pr = panel.querySelector<HTMLButtonElement>('.dif-top .dif-pr > button')!;
-    expect(pr.textContent).toBe('PR into source');
+    expect(pr.textContent).toBe('PR into source (all)');
     expect(panel.querySelector('.dif-pr .hint-pop')!.textContent).toMatch(/^Opens one pull request per course repo carrying every edit listed under Edited in semester and Both/);
     await act(() => pr.click());
-    expect(open.mock.calls[1][0]).toMatchObject({ op: 'release.propagate_back', name: 'Keep for future semesters' });
+    expect(open.mock.calls[2][0]).toMatchObject({ op: 'release.propagate_back', name: 'Keep for future semesters', args: {} });
     // Nothing edited in the semester (only the lab released: changed and added in the course): PR into source greyed.
     await draw(stepFiles(), statusWith([rel('lab-1', 'labs/lab-1')]));
     expect([pr.disabled, pr.title]).toEqual([true, 'Nothing edited in the semester.']);
+  });
+
+  it('names the repo in a per-file PR into source outside the semester’s default materials repo', async () => {
+    const open = vi.fn();
+    root = document.createElement('div');
+    document.body.appendChild(root);
+    const env = { user: { login: 'prof', id: 1, name: 'P', email: null, avatar_url: '' }, client: new GitHubClient({ token: () => 't', fetch: new FakeGitHub().fetch }), ops: { open } } as unknown as Env;
+    const other: Release = { ...rel('s5', 'lectures/05_trees'), dest: { repo: 'extras', path: 'lectures/05_trees' } };
+    const base = stepFiles();
+    const f = Object.assign(Object.create(base), { tree: (o: string, r: string, ref?: string) => base.tree(o, r === 'extras' ? 'materials' : r, ref) });
+    await act(() => render(<EnvCtx.Provider value={env}><SemesterMaterialsScreen {...props({ files: f, loaded: statusWith([other]) })} /></EnvCtx.Provider>, root!));
+    const btn = [...root.querySelectorAll<HTMLButtonElement>('details.out-of-step .dif-right > button.btn')].find((b) => b.textContent === 'PR into source')!;
+    await act(() => btn.click());
+    expect(open.mock.calls[0][0].args).toEqual({ paths: 'extras/lectures/05_trees/notes.md' });
+  });
+
+  it('marks a file whose release waits in an open pull request from upstream, with Open PR and Overwrite in place of Re-release', async () => {
+    const open = vi.fn();
+    const url = `https://github.com/${ORG}/materials/pull/7`;
+    const gh = new FakeGitHub().on('GET', `/repos/${ORG}/materials/pulls?head=${encodeURIComponent(`${ORG}:upstream`)}&state=open&per_page=30`, [{ number: 7, html_url: url, title: 'Release', head: { ref: 'upstream' } }]);
+    root = document.createElement('div');
+    document.body.appendChild(root);
+    const env = { user: { login: 'prof', id: 1, name: 'P', email: null, avatar_url: '' }, client: new GitHubClient({ token: () => 't', fetch: gh.fetch }), ops: { open } } as unknown as Env;
+    // notes.md edited in the semester (its upstream blob differs from main), extra.md only in the semester, lab.ipynb behind.
+    await act(() => render(<EnvCtx.Provider value={env}><SemesterMaterialsScreen {...props({ files: stepFiles({}, ['lectures/05_trees/extra.md']) })} /></EnvCtx.Provider>, root!));
+    for (let i = 0; i < 6; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    // Read once for the one repo listed.
+    expect(gh.seen.filter((x) => x.url.includes('/pulls?'))).toHaveLength(1);
+    const row = (name: string) => [...root!.querySelectorAll<HTMLElement>('details.out-of-step li.dif-file')].find((li) => li.querySelector('.dif-name')!.textContent === name)!;
+    const buttons = (li: HTMLElement) => [...li.querySelectorAll<HTMLElement>('.dif-right > .btn')].map((b) => b.textContent);
+    const notes = row('notes.md');
+    const note = notes.querySelector<HTMLElement>('.dif-pending[role="status"]')!;
+    expect(note.querySelector('span')!.textContent).toBe('Release pending in a pull request');
+    expect(buttons(notes)).not.toContain('Re-release');
+    expect(buttons(notes)).toContain('PR into source');
+    const openPr = note.querySelector<HTMLAnchorElement>('a.btn')!;
+    expect([openPr.textContent, openPr.getAttribute('href'), openPr.getAttribute('target')]).toEqual(['Open PR', url, '_blank']);
+    await act(() => [...note.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Overwrite')!.click());
+    expect(open.mock.calls[0][0]).toMatchObject({
+      op: 'release.adhoc', confirm: 'Replaces the semester’s copy of this file with the course version; its edit is lost.',
+      args: { course_source_path: 'lectures/05_trees/notes.md', semester_dest_path: 'lectures/05_trees/notes.md', replace: true },
+    });
+    // Not pending: a file the release does not touch (only in the semester), nor one edited in the course.
+    expect(row('extra.md').querySelector('.dif-pending')).toBeNull();
+    expect(row('lab.ipynb').querySelector('.dif-pending')).toBeNull();
+    expect(buttons(row('lab.ipynb'))).toContain('Re-release');
+    // The ? says so in one line.
+    expect(root.querySelector('details.out-of-step summary .hint-pop')!.textContent).toContain('Release pending in a pull request: a re-release that conflicted waits there');
+  });
+
+  it('draws no pending notice without an open pull request from upstream', async () => {
+    const el = await mount(<SemesterMaterialsScreen {...props({ files: stepFiles() })} />);
+    expect(el.querySelector('details.out-of-step .dif-pending')).toBeNull();
   });
 
   it('draws no differing-materials panel when every released folder is in step', () => {

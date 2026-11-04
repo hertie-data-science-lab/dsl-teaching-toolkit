@@ -85,8 +85,10 @@ describe('a released folder that differs from the course copy', () => {
     const def = releaseAgain(scope, ref, releaseAgainDrift(divergenceOf(released, 's5')));
     expect(def.facts).toEqual(['s5 has changed in the course.', '2 files of s5 were deleted.', 's5 was edited in the semester.']);
     expect(def.options?.remove_deleted).toMatchObject({ widget: 'checkbox', default: false, label: 'Also remove the 2 files deleted from the course copy' });
+    // Then the advanced Overwrite, off.
+    expect(Object.keys(def.options!)).toEqual(['remove_deleted', 'replace']);
     const plain = releaseAgain(scope, ref);
-    expect(plain.options).toBeUndefined();
+    expect(Object.keys(plain.options!)).toEqual(['replace']);
     expect(plain.facts).toBeUndefined();
   });
 

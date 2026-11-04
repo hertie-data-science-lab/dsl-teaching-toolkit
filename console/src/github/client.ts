@@ -132,6 +132,13 @@ export interface GhIssue {
   pull_request?: object;
 }
 
+export interface GhPull {
+  number: number;
+  html_url: string;
+  title: string;
+  head: { ref: string };
+}
+
 export interface GhComment {
   id: number;
   body: string;
@@ -649,6 +656,11 @@ export class GitHubClient {
       if (batch.length < 100) break;
     }
     return null;
+  }
+
+  /** A repo's pull requests from its own branch `head` (GitHub filters by `owner:branch`), in `state`; one page of 30, empty when the repo cannot be read. */
+  async listPulls(owner: string, repo: string, q: { head: string; state: 'open' | 'closed' | 'all' }): Promise<GhPull[]> {
+    return (await this.getOrNull<GhPull[]>(`/repos/${owner}/${repo}/pulls?head=${encodeURIComponent(`${owner}:${q.head}`)}&state=${q.state}&per_page=30`)) ?? [];
   }
 
   /** An issue's comments, oldest first (up to 100: a Submission receipts issue stays well under). */

@@ -5,7 +5,8 @@
 // (the import picker) has a tick per row, everything ticked until a line leaves it out. It reads as a
 // file tree (decision 0026 rule 5): indent guides, folder and file icons, withheld rows greyed with
 // the name struck through (`ft-out`), the kind chip on kind folders. A folder with something
-// withheld inside says how much. `control` swaps the
+// withheld inside says how much, while it is closed (`.ft-rollup`: a folder's roll-up chips show only
+// closed, its children carrying them once open; its own chip shows either way). `control` swaps the
 // per-row control for the caller's own. `SelectionEditor` wraps it for every "which files" setting.
 // The Files panel (plan 2026-11-04, decisions 1 and 3) adds `chip` (the row's chip in place of the
 // withheld word: state chips, roll-ups), `rowClick` (a click on a file row toggles its tick) and
@@ -136,7 +137,7 @@ function Node({ n, depth, c }: { n: TreeNode; depth: number; c: Ctx }) {
           <FolderHead name={n.name} />
           {c.kinds[n.path] ? <span class="chip">{c.kinds[n.path]}</span> : null}
           {c.chip ? c.chip(n.path, true)
-            : fixed ? <span class="chip amber">{fixed}</span> : out ? <span class="chip amber">{c.withheldWord}</span> : row.withheld ? <span class="chip amber">{row.withheld} {c.withheldWord}</span> : null}
+            : fixed ? <span class="chip amber">{fixed}</span> : out ? <span class="chip amber">{c.withheldWord}</span> : row.withheld ? <span class="ft-rollup"><span class="chip amber">{row.withheld} {c.withheldWord}</span></span> : null}
           {why}
           {c.mode === 'exclude' ? control : null}
           {note}

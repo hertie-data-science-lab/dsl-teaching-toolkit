@@ -1,5 +1,5 @@
 // A materials repo's files as a folder tree, to look at, not to edit (the course materials
-// index): every folder starts collapsed, with "N files" beside it while it is, and a GitHub link
+// index): every folder starts collapsed, with "N files" beside it while it is (`.ft-rollup`, hidden by CSS once open), and a GitHub link
 // to its tree page; each file is the file row both consoles share (`FileRow.tsx`), its name
 // opening the file in the console's viewer (`?file=<repo>/<path>`, decision 0040 rule 6). The
 // folders a viewer opened are kept per repo in sessionStorage, a convenience only. `focus`
@@ -98,7 +98,7 @@ export function MaterialsTree({ org, repo, paths, focus, current, at = 'course' 
         <details open={isOpen} onToggle={(e) => toggle(n.path, (e.currentTarget as HTMLDetailsElement).open)}>
           <summary>
             <FolderHead name={n.name} />
-            {isOpen ? null : <span class="ft-count">{plural(counts.get(n.path) ?? 0, 'file')}</span>}
+            <span class="ft-rollup"><span class="ft-count">{plural(counts.get(n.path) ?? 0, 'file')}</span></span>
             <a class="ft-gh" href={ghUrl(org, repo, n.path, 'HEAD', 'tree')} target="_blank" rel="noopener" aria-label={`${n.path}/ on GitHub`}>GitHub <Ext /></a>
           </summary>
           {isOpen ? <ul>{n.children.map(node)}</ul> : null}

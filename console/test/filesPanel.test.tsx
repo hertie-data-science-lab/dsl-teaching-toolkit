@@ -15,7 +15,7 @@ import { GitHubClient } from '../src/github/client';
 import type { FileState, TreeState } from '../src/model/files';
 import type { Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
-import { FilesPanel, SCHEDULE_LINK_HINT, type FilesPanelProps } from '../src/ui/FilesPanel';
+import { FilesPanel, SCHEDULE_LINK_LEAD, SCHEDULE_LINK_REST, type FilesPanelProps } from '../src/ui/FilesPanel';
 import { FakeGitHub, fileBody } from './fake';
 import example from './fixtures/status.example.json';
 import { StaticFiles } from './staticFiles';
@@ -122,7 +122,7 @@ const click = (x: Element) => act(() => (x as HTMLElement).click());
 /** A file row by its path's last part, and a folder's summary by its name. */
 const fileRow = (el: HTMLElement, name: string) => [...el.querySelectorAll<HTMLElement>('.file-tree li.ft-file')].find((li) => li.querySelector('.ft-name')?.textContent === name)!;
 const folder = (el: HTMLElement, name: string) => [...el.querySelectorAll<HTMLElement>('.file-tree li.ft-dir')].find((li) => li.querySelector(':scope > details > summary .ft-name')?.textContent === `${name}/`)!;
-const chips = (li: HTMLElement) => [...li.querySelectorAll(':scope > .chip:not(.rule-chip), :scope > .chip-hint > .chip, :scope > details > summary > .chip:not(.rule-chip), :scope > details > summary > .chip-hint > .chip')].map((c) => c.textContent);
+const chips = (li: HTMLElement) => [...li.querySelectorAll(':scope > .chip:not(.rule-chip), :scope > .chip-hint > .chip, :scope > details > summary > .chip:not(.rule-chip), :scope > details > summary > .chip-hint > .chip, :scope > details > summary > .ft-rollup > .chip')].map((c) => c.textContent);
 /** Text as drawn: a closed popover waits hidden in place. */
 const shown = (x: HTMLElement) => {
   const c = x.cloneNode(true) as HTMLElement;
@@ -234,6 +234,9 @@ describe('the Files panel', () => {
     expect(chips(folder(el, '01_intro'))).toEqual(['1 behind · 1 ahead']);
     expect(chips(folder(el, '02_linear'))).toEqual(['1 diverged']);
     expect(chips(folder(el, 'drafts'))).toEqual(['withheld']);
+    // A roll-up is about the folder's contents (`.ft-rollup`, hidden by CSS once open); a folder's own chip is not one.
+    expect(folder(el, '01_intro').querySelector(':scope > details > summary > .ft-rollup')!.textContent).toBe('1 behind · 1 ahead');
+    expect(folder(el, 'drafts').querySelector(':scope > details > summary > .ft-rollup')).toBeNull();
     expect(tick(folder(el, 'drafts'))).toBeNull();
     // Withheld by default on a folder copy; ticking the folder names it outright, which ships it (`selection.deny`).
     expect(chips(folder(el, 'solutions'))).toEqual(['withheld']);
@@ -372,7 +375,10 @@ describe('the Files panel', () => {
     const lede = () => el.querySelector<HTMLElement>('.files-panel > p.lede.rh-sched')!;
     expect(shown(lede())).toBe('Want to automate these releases? Schedule on the calendar → ?');
     // The ? right after the link: the placeholder wording, or the caller's.
-    expect(lede().querySelector('a.textlink + .hint-wrap .hint-pop')!.textContent).toBe(SCHEDULE_LINK_HINT);
+    const pop = lede().querySelector('a.textlink + .hint-wrap .hint-pop')!;
+    expect(pop.textContent).toBe(`${SCHEDULE_LINK_LEAD} ${SCHEDULE_LINK_REST}`);
+    // Its first sentence in bold.
+    expect(pop.querySelector('b')!.textContent).toBe(SCHEDULE_LINK_LEAD);
     expect(lede().querySelector('a')!.getAttribute('href')).toBe(`?cohort=${SEM}#schedule-0`);
     // Before the tree and its heads (the edited-files notice between), not in the footer.
     expect(lede().nextElementSibling!.classList.contains('edited-note')).toBe(true);

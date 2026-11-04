@@ -59,11 +59,14 @@ students with one plain **withheld** chip; **Withhold** says why.
 A folded panel listing every released folder whose files differ between the course copy and
 the semester's, its count the differing files: **ahead** (edited in the semester, a file added there included), **behind** (changed in the course since the
 release, a file added there included) or **diverged** (both). A filter narrows it to one kind.
-**PR into source** opens one pull request per course repo carrying every semester edit back
+**PR into source (all)** opens one pull request per course repo carrying every semester edit back
 ([below](#carrying-cohort-edits-back)). Under each folder, each differing file has
 **Re-release** (that file's course version, merged onto the semester's edit; a conflict opens a
-pull request), **Open**, and **Diff**, which shows what changed under the row (text files), with
-**Compare on GitHub** for an edited one. Nothing changes until you choose.
+pull request; its Options can **Overwrite the semester's copy** instead, discarding its edit),
+**PR into source** (that file's semester edit only), **Open**, and **Diff**, which shows what changed under the row (text files), with
+**Compare on GitHub** for an edited one. While a re-release waits in its pull request, the
+file says **Release pending in a pull request**, with **Open PR** to resolve it on GitHub and
+**Overwrite** to take the course version. Nothing changes until you choose.
 
 On a course repo's **Files** → **Release**, a notice says when the chosen semester has edited
 released files from that repo, with **PR into source** and **See which**.

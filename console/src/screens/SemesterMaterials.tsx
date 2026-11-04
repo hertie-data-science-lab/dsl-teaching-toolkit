@@ -5,9 +5,11 @@
 // every file opening in the viewer both consoles use (`Split`, `RepoFile`). The released folders
 // whose files differ from the course copy sit in their own folded panel ("Released materials
 // that differ from their source files", worked out here three-way, `outOfStep`), each
-// folder a fold of its own, headed by its two ways to settle it (Release again, Keep for
-// future semesters), its differing files listed beneath, each with Open and an inline Diff; the
-// engine's `DIVERGED_RELEASED` lines stay on the Dashboard.
+// folder a fold of its own, its differing files listed beneath, each with its two ways to settle
+// it (Re-release, with Overwrite in its Options; PR into source), Open and an inline Diff, and
+// one PR into source (all) for the panel. A re-release that conflicted waits in an open pull
+// request from the semester repo's `upstream` branch: its files then say so, with Open PR and
+// Overwrite in place of Re-release. The engine's `DIVERGED_RELEASED` lines stay on the Dashboard.
 // Below, for those who can change the course, Release by hand: the Files panel's Release view
 // (`FilesPanel`, plan 2026-11-04 decision 2). Withheld files are the course's concern, so nothing
 // here edits them.
@@ -38,7 +40,11 @@ import { RepoFiles, addMaterialsTopic, fileIn, focusIn, repoOf } from './CourseI
 import { newestRepo } from './CourseEdit';
 import { sourceRepos } from './Schedule';
 import { WithStatus, cohortScope } from './common';
-import { keepFuture, releasePicked, type Scope } from '../ops/defs';
+import { keepFuture, keepFuturePaths, releasePicked, type Scope } from '../ops/defs';
+import { REPLACE } from '../tiers/ops';
+import { useLoad } from '../ui/load';
+import type { GhPull } from '../github/client';
+import type { TreeState } from '../model/files';
 import type { OpDef } from '../ops/session';
 import { OpOpen } from '../ops/Panel';
 import type { CohortProps, ReadyProps } from './types';
@@ -201,8 +207,9 @@ const STEP_HINT_ITEMS = [
   <><b>Edited in semester</b> (ahead): the semester’s copy was changed after the release.</>,
   <><b>Edited in course</b> (behind): the course copy changed since the release, additions included.</>,
   <><b>Both</b> (diverged): changed on both sides.</>,
-  <><b>Re-release</b> copies one file’s course version over, merged onto the semester’s edit; a conflict opens a pull request for the instructors.</>,
-  <><b>PR into source</b> opens a pull request carrying the semester’s edits back into the course.</>,
+  <><b>Re-release</b> copies one file’s course version over, merged onto the semester’s edit; a conflict opens a pull request for the instructors. Its Options can overwrite instead.</>,
+  <><b>PR into source</b> opens a pull request carrying the semester’s edit back into the course repo, so next semester starts from it.</>,
+  <><b>Release pending in a pull request</b>: a re-release that conflicted waits there; Open PR to resolve it, or Overwrite to take the course version.</>,
 ];
 
 const STEP_TABS: [FolderStep | 'all', string][] = [['all', 'All'], ['ahead', 'Edited in semester'], ['behind', 'Edited in course'], ['diverged', 'Both']];
@@ -220,14 +227,26 @@ const DIFF_WHAT: Record<FolderStep, string> = {
 export const NO_LINE_DIFF = 'A binary file: no line diff. Open it to compare.';
 export const NOTHING_TO_RERELEASE = 'The semester already has the course version; re-releasing changes nothing.';
 export const ONLY_IN_SEMESTER = 'Only in the semester: nothing in the course to release.';
-const PR_HINT = 'Opens one pull request per course repo carrying every edit listed under Edited in semester and Both, so next semester starts from them. Nothing per file: the pull request holds all of the semester’s edits.';
+const PR_HINT = 'Opens one pull request per course repo carrying every edit listed under Edited in semester and Both, so next semester starts from them.';
+export const NOTHING_TO_PROPOSE = 'Nothing edited in the semester for this file.';
+export const OVERWRITE_CONFIRM = 'Replaces the semester’s copy of this file with the course version; its edit is lost.';
 
-/** Re-release: `release.adhoc` of exactly one course file (`from` in `srcRepo`) onto its released copy (`to` in `destRepo`). */
-function reRelease(scope: Scope, srcRepo: string, from: string, destRepo: string, to: string) {
+/** Re-release: `release.adhoc` of exactly one course file (`from` in `srcRepo`) onto its released copy (`to` in `destRepo`), with Overwrite (`replace`) in its Options. */
+export function reRelease(scope: Scope, srcRepo: string, from: string, destRepo: string, to: string): OpDef {
   const parent = (x: string) => (x.includes('/') ? x.slice(0, x.lastIndexOf('/')) : '');
   const folder = parent(from);
   const g: Group = { repo: srcRepo, head: folder ? `${folder}/` : TOP_LEVEL, folder, kind: 'partial', files: 1, of: 1, sources: [from], ship: [from], withheld: [], destRepo, destPath: parent(to) };
-  return releasePicked(scope, [g], { defaultDestRepo: destRepo });
+  return { ...releasePicked(scope, [g], { defaultDestRepo: destRepo }), options: REPLACE };
+}
+
+/** Overwrite: the Re-release of a file whose release waits in a pull request, `replace` set. */
+export const overwrite = (again: OpDef): OpDef => ({ ...again, args: { ...again.args, replace: true }, confirm: OVERWRITE_CONFIRM });
+
+/** A path's blob on two branches differs: there, and not the same object (false while either is being read). */
+function differs(a: TreeState, b: TreeState, path: string): boolean {
+  if (a.kind !== 'ready' || b.kind !== 'ready') return false;
+  const x = a.paths.find((e) => e.path === path && !e.dir), y = b.paths.find((e) => e.path === path && !e.dir);
+  return !!x && x.sha !== y?.sha;
 }
 
 /** A file no line diff is drawn for, by its name: documents and archives (`editableFile`) and images but svg. */
@@ -246,6 +265,10 @@ function OutOfStepPanel(p: ReadyProps & { def: string }) {
   const [show, setShow] = useState<FolderStep | 'all'>('all');
   const org = p.cohort.org;
   const rows = outOfStep(p.status, p.files, p.course.org, org, p.def);
+  // A re-release that conflicted waits in an open pull request from `upstream`: read once per repo listed.
+  const prRepos = [...new Set(rows.map((x) => x.repo))];
+  const prs = useLoad(env && prRepos.length ? () => Promise.all(prRepos.map((r) => env.client.listPulls(org, r, { head: 'upstream', state: 'open' }))) : null, [org, prRepos.join('\n')]);
+  const prOf = (repo: string): GhPull | undefined => (prs.kind === 'ready' ? prs.value[prRepos.indexOf(repo)]?.[0] : undefined);
   if (!rows.length) return null;
   const scope = cohortScope(p);
   const repos = p.files.repos(org);
@@ -270,8 +293,8 @@ function OutOfStepPanel(p: ReadyProps & { def: string }) {
           ))}
         </div>
         <span class="dif-pr">
-          <button class="btn small quiet" type="button" disabled={!edited} title={edited ? undefined : 'Nothing edited in the semester.'} onClick={keep}>PR into source</button>
-          <Hint label="About PR into source">{PR_HINT}</Hint>
+          <button class="btn small quiet" type="button" disabled={!edited} title={edited ? undefined : 'Nothing edited in the semester.'} onClick={keep}>PR into source (all)</button>
+          <Hint label="About PR into source (all)">{PR_HINT}</Hint>
         </span>
       </div>
       <ul class="dif-list">
@@ -279,13 +302,18 @@ function OutOfStepPanel(p: ReadyProps & { def: string }) {
           const pulls = `${ghUrl(org, x.repo)}/pulls`;
           const compare = `${ghUrl(org, x.repo)}/compare/upstream...${branchOf(x.repo)}`;
           const src = x.r.source!.repo;
+          const pr = prOf(x.repo);
+          const up = p.files.tree(org, x.repo, 'upstream'), live = p.files.tree(org, x.repo);
+          // Its file the pending release changes: edited in the semester, and `upstream` (the course version) differing from what students read.
+          const pendingOf = (f: OutOfStep['files'][number]) => (pr && (f.state === 'ahead' || f.state === 'diverged') && differs(up, live, f.path) ? pr.html_url : undefined);
           return (
             <li class="dif-folder"><details class="fold" open>
               <summary class="dif-fhead"><code class="dif-path">{x.repo === p.def ? '' : `${x.repo}: `}{x.path}/</code></summary>
               <ul class="dif-files">
                 {x.files.filter(shown).map((f) => (
                   <DiffFile key={f.path} files={p.files} org={org} repo={x.repo} folder={x.path} f={f} setup={setup} onKeep={keep} pulls={pulls} compare={compare}
-                    course={f.from ? [p.course.org, src, f.from] : null} again={f.from ? reRelease(scope, src, f.from, x.repo, f.path) : null} />
+                    course={f.from ? [p.course.org, src, f.from] : null} again={f.from ? reRelease(scope, src, f.from, x.repo, f.path) : null}
+                    keepFile={keepFuturePaths(scope, [x.repo === p.def ? f.path : `${x.repo}/${f.path}`])} pending={pendingOf(f)} />
                 ))}
               </ul>
             </details></li>
@@ -302,6 +330,10 @@ function DiffFile(p: {
   onKeep: () => void; pulls: string; compare: string; course: Side | null;
   /** Re-release: that one file, or null for a file only the semester has. */
   again: OpDef | null;
+  /** PR into source: that one file. */
+  keepFile: OpDef;
+  /** The open pull request its re-release waits in, if any: Open PR and Overwrite in place of Re-release. */
+  pending?: string;
 }) {
   const { f } = p;
   const [open, setOpen] = useState(false);
@@ -319,15 +351,25 @@ function DiffFile(p: {
         <StateChip kind={f.state as ChipKind} onKeep={p.onKeep} prUrl={f.state === 'diverged' ? p.pulls : undefined} />
         <span class="dif-sum">{sum}</span>
         <span class="dif-right">
-          {p.again && (f.state === 'behind' || f.state === 'diverged' || f.state === 'not_released')
+          {p.pending ? null : p.again && (f.state === 'behind' || f.state === 'diverged' || f.state === 'not_released')
             ? <OpOpen def={p.again} cls="btn small quiet" label="Re-release" />
             : <button class="btn small quiet" type="button" disabled title={p.again ? NOTHING_TO_RERELEASE : ONLY_IN_SEMESTER}>Re-release</button>}
+          {step === 'behind'
+            ? <button class="btn small quiet" type="button" disabled title={NOTHING_TO_PROPOSE}>PR into source</button>
+            : <OpOpen def={p.keepFile} cls="btn small quiet" label="PR into source" />}
           {inSemester ? <OpenSplit org={p.org} repo={p.repo} path={f.path} setup={p.setup} profile={profileHref(p.org)} /> : null}
           {binary
             ? <button class="btn small quiet" type="button" disabled title={NO_LINE_DIFF}>Diff</button>
             : <button class="btn small quiet" type="button" aria-expanded={open} aria-pressed={open} aria-label={`Diff ${f.path}`} onClick={() => { setOpen(!open); setSeen(true); }}>Diff</button>}
         </span>
       </div>
+      {p.pending ? (
+        <div class="dif-pending" role="status">
+          <span>Release pending in a pull request</span>
+          <a class="btn small quiet" href={p.pending} target="_blank" rel="noopener">Open PR</a>
+          {p.again ? <OpOpen def={overwrite(p.again)} cls="btn small quiet" label="Overwrite" /> : null}
+        </div>
+      ) : null}
       {open && !binary ? (
         <div class="dif-diff">
           <div class="dif-diff-head">
