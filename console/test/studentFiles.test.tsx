@@ -1,13 +1,11 @@
 // @vitest-environment happy-dom
-// A released file's menu (decision 0035 rule 10): the name, then one chevron whose menu is one
-// list with no headings - View here (the console's viewer in a new tab, for a materials file it
-// draws; GitHub's blob page for any other file in the org GitHub draws), View on GitHub, a
-// hairline, Edit in browser (github.dev in the student's fork once the fork check found one, else
-// the org's) and Edit in the editor from Profile, in the semester's folder. The same four rows on
-// every file, each with a status on the right; an unavailable one greyed with its reason: Edit
-// for a file no editor opens, the editor until Profile has a folder and an editor that takes a
-// path, View here where nothing draws the file. One fork read per
-// repo per session, and none for a row that needs none.
+// A released file's menu (decision 0035 rule 10): the name, then one chevron whose menu is the
+// Open split button's (`ui/OpenSplit.tsx`): In the browser - In the console (the console's
+// viewer in a new tab, for a materials file it draws), On GitHub, On github.dev (in the
+// student's fork once the fork check found one, else the org's); On your computer - the editor
+// from Profile, in the semester's folder, or "Set up your editor in Profile"; then Change your
+// profile. A file no editor opens has "Not an editable format" greyed in place of github.dev and
+// the editor. One fork read per repo per session, and none for a row that needs none.
 
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
@@ -74,37 +72,27 @@ describe('the file menu', () => {
     return root;
   }
   const forkReads = (gh: FakeGitHub) => gh.seen.filter((x) => x.url.includes(`/repos/${LOGIN}/`)).length;
-  const btns = (li: Element) => Object.fromEntries([...li.querySelectorAll<HTMLElement>('.file-menu-list > a, .file-menu-list > .fm-off')].map((a) => [a.querySelector('.fm-lbl')!.textContent, a]));
-  const desc = (a: Element) => a.querySelector('small')?.textContent;
-  /** The rows that are live, in order; every menu lists `FOUR`, the rest greyed. */
-  const live = (b: Record<string, HTMLElement>) => Object.keys(b).filter((k) => !b[k].classList.contains('fm-off'));
-  const [VIEW, GH, WEB, VSC] = ['View here', 'View on GitHub', 'Edit in browser', 'Edit in VS Code'];
-  const FOUR = [VIEW, GH, WEB, VSC];
-  const SET_UP = 'set up in Profile';
-  const NOT_EDITABLE = 'not an editable format';
+  /** A row's menu items by their words, in order. */
+  const btns = (li: Element) => Object.fromEntries([...li.querySelectorAll<HTMLElement>('.open-menu [role="menuitem"]')].map((a) => [a.textContent, a]));
+  const greyed = (li: Element) => [...li.querySelectorAll('.open-menu .pm-off')].map((x) => x.textContent);
+  const [VIEW, GH, WEB, FORK, SET_UP, PROFILE] = ['In the console', 'On GitHub', 'On github.dev', 'On github.dev, in your fork', 'Set up your editor in Profile', 'Change your profile'];
+  const NOT_EDITABLE = 'Not an editable format';
 
   it('edits online in the student’s fork, once the check finds it, and reads it once per repo', async () => {
     const gh = new FakeGitHub().on('GET', `/repos/${LOGIN}/materials`, { name: 'materials', fork: true, parent: { full_name: `${ORG}/materials` }, html_url: '' });
     const el = await mount(<FileList org={ORG} repos={['materials']} links={[link('labs/lab.ipynb'), link('notes.md'), link('slides.pdf')]} />, gh);
-    const [nb, md, pdf] = [...el.querySelectorAll('li')].map(btns);
+    const lis = [...el.querySelectorAll('li')];
+    const [nb, md, pdf] = lis.map(btns);
     expect(nb[GH].getAttribute('href')).toBe(`https://github.com/${ORG}/materials/blob/main/labs/lab.ipynb`);
-    expect(nb[WEB].getAttribute('href')).toBe(`https://github.dev/${LOGIN}/materials/blob/main/labs/lab.ipynb`);
-    expect(desc(nb[WEB])).toBe('your fork');
-    expect(md[WEB].getAttribute('target')).toBe('_blank');
-    // A pdf: all four listed, Edit greyed for its format - no href, aria-disabled.
-    expect(Object.keys(pdf)).toEqual(FOUR);
-    expect(live(pdf)).toEqual([VIEW, GH]);
-    expect([desc(pdf[WEB]), desc(pdf[VSC])]).toEqual([NOT_EDITABLE, NOT_EDITABLE]);
-    expect(pdf[WEB].hasAttribute('href')).toBe(false);
-    expect(pdf[WEB].querySelector('[aria-disabled="true"]')).not.toBeNull();
-    // No folder in Profile: the editor greyed, its reason linking Profile in the console.
-    expect(Object.keys(nb)).toEqual(FOUR);
-    expect(live(nb)).toEqual([VIEW, GH, WEB]);
-    expect(desc(nb[VSC])).toBe(SET_UP);
-    const profile = nb[VSC].querySelector('small a')!;
-    expect(profile.textContent).toBe('Profile');
-    expect(profile.getAttribute('href')).toBe(`?cohort=${ORG}#profile`);
-    expect(profile.hasAttribute('target')).toBe(false);
+    expect(nb[FORK].getAttribute('href')).toBe(`https://github.dev/${LOGIN}/materials/blob/main/labs/lab.ipynb`);
+    expect(md[FORK].getAttribute('target')).toBe('_blank');
+    // A pdf: github.dev and the editor greyed for its format.
+    expect(Object.keys(pdf)).toEqual([VIEW, GH, PROFILE]);
+    expect(greyed(lis[2])).toEqual([NOT_EDITABLE, NOT_EDITABLE]);
+    // No folder in Profile: the editor's place links Profile in the console, and no second Profile line.
+    expect(Object.keys(nb)).toEqual([VIEW, GH, FORK, SET_UP]);
+    expect(nb[SET_UP].getAttribute('href')).toBe(`?cohort=${ORG}#profile`);
+    expect(nb[SET_UP].hasAttribute('target')).toBe(false);
     expect(forkReads(gh)).toBe(1);
     // The name still opens the file in the console.
     expect(el.querySelector('li > .file-link > a')!.getAttribute('href')).toContain('#materials-');
@@ -117,56 +105,33 @@ describe('the file menu', () => {
     const b = btns(el);
     expect(el.querySelector('a.st-chip')!.textContent).toBe('lab.ipynb');
     expect(b[WEB].getAttribute('href')).toBe(`https://github.dev/${ORG}/materials/blob/main/labs/lab.ipynb`);
-    expect(desc(b[WEB])).toBe('course repo');
-    expect(b['Edit in Zed'].getAttribute('href')).toBe(`zed://file/Users/o/repos/${ORG}/materials/labs/lab.ipynb`);
-    expect(desc(b['Edit in Zed'])).toBe('your clone');
+    expect(b['In Zed'].getAttribute('href')).toBe(`zed://file/Users/o/repos/${ORG}/materials/labs/lab.ipynb`);
     // A custom scheme opens no new tab.
-    expect(b['Edit in Zed'].hasAttribute('target')).toBe(false);
+    expect(b['In Zed'].hasAttribute('target')).toBe(false);
+    expect(b[PROFILE].getAttribute('href')).toBe(`?cohort=${ORG}#profile`);
     if (root) render(null, root);
-    // An editor with no name it is known by is `Edit locally`.
+    // An editor with no name it is known by is `In your editor`.
     saveYourSetup(LOGIN, { folder: '/Users/o/repos', editor: 'other', scheme: 'myeditor://open/{path}' });
-    expect(Object.keys(btns(await mount(<FileChips org={ORG} repos={['materials']} links={[link('labs/lab.ipynb')]} />, gh)))).toEqual([VIEW, GH, WEB, 'Edit locally']);
+    expect(Object.keys(btns(await mount(<FileChips org={ORG} repos={['materials']} links={[link('labs/lab.ipynb')]} />, gh)))).toEqual([VIEW, GH, WEB, 'In your editor', PROFILE]);
   });
 
   it('renders a file the viewer draws in a new tab: in All materials, or in the kind tab it is listed in', async () => {
     const files = ['slides.pdf', 'notes.md', 'labs/lab.ipynb', 'deck.html', 'fig.png', 'code.py', 'essay.docx'].map((p) => link(p));
-    const el = await mount(<FileList org={ORG} repos={['materials']} links={[...files, link('slides.pdf', 'handouts')]} />, new FakeGitHub());
+    const el = await mount(<FileList org={ORG} repos={['materials']} links={[...files, link('slides.pdf', 'handouts'), link('brief.md', 'assignment-1-octo')]} />, new FakeGitHub());
     const rows = [...el.querySelectorAll('li')].map(btns);
-    expect(rows.every((b) => Object.keys(b).join() === FOUR.join())).toBe(true);
-    expect(rows.map(live)).toEqual([
-      [VIEW, GH], [VIEW, GH, WEB], [VIEW, GH, WEB], [VIEW, GH, WEB], [VIEW, GH, WEB],
-      [GH, WEB], [GH],
-      // Not in a materials repo: the console cannot open it, so View here is GitHub's blob page.
-      [VIEW, GH],
-    ]);
-    expect(desc(rows[5][VIEW])).toBe('no preview for this file');
-    expect(rows[7][VIEW].getAttribute('href')).toBe(`https://github.com/${ORG}/handouts/blob/main/slides.pdf`);
-    expect(desc(rows[7][VIEW])).toBe('on GitHub');
+    // Not in a materials repo, the console cannot open it: GitHub only.
+    expect(rows.map((b) => VIEW in b)).toEqual([true, true, true, true, true, false, false, false, false]);
+    expect(rows[8][GH].getAttribute('href')).toBe(`https://github.com/${ORG}/assignment-1-octo/blob/main/brief.md`);
     const pdf = rows[0][VIEW];
     expect(pdf.getAttribute('href')).toBe(`?semester=${ORG}#materials-${encodeURIComponent('materials/slides.pdf')}`);
     expect(pdf.getAttribute('target')).toBe('_blank');
     expect(pdf.getAttribute('rel')).toBe('noopener');
-    expect(desc(pdf)).toBe('rendered here');
     if (root) render(null, root);
     const tab = await mount(<FileList org={ORG} repos={['materials']} links={[link('slides.pdf')]} tab="kind-lecture" current="materials/slides.pdf" />, new FakeGitHub());
     const name = tab.querySelector('li > .file-link > a')!;
     expect(name.getAttribute('href')).toBe(`?semester=${ORG}#kind-lecture/${encodeURIComponent('materials/slides.pdf')}`);
     expect(name.getAttribute('aria-current')).toBe('page');
     expect(btns(tab)[VIEW].getAttribute('href')).toBe(name.getAttribute('href'));
-  });
-
-  it('renders a file outside the materials repos on GitHub only when GitHub draws it', async () => {
-    const files = ['brief.md', 'lab.ipynb', 'fig.png', 'slides.pdf', 'page.html', 'run.py', 'a.docx'].map((p) => link(p, 'assignment-1-octo'));
-    const el = await mount(<FileList org={ORG} repos={['materials']} links={files} />, new FakeGitHub());
-    const rows = [...el.querySelectorAll('li')].map(btns);
-    expect(rows.map((b) => live(b).includes(VIEW))).toEqual([true, true, true, true, false, false, false]);
-    const blob = (p: string) => `https://github.com/${ORG}/assignment-1-octo/blob/main/${p}`;
-    expect(rows[0][VIEW].getAttribute('href')).toBe(blob('brief.md'));
-    // Markdown and notebooks: GitHub shows the text, so it differs from View here; the rest keep the plain blob.
-    expect(rows.map((b) => b[GH].getAttribute('href'))).toEqual([
-      `${blob('brief.md')}?plain=1`, `${blob('lab.ipynb')}?plain=1`, blob('fig.png'), blob('slides.pdf'), blob('page.html'), blob('run.py'), blob('a.docx'),
-    ]);
-    expect(rows[0][VIEW].getAttribute('target')).toBe('_blank');
   });
 
   it('draws the name alone in brackets for a sentence, and a label in place of the name', async () => {
@@ -176,7 +141,7 @@ describe('the file menu', () => {
     if (root) render(null, root);
     const btn = await mount(<FileLinkItem org={ORG} repos={['materials']} link={link('SYLLABUS.md')} setup={null} cls="btn outline" label={<b>Syllabus</b>} />, new FakeGitHub());
     expect(btn.querySelector('a.btn')!.innerHTML).toBe('<b>Syllabus</b>');
-    expect(Object.keys(btns(btn))).toEqual(FOUR);
+    expect(Object.keys(btns(btn))).toEqual([VIEW, GH, WEB, SET_UP]);
   });
 
   it('links GitHub to the blob when the link carries no url', async () => {
@@ -199,6 +164,7 @@ describe('the file menu', () => {
     const menuOf = (c: HTMLButtonElement) => c.parentElement!.querySelector<HTMLElement>('[role="menu"]')!;
     expect(a.title).toBe('More ways to open');
     expect(a.getAttribute('aria-label')).toBe('More ways to open notes.md');
+    expect(a.getAttribute('aria-haspopup')).toBe('menu');
     expect(menuOf(a).hidden).toBe(true);
     await act(() => a.click());
     expect(menuOf(a).hidden).toBe(false);
@@ -214,13 +180,8 @@ describe('the file menu', () => {
     await act(() => a.click());
     await act(() => document.body.click());
     expect(menuOf(a).hidden).toBe(true);
-    // No headings: one hairline between the View rows and the Edit rows, a pdf's too.
-    for (const m of [menuOf(a), menuOf(b)]) {
-      expect(m.querySelectorAll('.pm-h')).toHaveLength(0);
-      const kids = [...m.children];
-      expect(kids.filter((k) => k.classList.contains('fm-sep'))).toHaveLength(1);
-      expect(kids.findIndex((k) => k.classList.contains('fm-sep'))).toBe(2);
-      expect(m.querySelector('.fm-sep')!.getAttribute('role')).toBe('separator');
-    }
+    // The split button's sections, a pdf's too; the chevron is the row's only Open part.
+    for (const m of [menuOf(a), menuOf(b)]) expect([...m.querySelectorAll('.pm-h')].map((h) => h.textContent)).toEqual(['In the browser', 'On your computer']);
+    expect(el.querySelector('.split-main')).toBeNull();
   });
 });

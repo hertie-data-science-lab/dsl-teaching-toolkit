@@ -15,7 +15,7 @@ import { SchemaForm, effective, fieldErrors } from '../forms/Form';
 import { authorOf, copyFiles, type CopyResult } from '../github/client';
 import { validGrading } from '../model/settings';
 import { createAssignment, derive } from '../ops/defs';
-import { OpButtons } from '../ops/Panel';
+import { OpOpen } from '../ops/Panel';
 import { FormatPicker } from '../forms/FormatPicker';
 import { labelOf } from '../model/labels';
 import { DEFAULT_FORMATS, SUBMIT_VIA_DEFAULT } from '../model/policy';
@@ -446,7 +446,7 @@ export function NewAssignmentScreen(p: CourseProps & { step?: number }) {
             </div>
             {starterChoice(v) === 'derived' ? (
               <div class="actions">
-                <OpButtons def={derive(courseScope(p), repo, repo, name)} small label="Derive the student version now" />
+                <OpOpen def={derive(courseScope(p), repo, repo, name)} label="Derive the student version now" cls="btn small" />
               </div>
             ) : null}
           </>

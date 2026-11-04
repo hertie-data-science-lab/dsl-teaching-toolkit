@@ -117,9 +117,9 @@ describe('where each choice opens', () => {
     const setup: Setup = { folder: '/r', editor: 'other', scheme: 'zed://file/{path}' };
     const menu = (c?: boolean) => openItems(REF, setup, c).filter((i) => i.group === 'local').map((i) => i.label);
     // Clone entries before Open entries; the clone command is in Clone's ?, not the menu.
-    expect(menu()).toEqual(['Clone in VS Code', 'Open in VS Code', 'Open in GitHub Desktop', 'Open in your editor']);
+    expect(menu()).toEqual(['Clone in VS Code', 'Open in VS Code', 'Open in GitHub Desktop', 'Open in Zed']);
     expect(hrefs(setup).vsclone).toBe(`vscode://vscode.git/clone?url=${encodeURIComponent(GH)}`);
-    expect(menu(true)).toEqual(['Open in VS Code', 'Open in GitHub Desktop', 'Open in your editor']);
+    expect(menu(true)).toEqual(['Open in VS Code', 'Open in GitHub Desktop', 'Open in Zed']);
     expect(menu(false)).toEqual(['Clone in VS Code', 'Open in GitHub Desktop']);
     // Without a folder the check changes nothing.
     expect(openItems(REF, null, true)).toEqual(openItems(REF, null));
@@ -220,7 +220,7 @@ describe('the Open button', () => {
     expect(caret.getAttribute('aria-expanded')).toBe('true');
     expect(document.activeElement).toBe(items()[0]);
     await key(items()[0], 'ArrowDown');
-    expect(document.activeElement?.textContent).toBe('Open on github.dev');
+    expect(document.activeElement?.textContent).toBe('On github.dev');
     await key(items()[1], 'End');
     expect(document.activeElement?.textContent).toBe('Set up a local folder');
     await key(items()[0], 'ArrowUp');
@@ -241,7 +241,7 @@ describe('the Open button', () => {
 
   it('remembers the choice made, so the button and the others on the page do it next', async () => {
     await mount(<><OpenButton {...REF} /><OpenButton org={ORG} repo="materials" small /></>);
-    const dev = items().find((i) => i.textContent === 'Open on github.dev')!;
+    const dev = items().find((i) => i.textContent === 'On github.dev')!;
     dev.addEventListener('click', (e) => e.preventDefault());
     await act(() => dev.click());
     expect(yourSetup(LOGIN)?.lastOpen).toBe('githubdev');

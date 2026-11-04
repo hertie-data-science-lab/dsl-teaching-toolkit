@@ -143,6 +143,7 @@ main { min-width: 0; }
 .chip { display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-display); font-weight: 600; font-size: 12px; line-height: 1.6; padding: 0 9px; border-radius: 999px; background: var(--sunk); color: var(--ink-2); white-space: nowrap; }
 .chip.ok { background: var(--ok-soft); color: var(--ok); }
 .chip.amber { background: var(--amber-soft); color: var(--amber-ink); }
+.open-menu .pm-off { padding: 7px 10px; }
 .chip.bad { background: var(--bad-soft); color: var(--bad-ink); }
 .chip.asg { background: var(--asg-bg); color: var(--asg-ink); }
 .chip.lec { background: var(--lec-bg); color: var(--lec-ink); }
@@ -445,8 +446,9 @@ table.grid td input:hover, table.grid td select:hover { border-color: var(--rule
 .check-line svg { width: 13px; height: 13px; flex: none; }
 .spin { width: 13px; height: 13px; border: 2px solid var(--rule-strong); border-top-color: var(--ink-2); border-radius: 50%; animation: spin 0.8s linear infinite; flex: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
+/* The Schedule entry as a bottom sheet: above the page (18), under the nav handle (19) and the top bar (20). */
 @media (max-width: 1140px) {
-  .entry { position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 30; max-height: 82vh; border-radius: 16px 16px 0 0; box-shadow: var(--shadow); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .entry { position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 18; max-height: 82vh; border-radius: 16px 16px 0 0; box-shadow: var(--shadow); padding-bottom: env(safe-area-inset-bottom, 0px); }
   .entry::before { content: ""; width: 40px; height: 4px; border-radius: 2px; background: var(--rule-strong); margin: 8px auto 0; flex: none; }
   .entry-foot { border-radius: 0; }
 }
@@ -719,7 +721,7 @@ input[aria-invalid="true"] { border-color: var(--bad); background: var(--bad-sof
 .sched-layout { grid-template-columns: minmax(0, 1fr); }
 @media (min-width: 1400px) { .sched-layout:not(.no-entry) { grid-template-columns: minmax(0, 1fr) 420px; } }
 @media (max-width: 1399px) {
-  .entry { position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 30; max-height: 84vh; border-radius: 16px 16px 0 0; box-shadow: var(--shadow); padding-bottom: env(safe-area-inset-bottom, 0px); max-width: 760px; margin: 0 auto; }
+  .entry { position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 18; max-height: 84vh; border-radius: 16px 16px 0 0; box-shadow: var(--shadow); padding-bottom: env(safe-area-inset-bottom, 0px); max-width: 760px; margin: 0 auto; }
   .entry::before { content: ""; width: 40px; height: 4px; border-radius: 2px; background: var(--rule-strong); margin: 8px auto 0; flex: none; }
   .entry-foot { border-radius: 0; }
 }
@@ -1210,3 +1212,6 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .pick-typed input { flex: 1; min-width: 0; }
 .picker { display: grid; gap: 12px; padding: 16px 18px; overflow-y: auto; }
 .danger-quiet { color: var(--bad-ink); }
+/* A file row's chevron opens the Open split button's menu (ui/OpenSplit.tsx `caretOnly`): from the chevron, rightwards. */
+.file-menu .open-menu { left: 0; right: auto; top: calc(100% + 6px); width: 300px; max-width: calc(100vw - 32px); }
+.open-menu .pm-off { cursor: default; }

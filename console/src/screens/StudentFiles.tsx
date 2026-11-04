@@ -1,7 +1,7 @@
 // How a released file is linked on the student screens (decision 0035 rule 10): the shared file
 // row (`ui/FileRow.tsx`), its name opening the file inside the console when it lives in a
 // materials repo (in All materials; in a kind tab's list, in that tab), else on GitHub, its
-// "set up in Profile" pointing at the semester's Profile. Every file link the student screens
+// "Set up your editor in Profile" pointing at the semester's Profile. Every file link the student screens
 // draw renders through here, the Home syllabus and Updates box (`inline`: the name in brackets,
 // no menu) and the assignment page's CONTRIBUTIONS.md included.
 

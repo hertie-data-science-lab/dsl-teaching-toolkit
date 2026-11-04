@@ -2,11 +2,12 @@
 // The file row and viewer on the instructor side (decision 0040 rule 6): the course materials
 // tree's files open in the console's viewer, their repo's tree beside them, each row with the
 // shared menu; the viewer's header has the file's GitHub link and a full-screen toggle that
-// Escape leaves.
+// Escape leaves. A PDF draws inline in an unsandboxed blob: frame whose Blob type is forced to
+// application/pdf (materials-release decision 10); an HTML page keeps its sandboxed frame.
 
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EnvCtx, type Env } from '../src/env';
 import { GitHubClient } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
@@ -16,6 +17,7 @@ import { parseSearch } from '../src/router';
 import { MaterialsIndexScreen, fileIn } from '../src/screens/CourseIndex';
 import type { CourseProps } from '../src/screens/types';
 import { MaterialsTree, fileViewHref } from '../src/ui/MaterialsTree';
+import { ShownView } from '../src/ui/Viewer';
 import { FakeGitHub, fileBody } from './fake';
 import example from './fixtures/status.example.json';
 import { StaticFiles } from './staticFiles';
@@ -58,12 +60,12 @@ describe('the course materials tree', () => {
     const name = li.querySelector<HTMLAnchorElement>('a.ft-name')!;
     expect(name.getAttribute('href')).toBe(fileViewHref(ORG, MAT, 'SYLLABUS.md'));
     expect(name.getAttribute('target')).toBeNull();
-    const items = [...li.querySelectorAll('.file-menu-list > a, .file-menu-list > .fm-off')];
-    expect(items.map((a) => a.querySelector('.fm-lbl')!.textContent)).toEqual(['View here', 'View on GitHub', 'Edit in browser', 'Edit in VS Code']);
+    const items = [...li.querySelectorAll('.open-menu [role="menuitem"]')];
+    expect(items.map((a) => a.textContent)).toEqual(['In the console', 'On GitHub', 'On github.dev', 'Set up your editor in Profile']);
     expect(items[0].getAttribute('href')).toBe(fileViewHref(ORG, MAT, 'SYLLABUS.md'));
     expect(items[1].getAttribute('href')).toBe(`https://github.com/${ORG}/${MAT}/blob/HEAD/SYLLABUS.md`);
     // The editor row points at the course's Profile, not a semester's.
-    expect(li.querySelector('.fm-off a')!.getAttribute('href')).toBe(`?course=${ORG}#profile`);
+    expect(items[3].getAttribute('href')).toBe(`?course=${ORG}#profile`);
   });
 
   it('marks the open file and opens the folders above it', async () => {
@@ -121,5 +123,45 @@ describe('the viewer’s full screen', () => {
     await act(() => button().click());
     await act(() => button().click());
     expect(panel().classList.contains('viewer-full')).toBe(false);
+  });
+});
+
+describe('the viewer’s PDF frame', () => {
+  // Detached from the document, so happy-dom does not try to load the frames.
+  const view = async (v: preact.VNode) => {
+    root = document.createElement('div');
+    await act(() => render(v, root!));
+    for (let i = 0; i < 2; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    return root;
+  };
+  it('draws a PDF in a frame over a blob: URL, unsandboxed, its Blob type forced to application/pdf', async () => {
+    const made: Blob[] = [];
+    const create = vi.spyOn(URL, 'createObjectURL').mockImplementation((b) => (made.push(b as Blob), 'blob:console/pdf-1'));
+    const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    try {
+      // The file's own mime is ignored: only the browser's PDF viewer may load unsandboxed.
+      const el = await view(<ShownView shown={{ kind: 'file', bytes: new Uint8Array([37, 80, 68, 70]), mime: 'text/html', pdf: true }} name="slides.pdf" />);
+      const frame = el.querySelector('iframe')!;
+      expect(frame.className).toBe('page-frame pdf-frame');
+      expect(frame.getAttribute('src')).toBe('blob:console/pdf-1');
+      expect(frame.getAttribute('title')).toBe('slides.pdf');
+      expect(frame.hasAttribute('sandbox')).toBe(false);
+      expect(made.map((b) => b.type)).toEqual(['application/pdf']);
+      const links = [...el.querySelectorAll('.footnote a')].map((a) => a.textContent);
+      expect(links).toEqual(['Open in a new tab', 'Download']);
+    } finally {
+      create.mockRestore();
+      revoke.mockRestore();
+    }
+  });
+
+  it('keeps an HTML page in its sandboxed srcdoc frame, and gives any other file no frame', async () => {
+    const page = await view(<ShownView shown={{ kind: 'page', srcdoc: '<p>Hi</p>', file: '<p>Hi</p>', missing: 0 }} name="page.html" />);
+    expect(page.querySelector('iframe')!.getAttribute('sandbox')).toBe('');
+    expect(page.querySelector('iframe')!.hasAttribute('src')).toBe(false);
+    render(null, root!);
+    root!.remove();
+    const other = await view(<ShownView shown={{ kind: 'file', bytes: new Uint8Array([1]), mime: 'application/zip', pdf: false }} name="data.zip" />);
+    expect(other.querySelector('iframe')).toBeNull();
   });
 });

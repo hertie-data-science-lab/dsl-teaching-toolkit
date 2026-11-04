@@ -9,7 +9,7 @@ import { RepoChip } from '../ui/SetupPanel';
 import { templateReadinessIn, tier } from '../model/readiness';
 import { Check } from '../ui/icons';
 import { collect, updateCopies } from '../ops/defs';
-import { OpButtons, OpOpen } from '../ops/Panel';
+import { OpOpen } from '../ops/Panel';
 import { useEffect } from 'preact/hooks';
 import { replaceHash, tabHref, type AssignmentTab } from '../router';
 import { ProblemCards } from '../ui/bits';
@@ -231,7 +231,7 @@ function Overview(p: TabProps) {
   const pushWhy = 'Update every copy pushes an assignment template file to every student and posts a note on each Submission receipts issue. Collect now pulls the latest work.';
   const pushOps = (
     <>
-      <div class="sa-op"><span class="opname">Update every copy</span><OpButtons def={updateCopies(scope, ref, templateFiles)} small /></div>
+      <div class="sa-op"><span class="opname">Update every copy</span><OpOpen def={updateCopies(scope, ref, templateFiles)} cls="btn small" /></div>
       <div class="sa-op"><span class="opname">Collect now</span><OpOpen def={collect({ ...scope }, { ...ref, when: a.due ? `Due ${fmtDay(a.due, tz, year)}` : ref.when })} cls="btn small" label="Collect now" /></div>
     </>
   );

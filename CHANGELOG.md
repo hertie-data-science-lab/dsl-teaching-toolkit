@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- PDFs draw inline in the viewer (the console's policy allows `frame-src blob:`), with Open in a
+  new tab and Download under them.
+- The side nav hides behind a handle on its edge; the choice is kept per browser.
+- A page shows an operation's verb alone; its panel offers the preview, never requires it.
 - `release.adhoc` takes comma lists of course and semester repos, paired in order with the
   paths, so one run copies from several course repos into several semester repos.
   `release_destinations` is a new `defaults:` list of the semester repos a hand release may land
@@ -18,6 +22,8 @@
 - **Keep for future semesters** and **PR into source** can carry back named paths (`paths`),
   hand and early releases included; successive per-path runs add to the open proposal, while a
   full run regenerates it.
+- One **Open** split button for repos and files in both consoles: the main part opens, the
+  caret lists In the browser, On your computer and Change your profile.
 
 ## 0.11.0 (unreleased)
 

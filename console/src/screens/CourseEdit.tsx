@@ -18,7 +18,7 @@ import { FLOORS, PUBLISH_DEFAULT, readSel, type Sel } from '../model/selection';
 import { institutionDefaults, rawBlock, semesterFile, validCourseFile, validSemesterBlocks, validSemesterFile, writeBlock } from '../model/settings';
 import { checkNow, confirmWithheld, generateSyllabus, publishWebsite, type Scope } from '../ops/defs';
 import type { OpsSession } from '../ops/session';
-import { OpButtons } from '../ops/Panel';
+import { OpOpen } from '../ops/Panel';
 import { ABOUT, COURSE_FACTS, defaultsTiers } from '../tiers/course';
 import { WEBSITE_OFF_LIVE, publishWebsite as publishTiers } from '../tiers/ops';
 import type { Values } from '../tiers/types';
@@ -477,7 +477,7 @@ export function WebsiteScreen(p: CourseProps) {
           <p class="footnote">Beta: leave this off for now - work in progress.</p>
         </div>
         <div class="actions">
-          <OpButtons def={publishWebsite(courseScope(p), published)} />
+          <OpOpen def={publishWebsite(courseScope(p), published)} />
           <EditFile cls="btn quiet" org={course.org} repo={COURSE_REPO} path={COURSE_FILE} branch={courseBranch(p.files, course.org)} exists={file.kind !== 'absent'} />
         </div>
       </div>
@@ -618,12 +618,12 @@ export function MaterialsScreen(p: CourseProps) {
           {semFile && semFile !== 'loading' && semFile.error ? <CheckLine cls="bad">{SEMESTER_FILE} does not parse; fix it with Edit the file directly.</CheckLine> : null}
           {semFile === null && scope ? <CheckLine cls="bad">Could not read {SEMESTER_FILE}.</CheckLine> : null}
           {semRef ? <SaveBar state={sylSave} onSave={() => void saveSyl()} small disabled={syl === null || syl === savedSyl || !semReady} file={semRef} /> : null}
-          <h3>Weekly plan for the syllabus <Hint label="About the weekly plan">Built from the semester schedule: every session with its date and readings. Copy shows it to paste anywhere; Write puts it into your syllabus file.</Hint></h3>
+          <h3>Weekly plan for the syllabus <Hint label="About the weekly plan">Built from the semester schedule: every session with its date and readings. Write opens it: Copy there shows it to paste anywhere, Write puts it into your syllabus file.</Hint></h3>
           {scope ? (
             <div class="actions">
               {noWrite === null ? (
                 <>
-                  <OpButtons def={generateSyllabus(scope, repo, syllabus)} small label="Write" />
+                  <OpOpen def={generateSyllabus(scope, repo, syllabus)} label="Write" cls="btn small" />
                   <Hint label="About Write">Write puts the plan into {syllabus} between the lines &lt;!-- dsl:weekly-plan --&gt; and &lt;!-- /dsl:weekly-plan --&gt;, adding them under “## Weekly plan” at the end the first time. Move the marked block anywhere in the file and Write updates it there; nothing else changes.</Hint>
                 </>
               ) : (
@@ -644,7 +644,7 @@ export function MaterialsScreen(p: CourseProps) {
           {reviewCheck && !reviewCheck.done ? (
             <div class="actions">
               <ul class="setup"><ItemRow it={{ id: 'withheld', label: reviewCheck.label, kind: 'step', need: 'suggested', state: 'open', why: reviewCheck.why ?? undefined }} /></ul>
-              {scope ? <OpButtons def={confirmWithheld(courseScope(p), repo)} small label="Confirm" /> : null}
+              {scope ? <OpOpen def={confirmWithheld(courseScope(p), repo)} label="Confirm" cls="btn small" /> : null}
             </div>
           ) : null}
           <p class="footnote">This reads the repo’s top-level .releaseignore; one in a subfolder still applies there.</p>
