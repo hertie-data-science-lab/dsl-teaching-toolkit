@@ -397,7 +397,7 @@ interface Fold {
  * every file on `upstream`, the record of all the engine landed: a release by hand included. A
  * file `upstream` has under a release's folder comes from that release's source; any other, in a
  * folder (a top-level file is the repo's own, not a release's), from the same path in the newest
- * course materials repo that has it (Release by hand's From), else the newest. A released file the
+ * course repo that has it (materials repos and release sources, newest term first), else the newest. A released file the
  * course no longer has is only in the semester (`added`, ahead), as is a file the default branch
  * adds under a released folder. Nothing is listed for a folder whose trees are still being read.
  */
@@ -407,8 +407,9 @@ export function outOfStep(status: Status, files: Files, courseOrg: string, semOr
     const d = destOf(r, def);
     if (r.source && d.path) last.set(`${d.repo}\0${d.path}`, r);
   }
-  const materials = (status.course?.materials ?? []).map((m) => m.repo).sort((a, b) => termRank(b) - termRank(a));
-  const candidates = [...new Set([...materials, ...(status.releases ?? []).map((r) => r.source?.repo ?? '')].filter(Boolean))];
+  // Newest first (Release by hand's From default, `newestRepo`'s rule); the sort is stable, so the course's materials repos lead within a term.
+  const candidates = [...new Set([...(status.course?.materials ?? []).map((m) => m.repo), ...(status.releases ?? []).map((r) => r.source?.repo ?? '')].filter(Boolean))]
+    .sort((a, b) => termRank(b) - termRank(a));
   const shas = (repo: string) => (repo ? blobs(files.tree(courseOrg, repo)) : NONE);
   const out: OutOfStep[] = [];
   for (const repo of [...new Set([def, ...(status.releases ?? []).map((r) => destOf(r, def).repo)])]) {
@@ -447,11 +448,15 @@ export function outOfStep(status: Status, files: Files, courseOrg: string, semOr
       } else {
         if (!b.path.includes('/')) continue;
         from = b.path;
-        const at = candidates.findIndex((x) => shas(x)?.has(from) !== false);
-        const src = at >= 0 ? candidates[at] : candidates[0] ?? '';
+        // Every candidate's tree is asked for (the cache reads it, the page draws again once it lands): the first read
+        // that has the file wins; while none does and one is still being read, the folder waits; a read lacking it is passed over.
+        const reads = candidates.map((x) => [x, files.tree(courseOrg, x)] as const);
+        const has = reads.find(([, t]) => t.kind === 'ready' && t.paths.some((e) => !e.dir && e.path === from));
+        const waiting = !has && reads.some(([, t]) => t.kind === 'loading');
+        const src = has?.[0] ?? candidates[0] ?? '';
         const folder = parentOf(b.path);
         fold = folds.find((f) => !f.r && f.path === folder && f.src === src) ?? (folds.push({ src, repo, path: folder, copies: new Map(), orphans: [] }), folds[folds.length - 1]);
-        if (at >= 0 && !shas(src)) fold.unknown = true;
+        if (waiting) fold.unknown = true;
       }
       if (shas(fold.src)?.has(from)) fold.copies.set(from, b.path);
       else fold.orphans.push(b.path);

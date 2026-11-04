@@ -20,7 +20,7 @@ import { COHORT_SCREENS, COURSE_SCREENS, RELEASED_MATERIALS, parseHash, parseSea
 import { SemesterMaterialsScreen } from '../src/screens/SemesterMaterials';
 import { outOfStep } from '../src/model/releaseState';
 import { editedIn } from '../src/screens/CourseIndex';
-import type { Files } from '../src/model/files';
+import type { Files, TreeState } from '../src/model/files';
 import type { CohortProps } from '../src/screens/types';
 import { Sidenav } from '../src/ui/shell';
 import { fileViewHref } from '../src/ui/MaterialsTree';
@@ -262,6 +262,27 @@ describe('Released materials', () => {
     expect(open.mock.calls[0][0]).toMatchObject({
       op: 'release.adhoc', args: { course_source_repo: 'course-materials-f2026', course_source_path: HAND, semester_dest_repo: 'materials', semester_dest_path: HAND, replace: true },
     });
+  });
+
+  it('finds a hand-released file’s source in whichever course repo has it, asking for every candidate’s tree (R1b)', () => {
+    const st = (RELEASED as Extract<Loaded, { kind: 'ready' }>).status;
+    // A newer course repo first, its tree still loading or absent; the older one has the file.
+    const status = { ...st, course: { ...st.course!, materials: [{ repo: 'course-materials-f2026', state: 'ready' }, { repo: 'course-materials-s2027', state: 'ready' }] } };
+    const asked: string[] = [];
+    const withNewer = (newer: TreeState) => {
+      const base = handFiles();
+      return Object.assign(Object.create(base), {
+        tree: (o: string, r: string, ref?: string) => (asked.push(r), r === 'course-materials-s2027' ? newer : base.tree(o, r, ref)),
+      }) as Files;
+    };
+    for (const newer of [{ kind: 'loading' }, { kind: 'absent' }] as TreeState[]) {
+      const hand = outOfStep(status, withNewer(newer), COURSE_ORG, ORG, 'materials').find((x) => !x.r)!;
+      expect([newer.kind, hand.src, hand.files]).toEqual([newer.kind, 'course-materials-f2026', [{ path: HAND, state: 'removed', from: HAND }]]);
+    }
+    expect(asked).toContain('course-materials-s2027');
+    // Only the repo still loading could have it: the folder waits for its tree.
+    const only = { ...status, course: { ...status.course, materials: [{ repo: 'course-materials-s2027', state: 'ready' }] }, releases: [] };
+    expect(outOfStep(only, withNewer({ kind: 'loading' }), COURSE_ORG, ORG, 'materials')).toEqual([]);
   });
 
   it('lists a hand-released file the course dropped, and one the semester added beside it, as only in the semester (R1b)', () => {
