@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 // A semester's Released materials (`?cohort=<org>#materials`): its materials repo with the tree,
-// a file opening in the viewer, each released folder's Release page link, a released copy edited
-// in the semester in the Dashboard's words, the empty states, the nav and the route that keeps
-// it apart from the course's `#materials` / `#materials-<repo>`.
+// a file opening in the viewer, a released copy edited in the semester in the Dashboard's words,
+// Release by hand below for those who can change the course (adding a course repo sets its
+// topic), the empty states, the nav and the route that keeps it apart from the course's
+// `#materials` / `#materials-<repo>`.
 
 import { render } from 'preact';
 import { render as html } from 'preact-render-to-string';
@@ -42,7 +43,10 @@ const statusWith = (releases: Release[], problems: Problem[] = []): Loaded => ({
 const RELEASED = statusWith([rel('s5', 'lectures/05_trees'), rel('lab-1', 'labs/lab-1'), rel('s6', 'lectures/06_nets', 'planned')], [edited]);
 
 const files = (trees: Record<string, string[]> = { [`${ORG}/materials`]: PATHS }) =>
-  new StaticFiles({}, {}, trees, { [ORG]: [{ name: 'materials', pushed_at: '2026-09-22T14:38:46Z' }] });
+  new StaticFiles({}, {}, trees, {
+    [ORG]: [{ name: 'materials', pushed_at: '2026-09-22T14:38:46Z' }, { name: 'assignment-2-anna-a' }],
+    [COURSE_ORG]: [{ name: 'course-materials-f2026' }, { name: 'assignment-3-f2026' }, { name: 'guest-lectures' }],
+  });
 const props = (over: Partial<CohortProps> = {}): CohortProps => ({ course, cohort, loaded: RELEASED, files: files(), now: Date.parse('2026-09-23T10:00:00Z'), ...over });
 const text = (v: preact.VNode) => html(v).replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
 
@@ -54,12 +58,12 @@ afterEach(() => {
   root = null;
 });
 
-async function mount(view: preact.VNode) {
-  const gh = new FakeGitHub()
+async function mount(view: preact.VNode, gh = new FakeGitHub()) {
+  gh
     .on('GET', `/repos/${ORG}/materials/git/trees/HEAD?recursive=1`, { sha: 't', truncated: false, tree: PATHS.map(blob) })
     .on('GET', `/repos/${ORG}/materials/contents/lectures/05_trees/notes.md`, fileBody('lectures/05_trees/notes.md', '# Trees'))
     .on('POST', '/markdown', () => new Response('<h1>Trees</h1>', { status: 200 }));
-  const env = { user: { login: 'prof', id: 1, name: 'P', email: null, avatar_url: '' }, client: new GitHubClient({ token: () => 't', fetch: gh.fetch }) } as unknown as Env;
+  const env = { user: { login: 'prof', id: 1, name: 'P', email: null, avatar_url: '' }, client: new GitHubClient({ token: () => 't', fetch: gh.fetch }), ops: { open: () => {} } } as unknown as Env;
   root = document.createElement('div');
   document.body.appendChild(root);
   await act(() => render(<EnvCtx.Provider value={env}>{view}</EnvCtx.Provider>, root!));
@@ -95,11 +99,45 @@ describe('Released materials', () => {
     expect(el.querySelector(`a[href="?cohort=${ORG}#materials"]`)!.textContent).toBe('All released materials');
   });
 
-  it('links each released folder to its Release page, not a planned one', async () => {
+  it('links no Release page from the tree rows: the edited-copy line keeps its link', async () => {
     const el = await mount(<SemesterMaterialsScreen {...props({ folder: 'materials/lectures/05_trees' })} />);
-    const link = el.querySelector<HTMLAnchorElement>('summary a[href="#release-s5"]');
-    expect(link?.textContent).toBe('Release page');
+    expect(el.querySelector('.file-tree a[href^="#release-"]')).toBeNull();
+    expect(el.querySelector('.r-sub a[href="#release-s5"]')!.textContent).toBe('Release page');
     expect(el.querySelector('a[href="#release-s6"]')).toBeNull();
+  });
+
+  it('folds Released materials this semester first, then Release by hand from the course repos', async () => {
+    const el = await mount(<SemesterMaterialsScreen {...props()} />);
+    const folds = [...el.querySelectorAll<HTMLDetailsElement>(':scope > details.panel-fold')];
+    expect(folds.map((d) => d.querySelector('summary h2')!.firstChild!.textContent!.trim())).toEqual(['Released materials this semester', 'Release by hand']);
+    expect(folds.every((d) => d.open)).toBe(true);
+    expect(folds[0].querySelector('ul.rows > li .materials-tree')).not.toBeNull();
+    // From: the course's materials repos, then its other repos (no template), then Add.
+    const from = el.querySelector<HTMLSelectElement>('#rbh-from')!;
+    expect([...from.options].map((o) => o.value)).toEqual(['course-materials-f2026', 'guest-lectures', '__add']);
+    expect(from.value).toBe('course-materials-f2026');
+  });
+
+  it('draws no Release by hand for a viewer who cannot change the course', async () => {
+    const el = await mount(<SemesterMaterialsScreen {...props({ course: { ...course, write: false } })} />);
+    expect(el.querySelector('#rbh-from')).toBeNull();
+    expect(el.querySelectorAll('details.panel-fold')).toHaveLength(1);
+  });
+
+  it('adds a course repo by setting its materials topic, as Treat as course materials does', async () => {
+    const gh = new FakeGitHub()
+      .on('GET', `/repos/${COURSE_ORG}/guest-lectures/topics`, { names: ['python'] })
+      .on('PUT', `/repos/${COURSE_ORG}/guest-lectures/topics`, { names: ['python', 'dsl-materials'] });
+    const el = await mount(<SemesterMaterialsScreen {...props()} />, gh);
+    const from = el.querySelector<HTMLSelectElement>('#rbh-from')!;
+    await act(() => {
+      from.value = '__add';
+      from.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await act(() => [...document.querySelectorAll<HTMLButtonElement>('.modal .btn')].find((b) => b.textContent === 'Add')!.click());
+    for (let i = 0; i < 6; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(gh.seen.find((x) => x.method === 'PUT')!.body).toEqual({ names: ['python', 'dsl-materials'] });
+    document.querySelectorAll('.modal-scrim').forEach((x) => x.remove());
   });
 
   it('says a released copy was edited, in the Dashboard’s words, with its Release page', () => {

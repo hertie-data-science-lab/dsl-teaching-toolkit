@@ -229,8 +229,13 @@ course materials index's mirror for the semester's copies, what students have re
 per materials repo (`materials`, then any other repo a released entry of `status.json`
 `releases` wrote to), with its count of releases, last change, Open, and the index's tree
 (`RepoFiles`, `MaterialsTree` with `at="cohort"`), each file opening in the viewer beside it
-(`?file=`, `?folder=` as on the index). Each released folder's row links its Release page; a
-`DIVERGED_RELEASED` problem shows as one line in the Dashboard's words. `?cohort=` with
+(`?file=`, `?folder=` as on the index), in a fold titled Released materials this semester; a
+`DIVERGED_RELEASED` problem shows as one line in the Dashboard's words, with its Release page
+link. Below it, for those who can change the course, the Release by hand fold: the Files
+panel's Release view (`ui/FilesPanel.tsx`) from the course's materials repos and Other repos
+(Add a course repo sets the `dsl-materials` topic, as Treat as course materials does); its
+Schedule on the calendar link opens the Schedule's new supporting-files entry with the picks
+(`?from=&paths=&to=&at=`, `scheduleNewHref`). `?cohort=` with
 `#materials` is this page (`screenOf`); `?course=` with `#materials`, and `#materials-<repo>`
 under either, are the course's, so the course nav's Course materials link names the course.
 

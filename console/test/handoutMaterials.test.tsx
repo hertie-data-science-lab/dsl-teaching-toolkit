@@ -17,7 +17,8 @@ import type { Adapter, Handle } from '../src/ops/adapter';
 import { generateSyllabus } from '../src/ops/defs';
 import { targetOf } from '../src/ops/Panel';
 import { OpsSession } from '../src/ops/session';
-import { MaterialsScreen, changedLine, syllabusChoices } from '../src/screens/CourseEdit';
+import { MaterialsScreen, syllabusChoices } from '../src/screens/CourseEdit';
+import { changedLine } from '../src/ui/FilesPanel';
 import { OtherRepoRow } from '../src/screens/CourseIndex';
 import type { CourseProps } from '../src/screens/types';
 import { PatternTree } from '../src/ui/PatternTree';
@@ -174,11 +175,14 @@ describe('the withheld tree', () => {
   it('sits beside the patterns, and a click flashes the line it wrote', async () => {
     const files = new StaticFiles({ [`${ORG}/${MAT}/.releaseignore`]: 'solutions/\n' }, {}, { [`${ORG}/${MAT}`]: TREE });
     await mount(null, <MaterialsScreen {...props(files)} />);
-    const grid = root!.querySelector('.grid-2.withhold')!;
-    expect(grid.children[0].querySelector('.file-tree')).not.toBeNull();
-    expect(grid.children[1].querySelector('textarea#ign-pat')).not.toBeNull();
+    // The Files panel's Withhold view: the tree left, the patterns right (materials-release decision 1).
+    await act(() => root!.querySelector<HTMLButtonElement>('#files-tab-withhold')!.click());
+    const grid = root!.querySelector('.materials-split')!;
+    expect(grid.querySelector('.materials-tree .file-tree')).not.toBeNull();
+    expect(grid.querySelector('.materials-file textarea#ign-pat')).not.toBeNull();
     expect(grid.querySelector('.pm-line.flash')).toBeNull();
-    await act(() => root!.querySelector<HTMLButtonElement>('button[aria-label="Withhold SYLLABUS.md"]')!.click());
+    const row = [...root!.querySelectorAll<HTMLElement>('.ft-file')].find((li) => li.querySelector('.ft-name')!.textContent === 'SYLLABUS.md')!;
+    await act(() => row.querySelector<HTMLElement>('.ft-name')!.click());
     const box = root!.querySelector<HTMLTextAreaElement>('textarea#ign-pat')!;
     const lines = box.value.split('\n');
     const flashed = [...grid.querySelectorAll('.pm-line')].findIndex((l) => l.classList.contains('flash'));

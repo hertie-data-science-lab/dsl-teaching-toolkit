@@ -3,7 +3,7 @@
 import { useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import { YamlText, obj } from '../edit/yamlText';
-import type { GhRepo } from '../github/client';
+import type { GhRepo, GitHubClient } from '../github/client';
 import { TEMPLATE_TOPIC, termOf } from '../model/discovery';
 import type { Files } from '../model/files';
 import { ago, fmtDay, templateName } from '../model/format';
@@ -49,6 +49,12 @@ export function repoOf(files: Files, org: string, name: string): GhRepo | undefi
 
 // --------------------------------------------------------------------------- materials
 
+/** Adds the `dsl-materials` topic to `repo`'s topics as GitHub has them now: the repo list may be old, and a PUT replaces them all. */
+export async function addMaterialsTopic(client: GitHubClient, org: string, repo: string): Promise<void> {
+  const topics = await client.getRepoTopics(org, repo);
+  await client.setTopics(org, repo, [...new Set([...topics, MATERIALS_TOPIC])]);
+}
+
 /** What "Treat as course materials" says once it has run, or why it could not. */
 type TreatState = { kind: 'idle' | 'busy' | 'done' } | { kind: 'bad'; text: string };
 
@@ -64,9 +70,7 @@ export function OtherRepoRow({ org, repo, write }: { org: string; repo: GhRepo; 
     if (!env) return;
     setSt({ kind: 'busy' });
     try {
-      // Read the topics just before the write: the repo list may be old, and a PUT replaces them all.
-      const topics = await env.client.getRepoTopics(org, repo.name);
-      await env.client.setTopics(org, repo.name, [...new Set([...topics, MATERIALS_TOPIC])]);
+      await addMaterialsTopic(env.client, org, repo.name);
       setSt({ kind: 'done' });
     } catch (e) {
       setSt({ kind: 'bad', text: `Could not add the topic: ${e instanceof Error ? e.message : String(e)}` });

@@ -26,6 +26,8 @@ import { NOTHING_TO_RELEASE, markClass, releaseRef, rowMark } from './Cohort';
 import { NotFound } from './Assignments';
 import { CheckNow, WithStatus, cohortScope, gradingConfig, todayOf, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
+import type { ReleasePrefill } from '../router';
+import { effectiveDestRepo } from '../model/releaseState';
 import { CONFIG_REPO } from '../model/names';
 import { RUN_KEYS, TEAM_FORMATION, TEAM_FORMATIONS, VISIBILITIES, VISIBILITY, effectiveOf, validSchedule, yamlBoolean } from '../model/settings';
 import { HandOutDialog, HandOutNow, ManualWaiting, NO_LATE_WINDOW, SolutionNote, canHoldSolution, cutoffOf, draftHandout, entryBelow, forcedVisibility, waitingHandOut, waitsByHand, windowDays } from './RunSettings';
@@ -256,6 +258,14 @@ function Slots({ id, d, set, errors }: { id: string; d: EntryDraft; set: Set_<En
       {d.tbc ? null : <div><button class="btn small quiet" type="button" onClick={() => set({ slots: [...d.slots, { date: d.slots[0]?.date ?? '', time: d.slots[0]?.time ?? '', location: '', details: '' }] })}>+ Another time slot (a second group, a repeat)</button></div>}
     </>
   );
+}
+
+/** A new release entry with a hand release's picks as its files; a destination that is the semester's default stays blank. */
+export function releasePrefilled(d: EntryDraft, r: ReleasePrefill, defaultRepo: string): EntryDraft {
+  const files = r.paths.map((path, i): FileDraft => ({
+    repo: r.from[i], path, toRepo: r.to[i] === defaultRepo ? '' : r.to[i], toPath: r.at[i] === path ? '' : r.at[i], atDate: '', atTime: '', public: false,
+  }));
+  return { ...d, files };
 }
 
 /** Release files to repo / to path, for every file of the entry (the path only with one file). */
@@ -687,8 +697,13 @@ function View(p: ReadyProps) {
   const handedOut = (k: string) => { const a = assignmentOf.get(k); return !!a?.handout && Date.parse(a.handout) <= now; };
 
   const baseOf = (k: string): Draft | null => (k === 'new' ? null : readDraft(doc, k));
-  // `?template=` opens a new assignment entry for that template (New assignment's last step).
-  const prefilled = (): Draft | null => (p.prefill && key === 'new' && sf ? { ...(newDraft('assignment', doc) as AssignmentDraft), template: p.prefill } : null);
+  // `?template=` opens a new assignment entry for that template (New assignment's last step);
+  // `?from=&paths=` a new supporting-files release with those files (the Files panel's "Schedule on the calendar").
+  const prefilled = (): Draft | null => {
+    if (key !== 'new' || !sf) return null;
+    if (p.prefill) return { ...(newDraft('assignment', doc) as AssignmentDraft), template: p.prefill };
+    return p.prefillRelease ? releasePrefilled(newDraft('assets', doc) as EntryDraft, p.prefillRelease, effectiveDestRepo(p.loaded)) : null;
+  };
   const draftOf = (k: string): Draft | null => drafts[k] ?? (k === 'new' ? prefilled() : baseOf(k));
   const dirtyKeys = Object.keys(drafts).filter((k) => k === 'new' || !deepEqual(drafts[k], baseOf(k)));
   const dirty = dirtyKeys.length + removed.length;

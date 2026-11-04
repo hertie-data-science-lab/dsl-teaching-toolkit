@@ -108,6 +108,39 @@ export interface Selection {
   folder?: string;
   /** A file to open in the viewer on the course materials index or a semester's Released materials, `<repo>/<path>`. */
   file?: string;
+  /** Picks to prefill a new release entry with (`?from=&paths=&to=&at=`, the Files panel's "Schedule on the calendar"). */
+  release?: ReleasePrefill;
+}
+
+/**
+ * A new release entry's files, from a hand release's picks: four comma lists paired by index, as
+ * the engine pairs `release.adhoc`'s (a list of one applies to every path). `to` and `at` blank
+ * mean the semester's default repo and the source's own path.
+ */
+export interface ReleasePrefill {
+  from: string[];
+  paths: string[];
+  to: string[];
+  at: string[];
+}
+
+const listOf = (v: string | null) => (v ? v.split(',').map((x) => x.trim()) : []);
+const pairOf = (list: string[], i: number) => (list.length === 1 ? list[0] : (list[i] ?? ''));
+
+/** `?from=&paths=&to=&at=` as the files they name, or undefined without paths or a source. */
+export function releasePrefillOf(q: URLSearchParams): ReleasePrefill | undefined {
+  const paths = listOf(q.get('paths')).filter(Boolean), from = listOf(q.get('from'));
+  if (!paths.length || !from.some(Boolean)) return undefined;
+  const to = listOf(q.get('to')), at = listOf(q.get('at'));
+  return { paths, from: paths.map((_, i) => pairOf(from, i)), to: paths.map((_, i) => pairOf(to, i)), at: paths.map((_, i) => pairOf(at, i)) };
+}
+
+/** The Schedule's new entry with `rows` prefilled; a row's `to`/`at` left blank when it is the default. */
+export function scheduleNewHref(cohortOrg: string, rows: { from: string; path: string; to?: string; at?: string }[]): string {
+  const q = new URLSearchParams({ cohort: cohortOrg, from: rows.map((r) => r.from).join(','), paths: rows.map((r) => r.path).join(',') });
+  if (rows.some((r) => r.to)) q.set('to', rows.map((r) => r.to ?? '').join(','));
+  if (rows.some((r) => r.at)) q.set('at', rows.map((r) => r.at ?? '').join(','));
+  return `?${q.toString()}#schedule-new`;
 }
 
 /** The semester's Released materials, the screen `?cohort=<org>#materials` shows (`screenOf`). */
@@ -125,6 +158,7 @@ export function parseSearch(search: string): Selection {
     template: q.get('template') ?? undefined,
     folder: q.get('folder') ?? undefined,
     file: q.get('file') ?? undefined,
+    release: releasePrefillOf(q),
   };
 }
 

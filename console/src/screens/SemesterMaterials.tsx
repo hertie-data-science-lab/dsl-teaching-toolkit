@@ -2,18 +2,33 @@
 // the mirror of the course materials index (`CourseIndex.tsx`) for the semester's copies. One row
 // per materials repo of the semester (`materials`, then any other repo a release wrote to), each
 // with its tree from the index (`RepoFiles`, `MaterialsTree`: the file row both consoles share),
-// every file opening in the viewer both consoles use (`Split`, `RepoFile`), and on each released
-// folder a link to its Release page. A released copy edited in the semester says so in the
-// Dashboard's words. Withheld files are the course's concern, so nothing here edits them.
+// every file opening in the viewer both consoles use (`Split`, `RepoFile`). A released copy edited
+// in the semester says so in the Dashboard's words, with a link to its Release page. Below, for
+// those who can change the course, Release by hand: the Files panel's Release view
+// (`FilesPanel`, plan 2026-11-04 decision 2). Withheld files are the course's concern, so nothing
+// here edits them.
 
+import { useState } from 'preact/hooks';
+import { useEnv } from '../env';
+import type { Files } from '../model/files';
+import type { CohortRef } from '../model/discovery';
 import { ago, fmtDay, plural } from '../model/format';
 import { DEFAULT_DEST_REPO } from '../model/policy';
+import { effectiveDestRepo, requestOf } from '../model/releaseState';
+import type { Loaded } from '../model/status';
 import type { Problem, Release, Status } from '../model/types';
+import { scheduleNewHref } from '../router';
+import { FilesPanel, type FilesPanelProps, type SemesterRef } from '../ui/FilesPanel';
+import { studentRepos } from '../ui/ReleaseChips';
+import { CheckLine } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { OpenButton } from '../ui/OpenButton';
 import { RepoFile, Split } from '../ui/Viewer';
-import { RepoFiles, fileIn, focusIn, repoOf } from './CourseIndex';
-import { WithStatus } from './common';
+import { RepoFiles, addMaterialsTopic, fileIn, focusIn, repoOf } from './CourseIndex';
+import { newestRepo } from './CourseEdit';
+import { sourceRepos } from './Schedule';
+import { WithStatus, cohortScope } from './common';
+import { keepFuture } from '../ops/defs';
 import type { CohortProps, ReadyProps } from './types';
 
 /** Where a release writes in the semester, as the Schedule reads it: its repo (`materials` when unnamed) and folder (its source's when unnamed). */
@@ -49,12 +64,32 @@ export function editedCopies(status: Status, repo: string): { p: Problem; r: Rel
 
 const releaseHref = (r: Release) => `#release-${r.id}`;
 
-/** A released folder's Release page link(s), on its row in the tree. */
-function folderLinks(folders: Map<string, Release[]>) {
-  return (path: string) => {
-    const rs = folders.get(path);
-    if (!rs) return null;
-    return rs.map((r) => <a class="ft-gh" href={releaseHref(r)} aria-label={`Release page of ${path}`}>{rs.length > 1 ? r.id : 'Release page'}</a>);
+/**
+ * A semester as the Files panel releases into it: its effective default destination and
+ * `release_destinations` (status.json), and the student and team repos it refuses as a
+ * destination. status.json names no student repo, so those are the semester's repos named
+ * after an assignment (`studentRepos`).
+ */
+export function semesterRefOf(files: Files, ref: CohortRef, loaded: Loaded | undefined): SemesterRef {
+  const st = loaded?.kind === 'ready' ? loaded.status : undefined;
+  const listed = (st?.semester?.defaults?.release_destinations?.value ?? []) as unknown;
+  const repos = files.repos(ref.org);
+  return {
+    org: ref.org, termLabel: ref.termLabel, loaded, ended: st?.semester?.ended,
+    defaultDest: effectiveDestRepo(loaded),
+    destinations: Array.isArray(listed) ? listed.filter((x): x is string => typeof x === 'string' && !!x.trim()) : [],
+    students: repos.kind === 'ready' ? studentRepos(repos.repos.map((r) => r.name), st) : [],
+  };
+}
+
+/** The Files panel's "Schedule on the calendar": the Schedule's new entry with the picks, a destination left blank where it is the semester's default. */
+export function scheduleHrefFor(semesters: SemesterRef[]): NonNullable<FilesPanelProps['scheduleHref']> {
+  return ({ semOrg, runRepo, groups }) => {
+    const def = semesters.find((x) => x.org === semOrg)?.defaultDest ?? DEFAULT_DEST_REPO;
+    const r = requestOf(groups, { defaultDestRepo: runRepo });
+    const list = (x: string) => (x ? x.split(',') : []);
+    const from = list(r.course_source_repo), to = list(r.semester_dest_repo), at = list(r.semester_dest_path);
+    return scheduleNewHref(semOrg, list(r.course_source_path).map((path, i) => ({ from: from[i], path, to: to[i] === def ? '' : to[i], at: at[i] === path ? '' : at[i] })));
   };
 }
 
@@ -80,7 +115,7 @@ function Released(p: ReadyProps) {
     return (
       <>
         <Head org={org} back />
-        <Split label={open.repo} side={<section class="panel section" aria-label={open.repo}><h2>{open.repo}</h2><RepoFiles files={p.files} org={org} repo={open.repo} current={open.path} at="cohort" folderSide={folderLinks(releasedFolders(p.status, open.repo))} /></section>}>
+        <Split label={open.repo} side={<section class="panel section" aria-label={open.repo}><h2>{open.repo}</h2><RepoFiles files={p.files} org={org} repo={open.repo} current={open.path} at="cohort" /></section>}>
           <RepoFile org={org} at={open} />
         </Split>
       </>
@@ -90,8 +125,8 @@ function Released(p: ReadyProps) {
   return (
     <>
       <Head org={org} back={false} />
-      <section class="panel section">
-        <h2>Semester materials repos</h2>
+      <details class="panel section panel-fold" open>
+        <summary><h2>Released materials this semester</h2></summary>
         {anything ? null : <p class="footnote">Nothing released yet: each folder arrives at its time on the Schedule.</p>}
         <ul class="rows">
           {repos.map((repo) => {
@@ -106,12 +141,35 @@ function Released(p: ReadyProps) {
                   <span class="r-sub"><b>{x.label ?? 'Released copy edited'}</b>: {x.text} <a class="textlink" href={releaseHref(r)}>Release page</a></span>
                 ))}
                 <span class="r-side"><OpenButton org={org} repo={repo} small quiet /></span>
-                <RepoFiles files={p.files} org={org} repo={repo} focus={focusIn(p.folder, repo)} at="cohort" folderSide={folderLinks(folders)} />
+                <RepoFiles files={p.files} org={org} repo={repo} focus={focusIn(p.folder, repo)} at="cohort" />
               </li>
             );
           })}
         </ul>
-      </section>
+      </details>
+      <ReleaseByHand {...p} />
+    </>
+  );
+}
+
+/** Release by hand (decision 2): the Files panel's Release view from the course's repos into this semester; drawn only for those who can change the course. */
+function ReleaseByHand(p: ReadyProps) {
+  const env = useEnv();
+  const [addBad, setAddBad] = useState<string | null>(null);
+  const materials = (p.status.course?.materials ?? []).map((m) => m.repo);
+  const sources = sourceRepos(p, materials);
+  const semester = semesterRefOf(p.files, p.cohort, p.loaded);
+  // "Add a course repo…" (decision 7) sets the topic as Treat as course materials does; the course lists it after the next Refresh.
+  const onAdd = env ? (repo: string) => {
+    setAddBad(null);
+    addMaterialsTopic(env.client, p.course.org, repo).catch((e) => setAddBad(`Could not add the topic: ${e instanceof Error ? e.message : String(e)}`));
+  } : undefined;
+  return (
+    <>
+      <FilesPanel files={p.files} courseOrg={p.course.org} repo={newestRepo(materials) ?? sources.others[0] ?? ''} mode="semester" write={p.course.write}
+        semester={semester} sources={{ materials: sources.materials, others: sources.others, addable: sources.others.map((name) => ({ name, note: 'not course materials yet' })), onAdd }}
+        scheduleHref={scheduleHrefFor([semester])} onKeep={() => env?.ops.open(keepFuture(cohortScope(p)))} />
+      {addBad ? <CheckLine cls="bad">{addBad}</CheckLine> : null}
     </>
   );
 }

@@ -381,13 +381,14 @@ describe('editing screens', () => {
   });
   it('materials settings previews what is withheld, and nothing about the public website', () => {
     const out = html(<MaterialsScreen {...cp} entry="course-materials-f2026" />);
-    expect(out).toMatch(/<span class="ft-name">slides.html<\/span><span class="chip ">released to students<\/span>/);
-    // solutions/ is the institution denylist's too (decision 0040): a folder release leaves it behind; only naming it ships it.
-    expect(out).toMatch(/<span class="ft-name">a.py<\/span><span class="chip amber">only if named<\/span>/);
-    expect(out).toContain('<span class="ft-name">solutions/</span><span class="chip amber">only if named</span>');
-    expect(out).not.toContain('aria-label="Withhold labs/01/solutions/"');
-    // The panel's last line: a solution is not copied unless named, so it counts there, not as withheld.
-    expect(out).toContain('<p class="footnote">1 never copied (by default) · 0 withheld · 2 released</p>');
+    // The Files panel opens on Browse (materials-release decision 1): names open the viewer, no ticks.
+    expect(out).toContain('<h2 id="files-h">Files');
+    expect(out).toContain('id="files-tab-browse" aria-selected="true"');
+    expect(out).toContain('Choose a file to view it here.');
+    expect(out).not.toContain('class="ft-tick"');
+    expect(out).toMatch(/class="ft-name">slides.html<\/button><\/li>/);
+    // solutions/ is the institution denylist's too (decision 0040): Browse calls it never copied.
+    expect(out).toMatch(/class="ft-name">a.py<\/button><span class="chip muted">never copied<\/span>/);
     expect(out).toContain('Weekly plan for the syllabus');
     // Write alone on the page (materials-release decision 11): it opens the panel, where Copy
     // shows the plan to copy and Write puts it into the syllabus (decision 0031 rule 9).
@@ -413,10 +414,10 @@ describe('editing screens', () => {
   it('materials settings releases every file when nothing is withheld', () => {
     const none = new StaticFiles({}, {}, { [`${COURSE_ORG}/course-materials-f2026`]: ['SYLLABUS.md', 'lectures/01/slides.html'] });
     const out = html(<MaterialsScreen {...cp} files={none} entry="course-materials-f2026" />);
-    expect(out).toMatch(/<span class="ft-name">SYLLABUS.md<\/span><span class="chip ">released to students<\/span>/);
-    expect(out).toContain('aria-label="Withhold SYLLABUS.md"');
+    // Nothing withheld, nothing denylisted: no row carries a chip.
+    expect(out).toMatch(/class="ft-name">SYLLABUS.md<\/button><\/li>/);
+    expect(out).not.toMatch(/class="chip[^"]*">(withheld|never copied)/);
     expect(out).not.toContain('class="file-list"');
-    expect(out).toContain('0 never copied (by default) · 0 withheld · 2 released');
   });
   it('the public website edits course.yml and asks for the confirmation the engine’s missing preview needs', () => {
     const out = html(<WebsiteScreen {...cp} />);

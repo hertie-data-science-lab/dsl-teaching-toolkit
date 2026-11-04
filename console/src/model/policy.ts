@@ -30,6 +30,7 @@ export interface Policy {
     marks_per_question: boolean;
     materials_repo: string;
     max_team_size: number;
+    release_destinations: string[];
     timezone: string;
   };
   institution: Record<string, string> & { contacts: string[] };

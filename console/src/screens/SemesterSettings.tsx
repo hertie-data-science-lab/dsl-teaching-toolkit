@@ -4,7 +4,9 @@
 // with its effective value and source (status.json). Assignments and Releases are both
 // `defaults:` keys of semester.yml and the dates are schedule.yml's, so a save is at most one
 // commit per file (`saveSteps`). The timezone is the `defaults:` one (decision 0039), in the
-// Assignments fold. `#defaults-<fold>` focuses that fold's heading on arrival (New semester's
+// Assignments fold. Releases also holds where a release may land and where it lands by default
+// (plan 2026-11-04, decision 7): the Release into chips (`release_destinations`, the course's
+// grey) and the Default destination (`materials_repo`) over them. `#defaults-<fold>` focuses that fold's heading on arrival (New semester's
 // card; the old `#settings` route lands here). The same form also opens in a modal, at the fold
 // that fits where it was opened (the Assignments, Schedule and Site pages), the others folded.
 
@@ -19,6 +21,7 @@ import { fmtDate } from '../model/format';
 import { CONFIG_REPO, SEMESTER_FILE } from '../model/names';
 import { draftErrors, readDraft, type SemesterDraft } from '../model/scheduleEdit';
 import { SOURCE_WORD, effectiveOf, semesterDefaults, semesterFile, valueWord } from '../model/settings';
+import { destinationRows, inheritedInto, ownInto, ReleaseInto, studentRepos } from '../ui/ReleaseChips';
 import type { Status } from '../model/types';
 import { defaultsTiers } from '../tiers/course';
 import type { Tiers, Values } from '../tiers/types';
@@ -32,19 +35,24 @@ import { WithStatus } from './common';
 import type { CohortProps, ReadyProps } from './types';
 
 const RELEASE_KEY = 'autosync_released_edits';
+const DEST_KEY = 'materials_repo';
+const INTO_KEY = 'release_destinations';
+/** The Releases fold's fields; every other `defaults:` field is the Assignments fold's. */
+const RELEASE_KEYS = [RELEASE_KEY, DEST_KEY, INTO_KEY];
 type Fold = 'assignments' | 'releases' | 'dates';
 const FOLDS: Fold[] = ['assignments', 'releases', 'dates'];
 /** The link to the Semester defaults screen, with one fold's heading focused on arrival. */
 export const defaultsHref = (fold?: Fold) => `#defaults${fold ? `-${fold}` : ''}`;
 
-/** The fold headings' one-line summaries: the run defaults, the release setting, the semester's dates. */
+/** The fold headings' one-line summaries: the run defaults, the release settings, the semester's dates. */
 export function settingsLines(status: Status): { assignments: string; releases: string; dates: string } {
   const sync = effectiveOf(semesterDefaults(status), RELEASE_KEY);
+  const dest = effectiveOf(semesterDefaults(status), DEST_KEY);
   const sem = status.semester;
   const tz = sem?.timezone;
   return {
     assignments: defaultsLine(semesterDefaults(status)),
-    releases: `Send fixes to released files automatically: ${valueWord(RELEASE_KEY, sync.value)} (${SOURCE_WORD[sync.source]}).`,
+    releases: `Send fixes to released files automatically: ${valueWord(RELEASE_KEY, sync.value)} (${SOURCE_WORD[sync.source]}). Lands in ${valueWord(DEST_KEY, dest.value)} (${SOURCE_WORD[dest.source]}).`,
     dates: sem?.start && sem.end ? `Semester dates: ${fmtDate(sem.start, tz)} to ${fmtDate(sem.end, tz)}.` : 'Semester dates: not set yet.',
   };
 }
@@ -147,8 +155,16 @@ function DefaultsForm({ p, at, folded = false, draft, focusRef }: { p: ReadyProp
   const yaml = f && f !== 'loading' && !f.error ? f : null;
   const before = yaml ? toValues(defaultsOf(yaml.doc)) : {};
   const inherited = semesterInherited(p);
-  const tiers = withHints(defaultsTiers(inherited, before));
   const cur = kept.defaults ?? before;
+  // Release into: what the course gives (grey), then the semester's own; the default destination chooses among them.
+  const fixedInto = inheritedInto(effectiveOf(inherited, DEST_KEY), inherited[INTO_KEY], 'the course');
+  const ownIntoList = ownInto(cur[INTO_KEY]);
+  const into = [...fixedInto.map((c) => c.name), ...ownIntoList];
+  const tiers = withHints(defaultsTiers(inherited, before, into));
+  const orgRepos = p.files.repos(org);
+  const repoList = orgRepos.kind === 'ready' ? orgRepos.repos : [];
+  const reserved = { org, students: studentRepos(repoList.map((r) => r.name), p.status) };
+  const intoSource = fixedInto.some((c) => c.from === 'the course') ? SOURCE_WORD.course : SOURCE_WORD.institution;
   const defaultsDirty = kept.defaults !== null && !deepEqual(compact(kept.defaults), compact(before));
   const datesBefore = ready ? (readDraft(ready.doc, 'semester') as SemesterDraft) : null;
   const dates = kept.dates ?? datesBefore;
@@ -190,12 +206,20 @@ function DefaultsForm({ p, at, folded = false, draft, focusRef }: { p: ReadyProp
         <summary ref={head('assignments')}><span>Assignments</span><span class="fold-line">{lines.assignments}</span></summary>
         <div class="fold-body">
           <p class="footnote">Every assignment this semester runs on these unless its own page says otherwise. Left empty, the value in grey applies: the course’s default, else the institution’s. <a class="textlink" href={`?course=${p.course.org}#details`}>Change the course’s defaults</a></p>
-          {defaultsForm(pick(tiers, (k) => k !== RELEASE_KEY), 'sd')}
+          {defaultsForm(pick(tiers, (k) => !RELEASE_KEYS.includes(k)), 'sd')}
         </div>
       </details>
       <details class="fold settings-fold" open={isOpen('releases')}>
         <summary ref={head('releases')}><span>Releases</span><span class="fold-line">{lines.releases}</span></summary>
-        <div class="fold-body">{defaultsForm(pick(tiers, (k) => k === RELEASE_KEY), 'sr')}</div>
+        <div class="fold-body rel-section">
+          {defaultsForm(pick(tiers, (k) => k === RELEASE_KEY), 'sr')}
+          {yaml ? (
+            <ReleaseInto id="sr-into" fixed={fixedInto} own={ownIntoList} defaultLabel={`${intoSource}: ${into.join(', ')}`}
+              hint="The repos of this semester a release may write into: the course’s list, plus any added here. The course’s ones are greyed; change them on Course details."
+              rows={destinationRows(repoList, into, reserved)} reserved={reserved} onChange={(list) => setKept({ ...kept, defaults: { ...cur, [INTO_KEY]: list } })} />
+          ) : null}
+          {defaultsForm(pick(tiers, (k) => k === DEST_KEY), 'sr')}
+        </div>
       </details>
       <details class="fold settings-fold" open={isOpen('dates')}>
         <summary ref={head('dates')}><span>Semester dates</span><span class="fold-line">{lines.dates}</span></summary>
