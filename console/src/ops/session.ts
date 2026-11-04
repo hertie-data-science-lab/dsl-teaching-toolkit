@@ -26,6 +26,8 @@ export interface OpDef {
   title: string;
   intro: string;
   confirm?: string; // a warning line under the intro ("Their old codes stop working.")
+  /** A line under the intro read from the Options' values as they stand (none: no line). */
+  introExtra?: (values: Record<string, unknown>) => string | undefined;
   /** Lines of figures under the intro ("Final: median 38, range 22–47, 2 held"). */
   facts?: string[];
   /** Shown under a preview's outcome, read afresh after each preview (who would be emailed). */

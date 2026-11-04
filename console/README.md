@@ -232,10 +232,12 @@ per materials repo (`materials`, then any other repo a released entry of `status
 (`?file=`, `?folder=` as on the index), in a fold titled Released materials this semester. Then,
 collapsed and drawn only when there is one, Released materials that differ from their source
 files (its chip counts the differing files): each released folder
-(`status.json` `releases`, the last release per destination) whose files differ, worked out
+(`status.json` `releases`, the last release per destination, and every file the semester repo's
+`upstream` branch holds, so a release by hand counts too: its folder is the file's own, its source
+the same path in the newest course materials repo that has it) whose files differ, worked out
 three-way in the page (`outOfStep`: the release's folder copy as `groupPicks` takes it, then
-`fileStates`, plus `semesterOnly`: a file only the semester copy has counts ahead, "added in the
-semester"; `folderStep` ahead / behind / diverged), its files filtered by step (`.seg`, counts of
+`fileStates`; a file only the semester has, added there or released and since dropped by the
+course, counts ahead, "added in the semester"; `folderStep` ahead / behind / diverged), its files filtered by step (`.seg`, counts of
 files; a file the course added is behind), beside one PR into source (all) (`keepFuture`, the
 full run, greyed when nothing is ahead or diverged). Each folder is a fold, open at first, headed by its path alone;
 under it each differing file is a row: its name, chip, a muted "+A −D" once its diff is read
@@ -293,7 +295,8 @@ semester's `release_destinations`, the repos its releases wrote to, or Choose a 
 `reserved`) and any `<assignment stem>-` name inline, `eligibleDestination`) and To path (blank:
 the group's own path); a group to another repo than the run's is amber with `(!)`. Picks
 may span course repos and destinations: one `release.adhoc` run (`releasePicked`,
-`requestOf`'s four paired lists), after which the destination trees are re-read (after
+`requestOf`'s four paired lists; its one Option the advanced Overwrite, `replace`, and while it is
+off the intro counts the picked files the semester removed, which a plain release leaves out), after which the destination trees are re-read (after
 `release.entry`, the entry's destination from `status.json`). The lists are comma-joined, so a
 path with a comma has no tick, and each list is capped at `LIST_MAX` (8192, the registry's
 `PATH_LIST_PATTERN`): past it the footer disables Release with a note (`releaseBlocked`). The run's

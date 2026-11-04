@@ -10,7 +10,7 @@ import { LiveFiles, type TreeState } from '../src/model/files';
 import { DEFAULT_DEST_REPO } from '../src/model/policy';
 import {
   assignmentStems, COMMA_TITLE, countsWords, destPathOf, destRepos, effectiveDestRepo, eligibleDestination, entryDestRepos, fileStates, foldersCopied, groupPicks, LIST_MAX,
-  releaseBlocked, requestOf, toArgs, TOO_MANY, type FileState, type Group, folderStep, semesterOnly,
+  releaseBlocked, requestOf, toArgs, TOO_MANY, type FileState, type Group, folderStep,
 } from '../src/model/releaseState';
 
 describe('a released folder’s step', () => {
@@ -24,11 +24,6 @@ describe('a released folder’s step', () => {
     expect(folderStep(['ahead', 'unknown'])).toBeNull();
   });
 
-  it('finds the files only the semester copy has under a folder, clutter aside', () => {
-    const t: TreeState = { kind: 'ready', truncated: false, paths: ['a/x.md', 'a/new.md', 'a/.DS_Store', 'ab/y.md', 'a/sub'].map((path) => ({ path, dir: path === 'a/sub', sha: 's' })) };
-    expect(semesterOnly(t, 'a', new Set(['a/x.md']))).toEqual(['a/new.md']);
-    expect(semesterOnly({ kind: 'loading' }, 'a', new Set())).toEqual([]);
-  });
 });
 import { fnmatch } from '../src/model/selection';
 import { validateArgs } from '../src/ops/adapter';
@@ -169,11 +164,13 @@ describe('the manifest’s groups', () => {
     });
   });
 
-  it('builds the Release by hand op: one run, the groups as facts, no Options', () => {
+  it('builds the Release by hand op: one run, the groups as facts, Overwrite its one Option', () => {
     const g: Group[] = groupPicks([pick('labs', true), pick('lectures/01_intro/notes.md'), pick('b.md', false, 'other')], trees);
     const def = releasePicked({ courseOrg: 'c', cohortOrg: ORG, where: 'Fall 2026' }, g, { defaultDestRepo: 'materials' });
     expect(def).toMatchObject({ op: 'release.adhoc', name: 'Release by hand', title: '3 paths from 2 repos', verb: 'Release 3 paths', cancel: 'Stop before copying' });
-    expect(def.options).toBeUndefined();
+    expect(Object.keys(def.options!)).toEqual(['replace']);
+    expect(def.options!.replace).toMatchObject({ tier: 'advanced', label: 'Overwrite the semester’s copy, discarding its edits', default: false });
+    expect(def.introExtra).toBeUndefined();
     expect(def.facts).toEqual(['labs/ · all 2 files → materials/labs/', 'lectures/01_intro/ · 1 of 3 files → materials/lectures/01_intro/', '(top level) · 1 of 1 file → materials/']);
     expect(def.args.semester_dest_repo).toBe('materials,materials,materials');
     expect(def.target).toBe(`https://github.com/${ORG}/materials/tree/main/labs`);

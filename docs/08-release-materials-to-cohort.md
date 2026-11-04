@@ -32,7 +32,7 @@ from their source files** ([below](#released-materials-that-differ-from-their-so
      **PR into source** carries the edit back to the course ([below](#carrying-cohort-edits-back)).
    - **diverged**: changed in both; a release opens a pull request ([below](#fixing-something-you-have-already-released)).
    - **removed in semester**: released, then deleted in the semester; a plain release changes
-     nothing, and **Overwrite** in the panel below restores the course version.
+     nothing; **Overwrite** in the panel below, or ticked in the release's Options, restores the course version.
    - **not released**: not in the semester yet.
    - **withheld**: a `.releaseignore` line keeps it from students ("withheld by `drafts/`"), or the
      institution's default for solutions and tests ("withheld by default"); a `!` line that
@@ -59,7 +59,7 @@ students with one plain **withheld** chip; **Withhold** says why.
 ### Released materials that differ from their source files
 
 A folded panel listing every released folder whose files differ between the course copy and
-the semester's, its count the differing files: **ahead** (edited in the semester, a file added there included), **behind** (changed in the course since the
+the semester's (scheduled releases and releases by hand alike), its count the differing files: **ahead** (edited in the semester, a file added there included), **behind** (changed in the course since the
 release, a file added there included) or **diverged** (both). A filter narrows it to one kind.
 **PR into source (all)** opens one pull request per course repo carrying every semester edit back
 ([below](#carrying-cohort-edits-back)). Under each folder, each differing file has

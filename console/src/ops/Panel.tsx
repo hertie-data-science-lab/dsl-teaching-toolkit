@@ -266,6 +266,7 @@ export function OpPanel() {
       <>
         <p class="op-intro">{d.intro}</p>
         {d.confirm ? <p class="op-confirm">{d.confirm}</p> : null}
+        {d.introExtra?.(values) ? <p class="op-confirm">{d.introExtra(values)}</p> : null}
         {d.facts?.length ? <div class="op-facts">{d.facts.map((f) => <p>{f}</p>)}</div> : null}
         <Options c={c} ops={ops} />
         {c.error ? <p class="check-line bad"><span>{c.error}</span></p> : null}

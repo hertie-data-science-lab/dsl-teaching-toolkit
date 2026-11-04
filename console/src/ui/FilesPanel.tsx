@@ -324,8 +324,8 @@ function Panel(p: FilesPanelProps) {
     return [groupKey(g), fileStates(blobs, up, at, { destPath: (x) => destPathOf(g, x) })];
   })), [groups, runRepo, ...groupTrees.flat()]);
   const stateOf = (g: Group, path: string) => groupStates.get(groupKey(g))?.[path];
-  // A plain release of a file the semester removed copies nothing: the run's panel says so.
-  const anyRemoved = groups.some((g) => g.ship.some((x) => stateOf(g, x) === 'removed'));
+  // A plain release of a file the semester removed copies nothing: the run's panel says so, and Overwrite restores it.
+  const removed = groups.reduce((n, g) => n + g.ship.filter((x) => stateOf(g, x) === 'removed').length, 0);
 
   const dests = into ? destsOf(p, into, defaultDest, chosen) : null;
   const prOf = (destRepo: string, path: string) => (into ? (p.prUrl?.(into.org, destRepo, path) ?? `${ghUrl(into.org, destRepo)}/pulls`) : undefined);
@@ -500,7 +500,7 @@ function Panel(p: FilesPanelProps) {
         </div>
       ) : null}
       {into ? (
-        <ReleaseFoot paths={rows.length} blocked={releaseBlocked(rows)} files={groups.reduce((n, g) => n + g.ship.length, 0)} def={releasePicked({ courseOrg: p.courseOrg, cohortOrg: into.org, where: into.termLabel }, groups, { defaultDestRepo: runRepo, removed: anyRemoved })} />
+        <ReleaseFoot paths={rows.length} blocked={releaseBlocked(rows)} files={groups.reduce((n, g) => n + g.ship.length, 0)} def={releasePicked({ courseOrg: p.courseOrg, cohortOrg: into.org, where: into.termLabel }, groups, { defaultDestRepo: runRepo, removed })} />
       ) : null}
       {adding && p.sources?.onAdd ? (
         <RepoPickerModal kind="source" rows={p.sources.others.map((name) => ({ name, note: 'not course materials yet' }))} onClose={() => setAdding(false)} onChoose={(r) => { p.sources!.onAdd!(r); setSrc(r); }} />

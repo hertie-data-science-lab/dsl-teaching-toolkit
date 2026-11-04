@@ -4,7 +4,8 @@
 // with its tree from the index (`RepoFiles`, `MaterialsTree`: the file row both consoles share),
 // every file opening in the viewer both consoles use (`Split`, `RepoFile`). The released folders
 // whose files differ from the course copy sit in their own folded panel ("Released materials
-// that differ from their source files", three-way, `outOfStep` in the model), each
+// that differ from their source files", three-way, `outOfStep` in the model: every copy the
+// `upstream` branch records, a release by hand's included, and the semester's own additions), each
 // folder a fold of its own, its differing files listed beneath, each with its two ways to settle
 // it (Re-release, with Overwrite in its Options; PR into source), Open and an inline Diff, and
 // one PR into source (all) for the panel. A re-release that conflicted waits in an open pull
@@ -40,7 +41,6 @@ import { newestRepo } from './CourseEdit';
 import { sourceRepos } from './Schedule';
 import { WithStatus, cohortScope } from './common';
 import { keepFuture, keepFuturePaths, releasePicked, type Scope } from '../ops/defs';
-import { REPLACE } from '../tiers/ops';
 import { useLoad } from '../ui/load';
 import type { GhPull } from '../github/client';
 import type { TreeState } from '../model/files';
@@ -160,6 +160,8 @@ const DIFF_WHAT: Record<FolderStep, string> = {
   diverged: 'as released → course and semester edits',
 };
 
+/** A folder no schedule entry wrote: released by hand. */
+export const BY_HAND = 'released by hand';
 export const NO_LINE_DIFF = 'A binary file: no line diff. Open it to compare.';
 export const NOTHING_TO_RERELEASE = 'The semester already has the course version; re-releasing changes nothing.';
 export const ONLY_IN_SEMESTER = 'Only in the semester: nothing in the course to release.';
@@ -169,12 +171,12 @@ export const REMOVED_RERELEASE = 'The semester removed it; Overwrite restores th
 export const NOTHING_TO_CARRY = 'Nothing to carry back: the file is gone on the semester side.';
 export const OVERWRITE_CONFIRM = 'Replaces the semester’s copy of this file with the course version; its edit is lost.';
 
-/** Re-release: `release.adhoc` of exactly one course file (`from` in `srcRepo`) onto its released copy (`to` in `destRepo`), with Overwrite (`replace`) in its Options. */
+/** Re-release: `release.adhoc` of exactly one course file (`from` in `srcRepo`) onto its released copy (`to` in `destRepo`), with Overwrite (`replace`) in its Options as every release by hand has. */
 export function reRelease(scope: Scope, srcRepo: string, from: string, destRepo: string, to: string): OpDef {
   const parent = (x: string) => (x.includes('/') ? x.slice(0, x.lastIndexOf('/')) : '');
   const folder = parent(from);
   const g: Group = { repo: srcRepo, head: folder ? `${folder}/` : TOP_LEVEL, folder, kind: 'partial', files: 1, of: 1, sources: [from], ship: [from], withheld: [], destRepo, destPath: parent(to) };
-  return { ...releasePicked(scope, [g], { defaultDestRepo: destRepo }), options: REPLACE };
+  return releasePicked(scope, [g], { defaultDestRepo: destRepo });
 }
 
 /** Overwrite: the Re-release of a file whose release waits in a pull request, `replace` set. */
@@ -239,14 +241,14 @@ function OutOfStepPanel(p: ReadyProps & { def: string }) {
         {rows.filter((x) => x.files.some(shown)).map((x) => {
           const pulls = `${ghUrl(org, x.repo)}/pulls`;
           const compare = `${ghUrl(org, x.repo)}/compare/upstream...${branchOf(x.repo)}`;
-          const src = x.r.source!.repo;
+          const src = x.src;
           const pr = prOf(x.repo);
           const up = p.files.tree(org, x.repo, 'upstream'), live = p.files.tree(org, x.repo);
           // Its file the pending release changes: edited in the semester, and `upstream` (the course version) differing from what students read.
           const pendingOf = (f: OutOfStep['files'][number]) => (pr && (f.state === 'ahead' || f.state === 'diverged') && differs(up, live, f.path) ? pr.html_url : undefined);
           return (
             <li class="dif-folder"><details class="fold" open>
-              <summary class="dif-fhead"><code class="dif-path">{x.repo === p.def ? '' : `${x.repo}: `}{x.path}/</code></summary>
+              <summary class="dif-fhead"><code class="dif-path">{x.repo === p.def ? '' : `${x.repo}: `}{x.path}/</code>{x.r ? null : <span class="footnote"> {BY_HAND}</span>}</summary>
               <ul class="dif-files">
                 {x.files.filter(shown).map((f) => (
                   <DiffFile key={f.path} files={p.files} org={org} repo={x.repo} folder={x.path} f={f} setup={setup} onKeep={keep} pulls={pulls} compare={compare}

@@ -157,11 +157,15 @@ function groupFact(g: Group, defaultDestRepo: string): string {
 
 /**
  * Release by hand (plan 2026-11-04 decisions 5-6): the manifest's groups in one `release.adhoc`
- * run, each source paired with its destination. No Options: the manifest set every destination.
- * `removed`: a picked file was removed in the semester, so a run with nothing to do says why.
+ * run, each source paired with its destination (the manifest set every destination). Its one
+ * Option is Overwrite (`replace`, advanced, off), which restores a file the semester removed and
+ * takes the course version over a semester edit. `removed`: how many picked files the semester
+ * removed; while Overwrite is off the intro says a plain release leaves them out, and a run with
+ * nothing to do says why.
  */
 export const REMOVED_NOTHING = 'Nothing copied: the semester removed these files; use Overwrite to restore them.';
-export function releasePicked(s: Scope, groups: Group[], run: { defaultDestRepo: string; removed?: boolean }): OpDef {
+export const removedPicked = (n: number) => `${plural(n, 'picked file')} ${n === 1 ? 'was' : 'were'} removed in the semester: a plain release leaves them out; tick Overwrite to restore them.`;
+export function releasePicked(s: Scope, groups: Group[], run: { defaultDestRepo: string; removed?: number }): OpDef {
   const rows = requestOf(groups, run);
   const n = rows.length;
   const repos = [...new Set(groups.map((g) => g.repo))];
@@ -174,7 +178,8 @@ export function releasePicked(s: Scope, groups: Group[], run: { defaultDestRepo:
     verb: `Release ${plural(n, 'path')}`, running: `Releasing ${plural(n, 'path')}`, cancel: 'Stop before copying',
     args: toArgs(rows),
     target: destUrl(s.cohortOrg ?? s.courseOrg, first?.destRepo || run.defaultDestRepo, first ? destPathOf(first, first.folder) : ''),
-    ...(run.removed ? { nothingExtra: REMOVED_NOTHING } : {}),
+    options: REPLACE,
+    ...(run.removed ? { nothingExtra: REMOVED_NOTHING, introExtra: (v: Record<string, unknown>) => (v.replace ? undefined : removedPicked(run.removed!)) } : {}),
   };
 }
 

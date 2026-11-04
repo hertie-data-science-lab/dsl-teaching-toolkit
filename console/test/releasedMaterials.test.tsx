@@ -54,13 +54,14 @@ const files = (trees: Record<string, string[]> = { [`${ORG}/materials`]: PATHS }
   });
 // The course copy and the semester's two branches for the step panel: notes.md edited in the
 // semester (ahead), lab.ipynb changed in the course and new.md added there (behind), slides.pdf
-// as released. `course` overrides a course blob's sha (`undefined` drops the file).
+// as released. `course` overrides a course blob's sha (`undefined` drops the file, a path not
+// listed adds it); `upstream`, what the semester's `upstream` branch has.
 const COURSE_PATHS = ['lectures/05_trees/notes.md', 'lectures/05_trees/slides.pdf', 'labs/lab-1/lab.ipynb', 'labs/lab-1/new.md', 'labs/lab-1/solutions/key.md'];
-function stepFiles(course: Record<string, string | undefined> = {}, semesterExtra: string[] = [], semesterGone: string[] = []): Files {
+function stepFiles(course: Record<string, string | undefined> = {}, semesterExtra: string[] = [], semesterGone: string[] = [], upstream: string[] = PATHS): Files {
   const shas: Record<string, string> = { [`${ORG}/materials/lectures/05_trees/notes.md`]: 'edited', [`${COURSE_ORG}/course-materials-f2026/labs/lab-1/lab.ipynb`]: 'new' };
-  const paths = COURSE_PATHS.filter((x) => !(x in course) || course[x] !== undefined);
+  const paths = [...COURSE_PATHS.filter((x) => !(x in course) || course[x] !== undefined), ...Object.keys(course).filter((x) => course[x] && !COURSE_PATHS.includes(x))];
   for (const [k, v] of Object.entries(course)) if (v) shas[`${COURSE_ORG}/course-materials-f2026/${k}`] = v;
-  const up = new StaticFiles({}, {}, { [`${ORG}/materials`]: PATHS });
+  const up = new StaticFiles({}, {}, { [`${ORG}/materials`]: upstream });
   const live = new StaticFiles({}, {}, { [`${ORG}/materials`]: [...PATHS.filter((x) => !semesterGone.includes(x)), ...semesterExtra], [`${COURSE_ORG}/course-materials-f2026`]: paths }, {
     [ORG]: [{ name: 'materials', pushed_at: '2026-09-22T14:38:46Z' }], [COURSE_ORG]: [{ name: 'course-materials-f2026' }],
   }, {}, shas);
@@ -227,6 +228,53 @@ describe('Released materials', () => {
     });
   });
 
+  // R1b: a copy released by hand (`release.adhoc`, no schedule entry) is on `upstream` all the same.
+  const HAND = 'labs/12_tutorial-presentations/README.md';
+  const handFiles = (more: string[] = [], live: string[] = []) => stepFiles({ [HAND]: `sha-${HAND}` }, live, [], [...PATHS, HAND, ...more]);
+
+  it('lists a file released by hand, then removed in the semester, beside the scheduled ones, with Overwrite (R1b)', async () => {
+    const st = (RELEASED as Extract<Loaded, { kind: 'ready' }>).status;
+    const rows = outOfStep(st, handFiles(), COURSE_ORG, ORG, 'materials');
+    expect(rows.map((x) => [x.path, x.r?.id, x.src, x.step])).toEqual([
+      ['lectures/05_trees', 's5', 'course-materials-f2026', 'ahead'], ['labs/lab-1', 'lab-1', 'course-materials-f2026', 'behind'],
+      ['labs/12_tutorial-presentations', undefined, 'course-materials-f2026', 'ahead'],
+    ]);
+    expect(rows[2].files).toEqual([{ path: HAND, state: 'removed', from: HAND }]);
+    // The repo's own top-level files on `upstream` (SYLLABUS.md here) are no release's.
+    expect(rows.flatMap((x) => x.files).some((f) => f.path === 'SYLLABUS.md')).toBe(false);
+    const open = vi.fn();
+    root = document.createElement('div');
+    document.body.appendChild(root);
+    const env = { user: { login: 'prof', id: 1, name: 'P', email: null, avatar_url: '' }, client: new GitHubClient({ token: () => 't', fetch: new FakeGitHub().fetch }), ops: { open } } as unknown as Env;
+    await act(() => render(<EnvCtx.Provider value={env}><SemesterMaterialsScreen {...props({ files: handFiles() })} /></EnvCtx.Provider>, root!));
+    const panel = root.querySelector<HTMLElement>('details.out-of-step')!;
+    // The count chip and the tabs count the scheduled and the hand-released files alike.
+    expect(panel.querySelector('summary .chip.amber')!.textContent).toBe('4 released files differ');
+    expect([...panel.querySelectorAll('[role="tab"]')].map((t) => t.textContent)).toEqual(['All 4', 'Edited in semester 2', 'Edited in course 2', 'Both 0']);
+    const folders = [...panel.querySelectorAll<HTMLElement>('li.dif-folder')];
+    expect(folders.map((li) => li.querySelector('summary.dif-fhead')!.textContent)).toEqual(['lectures/05_trees/', 'labs/lab-1/', 'labs/12_tutorial-presentations/ released by hand']);
+    const hand = folders[2].querySelector<HTMLElement>('li.dif-file')!;
+    expect(hand.querySelector('.dif-name')!.textContent).toBe('README.md');
+    expect(hand.querySelector('.chip')!.textContent).toBe('removed in semester');
+    const btn = [...hand.querySelectorAll<HTMLButtonElement>('.dif-right > button.btn')].find((b) => b.textContent === 'Overwrite')!;
+    expect(btn.disabled).toBe(false);
+    await act(() => btn.click());
+    expect(open.mock.calls[0][0]).toMatchObject({
+      op: 'release.adhoc', args: { course_source_repo: 'course-materials-f2026', course_source_path: HAND, semester_dest_repo: 'materials', semester_dest_path: HAND, replace: true },
+    });
+  });
+
+  it('lists a hand-released file the course dropped, and one the semester added beside it, as only in the semester (R1b)', () => {
+    const st = (RELEASED as Extract<Loaded, { kind: 'ready' }>).status;
+    const old = 'labs/12_tutorial-presentations/old.md', mine = 'labs/12_tutorial-presentations/mine.md';
+    const rows = outOfStep(st, handFiles([old], [old, mine]), COURSE_ORG, ORG, 'materials');
+    expect(rows[2].files).toEqual([{ path: HAND, state: 'removed', from: HAND }, { path: old, state: 'ahead', added: true }, { path: mine, state: 'ahead', added: true }]);
+    // Gone on both sides: nothing to list.
+    expect(outOfStep(st, handFiles([old]), COURSE_ORG, ORG, 'materials')[2].files.map((f) => f.path)).toEqual([HAND]);
+    // The course index chip counts them with the rest: notes.md edited, README.md removed, old.md and mine.md only in the semester.
+    expect(editedIn(handFiles([old], [old, mine]), COURSE_ORG, 'course-materials-f2026', ORG, RELEASED)).toBe(4);
+  });
+
   it('counts, for the course index chip, removed and semester-only files with the edited ones (R2)', () => {
     expect(editedIn(stepFiles(), COURSE_ORG, 'course-materials-f2026', ORG, RELEASED)).toBe(1);
     // notes.md edited, slides.pdf removed, extra.md added under the released lectures/05_trees.
@@ -365,7 +413,7 @@ describe('Released materials', () => {
     await act(() => pr.click());
     expect(open.mock.calls[2][0]).toMatchObject({ op: 'release.propagate_back', name: 'Keep for future semesters', args: {} });
     // Nothing edited in the semester (only the lab released: changed and added in the course): PR into source greyed.
-    await draw(stepFiles(), statusWith([rel('lab-1', 'labs/lab-1')]));
+    await draw(stepFiles({}, [], [], PATHS.filter((x) => !x.startsWith('lectures/'))), statusWith([rel('lab-1', 'labs/lab-1')]));
     expect([pr.disabled, pr.title]).toEqual([true, 'Nothing edited in the semester.']);
   });
 
@@ -376,7 +424,8 @@ describe('Released materials', () => {
     const env = { user: { login: 'prof', id: 1, name: 'P', email: null, avatar_url: '' }, client: new GitHubClient({ token: () => 't', fetch: new FakeGitHub().fetch }), ops: { open } } as unknown as Env;
     const other: Release = { ...rel('s5', 'lectures/05_trees'), dest: { repo: 'extras', path: 'lectures/05_trees' } };
     const base = stepFiles();
-    const f = Object.assign(Object.create(base), { tree: (o: string, r: string, ref?: string) => base.tree(o, r === 'extras' ? 'materials' : r, ref) });
+    // Only `extras` has the trees: the default `materials` has nothing released.
+    const f = Object.assign(Object.create(base), { tree: (o: string, r: string, ref?: string) => base.tree(o, r === 'extras' ? 'materials' : r === 'materials' ? 'none' : r, ref) });
     await act(() => render(<EnvCtx.Provider value={env}><SemesterMaterialsScreen {...props({ files: f, loaded: statusWith([other]) })} /></EnvCtx.Provider>, root!));
     const btn = [...root.querySelectorAll<HTMLButtonElement>('details.out-of-step .dif-right > button.btn')].find((b) => b.textContent === 'PR into source')!;
     await act(() => btn.click());

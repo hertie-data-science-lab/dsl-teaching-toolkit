@@ -477,7 +477,7 @@ describe('a release that copied nothing because the semester removed the files (
   }
 
   it('says, under the engine’s words, to use Overwrite', async () => {
-    const t = await ran(defs.releasePicked(scope, [g], { defaultDestRepo: 'materials', removed: true }), nothing);
+    const t = await ran(defs.releasePicked(scope, [g], { defaultDestRepo: 'materials', removed: 1 }), nothing);
     expect(t).toContain('Nothing to release: upstream already has these files.');
     expect(t).toContain(defs.REMOVED_NOTHING);
     expect(defs.REMOVED_NOTHING).toBe('Nothing copied: the semester removed these files; use Overwrite to restore them.');
@@ -486,7 +486,50 @@ describe('a release that copied nothing because the semester removed the files (
   it('says nothing more when no picked file was removed, or the run copied something', async () => {
     expect(await ran(defs.releasePicked(scope, [g], { defaultDestRepo: 'materials' }), nothing)).not.toContain('Nothing copied');
     render(null, root!);
-    expect(await ran(defs.releasePicked(scope, [g], { defaultDestRepo: 'materials', removed: true }), { ...nothing!, conclusion: 'done', summary: 'Released.' })).not.toContain('Nothing copied');
+    expect(await ran(defs.releasePicked(scope, [g], { defaultDestRepo: 'materials', removed: 1 }), { ...nothing!, conclusion: 'done', summary: 'Released.' })).not.toContain('Nothing copied');
+  });
+});
+
+describe('Release by hand’s Overwrite (R3)', () => {
+  const g = { repo: 'course-materials-f2026', head: 'labs/', folder: 'labs', kind: 'partial' as const, files: 2, of: 2, sources: ['labs/a.md', 'labs/b.md'], ship: ['labs/a.md', 'labs/b.md'], withheld: [] };
+  class Capture extends Scripted {
+    args: Record<string, unknown> | null = null;
+    override async submit(i: { op: string; courseOrg: string; preview: boolean; args?: Record<string, unknown> }): Promise<Handle> {
+      this.args = i.args ?? null;
+      return super.submit(i);
+    }
+  }
+
+  it('says picked files the semester removed are left out until Overwrite is ticked, and the run then carries replace', async () => {
+    const a = new Capture();
+    const ops = session(a);
+    await mount(envOf(ops), <OpPanel />);
+    await act(() => ops.open(defs.releasePicked(scope, [g], { defaultDestRepo: 'materials', removed: 2 })));
+    const line = '2 picked files were removed in the semester: a plain release leaves them out; tick Overwrite to restore them.';
+    expect(root!.querySelector('.drawer')!.textContent).toContain(line);
+    expect(defs.removedPicked(1)).toBe('1 picked file was removed in the semester: a plain release leaves them out; tick Overwrite to restore them.');
+    const box = [...root!.querySelectorAll('label')].find((l) => l.textContent?.includes('Overwrite the semester’s copy, discarding its edits'))!.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    expect(box.checked).toBe(false);
+    await act(() => box.click());
+    expect(root!.querySelector('.drawer')!.textContent).not.toContain(line);
+    await act(() => void ops.start('run'));
+    await settle(() => a.args !== null);
+    a.finish();
+    await settle(() => ops.current.value?.phase === 'done');
+    expect(a.args).toMatchObject({ course_source_path: 'labs/a.md,labs/b.md', replace: true });
+  });
+
+  it('leaves replace out of a plain run', async () => {
+    const a = new Capture();
+    const ops = session(a);
+    await mount(envOf(ops), <OpPanel />);
+    await act(() => ops.open(defs.releasePicked(scope, [g], { defaultDestRepo: 'materials' })));
+    expect(root!.textContent).not.toContain('removed in the semester');
+    await act(() => void ops.start('run'));
+    await settle(() => a.args !== null);
+    a.finish();
+    await settle(() => ops.current.value?.phase === 'done');
+    expect(a.args!.replace).toBeFalsy();
   });
 });
 
