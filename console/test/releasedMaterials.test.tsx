@@ -285,6 +285,19 @@ describe('Released materials', () => {
     expect(outOfStep(only, withNewer({ kind: 'loading' }), COURSE_ORG, ORG, 'materials')).toEqual([]);
   });
 
+  it('lists a hand-released file beside an entry with no source and a file release whose course repo is unread (R1b, demo 2026-11-04)', () => {
+    const st = (RELEASED as Extract<Loaded, { kind: 'ready' }>).status;
+    // As the demo's status has them: a released entry with no source or destination, and a file released from another repo.
+    const bare: Release = { ...rel('lecture-12', ''), source: null, dest: null };
+    const code: Release = { ...rel('lecture-09', 'dldemo/uncertainty.py'), source: { repo: 'lecture-code-f2026', path: 'dldemo/uncertainty.py' }, dest: { repo: 'materials', path: 'code/dldemo/uncertainty.py' } };
+    const status = { ...st, releases: [...st.releases!, bare, code] };
+    const f = handFiles(['code/dldemo/uncertainty.py'], ['code/dldemo/uncertainty.py']);
+    // lecture-code-f2026 not read: its file is no copy released by hand, and waits.
+    const rows = outOfStep(status, f, COURSE_ORG, ORG, 'materials');
+    expect(rows.map((x) => x.path)).toEqual(['lectures/05_trees', 'labs/lab-1', 'labs/12_tutorial-presentations']);
+    expect(rows[2].files).toEqual([{ path: HAND, state: 'removed', from: HAND }]);
+  });
+
   it('lists a hand-released file the course dropped, and one the semester added beside it, as only in the semester (R1b)', () => {
     const st = (RELEASED as Extract<Loaded, { kind: 'ready' }>).status;
     const old = 'labs/12_tutorial-presentations/old.md', mine = 'labs/12_tutorial-presentations/mine.md';

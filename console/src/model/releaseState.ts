@@ -436,7 +436,8 @@ export function outOfStep(status: Status, files: Files, courseOrg: string, semOr
     }
     // Every file on `upstream` a release's copies do not name: a copy released by hand, or one the course has since dropped.
     const landed = new Set(folds.flatMap((f) => [...f.copies.values()]));
-    const coverOf = (p: string) => covers.filter((c) => (c.file ? p === c.fold.path : p.startsWith(`${c.fold.path}/`))).sort((a, b) => b.fold.path.length - a.fold.path.length)[0];
+    // A release's folder or file covers its own path and everything under it (whether it named a file is unknown while its course tree is read).
+    const coverOf = (p: string) => covers.filter((c) => p === c.fold.path || p.startsWith(`${c.fold.path}/`)).sort((a, b) => b.fold.path.length - a.fold.path.length)[0];
     for (const b of up.kind === 'ready' ? up.paths : []) {
       if (b.dir || landed.has(b.path) || neverMaterial(b.path)) continue;
       const c = coverOf(b.path);
