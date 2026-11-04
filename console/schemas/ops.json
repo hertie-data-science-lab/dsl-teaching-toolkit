@@ -38,7 +38,7 @@
         "properties": {
           "course_source_path": {
             "description": "Path(s), comma-separated",
-            "pattern": "^(?=[\\s\\S]{1,8192}$)(?!-)[^\\x00-\\x1f]+$",
+            "pattern": "^(?=[\\s\\S]{1,8192}$)(?=[^,\\x00-\\x1f])(?!\\s*-)[^,\\x00-\\x1f]*(?:,(?!\\s*-)[^,\\x00-\\x1f]*)*$",
             "type": "string"
           },
           "course_source_repo": {
@@ -61,7 +61,7 @@
           },
           "semester_dest_path": {
             "description": "Destination path(s), comma-separated",
-            "pattern": "^(?=[\\s\\S]{1,8192}$)(?!-)[^\\x00-\\x1f]+$",
+            "pattern": "^(?=[\\s\\S]{1,8192}$)(?=[^,\\x00-\\x1f])(?!\\s*-)[^,\\x00-\\x1f]*(?:,(?!\\s*-)[^,\\x00-\\x1f]*)*$",
             "type": "string"
           },
           "semester_dest_repo": {
@@ -90,7 +90,7 @@
         "properties": {
           "course_source_path": {
             "description": "Path(s), comma-separated",
-            "pattern": "^(?=[\\s\\S]{1,8192}$)(?!-)[^\\x00-\\x1f]+$",
+            "pattern": "^(?=[\\s\\S]{1,8192}$)(?=[^,\\x00-\\x1f])(?!\\s*-)[^,\\x00-\\x1f]*(?:,(?!\\s*-)[^,\\x00-\\x1f]*)*$",
             "type": "string"
           },
           "course_source_repo": {
@@ -104,7 +104,7 @@
           },
           "semester_dest_path": {
             "description": "Destination path(s), comma-separated",
-            "pattern": "^(?=[\\s\\S]{1,8192}$)(?!-)[^\\x00-\\x1f]+$",
+            "pattern": "^(?=[\\s\\S]{1,8192}$)(?=[^,\\x00-\\x1f])(?!\\s*-)[^,\\x00-\\x1f]*(?:,(?!\\s*-)[^,\\x00-\\x1f]*)*$",
             "type": "string"
           },
           "semester_dest_repo": {
@@ -134,7 +134,7 @@
         "properties": {
           "paths": {
             "description": "Only these semester-side paths, comma-separated: `<dest repo>/<path>`, or `<path>` in the semester's materials repo; each inside a released copy",
-            "pattern": "^(?=[\\s\\S]{1,8192}$)(?!-)[^\\x00-\\x1f]+$",
+            "pattern": "^(?=[\\s\\S]{1,8192}$)(?=[^,\\x00-\\x1f])(?!\\s*-)[^,\\x00-\\x1f]*(?:,(?!\\s*-)[^,\\x00-\\x1f]*)*$",
             "type": "string"
           }
         },

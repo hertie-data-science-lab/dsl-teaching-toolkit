@@ -409,6 +409,23 @@ def test_replace_leaves_paths_outside_the_copy_and_added_files_alone(world):
     assert world.read("main", "lectures/01/extra.md") == "added in class"
 
 
+def test_replace_takes_several_paths_and_names_a_nested_copy_once(world):
+    _edited_on_both_sides(world)
+    world.commit("cm", {"lectures/02/lab.md": "two, rewritten\n"}, "rewrite two")
+
+    assert world.release(
+        "lectures/01", "lectures/02", "lectures/01/lab.md", replace=True
+    ) == (
+        0,
+        True,
+    )
+    assert world.read("main", "lectures/01/lab.md") == "version two"
+    assert world.read("main", "lectures/02/lab.md") == "two, rewritten"
+    assert "release: replace lectures/01, lectures/02 with the course version" in (
+        world.subjects("materials", "upstream..main")
+    )
+
+
 def test_replace_also_ships_when_another_path_is_held(world):
     # A conflict already standing for one path does not hold the path being replaced.
     _edited_on_both_sides(world)

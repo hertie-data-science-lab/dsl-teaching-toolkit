@@ -579,7 +579,7 @@ def _materials_index(
 
     Filtered by `materials.publishable`: a released `solution/`, `grading_config.yml` or
     hidden `tests/` is not course material, and this index lists everything a release
-    happened to carry; the never-listed names (`selection.UNLISTED`: clutter, `.gitkeep`) go with them.
+    happened to carry; the never-listed names (`selection.listable`: clutter, `.gitkeep`) go with them.
 
     Root files come out separately as `documents:`, one unheaded group rather than a
     section per repo. A name two repos both hold is listed once per repo, named

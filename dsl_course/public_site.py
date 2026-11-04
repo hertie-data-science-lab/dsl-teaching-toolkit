@@ -42,7 +42,7 @@ from .materials import folder_kind
 from .opencourse import OPENCOURSE_FILE, OpenCourse
 from .opencourse import read as read_opencourse
 from .readings import readings_block
-from .selection import PUBLISH, Selection, deny, floor, kept, publishable
+from .selection import PUBLISH, Selection, deny, floor, kept, listable, publishable
 from .selection import releaseignored as releaseignored_in
 from .site_repo import (
     ROW_NOUN,
@@ -313,14 +313,10 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
                     if oc.reading_lists:
                         reading_list_md = _reading_list_md(
                             read_src,
-                            # Named, never a `.gitkeep` (`publishable`).
+                            # Named, never a `.gitkeep` (`listable`).
                             lambda p: (
-                                publishable(p.relative_to(src).as_posix())
-                                and kept(
-                                    p.relative_to(src).as_posix(),
-                                    use=listed_names,
-                                    withheld=withheld,
-                                )
+                                listable(rel := p.relative_to(src).as_posix())
+                                and kept(rel, use=listed_names, withheld=withheld)
                             ),
                         )
 

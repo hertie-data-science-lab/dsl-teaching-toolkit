@@ -238,7 +238,7 @@ Things whose *literal spelling* is depended on from outside Python:
   0.11.0 migration folds (`migrate.fold_open_site`, `migrate.publish_host`).
 - **`selection`** is the one rule for every outbound copy (decision 0040): the institution
   denylist (`DENYLIST`, `CLUTTER`, one name's group by `group_of`; `UNLISTED` `.gitkeep` is
-  copied but never listed, `publishable`; on a release it judges
+  copied but never listed, `listable` / `publishable`; on a release it judges
   only what lies BELOW the named path, so `from_path: solutions/labs/02` ships while a lab
   folder's `solutions/` stays behind), then `.releaseignore`, then the use's Selection
   (`semester.yml student_site.host`, `open_course_site.publish`; a release has none but
@@ -311,7 +311,10 @@ In both, a listing that could not be READ raises rather than answering "there is
 inventing that answer opens a duplicate on every tick, for as long as the outage lasts.
 `propagate` is the second consumer of `pulls`, with `refresh_body=True` (its body is a
 running summary of what its branch now holds); the release's conflict PR is written once
-and left alone.
+and left alone. A per-path propagate also reads `find_pr`: it adds to the existing branch
+only while that branch's PR is open onto the base and every commit on it carries the
+`Propagate-Path:` trailer (`propagate.PATH_TRAILER`, which the body's path list is rebuilt
+from); otherwise, and on every full run, the branch is cut fresh.
 
 ## The grading sandbox's two outward contracts
 

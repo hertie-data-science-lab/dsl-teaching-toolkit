@@ -729,6 +729,47 @@ def test_a_trailing_newline_does_not_pass_a_pattern():
     assert exc.value.code == "BAD_ARGS"
 
 
+@pytest.mark.parametrize(
+    "args",
+    [
+        {"paths": "lectures/01,-rf"},
+        {"paths": "lectures/01, -rf"},
+        {"paths": "-rf"},
+    ],
+)
+def test_no_item_of_a_path_list_may_be_a_flag(args):
+    with pytest.raises(RequestError) as exc:
+        parse_request(json.dumps(_request(op="release.propagate_back", args=args)))
+    assert exc.value.code == "BAD_ARGS"
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        {"course_source_repo": "cm,-rf", "course_source_path": "a"},
+        {"course_source_repo": "cm", "course_source_path": "a,-rf"},
+        {
+            "course_source_repo": "cm",
+            "course_source_path": "a",
+            "semester_dest_path": "b, -x",
+        },
+    ],
+)
+def test_no_item_of_a_hand_release_list_may_be_a_flag(args):
+    with pytest.raises(RequestError) as exc:
+        parse_request(json.dumps(_request(op="release.adhoc", args=args)))
+    assert exc.value.code == "BAD_ARGS"
+
+
+def test_a_path_list_still_takes_several_paths():
+    req = parse_request(
+        json.dumps(
+            _request(op="release.propagate_back", args={"paths": "a/b-c, extras/wk01,"})
+        )
+    )
+    assert req.args["paths"] == "a/b-c, extras/wk01,"
+
+
 def test_a_failed_refresh_after_a_new_template_is_a_reason_not_a_failure(
     monkeypatch, capsys, engine
 ):

@@ -95,10 +95,10 @@ _CLUTTER_FOLDED = frozenset(n.casefold() for n in CLUTTER)
 
 # Copied, never listed: a `.gitkeep` ships an empty folder (a release, a hand-out, a publish
 # carries it like any file), but nobody wants to see it listed as course material, so the
-# listings (`publishable`: a site's materials index, the student status file; and
+# listings (`listable`: a site's materials index, the student status file, a reading list,
 # `site_repo.shape_links`) drop it with the clutter.
 UNLISTED = frozenset({".gitkeep"})
-_UNLISTED_FOLDED = frozenset(n.casefold() for n in UNLISTED) | _CLUTTER_FOLDED
+_NEVER_LISTED = frozenset(n.casefold() for n in UNLISTED) | _CLUTTER_FOLDED
 
 # Skipped when the WHOLE repo is released (`course_source_path: /`), and only at the repo
 # root: `.github` holds the Release workflows and their bot-token wiring - the toolkit's
@@ -131,11 +131,6 @@ RELEASE = (CONTENT,)
 def is_clutter(name: str) -> bool:
     """Whether one path COMPONENT is never course material (case-insensitive)."""
     return name.casefold() in _CLUTTER_FOLDED
-
-
-def is_unlisted(name: str) -> bool:
-    """Whether one path COMPONENT is never LISTED as material: clutter, or `UNLISTED`."""
-    return name.casefold() in _UNLISTED_FOLDED
 
 
 def group_of(name: str) -> str | None:
@@ -173,10 +168,16 @@ def denied(path: str) -> bool:
     return bool(part_groups(path))
 
 
+def listable(path: str) -> bool:
+    """Whether a path is ever LISTED as material: no component is clutter or `UNLISTED`
+    (a `.gitkeep` is copied but never listed)."""
+    return not any(p.casefold() in _NEVER_LISTED for p in path.split("/") if p)
+
+
 def publishable(path: str) -> bool:
     """Whether a path may be listed at all, whatever a selection says: nothing `denied`,
-    and no `UNLISTED` name (a `.gitkeep` is copied but never listed)."""
-    return not denied(path) and not any(is_unlisted(p) for p in path.split("/") if p)
+    and `listable`."""
+    return not denied(path) and listable(path)
 
 
 def _type(ext: str) -> str:

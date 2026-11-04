@@ -158,16 +158,17 @@ What it does and does not carry:
 - a semester repo that is **behind its latest release** - one with the conflict pull request
   above still open - is skipped until that pull request is merged, because its copy is
   missing what the course org has already released; the pull request names what was left;
-- the branch is regenerated on every run, so re-running after more edits refreshes the same
+- a full run regenerates the branch, so re-running after more edits refreshes the same
   pull request rather than stacking on it.
 
 To carry back only some files, give `paths`: a comma-separated list of semester-side paths,
 each `<dest repo>/<path>` or, in the semester's materials repo, just `<path>` (for example
-`lectures/01/lab.md, extras/week01`). Each must lie inside something already released; one
-that does not refuses the run and is named. Each is mapped back through its release to the
-course path it came from, and the pull request lists exactly those paths. The branch is
-still regenerated, so the pull request always shows the latest run: a per-path run replaces
-what a full run proposed, and the next full run replaces it again.
+`lectures/01/lab.md, extras/week01`). Each must lie inside something already released -
+on schedule, early, or by hand; one that does not refuses the run and is named. Each is
+mapped back through the release record to the course path it came from. Per-path runs add
+up: while their pull request is open, the next one adds its paths as further commits, so
+proposing two files in turn proposes both. A full run starts the branch again, and so does a
+per-path run after a full one, or after the pull request was merged or closed.
 
 Archiving a semester runs it first, so the semester's corrections are offered back before the repos
 are frozen.

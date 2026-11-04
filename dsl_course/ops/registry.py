@@ -56,7 +56,9 @@ PATH_PATTERN = r"^(?!-)[^\x00-\x1f]{1,1024}$"
 LIST_MAX = 8192
 _LIST_CAP = rf"(?=[\s\S]{{1,{LIST_MAX}}}$)"
 REPO_LIST_PATTERN = rf"^{_LIST_CAP}{_REPO}(?:\s*,\s*{_REPO})*$"
-PATH_LIST_PATTERN = rf"^{_LIST_CAP}(?!-)[^\x00-\x1f]+$"
+# No item may start with `-` (a flag, once `comma_items` strips it), not just the first.
+_PATH_ITEM = r"(?!\s*-)[^,\x00-\x1f]*"
+PATH_LIST_PATTERN = rf"^{_LIST_CAP}(?=[^,\x00-\x1f]){_PATH_ITEM}(?:,{_PATH_ITEM})*$"
 KEY_PATTERN = r"^(?!-)[A-Za-z0-9_.-]{1,100}$"
 SEMESTER_PATTERN = r"^[fs][0-9]{4}$"
 FORMATS_PATTERN = (
@@ -219,8 +221,8 @@ def _course_semester(request: Request) -> list[str]:
 
 
 def _propagate(request: Request) -> list[str]:
-    paths = ["--paths", _a(request, "paths")] if _a(request, "paths") else []
-    return [*_course_semester(request), *paths]
+    paths = _a(request, "paths")
+    return [*_course_semester(request), *(["--paths", paths] if paths else [])]
 
 
 def _status_refresh(request: Request) -> list[str]:

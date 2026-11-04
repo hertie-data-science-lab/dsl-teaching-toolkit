@@ -128,6 +128,12 @@ def plural(n: int, one: str, many: str | None = None) -> str:
     return f"{n} {one if n == 1 else (many or one + 's')}"
 
 
+def comma_items(spec: str) -> list[str]:
+    """A comma-separated input as stripped, non-empty items - so "a, b," is ["a", "b"]
+    and "" is []."""
+    return [item.strip() for item in spec.split(",") if item.strip()]
+
+
 def add_preview_flag(parser: argparse.ArgumentParser, help: str) -> None:
     """`--preview/--no-preview` on a CLI, ON by default (decision 0012): trying an
     operation without changing anything is what a bare invocation does, and acting takes

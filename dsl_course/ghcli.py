@@ -22,7 +22,7 @@ from typing import Any
 from urllib.parse import unquote
 
 from . import run
-from .log import CLIParser, log_err, on_cli_start, plural
+from .log import CLIParser, comma_items, log_err, on_cli_start, plural
 
 RATE_LIMIT_MARKERS = (
     "secondary rate limit",
@@ -480,7 +480,7 @@ _REMOTE_OWNER = re.compile(r"github\.com[:/]([A-Za-z0-9._-]+)/")
 def org_allowlist() -> frozenset[str] | None:
     """The orgs this process may write to, or None when the fence is off (the default)."""
     raw = os.environ.get(_ORG_ALLOWLIST_ENV, "")
-    names = {n.strip() for n in raw.split(",") if n.strip()}
+    names = set(comma_items(raw))
     return frozenset(names) if names else None
 
 

@@ -75,6 +75,7 @@ from .log import (
     CLIParser,
     Summary,
     add_preview_flag,
+    comma_items,
     log,
     log_err,
     log_ok,
@@ -93,6 +94,7 @@ from .schedule import DEFAULT_DEST_REPO, Deploy
 from .schedule_plan import (
     covered_copies,
     deploy_dest,
+    outermost,
     refuse_unnumbered,
     unnumbered_release,
 )
@@ -353,30 +355,59 @@ RELEASED, UNCHANGED, HELD, FAILED = "released", "unchanged", "held", "failed"
 LANDED = frozenset({RELEASED, UNCHANGED})
 
 
-def _replace_paths(dd: Path, base: str, paths: list[str], dropped: list[str]) -> int:
-    """Take the released version of exactly `paths` onto `base`, as one commit: what a
-    `--replace` release does before its merge - the hard overwrite.
+class Replacement(NamedTuple):
+    """What a `--replace` release overwrites in one dest: the paths copied into it and the
+    files `--remove-deleted` took off `upstream` there."""
 
-    `git checkout upstream -- <path>` per path `upstream` has, then `git rm` of `dropped`
-    (the files `--remove-deleted` took off `upstream` this run). A file the semester ADDED
-    under a path is not on `upstream`, so it stays - this discards edits, not additions.
-    Answers -1 on a git failure, else whether a commit was made (1) or not (0). The merge
-    that follows then has nothing to conflict on at these paths: both sides agree."""
+    paths: list[str]
+    dropped: list[str]
+
+
+def _replace_paths(dd: Path, base: str, replace: Replacement) -> int:
+    """Take the released version of exactly `replace.paths` onto `base`, as one commit:
+    what a `--replace` release does before its merge - the hard overwrite.
+
+    One `git checkout upstream -- <path>...` of the outermost paths `upstream` has (a copy
+    nested in another is already inside it), then `git rm` of `replace.dropped`. A file the
+    semester ADDED under a path is not on `upstream`, so it stays - this discards edits,
+    not additions. Answers -1 on a git failure, else whether a commit was made (1) or not
+    (0). The merge that follows then has nothing to conflict on at these paths: both
+    sides agree."""
     code, out = git("-C", str(dd), *GIT_ENV, "checkout", "-q", base)
     if code != 0:
         log_err(f"  could not check out `{base}` - {out[:200]}")
         return -1
-    for path in paths:
-        if git("-C", str(dd), "cat-file", "-e", f"{UPSTREAM_BRANCH}:{path}")[0] != 0:
-            continue  # nothing of it was released - a copy everything was excluded from
+    paths = outermost(replace.paths)
+    # `.` for the root, alone after `outermost`: listed, it is present when `upstream`
+    # has anything at all. A path not there had nothing of it released (everything
+    # excluded).
+    specs = [p or "." for p in paths]
+    code, out = git(
+        "-C", str(dd), "ls-tree", "-z", "--name-only", UPSTREAM_BRANCH, "--", *specs
+    )
+    if code != 0:
+        log_err(f"  could not list `{UPSTREAM_BRANCH}` - {out[:200]}")
+        return -1
+    listed = {n for n in out.split("\0") if n}
+    present = [s for s in specs if s in listed or (s == "." and listed)]
+    if present:
         code, out = git(
-            "-C", str(dd), *GIT_ENV, "checkout", UPSTREAM_BRANCH, "--", path or "."
+            "-C", str(dd), *GIT_ENV, "checkout", UPSTREAM_BRANCH, "--", *present
         )
         if code != 0:
-            log_err(f"  could not take `{path or '(repo root)'}` - {out[:200]}")
+            log_err(f"  could not take {', '.join(present)} - {out[:200]}")
             return -1
-    if dropped:
-        git("-C", str(dd), *GIT_ENV, "rm", "-q", "--ignore-unmatch", "--", *dropped)
+    if replace.dropped:
+        git(
+            "-C",
+            str(dd),
+            *GIT_ENV,
+            "rm",
+            "-q",
+            "--ignore-unmatch",
+            "--",
+            *replace.dropped,
+        )
     if git("-C", str(dd), "diff", "--cached", "--quiet")[0] == 0:
         return 0
     named = ", ".join(p or "(repo root)" for p in paths)
@@ -403,11 +434,11 @@ def _merge_and_push(
     touched: set[str],
     *,
     committed: bool,
-    replace: tuple[list[str], list[str]] | None = None,
+    replace: Replacement | None = None,
 ) -> tuple[int, str]:
     """Merge one dest's `UPSTREAM_BRANCH` into the branch students read and push both.
 
-    `replace` - `(paths, dropped)`, a `--replace` release - first takes the released version
+    `replace` - a `--replace` release - first takes the released version
     of those paths onto the branch students read (`_replace_paths`), discarding the
     semester's edits to them, so the merge cannot conflict there. The merge then runs as
     usual for everything else `upstream` holds; if THAT conflicts (a pull request already
@@ -427,7 +458,7 @@ def _merge_and_push(
     if replace and dest.upstream_on_remote:
         # A dest with no `upstream` yet - empty, or never released to by merge - has
         # nothing to replace: its first release lands on top of `base` anyway.
-        made = _replace_paths(dd, dest.base, *replace)
+        made = _replace_paths(dd, dest.base, replace)
         if made < 0:
             log_err(f"  {repo}: could not replace the released paths")
             return 1, FAILED
@@ -692,8 +723,8 @@ def deploy_many(
 
         # 3. apply every copy against the already-cloned trees
         touched: set[str] = set()
-        # Per dest, for `replace`: the paths copied into it and the files removed there.
-        landed_at: dict[str, tuple[list[str], list[str]]] = {}
+        # Per dest, for `replace` only: what it overwrites there.
+        replaced_paths: dict[str, Replacement] = {}
         for d in deploys:
             if (
                 d.course_source_repo not in src_dirs
@@ -819,9 +850,12 @@ def deploy_many(
                         f"- {d.semester_dest_repo}/{dest_rel}/{rel}".replace("//", "/")
                     )
             touched.add(d.semester_dest_repo)
-            at = landed_at.setdefault(d.semester_dest_repo, ([], []))
-            at[0].append(dest_rel)
-            at[1].extend(f"{dest_rel}/{rel}".lstrip("/") for rel in removed)
+            if replace:
+                at = replaced_paths.setdefault(
+                    d.semester_dest_repo, Replacement([], [])
+                )
+                at.paths.append(dest_rel)
+                at.dropped.extend(f"{dest_rel}/{rel}".lstrip("/") for rel in removed)
             applied.append((d, commits[d.course_source_repo], files, tuple(removed)))
 
         # 4. one commit on `upstream` per dest, then merge it into the branch students
@@ -865,7 +899,7 @@ def deploy_many(
                 dest,
                 touched,
                 committed=committed,
-                replace=landed_at.get(repo) if replace else None,
+                replace=replaced_paths.get(repo),
             )
             errors += merge_errors
             changed = changed or outcomes[repo] == RELEASED
@@ -892,12 +926,6 @@ def _sync_site(course_org: str, semester_org: str) -> int:
         log_err(f"site sync failed after release: {exc}")
         return 1
     return 0
-
-
-def _items(spec: str) -> list[str]:
-    """Split a comma-separated input into stripped, non-empty items - so
-    "a, b," is ["a", "b"] and "" is []."""
-    return [item.strip() for item in spec.split(",") if item.strip()]
 
 
 def _per_pair(repos: list[str], n: int, what: str) -> list[str]:
@@ -931,22 +959,22 @@ def parse_deploy_lists(
     blank `dest_repos` is `default_dest` (the semester's `materials_repo`) for every
     path. Surrounding whitespace is stripped and empty items (a trailing comma) are
     ignored throughout."""
-    paths = _items(source_paths)
+    paths = comma_items(source_paths)
     if not paths:
         raise ValueError("--course-source-path is empty")
-    landings: list[str | None] = _items(dest_paths) or [None] * len(paths)
+    landings: list[str | None] = comma_items(dest_paths) or [None] * len(paths)
     if len(landings) != len(paths):
         raise ValueError(
             f"{len(paths)} course_source_paths but {len(landings)} semester_dest_paths - "
             f"give one semester_dest_path per course_source_path (paired in order), or "
             f"leave semester_dest_path blank to mirror every course_source_path"
         )
-    sources = _items(source_repos)
+    sources = comma_items(source_repos)
     if not sources:
         raise ValueError("--course-source-repo is empty")
     sources = _per_pair(sources, len(paths), "course_source_repo")
     dests = _per_pair(
-        _items(dest_repos) or [default_dest], len(paths), "semester_dest_repo"
+        comma_items(dest_repos) or [default_dest], len(paths), "semester_dest_repo"
     )
     return [
         Deploy(repo, src, dest_repo, dest)
@@ -1221,10 +1249,13 @@ def main() -> int:
             {"items": len(deploys)},
             conclusion="nothing_to_do",
         )
+    verb, prep, tail = (
+        ("Replaced", "in", " with the course version")
+        if args.replace
+        else ("Released", "to", "")
+    )
     return Summary(
-        f"{'Replaced' if args.replace else 'Released'} {what} from {sources} "
-        f"{'in' if args.replace else 'to'} {dests}"
-        f"{' with the course version' if args.replace else ''}.",
+        f"{verb} {what} from {sources} {prep} {dests}{tail}.",
         {"items": len(deploys)},
     )
 
