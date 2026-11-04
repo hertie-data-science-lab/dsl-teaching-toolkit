@@ -12,6 +12,7 @@
     "assignment_repo_visibility",
     "archive_grace_days",
     "materials_repo",
+    "release_destinations",
     "autosync_released_edits",
     "marks_per_question",
     "team_formation"

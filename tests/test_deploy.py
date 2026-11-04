@@ -84,6 +84,79 @@ def test_an_empty_source_path_is_an_error_not_an_empty_batch():
         deploy.parse_path_pairs("  ,  ")
 
 
+def _rows(deploys):
+    return [
+        (
+            d.course_source_repo,
+            d.course_source_path,
+            d.semester_dest_repo,
+            d.semester_dest_path,
+        )
+        for d in deploys
+    ]
+
+
+def test_one_repo_on_each_side_applies_to_every_pair():
+    assert _rows(deploy.parse_deploy_lists("src", "a,b", "handouts", "x,y")) == [
+        ("src", "a", "handouts", "x"),
+        ("src", "b", "handouts", "y"),
+    ]
+
+
+def test_repo_lists_pair_with_the_paths_by_index():
+    # A hand release drawing on two course repos into two semester repos: one run.
+    got = deploy.parse_deploy_lists(
+        "materials-src, datasets-src", "lectures/01,data/01", "materials,datasets", ""
+    )
+    assert _rows(got) == [
+        ("materials-src", "lectures/01", "materials", None),
+        ("datasets-src", "data/01", "datasets", None),
+    ]
+
+
+def test_a_blank_dest_repo_is_the_default_for_every_pair():
+    got = deploy.parse_deploy_lists("a-src,b-src", "x,y", "  ")
+    assert [d.semester_dest_repo for d in got] == [deploy.DEFAULT_DEST_REPO] * 2
+
+
+@pytest.mark.parametrize(
+    ("sources", "dests", "message"),
+    [
+        ("a,b,c", "", "3 course_source_repos but 2 course_source_paths"),
+        ("a", "m,n,o", "3 semester_dest_repos but 2 course_source_paths"),
+        (" , ", "", "course-source-repo is empty"),
+    ],
+)
+def test_unpaired_repo_lists_fail_loudly_naming_the_counts(sources, dests, message):
+    with pytest.raises(ValueError, match=message):
+        deploy.parse_deploy_lists(sources, "p,q", dests)
+
+
+def test_cli_releases_several_repos_in_one_batch(monkeypatch, site_syncs, capsys):
+    seen = []
+    monkeypatch.setattr(
+        deploy,
+        "deploy_many",
+        lambda org, sem, deploys, sync=True, remove=None: (
+            seen.append(deploys) or deploy.Batch(0, True, [])
+        ),
+    )
+    monkeypatch.setattr(deploy, "unnumbered_release", lambda *a: None)
+    argv = ["deploy", "--course-org", "Course", "--semester-org", "Semester-f2026"]
+    argv += ["--course-source-repo", "materials-src,datasets-src"]
+    argv += ["--semester-dest-repo", "materials,datasets"]
+    argv += ["--course-source-path", "lectures/01,data/01", "--no-preview"]
+    monkeypatch.setattr("sys.argv", argv)
+    out = deploy.main()
+    assert out == 0 and len(seen) == 1
+    assert [d.semester_dest_repo for d in seen[0]] == ["materials", "datasets"]
+    assert (
+        "2 source repos in Course -> 2 repos in Semester-f2026"
+        in capsys.readouterr().out
+    )
+    assert out.text == "Released 2 items from 2 source repos to 2 repos."
+
+
 def test_cli_rejects_a_count_mismatch_with_a_nonzero_exit(monkeypatch, capsys):
     # End to end through the button's own entry point: no clone is attempted, and the
     # run fails visibly rather than releasing a partial batch.

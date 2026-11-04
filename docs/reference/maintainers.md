@@ -721,11 +721,14 @@ drop it; the public website neither hosts nor links its files, since it hosts by
 
 One hand-edited file per level (decision 0039), each with the same fixed `defaults:` key set:
 `timezone`, `late_window_days`, `late_penalty_per_day`, `max_team_size`,
-`assignment_repo_visibility`, `archive_grace_days`, `materials_repo`, `autosync_released_edits`,
-`marks_per_question`, and `team_formation` from the course level down (none at the institution:
-absent everywhere is `none`, no team forms, `settings.TEAM_FORMATION_FALLBACK`).
-`formats` is not a default: New assignment asks. A key resolves nearest first, per key never per
-block, and `settings.resolve` returns `(value, source)`:
+`assignment_repo_visibility`, `archive_grace_days`, `materials_repo`, `release_destinations`,
+`autosync_released_edits`, `marks_per_question`, and `team_formation` from the course level down
+(none at the institution: absent everywhere is `none`, no team forms,
+`settings.TEAM_FORMATION_FALLBACK`). `formats` is not a default: New assignment asks. A key
+resolves nearest first, per key never per block, and `settings.resolve` returns `(value, source)`;
+`release_destinations` (`settings.MERGED_KEYS`, the console's "Release into" list; the engine only
+reports it in status.json) is instead every layer's names together, the source the nearest layer
+adding any:
 
 | Source | File | Key |
 |---|---|---|

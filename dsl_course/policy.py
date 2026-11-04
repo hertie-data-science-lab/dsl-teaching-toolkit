@@ -44,6 +44,7 @@ DEFAULT_KEYS = (
     "assignment_repo_visibility",
     "archive_grace_days",
     "materials_repo",
+    "release_destinations",
     "autosync_released_edits",
     "marks_per_question",
 )
@@ -87,6 +88,10 @@ SCHEMA = {
                 },
                 "archive_grace_days": _WHOLE,
                 "materials_repo": {"type": "string", "pattern": r"^[\w.-]+$"},
+                "release_destinations": {
+                    "type": "array",
+                    "items": {"type": "string", "pattern": r"^[\w.-]+$"},
+                },
                 "autosync_released_edits": {"type": "boolean"},
                 "marks_per_question": {"type": "boolean"},
             },

@@ -49,6 +49,10 @@ VIA_WORKFLOW = "workflow:"
 # would read it as a flag, and a request is user text.
 ORG_PATTERN = r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$"
 REPO_PATTERN = r"^(?!-)[A-Za-z0-9._-]{1,100}$"
+# One repo, or a comma-separated list of them (a hand release's repos, paired with its
+# paths by index).
+_REPO = r"(?!-)[A-Za-z0-9._-]{1,100}"
+REPO_LIST_PATTERN = rf"^{_REPO}(?:\s*,\s*{_REPO})*$"
 PATH_PATTERN = r"^(?!-)[^\x00-\x1f]{1,1024}$"
 KEY_PATTERN = r"^(?!-)[A-Za-z0-9_.-]{1,100}$"
 SEMESTER_PATTERN = r"^[fs][0-9]{4}$"
@@ -179,9 +183,15 @@ _ENTRY = _string(
     KEY_PATTERN, "The schedule.yml assignments key, when two entries share the template"
 )
 _DEPLOY_FIELDS = {
-    "course_source_repo": _string(REPO_PATTERN, "Course-org repo to release from"),
+    "course_source_repo": _string(
+        REPO_LIST_PATTERN,
+        "Course-org repo(s) to release from, comma-separated: one per path, or one for all",
+    ),
     "course_source_path": _string(PATH_PATTERN, "Path(s), comma-separated"),
-    "semester_dest_repo": _string(REPO_PATTERN, "Semester repo to release into"),
+    "semester_dest_repo": _string(
+        REPO_LIST_PATTERN,
+        "Semester repo(s) to release into, comma-separated: one per path, or one for all",
+    ),
     "semester_dest_path": _string(PATH_PATTERN, "Destination path(s), comma-separated"),
 }
 

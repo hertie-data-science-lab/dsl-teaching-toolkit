@@ -42,8 +42,8 @@
             "type": "string"
           },
           "course_source_repo": {
-            "description": "Course-org repo to release from",
-            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
+            "description": "Course-org repo(s) to release from, comma-separated: one per path, or one for all",
+            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}(?:\\s*,\\s*(?!-)[A-Za-z0-9._-]{1,100})*$",
             "type": "string"
           },
           "entry": {
@@ -61,8 +61,8 @@
             "type": "string"
           },
           "semester_dest_repo": {
-            "description": "Semester repo to release into",
-            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
+            "description": "Semester repo(s) to release into, comma-separated: one per path, or one for all",
+            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}(?:\\s*,\\s*(?!-)[A-Za-z0-9._-]{1,100})*$",
             "type": "string"
           }
         },
@@ -90,8 +90,8 @@
             "type": "string"
           },
           "course_source_repo": {
-            "description": "Course-org repo to release from",
-            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
+            "description": "Course-org repo(s) to release from, comma-separated: one per path, or one for all",
+            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}(?:\\s*,\\s*(?!-)[A-Za-z0-9._-]{1,100})*$",
             "type": "string"
           },
           "semester_dest_path": {
@@ -100,8 +100,8 @@
             "type": "string"
           },
           "semester_dest_repo": {
-            "description": "Semester repo to release into",
-            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
+            "description": "Semester repo(s) to release into, comma-separated: one per path, or one for all",
+            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}(?:\\s*,\\s*(?!-)[A-Za-z0-9._-]{1,100})*$",
             "type": "string"
           }
         },

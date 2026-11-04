@@ -3430,3 +3430,25 @@ def test_run_settings_quote_no_late_window_for_external_work():
     repo = grading_spec.GradingSpec(late_window_days=10, sources=sources)
     assert status_json.run_settings(external)["late_window_days"]["value"] is None
     assert status_json.run_settings(repo)["late_window_days"]["value"] == 10
+
+
+def test_the_release_destinations_ride_beside_the_default_destination(monkeypatch):
+    # The console's "Release into" list: the course's names, then the semester's own.
+    monkeypatch.setattr(
+        settings,
+        "org_meta",
+        lambda org: {"defaults": {"release_destinations": ["datasets"]}},
+    )
+    monkeypatch.setattr(
+        settings,
+        "_semester_text",
+        lambda org: "defaults:\n  release_destinations: [handouts]\n",
+    )
+    doc = _render()
+    defaults = doc["semester"]["defaults"]
+    assert defaults["materials_repo"] == {"value": "materials", "source": "institution"}
+    assert defaults["release_destinations"] == {
+        "value": ["datasets", "handouts"],
+        "source": "semester",
+    }
+    assert validate(doc, schemas.status_schema()) == []

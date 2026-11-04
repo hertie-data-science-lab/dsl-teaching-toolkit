@@ -75,6 +75,13 @@
         "max_team_size": {
           "type": "integer"
         },
+        "release_destinations": {
+          "items": {
+            "pattern": "^[\\w.-]+$",
+            "type": "string"
+          },
+          "type": "array"
+        },
         "team_formation": {
           "enum": [
             "self_select",

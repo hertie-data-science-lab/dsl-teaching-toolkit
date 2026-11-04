@@ -17,8 +17,10 @@ clones it once, not 27 times. Both callers arrive here - the hourly scheduler
 manual "Release materials" workflow (via `main` below, whose five inputs are deliberately the
 same five fields as a `deploy:` entry).
 
-The workflow's `course_source_path`/`semester_dest_path` are comma-separated PARALLEL lists
-paired by index (parse_path_pairs) - one Deploy per pair, one deploy_many call for the batch.
+The workflow's four inputs are comma-separated PARALLEL lists paired by index
+(parse_deploy_lists): the paths pair one to one, and a repo list of one item applies to
+every pair - so one hand release may draw on several source repos and land in several
+destination repos. One Deploy per pair, one deploy_many call for the batch.
 
 `--entry KEY` releases one schedule.yml entry instead: every copy it lists, from every
 source repo it draws on, in ONE deploy_many call with one site sync.
@@ -811,6 +813,39 @@ def parse_path_pairs(
     return list(zip(sources, dests))
 
 
+def _per_pair(repos: list[str], n: int, what: str) -> list[str]:
+    """`repos` spread over `n` path pairs: one repo applies to every pair, otherwise one
+    per pair - the same loud mismatch as the paths'."""
+    if len(repos) == 1:
+        return repos * n
+    if len(repos) != n:
+        raise ValueError(
+            f"{len(repos)} {what}s but {n} course_source_paths - give one {what} per "
+            f"course_source_path (paired in order), or one {what} for them all"
+        )
+    return repos
+
+
+def parse_deploy_lists(
+    source_repos: str, source_paths: str, dest_repos: str = "", dest_paths: str = ""
+) -> list[Deploy]:
+    """The Release materials workflow's four comma-separated lists as one Deploy per path
+    pair (`parse_path_pairs`), each pair's repos by the same index. A blank `dest_repos`
+    is `DEFAULT_DEST_REPO` for every pair; a blank `dest_paths` mirrors every source."""
+    pairs = parse_path_pairs(source_paths, dest_paths)
+    sources = _items(source_repos)
+    if not sources:
+        raise ValueError("--course-source-repo is empty")
+    sources = _per_pair(sources, len(pairs), "course_source_repo")
+    dests = _per_pair(
+        _items(dest_repos) or [DEFAULT_DEST_REPO], len(pairs), "semester_dest_repo"
+    )
+    return [
+        Deploy(repo, src, dest_repo, dest)
+        for repo, (src, dest), dest_repo in zip(sources, pairs, dests)
+    ]
+
+
 def _entry_of(sched: schedule.Schedule, label: str) -> schedule.Release | str:
     """The schedule entry `label`, or the refusal to say instead."""
     found = next((r for r in sched.releases if r.label == label), None)
@@ -874,16 +909,27 @@ def _named(names: list[str], what: str) -> str:
     return unique[0] if len(unique) == 1 else plural(len(unique), what)
 
 
+def _in_org(org: str, names: list[str], what: str) -> str:
+    """`org/repo` for one repo, "2 source repos in org" for several - the log's line."""
+    named = _named(names, what)
+    return f"{org}/{named}" if len(set(names)) == 1 else f"{named} in {org}"
+
+
 def main() -> int:
     parser = CLIParser(description=__doc__)
     parser.add_argument("--course-org", required=True, help="Course org (source)")
-    parser.add_argument("--course-source-repo", help="Source repo holding the path(s)")
+    parser.add_argument(
+        "--course-source-repo",
+        help="Source repo holding the path(s), or a comma-separated list paired with "
+        "--course-source-path by index (one repo applies to every path)",
+    )
     parser.add_argument("--semester-org", required=True, help="Semester org (target)")
     parser.add_argument(
         "--semester-dest-repo",
         default=DEFAULT_DEST_REPO,
-        help="Target repo in the semester org, created if missing "
-        f"(default: {DEFAULT_DEST_REPO})",
+        help="Target repo in the semester org, created if missing, or a "
+        "comma-separated list paired with --course-source-path by index (one repo "
+        f"applies to every path; default: {DEFAULT_DEST_REPO})",
     )
     parser.add_argument(
         "--course-source-path",
@@ -933,15 +979,16 @@ def main() -> int:
         if not (args.course_source_repo and args.course_source_path):
             log_err("give --entry, or --course-source-repo and --course-source-path.")
             return 1
-        dest_repo = args.semester_dest_repo.strip() or DEFAULT_DEST_REPO
         try:
-            pairs = parse_path_pairs(args.course_source_path, args.semester_dest_path)
+            deploys = parse_deploy_lists(
+                args.course_source_repo,
+                args.course_source_path,
+                args.semester_dest_repo,
+                args.semester_dest_path,
+            )
         except ValueError as e:
             log_err(f"{e}.")
             return 1
-        deploys = [
-            Deploy(args.course_source_repo, src, dest_repo, dest) for src, dest in pairs
-        ]
     if any(
         (args.course_org, d.course_source_repo)
         == (args.semester_org, d.semester_dest_repo)
@@ -960,14 +1007,17 @@ def main() -> int:
         if refusal:
             return refuse_unnumbered(refusal)
 
-    sources = _named([d.course_source_repo for d in deploys], "source repo")
-    dests = _named([d.semester_dest_repo for d in deploys], "repo")
+    source_names = [d.course_source_repo for d in deploys]
+    dest_names = [d.semester_dest_repo for d in deploys]
+    sources = _named(source_names, "source repo")
+    dests = _named(dest_names, "repo")
+    route = (
+        f"from {_in_org(args.course_org, source_names, 'source repo')} -> "
+        f"{_in_org(args.semester_org, dest_names, 'repo')}"
+    )
     what = plural(len(deploys), "item")
     if args.preview:
-        log_step(
-            f"PREVIEW release {len(deploys)} path(s) from {args.course_org}/{sources} "
-            f"-> {args.semester_org}/{dests}"
-        )
+        log_step(f"PREVIEW release {len(deploys)} path(s) {route}")
         # The cheap structural checks need no clone, so catch them here: a source path that
         # contains `..` (rejected at run for resolving to the root or escaping the clone).
         # (The full clone-relative escape-check stays at copy time in deploy_many.)
@@ -998,10 +1048,7 @@ def main() -> int:
             {"items": len(deploys)},
         )
 
-    log_step(
-        f"Releasing {len(deploys)} path(s) from {args.course_org}/{sources} -> "
-        f"{args.semester_org}/{dests}"
-    )
+    log_step(f"Releasing {len(deploys)} path(s) {route}")
     remove = None
     if args.remove_deleted:
         # Every file the record lists for each copy: `deploy_many` removes only those the

@@ -595,3 +595,52 @@ def test_autosync_resolves_semester_then_course_then_institution(
 def test_autosync_has_no_entry_layer():
     # A semester-wide key: written on a schedule entry it is not a run setting.
     assert settings.inline_settings({"autosync_released_edits": True}, "e", []) == {}
+
+
+def test_release_destinations_keep_the_repo_names_and_drop_the_rest():
+    read = settings.parse_instance(
+        "defaults:\n  release_destinations: [datasets, 'bad name', datasets, handouts]\n"
+    )
+    assert read.defaults == {"release_destinations": ["datasets", "handouts"]}
+    (fault,) = read.faults
+    assert fault.field == "release_destinations" and fault.lineno == 2
+    assert "`release_destinations: bad name` is not a repo name" in fault.what
+
+
+def test_release_destinations_that_are_not_a_list_state_nothing():
+    dropped: list = []
+    got = settings.read_defaults({"release_destinations": "datasets"}, "w", dropped)
+    assert got == {"release_destinations": None}
+    assert "is not a list of repo names" in dropped[0].what
+
+
+@pytest.mark.parametrize(
+    ("course", "semester", "expected"),
+    [
+        (None, None, ([], "institution")),
+        (["datasets"], None, (["datasets"], "course")),
+        # A semester adds to its course's list, never replaces it.
+        (
+            ["datasets", "handouts"],
+            "[handouts, extra]",
+            (
+                ["datasets", "handouts", "extra"],
+                "semester",
+            ),
+        ),
+        (None, "[extra]", (["extra"], "semester")),
+    ],
+)
+def test_release_destinations_merge_course_then_semester(
+    monkeypatch, course, semester, expected
+):
+    block = {} if course is None else {"release_destinations": course}
+    monkeypatch.setattr(settings, "org_meta", lambda org: {"defaults": block})
+    text = (
+        "" if semester is None else f"defaults:\n  release_destinations: {semester}\n"
+    )
+    monkeypatch.setattr(settings, "_semester_text", lambda org: text)
+    assert settings.effective_defaults("C", "Sem")["release_destinations"] == {
+        "value": expected[0],
+        "source": expected[1],
+    }

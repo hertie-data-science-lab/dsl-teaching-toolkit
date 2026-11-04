@@ -379,10 +379,15 @@ def status_schema(*, closed: bool = True) -> dict:
         },
         ("id", "kind", "repo", "text", "need"),
     )
-    # Every `defaults:` key's effective value and the layer that gave it (`settings`).
+    # Every `defaults:` key's effective value and the layer that gave it (`settings`); a
+    # merged list (`release_destinations`) is every layer's items, its source the nearest
+    # layer adding any.
     effective = obj(
         {
-            "value": {"type": ["string", "integer", "boolean", "null"]},
+            "value": {
+                "type": ["string", "integer", "boolean", "null", "array"],
+                "items": {"type": "string"},
+            },
             "source": _enum(SOURCES),
         },
         ("value", "source"),
@@ -753,6 +758,10 @@ def _defaults(keys) -> dict:
         "timezone": _str(),
         "archive_grace_days": {"type": "integer"},
         "materials_repo": {"type": "string", "pattern": r"^[\w.-]+$"},
+        "release_destinations": {
+            "type": "array",
+            "items": {"type": "string", "pattern": r"^[\w.-]+$"},
+        },
         "autosync_released_edits": {"type": "boolean"},
     }
     out = _obj(_keys(keys, types))

@@ -19,7 +19,7 @@ A `files:` item of a `schedule.yml` entry releases exactly what the ops below do
 Two ops, in the console or on the CLI:
 
 - **`release.entry`** (`python -m dsl_course release.entry`) - ships one schedule entry's files now, ahead of their time.
-- **`release.adhoc`** (`python -m dsl_course release.adhoc`) - copies a path no entry names. Its arguments are a `files:` item's under their op names: `course_source_repo` (`from_course_repo`), `course_source_path` (`from_path`, comma-separated for several), `semester_dest_repo` (`to_semester_repo`; created if missing, private, `students` + `auditors` read) and `semester_dest_path` (`to_path`, default: the source path).
+- **`release.adhoc`** (`python -m dsl_course release.adhoc`) - copies a path no entry names. Its arguments are a `files:` item's under their op names: `course_source_repo` (`from_course_repo`), `course_source_path` (`from_path`, comma-separated for several), `semester_dest_repo` (`to_semester_repo`; created if missing, private, `students` + `auditors` read) and `semester_dest_path` (`to_path`, default: the source path). Either repo may also be a comma-separated list, paired in order with the paths (one item applies to all), so one run can draw on several course repos and land in several semester repos.
 
 ### How to specify release paths
 

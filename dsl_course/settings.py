@@ -16,8 +16,10 @@ and `effective` says which layer answered. A RUN setting (`RUN_KEYS`: how teams 
 team cap, the late window and penalty, the repo visibility, the external submit link, whether returned
 marks show each question) has all four; a SEMESTER-WIDE one (`SEMESTER_KEYS`: timezone,
 archive grace, the default materials repo; and `autosync_released_edits`, which the release
-engine reads through `effective`) has no entry layer. `team_formation` has no
-institution layer (decision 0039 rule 2). The late window and the penalty resolve each on
+engine reads through `effective`) has no entry layer. `release_destinations` (the semester
+repos a hand release may land in, which the console keeps) is a list MERGED across the
+layers (`MERGED_KEYS`) rather than answered by the nearest; the engine only reports it.
+`team_formation` has no institution layer (decision 0039 rule 2). The late window and the penalty resolve each on
 its own, like every other key: a layer stating the window alone keeps the penalty below
 (`late_window_days: 0` is no late work). The files spell `visibility` as `assignment_repo_visibility` (`FILE_NAMES`). A template's
 `grading_config.yml` states no run setting (a run key there is RUN_SETTING_IN_TEMPLATE).
@@ -89,10 +91,15 @@ DEFAULT_KEYS = (
     "visibility",
     "archive_grace_days",
     "materials_repo",
+    "release_destinations",
     "autosync_released_edits",
     "marks_per_question",
     "team_formation",
 )
+# The keys whose value is every layer's list together (institution first, then course,
+# then semester additions), not the nearest layer's: a semester adds destinations to its
+# course's, it does not replace them.
+MERGED_KEYS = ("release_destinations",)
 # The same, as the files spell them, in the order the seeded skeletons write them.
 DEFAULT_FILE_KEYS = tuple(FILE_NAMES.get(key, key) for key in DEFAULT_KEYS)
 # `team_formation` when no layer states it: none, so no team is formed and the assignment
@@ -146,6 +153,40 @@ def _materials_repo(value: object, where: str, dropped: list[str]) -> str | None
     return None
 
 
+def _release_destinations(
+    value: object, where: str, dropped: list[str]
+) -> list[str] | None:
+    """`release_destinations`: semester repo names, each held to `materials_repo`'s rule. A
+    name that is not one is dropped and the rest kept; a value that is not a list states
+    nothing. Blank (`release_destinations:`) is no destinations."""
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        dropped.append(
+            Dropped(
+                where,
+                "release_destinations",
+                f"`release_destinations: {value}` is not a list of repo names - ignored",
+            )
+        )
+        return None
+    names = []
+    for item in value:
+        name = str(item if item is not None else "").strip()
+        if REPO_NAME.match(name):
+            names.append(name)
+            continue
+        dropped.append(
+            Dropped(
+                where,
+                "release_destinations",
+                f"`release_destinations: {item}` is not a repo name (letters, digits, "
+                f"`.`, `_`, `-`) - ignored",
+            )
+        )
+    return list(dict.fromkeys(names))
+
+
 def _autosync(value: object, where: str, dropped: list[str]) -> bool | None:
     """`autosync_released_edits` (decision 0043): true = an edit to an already-released
     course folder re-ships on the next scheduler tick; false = a release is one copy at its
@@ -169,6 +210,7 @@ _SEMESTER_READERS = {
     "timezone": _timezone,
     "archive_grace_days": _grace_days,
     "materials_repo": _materials_repo,
+    "release_destinations": _release_destinations,
     "autosync_released_edits": _autosync,
 }
 
@@ -613,7 +655,12 @@ def _states(block: Mapping, key: str) -> bool:
 
 
 def resolve(key: str, stack: Sequence[Layer]) -> tuple[object, str]:
-    """`(value, source)` for `key`: the nearest layer that states it."""
+    """`(value, source)` for `key`: the nearest layer that states it - or, for a
+    `MERGED_KEYS` list, every layer's items together and the nearest layer adding any."""
+    if key in MERGED_KEYS:
+        merged = [item for _, block in reversed(stack) for item in block.get(key) or ()]
+        source = next((s for s, block in stack if block.get(key)), "institution")
+        return list(dict.fromkeys(merged)), source
     for source, block in stack:
         if _states(block, key):
             return block.get(key), source
