@@ -23,6 +23,7 @@ import { parseRoster, teamColumn, type RosterRow } from '../model/people';
 import type { Assignment } from '../model/types';
 import { returnMarks, teamsWindow, type AsgRef, type LateReturn, type PerQuestion } from '../ops/defs';
 import { OpOpen } from '../ops/Panel';
+import { useDragHandle, type DragHandle } from '../ui/dragHandle';
 import type { OpDef } from '../ops/session';
 import { assignmentHref, replaceHash, tabHref } from '../router';
 import { CheckLine, Loading } from '../ui/bits';
@@ -110,6 +111,12 @@ function OpenOnArrival({ slug, def, start }: { slug: string; def: OpDef; start: 
     env?.ops.open(def, start);
   }, []);
   return null;
+}
+
+/** A column's resize grip (`useDragHandle`). */
+function ColGrip({ colKey, label, handle }: { colKey: string; label: string; handle: DragHandle }) {
+  const { props } = useDragHandle(handle);
+  return <span class="col-grip" {...props} aria-label={`Resize ${label}: drag, or use the arrow keys; double-click resets it`} data-col-key={colKey} />;
 }
 
 /** A row of the grid the side panel can show: a student or team, or one member of a team. */
@@ -946,39 +953,28 @@ export function MarksTab(p: TabProps) {
   const grip = (key: string) => {
     const c = cols.find((x) => x.key === key);
     if (!c) return null;
-    const start = (e: PointerEvent) => {
-      const el = e.currentTarget as HTMLElement;
-      const w0 = widthOf(c) ?? el.parentElement!.getBoundingClientRect().width;
-      const x0 = e.clientX;
-      e.preventDefault();
-      el.setPointerCapture?.(e.pointerId);
-      // While dragging, only the column and the table's minimum move, on the page itself; the width is kept once, on release.
-      const tbl = table.current;
-      const col = [...(tbl?.querySelectorAll<HTMLElement>('col') ?? [])].find((x) => x.dataset.colKey === key);
-      let w: number | null = null;
-      const move = (m: PointerEvent) => {
-        w = clampW(w0 + m.clientX - x0);
-        if (col) col.style.width = `${w}px`;
-        if (tbl) tbl.style.minWidth = `${minTable - colMin(c) + colMin(c, w)}px`;
-      };
-      const end = () => {
-        el.removeEventListener('pointermove', move);
-        el.removeEventListener('pointerup', end);
-        el.removeEventListener('pointercancel', end);
-        if (w !== null) setWidth(key, w);
-      };
-      el.addEventListener('pointermove', move);
-      el.addEventListener('pointerup', end);
-      el.addEventListener('pointercancel', end);
+    const at = (el: HTMLElement) => widthOf(c) ?? el.parentElement!.getBoundingClientRect().width;
+    const handle: DragHandle = {
+      start: (e, el) => {
+        const w0 = at(el);
+        const x0 = e.clientX;
+        // While dragging, only the column and the table's minimum move, on the page itself; the width is kept once, on release.
+        const tbl = table.current;
+        const col = [...(tbl?.querySelectorAll<HTMLElement>('col') ?? [])].find((x) => x.dataset.colKey === key);
+        let w: number | null = null;
+        return {
+          move: (m) => {
+            w = clampW(w0 + m.clientX - x0);
+            if (col) col.style.width = `${w}px`;
+            if (tbl) tbl.style.minWidth = `${minTable - colMin(c) + colMin(c, w)}px`;
+          },
+          end: () => { if (w !== null) setWidth(key, w); },
+        };
+      },
+      step: (dir, el) => setWidth(key, at(el) + dir * 8),
+      reset: () => resetWidth(key),
     };
-    const keys = (e: KeyboardEvent) => {
-      const d = e.key === 'ArrowLeft' ? -8 : e.key === 'ArrowRight' ? 8 : 0;
-      if (!d) return;
-      e.preventDefault();
-      const el = e.currentTarget as HTMLElement;
-      setWidth(key, (widthOf(c) ?? el.parentElement!.getBoundingClientRect().width) + d);
-    };
-    return <span class="col-grip" role="separator" aria-orientation="vertical" tabindex={0} aria-label={`Resize ${c.label}: drag, or use the arrow keys; double-click resets it`} title="Drag to resize; double-click to reset" data-col-key={key} onPointerDown={start} onKeyDown={keys} onDblClick={() => resetWidth(key)} />;
+    return <ColGrip colKey={key} label={c.label} handle={handle} />;
   };
   const colgroup = <colgroup>{cols.map((c) => <col data-col-key={c.key} style={widthOf(c) !== null ? { width: `${widthOf(c)}px` } : undefined} />)}</colgroup>;
   const head = (

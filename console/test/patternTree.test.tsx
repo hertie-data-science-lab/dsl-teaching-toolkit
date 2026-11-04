@@ -5,7 +5,7 @@
 import { readFileSync } from 'node:fs';
 import { render } from 'preact-render-to-string';
 import { describe, expect, it } from 'vitest';
-import { exactLine, toggle, withholdCounts } from '../src/edit/badges';
+import { exactLine, standing, tally, toggle } from '../src/edit/badges';
 import { compileAll, withheldBy } from '../src/edit/glob';
 import { PatternTree } from '../src/ui/PatternTree';
 
@@ -62,9 +62,9 @@ describe('the pattern tree', () => {
 
   it('badges from the draft and names the broader rule', () => {
     const out = html(['labs/']);
-    expect(out).toMatch(/<span class="ft-name">labs\/<\/span><span class="chip amber">withheld<\/span>/);
-    expect(out).toMatch(/<span class="ft-name">lab.pdf<\/span><span class="chip amber">withheld<\/span><span class="footnote">withheld by <code>labs\/<\/code><\/span>/);
-    expect(out).toMatch(/<span class="ft-name">a.pdf<\/span><span class="chip ">released to students<\/span>/);
+    expect(out).toMatch(/<span class="ft-name">labs\/<\/span><\/span><span class="chip amber">withheld<\/span>/);
+    expect(out).toMatch(/<span class="ft-name">lab.pdf<\/span><\/span><span class="chip amber">withheld<\/span><span class="chip muted rule-chip">withheld by <code>labs\/<\/code><\/span>/);
+    expect(out).toMatch(/<span class="ft-name">a.pdf<\/span><\/span><span class="chip ">released to students<\/span>/);
     expect(out).toContain('aria-label="Include labs/"');
     expect(out).toContain('aria-label="Withhold lectures/"');
   });
@@ -102,21 +102,32 @@ describe('the withheld tree’s folder counts', () => {
   it('says how many files a folder withholds, and not how many are released', () => {
     const out = render(<PatternTree files={files} patterns={patterns} onChange={() => {}} />);
     // Withheld: labs/02/lab.pdf, labs/02/key.pdf, the never-material .DS_Store and the denylisted solutions/a.py.
-    expect(out).toContain('<span class="ft-name">labs/</span><span class="chip amber">4 withheld</span>');
+    expect(out).toContain('<span class="ft-name">labs/</span></span><span class="ft-rollup"><span class="chip amber">4 withheld</span></span>');
     // A folder no list can release says so, with no toggle.
-    expect(out).toContain('<span class="ft-name">solutions/</span><span class="chip amber">never copied</span>');
+    expect(out).toContain('<span class="ft-name">solutions/</span></span><span class="chip amber">never copied</span>');
     expect(out).not.toContain('aria-label="Withhold labs/solutions/"');
-    expect(out).toContain('<span class="ft-name">02/</span><span class="chip amber">2 withheld</span>');
+    expect(out).toContain('<span class="ft-name">02/</span></span><span class="ft-rollup"><span class="chip amber">2 withheld</span></span>');
     expect(out).not.toContain('· 2 released');
     // A folder with nothing withheld says nothing.
-    expect(render(<PatternTree files={files} patterns={[]} onChange={() => {}} />)).not.toContain('<span class="ft-name">01/</span><span class="chip amber">');
+    expect(render(<PatternTree files={files} patterns={[]} onChange={() => {}} />)).not.toContain('<span class="ft-name">01/</span></span><span class="ft-rollup">');
   });
 
-  it('counts the whole repo three ways: never copied, withheld by a line, released', () => {
-    // Never copied: .DS_Store and the denylisted solutions/a.py. Withheld: labs/02's two pdfs.
-    expect(withholdCounts(files, patterns)).toEqual({ never: 2, withheld: 2, released: 2 });
-    // A line naming a never-copied file does not move it to withheld.
-    expect(withholdCounts(files, ['solutions/'])).toEqual({ never: 2, withheld: 0, released: 4 });
-    expect(withholdCounts([], patterns)).toEqual({ never: 0, withheld: 0, released: 0 });
+  it('shows a folder’s roll-up only while it is closed, its own chip either way', () => {
+    // A withheld folder's own `withheld` chip is about the folder: never in the roll-up.
+    const out = render(<PatternTree files={files} patterns={['labs/02/']} onChange={() => {}} />);
+    expect(out).toContain('<span class="ft-name">02/</span></span><span class="chip amber">withheld</span>');
+    expect(out).toContain('<span class="ft-name">labs/</span></span><span class="ft-rollup"><span class="chip amber">');
+    // CSS hides the roll-up of an open folder, so a toggle needs no re-render.
+    const css = readFileSync(new URL('../src/styles/console.css', import.meta.url), 'utf8');
+    expect(css).toContain('.file-tree details[open] > summary .ft-rollup { display: none; }');
+  });
+
+  it('counts the whole repo three ways under the institution’s defaults: never leaving, withheld, released', () => {
+    const n = (lines: string[], fs = files) => tally(fs, (f) => standing(compileAll(lines, { defaults: true }), lines, f, false));
+    // Never: .DS_Store. Withheld: labs/02's two pdfs, and solutions/a.py by default.
+    expect(n(patterns)).toEqual({ never: 1, withheld: 3, released: 2 });
+    // A ! line releases the content name.
+    expect(n(['!solutions/'])).toEqual({ never: 1, withheld: 0, released: 5 });
+    expect(n(patterns, [])).toEqual({ never: 0, withheld: 0, released: 0 });
   });
 });

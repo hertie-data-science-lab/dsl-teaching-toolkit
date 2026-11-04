@@ -16,6 +16,65 @@ A `files:` item of a `schedule.yml` entry releases exactly what the ops below do
 
 ## Release by hand
 
+### From the console
+
+In the semester nav, **Materials** opens **Released materials this semester** (each semester
+repo as students have it, every file opening in the viewer), **Released materials that differ
+from their source files** ([below](#released-materials-that-differ-from-their-source-files)) when a released folder differs from the course copy, and
+**Release by hand**:
+
+1. **From**: pick a course repo. Its tree is on the left.
+2. Tick files or folders (a click anywhere on a file's row ticks it). Each row's chip says where
+   it stands against the semester:
+   - **released** (the name greyed): the semester already has this version; nothing to release.
+   - **behind**: the course copy changed since its release; a release updates the semester.
+   - **ahead**: edited in the semester since its release; a release merges onto that edit. Its
+     **PR into source** carries the edit back to the course ([below](#carrying-cohort-edits-back)).
+   - **diverged**: changed in both; a release opens a pull request ([below](#fixing-something-you-have-already-released)).
+   - **removed in semester**: released, then deleted in the semester; a plain release changes
+     nothing; **Overwrite** in the panel below, or ticked in the release's Options, restores the course version.
+   - **not released**: not in the semester yet.
+   - **withheld**: a `.releaseignore` line keeps it from students ("withheld by `drafts/`"), or the
+     institution's default for solutions and tests ("withheld by default"); a `!` line that
+     releases one says so ("released by `!solutions/`") ([below](#withholding-files-with-releaseignore)).
+   - **never released**: secrets, git metadata and grading files; no release carries one.
+3. On the right, the manifest lists every file the release copies and where it lands, grouped
+   by folder. **To** over it is the semester repo (the semester's Default destination to start
+   with). A group's **Edit destination** sends it to another repo or path; a group going to a
+   different repo is marked `(!)`.
+4. **Release** opens the run's panel; run it there. A path with a comma in it cannot be ticked
+   (rename it), and a release of several hundred individual files is too long for one run: tick
+   their folders instead, or release in two goes.
+
+Picks from several course repos (switch **From**; earlier picks stay in the manifest) into
+several semester repos go out as one run. **Want to automate these releases? Schedule on the calendar**, under the panel's title,
+opens a new Schedule entry with the same files (or an empty one, with nothing ticked) instead, to
+release them at a time ([07](07-schedule-releases.md)).
+
+The same view is on each course repo's settings page (**Course materials** → the repo →
+**Files** → **Release**), with **Release into** choosing the semester
+([02](02-add-materials-to-course.md)). Its **Browse** view marks whatever does not reach
+students with one plain **withheld** chip; **Withhold** says why.
+
+### Released materials that differ from their source files
+
+A folded panel listing every released folder whose files differ between the course copy and
+the semester's (scheduled releases and releases by hand alike), its count the differing files: **ahead** (edited in the semester, a file added there included), **behind** (changed in the course since the
+release, a file added there included) or **diverged** (both). A filter narrows it to one kind.
+**PR into source (all)** opens one pull request per course repo carrying every semester edit back
+([below](#carrying-cohort-edits-back)). Under each folder, each differing file has
+**Re-release** (that file's course version, merged onto the semester's edit; a conflict opens a
+pull request; its Options can **Overwrite the semester's copy** instead, discarding its edit),
+**PR into source** (that file's semester edit only), **Open**, and **Diff**, which shows what changed under the row (text files), with
+**Compare on GitHub** for an edited one. While a re-release waits in its pull request, the
+file says **Release pending in a pull request**, with **Open PR** to resolve it on GitHub and
+**Overwrite** to take the course version. Nothing changes until you choose.
+
+On a course repo's **Files** → **Release**, a notice says when the chosen semester has edited
+released files from that repo, with **PR into source** and **See which**.
+
+### The ops
+
 Two ops, in the console or on the CLI:
 
 - **`release.entry`** (`python -m dsl_course release.entry`) - ships one schedule entry's files now, ahead of their time.
@@ -30,8 +89,6 @@ No release lands in a repo the semester uses for something else: `semester-confi
 - **The whole repo**: `/` (or `.`), minus `.git`, `.github` and `.system/` (your operating notes `MAINTAINING.md` and the syllabus example - never released).
 
 Re-releasing is safe - copies are additive and idempotent. A release made here is recorded like a scheduled one, so the scheduler does not copy it again - even a copy whose planned time is still to come: releasing it by hand is its release, and its `release_datetime` becomes the time it went out.
-
-The console's semester **Materials** page shows each semester repo as students have it, each released folder linked to its Release page.
 
 ### Phased code release
 

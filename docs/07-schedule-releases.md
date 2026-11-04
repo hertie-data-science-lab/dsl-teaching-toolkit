@@ -94,6 +94,8 @@ Folder names mean nothing: the block says what the entry is. A release only ever
 
 No `files:` key: a session with nothing to ship (a row, never "not yet released"). `files: []`: files still to write - a to-do on the Dashboard.
 
+In the console, **Schedule on the calendar** under a hand release ([08](08-release-materials-to-cohort.md#from-the-console)) opens a new `assets:` entry with the picked paths already in its `files:` (and any destination you changed); give it a date and save.
+
 NB: `from_path: /` releases the whole repo, less `.github` and `.system/`. A root `README.md` or `SYLLABUS.md` still carrying the scaffold's placeholder is **withheld** - see [08](08-release-materials-to-cohort.md#the-unwritten-root-stubs-are-withheld-until-you-write-them).
 
 ### Readings

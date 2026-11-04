@@ -3,10 +3,12 @@
 import { useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import { YamlText, obj } from '../edit/yamlText';
-import type { GhRepo } from '../github/client';
+import type { GhRepo, GitHubClient } from '../github/client';
 import { TEMPLATE_TOPIC, termOf } from '../model/discovery';
 import type { Files } from '../model/files';
-import { ago, fmtDay, templateName } from '../model/format';
+import { ago, fmtDay, plural, templateName } from '../model/format';
+import { editedFiles, effectiveDestRepo, fileStates, outOfStep } from '../model/releaseState';
+import type { Loaded } from '../model/status';
 import { MATERIALS_TOPIC } from '../model/materialsRepo';
 import { formatWord, formatsList } from '../tiers/grading';
 import { CheckLine, Loading } from '../ui/bits';
@@ -15,7 +17,7 @@ import { Ext } from '../ui/icons';
 import { MaterialsTree } from '../ui/MaterialsTree';
 import { OpenButton } from '../ui/OpenButton';
 import { RepoFile, Split } from '../ui/Viewer';
-import { courseOf, useCourseView } from './Course';
+import { courseOf, liveSemesters, useCourseView } from './Course';
 import { RepoChip, RepoWhy, TemplateSub } from '../ui/SetupPanel';
 import { materialsReadiness, templateReadinessIn } from '../model/readiness';
 import type { CourseProps } from './types';
@@ -49,6 +51,33 @@ export function repoOf(files: Files, org: string, name: string): GhRepo | undefi
 
 // --------------------------------------------------------------------------- materials
 
+/**
+ * How many of `repo`'s files the semester `semOrg` edited since their release (ahead, diverged or
+ * removed in semester, three-way at the same paths in its default destination, and the files it
+ * added under this repo's released folders: `editedFiles`, as the Files panel's notice counts
+ * them), or null while a tree is unread.
+ */
+export function editedIn(files: Files, courseOrg: string, repo: string, semOrg: string, loaded: Loaded): number | null {
+  const dest = effectiveDestRepo(loaded);
+  const course = files.tree(courseOrg, repo), live = files.tree(semOrg, dest), up = files.tree(semOrg, dest, 'upstream');
+  if (course.kind !== 'ready' || live.kind !== 'ready' || up.kind === 'loading') return null;
+  const rows = loaded.kind === 'ready' ? outOfStep(loaded.status, files, courseOrg, semOrg, dest) : [];
+  const e = editedFiles(fileStates(course.paths.filter((x) => !x.dir), up, live), rows, repo, dest);
+  return e.coursePaths.length + e.added.length;
+}
+
+/** Adds the `dsl-materials` topic to `repo`'s topics as GitHub has them now: the repo list may be old, and a PUT replaces them all. */
+export async function addMaterialsTopic(client: GitHubClient, org: string, repo: string): Promise<void> {
+  const topics = await client.getRepoTopics(org, repo);
+  await client.setTopics(org, repo, [...new Set([...topics, MATERIALS_TOPIC])]);
+}
+
+/** Removes the `dsl-materials` topic from `repo`, read just before the write as `addMaterialsTopic` does. */
+export async function removeMaterialsTopic(client: GitHubClient, org: string, repo: string): Promise<void> {
+  const topics = await client.getRepoTopics(org, repo);
+  await client.setTopics(org, repo, topics.filter((t) => t !== MATERIALS_TOPIC));
+}
+
 /** What "Treat as course materials" says once it has run, or why it could not. */
 type TreatState = { kind: 'idle' | 'busy' | 'done' } | { kind: 'bad'; text: string };
 
@@ -64,9 +93,7 @@ export function OtherRepoRow({ org, repo, write }: { org: string; repo: GhRepo; 
     if (!env) return;
     setSt({ kind: 'busy' });
     try {
-      // Read the topics just before the write: the repo list may be old, and a PUT replaces them all.
-      const topics = await env.client.getRepoTopics(org, repo.name);
-      await env.client.setTopics(org, repo.name, [...new Set([...topics, MATERIALS_TOPIC])]);
+      await addMaterialsTopic(env.client, org, repo.name);
       setSt({ kind: 'done' });
     } catch (e) {
       setSt({ kind: 'bad', text: `Could not add the topic: ${e instanceof Error ? e.message : String(e)}` });
@@ -88,8 +115,8 @@ export function OtherRepoRow({ org, repo, write }: { org: string; repo: GhRepo; 
 /** The folder `?folder=<repo>/<path>` names inside `repo`, if it is that repo's. */
 export const focusIn = (folder: string | undefined, repo: string) => (folder?.startsWith(`${repo}/`) ? folder.slice(repo.length + 1).replace(/\/+$/, '') || undefined : undefined);
 
-/** A materials repo's files under its row, as a folder tree; `current`, a file open beside it; `at` and `folderSide` as `MaterialsTree` takes them. */
-export function RepoFiles({ files, org, repo, focus, current, at, folderSide }: { files: Files; org: string; repo: string; focus?: string; current?: string } & Pick<Parameters<typeof MaterialsTree>[0], 'at' | 'folderSide'>) {
+/** A materials repo's files under its row, as a folder tree; `current`, a file open beside it; `at` as `MaterialsTree` takes it. */
+export function RepoFiles({ files, org, repo, focus, current, at }: { files: Files; org: string; repo: string; focus?: string; current?: string } & Pick<Parameters<typeof MaterialsTree>[0], 'at'>) {
   const t = files.tree(org, repo);
   if (t.kind === 'loading') return <div class="r-files"><Loading what="Reading the repo" /></div>;
   if (t.kind === 'absent' && at === 'cohort') return <p class="footnote">No such repo in the semester yet: the first release into it creates it.</p>;
@@ -97,7 +124,7 @@ export function RepoFiles({ files, org, repo, focus, current, at, folderSide }: 
   return (
     <div class="r-files">
       {t.truncated ? <p class="footnote">GitHub returned only part of this repo’s file list.</p> : null}
-      <MaterialsTree org={org} repo={repo} paths={t.paths} focus={focus} current={current} at={at} folderSide={folderSide} />
+      <MaterialsTree org={org} repo={repo} paths={t.paths} focus={focus} current={current} at={at} />
     </div>
   );
 }
@@ -134,6 +161,8 @@ export function MaterialsIndexScreen(p: CourseProps) {
   const repos = files.repos(course.org);
   const known = [...materials.map((m) => m.repo), ...(c?.templates ?? []).map((t) => t.repo)];
   const others = repos.kind === 'ready' ? otherRepos(course.org, repos.repos, known) : [];
+  // The newest live semester, whose edits each repo row counts.
+  const live = liveSemesters(p)[0]?.ref;
   return (
     <>
       <div class="page-head">
@@ -149,9 +178,11 @@ export function MaterialsIndexScreen(p: CourseProps) {
                 const gh = repoOf(files, course.org, m.repo);
                 const term = termLabel(m.repo);
                 const r = materialsReadiness(m);
+                const edits = live ? editedIn(files, course.org, m.repo, live.org, p.cohortStates[live.org]!) : null;
                 return (
                   <li>
-                    <span class="r-title">{m.repo} <RepoChip r={r} />{term ? <span class="chip term">{term}</span> : null}</span>
+                    <span class="r-title"><a class="textlink" href={`#materials-${m.repo}`}>{m.repo}</a> <RepoChip r={r} />{term ? <span class="chip term">{term}</span> : null}
+                      {edits ? <> <a class="chip muted" href={`#materials-${m.repo}`}>{plural(edits, 'file')} edited in {live!.termLabel}</a></> : null}</span>
                     <RepoWhy r={r} />
                     {gh?.pushed_at ? <span class="r-sub">Last change {fmtDay(gh.pushed_at)} ({ago(gh.pushed_at, p.now)}).</span> : null}
                     <span class="r-side"><OpenButton org={course.org} repo={m.repo} small quiet /><a class="btn small quiet" href={`#materials-${m.repo}`}>Settings</a></span>

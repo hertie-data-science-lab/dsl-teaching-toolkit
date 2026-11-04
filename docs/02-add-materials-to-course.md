@@ -8,6 +8,17 @@ materials** page does it: **Treat as course materials** on the repo's row). The 
 files as a folder tree: open a folder to see inside it; a folder links to GitHub, and a file opens in
 the console (its GitHub link and a **Full screen** button in its header, for presenting).
 
+Each repo's own settings page (its name under **Course materials** in the course nav) has a
+**Files** panel: the repo's tree, and three views of it.
+
+- **Browse**: a file's name opens it beside the tree, PDFs included; whatever does not reach
+  students reads **withheld**.
+- **Withhold**: untick what must never reach students, or write patterns in the box beside
+  the tree, then **Save**. **Withheld by default** above the box lists the institution's names;
+  a click on `solutions`, `tests` or `solution` writes its `!` line, releasing every such folder
+  here, and ticking a file inside one writes its folder's ([`.releaseignore`](08-release-materials-to-cohort.md#withholding-files-with-releaseignore)).
+- **Release**: tick files or folders and release them into a semester now ([08](08-release-materials-to-cohort.md#from-the-console)).
+
 ## Prerequisites
 
 - A bootstrapped [course org](01-new-course-org.md).

@@ -322,7 +322,7 @@ describe('S6 schedule and S11 release', () => {
     const withTree = (tree: TreeState): Files => Object.assign(Object.create(files), { tree: () => tree });
     const failed = html(<ScheduleScreen {...props({ entry: 's5', files: withTree({ kind: 'error', message: 'HTTP 502' }) })} />);
     expect(failed).not.toContain('file-chip bad');
-    const part = html(<ScheduleScreen {...props({ entry: 's5', files: withTree({ kind: 'ready', paths: [{ path: 'lectures', dir: true }], truncated: true }) })} />);
+    const part = html(<ScheduleScreen {...props({ entry: 's5', files: withTree({ kind: 'ready', paths: [{ path: 'lectures', dir: true, sha: 't' }], truncated: true }) })} />);
     expect(part).not.toContain('file-chip bad');
   });
   it('the picker lists the materials repos and the Other repos, marks withheld files, and takes a typed path', () => {
@@ -339,6 +339,12 @@ describe('S6 schedule and S11 release', () => {
     const solOut = html(<FilePicker files={sol} org={COURSE_ORG} repos={['course-materials-f2026']} onPick={() => {}} onClose={() => {}} />);
     expect(solOut).toContain('aria-label="Pick solutions/labs/02/key.py"');
     expect(solOut).not.toContain('never copied');
+    // A never-released name is refused even when an entry names it (decision B): no tick, and said so.
+    const hard = new StaticFiles({}, {}, { [`${COURSE_ORG}/course-materials-f2026`]: ['labs/01/lab.ipynb', 'labs/01/grading_config.yml', 'labs/01/.env', 'labs/.system/x.py'] });
+    const hardOut = html(<FilePicker files={hard} org={COURSE_ORG} repos={['course-materials-f2026']} onPick={() => {}} onClose={() => {}} />);
+    expect(hardOut).toContain('aria-label="Pick labs/01/lab.ipynb"');
+    for (const x of ['labs/01/grading_config.yml', 'labs/01/.env', 'labs/.system/']) expect(hardOut).not.toContain(`aria-label="Pick ${x}"`);
+    expect(hardOut).toMatch(/grading_config\.yml.*?<span class="chip amber">never released<\/span>/s);
     expect(out).toContain('Or type a path');
     expect(out).toContain('it need not exist yet');
   });

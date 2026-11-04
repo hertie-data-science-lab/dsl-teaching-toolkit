@@ -25,13 +25,14 @@ export interface OpDef {
   where: string; // eyebrow, after the comma: "Fall 2026"
   title: string;
   intro: string;
-  confirm?: string; // a warning line under the intro ("Their old codes stop working.")
+  /** A warning line under the intro ("Their old codes stop working."), or one read from the Options' values as they stand (none: no line). */
+  confirm?: string | ((values: Record<string, unknown>) => string | undefined);
   /** Lines of figures under the intro ("Final: median 38, range 22–47, 2 held"). */
   facts?: string[];
   /** Shown under a preview's outcome, read afresh after each preview (who would be emailed). */
   dryExtra?: ComponentChildren;
-  /** Shown under the verb's outcome unless it failed (a released TBC entry's session date). */
-  doneExtra?: ComponentChildren;
+  /** Shown under the verb's outcome, by its conclusion (a released TBC entry's session date; why a run had nothing to do); a string is a line of its own. */
+  outcomeExtra?: (conclusion: string | undefined) => ComponentChildren;
   verb: string;
   /** A `?` beside the verb, wherever it shows: its name, and one paragraph per string. */
   verbHint?: { label: string; text: string[] };
@@ -97,8 +98,8 @@ export interface SessionOptions {
   /** Tests: the pause between polls (default: poll's own, cut short when the tab comes back). */
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
-  /** Called after a run (not a preview) finishes, to refresh what the screens show. */
-  onFinished?: (def: OpDef) => void;
+  /** Called after a run (not a preview) finishes, with the args it was sent, to refresh what the screens show. */
+  onFinished?: (def: OpDef, args: Record<string, unknown>) => void;
   /** How many times to re-read a finished run whose outcome is not there yet. */
   outcomeTries?: number;
   /** How many polls in a row may fail before the panel stops following the run (default 20, a minute at 3 s). */
@@ -338,7 +339,7 @@ export class OpsSession {
       const ended = { running: null, stopping: false, stopped, error: null };
       this.patch(preview ? { ...ended, phase: 'ready', dry: result } : { ...ended, phase: 'done', result });
     }
-    if (!preview) this.opts.onFinished?.(def);
+    if (!preview) this.opts.onFinished?.(def, args);
   }
 }
 

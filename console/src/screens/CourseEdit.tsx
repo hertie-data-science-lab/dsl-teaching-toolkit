@@ -2,21 +2,19 @@
 // `.github/course.yml`, decision 0039), S19 Course materials repo settings (the syllabus, in the
 // newest semester's `semester.yml`, and `.releaseignore`).
 
-import { useRef, useState } from 'preact/hooks';
+import { useState } from 'preact/hooks';
 import { useEnv, type Env } from '../env';
-import { badgeFiles, withholdCounts } from '../edit/badges';
 import { invalidText, useSave, type SaveState } from '../edit/save';
 import { YamlText, blank, compact, deepEqual, isObj, obj, render, type Path } from '../edit/yamlText';
 import { SchemaForm, fieldErrors } from '../forms/Form';
-import { termRank } from '../model/catalogue';
+import { byNewestTerm } from '../model/catalogue';
 import { defaultsOf, placeBlock, statedDefaults, uncommentIn, withDefaults } from '../model/config';
 import { courseBlock } from '../model/discovery';
-import { withMark } from '../model/materialsRepo';
 import { sameHandle } from '../model/people';
 import { KINDS } from '../model/policy';
 import { FLOORS, PUBLISH_DEFAULT, readSel, type Sel } from '../model/selection';
 import { institutionDefaults, rawBlock, semesterFile, validCourseFile, validSemesterBlocks, validSemesterFile, writeBlock } from '../model/settings';
-import { checkNow, confirmWithheld, generateSyllabus, publishWebsite, type Scope } from '../ops/defs';
+import { checkNow, confirmWithheld, generateSyllabus, keepFuture, publishWebsite, type Scope } from '../ops/defs';
 import type { OpsSession } from '../ops/session';
 import { OpOpen } from '../ops/Panel';
 import { ABOUT, COURSE_FACTS, defaultsTiers } from '../tiers/course';
@@ -28,7 +26,10 @@ import { SaveBar } from '../ui/edit';
 import { SelectionEditor } from '../ui/SelectionEditor';
 import { Check, Ext } from '../ui/icons';
 import { OpenButton } from '../ui/OpenButton';
-import { courseOf, MaterialsChecklist } from './Course';
+import { courseOf, liveSemesters, MaterialsChecklist } from './Course';
+import { FilesPanel } from '../ui/FilesPanel';
+import { semesterRefOf } from './SemesterMaterials';
+import { scheduleNewHref } from '../router';
 import { ItemRow, RepoChip, RepoWhy } from '../ui/SetupPanel';
 import { materialsReadiness } from '../model/readiness';
 import { courseScope } from './common';
@@ -306,88 +307,6 @@ export function DetailsScreen(p: CourseProps) {
 
 // --------------------------------------------------------------------------- public website
 
-/** Beside a rule list: the rules that match no file, or that every rule matches one. */
-function Unmatched({ rules, total, loading, partial }: { rules: string[]; total: number; loading: boolean; partial: boolean }) {
-  if (loading) return <Loading />;
-  if (!total) return <p class="footnote">No rules yet.</p>;
-  if (partial) return <p class="footnote">Cannot tell which rules match nothing: the file list is incomplete.</p>;
-  return rules.length ? (
-    <ul class="unmatched">{rules.map((r) => <li><code>{r}</code> matches no file</li>)}</ul>
-  ) : <p class="footnote">Every rule matches at least one file.</p>;
-}
-
-/** A pattern list as the textarea shows it, and back: one line each, blank lines dropped at the ends. */
-const linesOf = (text: string) => text.split('\n');
-const textOf = (lines: string[]) => lines.join('\n');
-
-/** The line a tree click added or changed: the first index where the two lists differ; null when nothing changed or a line was removed (nothing to show). */
-export function changedLine(before: string[], after: string[]): number | null {
-  if (after.length < before.length) return null;
-  if (before.length === after.length && before.every((l, i) => l === after[i])) return null;
-  let i = 0;
-  while (i < before.length && before[i] === after[i]) i++;
-  return i;
-}
-
-/** A line to flash in the pattern box; `n` counts clicks, so the same line flashes again. */
-export interface Flash {
-  line: number;
-  n: number;
-}
-
-/** The pattern textarea over a mirror of its lines, where the line a tree click changed flashes (decision 0026 rule 5). */
-function PatternBox({ id, text, onText, flash }: { id: string; text: string; onText: (t: string) => void; flash: Flash | null }) {
-  const mirror = useRef<HTMLPreElement>(null);
-  return (
-    <div class="pattern-box">
-      <pre class="pattern-mirror" aria-hidden="true" ref={mirror}>
-        {linesOf(text).map((l, i) => (flash?.line === i ? <span key={`f${flash.n}`} class="pm-line flash">{l || ' '}</span> : <span key={`l${i}`} class="pm-line">{l || ' '}</span>))}
-      </pre>
-      <textarea class="code" id={id} value={text} onInput={(e) => onText((e.target as HTMLTextAreaElement).value)}
-        onScroll={(e) => { if (mirror.current) mirror.current.scrollTop = (e.target as HTMLTextAreaElement).scrollTop; }} />
-    </div>
-  );
-}
-
-/** The withhold tree over a repo beside its pattern box (two-way; stacked on narrow screens), and the rules that match nothing. */
-function WithholdEditor({ id, label, files, text, onText, loading, partial }: {
-  id: string; label: string; files: string[]; text: string; onText: (t: string) => void; loading: boolean; partial: boolean;
-}) {
-  const [flash, setFlash] = useState<Flash | null>(null);
-  const b = badgeFiles(files, linesOf(text));
-  const fromTree = (lines: string[]) => {
-    const line = changedLine(linesOf(text), lines);
-    if (line !== null) setFlash({ line, n: (flash?.n ?? 0) + 1 });
-    onText(textOf(lines));
-  };
-  return (
-    <>
-      {partial ? <CheckLine cls="bad">GitHub returned only part of this repo’s file list; badges may be incomplete.</CheckLine> : null}
-      <div class="grid-2 withhold">
-        <div>
-          {loading ? <Loading what="Reading the repo" /> : (
-            <SelectionEditor files={files} value={{ exclude: linesOf(text) }} onChange={(sel) => fromTree(sel.exclude ?? [])} inWord="released to students" outWord="withheld" />
-          )}
-        </div>
-        <div>
-          <div class="field">
-            <label for={id}>{label}</label>
-            <PatternBox id={id} text={text} onText={(t) => { setFlash(null); onText(t); }} flash={flash} />
-            <p class="hint">One pattern per line, as in .gitignore. Clicking the tree writes them here.</p>
-          </div>
-          <div class="field"><span class="label">Rules</span><Unmatched rules={b.unmatched} total={b.rules} loading={loading} partial={partial} /></div>
-        </div>
-      </div>
-    </>
-  );
-}
-
-/** The withheld panel's last line: the repo's files never copied, withheld by the list, and released. */
-export function WithholdSummary({ files, lines }: { files: string[]; lines: string[] }) {
-  const n = withholdCounts(files, lines);
-  return <p class="footnote">{n.never} never copied (by default) · {n.withheld} withheld · {n.released} released</p>;
-}
-
 /** `course.yml` `open_course_site:` as the website screen edits it (decision 0040: `publish` is a Selection plus `reading_lists`). */
 export interface Website {
   enabled: boolean;
@@ -428,7 +347,7 @@ export function folderKindOf(path: string): string {
  * name, oldest first, so its first one is never the default. Without a dated repo, the first one.
  */
 export function newestRepo(repos: string[]): string | undefined {
-  return repos.reduce<string | undefined>((best, r) => (best === undefined || termRank(r) > termRank(best) ? r : best), undefined);
+  return byNewestTerm(repos)[0];
 }
 
 /** A course fact the website shows, read-only here: its value, or that it is not set. */
@@ -546,8 +465,6 @@ export function MaterialsScreen(p: CourseProps) {
   const tree = p.files.tree(course.org, repo);
   const files = tree.kind === 'ready' ? tree.paths.filter((x) => !x.dir).map((x) => x.path) : [];
   const ignFile = p.files.file(course.org, repo, '.releaseignore');
-  const ignText = ignFile.kind === 'ready' ? ignFile.text : '';
-  const [ign, setIgn] = useState<string | null>(null);
   const [syl, setSyl] = useState<string | null>(null);
   const [sylSave, runSyl, setSylSave] = useSave(env);
   const scope = newestScope(p);
@@ -573,8 +490,6 @@ export function MaterialsScreen(p: CourseProps) {
   const branch = (repos.kind === 'ready' ? repos.repos.find((r) => r.name === repo)?.default_branch : undefined);
   // Each file's link: the editor while it exists, GitHub's new-file page while it does not (0024 rule 9).
   const semRef = semOrg ? { org: semOrg, repo: CONFIG_REPO, path: SEMESTER_FILE, exists: p.files.file(semOrg, CONFIG_REPO, SEMESTER_FILE).kind !== 'absent' } : undefined;
-  const ignRef = { org: course.org, repo, path: '.releaseignore', branch, exists: ignFile.kind !== 'absent' };
-  const partial = tree.kind === 'ready' && tree.truncated;
   const saveSyl = async () => {
     if (!semOrg || !semReady) return;
     const out = withSyllabus(semReady.text, syllabus);
@@ -583,12 +498,11 @@ export function MaterialsScreen(p: CourseProps) {
   };
   // "Withheld patterns reviewed" (decision 0040 rule 7): a suggestion, Confirm marks it without an edit.
   const reviewCheck = m?.checks?.find((c) => c.id === 'withheld');
-  const ignDraft = ign ?? ignText;
-  // What Save writes: a list that withholds nothing is marked reviewed.
-  const ignOut = withMark(ignDraft.endsWith('\n') || !ignDraft ? ignDraft : `${ignDraft}\n`);
-  const saveIgn = async () => {
-    if (await runIgn({ owner: course.org, repo, path: '.releaseignore' }, ignOut, ignFile.kind === 'ready' ? ignFile.sha : null, { message: 'materials: edit what is withheld from students, from the DSL Teaching Console', statusRepo: [course.org, COURSE_REPO], after })) setIgn(null);
-  };
+  // The Files panel's Withhold Save: what it writes already carries the reviewed mark when nothing is withheld.
+  const saveIgn = (text: string) =>
+    runIgn({ owner: course.org, repo, path: '.releaseignore' }, text, ignFile.kind === 'ready' ? ignFile.sha : null, { message: 'materials: edit what is withheld from students, from the DSL Teaching Console', statusRepo: [course.org, COURSE_REPO], after });
+  // Release into: the course's live semesters, newest first (decision 1).
+  const semesters = liveSemesters(p).map(({ ref }) => semesterRefOf(ref, p.cohortStates[ref.org]));
   return (
     <>
       <div class="page-head">
@@ -635,21 +549,15 @@ export function MaterialsScreen(p: CourseProps) {
             </div>
           ) : <p class="footnote">Needs a semester: the plan is built from its schedule.</p>}
         </section>
-        <section class="panel section">
-          <h2>Withheld from students <Hint label="About withheld files">Solutions, tests, grading files and system files are never copied unless a schedule entry names them. Everything else is released to students, by the schedule or by hand, unless a line here withholds it. Click a file or folder to withhold it; click again to release it. Use it for solutions, drafts and anything private.</Hint></h2>
-          {tree.kind === 'absent' || tree.kind === 'error' ? <p class="footnote">Could not read the repo’s files.</p> : (
-            <WithholdEditor id="ign-pat" label="Withheld patterns" files={files} text={ign ?? ignText} onText={setIgn} loading={tree.kind === 'loading'} partial={partial} />
-          )}
-          {tree.kind === 'ready' ? <WithholdSummary files={files} lines={linesOf(ignDraft)} /> : null}
-          {reviewCheck && !reviewCheck.done ? (
+        <FilesPanel files={p.files} courseOrg={course.org} repo={repo} mode="course" write={course.write} semesters={semesters} scheduleHref={scheduleNewHref}
+          onKeep={(s) => env?.ops.open(keepFuture({ courseOrg: course.org, cohortOrg: s.org, where: s.termLabel }))}
+          onSaveIgnore={saveIgn} ignoreSave={ignSave}
+          withholdExtra={reviewCheck && !reviewCheck.done ? (
             <div class="actions">
               <ul class="setup"><ItemRow it={{ id: 'withheld', label: reviewCheck.label, kind: 'step', need: 'suggested', state: 'open', why: reviewCheck.why ?? undefined }} /></ul>
               {scope ? <OpOpen def={confirmWithheld(courseScope(p), repo)} label="Confirm" cls="btn small" /> : null}
             </div>
-          ) : null}
-          <p class="footnote">This reads the repo’s top-level .releaseignore; one in a subfolder still applies there.</p>
-          <SaveBar state={ignSave} onSave={() => void saveIgn()} small disabled={ignFile.kind === 'loading' || (ignFile.kind === 'ready' && ignOut === ignText)} file={ignRef} />
-        </section>
+          ) : null} />
       </div>
     </>
   );

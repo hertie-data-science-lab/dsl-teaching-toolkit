@@ -516,7 +516,7 @@ describe('the wizard screens', () => {
 
   it('the schedule editor opens a new assignment entry prefilled with the template', () => {
     const files = new StaticFiles({ [`${COHORT_ORG}/semester-config/schedule.yml`]: 'timezone: Europe/Berlin\nassignments: {}\n' });
-    const p: CohortProps = { course, cohort: course.cohorts[0], loaded: ready, files, now: NOW, entry: 'new', prefill: 'assignment-4-f2026' };
+    const p: CohortProps = { course, cohort: course.cohorts[0], loaded: ready, files, now: NOW, entry: 'new', prefill: { kind: 'template', repo: 'assignment-4-f2026' } };
     const out = render(<ScheduleScreen {...p} />);
     expect(out).toContain('New assignment');
     expect(out).toContain('<option value="assignment-4-f2026" selected');
@@ -528,7 +528,7 @@ describe('the wizard screens', () => {
       [`${COHORT_ORG}/semester-config/schedule.yml`]: 'timezone: Europe/Berlin\nassignments:\n  assignment-1:\n    number: 1\n    template: x\n    due_datetime: 2026-10-01\n',
       [`${COURSE_ORG}/${tpl}/grading_config.yml`]: 'title: Group project\n',
     });
-    const p: CohortProps = { course, cohort: course.cohorts[0], loaded: ready, files, now: NOW, entry: 'new', prefill: tpl };
+    const p: CohortProps = { course, cohort: course.cohorts[0], loaded: ready, files, now: NOW, entry: 'new', prefill: { kind: 'template', repo: tpl } };
     const out = render(<ScheduleScreen {...p} />);
     expect(out).toContain(`<option value="${tpl}" selected>${tpl} (`);
     expect(out).toMatch(/<input id="e-num" type="number" min="1" max="999" value="2"/);

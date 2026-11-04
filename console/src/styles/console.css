@@ -143,7 +143,39 @@ main { min-width: 0; }
 .chip { display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-display); font-weight: 600; font-size: 12px; line-height: 1.6; padding: 0 9px; border-radius: 999px; background: var(--sunk); color: var(--ink-2); white-space: nowrap; }
 .chip.ok { background: var(--ok-soft); color: var(--ok); }
 .chip.amber { background: var(--amber-soft); color: var(--amber-ink); }
+/* The Released materials page's "Released materials that differ from their source files": an amber round !, the filter, flat by folder, a Diff per file. */
+.dif-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 8px; }
+.dif-pr { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; }
+.out-of-step .seg .cnt { font-weight: 400; opacity: 0.75; }
+.dif-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.dif-folder { border-top: 1px solid var(--rule); padding: 10px 0 6px; }
+.dif-folder:first-child { border-top: 0; }
+.dif-folder > .fold { border-top: 0; padding-top: 0; }
+.dif-folder > .fold > summary.dif-fhead { flex-wrap: wrap; gap: 6px 10px; min-height: 36px; font-family: var(--font-body); font-weight: 400; }
+.dif-path { font-family: var(--font-code); font-size: 13.5px; font-weight: 700; }
+.dif-files { list-style: none; margin: 4px 0 0 14px; padding: 0 0 0 14px; border-left: 1px solid var(--rule-strong); display: grid; gap: 2px; }
+.dif-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-height: 38px; }
+.dif-name { font-family: var(--font-code); font-size: 13px; }
+.dif-sum { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.dif-right { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+.dif-right .btn[aria-pressed="true"] { background: var(--sunk); border-color: var(--ink-2); }
+/* A file whose re-release waits in a pull request: Open PR and Overwrite in place of Re-release. */
+.dif-pending { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0 0 8px; padding: 6px 10px; border-radius: 8px; background: var(--amber-soft); color: var(--amber-ink); font-size: 13.5px; font-weight: 600; }
+.dif-pending .btn { background: var(--surface); }
+.dif-diff { border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; margin: 2px 0 10px; background: var(--surface); }
+.dif-diff-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 6px 10px; background: var(--surface-2); border-bottom: 1px solid var(--rule); font-size: 13px; }
+.dif-diff-head code { font-family: var(--font-code); font-size: 12.5px; }
+.dif-diff-head .textlink { margin-left: auto; min-height: 0; padding: 0; font-size: 12.5px; }
+.dif-diff > .file-diff { margin: 0; border: 0; border-radius: 0; max-height: 360px; }
+.dif-diff > .footnote { margin: 0; padding: 6px 10px; }
 .open-menu .pm-off { padding: 7px 10px; }
+.file-diff { font-family: var(--font-code); font-size: 12.5px; line-height: 1.45; max-height: 420px; overflow: auto; margin: 4px 0 0; padding: 6px 0; background: var(--sunk); border: 1px solid var(--rule); border-radius: 6px; }
+.file-diff > span { display: block; padding: 0 10px; white-space: pre; }
+.file-diff .fd-add { background: var(--ok-soft); }
+.file-diff .fd-del { background: var(--bad-soft); }
+.file-diff .fd-hunk { color: var(--muted); }
+.file-diff .fd-hunk:not(:first-child) { margin-top: 6px; border-top: 1px solid var(--rule); padding-top: 4px; }
+.step-bang { font-family: var(--font-display); font-weight: 700; font-size: 12px; width: 18px; height: 18px; border-radius: 999px; background: var(--amber-soft); color: var(--amber-ink); display: inline-grid; place-items: center; vertical-align: middle; }
 .chip.bad { background: var(--bad-soft); color: var(--bad-ink); }
 .chip.asg { background: var(--asg-bg); color: var(--asg-ink); }
 .chip.lec { background: var(--lec-bg); color: var(--lec-ink); }
@@ -285,10 +317,16 @@ button.wk { font: inherit; text-align: left; cursor: pointer; align-content: sta
 .file-tree li { padding: 2px 0; }
 .file-tree summary { cursor: pointer; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .file-tree .ft-file { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.file-tree .ft-name { font-family: var(--font-code); font-size: 12.5px; overflow-wrap: anywhere; }
+.file-tree .ft-name { font-family: var(--font-code); font-size: 12.5px; min-width: 0; overflow-wrap: anywhere; }
+/* The icon and the name on one line: a long name breaks inside itself; with the tick before it, the head takes at most the rest of the row, chips wrapping after. */
+.file-tree .ft-head { display: inline-flex; flex-wrap: nowrap; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
+.file-tree .ft-tick + .ft-head, .file-tree .ft-gap + .ft-head { max-width: calc(100% - 21px); }
 .file-tree .ft-toggle { min-height: 0; padding: 1px 8px; font-size: 12px; }
 .file-tree .ft-file .ft-toggle { margin-left: auto; }
 .file-tree .ft-tick { margin: 0; }
+.file-tree .ft-rollup { display: contents; }
+/* A folder's roll-up chips describe its contents: once open, its children carry them instead. */
+.file-tree details[open] > summary .ft-rollup { display: none; }
 .file-tree .ft-note { flex-basis: 100%; font-size: 12.5px; color: var(--amber-ink); }
 table.kinds { max-width: 720px; }
 table.kinds td:first-child { white-space: nowrap; }
@@ -831,6 +869,9 @@ table.marks th .th-fold:hover { text-decoration: underline; }
 .op-facts p { margin: 0; }
 .hint-pop .para { display: block; }
 .hint-pop .para + .para { margin-top: 6px; }
+/* A popover's bulleted list (`Hint` `items`, or a `<ul>` child): compact, under the paragraphs. */
+.hint-pop ul { display: block; margin: 6px 0 0; padding-left: 18px; list-style: disc; }
+.hint-pop li + li { margin-top: 4px; }
 table.marks tr.nosub td { color: var(--muted); }
 table.marks tr.team-row td { background: var(--sunk); font-weight: 600; border-top: 1px solid var(--rule-strong); }
 table.marks tr.member-row td { font-weight: 400; }
@@ -1087,7 +1128,7 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .file-tree .ft-icon { flex: none; color: var(--muted); }
 .file-tree .ft-closed, .file-tree .ft-opened { display: inline-flex; }
 .file-tree details[open] > summary .ft-closed, .file-tree details:not([open]) > summary .ft-opened { display: none; }
-.file-tree .ft-out > .ft-name, .file-tree .ft-out > details > summary > .ft-name { color: var(--muted); text-decoration: line-through; }
+.file-tree .ft-out > .ft-head .ft-name, .file-tree .ft-out > details > summary > .ft-head .ft-name { color: var(--muted); text-decoration: line-through; }
 .pattern-box { position: relative; background: var(--surface); border-radius: 6px; }
 .pattern-box textarea.code, .pattern-box .pattern-mirror { font-family: var(--font-code); font-size: 13px; line-height: 1.5; padding: 6px 9px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .pattern-box textarea.code { position: relative; background: transparent; min-height: 240px; }
@@ -1212,6 +1253,127 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .pick-typed input { flex: 1; min-width: 0; }
 .picker { display: grid; gap: 12px; padding: 16px 18px; overflow-y: auto; }
 .danger-quiet { color: var(--bad-ink); }
+
+/* ===== Files panel (decisions 1-8, 2026-11-04) ===== */
+/* Browse | Withhold | Release, the From / To row, the tree beside its right column with the bar between,
+   the manifest and its footer, the state chips and their popovers, the repo pickers. Ported from the
+   mock-ups' MOCK-UP ADDITIONS block; tokens only. */
+.seg { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--rule-strong); border-radius: 8px; background: var(--surface-2); }
+.seg button { font-family: var(--font-display); font-weight: 600; font-size: 13px; line-height: 1.3; padding: 3px 14px; min-height: 28px; border: 0; border-radius: 6px; background: none; color: var(--ink-2); cursor: pointer; }
+.seg button:hover { color: var(--ink); background: var(--sunk); }
+.seg button[aria-selected="true"] { background: var(--btn-bg); color: var(--btn-ink); }
+.seg button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.files-panel { display: grid; gap: 12px; }
+.panel-fold > summary { list-style: none; display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.panel-fold > summary::-webkit-details-marker { display: none; }
+.panel-fold > summary::before { content: ""; width: 8px; height: 8px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform 0.15s; flex: none; margin-right: 2px; }
+.panel-fold[open] > summary::before { transform: rotate(45deg); margin-top: -4px; }
+.panel-fold > summary:hover::before { border-color: var(--ink); }
+.panel-fold > summary h2 { margin: 0; }
+.panel-fold:not([open]) { padding-block: 14px; }
+.panel-fold[open] > summary { margin-bottom: 12px; }
+
+/* The two columns and the bar: the ratio sits on .split-panes as --lf / --rf, so the heads follow it. */
+.split-panes { display: grid; gap: 8px; }
+.files-split { display: grid; grid-template-columns: minmax(0, var(--lf, 55fr)) 6px minmax(0, var(--rf, 45fr)); column-gap: 8px; align-items: start; }
+.files-split > * { min-width: 0; }
+.files-split > .splitter { align-self: stretch; width: 6px; border-radius: 3px; cursor: col-resize; touch-action: none; background: transparent; transition: background 120ms ease; }
+.files-split > .splitter:hover, .files-split > .splitter.dragging, .files-split > .splitter:focus-visible { background: var(--rule-strong); outline: none; }
+.files-split > .materials-tree > .file-tree { height: 640px; max-height: 640px; overflow: auto; }
+.files-split > .materials-file { max-height: 640px; overflow: auto; }
+.files-split .manifest-wrap { height: 640px; }
+.files-split .mf-scroll { height: 100%; overflow: auto; padding-right: 2px; }
+.split-heads { min-height: 48px; align-items: center; margin: 0; }
+.split-heads > .rh-row { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; min-width: 0; }
+.split-heads .split-lbl { font-weight: 400; font-size: 13.5px; color: var(--muted); flex: none; }
+.split-heads select { flex: 1 1 auto; width: auto; min-width: 0; max-width: 320px; }
+.split-heads .mf-into { flex: none; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 1060px) {
+  .files-split { grid-template-columns: minmax(0, 1fr); row-gap: 12px; }
+  .files-split > .splitter, .files-split > .split-gap { display: none; }
+  .split-heads > .rh-row { flex-wrap: wrap; }
+  .files-split > .materials-tree > .file-tree, .files-split .manifest-wrap { height: auto; max-height: 640px; }
+}
+
+/* The tree's rows in the panel: a gap where a row has no tick, the name as the viewer's button, greyed up to date. */
+.file-tree .ft-gap { width: 13px; flex: none; }
+.file-tree input.ft-tick:disabled { cursor: not-allowed; }
+.file-tree button.ft-name { font: inherit; font-family: var(--font-code); font-size: 12.5px; color: var(--link); background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
+.file-tree button.ft-name:hover { text-decoration: underline; }
+.file-tree button.ft-name[aria-current] { font-weight: 700; }
+.file-tree li.ft-file:has(> [data-kind="up_to_date"]) > .ft-head .ft-name { color: var(--muted); }
+.file-tree:not(.select) li.ft-file { cursor: default; }
+.files-panel .file-tree.select li.ft-file { cursor: pointer; }
+.files-panel .file-tree.select li.ft-file:hover { background: var(--sunk); border-radius: 6px; }
+.file-tree .chip { white-space: normal; }
+/* Why a row is withheld or released (`withheld by solutions/`): a muted chip on the name's line, its rule in code. */
+.chip.rule-chip { white-space: normal; font-weight: 500; }
+.chip.rule-chip code { font-family: var(--font-code); font-size: 11.5px; }
+.mf-rows li.mf-out .mf-src { flex-basis: auto; }
+/* The course page's Release view: the chosen semester edited released files of this repo. */
+.files-panel .edited-note { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0 0 10px; padding: 8px 12px; border-radius: 8px; background: var(--amber-soft); color: var(--ink); font-size: 13.5px; }
+/* See which: the files the semester added (no course row), each with its chip and Open on the semester copy. */
+.files-panel .edited-added { list-style: none; margin: 0 0 10px; padding: 0 12px; display: grid; gap: 4px; font-size: 13px; }
+.files-panel .edited-added li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.files-panel .edited-added code { overflow-wrap: anywhere; }
+
+/* Chips: muted (up to date, withheld, never copied, never released) and the semester's purple (ahead). */
+.chip.muted { background: var(--sunk); color: var(--muted); font-weight: 400; }
+.chip.semester { background: var(--semester-bg); color: var(--semester-ink); }
+.hint-wrap.chip-hint { margin-left: 0; font-size: 12px; line-height: 1.6; }
+.chip-hint > button.chip { border: 0; cursor: help; font: inherit; font-family: var(--font-display); font-weight: 600; font-size: 12px; line-height: 1.6; padding: 0 9px; }
+.chip-hint > button.chip:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.hint-pop .textlink { min-height: 0; padding: 0; font-size: 14px; }
+
+/* The manifest and the Release footer. */
+.mf-into { font-family: var(--font-code); font-size: 13px; color: var(--muted); white-space: nowrap; }
+.mf-into + select.mf-repo, select.mf-repo { width: auto; min-height: 28px; padding: 2px 6px; font-size: 13px; }
+.manifest { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.mf-repo-h { margin: 10px 0 6px; font-family: var(--font-code); }
+.mf-repo-h:first-child { margin-top: 0; }
+.mf-group { border: 1px solid var(--rule); border-radius: 8px; padding: 8px 12px; background: var(--surface-2); }
+.mf-group.other { box-shadow: inset 3px 0 0 var(--amber); }
+.mf-head { font-size: 13.5px; color: var(--ink-2); }
+.mf-head code { font-family: var(--font-code); font-size: 12.5px; font-weight: 700; color: var(--ink); }
+.mf-rows { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; }
+.mf-rows li { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: center; }
+.mf-rows li + li { margin-top: 2px; }
+.mf-rows li .mf-src { flex-basis: 100%; }
+.mf-rows code, .mf-dest { font-family: var(--font-code); font-size: 12.5px; overflow-wrap: anywhere; }
+.mf-dest, .mf-arrow { color: var(--muted); }
+.mf-dest.mf-diff { color: var(--amber-ink); background: var(--amber-soft); border-radius: 4px; padding: 0 4px; }
+.mf-warn { font-family: var(--font-display); font-weight: 700; font-size: 12px; color: var(--amber-ink); cursor: help; }
+.mf-rows li.mf-out > code { color: var(--muted); text-decoration: line-through; }
+.mf-group .fold.mf-adv { margin-top: 8px; padding-top: 4px; }
+.mf-group .fold.mf-adv > summary { font-size: 13px; min-height: 26px; color: var(--muted); }
+.mf-group .fold.mf-adv .fold-body { padding-top: 6px; }
+.mf-group .fold.mf-adv input { font-family: var(--font-code); font-size: 13px; min-height: 32px; }
+.mf-dest-fields { grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 10px; }
+.mf-dest-fields select { min-height: 32px; font-size: 13px; }
+@media (max-width: 560px) { .mf-dest-fields { grid-template-columns: minmax(0, 1fr); } }
+.empty-note { border: 1.5px dashed var(--rule-strong); border-radius: 8px; padding: 14px; font-size: 13.5px; color: var(--muted); }
+.rh-foot { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; border-top: 1px solid var(--rule); padding-top: 12px; }
+.rh-foot .rh-count { font-size: 13.5px; color: var(--muted); margin-right: auto; }
+.rh-foot .hint-wrap { margin-left: 0; }
+.files-panel > .rh-sched { color: var(--ink-2); margin: 0 0 10px; }
+.files-panel > .rh-sched .textlink { min-height: 0; padding: 0 2px; }
+.files-withhold { gap: 10px; }
+
+/* The repo pickers. */
+.rp-list { display: grid; gap: 2px; border: 1px solid var(--rule); border-radius: 8px; padding: 4px; }
+.rp-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 7px 10px; border-radius: 6px; cursor: pointer; }
+.rp-row:hover { background: var(--sunk); }
+.rp-row:has(input:checked) { background: var(--sunk); box-shadow: inset 3px 0 0 var(--ink); }
+.rp-name { font-family: var(--font-code); font-size: 13.5px; }
+.rp-note { font-size: 12.5px; color: var(--muted); }
+.rp-new { border-top: 1px solid var(--rule); padding-top: 12px; display: grid; gap: 8px; }
+.rp-new .sub-h { margin: 0; }
+.modal .picker .savebar { justify-content: flex-end; }
+/* Withhold view: the institution's default groups above the pattern box, read-only (decision B). */
+.withhold-defaults { margin-bottom: 12px; }
+.withhold-defaults ul { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.withhold-defaults .defaults-hard code { color: var(--muted); background: none; }
+.withhold-defaults .defaults-content .chip { cursor: pointer; font-family: var(--font-code); }
 /* A file row's chevron opens the Open split button's menu (ui/OpenSplit.tsx `caretOnly`): from the chevron, rightwards. */
 .file-menu .open-menu { left: 0; right: auto; top: calc(100% + 6px); width: 300px; max-width: calc(100vw - 32px); }
 .open-menu .pm-off { cursor: default; }

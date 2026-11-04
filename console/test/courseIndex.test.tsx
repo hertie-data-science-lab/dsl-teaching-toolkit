@@ -1,6 +1,9 @@
+// @vitest-environment happy-dom
 // The Materials and Assignment templates index screens, the materials file tree and its
 // badges, the course nav's Cohorts group and the course overview's two status boxes.
 
+import { render as draw } from 'preact';
+import { act } from 'preact/test-utils';
 import { render } from 'preact-render-to-string';
 import { describe, expect, it } from 'vitest';
 import { badgeFiles, buildTree } from '../src/edit/badges';
@@ -12,6 +15,7 @@ import type { Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
 import { CourseScreen, MaterialsChecklist } from '../src/screens/Course';
 import { materialsReadiness } from '../src/model/readiness';
+import { effectiveDestRepo } from '../src/model/releaseState';
 import { HomeScreen } from '../src/screens/Home';
 import { MaterialsScreen, WebsiteScreen, withSyllabus } from '../src/screens/CourseEdit';
 import { MaterialsIndexScreen, TemplatesIndexScreen, otherRepos } from '../src/screens/CourseIndex';
@@ -50,6 +54,19 @@ const files = new StaticFiles(
 );
 const cp = (over: Partial<CourseProps> = {}): CourseProps => ({ course, loaded: { kind: 'absent' }, cohortStates: { [COHORT_ORG]: ready, [OLD_ORG]: archived }, files, now: NOW, ...over });
 const text = (v: preact.VNode) => render(v).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+const words = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+
+/** The materials settings page as drawn with its Files panel on `view` (it opens on Browse). */
+async function withhold(props: CourseProps, view = 'Withhold'): Promise<string> {
+  const el = document.createElement('div');
+  document.body.appendChild(el);
+  await act(() => draw(<MaterialsScreen {...props} />, el));
+  await act(() => [...el.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((b) => b.textContent === view)!.click());
+  const out = el.innerHTML;
+  draw(null, el);
+  el.remove();
+  return out;
+}
 
 describe('file badges', () => {
   const f = ['SYLLABUS.md', 'lectures/05/slides.html', 'lectures/05/notes.pdf', 'solutions/05.ipynb', 'lectures/05/answers.key'];
@@ -121,6 +138,26 @@ describe('index screens', () => {
     expect(t).not.toContain('assignment-9-draft');
     expect(t).not.toContain('old-thing');
     expect(render(<MaterialsIndexScreen {...cp()} />)).toContain(`href="#materials-${MAT}"`);
+    // The repo's name links its settings page too, beside the Settings button.
+    const row = render(<MaterialsIndexScreen {...cp()} />).split('<li>').find((li) => li.includes(`>${MAT}</a>`))!;
+    expect(row).toContain(`<span class="r-title"><a class="textlink" href="#materials-${MAT}">${MAT}</a>`);
+    expect(row).toContain(`href="#materials-${MAT}">Settings</a>`);
+  });
+  it('counts each materials repo’s files the newest live semester edited, linking its settings', () => {
+    const dest = effectiveDestRepo(ready);
+    const PATHS = ['SYLLABUS.md', 'lectures/05_trees/slides.html', 'lectures/05_trees/notes.pdf'];
+    // The semester edited SYLLABUS.md (ahead) and slides.html (diverged: the course changed it too); notes.pdf as released.
+    const edits = (live: Record<string, string>, course: Record<string, string> = {}): Files => {
+      const up = new StaticFiles({}, {}, { [`${COHORT_ORG}/${dest}`]: PATHS });
+      const now = new StaticFiles({}, {}, { [`${COHORT_ORG}/${dest}`]: PATHS, [`${COURSE_ORG}/${MAT}`]: PATHS }, { [COURSE_ORG]: [{ name: MAT }] }, {}, { ...live, ...course });
+      return Object.assign(Object.create(now), { tree: (o: string, r: string, ref?: string) => (ref ? up.tree(o, r) : now.tree(o, r)) });
+    };
+    const f = edits({ [`${COHORT_ORG}/${dest}/SYLLABUS.md`]: 'e1', [`${COHORT_ORG}/${dest}/lectures/05_trees/slides.html`]: 'e2' }, { [`${COURSE_ORG}/${MAT}/lectures/05_trees/slides.html`]: 'c2' });
+    const row = render(<MaterialsIndexScreen {...cp({ files: f })} />).split('<li>').find((li) => li.includes(`>${MAT}</a>`))!;
+    expect(row).toContain(`<a class="chip muted" href="#materials-${MAT}">2 files edited in Fall 2026</a>`);
+    // Nothing edited, or the trees unread: no chip.
+    expect(render(<MaterialsIndexScreen {...cp({ files: edits({}) })} />)).not.toContain('edited in');
+    expect(render(<MaterialsIndexScreen {...cp()} />)).not.toContain('edited in');
   });
   it('says why a materials repo is not ready: its first missing needed check, and counts its suggestions', () => {
     const m = STATUS.course!.materials[0];
@@ -182,34 +219,34 @@ describe('materials settings file tree', () => {
     expect(out).toContain('<span class="s-why">The weekly plan (written from the schedule) is not in SYLLABUS.md yet.</span>');
     expect(out).not.toContain('required');
   });
-  it('saves a withhold list that withholds nothing with the reviewed mark, Save enabled', () => {
+  it('saves a withhold list that withholds nothing with the reviewed mark, Save enabled', async () => {
     expect(withMark('')).toBe(`${REVIEWED_MARK}\n`);
     expect(withMark('# seeded comment\n\n')).toBe(`# seeded comment\n${REVIEWED_MARK}\n`);
     expect(withMark('solutions/\n')).toBe('solutions/\n');
     expect(withMark(`# c\n${REVIEWED_MARK}\n`)).toBe(`# c\n${REVIEWED_MARK}\n`);
     const seeded = new StaticFiles({ [`${COURSE_ORG}/${MAT}/.releaseignore`]: '# seeded comment\n' }, {}, { [`${COURSE_ORG}/${MAT}`]: ['a.md'] });
-    // The withhold list's own Save, after its heading.
-    const saveOf = (f: Files) => { const out = render(<MaterialsScreen {...cp({ entry: MAT, files: f })} />); return /<button[^>]*>Save<\/button>/.exec(out.slice(out.indexOf('Withheld from students')))?.[0] ?? ''; };
+    // The withhold list's own Save, in the Files panel's Withhold view.
+    const saveOf = async (f: Files) => { const out = await withhold(cp({ entry: MAT, files: f })); return /<button[^>]*>Save<\/button>/.exec(out.slice(out.indexOf('files-withhold')))?.[0] ?? ''; };
     // Unchanged but withholding nothing: Save is on, and would write the mark.
-    expect(saveOf(seeded)).toContain('>Save<');
-    expect(saveOf(seeded)).not.toContain('disabled');
+    expect(await saveOf(seeded)).toContain('>Save<');
+    expect(await saveOf(seeded)).not.toContain('disabled');
     // The fixture's list has patterns and is unchanged: nothing to save.
-    expect(saveOf(files)).toContain('disabled');
+    expect(await saveOf(files)).toContain('disabled');
   });
-  it('has Syllabus and Withheld only: no Folder kinds, no kind pickers (decision 0038)', () => {
+  it('has Syllabus and Files only: no Folder kinds, no kind pickers (decision 0038)', () => {
     const out = render(<MaterialsScreen {...cp({ entry: MAT })} />);
     expect(out).not.toContain('Folder kinds');
     expect(out).not.toContain('aria-label="Kind of');
     expect(out).not.toContain('Kinds found');
     expect(out.match(/<ul class="file-tree">/g)?.length).toBe(1);
-    expect([...out.matchAll(/<h2>([^<]+)/g)].map((m) => m[1].trim())).toEqual(['Syllabus', 'Withheld from students']);
+    expect([...out.matchAll(/<h2(?: id="[^"]*")?>([^<]+)/g)].map((m) => m[1].trim())).toEqual(['Syllabus', 'Files']);
   });
-  it('badges every file and flags the rule that matches nothing, with no edit link per row', () => {
-    const out = render(<MaterialsScreen {...cp({ entry: MAT })} />);
-    const t = text(<MaterialsScreen {...cp({ entry: MAT })} />);
+  it('badges every file and flags the rule that matches nothing, with no edit link per row', async () => {
+    const out = await withhold(cp({ entry: MAT }));
+    const t = words(out);
     expect(t).not.toContain('for the public website');
     expect(t).toContain('withheld');
-    expect(t).toContain('released to students');
+    expect(t).toContain('0 never released · 1 withheld · 3 released');
     expect(t).toContain('*.key matches no file');
     // Decision 0024 rule 10: the tree only withholds; editing is the Open button's job.
     expect(out).not.toContain(`/edit/main/lectures/05_trees/slides.html`);
@@ -217,16 +254,25 @@ describe('materials settings file tree', () => {
     expect(out).not.toContain('class="file-list"');
     expect(t).not.toContain('only part of this repo');
   });
-  it('says No rules yet, and leaves out Edit links while the default branch is unknown', () => {
+  it('says No rules yet, and leaves out Edit links while the default branch is unknown', async () => {
     const bare = new StaticFiles({}, {}, { [`${COURSE_ORG}/${MAT}`]: ['a.md'] });
-    const out = render(<MaterialsScreen {...cp({ entry: MAT, files: bare })} />);
+    const out = await withhold(cp({ entry: MAT, files: bare }));
     expect(out.match(/No rules yet\./g)).toHaveLength(1);
+    // Nothing withheld: every file is released.
+    expect(words(out)).toContain('0 never released · 0 withheld · 1 released');
     expect(out).not.toContain('Edit on GitHub');
     expect(out).not.toContain('/edit/main/a.md');
   });
-  it('warns on a truncated tree and does not flag rules as matching nothing', () => {
+  it('releases into the course’s live semesters only, from the Files panel’s Release view', async () => {
+    const out = await withhold(cp({ entry: MAT }), 'Release');
+    expect([...out.matchAll(/<option value="([^"]+)"[^>]*>([^<]+)<\/option>/g)].filter((m) => m[1].startsWith('hertie-dsl-demo-f')).map((m) => m[2])).toEqual(['Fall 2026']);
+    expect(out).toContain('id="rel-into"');
+    // Schedule on the calendar is the Release view's lede, picks or none (its link is the filesPanel test's).
+    expect(out).toContain('Want to automate these releases?');
+  });
+  it('warns on a truncated tree and does not flag rules as matching nothing', async () => {
     const part: Files = Object.assign(Object.create(files), { tree: (o: string, r: string) => ({ ...files.tree(o, r), truncated: true }) });
-    const t = text(<MaterialsScreen {...cp({ entry: MAT, files: part })} />);
+    const t = words(await withhold(cp({ entry: MAT, files: part })));
     expect(t).toContain('GitHub returned only part of this repo’s file list; badges may be incomplete.');
     expect(t).not.toContain('matches no file');
   });
@@ -292,11 +338,11 @@ describe('materials settings: the syllabus file is the newest semester’s semes
     expect(withSyllabus('# c\nstudent_site:\n  syllabus: Syllabus.md\n', 'SYLLABUS.md')).toEqual({ text: '# c\n' });
     expect(withSyllabus('people: [\n', 'x.md')).toEqual({ error: 'semester.yml does not parse; fix it with Edit the file directly.' });
   });
-  it('offers Confirm on the withheld patterns while they are not reviewed (decision 0040 rule 7)', () => {
+  it('offers Confirm on the withheld patterns while they are not reviewed (decision 0040 rule 7)', async () => {
     const materials = STATUS.course!.materials.map((m) => ({ ...m, checks: m.checks?.map((c) => (c.id === 'withheld' ? { ...c, done: false } : c)) }));
     const open: Loaded = { kind: 'ready', status: { ...STATUS, course: { ...STATUS.course!, materials } }, sha: 's', stale: [] };
-    const t = text(<MaterialsScreen {...cp({ entry: MAT, cohortStates: { [COHORT_ORG]: open, [OLD_ORG]: archived } })} />);
-    const withheld = t.slice(t.indexOf('Withheld from students'));
+    const t = words(await withhold(cp({ entry: MAT, cohortStates: { [COHORT_ORG]: open, [OLD_ORG]: archived } })));
+    const withheld = t.slice(t.indexOf('Withheld patterns'));
     expect(withheld).toContain('Withheld patterns reviewed');
     expect(withheld).toContain('Confirm');
   });
@@ -349,8 +395,8 @@ describe('materials checklist and edit links (decision 0024 rules 8 and 9)', () 
     expect(present).not.toContain('Lives in');
   });
 
-  it('on the settings screen: new-file links for an absent semester.yml, the editor for a present .releaseignore', () => {
-    const out = render(<MaterialsScreen {...cp({ entry: MAT })} />);
+  it('on the settings screen: new-file links for an absent semester.yml, the editor for a present .releaseignore', async () => {
+    const out = await withhold(cp({ entry: MAT }));
     expect(out).toContain(`href="https://github.com/${COHORT_ORG}/semester-config/new/main?filename=semester.yml"`);
     expect(out).not.toContain('materials.yml');
     expect(out).toContain(`href="https://github.com/${COURSE_ORG}/${MAT}/edit/main/.releaseignore"`);
