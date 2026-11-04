@@ -3590,6 +3590,38 @@ def test_a_solution_released_by_its_own_path_is_no_fault(monkeypatch):
     assert schedule.source_faults(s, "Course-Org") == []
 
 
+_BANG_TREE = [".releaseignore", "labs/01/lab.ipynb", "labs/01/solutions/a.ipynb"]
+
+
+@pytest.mark.parametrize(
+    ("extra", "left"), [((), 0), (("labs/01/tests/t.py",), 1)], ids=["only", "tests"]
+)
+def test_a_folder_whose_solutions_a_bang_line_re_includes_is_no_fault(
+    monkeypatch, extra, left
+):
+    # Decision B: `!solutions/` in the repo's `.releaseignore` releases them with their
+    # folder, so the copy leaves nothing behind and nothing is said. `tests/` still is.
+    _org(monkeypatch, {"cm": [*_BANG_TREE, *extra]})
+    monkeypatch.setattr(
+        schedule, "get_file_content", lambda org, repo, path, **k: "!solutions/\n"
+    )
+    s = Schedule(releases=[_release("lab-1", "labs/01")])
+    faults = schedule.source_faults(s, "Course-Org")
+    assert len(faults) == left
+    assert all(f"{left} file(s) in it" in f.line() for f in faults)
+
+
+def test_naming_a_never_released_path_is_flagged_in_the_deploy_s_words(monkeypatch):
+    _org(monkeypatch, {"cm": ["labs/01/lab.ipynb", "labs/01/grading_config.yml"]})
+    s = Schedule(releases=[_release("lab-1", "labs/01/grading_config.yml")])
+    (fault,) = schedule.source_faults(s, "Course-Org")
+    assert (
+        "never released: labs/01/grading_config.yml is on the institution's list"
+        in (fault.line())
+    )
+    assert fault.severity(datetime(2026, 9, 8, 9, 0, tzinfo=BERLIN)) is Severity.WARNING
+
+
 def test_a_copy_may_be_made_public_and_anything_else_is_flagged():
     # `public: true` (the console's per-file toggle on a readings entry) hosts the copy
     # on the semester site whatever `student_site.host` says (decision 0040).

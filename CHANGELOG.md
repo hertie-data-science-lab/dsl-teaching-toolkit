@@ -27,7 +27,9 @@
   `.env.*`, `grading_config.yml`, `grading.yml`): no route ships one, and naming one outright is
   refused. **Content** (`solution`, `solutions`, `tests`): withheld from a folder release unless
   a `!` line in the repo's `.releaseignore` re-includes it; naming one outright still ships it.
-  In Withhold these rows start unticked as `default withheld`, and a tick writes the `!` line.
+  In the Files panel these rows show `withheld` like a line's, footnoted "withheld by default";
+  in Withhold they start unticked, and a tick writes the `!` line ("released by `!solutions/`").
+  The public website keeps the content group off whatever a `!` line says.
 
 ## 0.11.0 (unreleased)
 

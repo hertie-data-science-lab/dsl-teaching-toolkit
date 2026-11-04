@@ -1269,7 +1269,7 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .files-panel .file-tree.select li.ft-file:hover { background: var(--sunk); border-radius: 6px; }
 .file-tree .chip { white-space: normal; }
 
-/* Chips: muted (up to date, withheld, never copied, only if named) and the semester's purple (ahead). */
+/* Chips: muted (up to date, withheld, never copied, never released) and the semester's purple (ahead). */
 .chip.muted { background: var(--sunk); color: var(--muted); font-weight: 400; }
 .chip.semester { background: var(--semester-bg); color: var(--semester-ink); }
 .hint-wrap.chip-hint { margin-left: 0; font-size: 12px; line-height: 1.6; }

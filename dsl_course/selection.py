@@ -38,7 +38,7 @@ the institution's floor (`policy`).
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass
 from fnmatch import fnmatch
 from functools import cached_property
@@ -384,6 +384,7 @@ def deny(
     use: Selection | None = None,
     kind_of: KindOf = _no_kind,
     limit: Floor | None = None,
+    content_floor: bool = False,
 ) -> Deny:
     """The layers as a `copytree` filter over the clone at `root`. The denylist judges the
     names BELOW the path a copy names, never that path's own ancestors: it stops a folder
@@ -394,12 +395,17 @@ def deny(
     there re-includes it (decision B). A denied, `.releaseignore`-withheld or
     `use`-excluded name is pruned (nothing inside it is walked), and each FILE must also
     be kept by `use` and `limit`. A folder is never dropped for its kind: an `include`
-    may name a file inside one whose kind is out."""
-    ignored = deny_for(root, default=is_content_denied)
+    may name a file inside one whose kind is out.
+
+    `content_floor` makes the content names a floor like the hard ones, no `!` line
+    re-including one: the public website's copy (`public_site`), whose audience is the
+    open internet rather than a semester's enrolled students."""
+    ignored = deny_for(root, default=None if content_floor else is_content_denied)
+    floored = is_denied if content_floor else is_hard_denied
 
     def ignore(dirpath: str, names: list[str]) -> set[str]:
         here = Path(dirpath)
-        skip = {n for n in names if is_hard_denied(n) or is_clutter(n)}
+        skip = {n for n in names if floored(n) or is_clutter(n)}
         skip |= ignored(dirpath, names)
         if use is None and limit is None:
             return skip
@@ -420,11 +426,23 @@ def deny(
     return ignore
 
 
-def swept(path: str) -> bool:
-    """Whether a path BELOW the one a copy names has a denylisted component (clutter
-    aside): what a folder copy leaves behind (`schedule`'s warning), a `!` line in the
-    repo's `.releaseignore` aside."""
-    return any(is_denied(p) for p in path.split("/") if p)
+def swept(path: str, reincluded: Collection[str] = (), base: str = "") -> bool:
+    """Whether a path BELOW the one a copy names (`base`, the copy's own path in the
+    repo) has a denylisted component (clutter aside): what a folder copy leaves behind
+    (`schedule`'s warning, `divergence`). A content name whose node (repo path) is in
+    `reincluded` - a `!` line in the repo's `.releaseignore` re-includes it
+    (`releaseignore.judged_in_tree`) - is carried, as `deny` carries it; a never-released
+    one never is."""
+    parts = [p for p in path.split("/") if p]
+    prefix = base.strip("/")
+    for i, part in enumerate(parts):
+        if is_hard_denied(part):
+            return True
+        if is_content_denied(part):
+            node = "/".join([*([prefix] if prefix else []), *parts[: i + 1]])
+            if node not in reincluded:
+                return True
+    return False
 
 
 def release_use(whole_repo: bool, stubs: Iterable[str] = ()) -> Selection:

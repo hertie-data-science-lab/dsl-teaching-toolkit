@@ -262,7 +262,14 @@ repos inline) and To path; a group to another repo than the run's is amber with 
 may span course repos and destinations: one `release.adhoc` run (`releasePicked`,
 `requestOf`'s four paired lists), after which the destination trees are re-read. The run's
 default repo is the semester's effective `materials_repo` from `status.json`, never the
-constant. The panel is drawn only for those who can change the course.
+constant. The semester's panel is drawn only for those who can change the course; on the repo
+settings page a read-only viewer gets Browse alone (no view control, no ticks). Decision B's
+words: a row a `.releaseignore` line or the institution's content default keeps off is
+`withheld`, its footnote naming why ("withheld by `solutions/`", "withheld by default"); a `!`
+line's row reads as released, footnoted "released by `!solutions/`"; the never-released names
+have their own `never released` chip. The Withhold summary counts never released · withheld ·
+released. A folder release's manifest ships a content name a `!` line re-includes and lists a
+never-released one as left behind (`groupPicks`).
 
 **Course details**' Advanced fold has a **Releases** section: Release from (the course's
 materials repos; a chip's × unsets the `dsl-materials` topic and Add a repo… sets it, both

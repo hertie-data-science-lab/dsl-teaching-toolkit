@@ -34,8 +34,7 @@ import { materialsReadiness } from '../model/readiness';
 import { courseScope } from './common';
 import type { CourseProps } from './types';
 import { effectiveOf } from '../model/settings';
-import { MATERIALS_TOPIC } from '../model/materialsRepo';
-import { otherRepos } from './CourseIndex';
+import { addMaterialsTopic, otherRepos, removeMaterialsTopic } from './CourseIndex';
 import { destinationRows, inheritedInto, ownInto, ReleaseInto, RepoChips, studentRepos } from '../ui/ReleaseChips';
 import { RepoPickerModal } from '../ui/RepoPickerModal';
 import { CONFIG_REPO, COURSE_FILE, COURSE_REPO, DEFAULT_SYLLABUS, SEMESTER_FILE } from '../model/names';
@@ -264,9 +263,7 @@ function ReleaseFrom(p: CourseProps) {
     if (!env) return;
     setBusy(true);
     try {
-      // Read the topics just before the write: the repo list may be old, and a PUT replaces them all.
-      const topics = await env.client.getRepoTopics(course.org, repo);
-      await env.client.setTopics(course.org, repo, on ? [...new Set([...topics, MATERIALS_TOPIC])] : topics.filter((t) => t !== MATERIALS_TOPIC));
+      await (on ? addMaterialsTopic : removeMaterialsTopic)(env.client, course.org, repo);
       setMarked({ ...marked, [repo]: on });
       setNote(`${repo} ${on ? 'is now' : 'is no longer'} course materials. ${await refreshAfterSave(env.ops, newestScope(p), course.name)}`);
     } catch (e) {

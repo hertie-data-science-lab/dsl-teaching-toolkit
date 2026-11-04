@@ -225,7 +225,7 @@ describe('materials settings file tree', () => {
     const t = words(out);
     expect(t).not.toContain('for the public website');
     expect(t).toContain('withheld');
-    expect(t).toContain('0 never released · 0 default withheld · 1 withheld · 3 released');
+    expect(t).toContain('0 never released · 1 withheld · 3 released');
     expect(t).toContain('*.key matches no file');
     // Decision 0024 rule 10: the tree only withholds; editing is the Open button's job.
     expect(out).not.toContain(`/edit/main/lectures/05_trees/slides.html`);
@@ -238,7 +238,7 @@ describe('materials settings file tree', () => {
     const out = await withhold(cp({ entry: MAT, files: bare }));
     expect(out.match(/No rules yet\./g)).toHaveLength(1);
     // Nothing withheld: every file is released.
-    expect(words(out)).toContain('0 never released · 0 default withheld · 0 withheld · 1 released');
+    expect(words(out)).toContain('0 never released · 0 withheld · 1 released');
     expect(out).not.toContain('Edit on GitHub');
     expect(out).not.toContain('/edit/main/a.md');
   });
@@ -246,8 +246,8 @@ describe('materials settings file tree', () => {
     const out = await withhold(cp({ entry: MAT }), 'Release');
     expect([...out.matchAll(/<option value="([^"]+)"[^>]*>([^<]+)<\/option>/g)].filter((m) => m[1].startsWith('hertie-dsl-demo-f')).map((m) => m[2])).toEqual(['Fall 2026']);
     expect(out).toContain('id="rel-into"');
-    // Schedule on the calendar opens that semester's new schedule entry.
-    expect(out).toMatch(new RegExp(`href="\\?cohort=${COHORT_ORG}&amp;[^"]*#schedule-new"`));
+    // Schedule on the calendar waits for a pick (its link is the filesPanel test's).
+    expect(out).not.toContain('Schedule on the calendar');
   });
   it('warns on a truncated tree and does not flag rules as matching nothing', async () => {
     const part: Files = Object.assign(Object.create(files), { tree: (o: string, r: string) => ({ ...files.tree(o, r), truncated: true }) });

@@ -385,6 +385,25 @@ def test_a_reading_list_does_not_name_a_withheld_reading(published):
     assert "embargoed" not in page
 
 
+def test_a_bang_line_that_releases_solutions_to_students_does_not_publish_them(
+    published, monkeypatch
+):
+    # `!solution/` and `!tests/` re-include those for the semester release (decision B);
+    # the public website is the open internet, so the content group stays a floor there.
+    seed = _seed_source
+
+    def seeded(root: Path) -> None:
+        seed(root)
+        (root / ".releaseignore").write_text("draft-*\n*.key\n!solution/\n!tests/\n")
+
+    monkeypatch.setattr(sys.modules[__name__], "_seed_source", seeded)
+    files = published(kinds=WITH_READINGS, reading_lists=False)
+    assert f"{SERVED}/session-1/labs/lab.ipynb" in files  # the material still ships
+    assert f"{SERVED}/session-1/labs/solution/answers.ipynb" not in files
+    assert f"{SERVED}/session-2/labs/tests/test_hidden.py" not in files
+    assert "answers" not in files["_lectures/lab-01.md"]
+
+
 def test_the_releaseignore_itself_is_never_published(published):
     # The one entry on PUBLICATION_DENYLIST that a semester release deliberately DOES carry.
     # Its contents name what was held back, and this destination is a world-readable page.

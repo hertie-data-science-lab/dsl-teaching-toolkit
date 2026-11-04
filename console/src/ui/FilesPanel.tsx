@@ -5,16 +5,18 @@
 // copy now, the manifest right, one Release button. The course repo settings page shows all three
 // (mode `course`, `Release into [semester]`); the semester's Released materials page only Release
 // (mode `semester`, `From [course repo]`, "Release by hand"). The tree is one instance across the
-// views, so the folders open stay open.
+// views, so the folders open stay open. A viewer who cannot change the course sees the course
+// page's panel as Browse alone (no views to pick, no ticks); the semester's is not drawn.
 //
-// Chips per view (decision 3): Browse shows withheld and never copied; Withhold withheld, never
-// copied and only if named; Release each file's state against the run's destination (three-way,
-// `fileStates`) and withheld. Release ticks follow the saved `.releaseignore`, as the engine does.
+// Chips per view (decision 3): Browse and Withhold show withheld, never released and never copied;
+// Release each file's state against the run's destination (three-way, `fileStates`) and withheld.
+// Release ticks follow the saved `.releaseignore`, as the engine does.
 //
 // Decision B (2026-11-04): the institution's names in two groups. Never released (`.env`, `.git`,
 // grading files, `.system`): no tick in any view, "never released". Content (`solutions`,
-// `tests`): "default withheld", unticked in Withhold until a tick (or a typed line) writes the
-// `!` line that releases it; Release keeps "only if named" for them unless that line is saved.
+// `tests`): "withheld" like a line's row, its note "withheld by default", unticked in Withhold
+// until a tick (or a typed line) writes the `!` line that releases it (its note "released by
+// `!line`"); a release that names one outright still ships it.
 
 import type { ComponentChildren } from 'preact';
 import { useRef, useState } from 'preact/hooks';
@@ -63,7 +65,7 @@ export interface FilesPanelProps {
   /** Course mode: the page's repo. Semester mode: the source the From select starts on. */
   repo: string;
   mode: 'course' | 'semester';
-  /** Can the viewer change this course? Without it the panel is not drawn. */
+  /** Can the viewer change this course? Without it the course page's panel is Browse alone and the semester's is not drawn. */
   write: boolean;
   /** Semester mode: the semester released into. */
   semester?: SemesterRef;
@@ -181,7 +183,7 @@ function repoOf(files: Files, org: string, repo: string) {
 
 export function FilesPanel(p: FilesPanelProps) {
   const course = p.mode === 'course';
-  const [view, setView] = useState<FilesView>(course ? 'browse' : 'release');
+  const [picked, setView] = useState<FilesView>(course ? 'browse' : 'release');
   const [file, setFile] = useState<string | null>(null);
   const [draft, setDraft] = useState<string | null>(null);
   const [flash, setFlash] = useState<Flash | null>(null);
@@ -192,7 +194,9 @@ export function FilesPanel(p: FilesPanelProps) {
   const [runPick, setRunPick] = useState<{ org: string; repo: string } | null>(null);
   const [overrides, setOverrides] = useState<Record<string, { destRepo?: string; destPath?: string }>>({});
   const [chosen, setChosen] = useState<string[]>([]);
-  if (!p.write) return null;
+  if (!p.write && !course) return null;
+  // Read-only: Browse alone, whatever view was last picked.
+  const view = p.write ? picked : 'browse';
 
   const repo = course ? p.repo : src;
   const sem = course ? (p.semesters ?? []).find((s) => s.org === semOrg) ?? p.semesters?.[0] : p.semester;
@@ -260,7 +264,7 @@ export function FilesPanel(p: FilesPanelProps) {
   const pickControl = (path: string, dir: boolean) => {
     if (outOf(path, dir) || neverMaterial(path)) return <span class="ft-gap" />;
     const by = inPicked(path);
-    const off = hardDenied(path) ? NEVER_RELEASED_TITLE : by ? 'Picked with its folder' : disabledTick(path, dir, states[path], here.paths) ? (dir ? NEVER_FOLDER : NOTHING) : null;
+    const off = hardDenied(path) ? NEVER_RELEASED_TITLE : by ? 'Picked with its folder' : disabledTick(path, dir, states[path], here.paths, rules) ? (dir ? NEVER_FOLDER : NOTHING) : null;
     return <input type="checkbox" class="ft-tick" checked={by || isPicked(path, dir)} disabled={off !== null} title={off ?? undefined} aria-label={`Pick ${path}${dir ? '/' : ''}`} onClick={() => togglePick(path, dir)} />;
   };
   const releaseSide = (path: string, dir: boolean): ComponentChildren => {
@@ -268,7 +272,8 @@ export function FilesPanel(p: FilesPanelProps) {
     if (!dir) {
       if (neverMaterial(path)) return <StateChip kind="never_copied" />;
       if (hardDenied(path)) return <StateChip kind="never_released" />;
-      if (defaultWithheld(rules, path)) return <StateChip kind="only_if_named" />;
+      // Withheld by default: the tree's own chip says so; a tick names it outright, which ships it.
+      if (defaultWithheld(rules, path)) return null;
       const s = states[path];
       if (!s || s === 'unknown') return null;
       return <StateChip kind={s} onTick={s === 'behind' && !isPicked(path, false) && !inPicked(path) ? () => togglePick(path, false) : undefined} onKeep={keep} prUrl={prOf(runRepo, path)} />;
@@ -278,8 +283,7 @@ export function FilesPanel(p: FilesPanelProps) {
     if (!node) return null;
     const counts = folderCounts(node, states, shipsNot);
     const words = countsWords(counts);
-    if (words) return <span class={`chip${Object.keys(counts).every((k) => k === 'up_to_date') ? ' muted' : ''}`}>{words}</span>;
-    return disabledTick(path, true, undefined, here.paths) ? <StateChip kind="only_if_named" /> : null;
+    return words ? <span class={`chip${Object.keys(counts).every((k) => k === 'up_to_date') ? ' muted' : ''}`}>{words}</span> : null;
   };
 
   // ---- Withhold: the draft, written by the tree or the box (decision 0026 rule 5)
@@ -302,9 +306,7 @@ export function FilesPanel(p: FilesPanelProps) {
   };
 
   // ---- the tree, one instance for every view
-  const browseFixed = (path: string) => (neverMaterial(path) ? 'never copied' : hardDenied(path) ? 'never released'
-    : defaultWithheld(rules, path, folders.has(path)) ? 'default withheld' : null);
-  const withholdFixed = (path: string) => (neverMaterial(path) ? 'never copied' : hardDenied(path) ? 'never released' : null);
+  const fixedWord = (path: string) => (neverMaterial(path) ? 'never copied' : hardDenied(path) ? 'never released' : null);
   const name = (path: string) => (
     <button type="button" class="ft-name" aria-current={file === path ? 'true' : undefined} onClick={() => setFile(path)}>{path.split('/').pop()}</button>
   );
@@ -319,8 +321,8 @@ export function FilesPanel(p: FilesPanelProps) {
         mode={view === 'browse' ? 'exclude' : 'select'}
         releasedWord=""
         wordClass="muted"
-        fixed={view === 'browse' ? browseFixed : view === 'withhold' ? withholdFixed : () => null}
-        defaults={view === 'withhold'}
+        fixed={release ? () => null : fixedWord}
+        defaults
         control={view === 'browse' ? () => null : release ? pickControl : undefined}
         side={release ? releaseSide : undefined}
         rowClick={view !== 'browse'}
@@ -406,6 +408,14 @@ export function FilesPanel(p: FilesPanelProps) {
       </details>
     );
   }
+  if (!p.write) {
+    return (
+      <section class="panel section files-panel" aria-labelledby="files-h">
+        <div class="section-head"><h2 id="files-h">Files <Hint label="About the files">{hint}</Hint></h2></div>
+        {body}
+      </section>
+    );
+  }
   const tab = (v: FilesView, label: string) => (
     <button type="button" role="tab" id={`files-tab-${v}`} aria-selected={view === v} onClick={() => { setView(v); setFlash(null); }}>{label}</button>
   );
@@ -420,8 +430,8 @@ export function FilesPanel(p: FilesPanelProps) {
   );
 }
 
-/** The Withhold view's last line: the repo's files never released, withheld by default, withheld by the list, and released. */
+/** The Withhold view's last line: the repo's files never released, withheld (by the list or by default), and released. */
 function WithholdCounts({ files, lines }: { files: string[]; lines: string[] }) {
   const n = withholdTally(files, lines);
-  return <p class="footnote">{n.never} never released · {n.defaulted} default withheld · {n.withheld} withheld · {n.released} released</p>;
+  return <p class="footnote">{n.never} never released · {n.withheld} withheld · {n.released} released</p>;
 }

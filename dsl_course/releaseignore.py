@@ -280,6 +280,33 @@ def excluded_in_tree(
     folder they happen to share. A withheld folder therefore comes back as each of its
     files, which is also why `Ignore.excludes` walks components: the folder's own verdict
     is what decides them."""
+    return judged_in_tree(paths, read)[0]
+
+
+def judged_in_tree(
+    paths: Iterable[str],
+    read: Callable[[str], str | None],
+    default: Callable[[str], bool] | None = None,
+) -> tuple[tuple[str, ...], frozenset[str]]:
+    """`excluded_in_tree`'s answer, plus the files and folders whose own name `default`
+    withholds and a `!` line re-includes (`!solutions/`, decision B): what a folder copy
+    carries where the default alone would leave it. One read of each `.releaseignore`
+    for both, so `schedule`'s check and the status render read faculty's lines once."""
     every = sorted({p.strip("/") for p in paths if p.strip("/")})
     ignore, is_dir = from_tree(every, read)
-    return tuple(p for p in every if ignore.excludes(p, is_dir))
+    withheld = tuple(p for p in every if ignore.excludes(p, is_dir))
+    if default is None:
+        return withheld, frozenset()
+    nodes = {
+        "/".join(parts[:i])
+        for p in every
+        for parts in [p.split("/")]
+        for i in range(1, len(parts) + 1)
+    }
+    reincluded = frozenset(
+        n
+        for n in nodes
+        for head, _, tail in [n.rpartition("/")]
+        if default(tail) and ignore.verdict(head, tail, is_dir(n)) is False
+    )
+    return withheld, reincluded

@@ -94,7 +94,7 @@ describe('the manifest’s groups', () => {
     expect(g[1].ship).toEqual(['lectures/01_intro/notes.md', 'lectures/01_intro/slides.pdf']);
   });
 
-  it('lists what a picked folder leaves out, with the rule (null: only if named), never-material names absent', () => {
+  it('lists what a picked folder leaves out, with the rule (null: withheld by default), never-material names absent', () => {
     const [labs] = groupPicks([pick('labs', true)], trees);
     expect(labs.ship).toEqual(['labs/lab-1.ipynb', 'labs/lab-2.ipynb']);
     expect(labs.withheld).toEqual([{ path: 'labs/solutions/s1.ipynb', rule: null }, { path: 'labs/draft.md', rule: '/labs/draft.md' }]);
@@ -108,6 +108,18 @@ describe('the manifest’s groups', () => {
     const draft = groupPicks([pick('labs/draft.md')], trees)[0];
     expect(draft.ship).toEqual([]);
     expect(draft.withheld).toEqual([{ path: 'labs/draft.md', rule: '/labs/draft.md' }]);
+  });
+
+  it('ships a content name a ! line re-includes, and leaves a never-released name, named or swept, as never released', () => {
+    const t = { r: { files: ['labs/a.md', 'labs/solutions/s1.ipynb', 'labs/.env', 'grading.yml'], rules: compileAll(['!solutions/']) } };
+    const [labs, top] = groupPicks([pick('labs', true, 'r'), pick('grading.yml', false, 'r')], t);
+    expect(labs.ship).toEqual(['labs/a.md', 'labs/solutions/s1.ipynb']);
+    expect(labs.withheld).toEqual([{ path: 'labs/.env', rule: null, never: true }]);
+    expect(top.ship).toEqual([]);
+    expect(top.sources).toEqual([]);
+    expect(top.withheld).toEqual([{ path: 'grading.yml', rule: null, never: true }]);
+    // Without the ! line the default withholds it again.
+    expect(groupPicks([pick('labs', true, 'r')], { r: { ...t.r, rules: [] } })[0].withheld).toContainEqual({ path: 'labs/solutions/s1.ipynb', rule: null });
   });
 
   it('keeps each repo’s picks together, in the order the repos were first picked', () => {
@@ -141,13 +153,20 @@ describe('the manifest’s groups', () => {
 });
 
 describe('a disabled tick', () => {
-  const files = ['labs/a.md', 'only/solutions/s.md', 'only/.DS_Store', 'tests/t.py'];
-  it('is an up-to-date file, or a folder holding only files never copied', () => {
+  const files = ['labs/a.md', 'only/solutions/s.md', 'only/.DS_Store', 'tests/t.py', 'keys/.env', 'keys/.DS_Store'];
+  it('is an up-to-date file, or a folder whose copy would take nothing', () => {
     expect(disabledTick('labs/a.md', false, 'up_to_date', files)).toBe(true);
     expect(disabledTick('labs/a.md', false, 'behind', files)).toBe(false);
     expect(disabledTick('only', true, undefined, files)).toBe(true);
-    expect(disabledTick('tests', true, undefined, files)).toBe(true);
+    expect(disabledTick('keys', true, undefined, files)).toBe(true);
     expect(disabledTick('labs', true, undefined, files)).toBe(false);
+    // The denylist judges the names below the folder a copy names (`selection.deny`): `tests/` named ships.
+    expect(disabledTick('tests', true, undefined, files)).toBe(false);
+  });
+
+  it('follows a ! line that re-includes a content name, never a never-released one', () => {
+    expect(disabledTick('only', true, undefined, files, compileAll(['!solutions/']))).toBe(false);
+    expect(disabledTick('keys', true, undefined, files, compileAll(['!.env']))).toBe(true);
   });
 });
 

@@ -42,7 +42,7 @@ from .materials import folder_kind
 from .opencourse import OPENCOURSE_FILE, OpenCourse
 from .opencourse import read as read_opencourse
 from .readings import readings_block
-from .selection import PUBLISH, Selection, deny, floor, kept, never_copied
+from .selection import PUBLISH, Selection, denied, deny, floor, kept
 from .selection import releaseignored as releaseignored_in
 from .site_repo import (
     ROW_NOUN,
@@ -137,15 +137,13 @@ def _public_links(local_dir: Path, url_prefix: str) -> list[Link]:
     the allowlist excluded would be served and unreachable. The semester site takes the extra
     narrowing because it CAN offer a folder link; this one keeps every file reachable."""
     files = sorted(q for q in local_dir.rglob("*") if q.is_file())
-    # Never-released names are already absent from a folder THIS run copied
-    # (`selection`), so this is the second lock on the same door - and the one that holds
-    # if a file ever reaches the served tree by another route. Not the content names: a
-    # `solutions/` is here only because the repo's `.releaseignore` re-includes it with a
-    # `!` line (decision B), and a copy served but never linked is the worst of both.
+    # Denylisted paths are already absent from a folder THIS run copied (`selection`),
+    # so this is the second lock on the same door - and the one that holds if a file
+    # ever reaches the served tree by another route.
     rels = [
         rel
         for rel in (q.relative_to(local_dir).as_posix() for q in files)
-        if not never_copied(rel)
+        if not denied(rel)
     ]
     if any("/" not in rel for rel in rels):
         rels = [rel for rel in rels if "/" not in rel]
@@ -246,9 +244,17 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
             # One rule (`selection`): the institution denylist, faculty's
             # `.releaseignore`, `publish:` and the institution's floor, anchored at the
             # CLONE root even though what gets copied is a session folder deep inside it.
+            # The whole denylist is a floor here: a `!solutions/` that releases solutions
+            # to a semester's students does not publish them to the open internet.
             def withhold(section: str):
                 kind = _section_kind(section)
-                return deny(src, use=sel, kind_of=lambda _rel: kind, limit=limit)
+                return deny(
+                    src,
+                    use=sel,
+                    kind_of=lambda _rel: kind,
+                    limit=limit,
+                    content_floor=True,
+                )
 
             withheld = releaseignored_in(src)
             # A reading list NAMES files, so it is a copy of a kind too: the denylist,

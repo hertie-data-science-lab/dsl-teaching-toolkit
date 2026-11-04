@@ -84,6 +84,15 @@ describe('Released materials', () => {
     expect(names.some((n) => n?.startsWith('labs'))).toBe(true);
   });
 
+  it('lists the semester’s effective default destination, where a release naming no repo lands', () => {
+    const sem = { ...STATUS.semester!, defaults: { ...STATUS.semester!.defaults, materials_repo: { value: 'course-files', source: 'semester' as const } } };
+    const unnamed: Release = { ...rel('s5', 'lectures/05_trees'), dest: null };
+    const loaded: Loaded = { kind: 'ready', sha: 's', stale: [], status: { ...STATUS, semester: sem, releases: [unnamed], problems: [] } };
+    const t = text(<SemesterMaterialsScreen {...props({ loaded, files: files({ [`${ORG}/course-files`]: PATHS }) })} />);
+    expect(t).toContain('course-files 1 release');
+    expect(t).not.toContain('materials nothing released');
+  });
+
   it('opens each file in the viewer on the semester’s page', async () => {
     const el = await mount(<SemesterMaterialsScreen {...props()} />);
     const name = el.querySelector<HTMLAnchorElement>('.ft-file a.ft-name')!;

@@ -41,8 +41,8 @@ describe('standing with the defaults', () => {
   });
 
   it('a ! line overrides the default, its own or a broader one, last match winning', () => {
-    expect(st(['!labs/solutions/'], 'labs/solutions', true)).toEqual({ kind: 'overridden' });
-    expect(st(['!solutions/'], 'labs/solutions', true)).toEqual({ kind: 'overridden' });
+    expect(st(['!labs/solutions/'], 'labs/solutions', true)).toEqual({ kind: 'overridden', rule: '!labs/solutions/' });
+    expect(st(['!solutions/'], 'labs/solutions', true)).toEqual({ kind: 'overridden', rule: '!solutions/' });
     expect(st(['!solutions/'], 'labs/solutions/a.py', false)).toEqual({ kind: 'released' });
     expect(st(['!solutions/', 'labs/'], 'labs/solutions', true)).toMatchObject({ kind: 'broader', rule: 'labs/' });
     // Anchored like any other line, and as written (gitignore is case-sensitive).
@@ -77,9 +77,9 @@ describe('a click on a default row', () => {
 });
 
 describe('the Withhold view’s summary', () => {
-  it('counts never released, default withheld, withheld and released', () => {
+  it('counts never released, withheld (by a line or the default) and released', () => {
     const files = ['.releaseignore', 'labs/.env', 'labs/.DS_Store', 'labs/solutions/a.py', 'tests/t.py', 'drafts/x.md', 'lab.md'];
-    expect(withholdTally(files, ['drafts/'])).toEqual({ never: 3, defaulted: 2, withheld: 1, released: 1 });
-    expect(withholdTally(files, ['drafts/', '!solutions/', '!.env'])).toEqual({ never: 3, defaulted: 1, withheld: 1, released: 2 });
+    expect(withholdTally(files, ['drafts/'])).toEqual({ never: 3, withheld: 3, released: 1 });
+    expect(withholdTally(files, ['drafts/', '!solutions/', '!.env'])).toEqual({ never: 3, withheld: 2, released: 2 });
   });
 });

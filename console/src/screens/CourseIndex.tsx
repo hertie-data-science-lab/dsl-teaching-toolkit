@@ -55,6 +55,12 @@ export async function addMaterialsTopic(client: GitHubClient, org: string, repo:
   await client.setTopics(org, repo, [...new Set([...topics, MATERIALS_TOPIC])]);
 }
 
+/** Removes the `dsl-materials` topic from `repo`, read just before the write as `addMaterialsTopic` does. */
+export async function removeMaterialsTopic(client: GitHubClient, org: string, repo: string): Promise<void> {
+  const topics = await client.getRepoTopics(org, repo);
+  await client.setTopics(org, repo, topics.filter((t) => t !== MATERIALS_TOPIC));
+}
+
 /** What "Treat as course materials" says once it has run, or why it could not. */
 type TreatState = { kind: 'idle' | 'busy' | 'done' } | { kind: 'bad'; text: string };
 

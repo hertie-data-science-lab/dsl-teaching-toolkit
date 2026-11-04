@@ -10,8 +10,9 @@
 // The Files panel (plan 2026-11-04, decisions 1 and 3) adds what sits beside a row: `side` (its
 // state chips), `rowClick` (a click on a file row toggles its tick), `tickDisabled` (why a tick
 // cannot change) and `nameLink` (the name opening the viewer, in Browse). `defaults` (decision B)
-// draws the institution's content names withheld by default ("default withheld"), a click
-// writing the `!` line that releases one ("released · overrides the default").
+// draws the institution's content names withheld like any other row ("withheld", its note
+// "withheld by default"), a click writing the `!` line that releases one (its note "released by
+// `!line`").
 
 import type { ComponentChildren } from 'preact';
 import { useState } from 'preact/hooks';
@@ -48,9 +49,6 @@ export interface PatternTreeProps {
   /** The content names are withheld by default and a `!` line releases one (decision B; `.releaseignore` only). */
   defaults?: boolean;
 }
-
-const DEFAULT_WORD = 'default withheld';
-const OVERRIDE_WORD = 'released · overrides the default';
 
 interface Ctx extends Required<Pick<PatternTreeProps, 'patterns' | 'onChange' | 'mode' | 'withheldWord' | 'releasedWord' | 'fixed' | 'kinds' | 'wordClass' | 'defaults'>>, Pick<PatternTreeProps, 'control' | 'side' | 'rowClick' | 'tickDisabled' | 'nameLink'> {
   rules: Rule[];
@@ -93,8 +91,12 @@ function Control({ n, dir, s, c }: { n: TreeNode; dir: boolean; s: Standing; c: 
   return <button class="btn small quiet ft-toggle" type="button" disabled={off !== null} title={off ?? undefined} aria-label={`${out ? 'Include' : 'Withhold'} ${what}`} onClick={click}>{out ? 'Include' : 'Withhold'}</button>;
 }
 
+/** Why a row stands as it does: the broader line that withholds it, the content default, or the `!` line that re-includes it. */
 function Why({ s, word }: { s: Standing; word: string }) {
-  return s.kind === 'broader' ? <span class="footnote">{word} by <code>{s.rule}</code></span> : null;
+  if (s.kind === 'broader') return <span class="footnote">{word} by <code>{s.rule}</code></span>;
+  if (s.kind === 'default') return <span class="footnote">{word} by default</span>;
+  if (s.kind === 'overridden' && s.rule) return <span class="footnote">released by <code>{s.rule}</code></span>;
+  return null;
 }
 
 /** What a row click leaves to its own target: the tick itself, links, buttons, chips with popovers, the note. */
@@ -116,15 +118,13 @@ function Node({ n, depth, c }: { n: TreeNode; depth: number; c: Ctx }) {
   const out = isOut(s);
   const note = c.note?.path === n.path ? <span class="ft-note">{c.note.text}</span> : null;
   const control = c.control ? c.control(n.path, dir) : fixed ? null : <Control n={n} dir={dir} s={s} c={c} />;
-  // The default's own words, on every row it (or a `!` line over it) decides.
-  const own = s.kind === 'default' ? DEFAULT_WORD : s.kind === 'overridden' ? OVERRIDE_WORD : null;
   if (!dir) {
-    const word = fixed ?? own ?? (out ? c.withheldWord : c.releasedWord);
+    const word = fixed ?? (out ? c.withheldWord : c.releasedWord);
     return (
       <li class={`ft-file${fixed || out ? ' ft-out' : ''}`} onClick={c.rowClick ? rowToggle : undefined}>
         {c.mode === 'select' ? control : null}
         <FileHead name={n.name}>{c.nameLink?.(n.path) ?? undefined}</FileHead>
-        {word ? <span class={`chip ${fixed || out || own ? c.wordClass : ''}`}>{word}</span> : null}
+        {word ? <span class={`chip ${fixed || out ? c.wordClass : ''}`}>{word}</span> : null}
         <Why s={s} word={c.withheldWord} />
         {c.side?.(n.path, false)}
         {c.mode === 'exclude' ? control : null}
@@ -140,7 +140,7 @@ function Node({ n, depth, c }: { n: TreeNode; depth: number; c: Ctx }) {
           {c.mode === 'select' ? control : null}
           <FolderHead name={n.name} />
           {c.kinds[n.path] ? <span class="chip">{c.kinds[n.path]}</span> : null}
-          {fixed ? <span class={`chip ${c.wordClass}`}>{fixed}</span> : own ? <span class={`chip ${c.wordClass}`}>{own}</span> : out ? <span class={`chip ${c.wordClass}`}>{c.withheldWord}</span> : count ? <span class={`chip ${c.wordClass}`}>{count} {c.withheldWord}</span> : null}
+          {fixed ? <span class={`chip ${c.wordClass}`}>{fixed}</span> : out ? <span class={`chip ${c.wordClass}`}>{c.withheldWord}</span> : count ? <span class={`chip ${c.wordClass}`}>{count} {c.withheldWord}</span> : null}
           <Why s={s} word={c.withheldWord} />
           {c.side?.(n.path, true)}
           {c.mode === 'exclude' ? control : null}

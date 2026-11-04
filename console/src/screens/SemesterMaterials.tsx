@@ -31,31 +31,31 @@ import { WithStatus, cohortScope } from './common';
 import { keepFuture } from '../ops/defs';
 import type { CohortProps, ReadyProps } from './types';
 
-/** Where a release writes in the semester, as the Schedule reads it: its repo (`materials` when unnamed) and folder (its source's when unnamed). */
-export const destOf = (r: Release) => ({ repo: r.dest?.repo || DEFAULT_DEST_REPO, path: (r.dest?.path || r.source?.path || '').replace(/\/+$/, '') });
+/** Where a release writes in the semester, as the Schedule reads it: its repo (the semester's default destination `def` when unnamed) and folder (its source's when unnamed). */
+export const destOf = (r: Release, def: string) => ({ repo: r.dest?.repo || def, path: (r.dest?.path || r.source?.path || '').replace(/\/+$/, '') });
 
 const releasedOf = (status: Status) => (status.releases ?? []).filter((r) => r.state === 'released');
 
-/** The semester's materials repos: `materials`, then each other repo a release has written to, in the schedule's order. */
-export function semesterMaterialsRepos(status: Status): string[] {
-  const out = [DEFAULT_DEST_REPO];
-  for (const r of releasedOf(status)) if (!out.includes(destOf(r).repo)) out.push(destOf(r).repo);
+/** The semester's materials repos: its default destination `def`, then each other repo a release has written to, in the schedule's order. */
+export function semesterMaterialsRepos(status: Status, def: string): string[] {
+  const out = [def];
+  for (const r of releasedOf(status)) if (!out.includes(destOf(r, def).repo)) out.push(destOf(r, def).repo);
   return out;
 }
 
 /** `repo`'s released folders, each with the releases that wrote it. */
-export function releasedFolders(status: Status, repo: string): Map<string, Release[]> {
+export function releasedFolders(status: Status, repo: string, def: string): Map<string, Release[]> {
   const out = new Map<string, Release[]>();
   for (const r of releasedOf(status)) {
-    const d = destOf(r);
+    const d = destOf(r, def);
     if (d.repo === repo && d.path) out.set(d.path, [...(out.get(d.path) ?? []), r]);
   }
   return out;
 }
 
 /** The released copies of `repo` edited in the semester (`DIVERGED_RELEASED`), each with its release. */
-export function editedCopies(status: Status, repo: string): { p: Problem; r: Release }[] {
-  const byId = new Map(releasedOf(status).filter((r) => destOf(r).repo === repo).map((r) => [r.id, r]));
+export function editedCopies(status: Status, repo: string, def: string): { p: Problem; r: Release }[] {
+  const byId = new Map(releasedOf(status).filter((r) => destOf(r, def).repo === repo).map((r) => [r.id, r]));
   return (status.problems ?? []).flatMap((p) => {
     const r = p.kind === 'DIVERGED_RELEASED' && p.release ? byId.get(p.release) : undefined;
     return r ? [{ p, r }] : [];
@@ -109,7 +109,8 @@ function Head({ org, back }: { org: string; back: boolean }) {
 
 function Released(p: ReadyProps) {
   const org = p.cohort.org;
-  const repos = semesterMaterialsRepos(p.status);
+  const def = effectiveDestRepo(p.loaded);
+  const repos = semesterMaterialsRepos(p.status, def);
   const open = fileIn(p.file, repos);
   if (open) {
     return (
@@ -131,13 +132,13 @@ function Released(p: ReadyProps) {
         <ul class="rows">
           {repos.map((repo) => {
             const gh = repoOf(p.files, org, repo);
-            const folders = releasedFolders(p.status, repo);
+            const folders = releasedFolders(p.status, repo, def);
             const n = [...folders.values()].reduce((s, rs) => s + rs.length, 0);
             return (
               <li>
                 <span class="r-title">{repo} {n ? <span class="chip ok">{plural(n, 'release')}</span> : <span class="chip">nothing released</span>}</span>
                 {gh?.pushed_at ? <span class="r-sub">Last change {fmtDay(gh.pushed_at)} ({ago(gh.pushed_at, p.now)}).</span> : null}
-                {editedCopies(p.status, repo).map(({ p: x, r }) => (
+                {editedCopies(p.status, repo, def).map(({ p: x, r }) => (
                   <span class="r-sub"><b>{x.label ?? 'Released copy edited'}</b>: {x.text} <a class="textlink" href={releaseHref(r)}>Release page</a></span>
                 ))}
                 <span class="r-side"><OpenButton org={org} repo={repo} small quiet /></span>

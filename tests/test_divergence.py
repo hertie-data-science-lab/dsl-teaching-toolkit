@@ -107,6 +107,22 @@ def test_the_course_side_is_filtered_as_a_copy_is():
     ) == {"week9.md": "o"}
 
 
+def test_a_content_name_a_bang_line_re_includes_is_part_of_the_source():
+    # Decision B: `!solutions/` releases them with their folder, so they are what the
+    # copy took; a never-released name never is, whatever a line says.
+    blobs = {"labs/08/a.md": "a", "labs/08/solutions/k.md": "k", "labs/08/.env": "e"}
+    re = {"labs/08/solutions"}
+    assert divergence.source_files("labs/08", "labs/08", blobs, (), (), re) == {
+        "a.md": "a",
+        "solutions/k.md": "k",
+    }
+    assert divergence.source_files("labs/08", "labs/08", blobs, (), ()) == {"a.md": "a"}
+    # A whole-repo copy judges the same nodes.
+    assert "labs/08/solutions/k.md" in divergence.source_files(
+        "/", "", blobs, (), (), re
+    )
+
+
 def test_blobs_of_drops_the_folders_of_a_full_listing():
     shas = {"labs": "t1", "labs/08": "t2", "labs/08/a.md": "b1", "README.md": "b2"}
     assert divergence.blobs_of(shas) == {"labs/08/a.md": "b1", "README.md": "b2"}

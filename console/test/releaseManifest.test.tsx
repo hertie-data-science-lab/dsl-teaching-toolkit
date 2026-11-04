@@ -60,11 +60,19 @@ describe('the manifest', () => {
     const rows = [...el.querySelectorAll('.mf-rows li')].map(shown);
     expect(rows).toEqual([
       'labs/week01/lab.ipynb→labs/week01/lab.ipynbnot released', 'labs/week01/data.csv→labs/week01/data.csvnot released',
-      'labs/week01/solutions/lab.ipynbonly if named', 'labs/notes.mdwithheld by labs/notes.md',
+      'labs/week01/solutions/lab.ipynbwithheld by default', 'labs/notes.mdwithheld by labs/notes.md',
       'README.md→README.mdbehind',
     ]);
     expect(el.querySelectorAll('.mf-rows li.mf-out')).toHaveLength(2);
     expect(el.querySelector('.sub-h')).toBeNull();
+  });
+
+  it('ships solutions a ! line re-includes, and lists a never-released name as never released', async () => {
+    const t = { [A]: { files: ['labs/a.md', 'labs/solutions/s.py', 'labs/.env'], rules: compileAll(['!solutions/']) } };
+    const { el } = await mount(manifest(groupPicks([{ repo: A, path: 'labs', dir: true }], t)));
+    expect([...el.querySelectorAll('.mf-rows li')].map(shown)).toEqual([
+      'labs/a.md→labs/a.mdnot released', 'labs/solutions/s.py→labs/solutions/s.pynot released', 'labs/.envnever released',
+    ]);
   });
 
   it('lists picks from two course repos under each repo’s name', async () => {
@@ -125,8 +133,8 @@ describe('the Release footer', () => {
     expect(el.querySelector('.rh-sched')!.textContent).toBe('Want to pre-automate these releases? Schedule on the calendar →');
   });
 
-  it('is disabled with nothing picked', async () => {
-    const { el } = await mount(<ReleaseFoot paths={0} files={0} def={releasePicked(scope, [], { defaultDestRepo: 'materials' })} />);
+  it('is disabled with nothing picked, and offers no Schedule on the calendar then', async () => {
+    const { el } = await mount(<ReleaseFoot paths={0} files={0} def={releasePicked(scope, [], { defaultDestRepo: 'materials' })} scheduleHref="?cohort=x#schedule" />);
     expect(el.querySelector<HTMLButtonElement>('.btn')!.disabled).toBe(true);
     expect(el.querySelector('.rh-sched')).toBeNull();
   });

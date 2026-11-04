@@ -6,12 +6,15 @@
 // branch (where a release lands) and its default branch (what students read, which the release
 // merges into). A semester with no `upstream` branch (made before it existed) is two-way.
 //
-// What a copy takes is the engine's (`deploy.deploy_many`): a folder copy skips never-material
-// names, the institution denylist and whatever `.releaseignore` withholds; a file named outright
-// ships even when denylisted, and not when `.releaseignore` withholds it.
+// What a copy takes is the engine's (`deploy.deploy_many`, `selection.deny`): a folder copy skips
+// never-material names, the never-released names (`hardDenied`), the content names (`solutions`,
+// `tests`) unless a `!` line in `.releaseignore` re-includes them, and whatever `.releaseignore`
+// withholds; a file named outright ships even when a content name, never when never-released, and
+// not when `.releaseignore` withholds it.
 
-import { buildTree, denylisted, neverMaterial, type TreeNode } from '../edit/badges';
-import { withheldBy, type Rule } from '../edit/glob';
+import { buildTree, hardDenied, neverMaterial, type TreeNode } from '../edit/badges';
+import { withheldBy, withheldOnCopy, type Rule } from '../edit/glob';
+import { contentName } from './selection';
 import type { TreeState } from './files';
 import type { Loaded } from './status';
 import { COURSE_REPO, JOIN_REPO, CONFIG_REPO } from './names';
@@ -102,10 +105,15 @@ export interface ReleasePick {
   dir: boolean;
 }
 
-/** A file left out of a picked folder, or a picked file `.releaseignore` withholds: `rule` the line, null for the institution denylist ("only if named"). */
+/**
+ * A file left out of a picked folder, or a picked file that does not ship: `rule` the
+ * `.releaseignore` line, null for the institution's content default; `never` for a
+ * never-released name (`hardDenied`), which no line or naming ships.
+ */
 export interface Left {
   path: string;
   rule: string | null;
+  never?: true;
 }
 
 export interface Group {
@@ -160,22 +168,26 @@ export function groupPicks(picks: ReleasePick[], trees: Record<string, RepoFiles
     const implied = (path: string) => [...folders].some((f) => f !== path && under(path, f));
     const pickedFiles = new Set(mine.filter((p) => !p.dir && !implied(p.path)).map((p) => p.path));
     const pickedFolders = new Set([...folders].filter((f) => !implied(f)));
-    const withheld = (path: string) => withheldBy(t.rules, path)?.rule.line ?? null;
+    // Named outright: `.releaseignore` still withholds, a content name ships, a never-released name never does.
+    const named = (path: string): Left | null => {
+      if (hardDenied(path)) return { path, rule: null, never: true };
+      const w = withheldBy(t.rules, path);
+      return w ? { path, rule: w.rule.line } : null;
+    };
 
     const allGroup = (folder: string): Group => {
       const ship: string[] = [], left: Left[] = [];
       for (const f of t.files.filter((x) => under(x, folder))) {
         if (neverMaterial(f)) continue;
-        const rule = withheld(f);
-        if (rule !== null) left.push({ path: f, rule });
-        else if (denylisted(f)) left.push({ path: f, rule: null });
+        const out = sweptOut(t.rules, folder, f);
+        if (out) left.push(out);
         else ship.push(f);
       }
       return { repo, head: `${folder}/`, folder, kind: 'all', files: ship.length, sources: [folder], ship, withheld: left };
     };
     const partialGroup = (folder: string, picked: string[]): Group => {
-      const ship = picked.filter((p) => withheld(p) === null);
-      const left = picked.filter((p) => withheld(p) !== null).map((p) => ({ path: p, rule: withheld(p) }));
+      const ship = picked.filter((p) => named(p) === null);
+      const left = picked.map(named).filter((x): x is Left => x !== null);
       const of = t.files.filter((f) => parentOf(f) === folder && !neverMaterial(f)).length;
       return { repo, head: folder ? `${folder}/` : TOP_LEVEL, folder, kind: 'partial', files: picked.length, of: Math.max(of, picked.length), sources: ship, ship, withheld: left };
     };
@@ -240,12 +252,20 @@ export function destRepos(args: Record<string, unknown>, fallback: string): stri
 
 /**
  * Whether a Release-view tick is disabled: a file already up to date, or a folder whose copy
- * would take nothing (every file under it never copied: never material or denylisted).
+ * would take nothing (every file under it never material, never released, or a content name
+ * below the folder no `!` line in `rules`, the saved `.releaseignore`, re-includes).
  * `files` is the repo's file paths.
  */
-export function disabledTick(path: string, dir: boolean, state: FileState | undefined, files: string[]): boolean {
+export function disabledTick(path: string, dir: boolean, state: FileState | undefined, files: string[], rules: Rule[] = []): boolean {
   if (!dir) return state === 'up_to_date';
-  return files.filter((f) => under(f, path)).every((f) => neverMaterial(f) || denylisted(f));
+  return files.filter((f) => under(f, path)).every((f) => neverMaterial(f) || !!sweptOut(rules, path, f));
+}
+
+/** What a folder copy of `folder` leaves of `f` (`selection.deny`): never released, or withheld by a line or the content default, judged below the folder. */
+function sweptOut(rules: Rule[], folder: string, f: string): Left | null {
+  if (hardDenied(folder ? f.slice(folder.length + 1) : f)) return { path: f, rule: null, never: true };
+  const w = withheldOnCopy(rules, f, false, (name, at) => at.length > folder.length && contentName(name));
+  return w ? { path: f, rule: w.rule?.line ?? null } : null;
 }
 
 /** The names a semester already uses for something other than materials. */

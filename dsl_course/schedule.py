@@ -123,9 +123,9 @@ from .gh_contents import (
     yaml_mark_line,
 )
 from .log import CLIParser, log, log_err
-from .releaseignore import RELEASEIGNORE, excluded_in_tree
+from .releaseignore import RELEASEIGNORE, judged_in_tree
 from .repos import default_branch, repo_missing
-from .selection import swept
+from .selection import hard_denied, is_content_denied, swept
 
 SCHEDULE_PATH = SCHEDULE_FILE
 
@@ -2487,22 +2487,33 @@ def source_repo_shas(course_org: str, repo: str) -> dict[str, str] | None:
     return _repo_shas(course_org, repo)
 
 
+class SourceWithheld(NamedTuple):
+    """What a source repo's `.releaseignore` files decide (`source_withheld`)."""
+
+    # Its paths a line withholds, a withheld folder as each of its paths.
+    withheld: frozenset[str]
+    # Its content-named files and folders a `!` line re-includes (decision B): a folder
+    # copy carries them (`selection.swept`).
+    reincluded: frozenset[str]
+
+
 def source_withheld(
     course_org: str, repo: str, paths: Collection[str]
-) -> frozenset[str]:
-    """Which of a source repo's `paths` (its tree) its `.releaseignore` files withhold, a
-    withheld folder as each of its paths. Only a `.releaseignore` the tree lists is read
-    (each read once a run). Empty when an ignore file cannot be read: a repo that cannot
-    be READ is passed over, and a missing source is still reported where it is checked."""
+) -> SourceWithheld:
+    """What a source repo's `.releaseignore` files decide over its `paths` (its tree):
+    what they withhold and which content names they re-include. Only a `.releaseignore`
+    the tree lists is read (each read once a run). Empty when an ignore file cannot be
+    read: a repo that cannot be READ is passed over, and a missing source is still
+    reported where it is checked."""
     try:
-        return frozenset(
-            excluded_in_tree(
-                paths,
-                lambda p: get_file_content(course_org, repo, p, confirm_absent=True),
-            )
+        withheld, reincluded = judged_in_tree(
+            paths,
+            lambda p: get_file_content(course_org, repo, p, confirm_absent=True),
+            default=is_content_denied,
         )
     except RuntimeError:
-        return frozenset()
+        return SourceWithheld(frozenset(), frozenset())
+    return SourceWithheld(frozenset(withheld), reincluded)
 
 
 def _window_blurb() -> str:
@@ -2622,7 +2633,7 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
         # repo, off the tree already fetched above (`source_withheld`). A read failure
         # degrades to "no withheld paths known": the commit-time validator must not
         # traceback on faculty's own push over a transient 429.
-        withheld = source_withheld(course_org, repo, paths)
+        withheld, reincluded = source_withheld(course_org, repo, paths)
         for w in wanted[repo]:
             # "" is the assignment case: the repo IS the source, so its existence is all
             # there is to check. `/` and `.` mean the whole repo, likewise - and which
@@ -2631,6 +2642,24 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
             if is_repo_root(w.path):
                 continue
             clean = w.path.strip("/").strip()
+            if hard_denied(clean):
+                # Refused by the release itself (`deploy._warn_never_released`), in its
+                # words: no line releases one, so the copy ships nothing either way.
+                out.append(
+                    SourceFault(
+                        w.where,
+                        f"never released: {clean} is on the institution's list",
+                        w.fires,
+                        field="from_path",
+                        kind=FaultKind.WITHHELD,
+                        file=SCHEDULE_PATH,
+                        ceiling=Severity.WARNING,
+                        lineno=w.lineno("from_path"),
+                        repo=repo,
+                        path=clean,
+                    )
+                )
+                continue
             if clean in withheld:
                 # The file EXISTS, so nothing looks wrong - which is why this is worth
                 # saying here rather than leaving to the `::warning::` a green release run
@@ -2652,9 +2681,10 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
                 continue
             # A folder copy leaves the institution denylist behind (decision 0040): said
             # here, so a lab folder holding its `solutions/` is not a surprise. Naming the
-            # denylisted path itself ships it, and is never warned about.
+            # denylisted path itself ships it, and is never warned about; nor is a
+            # content name a `!` line re-includes (decision B), which the copy carries.
             below = [p[len(clean) + 1 :] for p in paths if p.startswith(f"{clean}/")]
-            left = [p for p in below if swept(p)]
+            left = [p for p in below if swept(p, reincluded, clean)]
             if left:
                 out.append(
                     SourceFault(

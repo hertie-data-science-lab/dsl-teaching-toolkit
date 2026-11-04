@@ -13,7 +13,8 @@ can have happened since, each a different remedy:
   gone from it - students lack a file they were given (Release again puts it back).
 
 The course side is filtered exactly as a copy would be (`source_files`): the institution
-denylist below the copy's own path, `.releaseignore`, and for a whole-repo copy the root
+denylist below the copy's own path (a content name a `!` line re-includes aside),
+`.releaseignore`, and for a whole-repo copy the root
 plumbing and any root stub still the placeholder. A path another copy lands at inside
 this one (a lab's `solutions/` copy) is that copy's, and left out of all three sides.
 
@@ -31,7 +32,7 @@ from .course import is_repo_root
 from .gh_contents import WITHHELD_ROOT_STUBS
 from .release_record import inside
 from .schedule_plan import within
-from .selection import kept, release_use
+from .selection import kept, never_copied, release_use, swept
 
 COURSE = "DIVERGED_COURSE"
 DELETED = "DIVERGED_DELETED"
@@ -67,11 +68,14 @@ def source_files(
     blobs: Mapping[str, str],
     withheld: Collection[str],
     unwritten: Collection[str],
+    reincluded: Collection[str] = (),
 ) -> dict[str, str]:
     """What a copy of `src_path` would take from a course repo's files now, keyed as its
     manifest is (`deploy._copy_listed`): relative to the copy, a single file by its
     destination name. `withheld` is the repo's `.releaseignore` verdict (repo paths);
-    `unwritten` the root stubs still the placeholder, left out of a whole-repo copy."""
+    `unwritten` the root stubs still the placeholder, left out of a whole-repo copy;
+    `reincluded` the content names a `!` line re-includes (repo paths), which the copy
+    carries (`selection.swept`)."""
     src = src_path.strip("/")
     root = is_repo_root(src)
     if not root and src in withheld:
@@ -84,7 +88,13 @@ def source_files(
     out = {}
     for path, sha in blobs.items():
         rel = within(src, path)
-        if rel and path not in withheld and kept(rel, use=use):
+        if (
+            rel
+            and path not in withheld
+            and not never_copied(rel)
+            and not swept(rel, reincluded, "" if root else src)
+            and use.keeps(rel, None)
+        ):
             out[rel] = sha
     return out
 

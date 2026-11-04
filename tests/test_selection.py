@@ -256,6 +256,20 @@ def test_no_bang_line_re_includes_a_never_released_name(tmp_path):
     assert deny(str(tmp_path / "labs/01"), names) == set(names)
 
 
+def test_the_content_floor_refuses_a_bang_line_s_re_include(tmp_path):
+    # The public website's copy: the open internet is not a semester's students.
+    _tree(tmp_path, "labs/01/lab.ipynb", "labs/01/solutions/a.ipynb", "labs/01/.env")
+    (tmp_path / ".releaseignore").write_text("!solutions/\n")
+    names = ["lab.ipynb", "solutions", ".env"]
+    assert selection.deny(tmp_path)(str(tmp_path / "labs/01"), names) == {".env"}
+    floored = selection.deny(tmp_path, content_floor=True)
+    assert floored(str(tmp_path / "labs/01"), names) == {"solutions", ".env"}
+    # Faculty's own lines still hold under the floor.
+    (tmp_path / ".releaseignore").write_text("lab.ipynb\n")
+    floored = selection.deny(tmp_path, content_floor=True)
+    assert floored(str(tmp_path / "labs/01"), names) == set(names)
+
+
 def test_with_no_releaseignore_the_content_names_stay_withheld(tmp_path):
     _tree(tmp_path, "labs/01/Solution/a.md", "labs/01/lab.md")
     deny = selection.deny(tmp_path)
@@ -268,7 +282,7 @@ def test_the_path_lists_still_refuse_both_groups():
     assert selection.denied("labs/01/solutions/a.pdf")
     assert selection.denied("labs/01/.env")
     assert not selection.publishable("labs/01/solutions/a.pdf")
-    # The copy's lock on the open site: only what no copy carries.
+    # What no copy carries, whatever a `.releaseignore` says.
     assert selection.never_copied("labs/.DS_Store")
     assert selection.never_copied("labs/.env")
     assert not selection.never_copied("labs/01/solutions/a.pdf")

@@ -13,7 +13,7 @@
 // the caller's `fixed` rows, which no line changes.
 
 import { clutter, contentDenied, contentName, denylisted, hardDenied, parts } from '../model/selection';
-import { compile, compileAll, matchRules, withheldBy, withheldOnCopy, type Rule } from './glob';
+import { compile, compileAll, deciding, matchRules, withheldBy, withheldOnCopy, type Rule } from './glob';
 
 export type Badge = 'withheld' | 'released';
 
@@ -58,18 +58,12 @@ export function withholdCounts(files: string[], lines: string[]): { never: numbe
 
 /**
  * The Withhold view's summary (decision B): never released (the never-released names, clutter and
- * the list file), withheld by the content default alone, withheld by a line, and released.
+ * the list file), withheld (by a line or the content default), and released.
  */
-export function withholdTally(files: string[], lines: string[]): { never: number; defaulted: number; withheld: number; released: number } {
+export function withholdTally(files: string[], lines: string[]): { never: number; withheld: number; released: number } {
   const rs = compileAll(lines);
-  const n = { never: 0, defaulted: 0, withheld: 0, released: 0 };
-  for (const f of files) {
-    if (neverMaterial(f) || hardDenied(f)) n.never++;
-    else {
-      const w = withheldOnCopy(rs, f, false, contentName);
-      n[!w ? 'released' : w.rule ? 'withheld' : 'defaulted']++;
-    }
-  }
+  const n = { never: 0, withheld: 0, released: 0 };
+  for (const f of files) n[neverMaterial(f) || hardDenied(f) ? 'never' : withheldOnCopy(rs, f, false, contentName) ? 'withheld' : 'released']++;
   return n;
 }
 
@@ -92,14 +86,15 @@ const names = (line: string, path: string, isDir: boolean) => bare(line) === bar
 /**
  * Where a path stands in a list: its own line, re-included by its own `!` line, withheld by a
  * broader rule, or neither. With `defaults` (decision B), also withheld by the content default
- * (`at` the path or the folder it sits in) or, for a content name a `!` line re-includes, overridden.
+ * (`at` the path or the folder it sits in) or, for a content name a `!` line re-includes,
+ * overridden (`rule` that line).
  */
 export type Standing =
   | { kind: 'own' }
   | { kind: 'included' }
   | { kind: 'broader'; rule: string; at: string; legal: boolean }
   | { kind: 'default'; at: string }
-  | { kind: 'overridden' }
+  | { kind: 'overridden'; rule: string }
   | { kind: 'released' };
 
 /** A standing whose row is unticked: a folder copy leaves it behind. */
@@ -109,9 +104,11 @@ export function standing(rs: Rule[], lines: string[], path: string, isDir: boole
   const live = lines.filter((l) => compile(l));
   if (live.some((l) => !l.trim().startsWith('!') && names(l, path, isDir))) return { kind: 'own' };
   const content = defaults && contentName(path.split('/').pop() ?? '');
-  if (live.some((l) => l.trim().startsWith('!') && names(l.trim().slice(1), path, isDir))) return { kind: content ? 'overridden' : 'included' };
+  const bang = live.find((l) => l.trim().startsWith('!') && names(l.trim().slice(1), path, isDir));
+  if (bang) return content ? { kind: 'overridden', rule: bang.trim() } : { kind: 'included' };
   const w = defaults ? withheldOnCopy(rs, path, isDir, contentName) : withheldBy(rs, path, isDir);
-  if (!w) return { kind: content ? 'overridden' : 'released' };
+  // A content name the copy carries: the `!` line deciding it re-included it.
+  if (!w) return content ? { kind: 'overridden', rule: deciding(rs, path, isDir)?.line ?? '' } : { kind: 'released' };
   if (!w.rule) return { kind: 'default', at: w.at };
   return { kind: 'broader', rule: w.rule.line, at: w.at, legal: w.at === path };
 }

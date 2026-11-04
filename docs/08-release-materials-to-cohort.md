@@ -30,7 +30,10 @@ semester repo as students have it, every file opening in the viewer) and **Relea
      **Keep for future semesters** carries the edit back to the course ([below](#carrying-cohort-edits-back)).
    - **diverged**: changed in both; a release opens a pull request ([below](#fixing-something-you-have-already-released)).
    - **not released**: not in the semester yet.
-   - **withheld**: `.releaseignore` keeps it from students ([below](#withholding-files-with-releaseignore)).
+   - **withheld**: a `.releaseignore` line keeps it from students ("withheld by `drafts/`"), or the
+     institution's default for solutions and tests ("withheld by default"); a `!` line that
+     releases one says so ("released by `!solutions/`") ([below](#withholding-files-with-releaseignore)).
+   - **never released**: secrets, git metadata and grading files; no release carries one.
 3. On the right, the manifest lists every file the release copies and where it lands, grouped
    by folder. **To** over it is the semester repo (the semester's Default destination to start
    with). A group's **Edit destination** sends it to another repo or path; a group going to a
@@ -157,7 +160,9 @@ any depth, whatever the case:
   `!` line in this repo's `.releaseignore` re-includes them (`!solutions/`; the last matching
   line wins and anchoring works as for any other line, so `!/solutions/` means the root one
   only). A path named outright ships exactly what it names (`from_path:
-  solutions/labs/02_lab`). `--validate` warns when a folder leaves one behind.
+  solutions/labs/02_lab`). `--validate` warns when a folder leaves one behind. The public
+  website never takes a `!` line's word for these: its copy leaves them behind whatever
+  `.releaseignore` says, the open internet being a different audience from enrolled students.
 
 Clutter such as `.DS_Store` is never copied either. The sites then choose what they show on
 top (`student_site.host`, `open_course_site.publish`:

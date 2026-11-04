@@ -287,6 +287,8 @@ class SemesterFacts:
     dest_blobs: dict[str, dict[str, str]] = field(default_factory=dict)
     source_blobs: dict[str, dict[str, str] | None] = field(default_factory=dict)
     source_withheld: dict[str, frozenset[str]] = field(default_factory=dict)
+    # and the content names a `!` line in it re-includes (decision B)
+    source_reincluded: dict[str, frozenset[str]] = field(default_factory=dict)
     source_branches: dict[str, str] = field(default_factory=dict)
     # `{(source repo, root stub path): still the placeholder}` for every copy the plan
     # makes of a root SYLLABUS.md / README.md: the release leaves such a copy out.
@@ -2476,6 +2478,7 @@ def divergence_problems(
                 blobs,
                 facts.source_withheld.get(k[0], frozenset()),
                 unwritten,
+                facts.source_reincluded.get(k[0], frozenset()),
             )
         )
         dest_blobs = facts.dest_blobs.get(k[2])
@@ -2901,7 +2904,9 @@ def _gather_sources(course_org: str, facts: SemesterFacts) -> None:
             facts.source_blobs[repo] = None
             continue
         blobs = facts.source_blobs[repo] = divergence.blobs_of(shas)
-        facts.source_withheld[repo] = schedule.source_withheld(course_org, repo, shas)
+        judged = schedule.source_withheld(course_org, repo, shas)
+        facts.source_withheld[repo] = judged.withheld
+        facts.source_reincluded[repo] = judged.reincluded
         facts.source_branches[repo] = default_branch(course_org, repo, fallback="main")
         for k, files in facts.manifests.items():
             if k[0] != repo or k[1] or k not in plan:

@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from dsl_course import releaseignore
+from dsl_course import releaseignore, selection
 from dsl_course.fs import copy_tree
 
 # name -> {relpath: contents}. A `.releaseignore` entry is the rules; everything else is
@@ -456,3 +456,20 @@ def test_a_nested_ignore_file_works_through_the_tree_adapter():
         "w1/.releaseignore",
         "w1/other.md",
     )
+
+
+def test_judged_in_tree_names_what_a_bang_line_re_includes_over_the_default():
+    paths = [
+        ".releaseignore",
+        "labs/01/solutions/a.md",
+        "labs/02/solutions/b.md",
+        "tests/t.py",
+    ]
+    body = {".releaseignore": "!solutions/\nlabs/02/solutions/\n"}
+    withheld, reincluded = releaseignore.judged_in_tree(
+        paths, body.get, default=selection.is_content_denied
+    )
+    assert reincluded == {"labs/01/solutions"}
+    assert "labs/02/solutions/b.md" in withheld
+    # Without a default nothing is re-included, and the withheld half is unchanged.
+    assert releaseignore.judged_in_tree(paths, body.get) == (withheld, frozenset())

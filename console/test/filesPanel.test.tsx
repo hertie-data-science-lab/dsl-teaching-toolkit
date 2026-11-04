@@ -3,8 +3,8 @@
 // keeps its open folders, a name opening the viewer in Browse, an untick writing its line and
 // enabling Save, Release ticks grouped in the manifest with the op's paired lists, the chips per
 // view against the semester's two branches, a destination override highlighted, the semester
-// page's Release by hand, and nothing for a read-only viewer. Decision B: `.env` never released in
-// any view, `solutions/` withheld by default until a tick or a typed `!` line releases it.
+// page's Release by hand, and Browse alone for a read-only viewer. Decision B: `.env` never released
+// in any view, `solutions/` withheld ("withheld by default") until a tick or a typed `!` line releases it.
 
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
@@ -108,17 +108,19 @@ const shown = (x: HTMLElement) => {
   c.querySelectorAll('.hint-pop').forEach((h) => h.remove());
   return c.textContent;
 };
+const note = (li: HTMLElement) => li.querySelector(':scope > .footnote, :scope > details > summary > .footnote')?.textContent ?? null;
 const tick = (li: HTMLElement) => li.querySelector<HTMLInputElement>(':scope > input.ft-tick, :scope > details > summary > input.ft-tick');
 
 describe('the Files panel', () => {
-  it('opens on Browse: no ticks, the viewer placeholder, withheld, default withheld and never released chips only', async () => {
+  it('opens on Browse: no ticks, the viewer placeholder, withheld (with why) and never released chips only', async () => {
     const { el } = await mount();
     expect(el.querySelector('[role="tablist"]')).not.toBeNull();
     expect(tab(el, 'Browse').getAttribute('aria-selected')).toBe('true');
     expect(el.querySelector('.materials-file')!.textContent).toContain('Choose a file to view it here.');
     expect(el.querySelectorAll('.file-tree input.ft-tick')).toHaveLength(0);
     expect(chips(folder(el, 'drafts'))).toEqual(['withheld']);
-    expect(chips(folder(el, 'solutions'))).toEqual(['default withheld']);
+    expect(chips(folder(el, 'solutions'))).toEqual(['withheld']);
+    expect(note(folder(el, 'solutions'))).toBe('withheld by default');
     expect(chips(fileRow(el, '.env'))).toEqual(['never released']);
     expect(chips(fileRow(el, 'slides.pdf'))).toEqual([]);
   });
@@ -148,13 +150,14 @@ describe('the Files panel', () => {
     const onSaveIgnore = vi.fn(async () => true);
     const { el } = await mount({ onSaveIgnore });
     await click(tab(el, 'Withhold'));
-    expect(chips(folder(el, 'solutions'))).toEqual(['default withheld']);
+    expect(chips(folder(el, 'solutions'))).toEqual(['withheld']);
+    expect(note(folder(el, 'solutions'))).toBe('withheld by default');
     const save = () => [...el.querySelectorAll<HTMLButtonElement>('.savebar button')].find((b) => b.textContent === 'Save')!;
     expect(save().disabled).toBe(true);
     await click(fileRow(el, 'README.md').querySelector('.ft-name')!);
     expect(el.querySelector<HTMLTextAreaElement>('#ign-pat')!.value).toBe('drafts/\n/README.md');
     expect(tick(fileRow(el, 'README.md'))!.checked).toBe(false);
-    expect(el.textContent).toContain('2 never released · 1 default withheld · 2 withheld · 5 released');
+    expect(el.textContent).toContain('2 never released · 3 withheld · 5 released');
     expect(save().disabled).toBe(false);
     await click(save());
     expect(onSaveIgnore).toHaveBeenCalledWith('drafts/\n/README.md\n');
@@ -171,8 +174,10 @@ describe('the Files panel', () => {
     expect(chips(folder(el, '02_linear'))).toEqual(['1 diverged']);
     expect(chips(folder(el, 'drafts'))).toEqual(['withheld']);
     expect(tick(folder(el, 'drafts'))).toBeNull();
-    expect(chips(folder(el, 'solutions'))).toEqual(['only if named']);
-    expect(tick(folder(el, 'solutions'))!.disabled).toBe(true);
+    // Withheld by default on a folder copy; ticking the folder names it outright, which ships it (`selection.deny`).
+    expect(chips(folder(el, 'solutions'))).toEqual(['withheld']);
+    expect(note(folder(el, 'solutions'))).toBe('withheld by default');
+    expect(tick(folder(el, 'solutions'))!.disabled).toBe(false);
     expect(chips(fileRow(el, '.env'))).toEqual(['never released']);
     expect(tick(fileRow(el, '.env'))!.disabled).toBe(true);
     expect(tick(fileRow(el, '.env'))!.title).toBe('Never released: on the institution’s list.');
@@ -189,11 +194,13 @@ describe('the Files panel', () => {
     await click(tick(folder(el, 'solutions'))!);
     expect(box().value).toBe('drafts/\n!/solutions/');
     expect(tick(folder(el, 'solutions'))!.checked).toBe(true);
-    expect(chips(folder(el, 'solutions'))).toEqual(['released · overrides the default']);
-    expect(el.textContent).toContain('2 never released · 0 default withheld · 1 withheld · 7 released');
+    expect(chips(folder(el, 'solutions'))).toEqual([]);
+    expect(note(folder(el, 'solutions'))).toBe('released by !/solutions/');
+    expect(el.textContent).toContain('2 never released · 1 withheld · 7 released');
     await click(tick(folder(el, 'solutions'))!);
     expect(box().value).toBe('drafts/');
-    expect(chips(folder(el, 'solutions'))).toEqual(['default withheld']);
+    expect(chips(folder(el, 'solutions'))).toEqual(['withheld']);
+    expect(note(folder(el, 'solutions'))).toBe('withheld by default');
   });
 
   it('Withhold: a ! line typed in the box releases the default on the tree', async () => {
@@ -205,7 +212,8 @@ describe('the Files panel', () => {
       box.dispatchEvent(new Event('input', { bubbles: true }));
     });
     expect(tick(folder(el, 'solutions'))!.checked).toBe(true);
-    expect(chips(folder(el, 'solutions'))).toEqual(['released · overrides the default']);
+    expect(chips(folder(el, 'solutions'))).toEqual([]);
+    expect(note(folder(el, 'solutions'))).toBe('released by !solutions/');
     expect(tick(fileRow(el, 'week01.ipynb'))!.checked).toBe(true);
   });
 
@@ -313,8 +321,18 @@ describe('the Files panel', () => {
     expect(onAdd).toHaveBeenCalledWith('guest-lectures');
   });
 
-  it('is not drawn for a read-only viewer', async () => {
+  it('shows a read-only viewer Browse alone on the course page, and nothing on the semester’s', async () => {
     const { el } = await mount({ write: false });
-    expect(el.innerHTML).toBe('');
+    expect(el.querySelector('[role="tablist"]')).toBeNull();
+    expect(el.querySelectorAll('.file-tree input.ft-tick')).toHaveLength(0);
+    expect(el.querySelector('.rh-foot')).toBeNull();
+    expect(chips(folder(el, 'drafts'))).toEqual(['withheld']);
+    expect(chips(fileRow(el, '.env'))).toEqual(['never released']);
+    await click(fileRow(el, 'README.md').querySelector('button.ft-name')!);
+    await settle();
+    expect(el.querySelector('.materials-file h2.mono')!.textContent).toBe('README.md');
+    render(null, root!);
+    const sem = await mount({ write: false, mode: 'semester', semester, semesters: undefined, sources: { materials: [REPO], others: [] } });
+    expect(sem.el.innerHTML).toBe('');
   });
 });

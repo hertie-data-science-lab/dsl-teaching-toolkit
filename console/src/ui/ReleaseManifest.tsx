@@ -93,7 +93,7 @@ function GroupRows({ g, p }: { g: Group; p: ManifestProps }) {
       {g.withheld.map((w) => (
         <li class="mf-out">
           <code class="mf-src">{w.path}</code>
-          <span class="footnote">{w.rule === null ? 'only if named' : <>withheld by <code>{w.rule}</code></>}</span>
+          <span class="footnote">{w.never ? 'never released' : w.rule === null ? 'withheld by default' : <>withheld by <code>{w.rule}</code></>}</span>
         </li>
       ))}
     </ul>
@@ -157,7 +157,7 @@ export function ReleaseFoot({ paths, files, def, scheduleHref }: { paths: number
         <b class="para">Release</b>
         <span class="para">Copies every listed file now, to its destination in the semester. A file already up to date is left as it is; a semester edit is merged with, and an edit on both sides opens a pull request. Nothing is deleted, and nothing is added to the schedule.</span>
       </Hint>
-      {scheduleHref ? <p class="footnote rh-sched">Want to pre-automate these releases? <a class="textlink" href={scheduleHref}>Schedule on the calendar →</a></p> : null}
+      {scheduleHref && paths ? <p class="footnote rh-sched">Want to pre-automate these releases? <a class="textlink" href={scheduleHref}>Schedule on the calendar →</a></p> : null}
     </div>
   );
 }
