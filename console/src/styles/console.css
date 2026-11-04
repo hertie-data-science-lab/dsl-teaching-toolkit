@@ -317,7 +317,10 @@ button.wk { font: inherit; text-align: left; cursor: pointer; align-content: sta
 .file-tree li { padding: 2px 0; }
 .file-tree summary { cursor: pointer; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .file-tree .ft-file { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.file-tree .ft-name { font-family: var(--font-code); font-size: 12.5px; overflow-wrap: anywhere; }
+.file-tree .ft-name { font-family: var(--font-code); font-size: 12.5px; min-width: 0; overflow-wrap: anywhere; }
+/* The icon and the name on one line: a long name breaks inside itself; with the tick before it, the head takes at most the rest of the row, chips wrapping after. */
+.file-tree .ft-head { display: inline-flex; flex-wrap: nowrap; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
+.file-tree .ft-tick + .ft-head, .file-tree .ft-gap + .ft-head { max-width: calc(100% - 21px); }
 .file-tree .ft-toggle { min-height: 0; padding: 1px 8px; font-size: 12px; }
 .file-tree .ft-file .ft-toggle { margin-left: auto; }
 .file-tree .ft-tick { margin: 0; }
@@ -481,8 +484,9 @@ table.grid td input:hover, table.grid td select:hover { border-color: var(--rule
 .check-line svg { width: 13px; height: 13px; flex: none; }
 .spin { width: 13px; height: 13px; border: 2px solid var(--rule-strong); border-top-color: var(--ink-2); border-radius: 50%; animation: spin 0.8s linear infinite; flex: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
+/* The Schedule entry as a bottom sheet: above the page (18), under the nav handle (19) and the top bar (20). */
 @media (max-width: 1140px) {
-  .entry { position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 30; max-height: 82vh; border-radius: 16px 16px 0 0; box-shadow: var(--shadow); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .entry { position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 18; max-height: 82vh; border-radius: 16px 16px 0 0; box-shadow: var(--shadow); padding-bottom: env(safe-area-inset-bottom, 0px); }
   .entry::before { content: ""; width: 40px; height: 4px; border-radius: 2px; background: var(--rule-strong); margin: 8px auto 0; flex: none; }
   .entry-foot { border-radius: 0; }
 }
@@ -755,7 +759,7 @@ input[aria-invalid="true"] { border-color: var(--bad); background: var(--bad-sof
 .sched-layout { grid-template-columns: minmax(0, 1fr); }
 @media (min-width: 1400px) { .sched-layout:not(.no-entry) { grid-template-columns: minmax(0, 1fr) 420px; } }
 @media (max-width: 1399px) {
-  .entry { position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 30; max-height: 84vh; border-radius: 16px 16px 0 0; box-shadow: var(--shadow); padding-bottom: env(safe-area-inset-bottom, 0px); max-width: 760px; margin: 0 auto; }
+  .entry { position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 18; max-height: 84vh; border-radius: 16px 16px 0 0; box-shadow: var(--shadow); padding-bottom: env(safe-area-inset-bottom, 0px); max-width: 760px; margin: 0 auto; }
   .entry::before { content: ""; width: 40px; height: 4px; border-radius: 2px; background: var(--rule-strong); margin: 8px auto 0; flex: none; }
   .entry-foot { border-radius: 0; }
 }
@@ -1124,7 +1128,7 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .file-tree .ft-icon { flex: none; color: var(--muted); }
 .file-tree .ft-closed, .file-tree .ft-opened { display: inline-flex; }
 .file-tree details[open] > summary .ft-closed, .file-tree details:not([open]) > summary .ft-opened { display: none; }
-.file-tree .ft-out > .ft-name, .file-tree .ft-out > details > summary > .ft-name { color: var(--muted); text-decoration: line-through; }
+.file-tree .ft-out > .ft-head .ft-name, .file-tree .ft-out > details > summary > .ft-head .ft-name { color: var(--muted); text-decoration: line-through; }
 .pattern-box { position: relative; background: var(--surface); border-radius: 6px; }
 .pattern-box textarea.code, .pattern-box .pattern-mirror { font-family: var(--font-code); font-size: 13px; line-height: 1.5; padding: 6px 9px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .pattern-box textarea.code { position: relative; background: transparent; min-height: 240px; }
@@ -1302,7 +1306,7 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .file-tree button.ft-name { font: inherit; font-family: var(--font-code); font-size: 12.5px; color: var(--link); background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
 .file-tree button.ft-name:hover { text-decoration: underline; }
 .file-tree button.ft-name[aria-current] { font-weight: 700; }
-.file-tree li.ft-file:has(> [data-kind="up_to_date"]) > .ft-name { color: var(--muted); }
+.file-tree li.ft-file:has(> [data-kind="up_to_date"]) > .ft-head .ft-name { color: var(--muted); }
 .file-tree:not(.select) li.ft-file { cursor: default; }
 .files-panel .file-tree.select li.ft-file { cursor: pointer; }
 .files-panel .file-tree.select li.ft-file:hover { background: var(--sunk); border-radius: 6px; }
@@ -1313,6 +1317,10 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .mf-rows li.mf-out .mf-src { flex-basis: auto; }
 /* The course page's Release view: the chosen semester edited released files of this repo. */
 .files-panel .edited-note { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0 0 10px; padding: 8px 12px; border-radius: 8px; background: var(--amber-soft); color: var(--ink); font-size: 13.5px; }
+/* See which: the files the semester added (no course row), each with its chip and Open on the semester copy. */
+.files-panel .edited-added { list-style: none; margin: 0 0 10px; padding: 0 12px; display: grid; gap: 4px; font-size: 13px; }
+.files-panel .edited-added li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.files-panel .edited-added code { overflow-wrap: anywhere; }
 
 /* Chips: muted (up to date, withheld, never copied, never released) and the semester's purple (ahead). */
 .chip.muted { background: var(--sunk); color: var(--muted); font-weight: 400; }

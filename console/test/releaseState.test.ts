@@ -325,3 +325,19 @@ describe('after a release', () => {
     expect(live.tree(ORG, 'other')).toMatchObject({ paths: [{ sha: 'v0' }] });
   });
 });
+
+describe('a file released, then removed in the semester (R1)', () => {
+  it('is removed: upstream has the course blob, the default branch lacks it', () => {
+    const course = [{ path: 'gone', sha: 'a' }, { path: 'changed', sha: 'new' }, { path: 'never', sha: 'a' }];
+    expect(fileStates(course, tree({ gone: 'a', changed: 'a' }), tree({}))).toEqual({ gone: 'removed', changed: 'not_released', never: 'not_released' });
+    // Two-way, or no semester repo at all: nothing to tell it by.
+    expect(fileStates(course, null, tree({})).gone).toBe('not_released');
+    expect(fileStates(course, tree({ gone: 'a' }), { kind: 'absent' }).gone).toBe('not_released');
+  });
+
+  it('is a semester edit to its folder, and has its own word', () => {
+    expect(folderStep(['removed'])).toBe('ahead');
+    expect(folderStep(['removed', 'behind'])).toBe('diverged');
+    expect(countsWords({ removed: 1 })).toBe('1 removed in semester');
+  });
+});

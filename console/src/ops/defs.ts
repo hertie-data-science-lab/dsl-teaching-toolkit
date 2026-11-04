@@ -69,6 +69,7 @@ export function keepFuturePaths(s: Scope, paths: string[]): OpDef {
   return {
     ...keepFuture(s), key: `paths:${paths.join(',')}`, name: 'PR into source', title: paths.join(', '),
     intro: 'Opens a pull request carrying this file’s semester edit back into the course repo, so next semester starts from it.',
+    verb: 'Open the pull request', running: 'Opening the pull request',
     args: { paths: paths.join(',') },
   };
 }
@@ -157,8 +158,10 @@ function groupFact(g: Group, defaultDestRepo: string): string {
 /**
  * Release by hand (plan 2026-11-04 decisions 5-6): the manifest's groups in one `release.adhoc`
  * run, each source paired with its destination. No Options: the manifest set every destination.
+ * `removed`: a picked file was removed in the semester, so a run with nothing to do says why.
  */
-export function releasePicked(s: Scope, groups: Group[], run: { defaultDestRepo: string }): OpDef {
+export const REMOVED_NOTHING = 'Nothing copied: the semester removed these files; use Overwrite to restore them.';
+export function releasePicked(s: Scope, groups: Group[], run: { defaultDestRepo: string; removed?: boolean }): OpDef {
   const rows = requestOf(groups, run);
   const n = rows.length;
   const repos = [...new Set(groups.map((g) => g.repo))];
@@ -171,6 +174,7 @@ export function releasePicked(s: Scope, groups: Group[], run: { defaultDestRepo:
     verb: `Release ${plural(n, 'path')}`, running: `Releasing ${plural(n, 'path')}`, cancel: 'Stop before copying',
     args: toArgs(rows),
     target: destUrl(s.cohortOrg ?? s.courseOrg, first?.destRepo || run.defaultDestRepo, first ? destPathOf(first, first.folder) : ''),
+    ...(run.removed ? { nothingExtra: REMOVED_NOTHING } : {}),
   };
 }
 

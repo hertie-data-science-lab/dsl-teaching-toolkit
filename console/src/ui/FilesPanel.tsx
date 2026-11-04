@@ -17,9 +17,10 @@
 // its state, draws the chip, the tick and the folder roll-up in every view; the Withhold summary
 // counts the same standings.
 //
-// On the course page, Release: when the chosen semester edited released files of this repo (ahead
-// or diverged), a notice over the tree says how many, with PR into source and "See which", which
-// narrows the tree to those files ("Show all" undoes it).
+// On the course page, Release: when the chosen semester edited released files of this repo (ahead,
+// diverged or removed in semester, and the files it added under this repo's released folders), a
+// notice over the tree says how many, with PR into source and "See which", which narrows the tree
+// to those files and lists the added ones (no course row) under the notice ("Show all" undoes it).
 //
 // Decision B (2026-11-04): the institution's names in two groups. Never released (`.env`, `.git`,
 // grading files, `.system`): no tick in any view, "never released". Content (`solutions`,
@@ -37,12 +38,15 @@ import { plural } from '../model/format';
 import { DENYLIST_CONTENT, DENYLIST_HARD } from '../model/selection';
 import { withMark } from '../model/materialsRepo';
 import {
-  assignmentStems, COMMA_TITLE, countsWords, effectiveDestRepo, fileStates, foldersCopied, groupPicks, destPathOf, releaseBlocked, requestOf,
+  assignmentStems, COMMA_TITLE, countsWords, editedState, effectiveDestRepo, fileStates, foldersCopied, groupPicks, destPathOf, outOfStep, releaseBlocked, requestOf, semesterAdded,
   type FileState as ReleaseState, type Group, type ReleasePick, type ReleaseRow,
 } from '../model/releaseState';
 import type { Loaded } from '../model/status';
 import { releasePicked } from '../ops/defs';
 import { CheckLine, Loading, ghUrl } from './bits';
+import { useYourSetup } from './FileRow';
+import { OpenSplit } from './OpenSplit';
+import { profileHref } from '../model/open';
 import { SaveBar } from './edit';
 import { Hint } from './Hint';
 import { PatternTree } from './PatternTree';
@@ -100,6 +104,7 @@ const ADD = '__add';
 const IDLE: SaveState = { kind: 'idle' };
 const NOTHING = 'Nothing to release: the semester has this version.';
 const NEVER_FOLDER = 'A folder release never copies these files; tick the file itself.';
+export const REMOVED_TICK = 'Removed in the semester: a plain release changes nothing; Overwrite (on the semester’s Released materials) restores the course version.';
 const linesOf = (text: string) => text.split('\n');
 const textOf = (lines: string[]) => lines.join('\n');
 const defaultOut = (d: string) => withMark(d.endsWith('\n') || !d ? d : `${d}\n`);
@@ -220,11 +225,11 @@ const pickKey = (repo: string, path: string, dir: boolean) => `${repo}\0${dir ? 
 /** The folders above a path, nearest last. */
 const above = (path: string) => path.split('/').slice(0, -1).map((_, i, a) => a.slice(0, i + 1).join('/'));
 
-/** One row as every view draws it: its chip, the folder's counts, and the Release tick (none: no tick; gap: a blank in its place; else why it is disabled, null when it is not). */
+/** One row as every view draws it: its chip, the folder's counts, and the Release tick (none: no tick; gap: a blank in its place; else why it is disabled, null when it is not, and an enabled tick's title). */
 interface RowState {
   chip: ChipKind | null;
   row: RowModel<ReleaseState>;
-  tick: 'none' | 'gap' | { off: string | null };
+  tick: 'none' | 'gap' | { off: string | null; title?: string };
 }
 
 export function FilesPanel(p: FilesPanelProps) {
@@ -247,6 +252,7 @@ function Panel(p: FilesPanelProps) {
   const [chosen, setChosen] = useState<string[]>([]);
   // Course Release view: the tree narrowed to the files the semester edited ("See which").
   const [onlyEdited, setOnlyEdited] = useState(false);
+  const setup = useYourSetup();
   // Read-only: Browse alone, whatever view was last picked.
   const view = p.write ? picked : 'browse';
   const release = view === 'release';
@@ -300,8 +306,26 @@ function Panel(p: FilesPanelProps) {
     if (s.kind === 'own' || s.kind === 'broader' || s.kind === 'never_copied') return { chip, row, tick: 'gap' };
     const off = never ? NEVER_RELEASED_TITLE : inPicked(path) ? 'Picked with its folder' : path.includes(',') ? COMMA_TITLE
       : dir ? (copied.has(path) ? null : NEVER_FOLDER) : state === 'up_to_date' ? NOTHING : null;
-    return { chip, row, tick: { off } };
+    return { chip, row, tick: { off, title: off === null && state === 'removed' ? REMOVED_TICK : undefined } };
   };
+
+  // Each group's states at its own destination, worked out once per change of its inputs: the
+  // group, the run's repo and the three trees it compares (each tree state a stable object until it is read again).
+  const groupTrees = groups.map((g) => {
+    const to = g.destRepo || runRepo;
+    return into ? [p.files.tree(p.courseOrg, g.repo), p.files.tree(into.org, to, 'upstream'), p.files.tree(into.org, to)] as const : null;
+  });
+  const groupStates = useMemo(() => new Map(groups.map((g, i) => {
+    const t = groupTrees[i];
+    if (!t) return [groupKey(g), NO_STATES];
+    const [courseTree, up, at] = t;
+    const ship = new Set(g.ship);
+    const blobs = filesOf(courseTree).blobs.filter((b) => ship.has(b.path));
+    return [groupKey(g), fileStates(blobs, up, at, { destPath: (x) => destPathOf(g, x) })];
+  })), [groups, runRepo, ...groupTrees.flat()]);
+  const stateOf = (g: Group, path: string) => groupStates.get(groupKey(g))?.[path];
+  // A plain release of a file the semester removed copies nothing: the run's panel says so.
+  const anyRemoved = groups.some((g) => g.ship.some((x) => stateOf(g, x) === 'removed'));
 
   const dests = into ? destsOf(p, into, defaultDest, chosen) : null;
   const prOf = (destRepo: string, path: string) => (into ? (p.prUrl?.(into.org, destRepo, path) ?? `${ghUrl(into.org, destRepo)}/pulls`) : undefined);
@@ -322,27 +346,37 @@ function Panel(p: FilesPanelProps) {
       </>
     );
   };
-  // Course Release view: the files this repo released that the semester edited (ahead or diverged), as their chips say.
-  const edited = course && release && live ? here.paths.filter((f) => {
-    const c = rowState(f, false).chip;
-    return c === 'ahead' || c === 'diverged';
-  }) : NO_PATHS;
-  const narrowed = onlyEdited && edited.length > 0;
+  // Course Release view: the files this repo released that the semester edited (ahead, diverged or removed), as their chips say,
+  // and the files the semester added under this repo's released folders (no course row: listed under the notice).
+  const edited = course && release && live ? here.paths.filter((f) => editedState(rowState(f, false).chip as ReleaseState)) : NO_PATHS;
+  const status = into?.loaded?.kind === 'ready' ? into.loaded.status : undefined;
+  const added = course && release && status && into ? semesterAdded(outOfStep(status, p.files, p.courseOrg, into.org, defaultDest), repo, runRepo) : NO_PATHS;
+  const changed = edited.length + added.length;
+  const narrowed = onlyEdited && changed > 0;
   const editedKey = edited.join('\n');
   const shownTree = useMemo(() => (narrowed ? buildTree(edited) : tree), [narrowed, editedKey, tree]);
-  const editedNote = edited.length && into ? (
-    <p class="edited-note" role="status">
-      <span class="step-bang" aria-hidden="true">!</span>
-      <span>{into.termLabel} has edited {plural(edited.length, 'released file')} from this repo.</span>
-      {keep ? <button class="btn small quiet" type="button" onClick={keep}>PR into source</button> : null}
-      <button class="textlink" type="button" aria-pressed={narrowed} onClick={() => setOnlyEdited(!narrowed)}>{narrowed ? 'Show all' : 'See which'}</button>
-    </p>
+  const editedNote = changed && into ? (
+    <>
+      <p class="edited-note" role="status">
+        <span class="step-bang" aria-hidden="true">!</span>
+        <span>{into.termLabel} has edited {plural(changed, 'released file')} from this repo.</span>
+        {keep ? <button class="btn small quiet" type="button" onClick={keep}>PR into source</button> : null}
+        <button class="textlink" type="button" aria-pressed={narrowed} onClick={() => setOnlyEdited(!narrowed)}>{narrowed ? 'Show all' : 'See which'}</button>
+      </p>
+      {narrowed && added.length ? (
+        <ul class="edited-added" aria-label="Added in the semester">
+          {added.map((path) => (
+            <li><code>{path}</code> <StateChip kind="ahead" onKeep={keep} /> <OpenSplit org={into.org} repo={runRepo} path={path} setup={setup} profile={profileHref(into.org)} /></li>
+          ))}
+        </ul>
+      ) : null}
+    </>
   ) : null;
   const pickControl = (path: string, dir: boolean) => {
     const t = rowState(path, dir).tick;
     if (typeof t !== 'object') return <span class="ft-gap" />;
     const by = inPicked(path);
-    return <input type="checkbox" class="ft-tick" checked={by || isPicked(path, dir)} disabled={t.off !== null} title={t.off ?? undefined} aria-label={`Pick ${path}${dir ? '/' : ''}`} onClick={() => togglePick(path, dir)} />;
+    return <input type="checkbox" class="ft-tick" checked={by || isPicked(path, dir)} disabled={t.off !== null} title={t.off ?? t.title} aria-label={`Pick ${path}${dir ? '/' : ''}`} onClick={() => togglePick(path, dir)} />;
   };
   const pickRow = (path: string) => {
     const t = rowState(path, false).tick;
@@ -375,6 +409,7 @@ function Panel(p: FilesPanelProps) {
   const partial = here.tree.kind === 'ready' && here.tree.truncated;
   const treeView = here.tree.kind === 'loading' ? <Loading what="Reading the repo" />
     : here.tree.kind !== 'ready' ? <p class="footnote">Could not read the repo’s files.</p>
+    : narrowed && !edited.length ? <p class="footnote">No course file changed: the semester’s own files are listed above.</p>
     : (
       <PatternTree
         files={narrowed ? edited : here.paths}
@@ -405,7 +440,8 @@ function Panel(p: FilesPanelProps) {
         <div class="field"><span class="label">Rules</span><Unmatched files={here.paths} lines={lines} rules={rules} partial={partial} /></div>
       </>
     )
-    : into && dests ? <Release {...{ p, into, runRepo, dests, groups, prOf, keep }} onGroupDest={(k, patch) => {
+    : into && dests ? <ReleaseManifest groups={groups} runRepo={runRepo} dests={dests} stateOf={stateOf} onKeep={keep}
+      prUrl={(g, path) => prOf(g.destRepo || runRepo, destPathOf(g, path))} onGroupDest={(k, patch) => {
       if (patch.destRepo && !chosen.includes(patch.destRepo)) setChosen([...chosen, patch.destRepo]);
       setOverrides({ ...overrides, [k]: { ...overrides[k], ...patch } });
     }} />
@@ -464,7 +500,7 @@ function Panel(p: FilesPanelProps) {
         </div>
       ) : null}
       {into ? (
-        <ReleaseFoot paths={rows.length} blocked={releaseBlocked(rows)} files={groups.reduce((n, g) => n + g.ship.length, 0)} def={releasePicked({ courseOrg: p.courseOrg, cohortOrg: into.org, where: into.termLabel }, groups, { defaultDestRepo: runRepo })} />
+        <ReleaseFoot paths={rows.length} blocked={releaseBlocked(rows)} files={groups.reduce((n, g) => n + g.ship.length, 0)} def={releasePicked({ courseOrg: p.courseOrg, cohortOrg: into.org, where: into.termLabel }, groups, { defaultDestRepo: runRepo, removed: anyRemoved })} />
       ) : null}
       {adding && p.sources?.onAdd ? (
         <RepoPickerModal kind="source" rows={p.sources.others.map((name) => ({ name, note: 'not course materials yet' }))} onClose={() => setAdding(false)} onChoose={(r) => { p.sources!.onAdd!(r); setSrc(r); }} />
@@ -534,31 +570,6 @@ function destsOf(p: FilesPanelProps, into: SemesterRef, defaultDest: string, cho
     reserved,
     rows: [...options.map((name) => ({ name, note: note(name) })), ...destinationRows(list.filter((r) => r.name), options, reserved).map((r) => ({ ...r, note: note(r.name) }))],
   };
-}
-
-/** The Release view's right column: the manifest, each shipping file's state at its group's destination. */
-function Release({ p, into, runRepo, dests, groups, prOf, keep, onGroupDest }: {
-  p: FilesPanelProps; into: SemesterRef; runRepo: string; dests: Dests; groups: Group[];
-  prOf: (destRepo: string, path: string) => string | undefined; keep?: () => void;
-  onGroupDest: (key: string, patch: { destRepo?: string; destPath?: string }) => void;
-}) {
-  // Each group's states, worked out once per change of its inputs: the group, the run's repo and
-  // the three trees it compares (each tree state a stable object until it is read again).
-  const trees = groups.map((g) => {
-    const to = g.destRepo || runRepo;
-    return [p.files.tree(p.courseOrg, g.repo), p.files.tree(into.org, to, 'upstream'), p.files.tree(into.org, to)] as const;
-  });
-  const groupStates = useMemo(() => new Map(groups.map((g, i) => {
-    const [course, upstream, live] = trees[i];
-    const ship = new Set(g.ship);
-    const blobs = filesOf(course).blobs.filter((b) => ship.has(b.path));
-    return [groupKey(g), fileStates(blobs, upstream, live, { destPath: (x) => destPathOf(g, x) })];
-  })), [groups, runRepo, ...trees.flat()]);
-  const stateOf = (g: Group, path: string) => groupStates.get(groupKey(g))?.[path];
-  return (
-    <ReleaseManifest groups={groups} runRepo={runRepo} dests={dests} stateOf={stateOf} onKeep={keep}
-      prUrl={(g, path) => prOf(g.destRepo || runRepo, destPathOf(g, path))} onGroupDest={onGroupDest} />
-  );
 }
 
 /** The Withhold view's last line: the repo's files never released, withheld (by the list or by default), and released. */

@@ -4,6 +4,7 @@
 // computer (the editor Profile names, or the way to set it up), a document no editor opens
 // listing neither github.dev nor an editor.
 
+import { readdirSync, readFileSync } from 'node:fs';
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -92,5 +93,14 @@ describe('OpenSplit', () => {
       ['On github.dev, in your fork', 'https://github.dev/octo/materials/blob/HEAD/a/notes.md'],
       ['Set up your editor in Profile', '?p'],
     ]);
+  });
+});
+
+describe('the file menu’s old list styles', () => {
+  it('are gone: the chevron opens the Open split button’s menu', () => {
+    const dir = `${__dirname}/../src/styles`;
+    const css = readdirSync(dir).map((f) => readFileSync(`${dir}/${f}`, 'utf8')).join('\n');
+    expect(css).not.toMatch(/\.file-menu-list|\.fm-/);
+    expect(css).toContain('.file-chev');
   });
 });

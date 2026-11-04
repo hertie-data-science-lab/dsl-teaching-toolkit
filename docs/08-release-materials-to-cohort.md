@@ -31,6 +31,8 @@ from their source files** ([below](#released-materials-that-differ-from-their-so
    - **ahead**: edited in the semester since its release; a release merges onto that edit. Its
      **PR into source** carries the edit back to the course ([below](#carrying-cohort-edits-back)).
    - **diverged**: changed in both; a release opens a pull request ([below](#fixing-something-you-have-already-released)).
+   - **removed in semester**: released, then deleted in the semester; a plain release changes
+     nothing, and **Overwrite** in the panel below restores the course version.
    - **not released**: not in the semester yet.
    - **withheld**: a `.releaseignore` line keeps it from students ("withheld by `drafts/`"), or the
      institution's default for solutions and tests ("withheld by default"); a `!` line that

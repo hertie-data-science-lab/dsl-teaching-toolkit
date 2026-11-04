@@ -250,6 +250,7 @@ export function OpPanel() {
       <>
         <OutcomeView result={c.result} def={d} url={c.progress?.htmlUrl} stopped={c.stopped} />
         {d.doneExtra && c.result.outcome?.conclusion !== 'failed' ? d.doneExtra : null}
+        {d.nothingExtra && c.result.outcome?.conclusion === 'nothing_to_do' ? <p class="op-confirm">{d.nothingExtra}</p> : null}
         <p class="footnote">Written to <a href="#operations">All operations</a>.</p>
       </>
     );

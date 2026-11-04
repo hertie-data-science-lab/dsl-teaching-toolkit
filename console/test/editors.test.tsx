@@ -386,9 +386,9 @@ describe('editing screens', () => {
     expect(out).toContain('id="files-tab-browse" aria-selected="true"');
     expect(out).toContain('Choose a file to view it here.');
     expect(out).not.toContain('class="ft-tick"');
-    expect(out).toMatch(/class="ft-name">slides.html<\/button><\/li>/);
+    expect(out).toMatch(/class="ft-name">slides.html<\/button><\/span><\/li>/);
     // solutions/ is the institution denylist's too (decision 0040): Browse calls it withheld.
-    expect(out).toMatch(/class="ft-name">a.py<\/button><span class="chip muted"[^>]*>withheld<\/span>/);
+    expect(out).toMatch(/class="ft-name">a.py<\/button><\/span><span class="chip muted"[^>]*>withheld<\/span>/);
     expect(out).toContain('Weekly plan for the syllabus');
     // Write alone on the page (materials-release decision 11): it opens the panel, where Copy
     // shows the plan to copy and Write puts it into the syllabus (decision 0031 rule 9).
@@ -415,7 +415,7 @@ describe('editing screens', () => {
     const none = new StaticFiles({}, {}, { [`${COURSE_ORG}/course-materials-f2026`]: ['SYLLABUS.md', 'lectures/01/slides.html'] });
     const out = html(<MaterialsScreen {...cp} files={none} entry="course-materials-f2026" />);
     // Nothing withheld, nothing denylisted: no row carries a chip.
-    expect(out).toMatch(/class="ft-name">SYLLABUS.md<\/button><\/li>/);
+    expect(out).toMatch(/class="ft-name">SYLLABUS.md<\/button><\/span><\/li>/);
     expect(out).not.toMatch(/class="chip[^"]*">(withheld|never copied)/);
     expect(out).not.toContain('class="file-list"');
   });
@@ -430,7 +430,7 @@ describe('editing screens', () => {
     expect(html(<WebsiteScreen {...cp} files={new StaticFiles({}, {}, {})} />)).toContain(`href="https://github.com/${COURSE_ORG}/.github/new/main?filename=course.yml"`);
     expect(out).toContain('Source materials');
     // One selection editor: the kind chips, and the tree's lines leave a folder out.
-    expect(out).toMatch(/<span class="ft-name">labs\/<\/span><span class="chip amber">left out<\/span>/);
+    expect(out).toMatch(/<span class="ft-name">labs\/<\/span><\/span><span class="chip amber">left out<\/span>/);
     expect(out).toMatch(/Lecture: In · 1/);
     expect(out).toContain('Reading lists');
     expect(out).toContain('Keep the website updated');

@@ -459,3 +459,40 @@ describe('Marked from', () => {
     expect(MARKED_FROM_HINT).toContain('Leave it blank');
   });
 });
+
+describe('a release that copied nothing because the semester removed the files (R1)', () => {
+  const g = { repo: 'course-materials-f2026', head: 'labs/', folder: 'labs', kind: 'partial' as const, files: 1, of: 1, sources: ['labs/a.md'], ship: ['labs/a.md'], withheld: [] };
+  const nothing = { schema: 'dsl.outcome/1', op: 'release.adhoc', run_id: 77, actor: 'a', preview: false, conclusion: 'nothing_to_do', summary: 'Nothing to release: upstream already has these files.' } as Result['outcome'];
+
+  async function ran(def: OpDef, outcome: Result['outcome']) {
+    const a = new Scripted();
+    a.outcome_ = outcome;
+    const ops = session(a);
+    await mount(envOf(ops), <OpPanel />);
+    await act(() => ops.open(def, 'run'));
+    await settle(() => !!ops.current.value?.handle);
+    a.finish();
+    await settle(() => ops.current.value?.phase === 'done');
+    return root!.textContent!;
+  }
+
+  it('says, under the engine’s words, to use Overwrite', async () => {
+    const t = await ran(defs.releasePicked(scope, [g], { defaultDestRepo: 'materials', removed: true }), nothing);
+    expect(t).toContain('Nothing to release: upstream already has these files.');
+    expect(t).toContain(defs.REMOVED_NOTHING);
+    expect(defs.REMOVED_NOTHING).toBe('Nothing copied: the semester removed these files; use Overwrite to restore them.');
+  });
+
+  it('says nothing more when no picked file was removed, or the run copied something', async () => {
+    expect(await ran(defs.releasePicked(scope, [g], { defaultDestRepo: 'materials' }), nothing)).not.toContain('Nothing copied');
+    render(null, root!);
+    expect(await ran(defs.releasePicked(scope, [g], { defaultDestRepo: 'materials', removed: true }), { ...nothing!, conclusion: 'done', summary: 'Released.' })).not.toContain('Nothing copied');
+  });
+});
+
+describe('the per-file PR into source (W2)', () => {
+  it('reads Open the pull request; the panel-level one keeps its own words', () => {
+    expect(defs.keepFuturePaths(scope, ['labs/a.md'])).toMatchObject({ name: 'PR into source', verb: 'Open the pull request', running: 'Opening the pull request' });
+    expect(defs.keepFuture(scope)).toMatchObject({ verb: 'Propose the changes', running: 'Proposing changes' });
+  });
+});

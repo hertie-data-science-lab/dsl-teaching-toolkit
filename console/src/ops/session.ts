@@ -32,6 +32,8 @@ export interface OpDef {
   dryExtra?: ComponentChildren;
   /** Shown under the verb's outcome unless it failed (a released TBC entry's session date). */
   doneExtra?: ComponentChildren;
+  /** A line under the engine's words when the run had nothing to do (why, and what would). */
+  nothingExtra?: string;
   verb: string;
   /** A `?` beside the verb, wherever it shows: its name, and one paragraph per string. */
   verbHint?: { label: string; text: string[] };

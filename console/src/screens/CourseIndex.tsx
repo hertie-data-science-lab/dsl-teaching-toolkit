@@ -7,7 +7,7 @@ import type { GhRepo, GitHubClient } from '../github/client';
 import { TEMPLATE_TOPIC, termOf } from '../model/discovery';
 import type { Files } from '../model/files';
 import { ago, fmtDay, plural, templateName } from '../model/format';
-import { effectiveDestRepo, fileStates } from '../model/releaseState';
+import { editedState, effectiveDestRepo, fileStates, outOfStep, semesterAdded } from '../model/releaseState';
 import type { Loaded } from '../model/status';
 import { MATERIALS_TOPIC } from '../model/materialsRepo';
 import { formatWord, formatsList } from '../tiers/grading';
@@ -52,15 +52,18 @@ export function repoOf(files: Files, org: string, name: string): GhRepo | undefi
 // --------------------------------------------------------------------------- materials
 
 /**
- * How many of `repo`'s files the semester `semOrg` edited since their release (ahead or diverged,
- * three-way at the same paths in its default destination, as the Files panel's Release view
- * reads them), or null while a tree is unread.
+ * How many of `repo`'s files the semester `semOrg` edited since their release (ahead, diverged or
+ * removed in semester, three-way at the same paths in its default destination, as the Files
+ * panel's Release view reads them, and the files it added under this repo's released folders),
+ * or null while a tree is unread.
  */
 export function editedIn(files: Files, courseOrg: string, repo: string, semOrg: string, loaded: Loaded): number | null {
   const dest = effectiveDestRepo(loaded);
   const course = files.tree(courseOrg, repo), live = files.tree(semOrg, dest), up = files.tree(semOrg, dest, 'upstream');
   if (course.kind !== 'ready' || live.kind !== 'ready' || up.kind === 'loading') return null;
-  return Object.values(fileStates(course.paths.filter((x) => !x.dir), up, live)).filter((s) => s === 'ahead' || s === 'diverged').length;
+  const edited = Object.values(fileStates(course.paths.filter((x) => !x.dir), up, live)).filter(editedState).length;
+  const added = loaded.kind === 'ready' ? semesterAdded(outOfStep(loaded.status, files, courseOrg, semOrg, dest), repo, dest).length : 0;
+  return edited + added;
 }
 
 /** Adds the `dsl-materials` topic to `repo`'s topics as GitHub has them now: the repo list may be old, and a PUT replaces them all. */

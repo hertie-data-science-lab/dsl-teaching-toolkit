@@ -81,16 +81,18 @@ function clickRow(c: Ctx, path: string, dir: boolean) {
 
 function Control({ n, dir, s, c }: { n: TreeNode; dir: boolean; s: Standing; c: Ctx }) {
   const out = bucket(s) !== 'released';
-  const click = (e: Event) => {
-    e.preventDefault();
-    clickRow(c, n.path, dir);
-  };
   const what = `${n.path}${dir ? '/' : ''}`;
   if (c.mode === 'select') {
     const blocked = s.kind === 'broader' && !s.legal;
-    return <input type="checkbox" class="ft-tick" checked={!out} aria-label={`Include ${what}`} title={blocked ? 'Inside a folder that is left out: include the folder first.' : undefined} onClick={click} />;
+    // Not `preventDefault`: a prevented click reverts the box after Preact's re-render has set it.
+    // The box goes back to the list's standing, and the re-render (if the list changed) moves it on.
+    const tick = (e: Event) => {
+      (e.currentTarget as HTMLInputElement).checked = !out;
+      clickRow(c, n.path, dir);
+    };
+    return <input type="checkbox" class="ft-tick" checked={!out} aria-label={`Include ${what}`} title={blocked ? 'Inside a folder that is left out: include the folder first.' : undefined} onClick={tick} />;
   }
-  return <button class="btn small quiet ft-toggle" type="button" aria-label={`${out ? 'Include' : 'Withhold'} ${what}`} onClick={click}>{out ? 'Include' : 'Withhold'}</button>;
+  return <button class="btn small quiet ft-toggle" type="button" aria-label={`${out ? 'Include' : 'Withhold'} ${what}`} onClick={() => clickRow(c, n.path, dir)}>{out ? 'Include' : 'Withhold'}</button>;
 }
 
 /** Why a row stands as it does: the broader line that withholds it, the content default, or the `!` line that re-includes it. */

@@ -4,7 +4,7 @@
 // with its tree from the index (`RepoFiles`, `MaterialsTree`: the file row both consoles share),
 // every file opening in the viewer both consoles use (`Split`, `RepoFile`). The released folders
 // whose files differ from the course copy sit in their own folded panel ("Released materials
-// that differ from their source files", worked out here three-way, `outOfStep`), each
+// that differ from their source files", three-way, `outOfStep` in the model), each
 // folder a fold of its own, its differing files listed beneath, each with its two ways to settle
 // it (Re-release, with Overwrite in its Options; PR into source), Open and an inline Diff, and
 // one PR into source (all) for the panel. A re-release that conflicted waits in an open pull
@@ -18,12 +18,11 @@ import { useEffect, useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import type { CohortRef } from '../model/discovery';
 import { ago, fmtDay, plural } from '../model/format';
-import { destPathOf, effectiveDestRepo, fileStates, folderStep, groupPicks, semesterOnly, TOP_LEVEL, type FileState as ReleaseFileState, type Group, type FolderStep } from '../model/releaseState';
+import { destOf, effectiveDestRepo, outOfStep, releasedOf, TOP_LEVEL, type FileState as ReleaseFileState, type Group, type FolderStep, type OutOfStep } from '../model/releaseState';
 import { effectiveOf, semesterDefaults } from '../model/settings';
 import type { Loaded } from '../model/status';
 import type { Release, Status } from '../model/types';
 import type { Files } from '../model/files';
-import { compileAll } from '../edit/glob';
 import { editableFile, profileHref, type Setup } from '../model/open';
 import { extOf, viewKind } from '../model/viewer';
 import { scheduleNewHref } from '../router';
@@ -49,11 +48,6 @@ import type { OpDef } from '../ops/session';
 import { OpOpen } from '../ops/Panel';
 import type { CohortProps, ReadyProps } from './types';
 
-/** Where a release writes in the semester, as the Schedule reads it: its repo (the semester's default destination `def` when unnamed) and folder (its source's when unnamed). */
-export const destOf = (r: Release, def: string) => ({ repo: r.dest?.repo || def, path: (r.dest?.path || r.source?.path || '').replace(/\/+$/, '') });
-
-const releasedOf = (status: Status) => (status.releases ?? []).filter((r) => r.state === 'released');
-
 /** The semester's materials repos: its default destination `def`, then each other repo a release has written to, in the schedule's order. */
 export function semesterMaterialsRepos(status: Status, def: string): string[] {
   const out = [def];
@@ -67,64 +61,6 @@ export function releasedFolders(status: Status, repo: string, def: string): Map<
   for (const r of releasedOf(status)) {
     const d = destOf(r, def);
     if (d.repo === repo && d.path) out.set(d.path, [...(out.get(d.path) ?? []), r]);
-  }
-  return out;
-}
-
-/**
- * A released folder out of step with the course: where it landed, the release that wrote it
- * last, its step and its differing files (semester paths, with their states).
- */
-export interface OutOfStep {
-  r: Release;
-  repo: string;
-  path: string;
-  step: FolderStep;
-  /** `from`: the course path (none for a file only the semester copy has, `added`, its state `ahead`). */
-  files: { path: string; state: ReleaseFileState; from?: string; added?: true }[];
-}
-
-/**
- * Every released folder whose files differ between the course copy and the semester's, three-way
- * (`fileStates`: the course tree, the semester repo's `upstream` branch and its default branch).
- * What a release copies is the engine's (`groupPicks`: a folder copy under the course repo's
- * `.releaseignore` and the institution's defaults). A folder more than one release wrote is
- * judged once, by the last. Nothing is listed for a folder whose trees are still being read.
- */
-export function outOfStep(status: Status, files: Files, courseOrg: string, semOrg: string, def: string): OutOfStep[] {
-  const last = new Map<string, Release>();
-  for (const r of releasedOf(status)) {
-    const d = destOf(r, def);
-    if (r.source && d.path) last.set(`${d.repo}\0${d.path}`, r);
-  }
-  const out: OutOfStep[] = [];
-  for (const r of last.values()) {
-    const d = destOf(r, def);
-    const src = r.source!;
-    const from = src.path.replace(/^\/+|\/+$/g, '');
-    const course = files.tree(courseOrg, src.repo);
-    const ign = files.file(courseOrg, src.repo, '.releaseignore');
-    if (!from || course.kind !== 'ready' || ign.kind === 'loading') continue;
-    const blobs = course.paths.filter((x) => !x.dir);
-    const rules = compileAll((ign.kind === 'ready' ? ign.text : '').split('\n'), { defaults: true });
-    const file = blobs.some((b) => b.path === from);
-    const g = groupPicks([{ repo: src.repo, path: from, dir: !file }], { [src.repo]: { files: blobs.map((b) => b.path), rules } })[0];
-    if (!g) continue;
-    const ship = new Set(g.ship);
-    const to = (x: string) => (file ? d.path : destPathOf({ ...g, destPath: d.path }, x));
-    const live = files.tree(semOrg, d.repo);
-    const states = fileStates(blobs.filter((b) => ship.has(b.path)), files.tree(semOrg, d.repo, 'upstream'), live, { destPath: to });
-    // A file only the semester copy has was added there: ahead.
-    const extra = file ? [] : semesterOnly(live, d.path, new Set(Object.keys(states).map(to)));
-    const step = folderStep([...Object.values(states), ...extra.map((): ReleaseFileState => 'ahead')]);
-    if (!step) continue;
-    out.push({
-      r, repo: d.repo, path: d.path, step,
-      files: [
-        ...Object.entries(states).filter(([, x]) => x !== 'up_to_date').map(([path, state]) => ({ path: to(path), state, from: path })),
-        ...extra.map((path) => ({ path, state: 'ahead' as const, added: true as const })),
-      ],
-    });
   }
   return out;
 }
@@ -204,7 +140,7 @@ function Released(p: ReadyProps) {
 /** The panel's `?`: what is compared, the three states, the two ways to settle one. */
 const STEP_HINT = 'For each released folder the toolkit compares the course copy with the semester’s and lists every file that differs. Nothing changes until you choose.';
 const STEP_HINT_ITEMS = [
-  <><b>Edited in semester</b> (ahead): the semester’s copy was changed after the release.</>,
+  <><b>Edited in semester</b> (ahead): the semester’s copy was changed after the release; <b>removed in semester</b>: deleted there, which only Overwrite restores.</>,
   <><b>Edited in course</b> (behind): the course copy changed since the release, additions included.</>,
   <><b>Both</b> (diverged): changed on both sides.</>,
   <><b>Re-release</b> copies one file’s course version over, merged onto the semester’s edit; a conflict opens a pull request for the instructors. Its Options can overwrite instead.</>,
@@ -214,8 +150,8 @@ const STEP_HINT_ITEMS = [
 
 const STEP_TABS: [FolderStep | 'all', string][] = [['all', 'All'], ['ahead', 'Edited in semester'], ['behind', 'Edited in course'], ['diverged', 'Both']];
 
-/** A differing file's step, the filter's key: a file the course added counts as edited in the course. */
-const fileStep = (s: ReleaseFileState): FolderStep => (s === 'ahead' || s === 'diverged' ? s : 'behind');
+/** A differing file's step, the filter's key: a file the course added counts as edited in the course, one the semester removed as edited in the semester. */
+const fileStep = (s: ReleaseFileState): FolderStep => (s === 'removed' ? 'ahead' : s === 'ahead' || s === 'diverged' ? s : 'behind');
 
 /** What a file's diff compares, by its step. */
 const DIFF_WHAT: Record<FolderStep, string> = {
@@ -229,6 +165,8 @@ export const NOTHING_TO_RERELEASE = 'The semester already has the course version
 export const ONLY_IN_SEMESTER = 'Only in the semester: nothing in the course to release.';
 const PR_HINT = 'Opens one pull request per course repo carrying every edit listed under Edited in semester and Both, so next semester starts from them.';
 export const NOTHING_TO_PROPOSE = 'Nothing edited in the semester for this file.';
+export const REMOVED_RERELEASE = 'The semester removed it; Overwrite restores the course version.';
+export const NOTHING_TO_CARRY = 'Nothing to carry back: the file is gone on the semester side.';
 export const OVERWRITE_CONFIRM = 'Replaces the semester’s copy of this file with the course version; its edit is lost.';
 
 /** Re-release: `release.adhoc` of exactly one course file (`from` in `srcRepo`) onto its released copy (`to` in `destRepo`), with Overwrite (`replace`) in its Options. */
@@ -340,7 +278,8 @@ function DiffFile(p: {
   // Read once first opened, so the row keeps its counts after Diff folds it again.
   const [seen, setSeen] = useState(false);
   const binary = binaryName(f.path);
-  const inSemester = f.state !== 'not_released';
+  const removed = f.state === 'removed';
+  const inSemester = f.state !== 'not_released' && !removed;
   const d = useDiff(p.files, p.course, inSemester ? [p.org, p.repo, f.path] : null, seen && !binary);
   const sum = binary ? 'binary' : d.kind === 'ready' ? lineCounts(d) : d.kind === 'not_diffable' ? 'binary or too large' : '';
   const step = fileStep(f.state);
@@ -353,8 +292,11 @@ function DiffFile(p: {
         <span class="dif-right">
           {p.pending ? null : p.again && (f.state === 'behind' || f.state === 'diverged' || f.state === 'not_released')
             ? <OpOpen def={p.again} cls="btn small quiet" label="Re-release" />
-            : <button class="btn small quiet" type="button" disabled title={p.again ? NOTHING_TO_RERELEASE : ONLY_IN_SEMESTER}>Re-release</button>}
-          {step === 'behind'
+            : <button class="btn small quiet" type="button" disabled title={removed ? REMOVED_RERELEASE : p.again ? NOTHING_TO_RERELEASE : ONLY_IN_SEMESTER}>Re-release</button>}
+          {removed && p.again && !p.pending ? <OpOpen def={overwrite(p.again)} cls="btn small quiet" label="Overwrite" /> : null}
+          {removed
+            ? <button class="btn small quiet" type="button" disabled title={NOTHING_TO_CARRY}>PR into source</button>
+            : step === 'behind'
             ? <button class="btn small quiet" type="button" disabled title={NOTHING_TO_PROPOSE}>PR into source</button>
             : <OpOpen def={p.keepFile} cls="btn small quiet" label="PR into source" />}
           {inSemester ? <OpenSplit org={p.org} repo={p.repo} path={f.path} setup={p.setup} profile={profileHref(p.org)} /> : null}

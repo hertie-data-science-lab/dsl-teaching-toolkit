@@ -49,11 +49,11 @@ const upstream: TreeState = {
 
 /** StaticFiles with a tree per ref (the semester's `upstream` branch). */
 class RefFiles extends StaticFiles {
-  constructor(private readonly refs: Record<string, TreeState>, course = COURSE) {
+  constructor(private readonly refs: Record<string, TreeState>, course = COURSE, students = STUDENTS) {
     super(
       { [`${COURSE_ORG}/${REPO}/.releaseignore`]: 'drafts/\n' },
       {},
-      { [`${COURSE_ORG}/${REPO}`]: course, [`${SEM}/materials`]: STUDENTS },
+      { [`${COURSE_ORG}/${REPO}`]: course, [`${SEM}/materials`]: students },
       { [SEM]: [{ name: 'materials' }, { name: 'lecture-code' }, { name: 'semester-config' }], [COURSE_ORG]: [{ name: REPO }] },
       {},
       { ...COURSE_SHAS, ...SEM_SHAS },
@@ -218,6 +218,60 @@ describe('the Files panel', () => {
     const { el } = await mount({ files: new RefFiles({ [`${SEM}/materials@upstream`]: plain }, ['README.md']) });
     await click(tab(el, 'Release'));
     expect(el.querySelector('.edited-note')).toBeNull();
+  });
+
+  describe('a file removed in the semester, and one the semester added (R1, R2)', () => {
+    // data.csv released as the course has it, then deleted on the semester's main; extra.md added
+    // in the semester under the released lectures/01_intro.
+    const up: TreeState = upstream.kind === 'ready' ? { ...upstream, paths: [...upstream.paths, { path: 'labs/week01/data.csv', dir: false, sha: 'sha-labs/week01/data.csv' }] } : upstream;
+    const releases = [{
+      id: 's1', when: '2026-09-10T10:00:00+02:00', kind: 'lecture', number: 1, title: 's1', state: 'released', tbc: false, show_on_site: true,
+      source: { repo: REPO, path: 'lectures/01_intro' }, dest: { repo: 'materials', path: 'lectures/01_intro' },
+    }];
+    const withReleases = { ...loaded, status: { ...(loaded as Extract<Loaded, { kind: 'ready' }>).status, releases } } as unknown as Loaded;
+    const files = () => new RefFiles({ [`${SEM}/materials@upstream`]: up }, COURSE, [...STUDENTS, 'lectures/01_intro/extra.md']);
+    const sem = { ...semester, loaded: withReleases };
+
+    it('chips the removed row, keeps its tick with why a plain release changes nothing, and the manifest says so', async () => {
+      const { el, open } = await mount({ files: files(), semesters: [sem] });
+      await click(tab(el, 'Release'));
+      expect(chips(fileRow(el, 'data.csv'))).toEqual(['removed in semester']);
+      const t = tick(fileRow(el, 'data.csv'))!;
+      expect([t.disabled, t.title]).toEqual([false, 'Removed in the semester: a plain release changes nothing; Overwrite (on the semester’s Released materials) restores the course version.']);
+      await click(t);
+      expect([...el.querySelectorAll<HTMLElement>('.mf-rows li')].map(shown)).toContain('labs/week01/data.csv→labs/week01/data.csvremoved in semester');
+      await click(el.querySelector<HTMLButtonElement>('.rh-foot .btn')!);
+      expect(open.mock.calls[0][0].nothingExtra).toBe('Nothing copied: the semester removed these files; use Overwrite to restore them.');
+    });
+
+    it('counts both in the notice, and See which lists the added file with its chip and Open on the semester copy', async () => {
+      const { el } = await mount({ files: files(), semesters: [sem] });
+      await click(tab(el, 'Release'));
+      const note = el.querySelector<HTMLElement>('.edited-note')!;
+      // 01 notes ahead, 02 notes diverged, data.csv removed, extra.md added.
+      expect(note.querySelector('span:not(.step-bang)')!.textContent).toBe('Fall 2026 has edited 4 released files from this repo.');
+      expect(el.querySelector('.edited-added')).toBeNull();
+      await click(note.querySelector<HTMLButtonElement>('button.textlink')!);
+      expect([...el.querySelectorAll('.file-tree li.ft-file .ft-name')].map((x) => x.textContent)).toEqual(['data.csv', 'notes.md', 'notes.md']);
+      const added = [...el.querySelectorAll<HTMLElement>('.edited-added > li')];
+      expect(added.map((li) => li.querySelector('code')!.textContent)).toEqual(['lectures/01_intro/extra.md']);
+      expect(added[0].querySelector('.chip')!.textContent).toBe('ahead');
+      expect(added[0].querySelector('.split .split-main')!.getAttribute('href')).toBe(`https://github.com/${SEM}/materials/blob/HEAD/lectures/01_intro/extra.md`);
+    });
+
+    it('counts and lists a semester-only file when no course file changed', async () => {
+      const plain: TreeState = { kind: 'ready', truncated: false, paths: [{ path: 'lectures/01_intro/notes.md', dir: false, sha: 'sha-lectures/01_intro/notes.md' }] };
+      const course = ['lectures/01_intro/notes.md'];
+      const f = new RefFiles({ [`${SEM}/materials@upstream`]: plain }, course, ['lectures/01_intro/notes.md', 'lectures/01_intro/extra.md']);
+      (f as unknown as { shaMap: Record<string, string> }).shaMap[`${SEM}/materials/lectures/01_intro/notes.md`] = 'sha-lectures/01_intro/notes.md';
+      const { el } = await mount({ files: f, semesters: [sem] });
+      await click(tab(el, 'Release'));
+      const note = el.querySelector<HTMLElement>('.edited-note')!;
+      expect(note.querySelector('span:not(.step-bang)')!.textContent).toBe('Fall 2026 has edited 1 released file from this repo.');
+      await click(note.querySelector<HTMLButtonElement>('button.textlink')!);
+      expect([...el.querySelectorAll('.edited-added code')].map((x) => x.textContent)).toEqual(['lectures/01_intro/extra.md']);
+      expect(el.textContent).not.toContain('The repo has no files yet.');
+    });
   });
 
   it('Release: the chips against the semester, disabled ticks, and folder roll-ups', async () => {

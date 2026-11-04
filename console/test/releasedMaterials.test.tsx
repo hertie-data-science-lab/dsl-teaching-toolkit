@@ -17,7 +17,9 @@ import type { Course } from '../src/model/discovery';
 import type { Loaded } from '../src/model/status';
 import type { Problem, Release, Status } from '../src/model/types';
 import { COHORT_SCREENS, COURSE_SCREENS, RELEASED_MATERIALS, parseHash, parseSearch, screenOf } from '../src/router';
-import { SemesterMaterialsScreen, outOfStep } from '../src/screens/SemesterMaterials';
+import { SemesterMaterialsScreen } from '../src/screens/SemesterMaterials';
+import { outOfStep } from '../src/model/releaseState';
+import { editedIn } from '../src/screens/CourseIndex';
 import type { Files } from '../src/model/files';
 import type { CohortProps } from '../src/screens/types';
 import { Sidenav } from '../src/ui/shell';
@@ -54,12 +56,12 @@ const files = (trees: Record<string, string[]> = { [`${ORG}/materials`]: PATHS }
 // semester (ahead), lab.ipynb changed in the course and new.md added there (behind), slides.pdf
 // as released. `course` overrides a course blob's sha (`undefined` drops the file).
 const COURSE_PATHS = ['lectures/05_trees/notes.md', 'lectures/05_trees/slides.pdf', 'labs/lab-1/lab.ipynb', 'labs/lab-1/new.md', 'labs/lab-1/solutions/key.md'];
-function stepFiles(course: Record<string, string | undefined> = {}, semesterExtra: string[] = []): Files {
+function stepFiles(course: Record<string, string | undefined> = {}, semesterExtra: string[] = [], semesterGone: string[] = []): Files {
   const shas: Record<string, string> = { [`${ORG}/materials/lectures/05_trees/notes.md`]: 'edited', [`${COURSE_ORG}/course-materials-f2026/labs/lab-1/lab.ipynb`]: 'new' };
   const paths = COURSE_PATHS.filter((x) => !(x in course) || course[x] !== undefined);
   for (const [k, v] of Object.entries(course)) if (v) shas[`${COURSE_ORG}/course-materials-f2026/${k}`] = v;
   const up = new StaticFiles({}, {}, { [`${ORG}/materials`]: PATHS });
-  const live = new StaticFiles({}, {}, { [`${ORG}/materials`]: [...PATHS, ...semesterExtra], [`${COURSE_ORG}/course-materials-f2026`]: paths }, {
+  const live = new StaticFiles({}, {}, { [`${ORG}/materials`]: [...PATHS.filter((x) => !semesterGone.includes(x)), ...semesterExtra], [`${COURSE_ORG}/course-materials-f2026`]: paths }, {
     [ORG]: [{ name: 'materials', pushed_at: '2026-09-22T14:38:46Z' }], [COURSE_ORG]: [{ name: 'course-materials-f2026' }],
   }, {}, shas);
   return Object.assign(Object.create(live), { tree: (o: string, r: string, ref?: string) => (ref ? up.tree(o, r) : live.tree(o, r)) });
@@ -193,6 +195,42 @@ describe('Released materials', () => {
     const extra = [...el.querySelectorAll<HTMLElement>('details.out-of-step li.dif-file')].find((li) => li.querySelector('.dif-name')!.textContent === 'extra.md')!;
     expect(extra.querySelector('.chip')!.textContent).toBe('ahead');
     expect(extra.querySelector('.split .split-main')!.getAttribute('href')).toBe(`https://github.com/${ORG}/materials/blob/HEAD/lectures/05_trees/extra.md`);
+  });
+
+  it('lists a file released, then removed in the semester: edited in semester, Overwrite restores it (R1)', async () => {
+    const st = (RELEASED as Extract<Loaded, { kind: 'ready' }>).status;
+    const f = stepFiles({}, [], ['lectures/05_trees/slides.pdf']);
+    expect(outOfStep(st, f, COURSE_ORG, ORG, 'materials')[0].files.map((x) => [x.path, x.state])).toEqual([
+      ['lectures/05_trees/notes.md', 'ahead'], ['lectures/05_trees/slides.pdf', 'removed'],
+    ]);
+    const open = vi.fn();
+    root = document.createElement('div');
+    document.body.appendChild(root);
+    const env = { user: { login: 'prof', id: 1, name: 'P', email: null, avatar_url: '' }, client: new GitHubClient({ token: () => 't', fetch: new FakeGitHub().fetch }), ops: { open } } as unknown as Env;
+    await act(() => render(<EnvCtx.Provider value={env}><SemesterMaterialsScreen {...props({ files: f })} /></EnvCtx.Provider>, root!));
+    const panel = root.querySelector<HTMLElement>('details.out-of-step')!;
+    expect(panel.querySelector('summary .chip.amber')!.textContent).toBe('4 released files differ');
+    expect([...panel.querySelectorAll('[role="tab"]')].map((t) => t.textContent)).toEqual(['All 4', 'Edited in semester 2', 'Edited in course 2', 'Both 0']);
+    const slides = [...panel.querySelectorAll<HTMLElement>('li.dif-file')].find((li) => li.querySelector('.dif-name')!.textContent === 'slides.pdf')!;
+    const chip = slides.querySelector<HTMLElement>('.chip')!;
+    expect([chip.textContent, chip.classList.contains('semester'), chip.title]).toEqual(['removed in semester', true, 'Released before, then removed in the semester; a plain release changes nothing. Overwrite restores the course version.']);
+    const btn = (label: string) => [...slides.querySelectorAll<HTMLButtonElement>('.dif-right > button.btn')].find((b) => b.textContent === label)!;
+    expect([btn('Re-release').disabled, btn('Re-release').title]).toEqual([true, 'The semester removed it; Overwrite restores the course version.']);
+    expect([btn('PR into source').disabled, btn('PR into source').title]).toEqual([true, 'Nothing to carry back: the file is gone on the semester side.']);
+    // Nothing to open on the semester side.
+    expect(slides.querySelector('.split')).toBeNull();
+    expect(btn('Overwrite').disabled).toBe(false);
+    await act(() => btn('Overwrite').click());
+    expect(open.mock.calls[0][0]).toMatchObject({
+      op: 'release.adhoc', confirm: 'Replaces the semester’s copy of this file with the course version; its edit is lost.',
+      args: { course_source_path: 'lectures/05_trees/slides.pdf', semester_dest_path: 'lectures/05_trees/slides.pdf', replace: true },
+    });
+  });
+
+  it('counts, for the course index chip, removed and semester-only files with the edited ones (R2)', () => {
+    expect(editedIn(stepFiles(), COURSE_ORG, 'course-materials-f2026', ORG, RELEASED)).toBe(1);
+    // notes.md edited, slides.pdf removed, extra.md added under the released lectures/05_trees.
+    expect(editedIn(stepFiles({}, ['lectures/05_trees/extra.md'], ['lectures/05_trees/slides.pdf']), COURSE_ORG, 'course-materials-f2026', ORG, RELEASED)).toBe(3);
   });
 
   it('lists the differing files flat under each folder, in their own folded panel, filtered by step', async () => {

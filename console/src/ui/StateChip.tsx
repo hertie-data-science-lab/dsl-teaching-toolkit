@@ -1,5 +1,5 @@
 // The Files panel's chips (plan 2026-11-04, decision 3): where a course file stands against the
-// semester, in GitHub's fork words, and the names a release leaves behind. Behind, ahead and
+// semester, in GitHub's fork words (and removed in semester: released, then deleted there), and the names a release leaves behind. Behind, ahead and
 // diverged are buttons with a popover (the `Hint` pattern): one sentence and one action, never a
 // Fix button. The words' meanings, for a panel's `?`, are `ChipMeanings`. Decision B splits the
 // institution's names in two: never released (no route ships one, its own chip) and the content
@@ -14,12 +14,16 @@ export type ChipKind = Exclude<ReleaseState, 'unknown'> | 'released' | 'withheld
 /** The title on a never-released row, its chip and its disabled tick. */
 export const NEVER_RELEASED_TITLE = 'Never released: on the institution’s list.';
 
+/** The title on a removed-in-semester chip. */
+export const REMOVED_TITLE = 'Released before, then removed in the semester; a plain release changes nothing. Overwrite restores the course version.';
+
 const CHIPS: Record<ChipKind, { word: string; cls: string; title: string }> = {
   up_to_date: { word: STATE_WORDS.up_to_date, cls: 'muted', title: 'The semester has this version.' },
   released: { word: 'released', cls: 'muted', title: 'The semester already has this version; nothing to release.' },
   behind: { word: STATE_WORDS.behind, cls: 'amber', title: 'The course copy changed since the release; a release updates the semester.' },
   ahead: { word: STATE_WORDS.ahead, cls: 'semester', title: 'Edited in the semester since the release; a release merges onto that edit.' },
   diverged: { word: STATE_WORDS.diverged, cls: 'bad', title: 'Changed in both the course and the semester; a release opens a pull request for the instructors.' },
+  removed: { word: STATE_WORDS.removed, cls: 'semester', title: REMOVED_TITLE },
   not_released: { word: STATE_WORDS.not_released, cls: '', title: 'Not in the semester yet; a release adds it.' },
   withheld: { word: 'withheld', cls: 'muted', title: 'A .releaseignore line, or the institution’s default, keeps it from students.' },
   never_copied: { word: 'never copied', cls: 'muted', title: 'Clutter such as .DS_Store: never course material.' },
@@ -70,7 +74,7 @@ export function StateChip({ kind, onTick, onKeep, prUrl }: StateChipProps) {
 
 /** Every chip word and what it means, one paragraph each, for a panel's `?`. */
 export function ChipMeanings() {
-  const order: ChipKind[] = ['released', 'behind', 'ahead', 'diverged', 'not_released'];
+  const order: ChipKind[] = ['released', 'behind', 'ahead', 'diverged', 'removed', 'not_released'];
   return (
     <>
       {order.map((k) => <span class="para"><b>{CHIPS[k].word}</b>{k === 'released' ? ' (greyed)' : ''}: {k === 'released' ? 'the semester already has this version; nothing to release.' : CHIPS[k].title}</span>)}

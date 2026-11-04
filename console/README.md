@@ -280,11 +280,11 @@ students (no strike-through, no note why, `PatternTree` `plain`); Withhold chips
 leaves behind; Release shows each file's state against the run's destination, three-way
 (`model/releaseState.ts` `fileStates`: the course blob against the semester repo's `upstream`
 branch and its default branch; two-way with no `upstream`): released (up to date: the name
-greyed, a muted chip), behind, ahead, diverged, not released, plus withheld. Behind, ahead and
+greyed, a muted chip), behind, ahead, diverged, removed in semester (`upstream` has the course blob, the default branch lacks it: a plain release keeps the deletion, so the differing-files panel offers Overwrite in place of Re-release), not released, plus withheld. Behind, ahead and
 diverged open a popover with one action (tick the row; PR into source, `release.propagate_back`;
 the open pull request). A folder rolls its rows up in the same words, up to date left out (a
 folder all released has no chip). On the course page, when the chosen semester edited released
-files of the repo (ahead or diverged), a notice over the tree counts them, with PR into source and
+files of the repo (ahead, diverged or removed, and the semester-only files under its released folders, `semesterAdded`), a notice over the tree counts them, with PR into source and
 See which (the tree narrowed to them; Show all). The Course materials index chips each repo with
 the files the newest live semester edited (`editedIn`). The manifest groups picks by immediate parent folder in
 tree order (`groupPicks`); each group's Edit destination sets its To repo (the run's, the

@@ -4,10 +4,11 @@
    A slim pill on the nav/content boundary, vertically centred. Pressed, the nav hides and the
    content spans the shell; the handle sits at the left edge and the top bar's Menu shows the nav
    again in place, as the handle does. Below 860px the collapsed state does nothing: the nav is the
-   Menu's drawer there. The reduced-motion rule in console.css stills the transitions. */
+   Menu's drawer there. The reduced-motion rule in console.css stills the transitions. It stacks
+   at 19: over every page panel (the Schedule's entry sheet is 18), under the top bar (20). */
 .shell { transition: grid-template-columns 150ms ease, gap 150ms ease; }
 .sidenav { transition: opacity 150ms ease; }
-.nav-handle { --shell-left: max(0px, calc((100vw - 1320px) / 2)); position: fixed; top: 50vh; transform: translateY(-50%); left: calc(var(--shell-left) + 16px + 228px + 16px - 10px); width: 20px; height: 64px; padding: 0; border: 0; background: none; cursor: pointer; z-index: 15; display: grid; place-items: center; transition: left 150ms ease; }
+.nav-handle { --shell-left: max(0px, calc((100vw - 1320px) / 2)); position: fixed; top: 50vh; transform: translateY(-50%); left: calc(var(--shell-left) + 16px + 228px + 16px - 10px); width: 20px; height: 64px; padding: 0; border: 0; background: none; cursor: pointer; z-index: 19; display: grid; place-items: center; transition: left 150ms ease; }
 .nh-pill { width: 6px; height: 48px; border-radius: 999px; background: var(--rule-strong); display: grid; place-items: center; transition: background 150ms ease, width 150ms ease; }
 .nav-handle:hover .nh-pill, .nav-handle:focus-visible .nh-pill { background: var(--ink-2); width: 10px; }
 .nav-handle:focus-visible { outline: none; }

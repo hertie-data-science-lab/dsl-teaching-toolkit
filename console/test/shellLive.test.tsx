@@ -307,6 +307,26 @@ describe('the side nav’s handle (materials-release decision 9)', () => {
     expect(collapsed()).toBe(false);
   });
 
+  it('keeps the handle above every page panel and below the topbar (N1)', async () => {
+    const css = ['console.css', 'shell.css'].map((f) => readFileSync(`${__dirname}/../src/styles/${f}`, 'utf8')).join('\n');
+    const style = document.createElement('style');
+    style.textContent = css;
+    document.head.appendChild(style);
+    try {
+      const el = await mount(`/?cohort=${cohort.org}#dashboard`);
+      expect(getComputedStyle(handle(el)).zIndex).toBe('19');
+      expect(getComputedStyle(el.querySelector('.topbar')!).zIndex).toBe('20');
+    } finally {
+      style.remove();
+    }
+    // Every z-index in the console's sheets: only the overlays (menus, popovers, the run's and the
+    // marks' drawers, modals, the full-screen marking view) stack above the handle.
+    const OVER = new Set(['.topbar', '.popmenu', '.hint-pop', '.modal-scrim', '.drawer', '.opbar', '.marking.full', '.drawer.marks-drawer']);
+    const stacks = [...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{[^{}]*z-index:\s*(\d+)/g)].map((m) => [m[1].trim().replace(/^@media[^{]*\{\s*/, ''), Number(m[2])] as const);
+    expect(stacks.length).toBeGreaterThan(10);
+    expect(stacks.filter(([sel, z]) => !OVER.has(sel) && sel !== '.nav-handle' && z >= 19)).toEqual([]);
+  });
+
   it('shows the Menu pill while the nav is hidden, and spans the content across the shell', async () => {
     const style = document.createElement('style');
     style.textContent = ['console.css', 'shell.css'].map((f) => readFileSync(`${__dirname}/../src/styles/${f}`, 'utf8')).join('\n');
