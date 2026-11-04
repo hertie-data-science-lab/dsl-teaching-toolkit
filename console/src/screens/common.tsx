@@ -12,7 +12,7 @@ import { CONFIG_REPO, COURSE_REPO } from '../model/names';
 import { DEFAULT_TIMEZONE, LEGACY_SUBMIT_VIA } from '../model/policy';
 import type { Operation, Status } from '../model/types';
 import { checkNow, keepFuture, previewNext, type Scope } from '../ops/defs';
-import { OpButtons } from '../ops/Panel';
+import { OpOpen } from '../ops/Panel';
 import { mergeOperations, type OpDef } from '../ops/session';
 import { CheckLine, Loading, Soon, ghUrl } from '../ui/bits';
 import { Hint } from '../ui/Hint';
@@ -117,7 +117,7 @@ export function cohortScope(p: Pick<CohortProps, 'course' | 'cohort'>): Scope {
 export function CheckNow({ small, p, label, about }: { small?: boolean; p?: Pick<CohortProps, 'course' | 'cohort'>; label?: string; about?: { text: string; doc: string } }) {
   const hint = about ? <Hint label={`About ${label ?? 'Refresh'}`} doc={about.doc}>{about.text}</Hint> : <Hint label="About Refresh">{REFRESH_HINT}</Hint>;
   if (!p) return <><Soon label="Refresh" cls={small ? 'btn small' : 'btn'} title={CHECK_NOW_SOON} />{hint}</>;
-  return <><OpButtons def={checkNow(cohortScope(p))} small={small} label={label} />{hint}</>;
+  return <><OpOpen def={checkNow(cohortScope(p))} label={label} cls={small ? 'btn small' : 'btn'} />{hint}</>;
 }
 
 /** The operations of this semester: the status file's record plus this session's runs. */

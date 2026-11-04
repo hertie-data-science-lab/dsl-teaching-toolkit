@@ -10,7 +10,7 @@ import { ghUrl } from '../ui/bits';
 import { DEFAULT_DEST_REPO } from '../model/policy';
 import { HANDOUT, RETURN_MARKS, RETURN_MARKS_ABOUT, RETURN_MARKS_ALWAYS, SEND_CODES_ABOUT, releaseAdhoc as adhocTiers, returnMarksTiers, updateCopies as copiesTiers } from '../tiers/ops';
 import type { Source } from '../model/settings';
-import { destPathOf, requestOf, type Group } from '../model/releaseState';
+import { destPathOf, requestOf, toArgs, type Group } from '../model/releaseState';
 import type { ComponentChildren } from 'preact';
 import type { OpDef } from './session';
 
@@ -144,8 +144,8 @@ function groupFact(g: Group, defaultDestRepo: string): string {
  * run, each source paired with its destination. No Options: the manifest set every destination.
  */
 export function releasePicked(s: Scope, groups: Group[], run: { defaultDestRepo: string }): OpDef {
-  const args = requestOf(groups, run);
-  const n = args.course_source_path ? args.course_source_path.split(',').length : 0;
+  const rows = requestOf(groups, run);
+  const n = rows.length;
   const repos = [...new Set(groups.map((g) => g.repo))];
   const first = groups[0];
   return {
@@ -154,7 +154,7 @@ export function releasePicked(s: Scope, groups: Group[], run: { defaultDestRepo:
     intro: 'Copies the picked files and folders to students now. Nothing is added to the schedule.',
     facts: groups.map((g) => groupFact(g, run.defaultDestRepo)),
     verb: `Release ${plural(n, 'path')}`, running: `Releasing ${plural(n, 'path')}`, cancel: 'Stop before copying',
-    args: { ...args },
+    args: toArgs(rows),
     target: destUrl(s.cohortOrg ?? s.courseOrg, first?.destRepo || run.defaultDestRepo, first ? destPathOf(first, first.folder) : ''),
   };
 }

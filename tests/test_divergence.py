@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from dsl_course import deploy, divergence, release_record, status_json
+from dsl_course import deploy, divergence, release_record, schedule, status_json
 from dsl_course.ops.registry import REGISTRY, Request
 from dsl_course.schedule import Deploy, Release, Schedule
 from dsl_course.status_json import SemesterFacts
@@ -83,6 +83,13 @@ def test_an_unreadable_side_judges_none_of_its_kinds():
     }
 
 
+def _lines(blobs, text: str = ""):
+    """The repo's `.releaseignore` reading as a release judges by, `text` its root file."""
+    return schedule.release_tree(
+        [*blobs, ".releaseignore"], {".releaseignore": text}.get
+    )
+
+
 def test_the_course_side_is_filtered_as_a_copy_is():
     blobs = {
         "labs/08/slides.pdf": "s1",
@@ -93,7 +100,7 @@ def test_the_course_side_is_filtered_as_a_copy_is():
         ".github/workflows/x.yml": "g",
         "README.md": "r",
     }
-    withheld = {"labs/08/drafts", "labs/08/drafts/wip.md"}
+    withheld = _lines(blobs, "drafts/\n")
     assert divergence.source_files("labs/08", "labs/08", blobs, withheld, ()) == {
         "slides.pdf": "s1"
     }
@@ -103,7 +110,7 @@ def test_the_course_side_is_filtered_as_a_copy_is():
     assert whole["labs/09/other.md"] == "o"
     # A single file, keyed by the name it lands under.
     assert divergence.source_files(
-        "labs/09/other.md", "readings/week9.md", blobs, (), ()
+        "labs/09/other.md", "readings/week9.md", blobs, _lines(blobs), ()
     ) == {"week9.md": "o"}
 
 
@@ -111,16 +118,20 @@ def test_a_content_name_a_bang_line_re_includes_is_part_of_the_source():
     # Decision B: `!solutions/` releases them with their folder, so they are what the
     # copy took; a never-released name never is, whatever a line says.
     blobs = {"labs/08/a.md": "a", "labs/08/solutions/k.md": "k", "labs/08/.env": "e"}
-    re = {"labs/08/solutions"}
-    assert divergence.source_files("labs/08", "labs/08", blobs, (), (), re) == {
+    re = _lines(blobs, "!solutions/\n!.env\n")
+    assert divergence.source_files("labs/08", "labs/08", blobs, re, ()) == {
         "a.md": "a",
         "solutions/k.md": "k",
     }
-    assert divergence.source_files("labs/08", "labs/08", blobs, (), ()) == {"a.md": "a"}
+    assert divergence.source_files("labs/08", "labs/08", blobs, _lines(blobs), ()) == {
+        "a.md": "a"
+    }
     # A whole-repo copy judges the same nodes.
-    assert "labs/08/solutions/k.md" in divergence.source_files(
-        "/", "", blobs, (), (), re
-    )
+    assert "labs/08/solutions/k.md" in divergence.source_files("/", "", blobs, re, ())
+    # A copy that names the content folder outright ships it, `!` line or not.
+    assert divergence.source_files(
+        "labs/08/solutions", "x", blobs, _lines(blobs), ()
+    ) == {"k.md": "k"}
 
 
 def test_blobs_of_drops_the_folders_of_a_full_listing():
@@ -333,9 +344,7 @@ def test_a_root_destination_keeps_its_own_plumbing_out_of_the_released_side():
 
 def test_a_folder_now_withheld_whole_is_still_judged_deleted():
     facts = _facts()
-    facts.source_withheld = {
-        "cm": frozenset({"labs/08", *(f"labs/08/{p}" for p in MANIFEST)})
-    }
+    facts.source_withheld = {"cm": _lines(facts.source_blobs["cm"], "/labs/08/\n")}
     assert _kinds(status_json.divergence_problems(facts, autosync=False)) == [
         "DIVERGED_DELETED"
     ]

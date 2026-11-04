@@ -247,9 +247,13 @@ ticked reaches students, an untick writes a `.releaseignore` line, the pattern b
 the Save bar below. Release: ticks pick what to copy now, `Release into [semester]` (the
 course's live semesters, newest first) over the tree, the manifest (`ui/ReleaseManifest.tsx`) on
 the right. In Withhold and Release a click on a file row toggles its tick; folder names open and
-close in every view; a splitter (`ui/Splitter.tsx`) sizes the columns, 25-75%, double-click
-resets. Chips (`ui/StateChip.tsx`): Browse and Withhold chip only what a release leaves
-behind; Release shows each file's state against the run's destination, three-way
+close in every view; a splitter (`ui/Splitter.tsx`, on the viewer's `Split`; its drag, keys and
+double-click are `ui/dragHandle.ts`, which the marks grid's column grips share) sizes the columns,
+25-75%, double-click resets. Each row's chip, tick and folder roll-up come from one standing
+(`edit/badges.ts` `standing`, `.releaseignore` compiled with the institution's content names as
+implied first lines, `compileAll(lines, { defaults: true })`), worked out once per render in one
+post-order pass (`treeModel`); the Withhold summary counts the same standings (`tally`). Chips
+(`ui/StateChip.tsx`): Browse and Withhold chip only what a release leaves behind; Release shows each file's state against the run's destination, three-way
 (`model/releaseState.ts` `fileStates`: the course blob against the semester repo's `upstream`
 branch and its default branch; two-way with no `upstream`): up to date, behind, ahead, diverged,
 not released, plus withheld. Behind, ahead and diverged open a popover with one action (tick the
@@ -257,8 +261,8 @@ row; Keep for future semesters, `release.propagate_back`; the open pull request)
 rolls its rows up in the same words. The manifest groups picks by immediate parent folder in
 tree order (`groupPicks`); each group's Edit destination sets its To repo (the run's, the
 semester's `release_destinations`, the repos its releases wrote to, or Choose a repo…,
-`ui/RepoPickerModal.tsx`, which refuses config, `.github`, site, join, `grades-*` and student
-repos inline) and To path; a group to another repo than the run's is amber with `(!)`. Picks
+`ui/RepoPickerModal.tsx`, which refuses the engine's reserved names (`schemas/selection.json`
+`reserved`) and student repos inline) and To path; a group to another repo than the run's is amber with `(!)`. Picks
 may span course repos and destinations: one `release.adhoc` run (`releasePicked`,
 `requestOf`'s four paired lists), after which the destination trees are re-read. The run's
 default repo is the semester's effective `materials_repo` from `status.json`, never the
@@ -492,7 +496,7 @@ a first visit, mostly free 304s after).
   `return_run_details`, polls the run's job listing alone (`src/github/poll.ts`, the one poll loop: every 3 s, every
   10 s after 30 s, nothing while the tab is hidden), and reads the public `dsl-outcome` annotation and the
   private outcome file. A page shows only an op's verb (materials-release decision 11,
-  `OpButtons`): it opens the panel, where the op runs; the panel offers a preview beside its
+  `OpOpen`, the verb or its own label): it opens the panel, where the op runs; the panel offers a preview beside its
   own verb where the op has one, never required, behind the op's confirmation box where it has
   one (return marks, archive, update every copy, send new codes); publishing the public website, which has no
   engine preview, asks for a confirmation. Other previews are offered only where they
@@ -538,8 +542,9 @@ slash (`#assignment-<slug>/teams`, `/marks`); the schedule editor also opens `#s
 Wizards: `#new-course-1..4`, `#new-semester-1..3`, `#new-assignment-1..4`, `#new-materials`; a
 step past the first unfinished one opens that one instead. `?template=<repo>#schedule-new`
 opens a new assignment entry for that template; `?cohort=<org>&from=&paths=&to=&at=#schedule-new`
-(comma lists paired by index, `to`/`at` blank for the default; `scheduleNewHref`) a new
-supporting-files entry with those files, from Schedule on the calendar; `?cohort=<org>#new-assignment-1` offers that
+(comma lists paired by index, a list of one for every path; `scheduleNewHref` writes each row's
+repo and path, and the entry leaves blank a destination that is the default; both arrive as
+`prefill`, `{ kind: 'template' }` or `{ kind: 'files', rows }`) a new supporting-files entry with those files, from Schedule on the calendar; `?cohort=<org>#new-assignment-1` offers that
 semester first at the wizard's end; `?folder=<repo>/<path>#materials` the materials
 index with that folder open; `?wizard=new-semester-3` adds a link back.
 A problem's `fix {screen, entry}` is `#<screen>-<entry>`.

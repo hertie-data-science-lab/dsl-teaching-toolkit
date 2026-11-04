@@ -10,16 +10,14 @@
 
 import { useState } from 'preact/hooks';
 import { useEnv } from '../env';
-import type { Files } from '../model/files';
 import type { CohortRef } from '../model/discovery';
 import { ago, fmtDay, plural } from '../model/format';
-import { DEFAULT_DEST_REPO } from '../model/policy';
-import { effectiveDestRepo, requestOf } from '../model/releaseState';
+import { effectiveDestRepo } from '../model/releaseState';
+import { effectiveOf, semesterDefaults } from '../model/settings';
 import type { Loaded } from '../model/status';
 import type { Problem, Release, Status } from '../model/types';
 import { scheduleNewHref } from '../router';
-import { FilesPanel, type FilesPanelProps, type SemesterRef } from '../ui/FilesPanel';
-import { studentRepos } from '../ui/ReleaseChips';
+import { FilesPanel, type SemesterRef } from '../ui/FilesPanel';
 import { CheckLine } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { OpenButton } from '../ui/OpenButton';
@@ -65,31 +63,16 @@ export function editedCopies(status: Status, repo: string, def: string): { p: Pr
 const releaseHref = (r: Release) => `#release-${r.id}`;
 
 /**
- * A semester as the Files panel releases into it: its effective default destination and
- * `release_destinations` (status.json), and the student and team repos it refuses as a
- * destination. status.json names no student repo, so those are the semester's repos named
- * after an assignment (`studentRepos`).
+ * A semester as the Files panel releases into it: its `release_destinations` (status.json, the
+ * effective list). Its default destination and the student repos it refuses are the panel's to
+ * work out, in the Release view only.
  */
-export function semesterRefOf(files: Files, ref: CohortRef, loaded: Loaded | undefined): SemesterRef {
+export function semesterRefOf(ref: CohortRef, loaded: Loaded | undefined): SemesterRef {
   const st = loaded?.kind === 'ready' ? loaded.status : undefined;
-  const listed = (st?.semester?.defaults?.release_destinations?.value ?? []) as unknown;
-  const repos = files.repos(ref.org);
+  const listed = effectiveOf(st ? semesterDefaults(st) : undefined, 'release_destinations').value;
   return {
     org: ref.org, termLabel: ref.termLabel, loaded, ended: st?.semester?.ended,
-    defaultDest: effectiveDestRepo(loaded),
     destinations: Array.isArray(listed) ? listed.filter((x): x is string => typeof x === 'string' && !!x.trim()) : [],
-    students: repos.kind === 'ready' ? studentRepos(repos.repos.map((r) => r.name), st) : [],
-  };
-}
-
-/** The Files panel's "Schedule on the calendar": the Schedule's new entry with the picks, a destination left blank where it is the semester's default. */
-export function scheduleHrefFor(semesters: SemesterRef[]): NonNullable<FilesPanelProps['scheduleHref']> {
-  return ({ semOrg, runRepo, groups }) => {
-    const def = semesters.find((x) => x.org === semOrg)?.defaultDest ?? DEFAULT_DEST_REPO;
-    const r = requestOf(groups, { defaultDestRepo: runRepo });
-    const list = (x: string) => (x ? x.split(',') : []);
-    const from = list(r.course_source_repo), to = list(r.semester_dest_repo), at = list(r.semester_dest_path);
-    return scheduleNewHref(semOrg, list(r.course_source_path).map((path, i) => ({ from: from[i], path, to: to[i] === def ? '' : to[i], at: at[i] === path ? '' : at[i] })));
   };
 }
 
@@ -159,7 +142,7 @@ function ReleaseByHand(p: ReadyProps) {
   const [addBad, setAddBad] = useState<string | null>(null);
   const materials = (p.status.course?.materials ?? []).map((m) => m.repo);
   const sources = sourceRepos(p, materials);
-  const semester = semesterRefOf(p.files, p.cohort, p.loaded);
+  const semester = semesterRefOf(p.cohort, p.loaded);
   // "Add a course repo…" (decision 7) sets the topic as Treat as course materials does; the course lists it after the next Refresh.
   const onAdd = env ? (repo: string) => {
     setAddBad(null);
@@ -168,8 +151,8 @@ function ReleaseByHand(p: ReadyProps) {
   return (
     <>
       <FilesPanel files={p.files} courseOrg={p.course.org} repo={newestRepo(materials) ?? sources.others[0] ?? ''} mode="semester" write={p.course.write}
-        semester={semester} sources={{ materials: sources.materials, others: sources.others, addable: sources.others.map((name) => ({ name, note: 'not course materials yet' })), onAdd }}
-        scheduleHref={scheduleHrefFor([semester])} onKeep={() => env?.ops.open(keepFuture(cohortScope(p)))} />
+        semester={semester} sources={{ materials: sources.materials, others: sources.others, onAdd }}
+        scheduleHref={scheduleNewHref} onKeep={() => env?.ops.open(keepFuture(cohortScope(p)))} />
       {addBad ? <CheckLine cls="bad">{addBad}</CheckLine> : null}
     </>
   );

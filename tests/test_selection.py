@@ -143,11 +143,11 @@ def test_the_denylist_stops_a_sweep_not_a_path_named_outright(tmp_path):
     ):
         (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / rel).write_text("x")
-    deny = selection.deny(tmp_path)
-    assert deny(str(tmp_path / "solutions/labs/02"), ["a.ipynb"]) == set()
-    assert deny(str(tmp_path / "labs/01"), ["lab.ipynb", "solutions"]) == {"solutions"}
-    assert selection.swept("solutions/b.ipynb")
-    assert not selection.swept("x/.gitkeep")  # clutter is never worth a warning
+    for deny in (selection.deny(tmp_path), _release(tmp_path)):
+        assert deny(str(tmp_path / "solutions/labs/02"), ["a.ipynb"]) == set()
+        assert deny(str(tmp_path / "labs/01"), ["lab.ipynb", "solutions"]) == {
+            "solutions"
+        }
 
 
 def test_an_exact_pattern_names_one_path_and_everything_under_it():
@@ -211,17 +211,24 @@ def _tree(root: Path, *rels: str) -> None:
         (root / rel).write_text("x")
 
 
+def _release(root: Path):
+    """A semester release's copy filter (`deploy`): the content names re-includable."""
+    return selection.deny(root, reincludable=selection.RELEASE)
+
+
 def test_the_denylist_is_two_groups_and_their_union():
     assert set(selection.DENYLIST) == {
         *selection.DENYLIST_HARD,
         *selection.DENYLIST_CONTENT,
     }
     assert not set(selection.DENYLIST_HARD) & set(selection.DENYLIST_CONTENT)
-    assert selection.is_hard_denied(".ENV.local") and selection.is_hard_denied(".git")
-    assert not selection.is_hard_denied("solutions")
-    assert selection.is_content_denied("Tests")
-    assert selection.hard_denied("labs/01/.system/x.md")
-    assert not selection.hard_denied("labs/01/solutions/x.md")
+    assert selection.group_of(".ENV.local") == selection.group_of(".git") == "hard"
+    assert selection.group_of("Tests") == selection.group_of("solutions") == "content"
+    assert selection.group_of(".DS_Store") == "clutter"
+    assert selection.group_of("lab.ipynb") is None
+    assert selection.part_groups("labs/01/.system/x.md") == {"hard"}
+    assert selection.part_groups("labs/solutions/.DS_Store") == {"content", "clutter"}
+    assert selection.part_groups("labs/01/x.md") == set()
 
 
 def test_a_bang_line_re_includes_a_content_name_on_a_folder_copy(tmp_path):
@@ -229,21 +236,21 @@ def test_a_bang_line_re_includes_a_content_name_on_a_folder_copy(tmp_path):
         tmp_path, "labs/01/lab.ipynb", "labs/01/solutions/a.ipynb", "labs/01/tests/t.py"
     )
     (tmp_path / ".releaseignore").write_text("!solutions/\n")
-    deny = selection.deny(tmp_path)
+    deny = _release(tmp_path)
     # Re-included for this repo; `tests/` still withheld by default.
     assert deny(str(tmp_path / "labs/01"), ["lab.ipynb", "solutions", "tests"]) == {
         "tests"
     }
     # The last match wins, as in .gitignore: a later line withholds it again.
     (tmp_path / ".releaseignore").write_text("!solutions/\nlabs/01/solutions/\n")
-    deny = selection.deny(tmp_path)
+    deny = _release(tmp_path)
     assert deny(str(tmp_path / "labs/01"), ["solutions"]) == {"solutions"}
 
 
 def test_a_bang_line_is_anchored_like_any_other(tmp_path):
     _tree(tmp_path, "solutions/a.md", "labs/01/solutions/b.md")
     (tmp_path / ".releaseignore").write_text("!/solutions/\n")
-    deny = selection.deny(tmp_path)
+    deny = _release(tmp_path)
     assert deny(str(tmp_path), ["solutions", "labs"]) == set()
     assert deny(str(tmp_path / "labs/01"), ["solutions"]) == {"solutions"}
 
@@ -251,29 +258,41 @@ def test_a_bang_line_is_anchored_like_any_other(tmp_path):
 def test_no_bang_line_re_includes_a_never_released_name(tmp_path):
     _tree(tmp_path, "labs/01/.env", "labs/01/grading_config.yml", "labs/01/.system/x")
     (tmp_path / ".releaseignore").write_text("!.env\n!grading_config.yml\n!.system/\n")
-    deny = selection.deny(tmp_path)
+    deny = _release(tmp_path)
     names = [".env", "grading_config.yml", ".system"]
     assert deny(str(tmp_path / "labs/01"), names) == set(names)
 
 
-def test_the_content_floor_refuses_a_bang_line_s_re_include(tmp_path):
-    # The public website's copy: the open internet is not a semester's students.
+def test_only_a_release_lets_a_bang_line_re_include(tmp_path):
+    # Every other copy - the public website's: the open internet is not a semester's
+    # students - keeps the whole denylist as its floor.
     _tree(tmp_path, "labs/01/lab.ipynb", "labs/01/solutions/a.ipynb", "labs/01/.env")
     (tmp_path / ".releaseignore").write_text("!solutions/\n")
     names = ["lab.ipynb", "solutions", ".env"]
-    assert selection.deny(tmp_path)(str(tmp_path / "labs/01"), names) == {".env"}
-    floored = selection.deny(tmp_path, content_floor=True)
+    assert _release(tmp_path)(str(tmp_path / "labs/01"), names) == {".env"}
+    floored = selection.deny(tmp_path)
     assert floored(str(tmp_path / "labs/01"), names) == {"solutions", ".env"}
     # Faculty's own lines still hold under the floor.
     (tmp_path / ".releaseignore").write_text("lab.ipynb\n")
-    floored = selection.deny(tmp_path, content_floor=True)
+    floored = selection.deny(tmp_path)
     assert floored(str(tmp_path / "labs/01"), names) == set(names)
 
 
 def test_with_no_releaseignore_the_content_names_stay_withheld(tmp_path):
     _tree(tmp_path, "labs/01/Solution/a.md", "labs/01/lab.md")
-    deny = selection.deny(tmp_path)
+    deny = _release(tmp_path)
     assert deny(str(tmp_path / "labs/01"), ["Solution", "lab.md"]) == {"Solution"}
+
+
+def test_a_release_keeps_a_content_name_only_where_layer_2_carries_it():
+    # The path-list form of the same rule (`divergence.source_files`): with the content
+    # names re-includable, the `.releaseignore` predicate decides them.
+    assert not selection.kept("labs/solutions/a.md")
+    assert selection.kept("labs/solutions/a.md", reincludable=selection.RELEASE)
+    assert not selection.kept(
+        "labs/solutions/a.md", reincludable=selection.RELEASE, withheld=lambda p: True
+    )
+    assert not selection.kept("labs/.env", reincludable=selection.RELEASE)
 
 
 def test_the_path_lists_still_refuse_both_groups():
@@ -282,7 +301,4 @@ def test_the_path_lists_still_refuse_both_groups():
     assert selection.denied("labs/01/solutions/a.pdf")
     assert selection.denied("labs/01/.env")
     assert not selection.publishable("labs/01/solutions/a.pdf")
-    # What no copy carries, whatever a `.releaseignore` says.
-    assert selection.never_copied("labs/.DS_Store")
-    assert selection.never_copied("labs/.env")
-    assert not selection.never_copied("labs/01/solutions/a.pdf")
+    assert not selection.publishable("labs/.DS_Store")

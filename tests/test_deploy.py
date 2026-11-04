@@ -1,6 +1,6 @@
-"""deploy.parse_path_pairs turns the Release materials button's two
-comma-separated inputs into (course_source_path, semester_dest_path) pairs, and the read
-grant covers both semester role teams.
+"""deploy.parse_deploy_lists turns the Release materials button's comma-separated inputs
+into one Deploy per (course_source_path, semester_dest_path) pair, and the read grant
+covers both semester role teams.
 
 (Session-directory discovery/matching lives in course.py - see test_course.py; the deploy
 batching itself is exercised in test_scheduler.py, which drives the same
@@ -25,19 +25,24 @@ def _no_plan(monkeypatch):
     monkeypatch.setattr(deploy.schedule, "load", lambda org: Schedule())
 
 
+def _pairs(source_paths: str, dest_paths: str = "") -> list[tuple[str, str | None]]:
+    return [
+        (d.course_source_path, d.semester_dest_path)
+        for d in deploy.parse_deploy_lists("src", source_paths, "", dest_paths)
+    ]
+
+
 def test_a_single_path_with_no_comma_still_works():
     # The overwhelmingly common case: one folder, mirrored.
-    assert deploy.parse_path_pairs("lectures/02_intro") == [("lectures/02_intro", None)]
+    assert _pairs("lectures/02_intro") == [("lectures/02_intro", None)]
     # ...and one folder with an explicit destination.
-    assert deploy.parse_path_pairs("lectures/02_intro", "week02") == [
-        ("lectures/02_intro", "week02")
-    ]
+    assert _pairs("lectures/02_intro", "week02") == [("lectures/02_intro", "week02")]
 
 
 def test_blank_dest_path_mirrors_every_source_path():
     # Blank dest path means the same thing here as an omitted `semester_dest_path:` in
     # schedule.yml: mirror the source path (None = let deploy_many mirror it).
-    assert deploy.parse_path_pairs("lectures/02,labs/02,readings/02") == [
+    assert _pairs("lectures/02,labs/02,readings/02") == [
         ("lectures/02", None),
         ("labs/02", None),
         ("readings/02", None),
@@ -45,7 +50,7 @@ def test_blank_dest_path_mirrors_every_source_path():
 
 
 def test_equal_length_lists_are_paired_by_index():
-    assert deploy.parse_path_pairs(
+    assert _pairs(
         "lectures/02,labs/02,readings/02", "week02/lecture,week02/lab,week02/reading"
     ) == [
         ("lectures/02", "week02/lecture"),
@@ -61,19 +66,17 @@ def test_mismatched_counts_fail_loudly_naming_both_counts():
     with pytest.raises(
         ValueError, match="3 course_source_paths but 2 semester_dest_paths"
     ):
-        deploy.parse_path_pairs("a,b,c", "x,y")
+        _pairs("a,b,c", "x,y")
     with pytest.raises(
         ValueError, match="2 course_source_paths but 3 semester_dest_paths"
     ):
-        deploy.parse_path_pairs("a,b", "x,y,z")
+        _pairs("a,b", "x,y,z")
 
 
 def test_whitespace_and_trailing_commas_are_tolerated():
     # Faculty type these into a GitHub text box: spaces after commas and a stray
     # trailing comma must not change the pairing (or trip the count check).
-    assert deploy.parse_path_pairs(
-        " lectures/02 , labs/02 ,", "week02/lecture , week02/lab , "
-    ) == [
+    assert _pairs(" lectures/02 , labs/02 ,", "week02/lecture , week02/lab , ") == [
         ("lectures/02", "week02/lecture"),
         ("labs/02", "week02/lab"),
     ]
@@ -81,7 +84,7 @@ def test_whitespace_and_trailing_commas_are_tolerated():
 
 def test_an_empty_source_path_is_an_error_not_an_empty_batch():
     with pytest.raises(ValueError, match="course-source-path is empty"):
-        deploy.parse_path_pairs("  ,  ")
+        _pairs("  ,  ")
 
 
 def _rows(deploys):
@@ -117,6 +120,8 @@ def test_repo_lists_pair_with_the_paths_by_index():
 def test_a_blank_dest_repo_is_the_default_for_every_pair():
     got = deploy.parse_deploy_lists("a-src,b-src", "x,y", "  ")
     assert [d.semester_dest_repo for d in got] == [deploy.DEFAULT_DEST_REPO] * 2
+    got = deploy.parse_deploy_lists("a-src", "x,y", "", default_dest="handouts")
+    assert [d.semester_dest_repo for d in got] == ["handouts"] * 2
 
 
 @pytest.mark.parametrize(
@@ -155,6 +160,51 @@ def test_cli_releases_several_repos_in_one_batch(monkeypatch, site_syncs, capsys
         in capsys.readouterr().out
     )
     assert out.text == "Released 2 items from 2 source repos to 2 repos."
+
+
+def _hand_release(monkeypatch, sched: Schedule, *extra: str) -> tuple[int, list]:
+    seen: list = []
+    monkeypatch.setattr(deploy.schedule, "load", lambda org: sched)
+    monkeypatch.setattr(
+        deploy,
+        "deploy_many",
+        lambda org, sem, deploys, sync=True, remove=None: (
+            seen.append(deploys) or deploy.Batch(0, False, [])
+        ),
+    )
+    monkeypatch.setattr(deploy, "unnumbered_release", lambda *a: None)
+    argv = ["deploy", "--course-org", "Course", "--semester-org", "Semester-f2026"]
+    argv += ["--course-source-repo", "src", "--course-source-path", "lectures/01"]
+    monkeypatch.setattr("sys.argv", [*argv, *extra, "--no-preview"])
+    return deploy.main(), seen
+
+
+def test_a_blank_dest_repo_is_the_semesters_materials_repo(monkeypatch):
+    # Not the institution's constant: the semester's effective `materials_repo`, the
+    # repo a schedule copy naming no `to_semester_repo` lands in too.
+    sched = Schedule(materials_repo="handouts")
+    out, seen = _hand_release(monkeypatch, sched, "--semester-dest-repo", " ")
+    assert out == 0 and [d.semester_dest_repo for d in seen[0]] == ["handouts"]
+    out, seen = _hand_release(monkeypatch, sched)
+    assert out == 0 and [d.semester_dest_repo for d in seen[0]] == ["handouts"]
+
+
+@pytest.mark.parametrize(
+    ("dest", "why"),
+    [
+        ("semester-config", "the semester's config"),
+        (".github", "the organisation's profile"),
+        ("Semester-f2026.github.io", "the semester's website"),
+        ("join", "the enrolment page"),
+        ("grades-alice", "students' marks"),
+        ("hw1-alice", "a student's repo"),
+    ],
+)
+def test_a_hand_release_never_lands_in_a_reserved_repo(monkeypatch, capsys, dest, why):
+    sched = Schedule(assignments={"hw1": object()})
+    out, seen = _hand_release(monkeypatch, sched, "--semester-dest-repo", dest)
+    assert out == 1 and seen == []
+    assert f"reserved for {why}" in capsys.readouterr().err
 
 
 def test_cli_rejects_a_count_mismatch_with_a_nonzero_exit(monkeypatch, capsys):
@@ -548,7 +598,7 @@ def test_the_dotgithub_description_says_the_opposite_thing_per_tier(monkeypatch)
 
 # The one definition of "this means the repo root". Blank is included because that is what
 # an empty `semester_dest_path` reduces to internally; neither front door accepts it as a
-# SOURCE (parse_path_pairs and schedule.py both reject an empty course_source_path).
+# SOURCE (parse_deploy_lists and schedule.py both reject an empty course_source_path).
 ROOT_SPELLINGS = ["/", ".", "", "./", "//"]
 
 
@@ -582,7 +632,9 @@ def _release_filter(root: Path, names: list[str], whole: bool, at: Path | None =
             (here / n).mkdir()
         else:
             (here / n).write_text("x")
-    ignore = selection.deny(root, use=selection.release_use(whole))
+    ignore = selection.deny(
+        root, use=selection.release_use(whole), reincludable=selection.RELEASE
+    )
     return ignore(str(here), names)
 
 
@@ -634,7 +686,9 @@ def test_a_solution_named_outright_ships_exactly_what_it_names(tmp_path):
     copy_tree(
         src / "solutions/labs/02_lab",
         dest,
-        selection.deny(src, use=selection.release_use(False)),
+        selection.deny(
+            src, use=selection.release_use(False), reincludable=selection.RELEASE
+        ),
     )
     assert sorted(
         p.relative_to(dest).as_posix() for p in dest.rglob("*") if p.is_file()

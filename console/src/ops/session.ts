@@ -55,7 +55,9 @@ export interface OpDef {
   /**
    * The page's verb only opens the panel, where the verb runs (13 Oct 2026 gate inspection):
    * hand out, return marks, archive, update every copy, send new codes, publish website. A
-   * preview there is offered, never required.
+   * preview there is offered, never required. Every page button now only opens the panel
+   * (`OpOpen`); what still needs this is `open(def, 'run')`: Marking's arrival on
+   * `#…/marks/return-run` opens Return marks that way, and must not run it unconfirmed.
    */
   confirmInPanel?: boolean;
   /**

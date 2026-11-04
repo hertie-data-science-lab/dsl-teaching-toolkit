@@ -2,7 +2,7 @@
 // picks grouped by their immediate parent folder (`groupPicks`), each row `path → dest path` with
 // its state chip, the files a picked folder leaves behind greyed with why, and per group an Edit
 // destination fold (To repo, To path); a group sent to a repo other than the run's is amber with
-// a (!). Above it the run's To row, below it the footer with the one Release button and the way
+// a (!). Above it the run's To row (the Files panel's), below it the footer with the one Release button and the way
 // to the Schedule. Props only: the Files panel reads the trees and holds the picks.
 
 import { useState } from 'preact/hooks';
@@ -44,17 +44,6 @@ export function RepoSelect({ id, value, dests, onPick, cls, label }: { id?: stri
         <option value={CHOOSE}>Choose a repo…</option>
       </select>
       {picking ? <RepoPickerModal kind="dest" rows={dests.rows} current={value} reserved={dests.reserved} onChoose={onPick} onClose={() => setPicking(false)} /> : null}
-    </>
-  );
-}
-
-/** The run's To row over the manifest: the semester org, then its repo. */
-export function ToRow({ org, runRepo, dests, onRunRepo }: { org: string; runRepo: string; dests: Dests; onRunRepo: (name: string) => void }) {
-  return (
-    <>
-      <span class="split-lbl">To</span>
-      <span class="mf-into">{org} /</span>
-      <RepoSelect cls="mf-repo" label="To repo" value={runRepo} dests={dests} onPick={onRunRepo} />
     </>
   );
 }

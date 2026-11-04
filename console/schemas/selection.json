@@ -609,6 +609,17 @@
     "events"
   ],
   "readings": "readings",
+  "reserved": {
+    "names": [
+      "semester-config",
+      ".github",
+      "join"
+    ],
+    "patterns": [
+      "*.github.io",
+      "grades-*"
+    ]
+  },
   "type_aliases": {
     "htm": "html"
   }

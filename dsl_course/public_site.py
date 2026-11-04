@@ -244,17 +244,12 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
             # One rule (`selection`): the institution denylist, faculty's
             # `.releaseignore`, `publish:` and the institution's floor, anchored at the
             # CLONE root even though what gets copied is a session folder deep inside it.
-            # The whole denylist is a floor here: a `!solutions/` that releases solutions
-            # to a semester's students does not publish them to the open internet.
+            # The whole denylist is a floor here (`deny` re-includes nothing unless asked):
+            # a `!solutions/` that releases solutions to a semester's students does not
+            # publish them to the open internet.
             def withhold(section: str):
                 kind = _section_kind(section)
-                return deny(
-                    src,
-                    use=sel,
-                    kind_of=lambda _rel: kind,
-                    limit=limit,
-                    content_floor=True,
-                )
+                return deny(src, use=sel, kind_of=lambda _rel: kind, limit=limit)
 
             withheld = releaseignored_in(src)
             # A reading list NAMES files, so it is a copy of a kind too: the denylist,

@@ -18,11 +18,17 @@ import { CheckLine, Loading, ghUrl } from './bits';
 import { Ext } from './icons';
 import { useLoad } from './load';
 
-/** `side` (labelled `label`) in a left column on wide screens, above the file on narrow ones, and the file beside it (decision 0035 rule 11). */
-export function Split({ label, side, children }: { label: string; side: preact.ComponentChildren; children: preact.ComponentChildren }) {
+/**
+ * `side` (labelled `label`) in a left column on wide screens, above the file on narrow ones, and
+ * the file beside it (decision 0035 rule 11). With `bar` (the Files panel's splitter) the bar sits
+ * between them and the columns take the ratio their wrapper sets (`files-split`); `box` is the
+ * columns' element, for the bar to measure.
+ */
+export function Split({ label, side, children, bar, box }: { label: string; side: preact.ComponentChildren; children: preact.ComponentChildren; bar?: preact.ComponentChildren; box?: preact.RefObject<HTMLDivElement> }) {
   return (
-    <div class="materials-split">
+    <div class={`materials-split${bar ? ' files-split' : ''}`} ref={box}>
       <nav class="materials-tree" aria-label={label}>{side}</nav>
+      {bar}
       <div class="materials-file">{children}</div>
     </div>
   );

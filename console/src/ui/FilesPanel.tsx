@@ -10,7 +10,10 @@
 //
 // Chips per view (decision 3): Browse and Withhold show withheld, never released and never copied;
 // Release each file's state against the run's destination (three-way, `fileStates`) and withheld.
-// Release ticks follow the saved `.releaseignore`, as the engine does.
+// Release ticks follow the saved `.releaseignore`, as the engine does. One `rowState` per row,
+// from its standing (`.releaseignore` compiled with the institution's defaults) and, in Release,
+// its state, draws the chip, the tick and the folder roll-up in every view; the Withhold summary
+// counts the same standings.
 //
 // Decision B (2026-11-04): the institution's names in two groups. Never released (`.env`, `.git`,
 // grading files, `.system`): no tick in any view, "never released". Content (`solutions`,
@@ -19,17 +22,17 @@
 // `!line`"); a release that names one outright still ships it.
 
 import type { ComponentChildren } from 'preact';
-import { useRef, useState } from 'preact/hooks';
-import { badgeFiles, buildTree, defaultWithheld, hardDenied, neverMaterial, withholdTally, type TreeNode } from '../edit/badges';
-import { compileAll, withheldBy } from '../edit/glob';
+import { useMemo, useRef, useState } from 'preact/hooks';
+import { badgeFiles, bucket, buildTree, tally, treeModel, type RowModel } from '../edit/badges';
+import { compileAll, type Rule } from '../edit/glob';
 import type { SaveState } from '../edit/save';
-import type { Files, TreePath } from '../model/files';
+import type { FileState as SavedFile, Files, TreePath, TreeState } from '../model/files';
 import { plural } from '../model/format';
 import { DENYLIST_CONTENT, DENYLIST_HARD } from '../model/selection';
 import { withMark } from '../model/materialsRepo';
 import {
-  countsWords, disabledTick, effectiveDestRepo, eligibleDestination, fileStates, folderCounts, groupPicks, destPathOf,
-  type FileState as ReleaseState, type Group, type ReleasePick, type RepoFiles,
+  countsWords, effectiveDestRepo, fileStates, foldersCopied, groupPicks, destPathOf, requestOf,
+  type FileState as ReleaseState, type Group, type ReleasePick, type ReleaseRow,
 } from '../model/releaseState';
 import type { Loaded } from '../model/status';
 import { releasePicked } from '../ops/defs';
@@ -37,10 +40,11 @@ import { CheckLine, Loading, ghUrl } from './bits';
 import { SaveBar } from './edit';
 import { Hint } from './Hint';
 import { PatternTree } from './PatternTree';
-import { ReleaseFoot, ReleaseManifest, ToRow, groupKey, type Dests } from './ReleaseManifest';
-import { RepoPickerModal, type RepoRow } from './RepoPickerModal';
+import { studentRepos, destinationRows } from './ReleaseChips';
+import { ReleaseFoot, ReleaseManifest, RepoSelect, groupKey, type Dests } from './ReleaseManifest';
+import { RepoPickerModal } from './RepoPickerModal';
 import { SplitPanes } from './Splitter';
-import { ChipMeanings, NEVER_RELEASED_TITLE, StateChip } from './StateChip';
+import { ChipMeanings, NEVER_RELEASED_TITLE, StateChip, type ChipKind } from './StateChip';
 import { RepoFile } from './Viewer';
 
 export type FilesView = 'browse' | 'withhold' | 'release';
@@ -51,12 +55,8 @@ export interface SemesterRef {
   termLabel: string;
   loaded?: Loaded;
   ended?: boolean;
-  /** Where a release lands when nothing names a repo; default: the effective `materials_repo` from status.json. */
-  defaultDest?: string;
   /** The `release_destinations` allow-list, beside the repos this semester's releases wrote to. */
   destinations?: string[];
-  /** Student and team repo names, refused as destinations. */
-  students?: string[];
 }
 
 export interface FilesPanelProps {
@@ -71,10 +71,10 @@ export interface FilesPanelProps {
   semester?: SemesterRef;
   /** Course mode: the Release into choices, newest first. */
   semesters?: SemesterRef[];
-  /** Semester mode: the From select's repos; `addable` + `onAdd` behind "Add a course repo…" (the caller sets the topic). */
-  sources?: { materials: string[]; others: string[]; addable?: RepoRow[]; onAdd?: (repo: string) => void };
+  /** Semester mode: the From select's repos; `onAdd` behind "Add a course repo…", over `others` (the caller sets the topic). */
+  sources?: { materials: string[]; others: string[]; onAdd?: (repo: string) => void };
   /** The Schedule editor's new entry with the picks prefilled. */
-  scheduleHref?: (run: { semOrg: string; runRepo: string; groups: Group[] }) => string;
+  scheduleHref?: (semOrg: string, rows: ReleaseRow[]) => string;
   /** An ahead chip's Keep for future semesters: the caller opens `keepFuture`. */
   onKeep?: (semester: SemesterRef) => void;
   /** A diverged file's open pull request; default: the destination repo's pull requests. */
@@ -156,32 +156,60 @@ export function PatternBox({ id, text, onText, flash }: { id: string; text: stri
 }
 
 /** Beside the pattern box: the rules that match no file, or that every rule matches one. */
-function Unmatched({ files, lines, partial }: { files: string[]; lines: string[]; partial: boolean }) {
-  const b = badgeFiles(files, lines);
+function Unmatched({ files, lines, rules, partial }: { files: string[]; lines: string[]; rules: Rule[]; partial: boolean }) {
+  const b = badgeFiles(files, lines, rules);
   if (!b.rules) return <p class="footnote">No rules yet.</p>;
   if (partial) return <p class="footnote">Cannot tell which rules match nothing: the file list is incomplete.</p>;
   return b.unmatched.length ? <ul class="unmatched">{b.unmatched.map((r) => <li><code>{r}</code> matches no file</li>)}</ul> : <p class="footnote">Every rule matches at least one file.</p>;
 }
 
-/** Every folder of a tree by its path, for the roll-ups. */
-function foldersOf(nodes: TreeNode[], out = new Map<string, TreeNode>()): Map<string, TreeNode> {
-  for (const n of nodes) if (n.children) {
-    out.set(n.path, n);
-    foldersOf(n.children, out);
+/** A tree's files, read once per tree state: the blobs with their shas, and their paths. */
+const READ = new WeakMap<TreeState, { blobs: TreePath[]; paths: string[] }>();
+const NO_FILES = { blobs: [] as TreePath[], paths: [] as string[] };
+function filesOf(tree: TreeState) {
+  if (tree.kind !== 'ready') return NO_FILES;
+  let r = READ.get(tree);
+  if (!r) {
+    const blobs = tree.paths.filter((x) => !x.dir);
+    READ.set(tree, (r = { blobs, paths: blobs.map((b) => b.path) }));
   }
-  return out;
+  return r;
+}
+
+/** A saved `.releaseignore` compiled with the institution's defaults, once per file state. */
+const SAVED = new WeakMap<SavedFile, Rule[]>();
+function savedRules(ign: SavedFile): Rule[] {
+  let r = SAVED.get(ign);
+  if (!r) SAVED.set(ign, (r = compileAll(linesOf(ign.kind === 'ready' ? ign.text : ''), { defaults: true })));
+  return r;
 }
 
 /** A repo's files with their shas, `.releaseignore` as saved, and how the tree reads. */
 function repoOf(files: Files, org: string, repo: string) {
   const tree = files.tree(org, repo);
-  const blobs: TreePath[] = tree.kind === 'ready' ? tree.paths.filter((x) => !x.dir) : [];
   const ign = files.file(org, repo, '.releaseignore');
-  const saved = ign.kind === 'ready' ? ign.text : '';
-  return { tree, blobs, paths: blobs.map((b) => b.path), ign, saved };
+  return { tree, ...filesOf(tree), ign, saved: ign.kind === 'ready' ? ign.text : '' };
+}
+
+const NO_STATES: Record<string, ReleaseState> = {};
+const NO_FOLDERS = new Set<string>();
+const pickKey = (repo: string, path: string, dir: boolean) => `${repo}\0${dir ? 'd' : 'f'}\0${path}`;
+/** The folders above a path, nearest last. */
+const above = (path: string) => path.split('/').slice(0, -1).map((_, i, a) => a.slice(0, i + 1).join('/'));
+
+/** One row as every view draws it: its chip, the folder's counts, and the Release tick (none: no tick; gap: a blank in its place; else why it is disabled, null when it is not). */
+interface RowState {
+  chip: ChipKind | null;
+  row: RowModel<ReleaseState>;
+  tick: 'none' | 'gap' | { off: string | null };
 }
 
 export function FilesPanel(p: FilesPanelProps) {
+  if (!p.write && p.mode !== 'course') return null;
+  return <Panel {...p} />;
+}
+
+function Panel(p: FilesPanelProps) {
   const course = p.mode === 'course';
   const [picked, setView] = useState<FilesView>(course ? 'browse' : 'release');
   const [file, setFile] = useState<string | null>(null);
@@ -194,96 +222,84 @@ export function FilesPanel(p: FilesPanelProps) {
   const [runPick, setRunPick] = useState<{ org: string; repo: string } | null>(null);
   const [overrides, setOverrides] = useState<Record<string, { destRepo?: string; destPath?: string }>>({});
   const [chosen, setChosen] = useState<string[]>([]);
-  if (!p.write && !course) return null;
   // Read-only: Browse alone, whatever view was last picked.
   const view = p.write ? picked : 'browse';
+  const release = view === 'release';
 
   const repo = course ? p.repo : src;
   const sem = course ? (p.semesters ?? []).find((s) => s.org === semOrg) ?? p.semesters?.[0] : p.semester;
   const here = repoOf(p.files, p.courseOrg, repo);
-  const release = view === 'release';
-  const lines = linesOf(release ? here.saved : (draft ?? here.saved));
-  const rules = compileAll(lines);
-  const folders = foldersOf(buildTree(here.paths));
+  const text = release ? here.saved : (draft ?? here.saved);
+  const lines = useMemo(() => linesOf(text), [text]);
+  const rules = useMemo(() => compileAll(lines, { defaults: true }), [lines]);
+  const tree = useMemo(() => buildTree(here.paths), [here.paths]);
 
-  // Where this run writes: the semester's effective default until another repo is chosen.
-  const defaultDest = sem ? (sem.defaultDest ?? effectiveDestRepo(sem.loaded)) : '';
-  const runRepo = sem && runPick?.org === sem.org ? runPick.repo : defaultDest;
-  const releases = sem?.loaded?.kind === 'ready' ? (sem.loaded.status.releases ?? []) : [];
-  const wrote = releases.map((r) => r.dest?.repo).filter((r): r is string => !!r);
-  const reserved = { org: sem?.org ?? '', students: sem?.students ?? [] };
-  const options = [...new Set([defaultDest, ...(sem?.destinations ?? []), ...wrote, ...chosen].filter(Boolean))];
-  const orgRepos = sem ? p.files.repos(sem.org) : null;
-  const eligible = orgRepos?.kind === 'ready' ? orgRepos.repos.map((r) => r.name).filter((n) => n && eligibleDestination(n, reserved) === null) : [];
-  const dests: Dests = {
-    options,
-    reserved,
-    rows: [...new Set([...options, ...eligible])].map((name) => {
-      const n = wrote.filter((r) => r === name).length;
-      return { name, note: name === defaultDest ? 'the default' : n ? plural(n, 'release') : 'no releases yet' };
-    }),
-  };
-  const choose = (name: string) => !options.includes(name) && setChosen([...chosen, name]);
+  // ---- Release only: where this run writes, the semester's trees, the picks (decision 6)
+  const into = release ? sem : undefined;
+  const defaultDest = into ? effectiveDestRepo(into.loaded) : '';
+  const runRepo = into && runPick?.org === into.org ? runPick.repo : defaultDest;
+  const upstream = into && runRepo ? p.files.tree(into.org, runRepo, 'upstream') : null;
+  const live = into && runRepo ? p.files.tree(into.org, runRepo) : null;
+  // Each file's state at the run's destination.
+  const states = useMemo(() => (live ? fileStates(here.blobs, upstream, live) : NO_STATES), [here.blobs, upstream, live]);
+  const model = useMemo(() => treeModel<ReleaseState>(tree, rules, lines, { state: live ? (path) => states[path] : undefined }), [tree, rules, lines, live, states]);
+  const copied = useMemo(() => (release ? foldersCopied(here.paths, rules) : NO_FOLDERS), [release, here.paths, rules]);
 
-  // Each file's state at the run's destination, read only in Release (it reads the semester's trees).
-  const statesAt = (destRepo: string, blobs: TreePath[], destPath?: (path: string) => string): Record<string, ReleaseState> =>
-    sem && destRepo ? fileStates(blobs, p.files.tree(sem.org, destRepo, 'upstream'), p.files.tree(sem.org, destRepo), { destPath }) : {};
-  const states = release ? statesAt(runRepo, here.blobs) : {};
-
-  // ---- Release: the picks, across course repos (decision 6)
-  const inPicked = (path: string) => picks.some((x) => x.repo === repo && x.dir && path.startsWith(`${x.path}/`));
-  const isPicked = (path: string, dir: boolean) => picks.some((x) => x.repo === repo && x.path === path && x.dir === dir);
+  const pickSet = useMemo(() => new Set(picks.map((x) => pickKey(x.repo, x.path, x.dir))), [picks]);
+  const isPicked = (path: string, dir: boolean) => pickSet.has(pickKey(repo, path, dir));
+  const inPicked = (path: string) => above(path).some((f) => pickSet.has(pickKey(repo, f, true)));
   const togglePick = (path: string, dir: boolean) =>
     setPicks(isPicked(path, dir)
       ? picks.filter((x) => !(x.repo === repo && x.path === path && x.dir === dir))
       // A folder picked takes its contents with it: their own picks go.
       : [...picks.filter((x) => !(dir && x.repo === repo && x.path.startsWith(`${path}/`))), { repo, path, dir }]);
-  const outOf = (path: string, dir = false) => !!withheldBy(rules, path, dir);
-  const shipsNot = (path: string) => outOf(path) || neverMaterial(path) || hardDenied(path) || defaultWithheld(rules, path);
-  const trees: Record<string, RepoFiles> = {};
-  for (const r of new Set(picks.map((x) => x.repo))) {
-    const o = r === repo ? here : repoOf(p.files, p.courseOrg, r);
-    trees[r] = { files: o.paths, rules: compileAll(linesOf(o.saved)) };
-  }
-  const groups = groupPicks(picks, trees).map((g) => ({ ...g, ...overrides[groupKey(g)] }));
-  const def = releasePicked({ courseOrg: p.courseOrg, cohortOrg: sem?.org, where: sem?.termLabel ?? '' }, groups, { defaultDestRepo: runRepo });
-  const nPaths = def.args.course_source_path ? String(def.args.course_source_path).split(',').length : 0;
-  const nFiles = groups.reduce((n, g) => n + g.ship.length, 0);
-  const prOf = (destRepo: string, path: string) => (sem ? (p.prUrl?.(sem.org, destRepo, path) ?? `${ghUrl(sem.org, destRepo)}/pulls`) : undefined);
-  const keep = sem && p.onKeep ? () => p.onKeep!(sem) : undefined;
-  const groupStates = new Map<string, Record<string, ReleaseState>>();
-  const stateOf = (g: Group, path: string) => {
-    const k = groupKey(g);
-    if (!groupStates.has(k)) {
-      const blobs = (g.repo === repo ? here : repoOf(p.files, p.courseOrg, g.repo)).blobs.filter((b) => g.ship.includes(b.path));
-      groupStates.set(k, statesAt(g.destRepo || runRepo, blobs, (x) => destPathOf(g, x)));
-    }
-    return groupStates.get(k)![path];
+
+  const pickedRepos = into ? [...new Set(picks.map((x) => x.repo))] : [];
+  const reads = pickedRepos.map((r) => (r === repo ? here : repoOf(p.files, p.courseOrg, r)));
+  const groups = useMemo(() => {
+    if (!into) return [];
+    const trees = Object.fromEntries(pickedRepos.map((r, i) => [r, { files: reads[i].paths, rules: savedRules(reads[i].ign) }]));
+    return groupPicks(picks, trees).map((g) => ({ ...g, ...overrides[groupKey(g)] }));
+  }, [!!into, picks, overrides, ...reads.flatMap((o) => [o.tree, o.ign])]);
+
+  const rowState = (path: string, dir: boolean): RowState => {
+    const row = model.get(path)!;
+    const s = row.s;
+    const never = s.kind === 'never_released' || s.kind === 'never_copied' ? s.kind : null;
+    const out = bucket(s) === 'withheld';
+    const state = !dir && !never && !out ? states[path] : undefined;
+    const chip: ChipKind | null = never ?? (out ? 'withheld' : state && state !== 'unknown' ? state : null);
+    if (!release) return { chip, row, tick: 'none' };
+    // Withheld by a line, or never material: no tick. A content name withheld by default ships when ticked (named outright).
+    if (s.kind === 'own' || s.kind === 'broader' || s.kind === 'never_copied') return { chip, row, tick: 'gap' };
+    const off = never ? NEVER_RELEASED_TITLE : inPicked(path) ? 'Picked with its folder'
+      : dir ? (copied.has(path) ? null : NEVER_FOLDER) : state === 'up_to_date' ? NOTHING : null;
+    return { chip, row, tick: { off } };
   };
 
-  const pickControl = (path: string, dir: boolean) => {
-    if (outOf(path, dir) || neverMaterial(path)) return <span class="ft-gap" />;
-    const by = inPicked(path);
-    const off = hardDenied(path) ? NEVER_RELEASED_TITLE : by ? 'Picked with its folder' : disabledTick(path, dir, states[path], here.paths, rules) ? (dir ? NEVER_FOLDER : NOTHING) : null;
-    return <input type="checkbox" class="ft-tick" checked={by || isPicked(path, dir)} disabled={off !== null} title={off ?? undefined} aria-label={`Pick ${path}${dir ? '/' : ''}`} onClick={() => togglePick(path, dir)} />;
+  const dests = into ? destsOf(p, into, defaultDest, chosen) : null;
+  const prOf = (destRepo: string, path: string) => (into ? (p.prUrl?.(into.org, destRepo, path) ?? `${ghUrl(into.org, destRepo)}/pulls`) : undefined);
+  const keep = into && p.onKeep ? () => p.onKeep!(into) : undefined;
+  const chip = (path: string, dir: boolean): ComponentChildren => {
+    const r = rowState(path, dir);
+    const words = release && dir && r.chip === null ? countsWords(r.row.states) : '';
+    return (
+      <>
+        {r.chip ? <StateChip kind={r.chip} onTick={r.chip === 'behind' && !isPicked(path, false) && !inPicked(path) ? () => togglePick(path, false) : undefined} onKeep={keep} prUrl={r.chip === 'diverged' ? prOf(runRepo, path) : undefined} /> : null}
+        {dir && r.chip === null && r.row.withheld ? <span class="chip muted">{r.row.withheld} withheld</span> : null}
+        {words ? <span class={`chip${Object.keys(r.row.states).every((k) => k === 'up_to_date') ? ' muted' : ''}`}>{words}</span> : null}
+      </>
+    );
   };
-  const releaseSide = (path: string, dir: boolean): ComponentChildren => {
-    if (outOf(path, dir)) return null;
-    if (!dir) {
-      if (neverMaterial(path)) return <StateChip kind="never_copied" />;
-      if (hardDenied(path)) return <StateChip kind="never_released" />;
-      // Withheld by default: the tree's own chip says so; a tick names it outright, which ships it.
-      if (defaultWithheld(rules, path)) return null;
-      const s = states[path];
-      if (!s || s === 'unknown') return null;
-      return <StateChip kind={s} onTick={s === 'behind' && !isPicked(path, false) && !inPicked(path) ? () => togglePick(path, false) : undefined} onKeep={keep} prUrl={prOf(runRepo, path)} />;
-    }
-    if (hardDenied(path)) return <StateChip kind="never_released" />;
-    const node = folders.get(path);
-    if (!node) return null;
-    const counts = folderCounts(node, states, shipsNot);
-    const words = countsWords(counts);
-    return words ? <span class={`chip${Object.keys(counts).every((k) => k === 'up_to_date') ? ' muted' : ''}`}>{words}</span> : null;
+  const pickControl = (path: string, dir: boolean) => {
+    const t = rowState(path, dir).tick;
+    if (typeof t !== 'object') return <span class="ft-gap" />;
+    const by = inPicked(path);
+    return <input type="checkbox" class="ft-tick" checked={by || isPicked(path, dir)} disabled={t.off !== null} title={t.off ?? undefined} aria-label={`Pick ${path}${dir ? '/' : ''}`} onClick={() => togglePick(path, dir)} />;
+  };
+  const pickRow = (path: string) => {
+    const t = rowState(path, false).tick;
+    if (typeof t === 'object' && t.off === null) togglePick(path, false);
   };
 
   // ---- Withhold: the draft, written by the tree or the box (decision 0026 rule 5)
@@ -293,11 +309,6 @@ export function FilesPanel(p: FilesPanelProps) {
     setDraft(textOf(next));
   };
   const out = (p.ignoreOut ?? defaultOut)(draft ?? here.saved);
-  const branch = p.files.repos(p.courseOrg);
-  const ignRef = {
-    org: p.courseOrg, repo, path: '.releaseignore', exists: here.ign.kind !== 'absent',
-    branch: branch.kind === 'ready' ? branch.repos.find((r) => r.name === repo)?.default_branch : undefined,
-  };
   const saveIgn = async () => {
     if (p.onSaveIgnore && (await p.onSaveIgnore(out))) {
       setDraft(null);
@@ -306,26 +317,24 @@ export function FilesPanel(p: FilesPanelProps) {
   };
 
   // ---- the tree, one instance for every view
-  const fixedWord = (path: string) => (neverMaterial(path) ? 'never copied' : hardDenied(path) ? 'never released' : null);
   const name = (path: string) => (
     <button type="button" class="ft-name" aria-current={file === path ? 'true' : undefined} onClick={() => setFile(path)}>{path.split('/').pop()}</button>
   );
   const partial = here.tree.kind === 'ready' && here.tree.truncated;
-  const tree = here.tree.kind === 'loading' ? <Loading what="Reading the repo" />
+  const treeView = here.tree.kind === 'loading' ? <Loading what="Reading the repo" />
     : here.tree.kind !== 'ready' ? <p class="footnote">Could not read the repo’s files.</p>
     : (
       <PatternTree
         files={here.paths}
         patterns={lines}
+        rules={rules}
+        model={{ tree, rows: model }}
         onChange={view === 'withhold' ? fromTree : () => undefined}
         mode={view === 'browse' ? 'exclude' : 'select'}
         releasedWord=""
-        wordClass="muted"
-        fixed={release ? () => null : fixedWord}
-        defaults
         control={view === 'browse' ? () => null : release ? pickControl : undefined}
-        side={release ? releaseSide : undefined}
-        rowClick={view !== 'browse'}
+        chip={chip}
+        rowClick={view === 'withhold' ? true : release ? pickRow : undefined}
         nameLink={view === 'browse' ? name : undefined}
       />
     );
@@ -340,16 +349,14 @@ export function FilesPanel(p: FilesPanelProps) {
           <PatternBox id="ign-pat" text={draft ?? here.saved} onText={(t) => { setFlash(null); setDraft(t); }} flash={flash} />
           <p class="hint">One pattern per line, as in .gitignore. Click the tree, or write them here.</p>
         </div>
-        <div class="field"><span class="label">Rules</span><Unmatched files={here.paths} lines={lines} partial={partial} /></div>
+        <div class="field"><span class="label">Rules</span><Unmatched files={here.paths} lines={lines} rules={rules} partial={partial} /></div>
       </>
     )
-    : sem ? (
-      <ReleaseManifest groups={groups} runRepo={runRepo} dests={dests} stateOf={stateOf} onKeep={keep} prUrl={(g, path) => prOf(g.destRepo || runRepo, destPathOf(g, path))}
-        onGroupDest={(k, patch) => {
-          if (patch.destRepo) choose(patch.destRepo);
-          setOverrides({ ...overrides, [k]: { ...overrides[k], ...patch } });
-        }} />
-    ) : <p class="empty-note">No semester to release into yet.</p>;
+    : into && dests ? <Release {...{ p, into, runRepo, dests, groups, prOf, keep }} onGroupDest={(k, patch) => {
+      if (patch.destRepo && !chosen.includes(patch.destRepo)) setChosen([...chosen, patch.destRepo]);
+      setOverrides({ ...overrides, [k]: { ...overrides[k], ...patch } });
+    }} />
+    : <p class="empty-note">No semester to release into yet.</p>;
 
   const fromRow = course ? (
     <>
@@ -376,24 +383,38 @@ export function FilesPanel(p: FilesPanelProps) {
       </select>
     </>
   );
-  const toRow = sem ? <ToRow org={sem.org} runRepo={runRepo} dests={dests} onRunRepo={(r) => { choose(r); setRunPick({ org: sem.org, repo: r }); }} /> : null;
+  // The run's To row over the manifest: the semester org, then its repo.
+  const toRow = into && dests ? (
+    <>
+      <span class="split-lbl">To</span>
+      <span class="mf-into">{into.org} /</span>
+      <RepoSelect cls="mf-repo" label="To repo" value={runRepo} dests={dests} onPick={(r) => {
+        if (!chosen.includes(r)) setChosen([...chosen, r]);
+        setRunPick({ org: into.org, repo: r });
+      }} />
+    </>
+  ) : null;
 
+  const rows = into ? requestOf(groups, { defaultDestRepo: runRepo }) : [];
   const body = (
     <>
-      <SplitPanes label={repo} left={tree} right={right} heads={release ? [fromRow, toRow] : undefined} />
-      {partial && view !== 'release' ? <CheckLine cls="bad">GitHub returned only part of this repo’s file list; badges may be incomplete.</CheckLine> : null}
+      <SplitPanes label={repo} left={treeView} right={right} heads={release ? [fromRow, toRow] : undefined} />
+      {partial && !release ? <CheckLine cls="bad">GitHub returned only part of this repo’s file list; badges may be incomplete.</CheckLine> : null}
       {view === 'withhold' ? (
         <div class="stack files-withhold">
-          {here.tree.kind === 'ready' ? <WithholdCounts files={here.paths} lines={lines} /> : null}
+          {here.tree.kind === 'ready' ? <WithholdCounts n={tally(here.paths, (f) => model.get(f)!.s)} /> : null}
           {p.withholdExtra}
           <p class="footnote">This reads the repo’s top-level .releaseignore; one in a subfolder still applies there.</p>
-          <SaveBar state={p.ignoreSave ?? IDLE} onSave={() => void saveIgn()} small file={ignRef}
+          <SaveBar state={p.ignoreSave ?? IDLE} onSave={() => void saveIgn()} small file={ignRef(p, repo, here.ign.kind !== 'absent')}
             disabled={!p.onSaveIgnore || here.ign.kind === 'loading' || (here.ign.kind === 'ready' && out === here.saved)} />
         </div>
       ) : null}
-      {release && sem ? <ReleaseFoot paths={nPaths} files={nFiles} def={def} scheduleHref={p.scheduleHref?.({ semOrg: sem.org, runRepo, groups })} /> : null}
+      {into ? (
+        <ReleaseFoot paths={rows.length} files={groups.reduce((n, g) => n + g.ship.length, 0)} def={releasePicked({ courseOrg: p.courseOrg, cohortOrg: into.org, where: into.termLabel }, groups, { defaultDestRepo: runRepo })}
+          scheduleHref={p.scheduleHref?.(into.org, rows)} />
+      ) : null}
       {adding && p.sources?.onAdd ? (
-        <RepoPickerModal kind="source" rows={p.sources.addable ?? []} onClose={() => setAdding(false)} onChoose={(r) => { p.sources!.onAdd!(r); setSrc(r); }} />
+        <RepoPickerModal kind="source" rows={p.sources.others.map((name) => ({ name, note: 'not course materials yet' }))} onClose={() => setAdding(false)} onChoose={(r) => { p.sources!.onAdd!(r); setSrc(r); }} />
       ) : null}
     </>
   );
@@ -408,14 +429,6 @@ export function FilesPanel(p: FilesPanelProps) {
       </details>
     );
   }
-  if (!p.write) {
-    return (
-      <section class="panel section files-panel" aria-labelledby="files-h">
-        <div class="section-head"><h2 id="files-h">Files <Hint label="About the files">{hint}</Hint></h2></div>
-        {body}
-      </section>
-    );
-  }
   const tab = (v: FilesView, label: string) => (
     <button type="button" role="tab" id={`files-tab-${v}`} aria-selected={view === v} onClick={() => { setView(v); setFlash(null); }}>{label}</button>
   );
@@ -423,15 +436,68 @@ export function FilesPanel(p: FilesPanelProps) {
     <section class="panel section files-panel" aria-labelledby="files-h">
       <div class="section-head">
         <h2 id="files-h">Files <Hint label="About the files">{hint}</Hint></h2>
-        <div class="seg" role="tablist" aria-label="View">{tab('browse', 'Browse')}{tab('withhold', 'Withhold')}{tab('release', 'Release')}</div>
+        {p.write ? <div class="seg" role="tablist" aria-label="View">{tab('browse', 'Browse')}{tab('withhold', 'Withhold')}{tab('release', 'Release')}</div> : null}
       </div>
       {body}
     </section>
   );
 }
 
+/** Where Save writes `.releaseignore`, for the Save bar's file link. */
+function ignRef(p: FilesPanelProps, repo: string, exists: boolean) {
+  const repos = p.files.repos(p.courseOrg);
+  return { org: p.courseOrg, repo, path: '.releaseignore', exists, branch: repos.kind === 'ready' ? repos.repos.find((r) => r.name === repo)?.default_branch : undefined };
+}
+
+/**
+ * The destination choices every repo select shares (Release view only): the run's default, the
+ * `release_destinations` list, the repos this semester's releases wrote to and any chosen this
+ * session, then the semester's other repos a release may write into (`destinationRows`), each
+ * with how many releases wrote there.
+ */
+function destsOf(p: FilesPanelProps, into: SemesterRef, defaultDest: string, chosen: string[]): Dests {
+  const st = into.loaded?.kind === 'ready' ? into.loaded.status : undefined;
+  const wrote = (st?.releases ?? []).map((r) => r.dest?.repo).filter((r): r is string => !!r);
+  const options = [...new Set([defaultDest, ...(into.destinations ?? []), ...wrote, ...chosen].filter(Boolean))];
+  const repos = p.files.repos(into.org);
+  const list = repos.kind === 'ready' ? repos.repos : [];
+  // status.json names no student repo: the semester's repos named after an assignment.
+  const reserved = { org: into.org, students: studentRepos(list.filter((r) => r.name).map((r) => r.name), st) };
+  const note = (name: string) => {
+    const n = wrote.filter((r) => r === name).length;
+    return name === defaultDest ? 'the default' : n ? plural(n, 'release') : 'no releases yet';
+  };
+  return {
+    options,
+    reserved,
+    rows: [...options.map((name) => ({ name, note: note(name) })), ...destinationRows(list.filter((r) => r.name), options, reserved).map((r) => ({ ...r, note: note(r.name) }))],
+  };
+}
+
+/** The Release view's right column: the manifest, each shipping file's state at its group's destination. */
+function Release({ p, into, runRepo, dests, groups, prOf, keep, onGroupDest }: {
+  p: FilesPanelProps; into: SemesterRef; runRepo: string; dests: Dests; groups: Group[];
+  prOf: (destRepo: string, path: string) => string | undefined; keep?: () => void;
+  onGroupDest: (key: string, patch: { destRepo?: string; destPath?: string }) => void;
+}) {
+  const groupStates = new Map<string, Record<string, ReleaseState>>();
+  const stateOf = (g: Group, path: string) => {
+    const k = groupKey(g);
+    if (!groupStates.has(k)) {
+      const ship = new Set(g.ship);
+      const blobs = filesOf(p.files.tree(p.courseOrg, g.repo)).blobs.filter((b) => ship.has(b.path));
+      const to = g.destRepo || runRepo;
+      groupStates.set(k, fileStates(blobs, p.files.tree(into.org, to, 'upstream'), p.files.tree(into.org, to), { destPath: (x) => destPathOf(g, x) }));
+    }
+    return groupStates.get(k)![path];
+  };
+  return (
+    <ReleaseManifest groups={groups} runRepo={runRepo} dests={dests} stateOf={stateOf} onKeep={keep}
+      prUrl={(g, path) => prOf(g.destRepo || runRepo, destPathOf(g, path))} onGroupDest={onGroupDest} />
+  );
+}
+
 /** The Withhold view's last line: the repo's files never released, withheld (by the list or by default), and released. */
-function WithholdCounts({ files, lines }: { files: string[]; lines: string[] }) {
-  const n = withholdTally(files, lines);
+function WithholdCounts({ n }: { n: { never: number; withheld: number; released: number } }) {
   return <p class="footnote">{n.never} never released · {n.withheld} withheld · {n.released} released</p>;
 }

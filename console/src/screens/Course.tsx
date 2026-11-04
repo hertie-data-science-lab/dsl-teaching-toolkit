@@ -11,7 +11,7 @@ import {
   type Tiered, type Verdict as VerdictT,
 } from '../model/readiness';
 import { checkNow, derive, publishWebsite } from '../ops/defs';
-import { OpButtons } from '../ops/Panel';
+import { OpOpen } from '../ops/Panel';
 import { FormatPicker } from '../forms/FormatPicker';
 import { effectiveOf, lateWord, valueWord } from '../model/settings';
 import { CONTACTS, POLICY } from '../model/policy';
@@ -265,7 +265,7 @@ export function CourseSubActions({ course, loaded, files, now, computed }: Pick<
         <>
           {age ? <span class="footnote">{age}</span> : null}
           {age ? <span aria-hidden="true">·</span> : null}
-          {scope ? <OpButtons def={{ ...checkNow(scope), where: course.name }} verbCls="textlink" /> : <Soon label="Refresh" cls="textlink" title="Refresh runs on a semester; this course has none yet." />}
+          {scope ? <OpOpen def={{ ...checkNow(scope), where: course.name }} cls="textlink" /> : <Soon label="Refresh" cls="textlink" title="Refresh runs on a semester; this course has none yet." />}
           <Hint label="About Refresh">{REFRESH_HINT}</Hint>
           <span class="sep" aria-hidden="true">|</span>
         </>
@@ -500,7 +500,7 @@ export function CourseScreen(p: CourseProps) {
           <h3>Public OpenCourse website <span class="chip">Beta</span> <Hint label="About the public website">Optional: an open version of this course and its materials, available to anyone on the internet. Beta: leave this off for now - work in progress.</Hint></h3>
           <SiteLive org={course.org} published={pub} last={lastPublish} running={publishing} now={p.now} />
           <div class="actions">
-            {course.write ? <OpButtons def={publishWebsite(courseScope({ course }), pub)} small verbCls="btn small outline" /> : null}
+            {course.write ? <OpOpen def={publishWebsite(courseScope({ course }), pub)} cls="btn small outline" /> : null}
             <a class="btn small quiet" href="#website">Edit website details</a>
           </div>
         </div>
@@ -706,7 +706,7 @@ export function TemplateScreen(p: CourseProps) {
             {cur.starter === 'derived' && !noStarter ? (
               <div class="form-section">
                 <h3>Student version <Hint label="About the student version" doc={STARTER_DOC}>Write the solution once and mark the answers; Derive builds the starter students get by blanking them. Run it after every change to the solution.</Hint></h3>
-                <div class="actions"><OpButtons def={derive(scope, repo, repo, heading)} small /></div>
+                <div class="actions"><OpOpen def={derive(scope, repo, repo, heading)} cls="btn small" /></div>
               </div>
             ) : null}
             <div class="form-section">

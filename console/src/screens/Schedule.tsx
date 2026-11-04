@@ -14,7 +14,7 @@ import {
 } from '../model/scheduleEdit';
 import type { Assignment, Release } from '../model/types';
 import { archive, keepFuture, releaseAdhoc, releaseAgain, releaseEarly, releaseNow, scheduledPreview } from '../ops/defs';
-import { OpButtons, OpOpen } from '../ops/Panel';
+import { OpOpen } from '../ops/Panel';
 import type { OpDef } from '../ops/session';
 import { RUN_REASON } from '../tiers/runSettings';
 import { CheckLine, DueSubmit, EditFile, Md, ProblemCards, ReleaseMarks, ghUrl } from '../ui/bits';
@@ -26,8 +26,7 @@ import { NOTHING_TO_RELEASE, markClass, releaseRef, rowMark } from './Cohort';
 import { NotFound } from './Assignments';
 import { CheckNow, WithStatus, cohortScope, gradingConfig, todayOf, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
-import type { ReleasePrefill } from '../router';
-import { effectiveDestRepo } from '../model/releaseState';
+import { effectiveDestRepo, type ReleaseRow } from '../model/releaseState';
 import { CONFIG_REPO } from '../model/names';
 import { RUN_KEYS, TEAM_FORMATION, TEAM_FORMATIONS, VISIBILITIES, VISIBILITY, effectiveOf, validSchedule, yamlBoolean } from '../model/settings';
 import { HandOutDialog, HandOutNow, ManualWaiting, NO_LATE_WINDOW, SolutionNote, canHoldSolution, cutoffOf, draftHandout, entryBelow, forcedVisibility, waitingHandOut, waitsByHand, windowDays } from './RunSettings';
@@ -260,10 +259,10 @@ function Slots({ id, d, set, errors }: { id: string; d: EntryDraft; set: Set_<En
   );
 }
 
-/** A new release entry with a hand release's picks as its files; a destination that is the semester's default stays blank. */
-export function releasePrefilled(d: EntryDraft, r: ReleasePrefill, defaultRepo: string): EntryDraft {
-  const files = r.paths.map((path, i): FileDraft => ({
-    repo: r.from[i], path, toRepo: r.to[i] === defaultRepo ? '' : r.to[i], toPath: r.at[i] === path ? '' : r.at[i], atDate: '', atTime: '', public: false,
+/** A new release entry with a hand release's picks as its files; a destination that is the default (the semester's repo, the source's path) stays blank. */
+export function releasePrefilled(d: EntryDraft, rows: ReleaseRow[], defaultRepo: string): EntryDraft {
+  const files = rows.map((r): FileDraft => ({
+    repo: r.repo, path: r.path, toRepo: r.toRepo === defaultRepo ? '' : r.toRepo, toPath: r.toPath === r.path ? '' : r.toPath, atDate: '', atTime: '', public: false,
   }));
   return { ...d, files };
 }
@@ -701,8 +700,8 @@ function View(p: ReadyProps) {
   // `?from=&paths=` a new supporting-files release with those files (the Files panel's "Schedule on the calendar").
   const prefilled = (): Draft | null => {
     if (key !== 'new' || !sf) return null;
-    if (p.prefill) return { ...(newDraft('assignment', doc) as AssignmentDraft), template: p.prefill };
-    return p.prefillRelease ? releasePrefilled(newDraft('assets', doc) as EntryDraft, p.prefillRelease, effectiveDestRepo(p.loaded)) : null;
+    if (p.prefill?.kind === 'template') return { ...(newDraft('assignment', doc) as AssignmentDraft), template: p.prefill.repo };
+    return p.prefill?.kind === 'files' ? releasePrefilled(newDraft('assets', doc) as EntryDraft, p.prefill.rows, effectiveDestRepo(p.loaded)) : null;
   };
   const draftOf = (k: string): Draft | null => drafts[k] ?? (k === 'new' ? prefilled() : baseOf(k));
   const dirtyKeys = Object.keys(drafts).filter((k) => k === 'new' || !deepEqual(drafts[k], baseOf(k)));
@@ -859,7 +858,7 @@ function View(p: ReadyProps) {
               : rel.state === 'released' ? <div class="savebar"><span class="footnote">Released.</span><a class="btn small quiet" href={`#release-${rel.id}`}>Release again…</a></div>
               : null
             ) : null}
-            {d.kind === 'semesterEntry' && d.type === 'archive' && !isNew && !archived ? <div class="savebar"><span class="footnote">{archivePassed ? 'The archive date has passed.' : 'Archiving before the scheduled date asks you to confirm.'}</span><OpButtons def={archive(scope, archiveWhen, archivePassed)} /></div> : null}
+            {d.kind === 'semesterEntry' && d.type === 'archive' && !isNew && !archived ? <div class="savebar"><span class="footnote">{archivePassed ? 'The archive date has passed.' : 'Archiving before the scheduled date asks you to confirm.'}</span><OpOpen def={archive(scope, archiveWhen, archivePassed)} /></div> : null}
             <SaveLine state={save} />
             <div class="savebar">
               {!isNew && key !== 'semester' && blockOf(doc, key) && !removed.includes(key) ? (
@@ -1006,7 +1005,7 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
         <DivergencePanel
           list={drift} courseOrg={p.course.org} cohortOrg={p.cohort.org}
           onSetAside={aside.onCircle ? (x) => aside.onCircle!({ id: x.id, label: gapLabel(x.id) ?? x.text }) : undefined}
-          again={<OpButtons def={dated(releaseAgain(scope, ref, releaseAgainDrift(drift)))} label="Release again" />}
+          again={<OpOpen def={dated(releaseAgain(scope, ref, releaseAgainDrift(drift)))} label="Release again" />}
           keep={<OpOpen def={keepFuture(scope)} cls="btn quiet" label="Keep for future semesters" />}
         />
         {aside.after}
@@ -1014,10 +1013,10 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
       <section class="panel section" style="margin-top:20px">
         <h2>Actions</h2>
         <div class="actions">
-          {st === 'planned' ? <OpButtons def={dated(releaseEarly(scope, ref))} label="Release early" />
+          {st === 'planned' ? <OpOpen def={dated(releaseEarly(scope, ref))} label="Release early" />
             : st === 'released' && drift.length ? <span class="footnote">Release again or keep the edits from Differs from the course copy, above.</span>
-            : st === 'released' ? <><OpButtons def={dated(releaseAgain(scope, ref))} label="Release again" /><OpOpen def={keepFuture(scope)} cls="btn quiet" label="Keep for future semesters" /></>
-            : st === 'late' ? <OpButtons def={dated(releaseNow(scope, ref))} label="Release now" />
+            : st === 'released' ? <><OpOpen def={dated(releaseAgain(scope, ref))} label="Release again" /><OpOpen def={keepFuture(scope)} cls="btn quiet" label="Keep for future semesters" /></>
+            : st === 'late' ? <OpOpen def={dated(releaseNow(scope, ref))} label="Release now" />
             : <span class="footnote">Nothing to run until the problem above is fixed.</span>}
         </div>
         <div class="savebar"><span class="footnote">After changing the course copy, the student site may need an update.</span><a class="btn small quiet" href="#site">Update site on the Site page</a></div>

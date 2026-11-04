@@ -52,7 +52,7 @@ export const parts = (path: string) => path.split('/').filter(Boolean).map((x) =
 /** A component that is never course material (`selection.CLUTTER`: `.DS_Store`, `.gitkeep`, ...). */
 export const clutter = (path: string) => parts(path).some((x) => CLUTTER.has(x));
 /** Whether one path COMPONENT is withheld by default (`selection.is_content_denied`), case aside. */
-export const contentName = (name: string) => CONTENT.some((re) => re.test(name.toLowerCase()));
+const contentName = (name: string) => CONTENT.some((re) => re.test(name.toLowerCase()));
 /** A component never released (`selection.hard_denied`): no copy carries it, no `!` line re-includes it, a release naming it is refused. */
 export const hardDenied = (path: string) => parts(path).some((x) => HARD.some((re) => re.test(x)));
 /** A component withheld by default (solutions, tests), which a `!` line in the repo's `.releaseignore` re-includes on a folder copy. */

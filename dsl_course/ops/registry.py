@@ -48,10 +48,10 @@ VIA_WORKFLOW = "workflow:"
 # The patterns every free-text argument is held to. No value may start with `-`: argparse
 # would read it as a flag, and a request is user text.
 ORG_PATTERN = r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$"
-REPO_PATTERN = r"^(?!-)[A-Za-z0-9._-]{1,100}$"
+_REPO = r"(?!-)[A-Za-z0-9._-]{1,100}"
+REPO_PATTERN = rf"^{_REPO}$"
 # One repo, or a comma-separated list of them (a hand release's repos, paired with its
 # paths by index).
-_REPO = r"(?!-)[A-Za-z0-9._-]{1,100}"
 REPO_LIST_PATTERN = rf"^{_REPO}(?:\s*,\s*{_REPO})*$"
 PATH_PATTERN = r"^(?!-)[^\x00-\x1f]{1,1024}$"
 KEY_PATTERN = r"^(?!-)[A-Za-z0-9_.-]{1,100}$"

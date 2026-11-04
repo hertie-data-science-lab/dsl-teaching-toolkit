@@ -20,7 +20,7 @@ import { CONFIG_REPO, SEMESTER_FILE } from '../model/names';
 import { draftErrors, newlyManual, readDraft, writeDraft, type AssignmentDraft, type Draft } from '../model/scheduleEdit';
 import { handout, type AsgRef } from '../ops/defs';
 import type { OpDef } from '../ops/session';
-import { OpButtons } from '../ops/Panel';
+import { OpOpen } from '../ops/Panel';
 import { SOLUTION_WARNING } from '../model/labels';
 import type { Assignment } from '../model/types';
 import { isGroup, pastDue } from '../model/assignment';
@@ -60,7 +60,7 @@ export const ManualWaiting = () => <span class="chip amber">Manual hand-out: not
 /** Hand out now for an assignment not yet handed out: one button, its panel the confirmation. */
 export function HandOutNow({ p, a, small }: { p: ReadyProps; a: Assignment; small?: boolean }) {
   const tz = tzOf(p.status), year = yearOf(p.now, tz);
-  return <OpButtons def={handout(cohortScope(p), handoutRef(p, a, isGroup(a), tz, year))} label="Hand out now" small={small} />;
+  return <OpOpen def={handout(cohortScope(p), handoutRef(p, a, isGroup(a), tz, year))} label="Hand out now" cls={small ? 'btn small' : 'btn'} />;
 }
 
 /**

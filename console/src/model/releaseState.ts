@@ -12,18 +12,17 @@
 // withholds; a file named outright ships even when a content name, never when never-released, and
 // not when `.releaseignore` withholds it.
 
+import selectionRules from '../../schemas/selection.json';
 import { buildTree, hardDenied, neverMaterial, type TreeNode } from '../edit/badges';
-import { withheldBy, withheldOnCopy, type Rule } from '../edit/glob';
-import { contentName } from './selection';
+import { withheldBy, type Rule } from '../edit/glob';
 import type { TreeState } from './files';
 import type { Loaded } from './status';
 import { COURSE_REPO, JOIN_REPO, CONFIG_REPO } from './names';
-import { DEFAULT_DEST_REPO } from './policy';
-import { REPO_NAME_RE } from './settings';
+import { REPO_NAME_RE, effectiveOf, semesterDefaults } from './settings';
 
 export type FileState = 'up_to_date' | 'behind' | 'ahead' | 'diverged' | 'not_released' | 'unknown';
 
-/** The short words of a folder's roll-up, in the order it lists them. */
+/** Each state's word (its chip's, and a folder roll-up's), in the order a roll-up lists them. */
 export const STATE_WORDS: Record<Exclude<FileState, 'unknown'>, string> = {
   behind: 'behind',
   ahead: 'ahead',
@@ -32,11 +31,16 @@ export const STATE_WORDS: Record<Exclude<FileState, 'unknown'>, string> = {
   up_to_date: 'up to date',
 };
 
-/** A tree's blob shas by path, or null while it cannot be read. */
+const SHAS = new WeakMap<TreeState, Map<string, string>>();
+const NONE = new Map<string, string>();
+
+/** A tree's blob shas by path (worked out once per tree read), or null while it cannot be read. */
 function blobs(t: TreeState): Map<string, string> | null {
-  if (t.kind === 'absent') return new Map();
+  if (t.kind === 'absent') return NONE;
   if (t.kind !== 'ready') return null;
-  return new Map(t.paths.filter((p) => !p.dir).map((p) => [p.path, p.sha]));
+  let m = SHAS.get(t);
+  if (!m) SHAS.set(t, (m = new Map(t.paths.filter((p) => !p.dir).map((p) => [p.path, p.sha]))));
+  return m;
 }
 
 /**
@@ -53,7 +57,7 @@ export function fileStates(
   o: { destPath?: (path: string) => string } = {},
 ): Record<string, FileState> {
   const live = blobs(students);
-  const up = upstream === null || upstream.kind === 'absent' ? new Map<string, string>() : blobs(upstream);
+  const up = upstream === null || upstream.kind === 'absent' ? NONE : blobs(upstream);
   const out: Record<string, FileState> = {};
   for (const { path, sha } of course) {
     const at = o.destPath ? o.destPath(path) : path;
@@ -71,20 +75,6 @@ export function fileStates(
 
 export type Counts = Partial<Record<FileState, number>>;
 
-/** How many files under `node` stand in each state, leaving out those `isOut` (withheld, never material). */
-export function folderCounts(node: TreeNode, states: Record<string, FileState>, isOut: (path: string) => boolean): Counts {
-  const n: Counts = {};
-  const walk = (x: TreeNode) => {
-    if (x.children) x.children.forEach(walk);
-    else if (!isOut(x.path)) {
-      const s = states[x.path];
-      if (s) n[s] = (n[s] ?? 0) + 1;
-    }
-  };
-  walk(node);
-  return n;
-}
-
 /** "2 behind · 1 ahead · 3 not released": zero parts and `unknown` left out. */
 export function countsWords(counts: Counts): string {
   return (Object.keys(STATE_WORDS) as (keyof typeof STATE_WORDS)[])
@@ -93,7 +83,7 @@ export function countsWords(counts: Counts): string {
     .join(' · ');
 }
 
-/** A course repo's files as the manifest reads them: every file path, and its root `.releaseignore` compiled. */
+/** A course repo's files as the manifest reads them: every file path, and its root `.releaseignore` compiled with the institution's defaults (`compileAll(lines, { defaults: true })`). */
 export interface RepoFiles {
   files: string[];
   rules: Rule[];
@@ -168,10 +158,10 @@ export function groupPicks(picks: ReleasePick[], trees: Record<string, RepoFiles
     const implied = (path: string) => [...folders].some((f) => f !== path && under(path, f));
     const pickedFiles = new Set(mine.filter((p) => !p.dir && !implied(p.path)).map((p) => p.path));
     const pickedFolders = new Set([...folders].filter((f) => !implied(f)));
-    // Named outright: `.releaseignore` still withholds, a content name ships, a never-released name never does.
+    // Named outright: `.releaseignore` still withholds, a content name ships (judged below the path itself: nowhere), a never-released name never does.
     const named = (path: string): Left | null => {
       if (hardDenied(path)) return { path, rule: null, never: true };
-      const w = withheldBy(t.rules, path);
+      const w = withheldBy(t.rules, path, false, path);
       return w ? { path, rule: w.rule.line } : null;
     };
 
@@ -216,32 +206,36 @@ export function groupPicks(picks: ReleasePick[], trees: Record<string, RepoFiles
   return out;
 }
 
-export interface ReleaseRequest {
-  course_source_repo: string;
-  course_source_path: string;
-  semester_dest_repo: string;
-  semester_dest_path: string;
+/** One path of a release: from a course repo and path, to a semester repo and path. */
+export interface ReleaseRow {
+  repo: string;
+  path: string;
+  toRepo: string;
+  toPath: string;
 }
 
 /**
- * `release.adhoc`'s four lists, paired by index (`deploy.parse_path_pairs`): one item per path
- * the groups name (a folder, or each file of a partial group), each with its own source repo,
- * destination repo and destination path.
+ * The paths the groups name (a folder, or each file of a partial group), each with its own source
+ * repo, destination repo (`run.defaultDestRepo` where the group names none) and destination path.
  */
-export function requestOf(groups: Group[], run: { defaultDestRepo: string }): ReleaseRequest {
-  const rows = groups.flatMap((g) => g.sources.map((src) => ({ repo: g.repo, src, to: g.destRepo || run.defaultDestRepo, at: destPathOf(g, src) })));
+export function requestOf(groups: Group[], run: { defaultDestRepo: string }): ReleaseRow[] {
+  return groups.flatMap((g) => g.sources.map((path) => ({ repo: g.repo, path, toRepo: g.destRepo || run.defaultDestRepo, toPath: destPathOf(g, path) })));
+}
+
+/** `release.adhoc`'s four lists, paired by index (`deploy.parse_path_pairs`). */
+export function toArgs(rows: ReleaseRow[]) {
   return {
     course_source_repo: rows.map((r) => r.repo).join(','),
-    course_source_path: rows.map((r) => r.src).join(','),
-    semester_dest_repo: rows.map((r) => r.to).join(','),
-    semester_dest_path: rows.map((r) => r.at).join(','),
+    course_source_path: rows.map((r) => r.path).join(','),
+    semester_dest_repo: rows.map((r) => r.toRepo).join(','),
+    semester_dest_path: rows.map((r) => r.toPath).join(','),
   };
 }
 
 /** Where a release lands when it names no repo: the semester's effective `materials_repo` (status.json), else the institution's. */
 export function effectiveDestRepo(loaded: Loaded | undefined): string {
-  const v = loaded?.kind === 'ready' ? loaded.status.semester?.defaults?.materials_repo?.value : undefined;
-  return typeof v === 'string' && v.trim() ? v.trim() : DEFAULT_DEST_REPO;
+  const v = effectiveOf(loaded?.kind === 'ready' ? semesterDefaults(loaded.status) : undefined, 'materials_repo').value;
+  return String(v ?? '').trim() || String(effectiveOf(undefined, 'materials_repo').value);
 }
 
 /** The destination repos a request writes to, each once; blank means `fallback`. */
@@ -251,21 +245,28 @@ export function destRepos(args: Record<string, unknown>, fallback: string): stri
 }
 
 /**
- * Whether a Release-view tick is disabled: a file already up to date, or a folder whose copy
- * would take nothing (every file under it never material, never released, or a content name
- * below the folder no `!` line in `rules`, the saved `.releaseignore`, re-includes).
- * `files` is the repo's file paths.
+ * The folders a Release-view folder tick can copy something from: a folder copy that would take
+ * nothing (every file under it never material, never released, or a content name below the
+ * folder no `!` line in `rules`, the saved `.releaseignore` with the defaults, re-includes) is
+ * left out. `files` is the repo's file paths. A file that ships from a folder's copy ships from
+ * every folder below it too, so each file marks its folders from the shallowest that takes it.
  */
-export function disabledTick(path: string, dir: boolean, state: FileState | undefined, files: string[], rules: Rule[] = []): boolean {
-  if (!dir) return state === 'up_to_date';
-  return files.filter((f) => under(f, path)).every((f) => neverMaterial(f) || !!sweptOut(rules, path, f));
+export function foldersCopied(files: string[], rules: Rule[]): Set<string> {
+  const out = new Set<string>();
+  for (const f of files) {
+    if (neverMaterial(f)) continue;
+    const parts = f.split('/').slice(0, -1);
+    const at = parts.findIndex((_, i) => !sweptOut(rules, parts.slice(0, i + 1).join('/'), f));
+    if (at >= 0) for (let i = at; i < parts.length; i++) out.add(parts.slice(0, i + 1).join('/'));
+  }
+  return out;
 }
 
 /** What a folder copy of `folder` leaves of `f` (`selection.deny`): never released, or withheld by a line or the content default, judged below the folder. */
 function sweptOut(rules: Rule[], folder: string, f: string): Left | null {
   if (hardDenied(folder ? f.slice(folder.length + 1) : f)) return { path: f, rule: null, never: true };
-  const w = withheldOnCopy(rules, f, false, (name, at) => at.length > folder.length && contentName(name));
-  return w ? { path: f, rule: w.rule?.line ?? null } : null;
+  const w = withheldBy(rules, f, false, folder);
+  return w ? { path: f, rule: w.rule.default ? null : w.rule.line } : null;
 }
 
 /** The names a semester already uses for something other than materials. */
@@ -276,17 +277,26 @@ export interface Reserved {
   students: string[];
 }
 
+/** The engine's reserved names (`schemas/selection.json` `reserved`): exact names, and globs. */
+const RESERVED = selectionRules.reserved;
+const glob = (p: string) => new RegExp(`^${p.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`, 'i');
+const RESERVED_GLOBS = RESERVED.patterns.map(glob);
+
+/** What a reserved name is for, in words ("the semester" where it has none of its own); null when it is not reserved (a student repo aside). */
+function reservedFor(n: string, org: string): string | null {
+  if (!RESERVED.names.some((x) => x.toLowerCase() === n) && !RESERVED_GLOBS.some((re) => re.test(n))) return null;
+  return n === CONFIG_REPO.toLowerCase() ? 'the semester’s config'
+    : n === COURSE_REPO ? 'the organisation’s profile'
+    : n === `${org}.github.io` ? 'the semester’s website'
+    : n === JOIN_REPO.toLowerCase() ? 'the enrolment page'
+    : n.startsWith('grades-') ? 'students’ marks'
+    : 'the semester';
+}
+
 /** Null when `name` may be a release destination, else why not ("That name is reserved for the semester’s config."). */
 export function eligibleDestination(name: string, known: Reserved): string | null {
   const n = name.trim().toLowerCase();
   if (n && !REPO_NAME_RE.test(n)) return 'A repo name takes letters, digits, “.”, “-” and “_” only.';
-  const what =
-    n === CONFIG_REPO.toLowerCase() ? 'the semester’s config'
-    : n === COURSE_REPO ? 'the organisation’s profile'
-    : n === `${known.org.toLowerCase()}.github.io` ? 'the semester’s website'
-    : n === JOIN_REPO.toLowerCase() ? 'the enrolment page'
-    : n.startsWith('grades-') ? 'students’ marks'
-    : known.students.some((s) => s.toLowerCase() === n) ? 'a student’s repo'
-    : null;
+  const what = reservedFor(n, known.org.toLowerCase()) ?? (known.students.some((s) => s.toLowerCase() === n) ? 'a student’s repo' : null);
   return what ? `That name is reserved for ${what}.` : null;
 }

@@ -16,7 +16,7 @@ import { FLOORS, PUBLISH_DEFAULT, readSel, type Sel } from '../model/selection';
 import { institutionDefaults, rawBlock, semesterFile, validCourseFile, validSemesterBlocks, validSemesterFile, writeBlock } from '../model/settings';
 import { checkNow, confirmWithheld, generateSyllabus, keepFuture, publishWebsite, type Scope } from '../ops/defs';
 import type { OpsSession } from '../ops/session';
-import { OpButtons } from '../ops/Panel';
+import { OpOpen } from '../ops/Panel';
 import { ABOUT, COURSE_FACTS, defaultsTiers } from '../tiers/course';
 import { WEBSITE_OFF_LIVE, publishWebsite as publishTiers } from '../tiers/ops';
 import type { Values } from '../tiers/types';
@@ -28,14 +28,14 @@ import { Check, Ext } from '../ui/icons';
 import { OpenButton } from '../ui/OpenButton';
 import { courseOf, liveSemesters, MaterialsChecklist } from './Course';
 import { FilesPanel } from '../ui/FilesPanel';
-import { scheduleHrefFor, semesterRefOf } from './SemesterMaterials';
+import { semesterRefOf } from './SemesterMaterials';
+import { scheduleNewHref } from '../router';
 import { ItemRow, RepoChip, RepoWhy } from '../ui/SetupPanel';
 import { materialsReadiness } from '../model/readiness';
 import { courseScope } from './common';
 import type { CourseProps } from './types';
-import { effectiveOf } from '../model/settings';
 import { addMaterialsTopic, otherRepos, removeMaterialsTopic } from './CourseIndex';
-import { destinationRows, inheritedInto, ownInto, ReleaseInto, RepoChips, studentRepos } from '../ui/ReleaseChips';
+import { releaseIntoOf, ReleaseInto, RepoChips } from '../ui/ReleaseChips';
 import { RepoPickerModal } from '../ui/RepoPickerModal';
 import { CONFIG_REPO, COURSE_FILE, COURSE_REPO, DEFAULT_SYLLABUS, SEMESTER_FILE } from '../model/names';
 
@@ -301,17 +301,15 @@ export function DetailsScreen(p: CourseProps) {
   // Releases (plan 2026-11-04, decision 7): Release into is the institution's (grey) and the
   // course's own `release_destinations`; the default destination chooses among them.
   const inst = institutionDefaults();
-  const fixedInto = inheritedInto(effectiveOf(inst, 'materials_repo'), inst.release_destinations, 'the institution');
-  const ownIntoList = ownInto(d.defaults.release_destinations);
-  const into = [...fixedInto.map((c) => c.name), ...ownIntoList];
-  const tiers = defaultsTiers(inst, before.defaults, into);
-  const { materials_repo: destTier, ...defaultsFields } = tiers;
   // The picker offers the newest semester's repos; a typed name is checked against that semester's.
   const newest = course.cohorts[0]?.org ?? '';
-  const semRepos = newest ? p.files.repos(newest) : null;
-  const semList = semRepos?.kind === 'ready' ? semRepos.repos : [];
   const semLoaded = newest ? p.cohortStates[newest] : undefined;
-  const reserved = { org: newest, students: studentRepos(semList.map((r) => r.name), semLoaded?.kind === 'ready' ? semLoaded.status : null) };
+  const rel = releaseIntoOf({
+    inherited: inst, nearest: 'the institution', own: d.defaults.release_destinations, org: newest,
+    repos: newest ? p.files.repos(newest) : null, status: semLoaded?.kind === 'ready' ? semLoaded.status : null,
+  });
+  const tiers = defaultsTiers(inst, before.defaults, rel.into);
+  const { materials_repo: destTier, ...defaultsFields } = tiers;
   const defaultErrs = fieldErrors(null, tiers, d.defaults);
   const errs = { ...fieldErrors(null, ABOUT, d.about), ...fieldErrors(null, COURSE_FACTS, d.about), ...defaultErrs };
   const doSave = async () => {
@@ -355,8 +353,8 @@ export function DetailsScreen(p: CourseProps) {
                 <div class="form-section rel-section">
                   <h3>Releases <Hint label="About releases">Which course repos a release copies from, which semester repos it may write into, and where it lands when nothing names a repo. Each semester can add to Release into and set its own default destination.</Hint></h3>
                   <ReleaseFrom {...p} />
-                  <ReleaseInto id="cd-into" fixed={fixedInto} own={ownIntoList} rows={destinationRows(semList, into, reserved)} reserved={reserved}
-                    hint={`The semester repos a release may write into. ${fixedInto.map((c) => c.name).join(', ')} ${fixedInto.length > 1 ? 'come' : 'comes'} from the institution and ${fixedInto.length > 1 ? 'are' : 'is'} always allowed.`}
+                  <ReleaseInto id="cd-into" fixed={rel.fixed} own={rel.own} rows={rel.rows} reserved={rel.reserved}
+                    hint={`The semester repos a release may write into. ${rel.fixed.map((c) => c.name).join(', ')} ${rel.fixed.length > 1 ? 'come' : 'comes'} from the institution and ${rel.fixed.length > 1 ? 'are' : 'is'} always allowed.`}
                     onChange={course.write ? (list) => set({ defaults: { ...d.defaults, release_destinations: list } }) : undefined} />
                   <SchemaForm id="cdx" schema={null} tiers={{ materials_repo: destTier }} values={d.defaults} onChange={(v) => set({ defaults: v })} />
                 </div>
@@ -463,7 +461,7 @@ export function WebsiteScreen(p: CourseProps) {
           <p class="footnote">Beta: leave this off for now - work in progress.</p>
         </div>
         <div class="actions">
-          <OpButtons def={publishWebsite(courseScope(p), published)} />
+          <OpOpen def={publishWebsite(courseScope(p), published)} />
           <EditFile cls="btn quiet" org={course.org} repo={COURSE_REPO} path={COURSE_FILE} branch={courseBranch(p.files, course.org)} exists={file.kind !== 'absent'} />
         </div>
       </div>
@@ -569,7 +567,7 @@ export function MaterialsScreen(p: CourseProps) {
   const saveIgn = (text: string) =>
     runIgn({ owner: course.org, repo, path: '.releaseignore' }, text, ignFile.kind === 'ready' ? ignFile.sha : null, { message: 'materials: edit what is withheld from students, from the DSL Teaching Console', statusRepo: [course.org, COURSE_REPO], after });
   // Release into: the course's live semesters, newest first (decision 1).
-  const semesters = liveSemesters(p).map(({ ref }) => semesterRefOf(p.files, ref, p.cohortStates[ref.org]));
+  const semesters = liveSemesters(p).map(({ ref }) => semesterRefOf(ref, p.cohortStates[ref.org]));
   return (
     <>
       <div class="page-head">
@@ -604,7 +602,7 @@ export function MaterialsScreen(p: CourseProps) {
             <div class="actions">
               {noWrite === null ? (
                 <>
-                  <OpButtons def={generateSyllabus(scope, repo, syllabus)} small label="Write" />
+                  <OpOpen def={generateSyllabus(scope, repo, syllabus)} label="Write" cls="btn small" />
                   <Hint label="About Write">Write puts the plan into {syllabus} between the lines &lt;!-- dsl:weekly-plan --&gt; and &lt;!-- /dsl:weekly-plan --&gt;, adding them under “## Weekly plan” at the end the first time. Move the marked block anywhere in the file and Write updates it there; nothing else changes.</Hint>
                 </>
               ) : (
@@ -616,13 +614,13 @@ export function MaterialsScreen(p: CourseProps) {
             </div>
           ) : <p class="footnote">Needs a semester: the plan is built from its schedule.</p>}
         </section>
-        <FilesPanel files={p.files} courseOrg={course.org} repo={repo} mode="course" write={course.write} semesters={semesters} scheduleHref={scheduleHrefFor(semesters)}
+        <FilesPanel files={p.files} courseOrg={course.org} repo={repo} mode="course" write={course.write} semesters={semesters} scheduleHref={scheduleNewHref}
           onKeep={(s) => env?.ops.open(keepFuture({ courseOrg: course.org, cohortOrg: s.org, where: s.termLabel }))}
           onSaveIgnore={saveIgn} ignoreSave={ignSave}
           withholdExtra={reviewCheck && !reviewCheck.done ? (
             <div class="actions">
               <ul class="setup"><ItemRow it={{ id: 'withheld', label: reviewCheck.label, kind: 'step', need: 'suggested', state: 'open', why: reviewCheck.why ?? undefined }} /></ul>
-              {scope ? <OpButtons def={confirmWithheld(courseScope(p), repo)} small label="Confirm" /> : null}
+              {scope ? <OpOpen def={confirmWithheld(courseScope(p), repo)} label="Confirm" cls="btn small" /> : null}
             </div>
           ) : null} />
       </div>

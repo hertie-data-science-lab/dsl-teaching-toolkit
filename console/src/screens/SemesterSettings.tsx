@@ -20,8 +20,8 @@ import { defaultsOf } from '../model/config';
 import { fmtDate } from '../model/format';
 import { CONFIG_REPO, SEMESTER_FILE } from '../model/names';
 import { draftErrors, readDraft, type SemesterDraft } from '../model/scheduleEdit';
-import { SOURCE_WORD, effectiveOf, semesterDefaults, semesterFile, valueWord } from '../model/settings';
-import { destinationRows, inheritedInto, ownInto, ReleaseInto, studentRepos } from '../ui/ReleaseChips';
+import { SOURCE_NAME, SOURCE_WORD, effectiveOf, semesterDefaults, semesterFile, valueWord } from '../model/settings';
+import { releaseIntoOf, ReleaseInto } from '../ui/ReleaseChips';
 import type { Status } from '../model/types';
 import { defaultsTiers } from '../tiers/course';
 import type { Tiers, Values } from '../tiers/types';
@@ -157,14 +157,9 @@ function DefaultsForm({ p, at, folded = false, draft, focusRef }: { p: ReadyProp
   const inherited = semesterInherited(p);
   const cur = kept.defaults ?? before;
   // Release into: what the course gives (grey), then the semester's own; the default destination chooses among them.
-  const fixedInto = inheritedInto(effectiveOf(inherited, DEST_KEY), inherited[INTO_KEY], 'the course');
-  const ownIntoList = ownInto(cur[INTO_KEY]);
-  const into = [...fixedInto.map((c) => c.name), ...ownIntoList];
-  const tiers = withHints(defaultsTiers(inherited, before, into));
-  const orgRepos = p.files.repos(org);
-  const repoList = orgRepos.kind === 'ready' ? orgRepos.repos : [];
-  const reserved = { org, students: studentRepos(repoList.map((r) => r.name), p.status) };
-  const intoSource = fixedInto.some((c) => c.from === 'the course') ? SOURCE_WORD.course : SOURCE_WORD.institution;
+  const rel = releaseIntoOf({ inherited, nearest: 'the course', own: cur[INTO_KEY], org, repos: p.files.repos(org), status: p.status });
+  const tiers = withHints(defaultsTiers(inherited, before, rel.into));
+  const intoSource = rel.fixed.some((c) => c.from === SOURCE_NAME.course) ? SOURCE_WORD.course : SOURCE_WORD.institution;
   const defaultsDirty = kept.defaults !== null && !deepEqual(compact(kept.defaults), compact(before));
   const datesBefore = ready ? (readDraft(ready.doc, 'semester') as SemesterDraft) : null;
   const dates = kept.dates ?? datesBefore;
@@ -214,9 +209,9 @@ function DefaultsForm({ p, at, folded = false, draft, focusRef }: { p: ReadyProp
         <div class="fold-body rel-section">
           {defaultsForm(pick(tiers, (k) => k === RELEASE_KEY), 'sr')}
           {yaml ? (
-            <ReleaseInto id="sr-into" fixed={fixedInto} own={ownIntoList} defaultLabel={`${intoSource}: ${into.join(', ')}`}
+            <ReleaseInto id="sr-into" fixed={rel.fixed} own={rel.own} defaultLabel={`${intoSource}: ${rel.into.join(', ')}`}
               hint="The repos of this semester a release may write into: the course’s list, plus any added here. The course’s ones are greyed; change them on Course details."
-              rows={destinationRows(repoList, into, reserved)} reserved={reserved} onChange={(list) => setKept({ ...kept, defaults: { ...cur, [INTO_KEY]: list } })} />
+              rows={rel.rows} reserved={rel.reserved} onChange={(list) => setKept({ ...kept, defaults: { ...cur, [INTO_KEY]: list } })} />
           ) : null}
           {defaultsForm(pick(tiers, (k) => k === DEST_KEY), 'sr')}
         </div>

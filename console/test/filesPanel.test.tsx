@@ -64,7 +64,7 @@ class RefFiles extends StaticFiles {
 }
 
 const loaded = { kind: 'ready', sha: 's', stale: [], status: { ...(example as unknown as Status), releases: [] } } as unknown as Loaded;
-const semester = { org: SEM, termLabel: 'Fall 2026', loaded, defaultDest: 'materials' };
+const semester = { org: SEM, termLabel: 'Fall 2026', loaded };
 
 let root: HTMLElement | null = null;
 afterEach(() => {
@@ -87,7 +87,7 @@ async function mount(over: Partial<FilesPanelProps> = {}) {
   const env = { user: { login: 'prof', id: 1, name: 'P', email: null, avatar_url: '' }, client: new GitHubClient({ token: () => 't', fetch: gh.fetch }), ops: { open } } as unknown as Env;
   const props: FilesPanelProps = {
     files: new RefFiles({ [`${SEM}/materials@upstream`]: upstream }), courseOrg: COURSE_ORG, repo: REPO, mode: 'course', write: true,
-    semesters: [semester], scheduleHref: ({ semOrg }) => `?cohort=${semOrg}#schedule`, ...over,
+    semesters: [semester], scheduleHref: (semOrg) => `?cohort=${semOrg}#schedule`, ...over,
   };
   root = document.createElement('div');
   document.body.appendChild(root);
@@ -305,7 +305,7 @@ describe('the Files panel', () => {
 
   it('semester mode: Release by hand only, From the course repos', async () => {
     const onAdd = vi.fn();
-    const { el } = await mount({ mode: 'semester', semester, semesters: undefined, sources: { materials: [REPO], others: ['lecture-code-f2026'], addable: [{ name: 'guest-lectures', note: 'no releases yet' }], onAdd } });
+    const { el } = await mount({ mode: 'semester', semester, semesters: undefined, sources: { materials: [REPO], others: ['lecture-code-f2026'], onAdd } });
     expect(el.querySelector('[role="tablist"]')).toBeNull();
     expect(el.querySelector('summary h2')!.textContent).toContain('Release by hand');
     const from = el.querySelector<HTMLSelectElement>('#rbh-from')!;
@@ -318,7 +318,7 @@ describe('the Files panel', () => {
     });
     expect(document.querySelector('#modal-title')!.textContent).toBe('Add a course repo');
     await click([...document.querySelectorAll<HTMLButtonElement>('.modal .btn')].find((b) => b.textContent === 'Add')!);
-    expect(onAdd).toHaveBeenCalledWith('guest-lectures');
+    expect(onAdd).toHaveBeenCalledWith('lecture-code-f2026');
   });
 
   it('shows a read-only viewer Browse alone on the course page, and nothing on the semester’s', async () => {

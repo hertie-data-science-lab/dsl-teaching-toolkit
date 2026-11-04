@@ -5,7 +5,7 @@
 import { readFileSync } from 'node:fs';
 import { render } from 'preact-render-to-string';
 import { describe, expect, it } from 'vitest';
-import { exactLine, toggle, withholdCounts } from '../src/edit/badges';
+import { exactLine, standing, tally, toggle } from '../src/edit/badges';
 import { compileAll, withheldBy } from '../src/edit/glob';
 import { PatternTree } from '../src/ui/PatternTree';
 
@@ -112,11 +112,12 @@ describe('the withheld tree’s folder counts', () => {
     expect(render(<PatternTree files={files} patterns={[]} onChange={() => {}} />)).not.toContain('<span class="ft-name">01/</span><span class="chip amber">');
   });
 
-  it('counts the whole repo three ways: never copied, withheld by a line, released', () => {
-    // Never copied: .DS_Store and the denylisted solutions/a.py. Withheld: labs/02's two pdfs.
-    expect(withholdCounts(files, patterns)).toEqual({ never: 2, withheld: 2, released: 2 });
-    // A line naming a never-copied file does not move it to withheld.
-    expect(withholdCounts(files, ['solutions/'])).toEqual({ never: 2, withheld: 0, released: 4 });
-    expect(withholdCounts([], patterns)).toEqual({ never: 0, withheld: 0, released: 0 });
+  it('counts the whole repo three ways under the institution’s defaults: never leaving, withheld, released', () => {
+    const n = (lines: string[], fs = files) => tally(fs, (f) => standing(compileAll(lines, { defaults: true }), lines, f, false));
+    // Never: .DS_Store. Withheld: labs/02's two pdfs, and solutions/a.py by default.
+    expect(n(patterns)).toEqual({ never: 1, withheld: 3, released: 2 });
+    // A ! line releases the content name.
+    expect(n(['!solutions/'])).toEqual({ never: 1, withheld: 0, released: 5 });
+    expect(n(patterns, [])).toEqual({ never: 0, withheld: 0, released: 0 });
   });
 });

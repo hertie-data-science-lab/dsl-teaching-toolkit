@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import copy
 import json
+from collections.abc import Iterable
 from datetime import datetime, timezone
+from fnmatch import fnmatchcase
 
 import yaml
 
@@ -44,6 +46,18 @@ from .repos import repo_exists, repo_is_archived, repo_missing
 SEMESTERS_PATH = "semesters.yml"
 
 INFRA_REPOS = {JOIN_REPO, CONFIG_REPO, ".github"}
+# The semester repo names a release may never land in, and what each is for: the
+# machinery above, the site, and the per-person repos (`reserved_destination`). The
+# console mirrors the data (`schemas.selection_json`).
+RESERVED_NAMES = {
+    CONFIG_REPO: "the semester's config",
+    ".github": "the organisation's profile",
+    JOIN_REPO: "the enrolment page",
+}
+RESERVED_PATTERNS = {
+    "*.github.io": "the semester's website",
+    f"{GRADEBOOK_PREFIX}*": "students' marks",
+}
 # The topic assign.py stamps on the frozen semester-side template it creates before
 # provisioning a single student repo (ensure_semester_template). Named here, and imported by
 # the one writer and the one reader, so the string cannot drift between them.
@@ -151,6 +165,23 @@ def _is_infra_repo(repo: dict) -> bool:
     if name in INFRA_REPOS or name.endswith(".github.io"):
         return True
     return _has_infra_topic(repo)
+
+
+def reserved_destination(name: str, assignment_stems: Iterable[str]) -> str | None:
+    """What a semester repo `name` is reserved for, or None when a release may land in
+    it: the config, profile, enrolment and site repos, a gradebook, or a student's or
+    team's `<stem>-<handle>` repo of one of `assignment_stems` (the plan's assignment
+    keys). Case-insensitive, as GitHub's names are."""
+    folded = name.strip().casefold()
+    for reserved, what in RESERVED_NAMES.items():
+        if folded == reserved.casefold():
+            return what
+    for pattern, what in RESERVED_PATTERNS.items():
+        if fnmatchcase(folded, pattern):
+            return what
+    if any(folded.startswith(f"{stem.casefold()}-") for stem in assignment_stems):
+        return "a student's repo"
+    return None
 
 
 def _has_infra_topic(repo: dict) -> bool:

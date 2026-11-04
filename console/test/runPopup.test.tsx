@@ -13,7 +13,7 @@ import { StaticFiles } from './staticFiles';
 import { StatusStore } from '../src/model/status';
 import { DispatchAdapter, stepsOf, type Adapter, type Handle, type Progress, type Result } from '../src/ops/adapter';
 import * as defs from '../src/ops/defs';
-import { OpButtons, OpPanel, targetOf } from '../src/ops/Panel';
+import { OpOpen, OpPanel, targetOf } from '../src/ops/Panel';
 import { PREVIEW_NOT_OFFERED, modeOf, opSpec } from '../src/ops/registry';
 import { OpsSession, type OpDef } from '../src/ops/session';
 import { MARKED_FROM_HINT, Questions } from '../src/screens/Course';
@@ -315,7 +315,7 @@ describe('See on GitHub', () => {
 describe('Preview buttons', () => {
   it('offers no Preview for derive: one button that runs it', async () => {
     const ops = session(new Scripted());
-    await mount(envOf(ops), <OpButtons def={defs.derive(course, 'assignment-2-f2026', 'assignment-2-f2026', 'Assignment 2')} small />);
+    await mount(envOf(ops), <OpOpen def={defs.derive(course, 'assignment-2-f2026', 'assignment-2-f2026', 'Assignment 2')} cls="btn small" />);
     expect(buttons().map((b) => b.textContent)).toEqual(['Derive student version']);
     await act(() => button('Derive student version')!.click());
     expect(ops.current.value?.mode).toBe('direct');
@@ -326,7 +326,7 @@ describe('Preview buttons', () => {
     const ops = session(adapter);
     const def = defs.sendCodes(scope, 3);
     expect(modeOf(def.op)).toBe('preview');
-    await mount(envOf(ops), <><OpButtons def={def} small /><OpPanel /></>);
+    await mount(envOf(ops), <><OpOpen def={def} cls="btn small" /><OpPanel /></>);
     // The verb and its `?`: no Preview beside it.
     expect(buttons().map((b) => b.textContent)).toEqual([def.verb, '?']);
     expect(buttons()[0].className).toBe('btn small');
@@ -340,7 +340,7 @@ describe('Preview buttons', () => {
   it('keeps a preview-only op’s single button, which previews', async () => {
     const ops = session(new Scripted());
     const def = defs.previewNext(scope);
-    await mount(envOf(ops), <OpButtons def={def} />);
+    await mount(envOf(ops), <OpOpen def={def} />);
     expect(buttons().map((b) => b.textContent)).toEqual([def.verb]);
     await act(() => buttons()[0].click());
     expect(ops.current.value?.mode).toBe('previewOnly');
@@ -360,7 +360,7 @@ describe('Hand out now', () => {
     const adapter = new Scripted();
     const ops = session(adapter);
     const def = defs.handout(scope, { slug: 'assignment-5', title: 'Assignment 5', template: 'assignment-5-f2026', units: 0, group: false, when: 'Hand out by hand' });
-    await mount(envOf(ops), <><OpButtons def={def} label="Hand out now" /><OpPanel /></>);
+    await mount(envOf(ops), <><OpOpen def={def} label="Hand out now" /><OpPanel /></>);
     expect([...root!.querySelectorAll('button')].map((b) => b.textContent?.trim())).toEqual(['Hand out now']);
     await act(() => (root!.querySelector('button') as HTMLElement).click());
     // Open, not running: the panel's verb (or Cancel) decides.

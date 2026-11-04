@@ -3634,3 +3634,49 @@ def test_a_copy_may_be_made_public_and_anything_else_is_flagged():
     out = schedule._parse_files(files, BERLIN, drops, "readings.r1")
     assert [d.public for d in out] == [True, False, False]
     assert len(drops.report) == 1 and "public" in drops.report[0]
+
+
+@pytest.mark.parametrize(
+    ("dest", "why"),
+    [
+        ("semester-config", "the semester's config"),
+        ("Sem.github.io", "the semester's website"),
+        ("grades-alice", "students' marks"),
+        ("hw1-alice", "a student's repo"),
+    ],
+)
+def test_a_copy_into_a_reserved_repo_is_dropped_at_parse(dest, why):
+    files = [
+        {"from_course_repo": "cm", "from_path": "labs/01", "to_semester_repo": dest}
+    ]
+    sched = _parse(
+        {
+            "labs": {"lab-1": {"event_datetime": "2026-09-15T14:00", "files": files}},
+            "assignments": {"hw1": {"template": "hw1-t", "due_datetime": "2026-10-13"}},
+        }
+    )
+    assert sched.releases[0].deploy == []
+    (fault,) = [f for f in sched.faults if f.field == "to_semester_repo"]
+    assert f"`to_semester_repo: {dest}` is reserved for {why}" in fault.what
+
+
+def test_validate_fails_on_a_copy_into_a_reserved_repo(monkeypatch, capsys, tmp_path):
+    f = tmp_path / "schedule.yml"
+    f.write_text(
+        "lectures:\n"
+        "  lecture-1:\n"
+        "    event_datetime: 2099-09-08T10:00\n"
+        "    files:\n"
+        "      - from_course_repo: cm\n"
+        "        from_path: lectures/01\n"
+        "        to_semester_repo: join\n"
+    )
+    monkeypatch.setattr("sys.argv", ["schedule", "--file", str(f), "--validate"])
+    assert schedule.main() == 1
+    assert "is reserved for the enrolment page" in capsys.readouterr().out
+
+
+def test_the_plan_carries_the_semesters_materials_repo():
+    instance = settings.Instance(materials_repo="handouts")
+    assert parse({}, instance).materials_repo == "handouts"
+    assert parse({}).materials_repo == schedule.DEFAULT_DEST_REPO

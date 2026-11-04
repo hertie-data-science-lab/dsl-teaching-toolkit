@@ -16,9 +16,11 @@ materials - a release, a hosted copy, the open site - asks `select` (a path list
 
     1. the institution's never-released names (`DENYLIST_HARD`) and `CLUTTER`: never
        copied anywhere, and a release naming one outright is refused (`deploy`)
-    2. the repo's `.releaseignore` files, over the institution's content names
-       (`DENYLIST_CONTENT`): withheld from a folder copy by default, as an implied first
-       line, so a `!solutions/` there releases them for that repo (decision B, 2026-11-04)
+    2. the repo's `.releaseignore` files. For a semester release (`RELEASE`) they sit
+       over the institution's content names (`DENYLIST_CONTENT`), withheld from a folder
+       copy by default as an implied first line, so a `!solutions/` there releases them
+       for that repo (decision B, 2026-11-04); for every other copy - the public sites -
+       the content names are floor, like layer 1
     3. the use-site selection
     4. `institution.yml selection_floor` for that use: a hard limit, applied last
 
@@ -47,7 +49,7 @@ from pathlib import Path
 from . import policy
 from .faults import Unusable
 from .fs import Deny
-from .releaseignore import Ignore, deny_for, excludes, listed
+from .releaseignore import Ignore, deny_with, excludes, listed, local
 
 KEYS = ("kinds", "types", "include", "exclude")
 
@@ -66,10 +68,11 @@ DENYLIST_HARD = (
     "grading_config.yml",
     "grading.yml",  # the pre-rename name; the engine stopped reading it, this list has not
 )
-# CONTENT: solutions and hidden tests. Withheld from a folder copy by default, as if the
-# root `.releaseignore` began with them, so a `!solutions/` line there releases them for
-# that repo (last match wins, anchored like any other line); a release naming one outright
-# ships it (decision 0040, coordinator ruling on PR #478).
+# CONTENT: solutions and hidden tests. Withheld from a semester release's folder copy by
+# default, as if the root `.releaseignore` began with them, so a `!solutions/` line there
+# releases them for that repo (last match wins, anchored like any other line); a release
+# naming one outright ships it (decision 0040, coordinator ruling on PR #478). Every other
+# copy - the public sites - never carries one (`RELEASE`).
 DENYLIST_CONTENT = ("solution", "solutions", "tests")
 # Both, for the callers that ask only "is this on the institution's list": the public
 # semester site and the student status file never name either group, released or not.
@@ -108,47 +111,55 @@ FLOOR_USES = (HOST, PUBLISH)
 _TYPE_ALIASES = {"htm": "html"}
 
 
+# The groups a name can be in (`group_of`): layer 1's, and the content names a release
+# lets a `!` line re-include.
+HARD = "hard"
+CONTENT = "content"
+CLUTTER_GROUP = "clutter"
+# What a semester release lets a `.releaseignore` `!` line re-include (decision B): the
+# content names, whose default is then layer 2's implied first line. Every other copy
+# re-includes nothing, the whole denylist its floor.
+RELEASE = (CONTENT,)
+
+
 def is_clutter(name: str) -> bool:
     """Whether one path COMPONENT is never course material (case-insensitive)."""
     return name.casefold() in _CLUTTER_FOLDED
 
 
-def _on(name: str, patterns: tuple[str, ...]) -> bool:
+def group_of(name: str) -> str | None:
+    """Which of the institution's lists one path COMPONENT is on (case-insensitive):
+    `HARD`, `CONTENT`, `CLUTTER_GROUP`, or None for course material."""
     folded = name.casefold()
-    return any(fnmatch(folded, pattern) for pattern in patterns)
+    if any(fnmatch(folded, pattern) for pattern in DENYLIST_HARD):
+        return HARD
+    if any(fnmatch(folded, pattern) for pattern in DENYLIST_CONTENT):
+        return CONTENT
+    return CLUTTER_GROUP if folded in _CLUTTER_FOLDED else None
 
 
-def is_denied(name: str) -> bool:
-    """Whether one path COMPONENT is on the institution denylist (case-insensitive)."""
-    return _on(name, DENYLIST)
+def part_groups(path: str) -> set[str]:
+    """The groups `path`'s components are in (`group_of`); empty for course material."""
+    return {g for part in path.split("/") if part and (g := group_of(part))}
 
 
-def is_hard_denied(name: str) -> bool:
-    """Whether one path COMPONENT is never released, by any route (`DENYLIST_HARD`)."""
-    return _on(name, DENYLIST_HARD)
+def defaulted(reincludable: Collection[str]) -> Callable[[str], bool] | None:
+    """The `.releaseignore` default a copy that re-includes the `reincludable` groups
+    reads by: a name in one is withheld unless a `!` line says otherwise."""
+    if not reincludable:
+        return None
+    return lambda name: group_of(name) in reincludable
 
 
-def is_content_denied(name: str) -> bool:
-    """Whether one path COMPONENT is withheld by default, a `!` line aside
-    (`DENYLIST_CONTENT`)."""
-    return _on(name, DENYLIST_CONTENT)
-
-
-def hard_denied(path: str) -> bool:
-    """Whether any component of `path` is never released (`DENYLIST_HARD`): a release
-    naming it is refused (`deploy`)."""
-    return any(is_hard_denied(p) for p in path.split("/") if p)
-
-
-def never_copied(path: str) -> bool:
-    """Whether any component of `path` is never released or is clutter: what no copy
-    carries, whatever a `.releaseignore` says."""
-    return any(is_hard_denied(p) or is_clutter(p) for p in path.split("/") if p)
+def release_ignore(root: Path) -> Ignore:
+    """The `.releaseignore` reading of the clone at `root` a semester release judges by:
+    faculty's lines over the content names' default (`RELEASE`)."""
+    return local(root, defaulted(RELEASE))
 
 
 def denied(path: str) -> bool:
     """Whether any component of `path` is on the denylist or is clutter: layer 1."""
-    return any(is_denied(p) or is_clutter(p) for p in path.split("/") if p)
+    return bool(part_groups(path))
 
 
 def publishable(path: str) -> bool:
@@ -345,10 +356,12 @@ def kept(
     use: Selection | None = None,
     withheld: Callable[[str], bool] | None = None,
     limit: Floor | None = None,
+    reincludable: Collection[str] = (),
 ) -> bool:
     """Whether one path survives every layer. `withheld` is layer 2 (a `.releaseignore`
-    predicate), `use` layer 3, `limit` layer 4; any left out is no filter."""
-    if denied(path):
+    predicate), `use` layer 3, `limit` layer 4; any left out is no filter. A group in
+    `reincludable` (`RELEASE`) is not layer 1's but `withheld`'s to judge."""
+    if part_groups(path) - set(reincludable):
         return False
     if withheld is not None and withheld(path):
         return False
@@ -384,28 +397,27 @@ def deny(
     use: Selection | None = None,
     kind_of: KindOf = _no_kind,
     limit: Floor | None = None,
-    content_floor: bool = False,
+    reincludable: Collection[str] = (),
+    ignore: Ignore | None = None,
 ) -> Deny:
     """The layers as a `copytree` filter over the clone at `root`. The denylist judges the
     names BELOW the path a copy names, never that path's own ancestors: it stops a folder
     copy SWEEPING up a `solutions/`, while a copy that names `solutions/labs/02` ships
-    exactly that (decision 0040, coordinator ruling on PR #478). A never-released name
-    (`DENYLIST_HARD`) and clutter are skipped whatever any line says; a content name
-    (`DENYLIST_CONTENT`) is the `.releaseignore` layer's implied first line, so a `!`
-    there re-includes it (decision B). A denied, `.releaseignore`-withheld or
-    `use`-excluded name is pruned (nothing inside it is walked), and each FILE must also
-    be kept by `use` and `limit`. A folder is never dropped for its kind: an `include`
-    may name a file inside one whose kind is out.
+    exactly that (decision 0040, coordinator ruling on PR #478). The whole denylist and
+    clutter are skipped whatever any line says - the public website's copy
+    (`public_site`), whose audience is the open internet. A semester release passes
+    `reincludable=RELEASE`: its content names (`DENYLIST_CONTENT`) are then the
+    `.releaseignore` layer's implied first line, so a `!` there re-includes them
+    (decision B), and `ignore` is its `release_ignore(root)` when it already has one. A
+    denied, `.releaseignore`-withheld or `use`-excluded name is pruned (nothing inside it
+    is walked), and each FILE must also be kept by `use` and `limit`. A folder is never
+    dropped for its kind: an `include` may name a file inside one whose kind is out."""
+    ignored = deny_with(root, ignore or local(root, defaulted(reincludable)))
+    reinclude = set(reincludable)
 
-    `content_floor` makes the content names a floor like the hard ones, no `!` line
-    re-including one: the public website's copy (`public_site`), whose audience is the
-    open internet rather than a semester's enrolled students."""
-    ignored = deny_for(root, default=None if content_floor else is_content_denied)
-    floored = is_denied if content_floor else is_hard_denied
-
-    def ignore(dirpath: str, names: list[str]) -> set[str]:
+    def deny_names(dirpath: str, names: list[str]) -> set[str]:
         here = Path(dirpath)
-        skip = {n for n in names if floored(n) or is_clutter(n)}
+        skip = {n for n in names if (g := group_of(n)) and g not in reinclude}
         skip |= ignored(dirpath, names)
         if use is None and limit is None:
             return skip
@@ -423,26 +435,7 @@ def deny(
                 skip.add(name)
         return skip
 
-    return ignore
-
-
-def swept(path: str, reincluded: Collection[str] = (), base: str = "") -> bool:
-    """Whether a path BELOW the one a copy names (`base`, the copy's own path in the
-    repo) has a denylisted component (clutter aside): what a folder copy leaves behind
-    (`schedule`'s warning, `divergence`). A content name whose node (repo path) is in
-    `reincluded` - a `!` line in the repo's `.releaseignore` re-includes it
-    (`releaseignore.judged_in_tree`) - is carried, as `deny` carries it; a never-released
-    one never is."""
-    parts = [p for p in path.split("/") if p]
-    prefix = base.strip("/")
-    for i, part in enumerate(parts):
-        if is_hard_denied(part):
-            return True
-        if is_content_denied(part):
-            node = "/".join([*([prefix] if prefix else []), *parts[: i + 1]])
-            if node not in reincluded:
-                return True
-    return False
+    return deny_names
 
 
 def release_use(whole_repo: bool, stubs: Iterable[str] = ()) -> Selection:

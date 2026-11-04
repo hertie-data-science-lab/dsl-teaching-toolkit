@@ -226,6 +226,9 @@ describe('the pieces', () => {
   it('names each inherited destination by who set it, the default destination first, once', () => {
     expect(inheritedInto({ value: 'lecture-code', source: 'course' }, { value: ['lecture-code', 'labs'], source: 'course' }, 'the course'))
       .toEqual([{ name: 'lecture-code', from: 'the course' }, { name: 'labs', from: 'the course' }]);
+    // status.json's per-item source, where it gives one.
+    expect(inheritedInto({ value: 'materials', source: 'institution' }, { value: ['materials', 'labs'], source: 'semester', items: [{ value: 'materials', source: 'institution' }, { value: 'labs', source: 'semester' }] }, 'the course'))
+      .toEqual([{ name: 'materials', from: 'the institution' }, { name: 'labs', from: 'this semester' }]);
   });
 
   it('lists the inherited default first, then the rest, and keeps a saved value the list lacks', () => {

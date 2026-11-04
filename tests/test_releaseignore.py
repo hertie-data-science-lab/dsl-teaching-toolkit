@@ -458,7 +458,7 @@ def test_a_nested_ignore_file_works_through_the_tree_adapter():
     )
 
 
-def test_judged_in_tree_names_what_a_bang_line_re_includes_over_the_default():
+def test_a_tree_carries_a_default_name_only_where_a_bang_line_re_includes_it():
     paths = [
         ".releaseignore",
         "labs/01/solutions/a.md",
@@ -466,10 +466,20 @@ def test_judged_in_tree_names_what_a_bang_line_re_includes_over_the_default():
         "tests/t.py",
     ]
     body = {".releaseignore": "!solutions/\nlabs/02/solutions/\n"}
-    withheld, reincluded = releaseignore.judged_in_tree(
-        paths, body.get, default=selection.is_content_denied
+    tree = releaseignore.from_tree(
+        paths, body.get, selection.defaulted(selection.RELEASE)
     )
-    assert reincluded == {"labs/01/solutions"}
-    assert "labs/02/solutions/b.md" in withheld
-    # Without a default nothing is re-included, and the withheld half is unchanged.
-    assert releaseignore.judged_in_tree(paths, body.get) == (withheld, frozenset())
+    assert tree.carries("labs/01", "labs/01/solutions/a.md")
+    assert not tree.carries("labs/02", "labs/02/solutions/b.md")  # the last line wins
+    assert not tree.carries("", "tests/t.py")  # withheld by default
+    # The default judges only BELOW the copy's own path: named outright, it ships.
+    assert tree.carries("tests", "tests/t.py")
+    # A faculty line judges the named path itself.
+    assert not tree.carries("labs/02/solutions", "labs/02/solutions/b.md")
+    # Without a default only faculty's lines judge.
+    plain = releaseignore.from_tree(paths, body.get)
+    assert plain.carries("", "tests/t.py")
+
+
+def test_ancestors_are_every_folder_above_each_path():
+    assert releaseignore.ancestors(["a/b/c.md", "d.md", "/e/f/"]) == {"a", "a/b", "e"}

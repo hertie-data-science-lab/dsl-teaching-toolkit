@@ -226,7 +226,7 @@ describe('the schedule editor’s forms, clicked through (forms mock-up v3)', ()
 
   it('adds an assignment with its changed run settings inline, in one commit', async () => {
     const gh = github(), f = files();
-    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'new', prefill: 'assignment-4-f2026' })} />);
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'new', prefill: { kind: 'template', repo: 'assignment-4-f2026' } })} />);
     await type('#e-hod', '2026-10-01');
     await type('#e-due', '2026-10-10');
     await type('#e-lw', '3');
@@ -239,14 +239,18 @@ describe('the schedule editor’s forms, clicked through (forms mock-up v3)', ()
 
   it('opens a new release with the Files panel’s picks and destinations prefilled (Schedule on the calendar)', async () => {
     const href = scheduleNewHref(COHORT_ORG, [
-      { from: 'course-materials-f2026', path: 'labs/week01' },
-      { from: 'lecture-code-f2026', path: 'demo.py', to: 'lecture-code', at: 'code/demo.py' },
+      { repo: 'course-materials-f2026', path: 'labs/week01', toRepo: 'materials', toPath: 'labs/week01' },
+      { repo: 'lecture-code-f2026', path: 'demo.py', toRepo: 'lecture-code', toPath: 'code/demo.py' },
     ]);
     expect(href.endsWith('#schedule-new')).toBe(true);
-    const release = parseSearch(href.split('#')[0]).release;
-    expect(release).toEqual({ from: ['course-materials-f2026', 'lecture-code-f2026'], paths: ['labs/week01', 'demo.py'], to: ['', 'lecture-code'], at: ['', 'code/demo.py'] });
+    const prefill = parseSearch(href.split('#')[0]).prefill;
+    expect(prefill).toEqual({ kind: 'files', rows: [
+      { repo: 'course-materials-f2026', path: 'labs/week01', toRepo: 'materials', toPath: 'labs/week01' },
+      { repo: 'lecture-code-f2026', path: 'demo.py', toRepo: 'lecture-code', toPath: 'code/demo.py' },
+    ] });
     const gh = github(), f = files();
-    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'new', prefillRelease: release })} />);
+    // The semester's default repo and the source's own path are left blank in the entry.
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'new', prefill })} />);
     expect(root!.textContent).toContain('Release supporting files');
     await type('#e-title', 'Week 1 lab');
     await type('#e-date0', '2026-10-01');
@@ -274,7 +278,7 @@ const declared: Loaded = { ...ready, status: { ...ready.status, assignments: [{ 
 describe('Save on an assignment entry handed out by hand', () => {
   async function addManual(gh: FakeGitHub, f: StaticFiles) {
     const env = envOf(gh, f);
-    await mount(env, <ScheduleScreen {...props(f, { entry: 'new', prefill: 'assignment-4-f2026' })} />);
+    await mount(env, <ScheduleScreen {...props(f, { entry: 'new', prefill: { kind: 'template', repo: 'assignment-4-f2026' } })} />);
     await handOut('hand');
     await type('#e-due', '2026-10-10');
     await click(button('Add assignment'));
@@ -331,7 +335,7 @@ describe('Save on an assignment entry handed out by hand', () => {
     const env = envOf(gh, f);
     await mount(env, <ScheduleScreen {...props(f, { entry: 'assignment-2', loaded: declared })} />);
     await handOut('hand');
-    await act(() => render(<EnvCtx.Provider value={env}><ScheduleScreen {...props(f, { entry: 'new', prefill: 'assignment-4-f2026', loaded: declared })} /></EnvCtx.Provider>, root!));
+    await act(() => render(<EnvCtx.Provider value={env}><ScheduleScreen {...props(f, { entry: 'new', prefill: { kind: 'template', repo: 'assignment-4-f2026' }, loaded: declared })} /></EnvCtx.Provider>, root!));
     await handOut('hand');
     await type('#e-due', '2026-10-10');
     await click(button('Add assignment'));
@@ -436,7 +440,7 @@ describe('Hand out now beside a saved entry handed out by hand', () => {
     await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'assignment-3', loaded: loaded({ ...waiting, state: 'open', handout: '2026-09-20T10:00:00+02:00' }) })} />);
     expect(handOutNow()).toBe(0);
     render(null, root!);
-    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'new', prefill: 'assignment-4-f2026', loaded: loaded(waiting) })} />);
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'new', prefill: { kind: 'template', repo: 'assignment-4-f2026' }, loaded: loaded(waiting) })} />);
     await handOut('hand');
     expect(handOutNow()).toBe(0);
   });

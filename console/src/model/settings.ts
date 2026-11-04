@@ -34,6 +34,8 @@ export type Block = Record<string, unknown>;
 export interface Effective {
   value: unknown;
   source: Source;
+  /** A merged list's items, each with the level that set it (`release_destinations`), where status.json says. */
+  items?: { value: unknown; source: Source }[];
 }
 
 /** Every effective value at one level, keyed as the files spell it (`assignment_repo_visibility`). */
@@ -175,6 +177,14 @@ export function over(key: RunKey, own: Block, source: Source, below: Effectives 
 }
 
 // ------------------------------------------------------------------ words
+
+/** Who set a value, as a phrase names them: "from the course", "Set by the institution". */
+export const SOURCE_NAME: Record<Source, string> = {
+  entry: 'this assignment',
+  semester: 'this semester',
+  course: 'the course',
+  institution: 'the institution',
+};
 
 export const SOURCE_WORD: Record<Source, string> = {
   entry: 'set for this assignment',

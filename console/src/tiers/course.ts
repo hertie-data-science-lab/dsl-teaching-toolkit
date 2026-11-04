@@ -5,7 +5,7 @@
 // destination (`materials_repo`) is a select over the level's Release into list when the page
 // draws that list (plan 2026-11-04, decision 7).
 
-import { REPO_NAME_RE, SOURCE_WORD, effectiveOf, valueWord, type Effective, type Effectives, type RunKey, type SemesterWideKey, type Source } from '../model/settings';
+import { REPO_NAME_RE, SOURCE_NAME, SOURCE_WORD, effectiveOf, valueWord, type Effective, type Effectives, type RunKey, type SemesterWideKey } from '../model/settings';
 import { CONTACTS, DEFAULT_TIMEZONE, POLICY } from '../model/policy';
 import { blank } from '../edit/yamlText';
 import { runTiers } from './runSettings';
@@ -40,14 +40,6 @@ export const COURSE_FACTS: Tiers = {
 /** The run settings a level's `defaults:` states (`settings.DEFAULT_KEYS`): no submit link, which is the assignment's. */
 export const DEFAULT_RUN_KEYS: RunKey[] = ['max_team_size', 'late_window_days', 'late_penalty_per_day', 'team_formation', 'visibility', 'marks_per_question'];
 
-/** Where an inherited value comes from, after its value: "materials, from the institution". */
-export const FROM_WORD: Record<Source, string> = {
-  entry: 'set for this assignment',
-  semester: 'from this semester',
-  course: 'from the course',
-  institution: 'from the institution',
-};
-
 /**
  * The default destination's choices: the inherited repo first, as "<repo>, from the course
  * (default)" with value `''`, then every other repo of `into`, and the saved value when the list
@@ -57,7 +49,7 @@ export function destinationOptions(fallback: Effective, into: string[], saved: u
   const fb = String(fallback.value ?? '');
   const cur = blank(saved) ? '' : String(saved);
   const rest = [...new Set([...into, ...(cur ? [cur] : [])])].filter((n) => n && n !== fb);
-  return [opt('', `${fb}, ${FROM_WORD[fallback.source]} (default)`), ...(cur === fb && cur ? [opt(fb, `${fb} (set here)`)] : []), ...rest.map((n) => opt(n, n))];
+  return [opt('', `${fb}, from ${SOURCE_NAME[fallback.source]} (default)`), ...(cur === fb && cur ? [opt(fb, `${fb} (set here)`)] : []), ...rest.map((n) => opt(n, n))];
 }
 
 /**

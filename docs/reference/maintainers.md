@@ -237,9 +237,9 @@ Things whose *literal spelling* is depended on from outside Python:
   `include_lectures`, `withhold`) and a materials repo's `publish.yml` are `legacy` rows the
   0.11.0 migration folds (`migrate.fold_open_site`, `migrate.publish_host`).
 - **`selection`** is the one rule for every outbound copy (decision 0040): the institution
-  denylist (`DENYLIST`, `CLUTTER`; on a release it judges only what lies BELOW the named
-  path, so `from_path: solutions/labs/02` ships while a lab folder's `solutions/` stays
-  behind), then `.releaseignore`, then the use's Selection
+  denylist (`DENYLIST`, `CLUTTER`, one name's group by `group_of`; on a release it judges
+  only what lies BELOW the named path, so `from_path: solutions/labs/02` ships while a lab
+  folder's `solutions/` stays behind), then `.releaseignore`, then the use's Selection
   (`semester.yml student_site.host`, `open_course_site.publish`; a release has none but
   the root `.github/` and unwritten stubs), then `institution.yml selection_floor`. `select`
   answers a path list, `deny` a `copytree` walk. A file's kind is the schedule block of the
@@ -248,6 +248,12 @@ Things whose *literal spelling* is depended on from outside Python:
   in `console/schemas/selection.json` and to the demo fixture's hosting
   (`console/test/fixtures/demo-hosting.json`, both checked by `tests/test_selection.py`).
   `propagate` keeps its own plumbing filter: it carries edits IN, so the denylist is not its.
+  The whole denylist is every copy's floor unless the caller passes `reincludable=RELEASE`:
+  only a semester release (`deploy`, and `divergence`/`schedule` judging as it does through
+  `releaseignore.Tree.carries`) lets a `!solutions/` line re-include the content names; the
+  public website never does. `discovery.reserved_destination` names the semester repos no
+  release lands in (`deploy`, the schedule parse, the `materials_repo` /
+  `release_destinations` readers; exported to `selection.json` as `reserved`).
   An assignment's copies are outside it too (decision 0040 amendment): the template copy
   (`assign.withhold_from_template`) and the solution push (`assign.push_solution`) carry exactly
   the template's files, `tests/` and grading files included, less only what the template's own
@@ -728,7 +734,7 @@ One hand-edited file per level (decision 0039), each with the same fixed `defaul
 resolves nearest first, per key never per block, and `settings.resolve` returns `(value, source)`;
 `release_destinations` (`settings.MERGED_KEYS`, the console's "Release into" list; the engine only
 reports it in status.json) is instead every layer's names together, the source the nearest layer
-adding any:
+adding any, and status.json's `items` each name with the layer that added it (`settings.merged_items`):
 
 | Source | File | Key |
 |---|---|---|

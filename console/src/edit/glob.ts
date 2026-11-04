@@ -2,13 +2,27 @@
 // `withhold` (both use gitignore's syntax; the last matching pattern wins, `!` re-includes).
 // The preview reads the repo's root file only; nested `.releaseignore` files still apply
 // when the engine copies.
+//
+// Decision B (2026-11-04): `compileAll(lines, { defaults: true })` reads a `.releaseignore` as the
+// engine does (`selection.deny`), the institution's content names (`solutions`, `tests`) as
+// implied first lines: matched case aside, at any depth, so a `!` line that matches one later
+// re-includes it, the last match winning.
+
+import { DENYLIST_CONTENT } from '../model/selection';
 
 export interface Rule {
   re: RegExp;
   neg: boolean;
   dirOnly: boolean;
-  /** The pattern line as written, trimmed. */
+  /** The pattern line as written, trimmed (the content name, for a default rule). */
   line: string;
+  /** One of the institution's content names, implied before the list's own lines. */
+  default?: true;
+}
+
+export interface CompileOpts {
+  /** The institution's content names first, as `.releaseignore` reads them on a copy. */
+  defaults?: boolean;
 }
 
 function toRegex(glob: string): string {
@@ -61,10 +75,20 @@ function hits(r: Rule, path: string, isDir: boolean): boolean {
   return false;
 }
 
-/** The pattern list's rules, compiled once for matching many paths. */
-export function compileAll(lines: string[]): Rule[] {
-  return lines.map(compile).filter((r): r is Rule => r !== null);
+/** The content names as rules: any depth, case aside (`selection.is_content_denied`). */
+const contentRules = (): Rule[] => DENYLIST_CONTENT.map((name) => {
+  const r = compile(name)!;
+  return { ...r, re: new RegExp(r.re.source, 'i'), default: true as const };
+});
+
+/** The pattern list's rules, compiled once for matching many paths; with `defaults`, the content names first. */
+export function compileAll(lines: string[], o: CompileOpts = {}): Rule[] {
+  const own = lines.map(compile).filter((r): r is Rule => r !== null);
+  return o.defaults ? [...contentRules(), ...own] : own;
 }
+
+/** Whether `rules` were compiled with the institution's content names. */
+export const carriesDefaults = (rules: Rule[]) => rules.some((r) => r.default);
 
 /** Whether `path` matches the rules, gitignore style: the last matching rule decides. */
 export function matchRules(rules: Rule[], path: string, isDir = false): boolean {
@@ -78,10 +102,10 @@ export function matches(lines: string[], path: string, isDir = false): boolean {
   return matchRules(compileAll(lines), path, isDir);
 }
 
-/** The rule that decides `path` itself (not its folders), gitignore style: the last one matching it, or null. */
-export function deciding(rules: Rule[], path: string, isDir: boolean): Rule | null {
+/** The rule that decides `path` itself (not its folders), gitignore style: the last one matching it, or null; `own` leaves the default rules out. */
+export function deciding(rules: Rule[], path: string, isDir: boolean, own = false): Rule | null {
   let hit: Rule | null = null;
-  for (const r of rules) if ((!r.dirOnly || isDir) && r.re.test(path)) hit = r;
+  for (const r of rules) if ((!r.dirOnly || isDir) && !(own && r.default) && r.re.test(path)) hit = r;
   return hit;
 }
 
@@ -89,33 +113,15 @@ export function deciding(rules: Rule[], path: string, isDir: boolean): Rule | nu
  * Git's own rule, as the engine applies it (`releaseignore.Ignore.excludes`): each folder on the
  * way down is judged first, and a withheld folder is never walked, so nothing inside it can be
  * re-included. The rule that withholds `path` and where it matched (`path` itself or a folder
- * above it), or null.
+ * above it), or null. `below`: a folder copy of that folder, which judges the content names only
+ * below it (`selection.deny`); the list's own lines still apply at every level.
  */
-export function withheldBy(rules: Rule[], path: string, isDir = false): { rule: Rule; at: string } | null {
+export function withheldBy(rules: Rule[], path: string, isDir = false, below?: string): { rule: Rule; at: string } | null {
   const parts = path.split('/').filter(Boolean);
   for (let i = 1; i <= parts.length; i++) {
     const at = parts.slice(0, i).join('/');
-    const r = deciding(rules, at, i < parts.length || isDir);
+    const r = deciding(rules, at, i < parts.length || isDir, below !== undefined && at.length <= below.length);
     if (r && !r.neg) return { rule: r, at };
-  }
-  return null;
-}
-
-/**
- * What a release's folder copy does with `path` (`selection.deny`, decision B): `withheldBy`
- * with the institution's content names (`byDefault`, one component at a time) as an implied
- * first line, so a `!` line that matches one re-includes it, the last match winning (`at`, the
- * path so far, lets a caller judge only the names below the folder it copies). The line
- * that withholds it (null: the default) and where, or null when the copy carries it.
- */
-export function withheldOnCopy(rules: Rule[], path: string, isDir: boolean, byDefault: (name: string, at: string) => boolean): { rule: Rule | null; at: string } | null {
-  const parts = path.split('/').filter(Boolean);
-  for (let i = 1; i <= parts.length; i++) {
-    const at = parts.slice(0, i).join('/');
-    const r = deciding(rules, at, i < parts.length || isDir);
-    if (r) {
-      if (!r.neg) return { rule: r, at };
-    } else if (byDefault(parts[i - 1], at)) return { rule: null, at };
   }
   return null;
 }

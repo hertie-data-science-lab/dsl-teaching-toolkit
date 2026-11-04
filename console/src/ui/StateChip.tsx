@@ -5,7 +5,7 @@
 // institution's names in two: never released (no route ships one, its own chip) and the content
 // names (withheld, like a `.releaseignore` line's row, until a `!` line releases one).
 
-import type { FileState as ReleaseState } from '../model/releaseState';
+import { STATE_WORDS, type FileState as ReleaseState } from '../model/releaseState';
 import { Hint } from './Hint';
 
 export type ChipKind = Exclude<ReleaseState, 'unknown'> | 'withheld' | 'never_copied' | 'never_released';
@@ -14,18 +14,15 @@ export type ChipKind = Exclude<ReleaseState, 'unknown'> | 'withheld' | 'never_co
 export const NEVER_RELEASED_TITLE = 'Never released: on the institution’s list.';
 
 const CHIPS: Record<ChipKind, { word: string; cls: string; title: string }> = {
-  up_to_date: { word: 'up to date', cls: 'muted', title: 'The semester has this version.' },
-  behind: { word: 'behind', cls: 'amber', title: 'The course copy changed since the release; a release updates the semester.' },
-  ahead: { word: 'ahead', cls: 'semester', title: 'Edited in the semester since the release; a release merges onto that edit.' },
-  diverged: { word: 'diverged', cls: 'bad', title: 'Changed in both the course and the semester; a release opens a pull request for the instructors.' },
-  not_released: { word: 'not released', cls: '', title: 'Not in the semester yet; a release adds it.' },
+  up_to_date: { word: STATE_WORDS.up_to_date, cls: 'muted', title: 'The semester has this version.' },
+  behind: { word: STATE_WORDS.behind, cls: 'amber', title: 'The course copy changed since the release; a release updates the semester.' },
+  ahead: { word: STATE_WORDS.ahead, cls: 'semester', title: 'Edited in the semester since the release; a release merges onto that edit.' },
+  diverged: { word: STATE_WORDS.diverged, cls: 'bad', title: 'Changed in both the course and the semester; a release opens a pull request for the instructors.' },
+  not_released: { word: STATE_WORDS.not_released, cls: '', title: 'Not in the semester yet; a release adds it.' },
   withheld: { word: 'withheld', cls: 'muted', title: 'A .releaseignore line, or the institution’s default, keeps it from students.' },
   never_copied: { word: 'never copied', cls: 'muted', title: 'Clutter such as .DS_Store: never course material.' },
   never_released: { word: 'never released', cls: 'muted', title: NEVER_RELEASED_TITLE },
 };
-
-/** The chip's word, as a folder roll-up and the tests read it. */
-export const chipWord = (k: ChipKind) => CHIPS[k].word;
 
 export interface StateChipProps {
   kind: ChipKind;

@@ -6,9 +6,10 @@
 
 import { useState } from 'preact/hooks';
 import type { GhRepo } from '../github/client';
+import type { ReposState } from '../model/files';
 import { DEFAULTS } from '../model/policy';
 import { eligibleDestination, type Reserved } from '../model/releaseState';
-import type { Effective } from '../model/settings';
+import { SOURCE_NAME, effectiveOf, type Effective, type Effectives } from '../model/settings';
 import type { Status } from '../model/types';
 import { Hint } from './Hint';
 import { RepoPickerModal, type RepoRow } from './RepoPickerModal';
@@ -19,19 +20,19 @@ export interface FixedChip {
   from: string;
 }
 
-const FROM: Record<string, string> = { institution: 'the institution', course: 'the course', semester: 'this semester' };
-
 /**
  * The Release into chips a level inherits: the default destination it inherits (always allowed),
- * then the inherited `release_destinations`, each named by the institution when the institution
- * lists it, else by `nearest` (the level below that added it: the course, for a semester).
+ * then the inherited `release_destinations`, each named by the level that set it: status.json's
+ * per-item source where it gives one, else the institution when the institution lists it, else
+ * `nearest` (the level below that added it: the course, for a semester).
  */
 export function inheritedInto(dest: Effective, into: Effective | undefined, nearest: 'the course' | 'the institution'): FixedChip[] {
   const out: FixedChip[] = [];
   const add = (name: string, from: string) => name && !out.some((c) => c.name === name) && out.push({ name, from });
-  add(String(dest.value ?? ''), FROM[dest.source] ?? nearest);
-  const inst = DEFAULTS.release_destinations ?? [];
-  for (const n of Array.isArray(into?.value) ? (into.value as unknown[]).map(String) : []) add(n, inst.includes(n) ? FROM.institution : nearest);
+  add(String(dest.value ?? ''), SOURCE_NAME[dest.source] ?? nearest);
+  const inst: unknown[] = DEFAULTS.release_destinations ?? [];
+  const items = into?.items ?? (Array.isArray(into?.value) ? (into.value as unknown[]).map((value) => ({ value, source: inst.includes(value) ? ('institution' as const) : null })) : []);
+  for (const it of items) add(String(it.value), it.source ? SOURCE_NAME[it.source] : nearest);
   return out;
 }
 
@@ -44,13 +45,28 @@ export function studentRepos(names: string[], status: Status | null | undefined)
   return names.filter((n) => stems.some((s) => n.toLowerCase().startsWith(s)));
 }
 
-/** The picker's rows: the semester's repos a release may write into, not listed already. */
+/** The picker's rows: the semester's repos a release may write into, not listed already, archived ones aside, by name. */
 export function destinationRows(repos: GhRepo[], listed: string[], reserved: Reserved): RepoRow[] {
   const have = new Set(listed.map((n) => n.toLowerCase()));
   return repos
     .filter((r) => !r.archived && !have.has(r.name.toLowerCase()) && eligibleDestination(r.name, reserved) === null)
     .map((r) => ({ name: r.name, note: 'in the semester' }))
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * A level's Release into, worked out once for its page: the chips it inherits from `inherited`
+ * (named by `nearest` where nothing says who), its own list `own` (as its form holds it), every
+ * name listed, the semester `org`'s names it refuses (`repos`, its repo list, and `status`, for
+ * the student repos) and the picker's rows.
+ */
+export function releaseIntoOf(o: { inherited: Effectives; nearest: 'the course' | 'the institution'; own: unknown; org: string; repos: ReposState | null; status: Status | null | undefined }) {
+  const fixed = inheritedInto(effectiveOf(o.inherited, 'materials_repo'), o.inherited.release_destinations, o.nearest);
+  const own = ownInto(o.own);
+  const into = [...fixed.map((c) => c.name), ...own];
+  const list = o.repos?.kind === 'ready' ? o.repos.repos : [];
+  const reserved: Reserved = { org: o.org, students: studentRepos(list.map((r) => r.name), o.status) };
+  return { fixed, own, into, reserved, rows: destinationRows(list, into, reserved) };
 }
 
 interface ChipsProps {
@@ -94,8 +110,8 @@ export function RepoChips(p: ChipsProps) {
 
 /**
  * Release into: the inherited chips, the level's own (`own`, written back through `onChange`)
- * and Add…, which opens "Choose a destination repo" over `rows` or a typed name that
- * `eligibleDestination` accepts.
+ * and Add…, which opens "Choose a destination repo" over `rows` (`releaseIntoOf`'s, which leave
+ * out every name listed) or a typed name that `eligibleDestination` accepts.
  */
 export function ReleaseInto({ id, hint, defaultLabel, fixed, own, onChange, rows, reserved }: {
   id: string;
@@ -116,7 +132,7 @@ export function ReleaseInto({ id, hint, defaultLabel, fixed, own, onChange, rows
     <>
       <RepoChips id={id} label="Release into" hint={hint} defaultLabel={defaultLabel} fixed={fixed} own={own} addLabel="Add…"
         onRemove={onChange ? (n) => set(own.filter((x) => x !== n)) : undefined} onAdd={onChange ? () => setAdding(true) : undefined} />
-      {adding ? <RepoPickerModal kind="dest" rows={rows.filter((r) => !listed.includes(r.name))} reserved={reserved} onChoose={add} onClose={() => setAdding(false)} /> : null}
+      {adding ? <RepoPickerModal kind="dest" rows={rows} reserved={reserved} onChoose={add} onClose={() => setAdding(false)} /> : null}
     </>
   );
 }

@@ -121,7 +121,7 @@ from .opencourse import load as load_opencourse
 from .opencourse import parse as parse_opencourse
 from .ops.outcome import OUTCOMES_DIR
 from .ops.registry import STATUS_SCHEMA
-from .releaseignore import RELEASEIGNORE, reviewed
+from .releaseignore import RELEASEIGNORE, Tree, reviewed
 from .repos import default_branch
 from .schedule_plan import (
     PlannedRow,
@@ -281,14 +281,12 @@ class SemesterFacts:
     dest_branches: dict[str, str] = field(default_factory=dict)  # and their branches
     # Decision 0043 rule 6, the divergence check's inputs: each recorded copy's manifest,
     # the files of each dest tree above, and of each source repo a recorded copy of the
-    # plan draws on (None: it could not be read), what its `.releaseignore` withholds
-    # and its default branch.
+    # plan draws on (None: it could not be read), its `.releaseignore` reading as a
+    # release judges by (`schedule.source_withheld`) and its default branch.
     manifests: dict[release_record.Key, dict[str, str]] = field(default_factory=dict)
     dest_blobs: dict[str, dict[str, str]] = field(default_factory=dict)
     source_blobs: dict[str, dict[str, str] | None] = field(default_factory=dict)
-    source_withheld: dict[str, frozenset[str]] = field(default_factory=dict)
-    # and the content names a `!` line in it re-includes (decision B)
-    source_reincluded: dict[str, frozenset[str]] = field(default_factory=dict)
+    source_withheld: dict[str, Tree] = field(default_factory=dict)
     source_branches: dict[str, str] = field(default_factory=dict)
     # `{(source repo, root stub path): still the placeholder}` for every copy the plan
     # makes of a root SYLLABUS.md / README.md: the release leaves such a copy out.
@@ -2476,9 +2474,8 @@ def divergence_problems(
                 d.course_source_path,
                 k[3],
                 blobs,
-                facts.source_withheld.get(k[0], frozenset()),
+                facts.source_withheld.get(k[0]) or schedule.release_tree(blobs),
                 unwritten,
-                facts.source_reincluded.get(k[0], frozenset()),
             )
         )
         dest_blobs = facts.dest_blobs.get(k[2])
@@ -2904,9 +2901,7 @@ def _gather_sources(course_org: str, facts: SemesterFacts) -> None:
             facts.source_blobs[repo] = None
             continue
         blobs = facts.source_blobs[repo] = divergence.blobs_of(shas)
-        judged = schedule.source_withheld(course_org, repo, shas)
-        facts.source_withheld[repo] = judged.withheld
-        facts.source_reincluded[repo] = judged.reincluded
+        facts.source_withheld[repo] = schedule.source_withheld(course_org, repo, shas)
         facts.source_branches[repo] = default_branch(course_org, repo, fallback="main")
         for k, files in facts.manifests.items():
             if k[0] != repo or k[1] or k not in plan:

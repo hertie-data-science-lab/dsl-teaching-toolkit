@@ -58,7 +58,7 @@ const NAV_KEY = 'console-nav';
  * narrow-screen drawer does. The choice is kept in this browser. Below 860px the drawer applies
  * and the handle is hidden (styles/shell.css). `onToggle` closes an open drawer.
  */
-export function NavHandle({ onToggle }: { onToggle?: () => void }) {
+export function NavHandle({ onToggle }: { onToggle: () => void }) {
   const [collapsed, setCollapsed] = useState(() => readText(safeStorage('local'), NAV_KEY) === 'collapsed');
   // Before paint, so a collapsed nav never flashes open on load.
   useLayoutEffect(() => {
@@ -69,8 +69,7 @@ export function NavHandle({ onToggle }: { onToggle?: () => void }) {
   const toggle = () => {
     const next = !collapsed;
     writeText(safeStorage('local'), NAV_KEY, next ? 'collapsed' : 'open');
-    document.body.classList.remove('nav-open');
-    onToggle?.();
+    onToggle();
     setCollapsed(next);
   };
   return (

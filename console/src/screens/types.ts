@@ -4,7 +4,7 @@ import type { Files } from '../model/files';
 import type { Heartbeat } from '../model/heartbeat';
 import type { Loaded } from '../model/status';
 import type { Status } from '../model/types';
-import type { AssignmentOpen, AssignmentTab, ReleasePrefill } from '../router';
+import type { AssignmentOpen, AssignmentTab, Prefill } from '../router';
 
 /** What every semester screen renders from. */
 export interface CohortProps {
@@ -19,10 +19,8 @@ export interface CohortProps {
   /** What the Marks tab opens on arrival, when the route names it. */
   open?: AssignmentOpen;
   heartbeat?: Heartbeat | null;
-  /** A template for the schedule editor's new entry (`?template=`, from New assignment). */
-  prefill?: string;
-  /** Files for the schedule editor's new release entry (`?from=&paths=`, from the Files panel). */
-  prefillRelease?: ReleasePrefill;
+  /** The schedule editor's new entry: a template (`?template=`, from New assignment) or a release's files (`?from=&paths=`, from the Files panel). */
+  prefill?: Prefill;
   /** The course's public status, read for the side nav anyway: its template list is fresher than the semester's copy. Absent in render tests. */
   courseLoaded?: Loaded;
   /** A folder to open on Released materials (`?folder=<repo>/<path>`). */

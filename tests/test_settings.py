@@ -601,10 +601,39 @@ def test_release_destinations_keep_the_repo_names_and_drop_the_rest():
     read = settings.parse_instance(
         "defaults:\n  release_destinations: [datasets, 'bad name', datasets, handouts]\n"
     )
-    assert read.defaults == {"release_destinations": ["datasets", "handouts"]}
+    # Read as written; the merge across the layers says each name once (`resolve`).
+    assert read.defaults == {
+        "release_destinations": ["datasets", "datasets", "handouts"]
+    }
+    stack = [("semester", read.defaults)]
+    assert settings.resolve("release_destinations", stack)[0] == [
+        "datasets",
+        "handouts",
+    ]
     (fault,) = read.faults
     assert fault.field == "release_destinations" and fault.lineno == 2
     assert "`release_destinations: bad name` is not a repo name" in fault.what
+
+
+@pytest.mark.parametrize(
+    ("name", "why"),
+    [
+        ("semester-config", "the semester's config"),
+        (".github", "the organisation's profile"),
+        ("Sem-f2026.github.io", "the semester's website"),
+        ("join", "the enrolment page"),
+        ("grades-alice", "students' marks"),
+    ],
+)
+def test_a_reserved_repo_is_never_a_release_destination(name, why):
+    for key, written, read_as in (
+        ("materials_repo", f"'{name}'", None),
+        ("release_destinations", f"['{name}', datasets]", ["datasets"]),
+    ):
+        read = settings.parse_instance(f"defaults:\n  {key}: {written}\n")
+        assert read.defaults == {key: read_as}
+        (fault,) = read.faults
+        assert fault.field == key and f"is reserved for {why} - ignored" in fault.what
 
 
 def test_release_destinations_that_are_not_a_list_state_nothing():
@@ -640,7 +669,30 @@ def test_release_destinations_merge_course_then_semester(
         "" if semester is None else f"defaults:\n  release_destinations: {semester}\n"
     )
     monkeypatch.setattr(settings, "_semester_text", lambda org: text)
-    assert settings.effective_defaults("C", "Sem")["release_destinations"] == {
+    got = settings.effective_defaults("C", "Sem")["release_destinations"]
+    assert {k: got[k] for k in ("value", "source")} == {
         "value": expected[0],
         "source": expected[1],
     }
+    assert [item["value"] for item in got["items"]] == expected[0]
+
+
+def test_each_merged_destination_names_the_layer_that_added_it(monkeypatch):
+    monkeypatch.setattr(
+        settings,
+        "org_meta",
+        lambda org: {"defaults": {"release_destinations": ["datasets", "handouts"]}},
+    )
+    monkeypatch.setattr(
+        settings,
+        "_semester_text",
+        lambda org: "defaults:\n  release_destinations: [handouts, extra]\n",
+    )
+    got = settings.effective_defaults("C", "Sem")["release_destinations"]
+    assert got["source"] == "semester"
+    # A name both layers list is the course's: the semester adds nothing by repeating it.
+    assert got["items"] == [
+        {"value": "datasets", "source": "course"},
+        {"value": "handouts", "source": "course"},
+        {"value": "extra", "source": "semester"},
+    ]

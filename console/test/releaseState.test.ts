@@ -4,12 +4,12 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { refreshAfterRun } from '../src/app';
-import { buildTree, neverMaterial } from '../src/edit/badges';
+import { buildTree, treeModel } from '../src/edit/badges';
 import { compileAll } from '../src/edit/glob';
 import { LiveFiles, type TreeState } from '../src/model/files';
 import { DEFAULT_DEST_REPO } from '../src/model/policy';
 import {
-  countsWords, destPathOf, destRepos, disabledTick, effectiveDestRepo, eligibleDestination, fileStates, folderCounts, groupPicks, requestOf, type Group,
+  countsWords, destPathOf, destRepos, effectiveDestRepo, eligibleDestination, fileStates, foldersCopied, groupPicks, requestOf, toArgs, type FileState, type Group,
 } from '../src/model/releaseState';
 import type { Loaded } from '../src/model/status';
 import { releaseAdhoc, releasePicked } from '../src/ops/defs';
@@ -65,13 +65,16 @@ describe('each file’s state', () => {
 
 describe('a folder’s roll-up', () => {
   const files = ['lectures/a.md', 'lectures/b.md', 'lectures/c.md', 'lectures/.DS_Store', 'lectures/d.md', 'lectures/e.md'];
-  const [node] = buildTree(files);
-  const states = { 'lectures/a.md': 'behind', 'lectures/b.md': 'behind', 'lectures/c.md': 'ahead', 'lectures/d.md': 'not_released', 'lectures/e.md': 'not_released', 'lectures/.DS_Store': 'not_released' } as const;
+  const states: Record<string, FileState> = { 'lectures/a.md': 'behind', 'lectures/b.md': 'behind', 'lectures/c.md': 'ahead', 'lectures/d.md': 'not_released', 'lectures/e.md': 'not_released', 'lectures/.DS_Store': 'not_released' };
 
   it('counts the files left in, in the short words, zero parts omitted', () => {
-    const n = folderCounts(node, states, (p) => neverMaterial(p) || p === 'lectures/e.md');
-    expect(n).toEqual({ behind: 2, ahead: 1, not_released: 1 });
-    expect(countsWords(n)).toBe('2 behind · 1 ahead · 1 not released');
+    const lines = ['/lectures/e.md'];
+    const rows = treeModel(buildTree(files), compileAll(lines, { defaults: true }), lines, { state: (p) => states[p] });
+    const n = rows.get('lectures')!;
+    expect(n.states).toEqual({ behind: 2, ahead: 1, not_released: 1 });
+    // The withheld file and the never-material one.
+    expect(n.withheld).toBe(2);
+    expect(countsWords(n.states)).toBe('2 behind · 1 ahead · 1 not released');
     expect(countsWords({ up_to_date: 3, diverged: 1, unknown: 2 })).toBe('1 diverged · 3 up to date');
     expect(countsWords({})).toBe('');
   });
@@ -81,7 +84,8 @@ describe('the manifest’s groups', () => {
   const FILES = ['labs/lab-1.ipynb', 'labs/lab-2.ipynb', 'labs/solutions/s1.ipynb', 'labs/draft.md', 'labs/.DS_Store',
     'lectures/01_intro/notes.md', 'lectures/01_intro/slides.pdf', 'lectures/01_intro/extra.md', 'lectures/02_trees/notes.md',
     'README.md', 'SYLLABUS.md', 'tests/check.py'];
-  const trees = { 'course-materials-f2026': { files: FILES, rules: compileAll(['/labs/draft.md']) }, other: { files: ['x/a.md', 'b.md'], rules: [] } };
+  const D = { defaults: true };
+  const trees = { 'course-materials-f2026': { files: FILES, rules: compileAll(['/labs/draft.md'], D) }, other: { files: ['x/a.md', 'b.md'], rules: compileAll([], D) } };
   const pick = (path: string, dir = false, repo = 'course-materials-f2026') => ({ repo, path, dir });
 
   it('groups by immediate parent in tree order: a picked folder whole, sibling files n of m, top level last', () => {
@@ -111,7 +115,7 @@ describe('the manifest’s groups', () => {
   });
 
   it('ships a content name a ! line re-includes, and leaves a never-released name, named or swept, as never released', () => {
-    const t = { r: { files: ['labs/a.md', 'labs/solutions/s1.ipynb', 'labs/.env', 'grading.yml'], rules: compileAll(['!solutions/']) } };
+    const t = { r: { files: ['labs/a.md', 'labs/solutions/s1.ipynb', 'labs/.env', 'grading.yml'], rules: compileAll(['!solutions/'], D) } };
     const [labs, top] = groupPicks([pick('labs', true, 'r'), pick('grading.yml', false, 'r')], t);
     expect(labs.ship).toEqual(['labs/a.md', 'labs/solutions/s1.ipynb']);
     expect(labs.withheld).toEqual([{ path: 'labs/.env', rule: null, never: true }]);
@@ -119,7 +123,7 @@ describe('the manifest’s groups', () => {
     expect(top.sources).toEqual([]);
     expect(top.withheld).toEqual([{ path: 'grading.yml', rule: null, never: true }]);
     // Without the ! line the default withholds it again.
-    expect(groupPicks([pick('labs', true, 'r')], { r: { ...t.r, rules: [] } })[0].withheld).toContainEqual({ path: 'labs/solutions/s1.ipynb', rule: null });
+    expect(groupPicks([pick('labs', true, 'r')], { r: { ...t.r, rules: compileAll([], D) } })[0].withheld).toContainEqual({ path: 'labs/solutions/s1.ipynb', rule: null });
   });
 
   it('keeps each repo’s picks together, in the order the repos were first picked', () => {
@@ -131,7 +135,9 @@ describe('the manifest’s groups', () => {
     const g = groupPicks([pick('labs', true), pick('lectures/01_intro/notes.md'), pick('lectures/01_intro/slides.pdf'), pick('b.md', false, 'other')], trees);
     g[1] = { ...g[1], destRepo: 'slides', destPath: 'week1/' };
     expect(destPathOf(g[1], 'lectures/01_intro/notes.md')).toBe('week1/notes.md');
-    expect(requestOf(g, { defaultDestRepo: 'materials' })).toEqual({
+    const rows = requestOf(g, { defaultDestRepo: 'materials' });
+    expect(rows[1]).toEqual({ repo: 'course-materials-f2026', path: 'lectures/01_intro/notes.md', toRepo: 'slides', toPath: 'week1/notes.md' });
+    expect(toArgs(rows)).toEqual({
       course_source_repo: 'course-materials-f2026,course-materials-f2026,course-materials-f2026,other',
       course_source_path: 'labs,lectures/01_intro/notes.md,lectures/01_intro/slides.pdf,b.md',
       semester_dest_repo: 'materials,slides,slides,materials',
@@ -152,21 +158,21 @@ describe('the manifest’s groups', () => {
   });
 });
 
-describe('a disabled tick', () => {
+describe('a disabled folder tick', () => {
   const files = ['labs/a.md', 'only/solutions/s.md', 'only/.DS_Store', 'tests/t.py', 'keys/.env', 'keys/.DS_Store'];
-  it('is an up-to-date file, or a folder whose copy would take nothing', () => {
-    expect(disabledTick('labs/a.md', false, 'up_to_date', files)).toBe(true);
-    expect(disabledTick('labs/a.md', false, 'behind', files)).toBe(false);
-    expect(disabledTick('only', true, undefined, files)).toBe(true);
-    expect(disabledTick('keys', true, undefined, files)).toBe(true);
-    expect(disabledTick('labs', true, undefined, files)).toBe(false);
-    // The denylist judges the names below the folder a copy names (`selection.deny`): `tests/` named ships.
-    expect(disabledTick('tests', true, undefined, files)).toBe(false);
+  const copied = (lines: string[] = []) => foldersCopied(files, compileAll(lines, { defaults: true }));
+  it('is a folder whose copy would take nothing', () => {
+    expect(copied().has('only')).toBe(false);
+    expect(copied().has('keys')).toBe(false);
+    expect(copied().has('labs')).toBe(true);
+    // The denylist judges the names below the folder a copy names (`selection.deny`): `tests/` and `only/solutions/` named ship.
+    expect(copied().has('tests')).toBe(true);
+    expect(copied().has('only/solutions')).toBe(true);
   });
 
   it('follows a ! line that re-includes a content name, never a never-released one', () => {
-    expect(disabledTick('only', true, undefined, files, compileAll(['!solutions/']))).toBe(false);
-    expect(disabledTick('keys', true, undefined, files, compileAll(['!.env']))).toBe(true);
+    expect(copied(['!solutions/']).has('only')).toBe(true);
+    expect(copied(['!.env']).has('keys')).toBe(false);
   });
 });
 
@@ -180,6 +186,9 @@ describe('a destination name', () => {
     expect(eligibleDestination('grades-octocat', known)).toBe('That name is reserved for students’ marks.');
     expect(eligibleDestination('Assignment-1-Octocat', known)).toBe('That name is reserved for a student’s repo.');
     expect(eligibleDestination('has space', known)).toMatch(/letters, digits/);
+    // The engine's reserved names and globs (`selection.json` `reserved`).
+    expect(eligibleDestination('other-org.github.io', known)).toBe('That name is reserved for the semester.');
+    expect(eligibleDestination('Join', known)).toBe('That name is reserved for the enrolment page.');
     expect(eligibleDestination('slides', known)).toBeNull();
   });
 });

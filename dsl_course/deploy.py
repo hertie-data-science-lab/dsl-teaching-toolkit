@@ -20,7 +20,8 @@ same five fields as a `deploy:` entry).
 The workflow's four inputs are comma-separated PARALLEL lists paired by index
 (parse_deploy_lists): the paths pair one to one, and a repo list of one item applies to
 every pair - so one hand release may draw on several source repos and land in several
-destination repos. One Deploy per pair, one deploy_many call for the batch.
+destination repos, the semester's `materials_repo` when it names none. One Deploy per
+pair, one deploy_many call for the batch.
 
 `--entry KEY` releases one schedule.yml entry instead: every copy it lists, from every
 source repo it draws on, in ONE deploy_many call with one site sync.
@@ -62,6 +63,7 @@ from .course import (
     UPSTREAM_BRANCH,
     is_repo_root,
 )
+from .discovery import reserved_destination
 from .fs import copy_tree
 from .gh_contents import (
     WITHHELD_ROOT_STUBS,
@@ -94,8 +96,8 @@ from .schedule_plan import (
     refuse_unnumbered,
     unnumbered_release,
 )
+from .selection import HARD, RELEASE, part_groups, release_ignore, release_use
 from .selection import deny as selection_deny
-from .selection import hard_denied, release_use
 
 
 def _warn_withheld_stub(course_org: str, repo: str, path: str) -> None:
@@ -580,6 +582,9 @@ def deploy_many(
             else:
                 src_dirs[repo] = sd
                 commits[repo] = git("-C", str(sd), "rev-parse", "HEAD")[1].strip()
+        # Each source's `.releaseignore` files, read once for every copy out of it: the
+        # copy's own path is judged by them (`excludes`), and its folder walk too.
+        ignores = {repo: release_ignore(sd.resolve()) for repo, sd in src_dirs.items()}
 
         # 2. clone (create if needed) each unique dest repo once (semester org)
         dests: dict[str, Dest] = {}
@@ -651,14 +656,17 @@ def deploy_many(
                 )
                 errors += 1
                 continue
-            if srcp != src_root and hard_denied(srcp.relative_to(src_root).as_posix()):
+            ignore = ignores[d.course_source_repo]
+            if srcp != src_root and HARD in part_groups(
+                srcp.relative_to(src_root).as_posix()
+            ):
                 # Never released, by any route (decision B): a release naming a `.env`, a
                 # grading file or `.system/` - or a path inside one - copies nothing.
                 _warn_never_released(
                     course_org, d.course_source_repo, d.course_source_path
                 )
                 continue
-            if excludes(src_root, srcp):
+            if excludes(src_root, srcp, ignore):
                 # The source path is itself excluded - so is everything under it, and no
                 # `!` deeper down can re-include any of it. Nothing else was asked for, so
                 # this copy is a no-op rather than a partial one. (A content name -
@@ -697,7 +705,10 @@ def deploy_many(
                         srcp,
                         destp,
                         selection_deny(
-                            src_root, use=release_use(srcp == src_root, withheld)
+                            src_root,
+                            use=release_use(srcp == src_root, withheld),
+                            reincludable=RELEASE,
+                            ignore=ignore,
                         ),
                     )
                 elif is_withheld_stub(
@@ -807,32 +818,6 @@ def _items(spec: str) -> list[str]:
     return [item.strip() for item in spec.split(",") if item.strip()]
 
 
-def parse_path_pairs(
-    source_paths: str, dest_paths: str = ""
-) -> list[tuple[str, str | None]]:
-    """Pair the Release materials workflow's two comma-separated lists by index.
-
-    A blank `dest_paths` mirrors every source path (`None` dest, exactly what an omitted
-    `semester_dest_path:` means in schedule.yml). Otherwise the counts MUST match: unlike the
-    schedule (which drops what it can't pair, on an unattended cron), a workflow run has an
-    operator watching it, so a mismatch is a loud ValueError naming both counts rather
-    than a silently short release. Surrounding whitespace is stripped and empty items
-    (a trailing comma) are ignored on both sides."""
-    sources = _items(source_paths)
-    if not sources:
-        raise ValueError("--course-source-path is empty")
-    dests = _items(dest_paths)
-    if not dests:
-        return [(s, None) for s in sources]
-    if len(dests) != len(sources):
-        raise ValueError(
-            f"{len(sources)} course_source_paths but {len(dests)} semester_dest_paths - give "
-            f"one semester_dest_path per course_source_path (paired in order), or leave "
-            f"semester_dest_path blank to mirror every course_source_path"
-        )
-    return list(zip(sources, dests))
-
-
 def _per_pair(repos: list[str], n: int, what: str) -> list[str]:
     """`repos` spread over `n` path pairs: one repo applies to every pair, otherwise one
     per pair - the same loud mismatch as the paths'."""
@@ -847,22 +832,43 @@ def _per_pair(repos: list[str], n: int, what: str) -> list[str]:
 
 
 def parse_deploy_lists(
-    source_repos: str, source_paths: str, dest_repos: str = "", dest_paths: str = ""
+    source_repos: str,
+    source_paths: str,
+    dest_repos: str = "",
+    dest_paths: str = "",
+    default_dest: str = DEFAULT_DEST_REPO,
 ) -> list[Deploy]:
-    """The Release materials workflow's four comma-separated lists as one Deploy per path
-    pair (`parse_path_pairs`), each pair's repos by the same index. A blank `dest_repos`
-    is `DEFAULT_DEST_REPO` for every pair; a blank `dest_paths` mirrors every source."""
-    pairs = parse_path_pairs(source_paths, dest_paths)
+    """The Release materials workflow's four comma-separated lists as one Deploy per
+    source path, paired by index.
+
+    A blank `dest_paths` mirrors every source path (`None` dest, exactly what an omitted
+    `semester_dest_path:` means in schedule.yml). Otherwise the counts MUST match: unlike
+    the schedule (which drops what it can't pair, on an unattended cron), a workflow run
+    has an operator watching it, so a mismatch is a loud ValueError naming both counts
+    rather than a silently short release. A repo list of one applies to every path; a
+    blank `dest_repos` is `default_dest` (the semester's `materials_repo`) for every
+    path. Surrounding whitespace is stripped and empty items (a trailing comma) are
+    ignored throughout."""
+    paths = _items(source_paths)
+    if not paths:
+        raise ValueError("--course-source-path is empty")
+    landings: list[str | None] = _items(dest_paths) or [None] * len(paths)
+    if len(landings) != len(paths):
+        raise ValueError(
+            f"{len(paths)} course_source_paths but {len(landings)} semester_dest_paths - "
+            f"give one semester_dest_path per course_source_path (paired in order), or "
+            f"leave semester_dest_path blank to mirror every course_source_path"
+        )
     sources = _items(source_repos)
     if not sources:
         raise ValueError("--course-source-repo is empty")
-    sources = _per_pair(sources, len(pairs), "course_source_repo")
+    sources = _per_pair(sources, len(paths), "course_source_repo")
     dests = _per_pair(
-        _items(dest_repos) or [DEFAULT_DEST_REPO], len(pairs), "semester_dest_repo"
+        _items(dest_repos) or [default_dest], len(paths), "semester_dest_repo"
     )
     return [
         Deploy(repo, src, dest_repo, dest)
-        for repo, (src, dest), dest_repo in zip(sources, pairs, dests)
+        for repo, src, dest_repo, dest in zip(sources, paths, dests, landings)
     ]
 
 
@@ -923,16 +929,14 @@ def _record(
     return 0
 
 
-def _named(names: list[str], what: str) -> str:
-    """One repo by name, or several by count - the Summary's subject or object."""
+def _named(org: str, names: list[str], what: str) -> tuple[str, str]:
+    """One repo by name, or several by count - the Summary's subject or object - and the
+    log's words for it: `org/repo`, or "2 source repos in org"."""
     unique = list(dict.fromkeys(names))
-    return unique[0] if len(unique) == 1 else plural(len(unique), what)
-
-
-def _in_org(org: str, names: list[str], what: str) -> str:
-    """`org/repo` for one repo, "2 source repos in org" for several - the log's line."""
-    named = _named(names, what)
-    return f"{org}/{named}" if len(set(names)) == 1 else f"{named} in {org}"
+    if len(unique) == 1:
+        return unique[0], f"{org}/{unique[0]}"
+    named = plural(len(unique), what)
+    return named, f"{named} in {org}"
 
 
 def main() -> int:
@@ -946,10 +950,10 @@ def main() -> int:
     parser.add_argument("--semester-org", required=True, help="Semester org (target)")
     parser.add_argument(
         "--semester-dest-repo",
-        default=DEFAULT_DEST_REPO,
+        default="",
         help="Target repo in the semester org, created if missing, or a "
         "comma-separated list paired with --course-source-path by index (one repo "
-        f"applies to every path; default: {DEFAULT_DEST_REPO})",
+        "applies to every path; default: the semester's materials_repo)",
     )
     parser.add_argument(
         "--course-source-path",
@@ -1005,9 +1009,18 @@ def main() -> int:
                 args.course_source_path,
                 args.semester_dest_repo,
                 args.semester_dest_path,
+                sched.materials_repo,
             )
         except ValueError as e:
             log_err(f"{e}.")
+            return 1
+    # A release never lands in a repo the semester uses for something else: its config,
+    # site or enrolment page, a gradebook, a student's repo (`reserved_destination`).
+    for dest in dict.fromkeys(d.semester_dest_repo for d in deploys):
+        if reserved := reserved_destination(dest, sched.assignments):
+            log_err(
+                f"{dest} cannot take a release: that name is reserved for {reserved}."
+            )
             return 1
     if any(
         (args.course_org, d.course_source_repo)
@@ -1027,14 +1040,13 @@ def main() -> int:
         if refusal:
             return refuse_unnumbered(refusal)
 
-    source_names = [d.course_source_repo for d in deploys]
-    dest_names = [d.semester_dest_repo for d in deploys]
-    sources = _named(source_names, "source repo")
-    dests = _named(dest_names, "repo")
-    route = (
-        f"from {_in_org(args.course_org, source_names, 'source repo')} -> "
-        f"{_in_org(args.semester_org, dest_names, 'repo')}"
+    sources, from_words = _named(
+        args.course_org, [d.course_source_repo for d in deploys], "source repo"
     )
+    dests, to_words = _named(
+        args.semester_org, [d.semester_dest_repo for d in deploys], "repo"
+    )
+    route = f"from {from_words} -> {to_words}"
     what = plural(len(deploys), "item")
     if args.preview:
         log_step(f"PREVIEW release {len(deploys)} path(s) {route}")

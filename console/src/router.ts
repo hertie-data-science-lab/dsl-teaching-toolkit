@@ -12,6 +12,7 @@ import { semesterOver } from './model/catalogue';
 import { ORG_NAME_RE, tabTitle } from './model/policy';
 import { isInstructor, roleOf, type Course, type CohortRef, type Estate, type Mode, type Semester } from './model/discovery';
 import type { SemesterFacts } from './model/student';
+import type { ReleaseRow } from './model/releaseState';
 
 export interface Route {
   screen: string;
@@ -102,44 +103,37 @@ export interface Selection {
   join?: string;
   /** A wizard step to come back to from an editor it opened (`new-semester-3`). */
   wizard?: string;
-  /** A template to prefill a new schedule entry with (New assignment's last step). */
-  template?: string;
   /** A folder to open on the course materials index or a semester's Released materials, `<repo>/<path>`. */
   folder?: string;
   /** A file to open in the viewer on the course materials index or a semester's Released materials, `<repo>/<path>`. */
   file?: string;
-  /** Picks to prefill a new release entry with (`?from=&paths=&to=&at=`, the Files panel's "Schedule on the calendar"). */
-  release?: ReleasePrefill;
+  /** What a new schedule entry opens with: a template (`?template=`, New assignment's last step) or a hand release's picks (`?from=&paths=&to=&at=`, the Files panel's "Schedule on the calendar"). */
+  prefill?: Prefill;
 }
 
-/**
- * A new release entry's files, from a hand release's picks: four comma lists paired by index, as
- * the engine pairs `release.adhoc`'s (a list of one applies to every path). `to` and `at` blank
- * mean the semester's default repo and the source's own path.
- */
-export interface ReleasePrefill {
-  from: string[];
-  paths: string[];
-  to: string[];
-  at: string[];
-}
+/** A new schedule entry's prefill: an assignment of a template, or a release of these files. */
+export type Prefill = { kind: 'template'; repo: string } | { kind: 'files'; rows: ReleaseRow[] };
 
 const listOf = (v: string | null) => (v ? v.split(',').map((x) => x.trim()) : []);
+// A list of one applies to every path, as the engine pairs `release.adhoc`'s.
 const pairOf = (list: string[], i: number) => (list.length === 1 ? list[0] : (list[i] ?? ''));
 
-/** `?from=&paths=&to=&at=` as the files they name, or undefined without paths or a source. */
-export function releasePrefillOf(q: URLSearchParams): ReleasePrefill | undefined {
+/** `?template=`, or `?from=&paths=&to=&at=` (four comma lists paired by index; `to`/`at` blank: the default repo, the source's path). */
+function prefillOf(q: URLSearchParams): Prefill | undefined {
+  const template = q.get('template');
+  if (template) return { kind: 'template', repo: template };
   const paths = listOf(q.get('paths')).filter(Boolean), from = listOf(q.get('from'));
   if (!paths.length || !from.some(Boolean)) return undefined;
   const to = listOf(q.get('to')), at = listOf(q.get('at'));
-  return { paths, from: paths.map((_, i) => pairOf(from, i)), to: paths.map((_, i) => pairOf(to, i)), at: paths.map((_, i) => pairOf(at, i)) };
+  return { kind: 'files', rows: paths.map((path, i) => ({ repo: pairOf(from, i), path, toRepo: pairOf(to, i), toPath: pairOf(at, i) })) };
 }
 
-/** The Schedule's new entry with `rows` prefilled; a row's `to`/`at` left blank when it is the default. */
-export function scheduleNewHref(cohortOrg: string, rows: { from: string; path: string; to?: string; at?: string }[]): string {
-  const q = new URLSearchParams({ cohort: cohortOrg, from: rows.map((r) => r.from).join(','), paths: rows.map((r) => r.path).join(',') });
-  if (rows.some((r) => r.to)) q.set('to', rows.map((r) => r.to ?? '').join(','));
-  if (rows.some((r) => r.at)) q.set('at', rows.map((r) => r.at ?? '').join(','));
+/** The Schedule's new entry with a hand release's `rows` prefilled. */
+export function scheduleNewHref(cohortOrg: string, rows: ReleaseRow[]): string {
+  const q = new URLSearchParams({
+    cohort: cohortOrg, from: rows.map((r) => r.repo).join(','), paths: rows.map((r) => r.path).join(','),
+    to: rows.map((r) => r.toRepo).join(','), at: rows.map((r) => r.toPath).join(','),
+  });
   return `?${q.toString()}#schedule-new`;
 }
 
@@ -155,10 +149,9 @@ export function parseSearch(search: string): Selection {
     semester: q.get('semester') ?? undefined,
     join: ORG_NAME_RE.test(q.get('join') ?? '') ? q.get('join')! : undefined,
     wizard: wizard && WIZARD_RE.test(wizard) ? wizard : undefined,
-    template: q.get('template') ?? undefined,
     folder: q.get('folder') ?? undefined,
     file: q.get('file') ?? undefined,
-    release: releasePrefillOf(q),
+    prefill: prefillOf(q),
   };
 }
 

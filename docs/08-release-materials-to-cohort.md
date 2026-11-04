@@ -54,7 +54,9 @@ The same view is on each course repo's settings page (**Course materials** → t
 Two ops, in the console or on the CLI:
 
 - **`release.entry`** (`python -m dsl_course release.entry`) - ships one schedule entry's files now, ahead of their time.
-- **`release.adhoc`** (`python -m dsl_course release.adhoc`) - copies a path no entry names. Its arguments are a `files:` item's under their op names: `course_source_repo` (`from_course_repo`), `course_source_path` (`from_path`, comma-separated for several), `semester_dest_repo` (`to_semester_repo`; created if missing, private, `students` + `auditors` read) and `semester_dest_path` (`to_path`, default: the source path). Either repo may also be a comma-separated list, paired in order with the paths (one item applies to all), so one run can draw on several course repos and land in several semester repos.
+- **`release.adhoc`** (`python -m dsl_course release.adhoc`) - copies a path no entry names. Its arguments are a `files:` item's under their op names: `course_source_repo` (`from_course_repo`), `course_source_path` (`from_path`, comma-separated for several), `semester_dest_repo` (`to_semester_repo`, default: the semester's `materials_repo`; created if missing, private, `students` + `auditors` read) and `semester_dest_path` (`to_path`, default: the source path). Either repo may also be a comma-separated list, paired in order with the paths (one item applies to all), so one run can draw on several course repos and land in several semester repos.
+
+No release lands in a repo the semester uses for something else: `semester-config`, `.github`, `join`, the `*.github.io` website, a `grades-*` gradebook or a student's `<assignment>-<handle>` repo. `release.adhoc` refuses one, `--validate` drops a `files:` copy naming one, and a `materials_repo` or `release_destinations` default naming one is ignored.
 
 ### How to specify release paths
 

@@ -10,14 +10,14 @@ import { EnvCtx, type Env } from '../src/env';
 import { compileAll } from '../src/edit/glob';
 import { groupPicks, type Group } from '../src/model/releaseState';
 import { releasePicked } from '../src/ops/defs';
-import { ReleaseFoot, ReleaseManifest, ToRow, groupKey, type Dests } from '../src/ui/ReleaseManifest';
+import { ReleaseFoot, ReleaseManifest, RepoSelect, groupKey, type Dests } from '../src/ui/ReleaseManifest';
 
 const SEM = 'hertie-dsl-demo-f2026';
 const A = 'course-materials-f2026';
 const B = 'lecture-code-f2026';
 const trees = {
-  [A]: { files: ['README.md', 'SYLLABUS.md', 'labs/week01/lab.ipynb', 'labs/week01/data.csv', 'labs/week01/solutions/lab.ipynb', 'labs/notes.md', 'drafts/x.md'], rules: compileAll(['labs/notes.md']) },
-  [B]: { files: ['demo.py'], rules: [] },
+  [A]: { files: ['README.md', 'SYLLABUS.md', 'labs/week01/lab.ipynb', 'labs/week01/data.csv', 'labs/week01/solutions/lab.ipynb', 'labs/notes.md', 'drafts/x.md'], rules: compileAll(['labs/notes.md'], { defaults: true }) },
+  [B]: { files: ['demo.py'], rules: compileAll([], { defaults: true }) },
 };
 const dests: Dests = { options: ['materials', 'lecture-code'], rows: [{ name: 'materials', note: 'the default' }], reserved: { org: SEM, students: [] } };
 const scope = { courseOrg: 'hertie-dsl-demo-course-e1234', cohortOrg: SEM, where: 'Fall 2026' };
@@ -68,7 +68,7 @@ describe('the manifest', () => {
   });
 
   it('ships solutions a ! line re-includes, and lists a never-released name as never released', async () => {
-    const t = { [A]: { files: ['labs/a.md', 'labs/solutions/s.py', 'labs/.env'], rules: compileAll(['!solutions/']) } };
+    const t = { [A]: { files: ['labs/a.md', 'labs/solutions/s.py', 'labs/.env'], rules: compileAll(['!solutions/'], { defaults: true }) } };
     const { el } = await mount(manifest(groupPicks([{ repo: A, path: 'labs', dir: true }], t)));
     expect([...el.querySelectorAll('.mf-rows li')].map(shown)).toEqual([
       'labs/a.md→labs/a.mdnot released', 'labs/solutions/s.py→labs/solutions/s.pynot released', 'labs/.envnever released',
@@ -105,10 +105,9 @@ describe('the manifest', () => {
     expect(onGroupDest).toHaveBeenLastCalledWith(groupKey(g), { destRepo: undefined });
   });
 
-  it('the To row names the org and offers the repos and the picker', async () => {
+  it('the To row’s select offers the repos and the picker', async () => {
     const onRunRepo = vi.fn();
-    const { el } = await mount(<ToRow org={SEM} runRepo="materials" dests={dests} onRunRepo={onRunRepo} />);
-    expect(el.querySelector('.mf-into')!.textContent).toBe(`${SEM} /`);
+    const { el } = await mount(<RepoSelect label="To repo" value="materials" dests={dests} onPick={onRunRepo} />);
     const sel = el.querySelector<HTMLSelectElement>('select')!;
     expect([...sel.options].map((o) => o.textContent)).toEqual(['materials', 'lecture-code', 'Choose a repo…']);
     await act(() => {

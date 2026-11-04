@@ -312,18 +312,12 @@ export function OpPanel() {
 }
 
 /**
- * The button a screen shows for an operation: the verb alone (materials-release decision 11).
- * It opens the panel, where the op runs; the panel offers a preview where the op has one,
- * never required. The verb's `?`, if any, follows it.
+ * The button a screen shows for an operation: the verb alone (materials-release decision 11),
+ * or `label`. It opens the panel, where the op runs; the panel offers a preview where the op has
+ * one, never required. The verb's `?`, if any, follows it; `disabled` greys it out.
  */
-export function OpButtons({ def, small, label, verbCls }: { def: OpDef; small?: boolean; label?: string; verbCls?: string }) {
-  const env = useEnv();
-  return <><button class={verbCls ?? `btn${small ? ' small' : ''}`} type="button" onClick={() => env?.ops.open(def)}>{label ?? def.verb}</button><VerbHint def={def} /></>;
-}
-
-/** A single button that opens the panel on `def` (no preview shortcut); `disabled` greys it out. */
 export function OpOpen({ def, cls = 'btn', label, disabled = false }: { def: OpDef; cls?: string; label?: string; disabled?: boolean }) {
   const env = useEnv();
-  return <><button class={cls} type="button" disabled={disabled} aria-disabled={disabled ? 'true' : undefined} onClick={() => env?.ops.open(def)}>{label ?? def.name}</button><VerbHint def={def} /></>;
+  return <><button class={cls} type="button" disabled={disabled} aria-disabled={disabled ? 'true' : undefined} onClick={() => env?.ops.open(def)}>{label ?? def.verb}</button><VerbHint def={def} /></>;
 }
 

@@ -3450,5 +3450,9 @@ def test_the_release_destinations_ride_beside_the_default_destination(monkeypatc
     assert defaults["release_destinations"] == {
         "value": ["datasets", "handouts"],
         "source": "semester",
+        "items": [
+            {"value": "datasets", "source": "course"},
+            {"value": "handouts", "source": "semester"},
+        ],
     }
     assert validate(doc, schemas.status_schema()) == []
