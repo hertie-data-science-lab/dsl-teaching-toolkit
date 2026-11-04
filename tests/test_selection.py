@@ -200,3 +200,75 @@ def test_the_demo_fixtures_hosting_is_what_the_console_previews():
         "`python -c 'import json, tests.test_selection as t; "
         f"print(json.dumps(t.demo_hosting(), indent=2, sort_keys=True))' > {DEMO_HOSTING}`"
     )
+
+
+# ----------------------------------- decision B: never released, or withheld by default
+
+
+def _tree(root: Path, *rels: str) -> None:
+    for rel in rels:
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text("x")
+
+
+def test_the_denylist_is_two_groups_and_their_union():
+    assert set(selection.DENYLIST) == {
+        *selection.DENYLIST_HARD,
+        *selection.DENYLIST_CONTENT,
+    }
+    assert not set(selection.DENYLIST_HARD) & set(selection.DENYLIST_CONTENT)
+    assert selection.is_hard_denied(".ENV.local") and selection.is_hard_denied(".git")
+    assert not selection.is_hard_denied("solutions")
+    assert selection.is_content_denied("Tests")
+    assert selection.hard_denied("labs/01/.system/x.md")
+    assert not selection.hard_denied("labs/01/solutions/x.md")
+
+
+def test_a_bang_line_re_includes_a_content_name_on_a_folder_copy(tmp_path):
+    _tree(
+        tmp_path, "labs/01/lab.ipynb", "labs/01/solutions/a.ipynb", "labs/01/tests/t.py"
+    )
+    (tmp_path / ".releaseignore").write_text("!solutions/\n")
+    deny = selection.deny(tmp_path)
+    # Re-included for this repo; `tests/` still withheld by default.
+    assert deny(str(tmp_path / "labs/01"), ["lab.ipynb", "solutions", "tests"]) == {
+        "tests"
+    }
+    # The last match wins, as in .gitignore: a later line withholds it again.
+    (tmp_path / ".releaseignore").write_text("!solutions/\nlabs/01/solutions/\n")
+    deny = selection.deny(tmp_path)
+    assert deny(str(tmp_path / "labs/01"), ["solutions"]) == {"solutions"}
+
+
+def test_a_bang_line_is_anchored_like_any_other(tmp_path):
+    _tree(tmp_path, "solutions/a.md", "labs/01/solutions/b.md")
+    (tmp_path / ".releaseignore").write_text("!/solutions/\n")
+    deny = selection.deny(tmp_path)
+    assert deny(str(tmp_path), ["solutions", "labs"]) == set()
+    assert deny(str(tmp_path / "labs/01"), ["solutions"]) == {"solutions"}
+
+
+def test_no_bang_line_re_includes_a_never_released_name(tmp_path):
+    _tree(tmp_path, "labs/01/.env", "labs/01/grading_config.yml", "labs/01/.system/x")
+    (tmp_path / ".releaseignore").write_text("!.env\n!grading_config.yml\n!.system/\n")
+    deny = selection.deny(tmp_path)
+    names = [".env", "grading_config.yml", ".system"]
+    assert deny(str(tmp_path / "labs/01"), names) == set(names)
+
+
+def test_with_no_releaseignore_the_content_names_stay_withheld(tmp_path):
+    _tree(tmp_path, "labs/01/Solution/a.md", "labs/01/lab.md")
+    deny = selection.deny(tmp_path)
+    assert deny(str(tmp_path / "labs/01"), ["Solution", "lab.md"]) == {"Solution"}
+
+
+def test_the_path_lists_still_refuse_both_groups():
+    # The public semester site and the student status file list released paths, which
+    # carry no `.releaseignore`: a released `solutions/` is never hosted or named there.
+    assert selection.denied("labs/01/solutions/a.pdf")
+    assert selection.denied("labs/01/.env")
+    assert not selection.publishable("labs/01/solutions/a.pdf")
+    # The copy's lock on the open site: only what no copy carries.
+    assert selection.never_copied("labs/.DS_Store")
+    assert selection.never_copied("labs/.env")
+    assert not selection.never_copied("labs/01/solutions/a.pdf")

@@ -3,7 +3,8 @@
 // keeps its open folders, a name opening the viewer in Browse, an untick writing its line and
 // enabling Save, Release ticks grouped in the manifest with the op's paired lists, the chips per
 // view against the semester's two branches, a destination override highlighted, the semester
-// page's Release by hand, and nothing for a read-only viewer.
+// page's Release by hand, and nothing for a read-only viewer. Decision B: `.env` never released in
+// any view, `solutions/` withheld by default until a tick or a typed `!` line releases it.
 
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
@@ -24,7 +25,7 @@ const REPO = 'course-materials-f2026';
 const COURSE = [
   '.releaseignore', 'README.md', 'drafts/idea.md',
   'lectures/01_intro/notes.md', 'lectures/01_intro/slides.pdf', 'lectures/02_linear/notes.md',
-  'labs/week01/lab.ipynb', 'labs/week01/data.csv', 'solutions/week01.ipynb',
+  'labs/week01/lab.ipynb', 'labs/week01/data.csv', 'labs/week01/.env', 'solutions/week01.ipynb',
 ];
 // The course copy: slides and 02 notes changed since the release (sha-<path> otherwise).
 const COURSE_SHAS = { [`${COURSE_ORG}/${REPO}/lectures/01_intro/slides.pdf`]: 'new', [`${COURSE_ORG}/${REPO}/lectures/02_linear/notes.md`]: 'new2' };
@@ -110,14 +111,15 @@ const shown = (x: HTMLElement) => {
 const tick = (li: HTMLElement) => li.querySelector<HTMLInputElement>(':scope > input.ft-tick, :scope > details > summary > input.ft-tick');
 
 describe('the Files panel', () => {
-  it('opens on Browse: no ticks, the viewer placeholder, withheld and never copied chips only', async () => {
+  it('opens on Browse: no ticks, the viewer placeholder, withheld, default withheld and never released chips only', async () => {
     const { el } = await mount();
     expect(el.querySelector('[role="tablist"]')).not.toBeNull();
     expect(tab(el, 'Browse').getAttribute('aria-selected')).toBe('true');
     expect(el.querySelector('.materials-file')!.textContent).toContain('Choose a file to view it here.');
     expect(el.querySelectorAll('.file-tree input.ft-tick')).toHaveLength(0);
     expect(chips(folder(el, 'drafts'))).toEqual(['withheld']);
-    expect(chips(folder(el, 'solutions'))).toEqual(['never copied']);
+    expect(chips(folder(el, 'solutions'))).toEqual(['default withheld']);
+    expect(chips(fileRow(el, '.env'))).toEqual(['never released']);
     expect(chips(fileRow(el, 'slides.pdf'))).toEqual([]);
   });
 
@@ -146,13 +148,13 @@ describe('the Files panel', () => {
     const onSaveIgnore = vi.fn(async () => true);
     const { el } = await mount({ onSaveIgnore });
     await click(tab(el, 'Withhold'));
-    expect(chips(folder(el, 'solutions'))).toEqual(['only if named']);
+    expect(chips(folder(el, 'solutions'))).toEqual(['default withheld']);
     const save = () => [...el.querySelectorAll<HTMLButtonElement>('.savebar button')].find((b) => b.textContent === 'Save')!;
     expect(save().disabled).toBe(true);
     await click(fileRow(el, 'README.md').querySelector('.ft-name')!);
     expect(el.querySelector<HTMLTextAreaElement>('#ign-pat')!.value).toBe('drafts/\n/README.md');
     expect(tick(fileRow(el, 'README.md'))!.checked).toBe(false);
-    expect(el.textContent).toContain('2 never copied (by default) · 2 withheld · 5 released');
+    expect(el.textContent).toContain('2 never released · 1 default withheld · 2 withheld · 5 released');
     expect(save().disabled).toBe(false);
     await click(save());
     expect(onSaveIgnore).toHaveBeenCalledWith('drafts/\n/README.md\n');
@@ -171,8 +173,64 @@ describe('the Files panel', () => {
     expect(tick(folder(el, 'drafts'))).toBeNull();
     expect(chips(folder(el, 'solutions'))).toEqual(['only if named']);
     expect(tick(folder(el, 'solutions'))!.disabled).toBe(true);
+    expect(chips(fileRow(el, '.env'))).toEqual(['never released']);
+    expect(tick(fileRow(el, '.env'))!.disabled).toBe(true);
+    expect(tick(fileRow(el, '.env'))!.title).toBe('Never released: on the institution’s list.');
     expect(el.querySelector('.manifest-wrap')!.textContent).toContain('Nothing picked yet. Tick files or folders in the tree.');
     expect(el.querySelector<HTMLButtonElement>('.rh-foot .btn')!.disabled).toBe(true);
+  });
+
+  it('Withhold: a tick on a default-withheld folder writes its ! line, and a second takes it out', async () => {
+    const { el } = await mount({ onSaveIgnore: vi.fn(async () => true) });
+    await click(tab(el, 'Withhold'));
+    const box = () => el.querySelector<HTMLTextAreaElement>('#ign-pat')!;
+    expect(tick(folder(el, 'solutions'))!.checked).toBe(false);
+    expect(folder(el, 'solutions').classList.contains('ft-out')).toBe(true);
+    await click(tick(folder(el, 'solutions'))!);
+    expect(box().value).toBe('drafts/\n!/solutions/');
+    expect(tick(folder(el, 'solutions'))!.checked).toBe(true);
+    expect(chips(folder(el, 'solutions'))).toEqual(['released · overrides the default']);
+    expect(el.textContent).toContain('2 never released · 0 default withheld · 1 withheld · 7 released');
+    await click(tick(folder(el, 'solutions'))!);
+    expect(box().value).toBe('drafts/');
+    expect(chips(folder(el, 'solutions'))).toEqual(['default withheld']);
+  });
+
+  it('Withhold: a ! line typed in the box releases the default on the tree', async () => {
+    const { el } = await mount();
+    await click(tab(el, 'Withhold'));
+    const box = el.querySelector<HTMLTextAreaElement>('#ign-pat')!;
+    await act(() => {
+      box.value = 'drafts/\n!solutions/';
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(tick(folder(el, 'solutions'))!.checked).toBe(true);
+    expect(chips(folder(el, 'solutions'))).toEqual(['released · overrides the default']);
+    expect(tick(fileRow(el, 'week01.ipynb'))!.checked).toBe(true);
+  });
+
+  it('Withhold: a never-released name has no tick, and a file in a default-withheld folder says why it cannot be ticked', async () => {
+    const { el } = await mount();
+    await click(tab(el, 'Withhold'));
+    expect(tick(fileRow(el, '.env'))).toBeNull();
+    expect(chips(fileRow(el, '.env'))).toEqual(['never released']);
+    await click(tick(fileRow(el, 'week01.ipynb'))!);
+    expect(el.querySelector<HTMLTextAreaElement>('#ign-pat')!.value).toBe('drafts/\n'); // unchanged
+    expect(fileRow(el, 'week01.ipynb').querySelector('.ft-note')!.textContent).toBe('Withheld by default with its folder solutions/. Tick the folder to release it.');
+  });
+
+  it('Withhold: the institution’s defaults above the box, and the patterns hint rendered from the export', async () => {
+    const { el } = await mount();
+    await click(tab(el, 'Withhold'));
+    const block = el.querySelector<HTMLElement>('.withhold-defaults')!;
+    expect(block.querySelector('.label')!.textContent).toBe('Withheld by default (institution)');
+    const rows = [...block.querySelectorAll('li')].map((li) => li.textContent);
+    expect(rows).toContain('.env never released');
+    expect(rows).toContain('solutions override with a ! line');
+    expect(el.textContent).toContain('One pattern per line, as in .gitignore. Click the tree, or write them here.');
+    const hint = [...el.querySelectorAll<HTMLElement>('.hint-pop')].map((h) => h.innerHTML).find((h) => h.startsWith('Guards for this repo'))!;
+    expect(hint).toContain('<code>.git</code>, <code>.system</code>');
+    expect(hint).toContain('the content names <code>solution</code>, <code>solutions</code>, <code>tests</code>, which a <code>!</code> line here overrides for this repo.');
   });
 
   it('Release: ticks become groups, counts and the op’s paired lists', async () => {

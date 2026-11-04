@@ -387,8 +387,8 @@ describe('editing screens', () => {
     expect(out).toContain('Choose a file to view it here.');
     expect(out).not.toContain('class="ft-tick"');
     expect(out).toMatch(/class="ft-name">slides.html<\/button><\/li>/);
-    // solutions/ is the institution denylist's too (decision 0040): Browse calls it never copied.
-    expect(out).toMatch(/class="ft-name">a.py<\/button><span class="chip muted">never copied<\/span>/);
+    // solutions/ is the institution denylist's too (decision 0040): Browse calls it withheld.
+    expect(out).toMatch(/class="ft-name">a.py<\/button><span class="chip muted">withheld<\/span>/);
     expect(out).toContain('Weekly plan for the syllabus');
     // Write alone on the page (materials-release decision 11): it opens the panel, where Copy
     // shows the plan to copy and Write puts it into the syllabus (decision 0031 rule 9).

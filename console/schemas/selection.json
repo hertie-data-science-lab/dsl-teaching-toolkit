@@ -574,17 +574,21 @@
       ]
     }
   },
-  "denylist": [
-    ".system",
-    "solution",
-    "solutions",
-    "grading_config.yml",
-    "grading.yml",
-    "tests",
-    ".env",
-    ".env.*",
-    ".git"
-  ],
+  "denylist": {
+    "content": [
+      "solution",
+      "solutions",
+      "tests"
+    ],
+    "hard": [
+      ".git",
+      ".system",
+      ".env",
+      ".env.*",
+      "grading_config.yml",
+      "grading.yml"
+    ]
+  },
   "floor": {
     "open_course_site_publish": {
       "exclude": [],

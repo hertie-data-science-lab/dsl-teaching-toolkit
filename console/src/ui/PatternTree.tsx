@@ -9,12 +9,15 @@
 // per-row control for the caller's own. `SelectionEditor` wraps it for every "which files" setting.
 // The Files panel (plan 2026-11-04, decisions 1 and 3) adds what sits beside a row: `side` (its
 // state chips), `rowClick` (a click on a file row toggles its tick), `tickDisabled` (why a tick
-// cannot change) and `nameLink` (the name opening the viewer, in Browse).
+// cannot change) and `nameLink` (the name opening the viewer, in Browse). `defaults` (decision B)
+// draws the institution's content names withheld by default ("default withheld"), a click
+// writing the `!` line that releases one ("released · overrides the default").
 
 import type { ComponentChildren } from 'preact';
 import { useState } from 'preact/hooks';
-import { buildTree, denylisted, neverMaterial, standing, toggle, type Standing, type TreeNode } from '../edit/badges';
-import { compileAll, withheldBy, type Rule } from '../edit/glob';
+import { buildTree, denylisted, isOut, neverMaterial, standing, toggle, type Standing, type TreeNode } from '../edit/badges';
+import { compileAll, withheldBy, withheldOnCopy, type Rule } from '../edit/glob';
+import { contentName } from '../model/selection';
 import { FileHead, FolderHead } from './FileTree';
 
 export interface PatternTreeProps {
@@ -42,9 +45,14 @@ export interface PatternTreeProps {
   nameLink?: (path: string) => ComponentChildren;
   /** The class of the withheld and fixed chips (default `amber`). */
   wordClass?: string;
+  /** The content names are withheld by default and a `!` line releases one (decision B; `.releaseignore` only). */
+  defaults?: boolean;
 }
 
-interface Ctx extends Required<Pick<PatternTreeProps, 'patterns' | 'onChange' | 'mode' | 'withheldWord' | 'releasedWord' | 'fixed' | 'kinds' | 'wordClass'>>, Pick<PatternTreeProps, 'control' | 'side' | 'rowClick' | 'tickDisabled' | 'nameLink'> {
+const DEFAULT_WORD = 'default withheld';
+const OVERRIDE_WORD = 'released · overrides the default';
+
+interface Ctx extends Required<Pick<PatternTreeProps, 'patterns' | 'onChange' | 'mode' | 'withheldWord' | 'releasedWord' | 'fixed' | 'kinds' | 'wordClass' | 'defaults'>>, Pick<PatternTreeProps, 'control' | 'side' | 'rowClick' | 'tickDisabled' | 'nameLink'> {
   rules: Rule[];
   note: { path: string; text: string } | null;
   setNote: (n: { path: string; text: string } | null) => void;
@@ -55,17 +63,19 @@ const defaultFixed = (path: string) => (neverMaterial(path) || denylisted(path) 
 
 /** How many files under a folder are withheld, fixed or by a line. */
 function withheldIn(n: TreeNode, c: Ctx): number {
-  if (!n.children) return c.fixed(n.path) || withheldBy(c.rules, n.path) ? 1 : 0;
+  if (!n.children) return c.fixed(n.path) || (c.defaults ? withheldOnCopy(c.rules, n.path, false, contentName) : withheldBy(c.rules, n.path)) ? 1 : 0;
   return n.children.reduce((sum, x) => sum + withheldIn(x, c), 0);
 }
 
 function Control({ n, dir, s, c }: { n: TreeNode; dir: boolean; s: Standing; c: Ctx }) {
-  const out = s.kind === 'own' || s.kind === 'broader';
+  const out = isOut(s);
   const click = (e: Event) => {
     e.preventDefault();
-    const t = toggle(c.patterns, n.path, dir);
+    const t = toggle(c.patterns, n.path, dir, c.defaults);
     if ('blocked' in t) {
-      const text = t.blocked.at === n.path
+      const text = t.blocked.byDefault
+        ? `Withheld by default with its folder ${t.blocked.at}/. Tick the folder to release it.`
+        : t.blocked.at === n.path
         ? `${t.blocked.rule} also covers everything inside this folder. Remove or narrow that rule to include it.`
         : `${c.withheldWord[0].toUpperCase()}${c.withheldWord.slice(1)} with its folder ${t.blocked.at}/ by ${t.blocked.rule}. Remove that rule to include it.`;
       c.setNote({ path: n.path, text });
@@ -77,7 +87,7 @@ function Control({ n, dir, s, c }: { n: TreeNode; dir: boolean; s: Standing; c: 
   const what = `${n.path}${dir ? '/' : ''}`;
   const off = c.tickDisabled?.(n.path, dir) ?? null;
   if (c.mode === 'select') {
-    const blocked = s.kind === 'broader' && !s.legal;
+    const blocked = (s.kind === 'broader' && !s.legal) || (s.kind === 'default' && s.at !== n.path);
     return <input type="checkbox" class="ft-tick" checked={!out} disabled={off !== null} aria-label={`Include ${what}`} title={off ?? (blocked ? 'Inside a folder that is left out: include the folder first.' : undefined)} onClick={click} />;
   }
   return <button class="btn small quiet ft-toggle" type="button" disabled={off !== null} title={off ?? undefined} aria-label={`${out ? 'Include' : 'Withhold'} ${what}`} onClick={click}>{out ? 'Include' : 'Withhold'}</button>;
@@ -102,17 +112,19 @@ function rowToggle(e: MouseEvent) {
 function Node({ n, depth, c }: { n: TreeNode; depth: number; c: Ctx }) {
   const dir = !!n.children;
   const fixed = c.fixed(n.path);
-  const s = standing(c.rules, c.patterns, n.path, dir);
-  const out = s.kind === 'own' || s.kind === 'broader';
+  const s = standing(c.rules, c.patterns, n.path, dir, c.defaults);
+  const out = isOut(s);
   const note = c.note?.path === n.path ? <span class="ft-note">{c.note.text}</span> : null;
   const control = c.control ? c.control(n.path, dir) : fixed ? null : <Control n={n} dir={dir} s={s} c={c} />;
+  // The default's own words, on every row it (or a `!` line over it) decides.
+  const own = s.kind === 'default' ? DEFAULT_WORD : s.kind === 'overridden' ? OVERRIDE_WORD : null;
   if (!dir) {
-    const word = fixed ?? (out ? c.withheldWord : c.releasedWord);
+    const word = fixed ?? own ?? (out ? c.withheldWord : c.releasedWord);
     return (
       <li class={`ft-file${fixed || out ? ' ft-out' : ''}`} onClick={c.rowClick ? rowToggle : undefined}>
         {c.mode === 'select' ? control : null}
         <FileHead name={n.name}>{c.nameLink?.(n.path) ?? undefined}</FileHead>
-        {word ? <span class={`chip ${fixed || out ? c.wordClass : ''}`}>{word}</span> : null}
+        {word ? <span class={`chip ${fixed || out || own ? c.wordClass : ''}`}>{word}</span> : null}
         <Why s={s} word={c.withheldWord} />
         {c.side?.(n.path, false)}
         {c.mode === 'exclude' ? control : null}
@@ -128,7 +140,7 @@ function Node({ n, depth, c }: { n: TreeNode; depth: number; c: Ctx }) {
           {c.mode === 'select' ? control : null}
           <FolderHead name={n.name} />
           {c.kinds[n.path] ? <span class="chip">{c.kinds[n.path]}</span> : null}
-          {fixed ? <span class={`chip ${c.wordClass}`}>{fixed}</span> : out ? <span class={`chip ${c.wordClass}`}>{c.withheldWord}</span> : count ? <span class={`chip ${c.wordClass}`}>{count} {c.withheldWord}</span> : null}
+          {fixed ? <span class={`chip ${c.wordClass}`}>{fixed}</span> : own ? <span class={`chip ${c.wordClass}`}>{own}</span> : out ? <span class={`chip ${c.wordClass}`}>{c.withheldWord}</span> : count ? <span class={`chip ${c.wordClass}`}>{count} {c.withheldWord}</span> : null}
           <Why s={s} word={c.withheldWord} />
           {c.side?.(n.path, true)}
           {c.mode === 'exclude' ? control : null}
@@ -146,7 +158,7 @@ export function PatternTree(p: PatternTreeProps) {
   const c: Ctx = {
     patterns: p.patterns, onChange: p.onChange, mode: p.mode ?? 'exclude',
     withheldWord: p.withheldWord ?? 'withheld', releasedWord: p.releasedWord ?? 'released to students',
-    fixed: p.fixed ?? defaultFixed, kinds: p.kinds ?? {}, rules: compileAll(p.patterns), wordClass: p.wordClass ?? 'amber',
+    fixed: p.fixed ?? defaultFixed, kinds: p.kinds ?? {}, rules: compileAll(p.patterns), wordClass: p.wordClass ?? 'amber', defaults: p.defaults ?? false,
     control: p.control, side: p.side, rowClick: p.rowClick, tickDisabled: p.tickDisabled, nameLink: p.nameLink, note, setNote,
   };
   return <ul class={`file-tree${c.mode === 'select' ? ' select' : ''}`}>{buildTree(p.files).map((n) => <Node n={n} depth={0} c={c} />)}</ul>;

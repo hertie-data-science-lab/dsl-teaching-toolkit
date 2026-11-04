@@ -100,3 +100,21 @@ export function withheldBy(rules: Rule[], path: string, isDir = false): { rule: 
   }
   return null;
 }
+
+/**
+ * What a release's folder copy does with `path` (`selection.deny`, decision B): `withheldBy`
+ * with the institution's content names (`byDefault`, one component at a time) as an implied
+ * first line, so a `!` line that matches one re-includes it, the last match winning. The line
+ * that withholds it (null: the default) and where, or null when the copy carries it.
+ */
+export function withheldOnCopy(rules: Rule[], path: string, isDir: boolean, byDefault: (name: string) => boolean): { rule: Rule | null; at: string } | null {
+  const parts = path.split('/').filter(Boolean);
+  for (let i = 1; i <= parts.length; i++) {
+    const at = parts.slice(0, i).join('/');
+    const r = deciding(rules, at, i < parts.length || isDir);
+    if (r) {
+      if (!r.neg) return { rule: r, at };
+    } else if (byDefault(parts[i - 1])) return { rule: null, at };
+  }
+  return null;
+}

@@ -14,8 +14,11 @@ Three uses: the materials repo's `.releaseignore` (exclude only: what students n
 materials - a release, a hosted copy, the open site - asks `select` (a path list) or `deny`
 (a `copytree` walk), which compose the same layers in a fixed order:
 
-    1. the institution denylist (`DENYLIST`, `CLUTTER`): never copied anywhere
-    2. the repo's `.releaseignore` files
+    1. the institution's never-released names (`DENYLIST_HARD`) and `CLUTTER`: never
+       copied anywhere, and a release naming one outright is refused (`deploy`)
+    2. the repo's `.releaseignore` files, over the institution's content names
+       (`DENYLIST_CONTENT`): withheld from a folder copy by default, as an implied first
+       line, so a `!solutions/` there releases them for that repo (decision B, 2026-11-04)
     3. the use-site selection
     4. `institution.yml selection_floor` for that use: a hard limit, applied last
 
@@ -48,21 +51,29 @@ from .releaseignore import Ignore, deny_for, excludes, listed
 
 KEYS = ("kinds", "types", "include", "exclude")
 
-# The institution denylist (decision 0040 rule 3): path COMPONENTS no copy ever carries,
-# matched by name at every depth, case-insensitively, as globs (`.env.local`). Solutions,
-# hidden tests, grading files, secrets, git metadata and the toolkit's own `.system/`. A
-# release, a hosted copy and the open site all refuse them; no pattern re-includes one.
-DENYLIST = (
+# The institution denylist (decision 0040 rule 3): path COMPONENTS a folder copy leaves
+# behind, matched by name at every depth, case-insensitively, as globs (`.env.local`). Two
+# groups (decision B, 2026-11-04):
+#
+# HARD: secrets, git metadata, grading files and the toolkit's own `.system/`. Never
+# released by any route: a folder copy skips them, no `!` line re-includes one, and a
+# release that names one outright is refused (`deploy`). Nothing in one is course material.
+DENYLIST_HARD = (
+    ".git",
     ".system",
-    "solution",
-    "solutions",
-    "grading_config.yml",
-    "grading.yml",  # the pre-rename name; the engine stopped reading it, this list has not
-    "tests",
     ".env",
     ".env.*",
-    ".git",
+    "grading_config.yml",
+    "grading.yml",  # the pre-rename name; the engine stopped reading it, this list has not
 )
+# CONTENT: solutions and hidden tests. Withheld from a folder copy by default, as if the
+# root `.releaseignore` began with them, so a `!solutions/` line there releases them for
+# that repo (last match wins, anchored like any other line); a release naming one outright
+# ships it (decision 0040, coordinator ruling on PR #478).
+DENYLIST_CONTENT = ("solution", "solutions", "tests")
+# Both, for the callers that ask only "is this on the institution's list": the public
+# semester site and the student status file never name either group, released or not.
+DENYLIST = DENYLIST_HARD + DENYLIST_CONTENT
 
 # Never course material, in any course, on any page: what a file manager or an interpreter
 # leaves in a folder. Kept apart from DENYLIST because nothing here leaks anything (it is
@@ -102,10 +113,37 @@ def is_clutter(name: str) -> bool:
     return name.casefold() in _CLUTTER_FOLDED
 
 
+def _on(name: str, patterns: tuple[str, ...]) -> bool:
+    folded = name.casefold()
+    return any(fnmatch(folded, pattern) for pattern in patterns)
+
+
 def is_denied(name: str) -> bool:
     """Whether one path COMPONENT is on the institution denylist (case-insensitive)."""
-    folded = name.casefold()
-    return any(fnmatch(folded, pattern) for pattern in DENYLIST)
+    return _on(name, DENYLIST)
+
+
+def is_hard_denied(name: str) -> bool:
+    """Whether one path COMPONENT is never released, by any route (`DENYLIST_HARD`)."""
+    return _on(name, DENYLIST_HARD)
+
+
+def is_content_denied(name: str) -> bool:
+    """Whether one path COMPONENT is withheld by default, a `!` line aside
+    (`DENYLIST_CONTENT`)."""
+    return _on(name, DENYLIST_CONTENT)
+
+
+def hard_denied(path: str) -> bool:
+    """Whether any component of `path` is never released (`DENYLIST_HARD`): a release
+    naming it is refused (`deploy`)."""
+    return any(is_hard_denied(p) for p in path.split("/") if p)
+
+
+def never_copied(path: str) -> bool:
+    """Whether any component of `path` is never released or is clutter: what no copy
+    carries, whatever a `.releaseignore` says."""
+    return any(is_hard_denied(p) or is_clutter(p) for p in path.split("/") if p)
 
 
 def denied(path: str) -> bool:
@@ -350,15 +388,18 @@ def deny(
     """The layers as a `copytree` filter over the clone at `root`. The denylist judges the
     names BELOW the path a copy names, never that path's own ancestors: it stops a folder
     copy SWEEPING up a `solutions/`, while a copy that names `solutions/labs/02` ships
-    exactly that (decision 0040, coordinator ruling on PR #478). A denied,
-    `.releaseignore`-withheld or `use`-excluded name is pruned (nothing inside it is
-    walked), and each FILE must also be kept by `use` and `limit`. A folder is never
-    dropped for its kind: an `include` may name a file inside one whose kind is out."""
-    ignored = deny_for(root)
+    exactly that (decision 0040, coordinator ruling on PR #478). A never-released name
+    (`DENYLIST_HARD`) and clutter are skipped whatever any line says; a content name
+    (`DENYLIST_CONTENT`) is the `.releaseignore` layer's implied first line, so a `!`
+    there re-includes it (decision B). A denied, `.releaseignore`-withheld or
+    `use`-excluded name is pruned (nothing inside it is walked), and each FILE must also
+    be kept by `use` and `limit`. A folder is never dropped for its kind: an `include`
+    may name a file inside one whose kind is out."""
+    ignored = deny_for(root, default=is_content_denied)
 
     def ignore(dirpath: str, names: list[str]) -> set[str]:
         here = Path(dirpath)
-        skip = {n for n in names if is_denied(n) or is_clutter(n)}
+        skip = {n for n in names if is_hard_denied(n) or is_clutter(n)}
         skip |= ignored(dirpath, names)
         if use is None and limit is None:
             return skip
@@ -381,7 +422,8 @@ def deny(
 
 def swept(path: str) -> bool:
     """Whether a path BELOW the one a copy names has a denylisted component (clutter
-    aside): what a folder copy leaves behind (`schedule`'s warning)."""
+    aside): what a folder copy leaves behind (`schedule`'s warning), a `!` line in the
+    repo's `.releaseignore` aside."""
     return any(is_denied(p) for p in path.split("/") if p)
 
 

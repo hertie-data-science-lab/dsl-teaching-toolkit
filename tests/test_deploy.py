@@ -983,3 +983,61 @@ def test_release_now_refuses_a_copy_of_an_entry_with_no_number(
         ]
     else:
         assert out == 0
+
+
+# ----------------------------------- decision B: never released, or withheld by default
+
+
+def _lab_with_answers(src):
+    for rel in (
+        "labs/01/lab.ipynb",
+        "labs/01/solutions/a.ipynb",
+        "labs/01/.env",
+        "solutions/key.md",
+    ):
+        (src / rel).parent.mkdir(parents=True, exist_ok=True)
+        (src / rel).write_text(rel)
+
+
+def test_a_bang_line_releases_a_content_name_with_its_folder(monkeypatch):
+    def build(src):
+        _lab_with_answers(src)
+        (src / ".releaseignore").write_text("!solutions/\n!.env\n")
+
+    snaps = _stub_deploy_many(monkeypatch, build)
+    errors, _changed, _copies = deploy.deploy_many(
+        "COURSE", "SEMESTER", [_deploy("labs/01")], sync=False
+    )
+    assert errors == 0
+    got = snaps["materials"]
+    assert got["labs/01/solutions/a.ipynb"] == "labs/01/solutions/a.ipynb"
+    assert "labs/01/.env" not in got  # no `!` line releases a never-released name
+
+
+def test_without_a_bang_line_a_folder_copy_leaves_the_content_names(monkeypatch):
+    snaps = _stub_deploy_many(monkeypatch, _lab_with_answers)
+    deploy.deploy_many("COURSE", "SEMESTER", [_deploy("labs/01")], sync=False)
+    assert "labs/01/lab.ipynb" in snaps["materials"]
+    assert "labs/01/solutions/a.ipynb" not in snaps["materials"]
+
+
+def test_a_never_released_path_named_outright_is_refused(monkeypatch, capsys):
+    snaps = _stub_deploy_many(monkeypatch, _lab_with_answers)
+    errors, _changed, _copies = deploy.deploy_many(
+        "COURSE", "SEMESTER", [_deploy("labs/01/.env"), _deploy("labs/01")], sync=False
+    )
+    assert errors == 0  # a refusal on a green run, as a `.releaseignore` one is
+    assert "labs/01/.env" not in snaps["materials"]
+    assert "labs/01/lab.ipynb" in snaps["materials"]  # the rest still shipped
+    err = capsys.readouterr().err
+    assert "::warning::" in err
+    assert "never released: labs/01/.env is on the institution's list" in err
+
+
+def test_a_content_name_named_outright_still_ships(monkeypatch):
+    snaps = _stub_deploy_many(monkeypatch, _lab_with_answers)
+    errors, _changed, _copies = deploy.deploy_many(
+        "COURSE", "SEMESTER", [_deploy("solutions")], sync=False
+    )
+    assert errors == 0
+    assert snaps["materials"]["solutions/key.md"] == "solutions/key.md"

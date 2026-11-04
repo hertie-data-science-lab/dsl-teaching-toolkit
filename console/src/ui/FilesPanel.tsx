@@ -10,14 +10,20 @@
 // Chips per view (decision 3): Browse shows withheld and never copied; Withhold withheld, never
 // copied and only if named; Release each file's state against the run's destination (three-way,
 // `fileStates`) and withheld. Release ticks follow the saved `.releaseignore`, as the engine does.
+//
+// Decision B (2026-11-04): the institution's names in two groups. Never released (`.env`, `.git`,
+// grading files, `.system`): no tick in any view, "never released". Content (`solutions`,
+// `tests`): "default withheld", unticked in Withhold until a tick (or a typed line) writes the
+// `!` line that releases it; Release keeps "only if named" for them unless that line is saved.
 
 import type { ComponentChildren } from 'preact';
 import { useRef, useState } from 'preact/hooks';
-import { badgeFiles, buildTree, denylisted, neverMaterial, withholdCounts, type TreeNode } from '../edit/badges';
+import { badgeFiles, buildTree, defaultWithheld, hardDenied, neverMaterial, withholdTally, type TreeNode } from '../edit/badges';
 import { compileAll, withheldBy } from '../edit/glob';
 import type { SaveState } from '../edit/save';
 import type { Files, TreePath } from '../model/files';
 import { plural } from '../model/format';
+import { DENYLIST_CONTENT, DENYLIST_HARD } from '../model/selection';
 import { withMark } from '../model/materialsRepo';
 import {
   countsWords, disabledTick, effectiveDestRepo, eligibleDestination, fileStates, folderCounts, groupPicks, destPathOf,
@@ -32,7 +38,7 @@ import { PatternTree } from './PatternTree';
 import { ReleaseFoot, ReleaseManifest, ToRow, groupKey, type Dests } from './ReleaseManifest';
 import { RepoPickerModal, type RepoRow } from './RepoPickerModal';
 import { SplitPanes } from './Splitter';
-import { ChipMeanings, StateChip } from './StateChip';
+import { ChipMeanings, NEVER_RELEASED_TITLE, StateChip } from './StateChip';
 import { RepoFile } from './Viewer';
 
 export type FilesView = 'browse' | 'withhold' | 'release';
@@ -90,6 +96,34 @@ const defaultOut = (d: string) => withMark(d.endsWith('\n') || !d ? d : `${d}\n`
 
 const FILES_HINT = 'The repo’s files. Browse: a name opens the file here. Withhold: a tick means the file reaches students; untick a file or folder to withhold it (.releaseignore), then Save. Release: tick files or folders and Release to copy them to the chosen semester’s materials repo now, at the same paths; copies are additive and nothing is added to the schedule. Each row says whether that semester already has the file.';
 const RBH_HINT = 'Copies what you tick from the course repo to this semester’s materials repo now, at the same paths. Copies are additive and idempotent; files withheld by the repo’s .releaseignore never ship. Each row compares the course file with the semester’s repo the run writes to, at the same path; a group sent to another repo or path (Edit destination) is compared there in the manifest.';
+
+/** A list of patterns, each in `<code>`, comma-separated. */
+const codes = (xs: string[]) => xs.map((x, i) => <>{i ? ', ' : ''}<code>{x}</code></>);
+
+/** The Withheld patterns `?` (decision B): what the list does, and the institution's two default groups. */
+export function WithheldHint() {
+  return (
+    <Hint label="About withheld patterns">
+      Guards for this repo: files that must never leave it by mistake. One pattern per line, as in .gitignore, e.g. <code>solutions/</code>, <code>**/draft-*</code>, <code>exam-*.pdf</code>.
+      {' '}A matching file is skipped by every copy out of this repo: scheduled and manual releases, assignment hand-outs and the public website, even when a release names its folder. A release that names the file itself is refused.
+      {' '}The institution withholds by default: {codes(DENYLIST_HARD)}, which can never be released, and the content names {codes(DENYLIST_CONTENT)}, which a <code>!</code> line here overrides for this repo. A release that names one of those outright still ships it.
+      {' '}Patterns stop future copies only: a file already released stays in the semester until you remove it there.
+    </Hint>
+  );
+}
+
+/** Above the pattern box: the institution's default groups, read-only (decision B). */
+export function InstitutionDefaults() {
+  return (
+    <div class="field withhold-defaults">
+      <span class="label">Withheld by default (institution)</span>
+      <ul class="defaults-list">
+        {DENYLIST_HARD.map((x) => <li><code>{x}</code> <span class="footnote">never released</span></li>)}
+        {DENYLIST_CONTENT.map((x) => <li><code>{x}</code> <span class="footnote">override with a ! line</span></li>)}
+      </ul>
+    </div>
+  );
+}
 
 /** The line a tree click added or changed (the first index where the lists differ); null when nothing changed or a line went. */
 export function changedLine(before: string[], after: string[]): number | null {
@@ -201,7 +235,7 @@ export function FilesPanel(p: FilesPanelProps) {
       // A folder picked takes its contents with it: their own picks go.
       : [...picks.filter((x) => !(dir && x.repo === repo && x.path.startsWith(`${path}/`))), { repo, path, dir }]);
   const outOf = (path: string, dir = false) => !!withheldBy(rules, path, dir);
-  const shipsNot = (path: string) => outOf(path) || neverMaterial(path) || denylisted(path);
+  const shipsNot = (path: string) => outOf(path) || neverMaterial(path) || hardDenied(path) || defaultWithheld(rules, path);
   const trees: Record<string, RepoFiles> = {};
   for (const r of new Set(picks.map((x) => x.repo))) {
     const o = r === repo ? here : repoOf(p.files, p.courseOrg, r);
@@ -226,18 +260,20 @@ export function FilesPanel(p: FilesPanelProps) {
   const pickControl = (path: string, dir: boolean) => {
     if (outOf(path, dir) || neverMaterial(path)) return <span class="ft-gap" />;
     const by = inPicked(path);
-    const off = by ? 'Picked with its folder' : disabledTick(path, dir, states[path], here.paths) ? (dir ? NEVER_FOLDER : NOTHING) : null;
+    const off = hardDenied(path) ? NEVER_RELEASED_TITLE : by ? 'Picked with its folder' : disabledTick(path, dir, states[path], here.paths) ? (dir ? NEVER_FOLDER : NOTHING) : null;
     return <input type="checkbox" class="ft-tick" checked={by || isPicked(path, dir)} disabled={off !== null} title={off ?? undefined} aria-label={`Pick ${path}${dir ? '/' : ''}`} onClick={() => togglePick(path, dir)} />;
   };
   const releaseSide = (path: string, dir: boolean): ComponentChildren => {
     if (outOf(path, dir)) return null;
     if (!dir) {
       if (neverMaterial(path)) return <StateChip kind="never_copied" />;
-      if (denylisted(path)) return <StateChip kind="only_if_named" />;
+      if (hardDenied(path)) return <StateChip kind="never_released" />;
+      if (defaultWithheld(rules, path)) return <StateChip kind="only_if_named" />;
       const s = states[path];
       if (!s || s === 'unknown') return null;
       return <StateChip kind={s} onTick={s === 'behind' && !isPicked(path, false) && !inPicked(path) ? () => togglePick(path, false) : undefined} onKeep={keep} prUrl={prOf(runRepo, path)} />;
     }
+    if (hardDenied(path)) return <StateChip kind="never_released" />;
     const node = folders.get(path);
     if (!node) return null;
     const counts = folderCounts(node, states, shipsNot);
@@ -266,8 +302,9 @@ export function FilesPanel(p: FilesPanelProps) {
   };
 
   // ---- the tree, one instance for every view
-  const browseFixed = (path: string) => (neverMaterial(path) || denylisted(path) ? 'never copied' : null);
-  const withholdFixed = (path: string) => (neverMaterial(path) ? 'never copied' : denylisted(path) ? 'only if named' : null);
+  const browseFixed = (path: string) => (neverMaterial(path) ? 'never copied' : hardDenied(path) ? 'never released'
+    : defaultWithheld(rules, path, folders.has(path)) ? 'default withheld' : null);
+  const withholdFixed = (path: string) => (neverMaterial(path) ? 'never copied' : hardDenied(path) ? 'never released' : null);
   const name = (path: string) => (
     <button type="button" class="ft-name" aria-current={file === path ? 'true' : undefined} onClick={() => setFile(path)}>{path.split('/').pop()}</button>
   );
@@ -283,6 +320,7 @@ export function FilesPanel(p: FilesPanelProps) {
         releasedWord=""
         wordClass="muted"
         fixed={view === 'browse' ? browseFixed : view === 'withhold' ? withholdFixed : () => null}
+        defaults={view === 'withhold'}
         control={view === 'browse' ? () => null : release ? pickControl : undefined}
         side={release ? releaseSide : undefined}
         rowClick={view !== 'browse'}
@@ -294,10 +332,11 @@ export function FilesPanel(p: FilesPanelProps) {
     ? (file ? <RepoFile org={p.courseOrg} at={{ repo, path: file }} /> : <p class="empty-note">Choose a file to view it here.</p>)
     : view === 'withhold' ? (
       <>
+        <InstitutionDefaults />
         <div class="field">
-          <label for="ign-pat">Withheld patterns</label>
+          <label for="ign-pat">Withheld patterns</label> <WithheldHint />
           <PatternBox id="ign-pat" text={draft ?? here.saved} onText={(t) => { setFlash(null); setDraft(t); }} flash={flash} />
-          <p class="hint">One pattern per line, as in .gitignore. Clicking the tree writes them here.</p>
+          <p class="hint">One pattern per line, as in .gitignore. Click the tree, or write them here.</p>
         </div>
         <div class="field"><span class="label">Rules</span><Unmatched files={here.paths} lines={lines} partial={partial} /></div>
       </>
@@ -381,8 +420,8 @@ export function FilesPanel(p: FilesPanelProps) {
   );
 }
 
-/** The Withhold view's last line: the repo's files never copied, withheld by the list, and released. */
+/** The Withhold view's last line: the repo's files never released, withheld by default, withheld by the list, and released. */
 function WithholdCounts({ files, lines }: { files: string[]; lines: string[] }) {
-  const n = withholdCounts(files, lines);
-  return <p class="footnote">{n.never} never copied (by default) · {n.withheld} withheld · {n.released} released</p>;
+  const n = withholdTally(files, lines);
+  return <p class="footnote">{n.never} never released · {n.defaulted} default withheld · {n.withheld} withheld · {n.released} released</p>;
 }

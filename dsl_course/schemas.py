@@ -893,6 +893,10 @@ WITHHOLD_CASES = (
     ("comments and blanks", ("# a note", "", "readings/**/*.md")),
     ("a folder, unanchored", ("data/",)),
     ("an escaped bracket", ("a\\[b]/*",)),
+    # Decision B: the content names re-included by a `!` line, the never-released not.
+    ("a default re-included", ("!solutions/",)),
+    ("a default re-included, case as written", ("!tests/",)),
+    ("a never-released name stays", ("!.env.local", "!grading_config.yml")),
 )
 
 
@@ -904,6 +908,22 @@ def withheld_paths(paths: tuple[str, ...], lines: tuple[str, ...]) -> list[str]:
     }
     ignore = releaseignore.listed(lines)
     return sorted(p for p in paths if ignore.excludes(p, lambda rel: rel in dirs))
+
+
+def copied_paths(paths: tuple[str, ...], lines: tuple[str, ...]) -> list[str]:
+    """Which of `paths` a release's folder copy of the repo root carries under a root
+    `.releaseignore` of `lines`, by the engine's own rule (`selection.deny`): never the
+    never-released names or clutter, the content names only where a `!` line says so."""
+    dirs = {
+        "/".join(p.split("/")[:i]) for p in paths for i in range(1, p.count("/") + 1)
+    }
+    ignore = releaseignore.listed(lines, default=selection.is_content_denied)
+    return sorted(
+        p
+        for p in paths
+        if not selection.never_copied(p)
+        and not ignore.excludes(p, lambda rel: rel in dirs)
+    )
 
 
 def materials_json() -> dict:
@@ -918,6 +938,7 @@ def materials_json() -> dict:
                 "paths": list(_TREE),
                 "patterns": list(lines),
                 "withheld": withheld_paths(_TREE, lines),
+                "copied": copied_paths(_TREE, lines),
             }
             for name, lines in WITHHOLD_CASES
         ],
@@ -1006,7 +1027,11 @@ def selection_json() -> dict:
     denylist and clutter names, the kinds, each use's defaults, the institution's floors,
     and golden vectors answered by `selection.select`."""
     return {
-        "denylist": list(selection.DENYLIST),
+        # Decision B: never released by any route / withheld by default, a `!` aside.
+        "denylist": {
+            "hard": list(selection.DENYLIST_HARD),
+            "content": list(selection.DENYLIST_CONTENT),
+        },
         "clutter": sorted(selection.CLUTTER),
         "kinds": list(selection.kind_names()),
         "readings": selection.READINGS,

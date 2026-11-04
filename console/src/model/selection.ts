@@ -2,7 +2,10 @@
 // institution denylist, a repo's `.releaseignore`, the use's selection (`kinds`, `types`,
 // `include`, `exclude`; every key optional) and the institution's floor, in that order. The
 // rules and the golden vectors come from the engine (`schemas/selection.json`); the tests
-// hold this file to them, and to the demo fixture's hosting.
+// hold this file to them, and to the demo fixture's hosting. The denylist is two groups
+// (decision B, 2026-11-04): never released (`DENYLIST_HARD`) and withheld by default, a `!` line
+// in the repo's `.releaseignore` re-including them on a folder copy (`DENYLIST_CONTENT`). The
+// path lists here (hosting, `select`) refuse both, as the engine's do.
 
 import rules from '../../schemas/selection.json';
 import { obj } from '../edit/yamlText';
@@ -35,7 +38,12 @@ export const PUBLISH_DEFAULT: Sel = rules.defaults.publish;
 export const FLOORS: Record<string, Floor> = rules.floor;
 
 const fnmatch = (p: string) => new RegExp(`^${p.replace(/[.+^${}()|\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`);
-const DENYLIST = rules.denylist.map(fnmatch);
+/** Never released by any route (`selection.DENYLIST_HARD`, decision B): `.git`, `.system`, `.env*`, grading files. */
+export const DENYLIST_HARD: string[] = rules.denylist.hard;
+/** Withheld from a folder copy by default, a `!` line re-including them (`selection.DENYLIST_CONTENT`). */
+export const DENYLIST_CONTENT: string[] = rules.denylist.content;
+const HARD = DENYLIST_HARD.map(fnmatch);
+const CONTENT = DENYLIST_CONTENT.map(fnmatch);
 const CLUTTER = new Set(rules.clutter.map((x) => x.toLowerCase()));
 const ALIASES: Record<string, string> = rules.type_aliases;
 
@@ -43,8 +51,14 @@ const ALIASES: Record<string, string> = rules.type_aliases;
 export const parts = (path: string) => path.split('/').filter(Boolean).map((x) => x.toLowerCase());
 /** A component that is never course material (`selection.CLUTTER`: `.DS_Store`, `.gitkeep`, ...). */
 export const clutter = (path: string) => parts(path).some((x) => CLUTTER.has(x));
-/** A component on the institution denylist (solutions, tests, grading files, `.env*`, `.git`, `.system`). */
-export const denylisted = (path: string) => parts(path).some((x) => DENYLIST.some((re) => re.test(x)));
+/** Whether one path COMPONENT is withheld by default (`selection.is_content_denied`), case aside. */
+export const contentName = (name: string) => CONTENT.some((re) => re.test(name.toLowerCase()));
+/** A component never released (`selection.hard_denied`): no copy carries it, no `!` line re-includes it, a release naming it is refused. */
+export const hardDenied = (path: string) => parts(path).some((x) => HARD.some((re) => re.test(x)));
+/** A component withheld by default (solutions, tests), which a `!` line in the repo's `.releaseignore` re-includes on a folder copy. */
+export const contentDenied = (path: string) => parts(path).some(contentName);
+/** A component on the institution denylist, either group. */
+export const denylisted = (path: string) => hardDenied(path) || contentDenied(path);
 /** Layer 1: either. */
 export const denied = (path: string) => clutter(path) || denylisted(path);
 

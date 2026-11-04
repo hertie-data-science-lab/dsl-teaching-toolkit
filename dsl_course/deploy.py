@@ -95,7 +95,7 @@ from .schedule_plan import (
     unnumbered_release,
 )
 from .selection import deny as selection_deny
-from .selection import release_use
+from .selection import hard_denied, release_use
 
 
 def _warn_withheld_stub(course_org: str, repo: str, path: str) -> None:
@@ -129,6 +129,19 @@ def _warn_ignored_source(course_org: str, repo: str, path: str) -> None:
         f"{course_org}/{repo}/{path} was NOT released - a `{RELEASEIGNORE}` excludes it. "
         "Everything else in this release shipped. Drop the pattern that matches it, or "
         "release a path that is not excluded."
+    )
+
+
+def _warn_never_released(course_org: str, repo: str, path: str) -> None:
+    """Say that a release's own source path is on the institution's never-released list
+    (`selection.DENYLIST_HARD`: secrets, git metadata, grading files, `.system/`).
+
+    Refused out loud for `_warn_ignored_source`'s reason, on its channel. Unlike that one
+    there is nothing for faculty to drop: no pattern releases these (decision B)."""
+    log_withheld(
+        f"{course_org}/{repo}/{path} was NOT released - never released: "
+        f"{path.strip('/')} is on the institution's list. Everything else in this "
+        "release shipped."
     )
 
 
@@ -638,12 +651,19 @@ def deploy_many(
                 )
                 errors += 1
                 continue
+            if srcp != src_root and hard_denied(srcp.relative_to(src_root).as_posix()):
+                # Never released, by any route (decision B): a release naming a `.env`, a
+                # grading file or `.system/` - or a path inside one - copies nothing.
+                _warn_never_released(
+                    course_org, d.course_source_repo, d.course_source_path
+                )
+                continue
             if excludes(src_root, srcp):
                 # The source path is itself excluded - so is everything under it, and no
                 # `!` deeper down can re-include any of it. Nothing else was asked for, so
-                # this copy is a no-op rather than a partial one. (A path on the
-                # institution denylist named outright DOES ship: the denylist only stops
-                # a folder copy sweeping one up - `selection.deny`.)
+                # this copy is a no-op rather than a partial one. (A content name -
+                # `solutions/`, `tests/` - named outright DOES ship: the default only
+                # stops a folder copy sweeping one up - `selection.deny`.)
                 _warn_ignored_source(
                     course_org, d.course_source_repo, d.course_source_path
                 )

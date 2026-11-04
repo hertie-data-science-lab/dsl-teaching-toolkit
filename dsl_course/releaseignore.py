@@ -19,6 +19,12 @@ paths do not all have a clone to look at:
 Both anchor on a ROOT, not on the subpath being copied: a root `.releaseignore` governs a
 `lectures/01` release the same way a root `.gitignore` governs a subdirectory.
 
+A `default` (decision B, 2026-11-04) is a set of NAMES withheld when no pattern has an
+opinion on them, as if it were an implied first line above the root `.releaseignore`: the
+institution's content names (`selection.DENYLIST_CONTENT`) on a release's folder copy,
+which a `!solutions/` line re-includes, last match winning as for any other line. Only
+`selection.deny` passes one; every other caller reads faculty's lines alone.
+
 The file EXCLUDES ITSELF, everywhere (`_SELF_EXCLUDED`). That departs from git, which
 tracks `.gitignore` - deliberately, because git has no equivalent of what happens here:
 a released copy lands in a repo every student and auditor can read (`deploy` grants both
@@ -79,7 +85,8 @@ def parse(text: str) -> GitIgnoreSpec:
 
 
 class Ignore:
-    """The nested-`.releaseignore` rule. Reads nothing - `spec_for` supplies the texts.
+    """The nested-`.releaseignore` rule. Reads nothing - `spec_for` supplies the texts, and
+    `default` the names withheld when no level has an opinion (module docstring).
 
     Chains are memoised per directory rather than pushed and popped on a stack, because
     the caller that drives this (`shutil.copytree`) announces entering a directory and
@@ -90,8 +97,11 @@ class Ignore:
     depends only on the directory and the anchor. Only the entry name varies per file, so
     judging one costs a string join rather than a path-relativise per level per entry."""
 
-    def __init__(self, spec_for: SpecFor) -> None:
+    def __init__(
+        self, spec_for: SpecFor, default: Callable[[str], bool] | None = None
+    ) -> None:
         self._spec_for = spec_for
+        self._default = default
         self._cache: dict[DirRel, tuple[tuple[str, GitIgnoreSpec], ...]] = {}
 
     def chain(self, dirrel: DirRel) -> tuple[tuple[str, GitIgnoreSpec], ...]:
@@ -116,7 +126,8 @@ class Ignore:
         return chain
 
     def verdict(self, dirrel: DirRel, name: str, is_dir: bool) -> bool | None:
-        """True withheld / False re-included by a `!` / None no opinion, for one entry.
+        """True withheld / False re-included by a `!` / None no opinion, for one entry. A
+        name `default` withholds is True when no level matches it: the implied first line.
 
         Every level is one ordered pattern list root-to-leaf and the LAST match wins, so
         the deepest level with an opinion decides - each level already applying
@@ -133,7 +144,7 @@ class Ignore:
             matched = spec.check_file(rel).include
             if matched is not None:
                 return matched
-        return None
+        return True if self._default is not None and self._default(name) else None
 
     def excludes(self, relpath: str, is_dir: Callable[[str], bool]) -> bool:
         """Whether `relpath` is withheld, judging every component from the root down.
@@ -168,8 +179,8 @@ def _is_dir(path: Path) -> bool:
     return path.is_dir() and not path.is_symlink()
 
 
-def _local(root: Path) -> Ignore:
-    return Ignore(lambda dirrel: _spec_in(root / dirrel if dirrel else root))
+def _local(root: Path, default: Callable[[str], bool] | None = None) -> Ignore:
+    return Ignore(lambda dirrel: _spec_in(root / dirrel if dirrel else root), default)
 
 
 def _deny(root: Path, ignore: Ignore) -> Deny:
@@ -179,9 +190,10 @@ def _deny(root: Path, ignore: Ignore) -> Deny:
         here = Path(dirpath)
         dirrel = here.relative_to(root).as_posix() if here != root else ""
         # No rules anywhere above this directory and none in it: the common case for a
-        # repo that has no `.releaseignore` at all, and worth not stat-ing every name for.
+        # repo that has no `.releaseignore` at all, and worth not stat-ing every name for
+        # (with no level, a verdict never asks whether a name is a directory).
         if not ignore.chain(dirrel):
-            return {n for n in names if n in _SELF_EXCLUDED}
+            return {n for n in names if ignore.verdict(dirrel, n, False) is True}
         return {
             name
             for name in names
@@ -191,8 +203,9 @@ def _deny(root: Path, ignore: Ignore) -> Deny:
     return deny
 
 
-def deny_for(root: Path) -> Deny:
-    """An `fs.Deny` withholding whatever the `.releaseignore` files under `root` exclude.
+def deny_for(root: Path, default: Callable[[str], bool] | None = None) -> Deny:
+    """An `fs.Deny` withholding whatever the `.releaseignore` files under `root` exclude,
+    and the names `default` withholds unless a `!` line re-includes them.
 
     Withholding a directory PRUNES it: `copytree` does not descend into a name this
     returns, so nothing inside is ever tested and no `!` written inside (or below) it can
@@ -201,13 +214,15 @@ def deny_for(root: Path) -> Deny:
     `root` must be an ancestor of every directory `copytree` walks, which it is: it walks
     the tree it was given. Paths are never resolved, so matching is on the names in the
     tree and a `notes.pdf -> ../solution/answers.pdf` is judged as `notes.pdf`."""
-    return _deny(root, _local(root))
+    return _deny(root, _local(root, default))
 
 
-def listed(lines: Iterable[str]) -> Ignore:
+def listed(
+    lines: Iterable[str], default: Callable[[str], bool] | None = None
+) -> Ignore:
     """One pattern list read as a `.releaseignore` at the root, and nowhere else."""
     spec = parse("\n".join(lines))
-    return Ignore(lambda dirrel: None if dirrel else spec)
+    return Ignore(lambda dirrel: None if dirrel else spec, default)
 
 
 def excludes(root: Path, path: Path) -> bool:

@@ -42,7 +42,7 @@ from .materials import folder_kind
 from .opencourse import OPENCOURSE_FILE, OpenCourse
 from .opencourse import read as read_opencourse
 from .readings import readings_block
-from .selection import PUBLISH, Selection, denied, deny, floor, kept
+from .selection import PUBLISH, Selection, deny, floor, kept, never_copied
 from .selection import releaseignored as releaseignored_in
 from .site_repo import (
     ROW_NOUN,
@@ -137,13 +137,15 @@ def _public_links(local_dir: Path, url_prefix: str) -> list[Link]:
     the allowlist excluded would be served and unreachable. The semester site takes the extra
     narrowing because it CAN offer a folder link; this one keeps every file reachable."""
     files = sorted(q for q in local_dir.rglob("*") if q.is_file())
-    # Denylisted paths are already absent from a folder THIS run copied (`selection`),
-    # so this is the second lock on the same door - and the one that holds if a file
-    # ever reaches the served tree by another route.
+    # Never-released names are already absent from a folder THIS run copied
+    # (`selection`), so this is the second lock on the same door - and the one that holds
+    # if a file ever reaches the served tree by another route. Not the content names: a
+    # `solutions/` is here only because the repo's `.releaseignore` re-includes it with a
+    # `!` line (decision B), and a copy served but never linked is the worst of both.
     rels = [
         rel
         for rel in (q.relative_to(local_dir).as_posix() for q in files)
-        if not denied(rel)
+        if not never_copied(rel)
     ]
     if any("/" not in rel for rel in rels):
         rels = [rel for rel in rels if "/" not in rel]

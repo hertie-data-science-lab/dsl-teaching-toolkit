@@ -225,7 +225,7 @@ describe('materials settings file tree', () => {
     const t = words(out);
     expect(t).not.toContain('for the public website');
     expect(t).toContain('withheld');
-    expect(t).toContain('1 never copied (by default) · 0 withheld · 3 released');
+    expect(t).toContain('0 never released · 0 default withheld · 1 withheld · 3 released');
     expect(t).toContain('*.key matches no file');
     // Decision 0024 rule 10: the tree only withholds; editing is the Open button's job.
     expect(out).not.toContain(`/edit/main/lectures/05_trees/slides.html`);
@@ -238,7 +238,7 @@ describe('materials settings file tree', () => {
     const out = await withhold(cp({ entry: MAT, files: bare }));
     expect(out.match(/No rules yet\./g)).toHaveLength(1);
     // Nothing withheld: every file is released.
-    expect(words(out)).toContain('0 never copied (by default) · 0 withheld · 1 released');
+    expect(words(out)).toContain('0 never released · 0 default withheld · 0 withheld · 1 released');
     expect(out).not.toContain('Edit on GitHub');
     expect(out).not.toContain('/edit/main/a.md');
   });
