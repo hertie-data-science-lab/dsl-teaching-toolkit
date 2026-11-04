@@ -34,6 +34,9 @@ import { ItemRow, RepoChip, RepoWhy } from '../ui/SetupPanel';
 import { materialsReadiness } from '../model/readiness';
 import { courseScope } from './common';
 import type { CourseProps } from './types';
+import { addMaterialsTopic, otherRepos, removeMaterialsTopic } from './CourseIndex';
+import { releaseIntoOf, ReleaseInto, RepoChips } from '../ui/ReleaseChips';
+import { RepoPickerModal } from '../ui/RepoPickerModal';
 import { CONFIG_REPO, COURSE_FILE, COURSE_REPO, DEFAULT_SYLLABUS, SEMESTER_FILE } from '../model/names';
 
 /** `course.yml`'s public-website block. */
@@ -238,6 +241,49 @@ function courseBranch(files: CourseProps['files'], org: string): string {
   return (gh.kind === 'ready' ? gh.repos.find((r) => r.name === COURSE_REPO)?.default_branch : undefined) ?? 'main';
 }
 
+/**
+ * Release from (plan 2026-11-04, decision 7): the course's materials repos (status.json), each
+ * with a × that unsets its `dsl-materials` topic, and "Add a repo…" over the course's Other
+ * repos, which sets it, as their "Treat as course materials" does. Both write at once, apart from
+ * the page's Save, and the list follows at the next Refresh (started here).
+ */
+function ReleaseFrom(p: CourseProps) {
+  const { course } = p;
+  const env = useEnv();
+  const c = courseOf(p);
+  const [marked, setMarked] = useState<Record<string, boolean>>({});
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const fromStatus = (c?.materials ?? []).map((m) => m.repo);
+  const listed = [...fromStatus.filter((r) => marked[r] !== false), ...Object.keys(marked).filter((r) => marked[r] && !fromStatus.includes(r))];
+  const repos = p.files.repos(course.org);
+  const others = repos.kind === 'ready' ? otherRepos(course.org, repos.repos, [...listed, ...(c?.templates ?? []).map((t) => t.repo)]) : [];
+  const mark = async (repo: string, on: boolean) => {
+    if (!env) return;
+    setBusy(true);
+    try {
+      await (on ? addMaterialsTopic : removeMaterialsTopic)(env.client, course.org, repo);
+      setMarked({ ...marked, [repo]: on });
+      setNote(`${repo} ${on ? 'is now' : 'is no longer'} course materials. ${await refreshAfterSave(env.ops, newestScope(p), course.name)}`);
+    } catch (e) {
+      setNote(`Could not ${on ? 'add' : 'remove'} the topic on ${repo}: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const write = course.write && !!env;
+  return (
+    <>
+      <RepoChips id="cd-from" label="Release from" addLabel="Add a repo…" fixed={[]} own={listed} busy={busy} note={note}
+        hint="The course repos a release may copy from: the Release by hand picker and the Schedule list these. A repo you add here is marked as course materials."
+        footnote="The course materials repos. Templates and the course’s own repos are never listed."
+        onRemove={write ? (r) => void mark(r, false) : undefined} onAdd={write ? () => setAdding(true) : undefined} />
+      {adding ? <RepoPickerModal kind="source" rows={others.map((r) => ({ name: r.name, note: 'other repo' }))} onChoose={(r) => void mark(r, true)} onClose={() => setAdding(false)} /> : null}
+    </>
+  );
+}
+
 export function DetailsScreen(p: CourseProps) {
   const { course } = p;
   const env = useEnv();
@@ -252,7 +298,18 @@ export function DetailsScreen(p: CourseProps) {
     setDraft({ ...d, ...patch });
     if (save.kind !== 'busy') setSave({ kind: 'idle' });
   };
-  const tiers = defaultsTiers(institutionDefaults(), before.defaults);
+  // Releases (plan 2026-11-04, decision 7): Release into is the institution's (grey) and the
+  // course's own `release_destinations`; the default destination chooses among them.
+  const inst = institutionDefaults();
+  // The picker offers the newest semester's repos; a typed name is checked against that semester's.
+  const newest = course.cohorts[0]?.org ?? '';
+  const semLoaded = newest ? p.cohortStates[newest] : undefined;
+  const rel = releaseIntoOf({
+    inherited: inst, nearest: 'the institution', own: d.defaults.release_destinations, org: newest,
+    repos: newest ? p.files.repos(newest) : null, status: semLoaded?.kind === 'ready' ? semLoaded.status : null,
+  });
+  const tiers = defaultsTiers(inst, before.defaults, rel.into);
+  const { materials_repo: destTier, ...defaultsFields } = tiers;
   const defaultErrs = fieldErrors(null, tiers, d.defaults);
   const errs = { ...fieldErrors(null, ABOUT, d.about), ...fieldErrors(null, COURSE_FACTS, d.about), ...defaultErrs };
   const doSave = async () => {
@@ -291,7 +348,15 @@ export function DetailsScreen(p: CourseProps) {
               <div class="fold-body">
                 <div class="form-section">
                   <h3>Defaults for this course’s semesters <Hint label="About the defaults">Sets the course’s default; each semester and each assignment can override. Left empty, the institution’s value in grey applies.</Hint></h3>
-                  <SchemaForm id="cdx" schema={null} tiers={tiers} values={d.defaults} onChange={(v) => set({ defaults: v })} />
+                  <SchemaForm id="cdx" schema={null} tiers={defaultsFields} values={d.defaults} onChange={(v) => set({ defaults: v })} />
+                </div>
+                <div class="form-section rel-section">
+                  <h3>Releases <Hint label="About releases">Which course repos a release copies from, which semester repos it may write into, and where it lands when nothing names a repo. Each semester can add to Release into and set its own default destination.</Hint></h3>
+                  <ReleaseFrom {...p} />
+                  <ReleaseInto id="cd-into" fixed={rel.fixed} own={rel.own} rows={rel.rows} reserved={rel.reserved}
+                    hint={`The semester repos a release may write into. ${rel.fixed.map((c) => c.name).join(', ')} ${rel.fixed.length > 1 ? 'come' : 'comes'} from the institution and ${rel.fixed.length > 1 ? 'are' : 'is'} always allowed.`}
+                    onChange={course.write ? (list) => set({ defaults: { ...d.defaults, release_destinations: list } }) : undefined} />
+                  <SchemaForm id="cdx" schema={null} tiers={{ materials_repo: destTier }} values={d.defaults} onChange={(v) => set({ defaults: v })} />
                 </div>
               </div>
             </details>

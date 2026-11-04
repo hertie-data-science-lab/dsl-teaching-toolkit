@@ -19,8 +19,12 @@ import { validator } from './validate';
 
 export const RUN_KEYS = ['team_formation', 'max_team_size', 'late_window_days', 'late_penalty_per_day', 'visibility', 'submit_url', 'marks_per_question'] as const;
 export type RunKey = (typeof RUN_KEYS)[number];
-/** The `defaults:` keys with no entry layer (`settings.SEMESTER_KEYS`, and `autosync_released_edits`). */
-export type SemesterWideKey = 'timezone' | 'archive_grace_days' | 'materials_repo' | 'autosync_released_edits';
+/**
+ * The `defaults:` keys with no entry layer (`settings.SEMESTER_KEYS`, and `autosync_released_edits`).
+ * `release_destinations` is a list the engine merges across the layers (`settings.MERGED_KEYS`):
+ * a level adds repos to the ones it inherits, it does not replace them (plan 2026-11-04, decision 7).
+ */
+export type SemesterWideKey = 'timezone' | 'archive_grace_days' | 'materials_repo' | 'release_destinations' | 'autosync_released_edits';
 
 /** Where an effective value comes from (`settings.SOURCES`). */
 export type Source = 'entry' | 'semester' | 'course' | 'institution';
@@ -30,6 +34,8 @@ export type Block = Record<string, unknown>;
 export interface Effective {
   value: unknown;
   source: Source;
+  /** A merged list's items, each with the level that set it (`release_destinations`), where status.json says. */
+  items?: { value: unknown; source: Source }[];
 }
 
 /** Every effective value at one level, keyed as the files spell it (`assignment_repo_visibility`). */
@@ -172,6 +178,14 @@ export function over(key: RunKey, own: Block, source: Source, below: Effectives 
 
 // ------------------------------------------------------------------ words
 
+/** Who set a value, as a phrase names them: "from the course", "Set by the institution". */
+export const SOURCE_NAME: Record<Source, string> = {
+  entry: 'this assignment',
+  semester: 'this semester',
+  course: 'the course',
+  institution: 'the institution',
+};
+
 export const SOURCE_WORD: Record<Source, string> = {
   entry: 'set for this assignment',
   semester: 'this semester’s default',
@@ -196,6 +210,8 @@ export function valueWord(key: RunKey | SemesterWideKey, v: unknown): string {
     case 'marks_per_question':
     case 'autosync_released_edits':
       return readSetting(key, v) ? 'on' : 'off';
+    case 'release_destinations':
+      return Array.isArray(v) && v.length ? v.join(', ') : 'none';
     default:
       return String(v);
   }

@@ -316,11 +316,19 @@ folder a `.releaseignore` line withholds, git's rule still refuses). The Withhol
 released. A folder release's manifest ships a content name a `!` line re-includes and lists a
 never-released one as left behind (`groupPicks`).
 
+**Course details**' Advanced fold has a **Releases** section: Release from (the course's
+materials repos; a chip's × unsets the `dsl-materials` topic and Add a repo… sets it, both
+written at once, outside the page's Save), Release into (`release_destinations` chips, the
+institution's greyed) and Default destination (`materials_repo`, a select over that list,
+relabelled from "Repo a release lands in").
+
 **Semester defaults** (decision 0043; `#defaults`, "Defaults" in the semester nav between Site and
 Operations) edits the semester's settings: three open folds, each heading
 carrying its line with the effective value and source from `status.json`: Assignments
 (semester.yml `defaults:`, the run defaults as `defaultsLine` words them), Releases
-(`autosync_released_edits`, "Send fixes to released files automatically") and Semester dates
+(`autosync_released_edits`, "Send fixes to released files automatically"; the Release into
+chips, `release_destinations`, the course's greyed; and the Default destination,
+`materials_repo`, moved here from Assignments) and Semester dates
 (schedule.yml's `semester:` block). The heading's `?` explains the cascade; the late window and
 late penalty each carry a `?` saying they are defaults a marker can waive or override per late
 unit on the Marks tab (a per-key `hint` added to the tiers). Each inherits on its own: a window
@@ -519,8 +527,8 @@ a first visit, mostly free 304s after).
   `grading_sheets/<slug>.yml`, `.github/course.yml` (its `open_course_site:` is the public
   website), a template's `grading_config.yml` (on `solution`), a materials repo's `.releaseignore`,
   the site's `index.md`, `_announcements/` and the institution keys of its `_config.yml`. "Treat as course materials" on an Other repos
-  row adds the `dsl-materials` topic to that repo (`PUT /repos/{o}/{r}/topics`), as does Add a
-  course repo…. YAML is edited in place (`src/edit/yamlText.ts`):
+  row adds the `dsl-materials` topic to that repo (`PUT /repos/{o}/{r}/topics`), as do Add a
+  course repo… and Course details' Release from, whose × removes it. YAML is edited in place (`src/edit/yamlText.ts`):
   only the changed values' bytes move, so comments and their columns survive. After a write the
   console follows the commit's checks and says what they found.
 - Operations, through the course org's Console workflow (`.github/.github/workflows/console.yml`,

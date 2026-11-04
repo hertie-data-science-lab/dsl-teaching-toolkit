@@ -95,7 +95,7 @@ describe('Semester defaults', () => {
   it('words one line per setting, its value and where it comes from', () => {
     expect(settingsLines(status)).toEqual({
       assignments: expect.stringMatching(/^Defaults: /),
-      releases: 'Send fixes to released files automatically: off (institution default).',
+      releases: 'Send fixes to released files automatically: off (institution default). Lands in materials (institution default).',
       dates: 'Semester dates: 7 Sep to 18 Dec.',
     });
   });
@@ -129,6 +129,15 @@ describe('Semester defaults', () => {
     expect(movedHash('#settings')).toBe('#defaults-assignments');
     await mount((f) => <SemesterDefaultsScreen {...props(f, { entry: 'assignments' })} />);
     expect(document.activeElement).toBe(q('details.settings-fold summary'));
+  });
+
+  it('asks for the default destination in Releases, after the automatic fixes, not in Assignments (plan 2026-11-04, decision 7)', async () => {
+    await mount((f) => <SemesterDefaultsScreen {...props(f)} />);
+    const [asg, rel] = [...root!.querySelectorAll<HTMLDetailsElement>('details.settings-fold')];
+    expect(asg.querySelector('[id$="materials_repo"]')).toBeNull();
+    const ids = [...rel.querySelectorAll('select, [role="group"]')].map((e) => e.id);
+    expect(ids).toEqual(['sr-autosync_released_edits', 'sr-into', 'sr-materials_repo']);
+    expect(rel.textContent).toContain('Default destination');
   });
 
   it('asks for the timezone once: the defaults one (schedule.yml names none, decision 0039)', async () => {
