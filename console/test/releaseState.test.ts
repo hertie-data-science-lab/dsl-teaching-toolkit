@@ -10,8 +10,22 @@ import { LiveFiles, type TreeState } from '../src/model/files';
 import { DEFAULT_DEST_REPO } from '../src/model/policy';
 import {
   assignmentStems, COMMA_TITLE, countsWords, destPathOf, destRepos, effectiveDestRepo, eligibleDestination, entryDestRepos, fileStates, foldersCopied, groupPicks, LIST_MAX,
-  releaseBlocked, requestOf, toArgs, TOO_MANY, type FileState, type Group,
+  releaseBlocked, requestOf, toArgs, TOO_MANY, type FileState, type Group, folderStep, stepWords,
 } from '../src/model/releaseState';
+
+describe('a released folder’s step', () => {
+  it('is ahead, behind (a course addition counts) or diverged, in step otherwise, and unknown while a state is', () => {
+    expect(folderStep(['up_to_date', 'ahead'])).toBe('ahead');
+    expect(folderStep(['behind', 'up_to_date'])).toBe('behind');
+    expect(folderStep(['not_released'])).toBe('behind');
+    expect(folderStep(['ahead', 'not_released'])).toBe('diverged');
+    expect(folderStep(['diverged'])).toBe('diverged');
+    expect(folderStep(['up_to_date'])).toBeNull();
+    expect(folderStep(['ahead', 'unknown'])).toBeNull();
+    expect(stepWords(['behind', 'ahead', 'not_released', 'up_to_date'])).toBe('2 changed, 1 added');
+    expect(stepWords(['not_released'])).toBe('1 added');
+  });
+});
 import { fnmatch } from '../src/model/selection';
 import { validateArgs } from '../src/ops/adapter';
 import { opSpec } from '../src/ops/registry';

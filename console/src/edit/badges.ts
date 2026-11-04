@@ -5,7 +5,8 @@
 // The rule is the engine's (`releaseignore`): gitignore syntax, the last matching line wins,
 // and a withheld folder is never walked, so nothing inside it can be re-included. The cases in
 // `schemas/materials.json` were answered by the engine and the tests hold this file to them.
-// Never-material names (`.DS_Store`, `.gitkeep`) and the list file itself never leave the repo.
+// Never-material names (`.DS_Store`, `__pycache__`) and the list file itself never leave the repo;
+// a `.gitkeep` is a file like any other (it is how an empty folder ships).
 //
 // Decision B (2026-11-04): a list compiled with the institution's defaults (`compileAll(lines,
 // { defaults: true })`, `.releaseignore` only) reads the content names (`solutions`, `tests`) as
@@ -109,20 +110,21 @@ export function tally(files: string[], standingOf: (path: string) => Standing): 
 }
 
 /**
- * A click: the list after it, or why it cannot change: the path sits inside a withheld folder
- * (`at` is that folder, `byDefault` when a content name withholds it), or it is a folder a `/**`
- * rule withholds, which also covers everything inside it so no `!` line can release its files
- * (`at` is the folder itself).
+ * A click: the list after it, or why it cannot change: the path sits inside a folder
+ * a `.releaseignore` line withholds (`at` is that folder), or it is a folder a `/**` rule
+ * withholds, which also covers everything inside it so no `!` line can release its files (`at`
+ * is the folder itself).
  */
-export type Toggled = { lines: string[] } | { blocked: { rule: string; at: string; byDefault?: boolean } };
+export type Toggled = { lines: string[] } | { blocked: { rule: string; at: string } };
 
 /**
  * Toggle one path, so the row always flips: its own line goes (so does its own `!` line), and
  * when that leaves it as it was, the line that flips it is written instead; a path nothing
  * withholds gets its exact line; one a broader rule withholds gets `!line` when git allows
  * re-inclusion, and otherwise nothing changes and the caller says which folder rule to remove.
- * A content name the default withholds gets `!line`; one inside a default-withheld folder is
- * blocked (`byDefault`). `o` is how the list is compiled (`defaults` for `.releaseignore`).
+ * A content name the default withholds gets `!line`; a path inside a default-withheld folder
+ * releases that folder with it (its `!` line, then the next one in's). `o` is
+ * how the list is compiled (`defaults` for `.releaseignore`).
  */
 export function toggle(lines: string[], path: string, isDir: boolean, o: CompileOpts = {}): Toggled {
   const s = standing(compileAll(lines, o), lines, path, isDir);
@@ -138,7 +140,12 @@ export function toggle(lines: string[], path: string, isDir: boolean, o: Compile
   if (s.kind === 'own') return after(lines.filter((l) => !own(l)), false);
   if (s.kind === 'included' || s.kind === 'overridden') return lines.some(ownBang) ? after(lines.filter((l) => !ownBang(l)), true) : { lines: append(lines, line) };
   if (s.kind === 'released') return { lines: append(lines, line) };
-  if (s.kind === 'default') return s.at === path ? { lines: append(lines, `!${line}`) } : { blocked: { rule: '', at: s.at, byDefault: true } };
+  if (s.kind === 'default') {
+    if (s.at === path) return { lines: append(lines, `!${line}`) };
+    // Inside a default-withheld folder: its `!` line releases the folder with the path.
+    const next = append(lines, `!${exactLine(s.at, true)}`);
+    return bucket(standing(compileAll(next, o), next, path, isDir)) === 'released' ? { lines: next } : toggle(next, path, isDir, o);
+  }
   if (!s.legal || (isDir && /(^|\/)\*\*$/.test(s.rule.trim()))) return { blocked: { rule: s.rule, at: s.at } };
   return { lines: append(lines, `!${line}`) };
 }

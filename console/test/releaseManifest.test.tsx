@@ -123,18 +123,18 @@ describe('the Release footer', () => {
   it('counts the picks and opens Release by hand with the paired lists', async () => {
     const groups = groupPicks([{ repo: A, path: 'labs/week01', dir: true }, { repo: B, path: 'demo.py', dir: false }], trees);
     const def = releasePicked(scope, groups, { defaultDestRepo: 'materials' });
-    const { el, open } = await mount(<ReleaseFoot paths={2} files={3} def={def} scheduleHref="?cohort=x#schedule" />);
+    const { el, open } = await mount(<ReleaseFoot paths={2} files={3} def={def} />);
     expect(el.querySelector('.rh-count')!.textContent).toBe('2 paths picked · 3 files');
     const btn = el.querySelector<HTMLButtonElement>('.btn')!;
     expect(btn.textContent).toBe('Release 2 paths');
     await act(() => btn.click());
     expect(open.mock.calls[0][0].args).toEqual({ course_source_repo: `${A},${B}`, course_source_path: 'labs/week01,demo.py', semester_dest_repo: 'materials,materials', semester_dest_path: 'labs/week01,demo.py' });
-    expect(el.querySelector('.rh-sched')!.textContent).toBe('Want to pre-automate these releases? Schedule on the calendar →');
+    // The way to the Schedule is the Files panel's lede, not the footer's.
+    expect(el.querySelector('.rh-sched')).toBeNull();
   });
 
-  it('is disabled with nothing picked, and offers no Schedule on the calendar then', async () => {
-    const { el } = await mount(<ReleaseFoot paths={0} files={0} def={releasePicked(scope, [], { defaultDestRepo: 'materials' })} scheduleHref="?cohort=x#schedule" />);
+  it('is disabled with nothing picked', async () => {
+    const { el } = await mount(<ReleaseFoot paths={0} files={0} def={releasePicked(scope, [], { defaultDestRepo: 'materials' })} />);
     expect(el.querySelector<HTMLButtonElement>('.btn')!.disabled).toBe(true);
-    expect(el.querySelector('.rh-sched')).toBeNull();
   });
 });

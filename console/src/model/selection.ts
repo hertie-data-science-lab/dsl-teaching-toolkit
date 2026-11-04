@@ -50,7 +50,7 @@ const ALIASES: Record<string, string> = rules.type_aliases;
 
 /** A path's components, lowercased. */
 export const parts = (path: string) => path.split('/').filter(Boolean).map((x) => x.toLowerCase());
-/** A component that is never course material (`selection.CLUTTER`: `.DS_Store`, `.gitkeep`, ...). */
+/** A component that is never course material (`selection.CLUTTER`: `.DS_Store`, `__pycache__`, ...; not `.gitkeep`, which ships an empty folder). */
 export const clutter = (path: string) => parts(path).some((x) => CLUTTER.has(x));
 /** Whether one path COMPONENT is withheld by default (`selection.is_content_denied`), case aside. */
 const contentName = (name: string) => CONTENT.some((re) => re.test(name.toLowerCase()));

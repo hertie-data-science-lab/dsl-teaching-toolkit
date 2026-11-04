@@ -137,6 +137,10 @@ describe('index screens', () => {
     expect(t).not.toContain('assignment-9-draft');
     expect(t).not.toContain('old-thing');
     expect(render(<MaterialsIndexScreen {...cp()} />)).toContain(`href="#materials-${MAT}"`);
+    // The repo's name links its settings page too, beside the Settings button.
+    const row = render(<MaterialsIndexScreen {...cp()} />).split('<li>').find((li) => li.includes(`>${MAT}</a>`))!;
+    expect(row).toContain(`<span class="r-title"><a class="textlink" href="#materials-${MAT}">${MAT}</a>`);
+    expect(row).toContain(`href="#materials-${MAT}">Settings</a>`);
   });
   it('says why a materials repo is not ready: its first missing needed check, and counts its suggestions', () => {
     const m = STATUS.course!.materials[0];
@@ -246,8 +250,8 @@ describe('materials settings file tree', () => {
     const out = await withhold(cp({ entry: MAT }), 'Release');
     expect([...out.matchAll(/<option value="([^"]+)"[^>]*>([^<]+)<\/option>/g)].filter((m) => m[1].startsWith('hertie-dsl-demo-f')).map((m) => m[2])).toEqual(['Fall 2026']);
     expect(out).toContain('id="rel-into"');
-    // Schedule on the calendar waits for a pick (its link is the filesPanel test's).
-    expect(out).not.toContain('Schedule on the calendar');
+    // Schedule on the calendar is the Release view's lede, picks or none (its link is the filesPanel test's).
+    expect(out).toContain('Want to pre-automate these releases?');
   });
   it('warns on a truncated tree and does not flag rules as matching nothing', async () => {
     const part: Files = Object.assign(Object.create(files), { tree: (o: string, r: string) => ({ ...files.tree(o, r), truncated: true }) });

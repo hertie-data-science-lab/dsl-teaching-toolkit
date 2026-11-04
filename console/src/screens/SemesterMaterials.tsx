@@ -2,9 +2,12 @@
 // the mirror of the course materials index (`CourseIndex.tsx`) for the semester's copies. One row
 // per materials repo of the semester (`materials`, then any other repo a release wrote to), each
 // with its tree from the index (`RepoFiles`, `MaterialsTree`: the file row both consoles share),
-// every file opening in the viewer both consoles use (`Split`, `RepoFile`). A released copy edited
-// in the semester says so in the Dashboard's words, with a link to its Release page. Below, for
-// those who can change the course, Release by hand: the Files panel's Release view
+// every file opening in the viewer both consoles use (`Split`, `RepoFile`). The released folders
+// whose files differ from the course copy sit in their own folded panel ("Out of step with the
+// course", worked out here three-way, `outOfStep`), each with its two ways to settle it (Release
+// again, Keep for future semesters) and its differing files; the engine's `DIVERGED_RELEASED`
+// lines stay on the Dashboard.
+// Below, for those who can change the course, Release by hand: the Files panel's Release view
 // (`FilesPanel`, plan 2026-11-04 decision 2). Withheld files are the course's concern, so nothing
 // here edits them.
 
@@ -12,21 +15,29 @@ import { useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import type { CohortRef } from '../model/discovery';
 import { ago, fmtDay, plural } from '../model/format';
-import { effectiveDestRepo } from '../model/releaseState';
+import { destPathOf, effectiveDestRepo, fileStates, folderStep, groupPicks, stepWords, type FileState as ReleaseFileState, type FolderStep } from '../model/releaseState';
 import { effectiveOf, semesterDefaults } from '../model/settings';
 import type { Loaded } from '../model/status';
-import type { Problem, Release, Status } from '../model/types';
+import type { Release, Status } from '../model/types';
+import type { Files } from '../model/files';
+import { compileAll } from '../edit/glob';
+import { profileHref } from '../model/open';
 import { scheduleNewHref } from '../router';
 import { FilesPanel, type SemesterRef } from '../ui/FilesPanel';
-import { CheckLine } from '../ui/bits';
+import { CheckLine, ghUrl } from '../ui/bits';
+import { FileRow, useYourSetup } from '../ui/FileRow';
+import { fileViewHref } from '../ui/MaterialsTree';
+import { StateChip, type ChipKind } from '../ui/StateChip';
 import { Hint } from '../ui/Hint';
 import { OpenButton } from '../ui/OpenButton';
 import { RepoFile, Split } from '../ui/Viewer';
 import { RepoFiles, addMaterialsTopic, fileIn, focusIn, repoOf } from './CourseIndex';
+import { releaseRef } from './Cohort';
 import { newestRepo } from './CourseEdit';
 import { sourceRepos } from './Schedule';
-import { WithStatus, cohortScope } from './common';
-import { keepFuture } from '../ops/defs';
+import { WithStatus, cohortScope, tzOf, yearOf } from './common';
+import { keepFuture, releaseAgain } from '../ops/defs';
+import { OpOpen } from '../ops/Panel';
 import type { CohortProps, ReadyProps } from './types';
 
 /** Where a release writes in the semester, as the Schedule reads it: its repo (the semester's default destination `def` when unnamed) and folder (its source's when unnamed). */
@@ -51,16 +62,53 @@ export function releasedFolders(status: Status, repo: string, def: string): Map<
   return out;
 }
 
-/** The released copies of `repo` edited in the semester (`DIVERGED_RELEASED`), each with its release. */
-export function editedCopies(status: Status, repo: string, def: string): { p: Problem; r: Release }[] {
-  const byId = new Map(releasedOf(status).filter((r) => destOf(r, def).repo === repo).map((r) => [r.id, r]));
-  return (status.problems ?? []).flatMap((p) => {
-    const r = p.kind === 'DIVERGED_RELEASED' && p.release ? byId.get(p.release) : undefined;
-    return r ? [{ p, r }] : [];
-  });
+/**
+ * A released folder out of step with the course: where it landed, the release that wrote it
+ * last, its step and its differing files (semester paths, with their states).
+ */
+export interface OutOfStep {
+  r: Release;
+  repo: string;
+  path: string;
+  step: FolderStep;
+  files: { path: string; state: ReleaseFileState }[];
 }
 
-const releaseHref = (r: Release) => `#release-${r.id}`;
+/**
+ * Every released folder whose files differ between the course copy and the semester's, three-way
+ * (`fileStates`: the course tree, the semester repo's `upstream` branch and its default branch).
+ * What a release copies is the engine's (`groupPicks`: a folder copy under the course repo's
+ * `.releaseignore` and the institution's defaults). A folder more than one release wrote is
+ * judged once, by the last. Nothing is listed for a folder whose trees are still being read.
+ */
+export function outOfStep(status: Status, files: Files, courseOrg: string, semOrg: string, def: string): OutOfStep[] {
+  const last = new Map<string, Release>();
+  for (const r of releasedOf(status)) {
+    const d = destOf(r, def);
+    if (r.source && d.path) last.set(`${d.repo}\0${d.path}`, r);
+  }
+  const out: OutOfStep[] = [];
+  for (const r of last.values()) {
+    const d = destOf(r, def);
+    const src = r.source!;
+    const from = src.path.replace(/^\/+|\/+$/g, '');
+    const course = files.tree(courseOrg, src.repo);
+    const ign = files.file(courseOrg, src.repo, '.releaseignore');
+    if (!from || course.kind !== 'ready' || ign.kind === 'loading') continue;
+    const blobs = course.paths.filter((x) => !x.dir);
+    const rules = compileAll((ign.kind === 'ready' ? ign.text : '').split('\n'), { defaults: true });
+    const file = blobs.some((b) => b.path === from);
+    const g = groupPicks([{ repo: src.repo, path: from, dir: !file }], { [src.repo]: { files: blobs.map((b) => b.path), rules } })[0];
+    if (!g) continue;
+    const ship = new Set(g.ship);
+    const to = (x: string) => (file ? d.path : destPathOf({ ...g, destPath: d.path }, x));
+    const states = fileStates(blobs.filter((b) => ship.has(b.path)), files.tree(semOrg, d.repo, 'upstream'), files.tree(semOrg, d.repo), { destPath: to });
+    const step = folderStep(Object.values(states));
+    if (!step) continue;
+    out.push({ r, repo: d.repo, path: d.path, step, files: Object.entries(states).filter(([, x]) => x !== 'up_to_date').map(([path, state]) => ({ path: to(path), state })) });
+  }
+  return out;
+}
 
 /**
  * A semester as the Files panel releases into it: its `release_destinations` (status.json, the
@@ -121,9 +169,6 @@ function Released(p: ReadyProps) {
               <li>
                 <span class="r-title">{repo} {n ? <span class="chip ok">{plural(n, 'release')}</span> : <span class="chip">nothing released</span>}</span>
                 {gh?.pushed_at ? <span class="r-sub">Last change {fmtDay(gh.pushed_at)} ({ago(gh.pushed_at, p.now)}).</span> : null}
-                {editedCopies(p.status, repo, def).map(({ p: x, r }) => (
-                  <span class="r-sub"><b>{x.label ?? 'Released copy edited'}</b>: {x.text} <a class="textlink" href={releaseHref(r)}>Release page</a></span>
-                ))}
                 <span class="r-side"><OpenButton org={org} repo={repo} small quiet /></span>
                 <RepoFiles files={p.files} org={org} repo={repo} focus={focusIn(p.folder, repo)} at="cohort" />
               </li>
@@ -131,8 +176,77 @@ function Released(p: ReadyProps) {
           })}
         </ul>
       </details>
+      <OutOfStepPanel {...p} def={def} />
       <ReleaseByHand {...p} />
     </>
+  );
+}
+
+const STEP_HINT =
+  'For each released folder the toolkit compares the course copy with the semester’s. A folder is listed when the two differ: edited in the semester (ahead), changed in the course since the release (behind), or both (diverged). Release again copies the course version over, merged onto the semester’s edit; a conflict opens a pull request for the instructors. Keep for future semesters opens a pull request carrying the semester’s edit back into the course. Nothing changes until you choose.';
+
+const STEP_TABS: [FolderStep | 'all', string][] = [['all', 'All'], ['ahead', 'Edited in the semester'], ['behind', 'Changed in the course'], ['diverged', 'Both']];
+
+/** The released folders out of step with the course (`outOfStep`), folded, with a filter by step; not drawn when there are none. */
+function OutOfStepPanel(p: ReadyProps & { def: string }) {
+  const env = useEnv();
+  const setup = useYourSetup();
+  const [show, setShow] = useState<FolderStep | 'all'>('all');
+  const org = p.cohort.org;
+  const rows = outOfStep(p.status, p.files, p.course.org, org, p.def);
+  if (!rows.length) return null;
+  const scope = cohortScope(p);
+  const tz = tzOf(p.status), year = yearOf(p.now, tz);
+  const repos = p.files.repos(org);
+  const branchOf = (repo: string) => (repos.kind === 'ready' ? repos.repos.find((x) => x.name === repo)?.default_branch : undefined) ?? 'main';
+  const keep = () => env?.ops.open(keepFuture(scope));
+  const count = (k: FolderStep | 'all') => (k === 'all' ? rows.length : rows.filter((x) => x.step === k).length);
+  return (
+    <details class="panel section panel-fold out-of-step">
+      {/* The ? inside the summary must not fold the panel. */}
+      <summary>
+        <h2>Out of step with the course <span class="step-bang" aria-hidden="true">!</span> <span class="chip amber">{plural(rows.length, 'released folder out of step', 'released folders out of step')}</span>{' '}
+          <span onClick={(e) => e.preventDefault()}><Hint label="About folders out of step">{STEP_HINT}</Hint></span></h2>
+      </summary>
+      <div class="seg" role="tablist" aria-label="Show">
+        {STEP_TABS.map(([k, label]) => (
+          <button type="button" role="tab" aria-selected={show === k} onClick={() => setShow(k)}>{label} <span class="cnt">{count(k)}</span></button>
+        ))}
+      </div>
+      <ul class="rows">
+        {rows.filter((x) => show === 'all' || x.step === show).map((x) => {
+          const ref = releaseRef(x.r, tz, year);
+          const pulls = `${ghUrl(org, x.repo)}/pulls`;
+          const compare = `${ghUrl(org, x.repo)}/compare/upstream...${branchOf(x.repo)}`;
+          return (
+            <li>
+              <span class="r-title"><code>{x.repo === p.def ? '' : `${x.repo}: `}{x.path}/</code> <StateChip kind={x.step} onKeep={keep} prUrl={x.step === 'diverged' ? pulls : undefined} /></span>
+              <span class="r-sub footnote">{stepWords(x.files.map((f) => f.state))}</span>
+              <span class="r-side">
+                {ref ? <OpOpen def={releaseAgain(scope, ref)} cls="btn small quiet" label="Release again" /> : null}
+                <OpOpen def={keepFuture(scope)} cls="btn small quiet" label="Keep for future semesters" />
+              </span>
+              <details class="fold step-files">
+                <summary aria-label={`The files of ${x.path}/ that differ`}>{plural(x.files.length, 'file')}</summary>
+                <ul>
+                  {x.files.map((f) => {
+                    const name = <code>{f.path.slice(x.path.length + 1) || f.path}</code>;
+                    return (
+                      <li>
+                        {f.state === 'not_released' ? name
+                          : <FileRow org={org} link={{ name: f.path.split('/').pop() ?? f.path, repo: x.repo, path: f.path, url: ghUrl(org, x.repo, f.path, 'HEAD') }} here={fileViewHref(org, x.repo, f.path, 'cohort')} setup={setup} profile={profileHref(org)} cls="ft-name" label={name} />}
+                        {' '}<StateChip kind={f.state as ChipKind} onKeep={keep} prUrl={f.state === 'diverged' ? pulls : undefined} />
+                        {f.state === 'ahead' || f.state === 'diverged' ? <>{' '}<a class="textlink" href={compare} target="_blank" rel="noopener">Compare on GitHub</a></> : null}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </details>
+            </li>
+          );
+        })}
+      </ul>
+    </details>
   );
 }
 

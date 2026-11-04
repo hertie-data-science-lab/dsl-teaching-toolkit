@@ -8,8 +8,9 @@
 // views, so the folders open stay open. A viewer who cannot change the course sees the course
 // page's panel as Browse alone (no views to pick, no ticks); the semester's is not drawn.
 //
-// Chips per view (decision 3): Browse and Withhold show withheld, never released and never copied;
-// Release each file's state against the run's destination (three-way, `fileStates`) and withheld.
+// Chips per view (decision 3): Browse shows one muted withheld chip on every row that does not
+// reach students (no strike-through, no note why); Withhold shows withheld, never released and
+// never copied; Release each file's state against the run's destination (three-way, `fileStates`) and withheld.
 // Release ticks follow the saved `.releaseignore`, as the engine does. One `rowState` per row,
 // from its standing (`.releaseignore` compiled with the institution's defaults) and, in Release,
 // its state, draws the chip, the tick and the folder roll-up in every view; the Withhold summary
@@ -105,25 +106,34 @@ const codes = (xs: string[]) => xs.map((x, i) => <>{i ? ', ' : ''}<code>{x}</cod
 /** The Withheld patterns `?` (decision B): what the list does, and the institution's two default groups. */
 export function WithheldHint() {
   return (
-    <Hint label="About withheld patterns">
-      Guards for this repo: files that must never leave it by mistake. One pattern per line, as in .gitignore, e.g. <code>solutions/</code>, <code>**/draft-*</code>, <code>exam-*.pdf</code>.
-      {' '}A matching file is skipped by every copy out of this repo: scheduled and manual releases, assignment hand-outs and the public website, even when a release names its folder. A release that names the file itself is refused.
-      {' '}The institution withholds by default: {codes(DENYLIST_HARD)}, which can never be released, and the content names {codes(DENYLIST_CONTENT)}, which a <code>!</code> line here overrides for this repo. A release that names one of those outright still ships it.
-      {' '}Patterns stop future copies only: a file already released stays in the semester until you remove it there.
+    <Hint label="About withheld patterns" items={[
+      <>One pattern per line, as in .gitignore, e.g. <code>solutions/</code>, <code>**/draft-*</code>, <code>exam-*.pdf</code>.</>,
+      'A matching file is skipped by every copy out of this repo: scheduled and manual releases, assignment hand-outs and the public website, even when a release names its folder. A release that names the file itself is refused.',
+      <>The institution withholds by default: {codes(DENYLIST_HARD)}, which can never be released, and the content names {codes(DENYLIST_CONTENT)}, which a <code>!</code> line here overrides for this repo. A release that names one of those outright still ships it.</>,
+      'Patterns stop future copies only: a file already released stays in the semester until you remove it there.',
+    ]}>
+      Guards for this repo: files that must never leave it by mistake.
     </Hint>
   );
 }
 
-/** Above the pattern box: the institution's default groups, read-only (decision B). */
-export function InstitutionDefaults() {
+/**
+ * Above the pattern box, folded (decision B): the institution's never-released names, muted, and
+ * its content names as chips; a click on one writes its `!<name>/` line (`onAdd`), which releases
+ * every folder of that name in this repo.
+ */
+export function InstitutionDefaults({ onAdd }: { onAdd?: (line: string) => void }) {
+  const [open, setOpen] = useState(false);
   return (
-    <div class="field withhold-defaults">
-      <span class="label">Withheld by default (institution)</span>
-      <ul class="defaults-list">
-        {DENYLIST_HARD.map((x) => <li><code>{x}</code> <span class="footnote">never released</span></li>)}
-        {DENYLIST_CONTENT.map((x) => <li><code>{x}</code> <span class="footnote">override with a ! line</span></li>)}
+    <details class="fold withhold-defaults" open={open} onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}>
+      <summary>Withheld by default{open ? ' (set at institutional-level)' : ''}</summary>
+      <ul class="defaults-hard">{DENYLIST_HARD.map((x) => <li><code>{x}</code></li>)}</ul>
+      <ul class="defaults-content">
+        {DENYLIST_CONTENT.map((x) => (
+          <li><button type="button" class="chip" title={`Release every ${x}/ folder in this repo: adds !${x}/`} disabled={!onAdd} onClick={() => onAdd?.(`!${x}/`)}>{x}</button></li>
+        ))}
       </ul>
-    </div>
+    </details>
   );
 }
 
@@ -268,7 +278,8 @@ function Panel(p: FilesPanelProps) {
     const never = s.kind === 'never_released' || s.kind === 'never_copied' ? s.kind : null;
     const out = bucket(s) === 'withheld';
     const state = !dir && !never && !out ? states[path] : undefined;
-    const chip: ChipKind | null = never ?? (out ? 'withheld' : state && state !== 'unknown' ? state : null);
+    // Browse: whatever does not reach students reads withheld, nothing more.
+    const chip: ChipKind | null = view === 'browse' ? (never || out ? 'withheld' : null) : never ?? (out ? 'withheld' : state && state !== 'unknown' ? state : null);
     if (!release) return { chip, row, tick: 'none' };
     // Withheld by a line, or never material: no tick. A content name withheld by default ships when ticked (named outright).
     if (s.kind === 'own' || s.kind === 'broader' || s.kind === 'never_copied') return { chip, row, tick: 'gap' };
@@ -308,6 +319,11 @@ function Panel(p: FilesPanelProps) {
     if (line !== null) setFlash({ line, n: (flash?.n ?? 0) + 1 });
     setDraft(textOf(next));
   };
+  // A content-name chip: its `!name/` line last, once.
+  const addLine = (line: string) => {
+    if (lines.some((l) => l.trim() === line)) return;
+    fromTree(lines.length && !lines[lines.length - 1].trim() ? [...lines.slice(0, -1), line] : [...lines, line]);
+  };
   const out = (p.ignoreOut ?? defaultOut)(draft ?? here.saved);
   const saveIgn = async () => {
     if (p.onSaveIgnore && (await p.onSaveIgnore(out))) {
@@ -336,6 +352,7 @@ function Panel(p: FilesPanelProps) {
         chip={chip}
         rowClick={view === 'withhold' ? true : release ? pickRow : undefined}
         nameLink={view === 'browse' ? name : undefined}
+        plain={view === 'browse'}
       />
     );
 
@@ -343,7 +360,7 @@ function Panel(p: FilesPanelProps) {
     ? (file ? <RepoFile org={p.courseOrg} at={{ repo, path: file }} /> : <p class="empty-note">Choose a file to view it here.</p>)
     : view === 'withhold' ? (
       <>
-        <InstitutionDefaults />
+        <InstitutionDefaults onAdd={addLine} />
         <div class="field">
           <label for="ign-pat">Withheld patterns</label> <WithheldHint />
           <PatternBox id="ign-pat" text={draft ?? here.saved} onText={(t) => { setFlash(null); setDraft(t); }} flash={flash} />
@@ -410,14 +427,15 @@ function Panel(p: FilesPanelProps) {
         </div>
       ) : null}
       {into ? (
-        <ReleaseFoot paths={rows.length} blocked={releaseBlocked(rows)} files={groups.reduce((n, g) => n + g.ship.length, 0)} def={releasePicked({ courseOrg: p.courseOrg, cohortOrg: into.org, where: into.termLabel }, groups, { defaultDestRepo: runRepo })}
-          scheduleHref={p.scheduleHref?.(into.org, rows)} />
+        <ReleaseFoot paths={rows.length} blocked={releaseBlocked(rows)} files={groups.reduce((n, g) => n + g.ship.length, 0)} def={releasePicked({ courseOrg: p.courseOrg, cohortOrg: into.org, where: into.termLabel }, groups, { defaultDestRepo: runRepo })} />
       ) : null}
       {adding && p.sources?.onAdd ? (
         <RepoPickerModal kind="source" rows={p.sources.others.map((name) => ({ name, note: 'not course materials yet' }))} onClose={() => setAdding(false)} onChoose={(r) => { p.sources!.onAdd!(r); setSrc(r); }} />
       ) : null}
     </>
   );
+  // The panel's lede in Release (the semester page's always): the picks, or none, as a new schedule entry.
+  const sched = into && p.scheduleHref ? <p class="lede rh-sched">Want to pre-automate these releases? <a class="textlink" href={p.scheduleHref(into.org, rows)}>Schedule on the calendar →</a></p> : null;
   const hint = <><span class="para">{course ? FILES_HINT : RBH_HINT}</span><ChipMeanings /></>;
 
   if (!course) {
@@ -425,6 +443,7 @@ function Panel(p: FilesPanelProps) {
       <details class="panel section panel-fold files-panel" open>
         {/* The ? inside the summary must not fold the panel. */}
         <summary><h2 id="rbh-h">Release by hand <span onClick={(e) => e.preventDefault()}><Hint label="About Release by hand">{hint}</Hint></span></h2></summary>
+        {sched}
         {body}
       </details>
     );
@@ -438,6 +457,7 @@ function Panel(p: FilesPanelProps) {
         <h2 id="files-h">Files <Hint label="About the files">{hint}</Hint></h2>
         {p.write ? <div class="seg" role="tablist" aria-label="View">{tab('browse', 'Browse')}{tab('withhold', 'Withhold')}{tab('release', 'Release')}</div> : null}
       </div>
+      {sched}
       {body}
     </section>
   );

@@ -18,8 +18,10 @@ A `files:` item of a `schedule.yml` entry releases exactly what the ops below do
 
 ### From the console
 
-In the semester nav, **Materials** opens two folds: **Released materials this semester** (each
-semester repo as students have it, every file opening in the viewer) and **Release by hand**:
+In the semester nav, **Materials** opens **Released materials this semester** (each semester
+repo as students have it, every file opening in the viewer), **Out of step with the course**
+([below](#out-of-step-with-the-course)) when a released folder differs from the course copy, and
+**Release by hand**:
 
 1. **From**: pick a course repo. Its tree is on the left.
 2. Tick files or folders (a click anywhere on a file's row ticks it). Each row's chip says where
@@ -43,13 +45,25 @@ semester repo as students have it, every file opening in the viewer) and **Relea
    their folders instead, or release in two goes.
 
 Picks from several course repos (switch **From**; earlier picks stay in the manifest) into
-several semester repos go out as one run. **Schedule on the calendar**, under the button, opens
-a new Schedule entry with the same files instead, to release them at a time
-([07](07-schedule-releases.md)).
+several semester repos go out as one run. **Schedule on the calendar**, under the panel's title,
+opens a new Schedule entry with the same files (or an empty one, with nothing ticked) instead, to
+release them at a time ([07](07-schedule-releases.md)).
 
 The same view is on each course repo's settings page (**Course materials** → the repo →
 **Files** → **Release**), with **Release into** choosing the semester
-([02](02-add-materials-to-course.md)).
+([02](02-add-materials-to-course.md)). Its **Browse** view marks whatever does not reach
+students with one plain **withheld** chip; **Withhold** says why.
+
+### Out of step with the course
+
+A folded panel listing every released folder whose files differ between the course copy and
+the semester's: **ahead** (edited in the semester), **behind** (changed in the course since the
+release, a file added there included) or **diverged** (both). A filter narrows it to one kind.
+Each folder has **Release again** (the course version, merged onto the semester's edit; a
+conflict opens a pull request) and **Keep for future semesters**
+([below](#carrying-cohort-edits-back)), and opens to its differing files, each with its open
+menu on the semester copy and, for an edited one, **Compare on GitHub**. Nothing changes until
+you choose.
 
 ### The ops
 
@@ -168,7 +182,8 @@ any depth, whatever the case:
   website never takes a `!` line's word for these: its copy leaves them behind whatever
   `.releaseignore` says, the open internet being a different audience from enrolled students.
 
-Clutter such as `.DS_Store` is never copied either. The sites then choose what they show on
+Clutter such as `.DS_Store` is never copied either. A `.gitkeep` is copied (it is how an empty
+folder ships) but never listed on a site. The sites then choose what they show on
 top (`student_site.host`, `open_course_site.publish`:
 [11](11-configure-cohort-site.md#what-the-public-sites-show)); the semester site never hosts
 either group, even once released.

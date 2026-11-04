@@ -5,6 +5,7 @@
 // beside its ?, clamped inside it, above everything: no scrolling body, sticky header, panel or
 // dialog can clip or cover it. It follows its ? on scroll. Closed, it waits hidden in place.
 // `trigger` puts a chip in place of the ? (the Files panel's state chips, plan 2026-11-04 decision 3).
+// `items` adds a compact bulleted list under the paragraphs (a `<ul>` among the children is styled alike).
 
 import { render, type ComponentChildren } from 'preact';
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'preact/hooks';
@@ -13,8 +14,8 @@ import { DOCS } from './bits';
 const GAP = 8; // between the ? and the popover, and the popover and the viewport's edge
 const LEAVE_MS = 150; // how long a popover waits for the pointer to cross from its ?
 
-/** `small` sets it beside a fact in a list or a column header rather than a heading. */
-export function Hint({ children, doc, label = 'About this page', small = false, trigger }: { children: ComponentChildren; doc?: string; label?: string; small?: boolean; trigger?: { text: ComponentChildren; cls: string } }) {
+/** `small` sets it beside a fact in a list or a column header rather than a heading; `items` a bulleted list after `children`. */
+export function Hint({ children, doc, label = 'About this page', small = false, trigger, items }: { children?: ComponentChildren; doc?: string; label?: string; small?: boolean; trigger?: { text: ComponentChildren; cls: string }; items?: ComponentChildren[] }) {
   const [hover, setHover] = useState(false);
   const [focus, setFocus] = useState(false);
   const [place, setPlace] = useState<{ up: boolean; top: number; left: number } | null>(null);
@@ -110,6 +111,7 @@ export function Hint({ children, doc, label = 'About this page', small = false, 
       onFocusOut={blur}
     >
       {children}
+      {items?.length ? <ul class="hint-list">{items.map((x) => <li>{x}</li>)}</ul> : null}
       {doc ? <> <a href={`${DOCS}${doc}`} target="_blank" rel="noopener">Learn more</a></> : null}
     </span>
   );

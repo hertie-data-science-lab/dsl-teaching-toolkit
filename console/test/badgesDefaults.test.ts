@@ -74,8 +74,14 @@ describe('a click on a default row', () => {
     expect(toggle(['labs/solutions/'], 'labs/solutions', true)).toEqual({ lines: [] });
   });
 
-  it('a file inside a default-withheld folder cannot be released on its own', () => {
-    expect(toggle([], 'labs/solutions/a.py', false, DEFAULTS)).toEqual({ blocked: { rule: '', at: 'labs/solutions', byDefault: true } });
+  it('a file inside a default-withheld folder is released with its folder', () => {
+    expect(toggle([], 'labs/solutions/a.py', false, DEFAULTS)).toEqual({ lines: ['!labs/solutions/'] });
+    // A content folder inside another: each one's ! line, outermost first.
+    expect(toggle([], 'labs/tests/solutions/a.py', false, DEFAULTS)).toEqual({ lines: ['!labs/tests/', '!labs/tests/solutions/'] });
+  });
+
+  it('a file inside a folder a line withholds stays blocked (no re-include under an excluded dir)', () => {
+    expect(toggle(['labs/'], 'labs/a.py', false, DEFAULTS)).toEqual({ blocked: { rule: 'labs/', at: 'labs' } });
   });
 });
 

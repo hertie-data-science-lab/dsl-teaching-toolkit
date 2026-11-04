@@ -12,8 +12,10 @@
 // `nameLink` (the name opening the viewer, in Browse), and hands in the list compiled with the
 // institution's defaults (decision B, `rules`) and the rows worked out once (`model`): the content
 // names then draw withheld like any other row ("withheld", its note "withheld by default"), a click
-// writing the `!` line that releases one (its note "released by `!line`"), and the never-released
-// and never-copied names are fixed rows.
+// writing the `!` line that releases one (its note "released by `!line`"; a file inside one
+// writes its folder's), and the never-released and
+// never-copied names are fixed rows. `plain` (Browse) draws a withheld row as its chip alone: no
+// strike-through, no "withheld by" note.
 
 import type { ComponentChildren } from 'preact';
 import { useMemo, useState } from 'preact/hooks';
@@ -46,9 +48,11 @@ export interface PatternTreeProps {
   rowClick?: true | ((path: string) => void);
   /** The file's name as the caller draws it (a button opening the viewer); null keeps the plain name. */
   nameLink?: (path: string) => ComponentChildren;
+  /** A withheld row as its chip alone: not struck through, no note saying why (the Files panel's Browse). */
+  plain?: boolean;
 }
 
-interface Ctx extends Required<Pick<PatternTreeProps, 'patterns' | 'onChange' | 'mode' | 'withheldWord' | 'releasedWord' | 'kinds'>>, Pick<PatternTreeProps, 'control' | 'chip' | 'rowClick' | 'nameLink'> {
+interface Ctx extends Required<Pick<PatternTreeProps, 'patterns' | 'onChange' | 'mode' | 'withheldWord' | 'releasedWord' | 'kinds'>>, Pick<PatternTreeProps, 'control' | 'chip' | 'rowClick' | 'nameLink' | 'plain'> {
   rules: Rule[];
   rows: Map<string, RowModel>;
   fixed: (path: string, s: Standing) => string | null;
@@ -64,9 +68,7 @@ const NEVER: Partial<Record<Standing['kind'], string>> = { never_copied: 'never 
 function clickRow(c: Ctx, path: string, dir: boolean) {
   const t = toggle(c.patterns, path, dir, { defaults: carriesDefaults(c.rules) });
   if ('blocked' in t) {
-    const text = t.blocked.byDefault
-      ? `Withheld by default with its folder ${t.blocked.at}/. Tick the folder to release it.`
-      : t.blocked.at === path
+    const text = t.blocked.at === path
       ? `${t.blocked.rule} also covers everything inside this folder. Remove or narrow that rule to include it.`
       : `${c.withheldWord[0].toUpperCase()}${c.withheldWord.slice(1)} with its folder ${t.blocked.at}/ by ${t.blocked.rule}. Remove that rule to include it.`;
     c.setNote({ path, text });
@@ -84,7 +86,7 @@ function Control({ n, dir, s, c }: { n: TreeNode; dir: boolean; s: Standing; c: 
   };
   const what = `${n.path}${dir ? '/' : ''}`;
   if (c.mode === 'select') {
-    const blocked = (s.kind === 'broader' && !s.legal) || (s.kind === 'default' && s.at !== n.path);
+    const blocked = s.kind === 'broader' && !s.legal;
     return <input type="checkbox" class="ft-tick" checked={!out} aria-label={`Include ${what}`} title={blocked ? 'Inside a folder that is left out: include the folder first.' : undefined} onClick={click} />;
   }
   return <button class="btn small quiet ft-toggle" type="button" aria-label={`${out ? 'Include' : 'Withhold'} ${what}`} onClick={click}>{out ? 'Include' : 'Withhold'}</button>;
@@ -107,6 +109,8 @@ function Node({ n, depth, c }: { n: TreeNode; depth: number; c: Ctx }) {
   const s = row.s;
   const fixed = c.fixed(n.path, s);
   const out = bucket(s) !== 'released';
+  const struck = !c.plain && (!!fixed || out);
+  const why = c.plain ? null : <Why s={s} word={c.withheldWord} />;
   const note = c.note?.path === n.path ? <span class="ft-note">{c.note.text}</span> : null;
   const control = c.control ? c.control(n.path, dir) : fixed ? null : <Control n={n} dir={dir} s={s} c={c} />;
   if (!dir) {
@@ -114,18 +118,18 @@ function Node({ n, depth, c }: { n: TreeNode; depth: number; c: Ctx }) {
     // A click on the row is its control's: the withhold toggle's, or the caller's own.
     const onRow = c.rowClick === true ? (fixed ? undefined : () => clickRow(c, n.path, false)) : c.rowClick ? () => (c.rowClick as (path: string) => void)(n.path) : undefined;
     return (
-      <li class={`ft-file${fixed || out ? ' ft-out' : ''}`} onClick={onRow ? (e) => !(e.target as HTMLElement | null)?.closest(OWN_CLICK) && onRow() : undefined}>
+      <li class={`ft-file${struck ? ' ft-out' : ''}`} onClick={onRow ? (e) => !(e.target as HTMLElement | null)?.closest(OWN_CLICK) && onRow() : undefined}>
         {c.mode === 'select' ? control : null}
         <FileHead name={n.name}>{c.nameLink?.(n.path) ?? undefined}</FileHead>
         {c.chip ? c.chip(n.path, false) : word ? <span class={`chip ${fixed || out ? 'amber' : ''}`}>{word}</span> : null}
-        <Why s={s} word={c.withheldWord} />
+        {why}
         {c.mode === 'exclude' ? control : null}
         {note}
       </li>
     );
   }
   return (
-    <li class={`ft-dir${fixed || out ? ' ft-out' : ''}`}>
+    <li class={`ft-dir${struck ? ' ft-out' : ''}`}>
       <details open={depth === 0}>
         <summary>
           {c.mode === 'select' ? control : null}
@@ -133,7 +137,7 @@ function Node({ n, depth, c }: { n: TreeNode; depth: number; c: Ctx }) {
           {c.kinds[n.path] ? <span class="chip">{c.kinds[n.path]}</span> : null}
           {c.chip ? c.chip(n.path, true)
             : fixed ? <span class="chip amber">{fixed}</span> : out ? <span class="chip amber">{c.withheldWord}</span> : row.withheld ? <span class="chip amber">{row.withheld} {c.withheldWord}</span> : null}
-          <Why s={s} word={c.withheldWord} />
+          {why}
           {c.mode === 'exclude' ? control : null}
           {note}
         </summary>
@@ -159,7 +163,7 @@ export function PatternTree(p: PatternTreeProps) {
     patterns: p.patterns, onChange: p.onChange, mode: p.mode ?? 'exclude',
     withheldWord: p.withheldWord ?? 'withheld', releasedWord: p.releasedWord ?? 'released to students',
     fixed, kinds: p.kinds ?? {}, rules, rows: model.rows,
-    control: p.control, chip: p.chip, rowClick: p.rowClick, nameLink: p.nameLink, note, setNote,
+    control: p.control, chip: p.chip, rowClick: p.rowClick, nameLink: p.nameLink, plain: p.plain, note, setNote,
   };
   return <ul class={`file-tree${c.mode === 'select' ? ' select' : ''}`}>{model.tree.map((n) => <Node n={n} depth={0} c={c} />)}</ul>;
 }

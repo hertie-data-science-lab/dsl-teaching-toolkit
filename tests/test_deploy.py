@@ -755,8 +755,9 @@ def test_junk_never_travels_with_a_release_at_any_depth(tmp_path):
         tmp_path, names, whole=False, at=tmp_path / "labs" / "01_session-1"
     )
     # `.Rprofile` is course material an R course's students need - the rule is a closed
-    # list of names, never a rule about dots.
-    assert skipped == set(names) - {"lab.ipynb", ".Rprofile"}
+    # list of names, never a rule about dots. A `.gitkeep` is how an empty folder ships: it
+    # travels with the copy (the site listings still leave it out, `selection.UNLISTED`).
+    assert skipped == set(names) - {"lab.ipynb", ".Rprofile", ".gitkeep"}
 
 
 def test_junk_is_matched_however_the_machine_that_wrote_it_spelled_it(tmp_path):

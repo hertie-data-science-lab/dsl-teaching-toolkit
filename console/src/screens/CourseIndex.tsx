@@ -161,7 +161,7 @@ export function MaterialsIndexScreen(p: CourseProps) {
                 const r = materialsReadiness(m);
                 return (
                   <li>
-                    <span class="r-title">{m.repo} <RepoChip r={r} />{term ? <span class="chip term">{term}</span> : null}</span>
+                    <span class="r-title"><a class="textlink" href={`#materials-${m.repo}`}>{m.repo}</a> <RepoChip r={r} />{term ? <span class="chip term">{term}</span> : null}</span>
                     <RepoWhy r={r} />
                     {gh?.pushed_at ? <span class="r-sub">Last change {fmtDay(gh.pushed_at)} ({ago(gh.pushed_at, p.now)}).</span> : null}
                     <span class="r-side"><OpenButton org={course.org} repo={m.repo} small quiet /><a class="btn small quiet" href={`#materials-${m.repo}`}>Settings</a></span>

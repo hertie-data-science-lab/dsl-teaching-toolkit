@@ -2,8 +2,8 @@
 // picks grouped by their immediate parent folder (`groupPicks`), each row `path → dest path` with
 // its state chip, the files a picked folder leaves behind greyed with why, and per group an Edit
 // destination fold (To repo, To path); a group sent to a repo other than the run's is amber with
-// a (!). Above it the run's To row (the Files panel's), below it the footer with the one Release button and the way
-// to the Schedule. Props only: the Files panel reads the trees and holds the picks.
+// a (!). Above it the run's To row (the Files panel's), below it the footer with the one Release button (the way to the
+// Schedule is the Files panel's lede). Props only: the Files panel reads the trees and holds the picks.
 
 import { useState } from 'preact/hooks';
 import { plural } from '../model/format';
@@ -139,7 +139,7 @@ export function ReleaseManifest(p: ManifestProps) {
 }
 
 /** The Release footer: the count, the one verb and its `?` (off with `blocked`'s note when the picks cannot go as one release), then the way to the Schedule. */
-export function ReleaseFoot({ paths, files, def, scheduleHref, blocked = null }: { paths: number; files: number; def: OpDef; scheduleHref?: string; blocked?: string | null }) {
+export function ReleaseFoot({ paths, files, def, blocked = null }: { paths: number; files: number; def: OpDef; blocked?: string | null }) {
   return (
     <div class="rh-foot">
       <span class="rh-count">{plural(paths, 'path')} picked · {plural(files, 'file')}</span>
@@ -149,7 +149,6 @@ export function ReleaseFoot({ paths, files, def, scheduleHref, blocked = null }:
         <span class="para">Copies every listed file now, to its destination in the semester. A file already up to date is left as it is; a semester edit is merged with, and an edit on both sides opens a pull request. Nothing is deleted, and nothing is added to the schedule.</span>
       </Hint>
       {blocked && paths ? <CheckLine cls="warn">{blocked}</CheckLine> : null}
-      {scheduleHref && paths ? <p class="footnote rh-sched">Want to pre-automate these releases? <a class="textlink" href={scheduleHref}>Schedule on the calendar →</a></p> : null}
     </div>
   );
 }

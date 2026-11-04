@@ -75,6 +75,29 @@ export function fileStates(
   return out;
 }
 
+/** A released folder against the course: edited in the semester, changed in the course since the release, or both. */
+export type FolderStep = 'ahead' | 'behind' | 'diverged';
+
+/**
+ * A released folder's step from its files' states (`fileStates`): `ahead` when a file is ahead and
+ * none behind, `behind` when a file is behind (or the course added one) and none ahead,
+ * `diverged` when a file diverged or both; null when in step, or while any state is unknown.
+ */
+export function folderStep(states: FileState[]): FolderStep | null {
+  if (states.includes('unknown')) return null;
+  const ahead = states.includes('ahead');
+  const behind = states.some((x) => x === 'behind' || x === 'not_released');
+  if (states.includes('diverged') || (ahead && behind)) return 'diverged';
+  return ahead ? 'ahead' : behind ? 'behind' : null;
+}
+
+/** "2 changed, 1 added": a folder's differing files, a file the course added since the release counted as added. */
+export function stepWords(states: FileState[]): string {
+  const changed = states.filter((x) => x === 'behind' || x === 'ahead' || x === 'diverged').length;
+  const added = states.filter((x) => x === 'not_released').length;
+  return [changed ? `${changed} changed` : '', added ? `${added} added` : ''].filter(Boolean).join(', ');
+}
+
 export type Counts = Partial<Record<FileState, number>>;
 
 /** "2 behind · 1 ahead · 3 not released": zero parts and `unknown` left out. */

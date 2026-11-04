@@ -39,6 +39,15 @@ describe('Hint', () => {
     expect(pop().querySelector('a')!.getAttribute('href')).toBe(`${DOCS}07-schedule-releases.md`);
   });
 
+  it('renders its items as a bulleted list under the paragraph', async () => {
+    root = document.createElement('div');
+    document.body.appendChild(root);
+    await act(() => render(<Hint items={['One.', <>Two <code>x</code>.</>]}>Intro.</Hint>, root!));
+    const list = pop().querySelector('ul.hint-list')!;
+    expect(pop().firstChild!.textContent).toBe('Intro.');
+    expect([...list.querySelectorAll('li')].map((li) => li.innerHTML)).toEqual(['One.', 'Two <code>x</code>.']);
+  });
+
   it('opens on keyboard focus and closes on Escape', async () => {
     const { btn } = await mount();
     await act(() => btn.focus());

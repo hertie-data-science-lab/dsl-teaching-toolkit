@@ -229,12 +229,18 @@ course materials index's mirror for the semester's copies, what students have re
 per materials repo (`materials`, then any other repo a released entry of `status.json`
 `releases` wrote to), with its count of releases, last change, Open, and the index's tree
 (`RepoFiles`, `MaterialsTree` with `at="cohort"`), each file opening in the viewer beside it
-(`?file=`, `?folder=` as on the index), in a fold titled Released materials this semester; a
-`DIVERGED_RELEASED` problem shows as one line in the Dashboard's words, with its Release page
-link. Below it, for those who can change the course, the Release by hand fold: the Files
+(`?file=`, `?folder=` as on the index), in a fold titled Released materials this semester. Then,
+collapsed and drawn only when there is one, Out of step with the course: each released folder
+(`status.json` `releases`, the last release per destination) whose files differ, worked out
+three-way in the page (`outOfStep`: the release's folder copy as `groupPicks` takes it, then
+`fileStates`; `folderStep` ahead / behind / diverged), filtered by step (`.seg`), each with
+Release again (`releaseAgain`), Keep for future semesters (`keepFuture`) and its differing files
+(the semester copy's `FileRow`, Compare on GitHub `compare/upstream...<default>` for ahead and
+diverged); the engine's `DIVERGED_RELEASED` lines stay on the Dashboard. Below it, for those who can change the course, the Release by hand fold: the Files
 panel's Release view (`ui/FilesPanel.tsx`) from the course's materials repos and Other repos
 (Add a course repo sets the `dsl-materials` topic, as Treat as course materials does); its
-Schedule on the calendar link opens the Schedule's new supporting-files entry with the picks
+lede, Schedule on the calendar (always shown; the course page's Files panel shows it in Release
+only), opens the Schedule's new supporting-files entry with the picks
 (`?from=&paths=&to=&at=`, `scheduleNewHref`). `?cohort=` with
 `#materials` is this page (`screenOf`); `?course=` with `#materials`, and `#materials-<repo>`
 under either, are the course's, so the course nav's Course materials link names the course.
@@ -253,7 +259,9 @@ double-click are `ui/dragHandle.ts`, which the marks grid's column grips share) 
 (`edit/badges.ts` `standing`, `.releaseignore` compiled with the institution's content names as
 implied first lines, `compileAll(lines, { defaults: true })`), worked out once per render in one
 post-order pass (`treeModel`); the Withhold summary counts the same standings (`tally`). Chips
-(`ui/StateChip.tsx`): Browse and Withhold chip only what a release leaves behind; Release shows each file's state against the run's destination, three-way
+(`ui/StateChip.tsx`): Browse chips one muted `withheld` on every row that does not reach
+students (no strike-through, no note why, `PatternTree` `plain`); Withhold chips what a release
+leaves behind; Release shows each file's state against the run's destination, three-way
 (`model/releaseState.ts` `fileStates`: the course blob against the semester repo's `upstream`
 branch and its default branch; two-way with no `upstream`): up to date, behind, ahead, diverged,
 not released, plus withheld. Behind, ahead and diverged open a popover with one action (tick the
@@ -275,7 +283,10 @@ settings page a read-only viewer gets Browse alone (no view control, no ticks). 
 words: a row a `.releaseignore` line or the institution's content default keeps off is
 `withheld`, its footnote naming why ("withheld by `solutions/`", "withheld by default"); a `!`
 line's row reads as released, footnoted "released by `!solutions/`"; the never-released names
-have their own `never released` chip. The Withhold summary counts never released · withheld ·
+have their own `never released` chip. Above the pattern box a folded Withheld by default lists
+the institution's names from the export (the content names as chips that write their `!name/`
+line); a tick on a file inside a default-withheld folder writes that folder's `!` line (inside a
+folder a `.releaseignore` line withholds, git's rule still refuses). The Withhold summary counts never released · withheld ·
 released. A folder release's manifest ships a content name a `!` line re-includes and lists a
 never-released one as left behind (`groupPicks`).
 

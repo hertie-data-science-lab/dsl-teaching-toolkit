@@ -532,7 +532,6 @@
   ],
   "clutter": [
     ".DS_Store",
-    ".gitkeep",
     ".ipynb_checkpoints",
     "Thumbs.db",
     "__pycache__",

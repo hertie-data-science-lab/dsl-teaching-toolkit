@@ -143,6 +143,13 @@ main { min-width: 0; }
 .chip { display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-display); font-weight: 600; font-size: 12px; line-height: 1.6; padding: 0 9px; border-radius: 999px; background: var(--sunk); color: var(--ink-2); white-space: nowrap; }
 .chip.ok { background: var(--ok-soft); color: var(--ok); }
 .chip.amber { background: var(--amber-soft); color: var(--amber-ink); }
+/* The Released materials page's "Out of step with the course": an amber round !, the filter, each folder's files. */
+.out-of-step .seg { margin-bottom: 8px; }
+.out-of-step .seg .cnt { font-weight: 400; opacity: 0.75; }
+.out-of-step .step-files { grid-column: 1 / -1; border-top: 0; padding-top: 0; }
+.out-of-step .step-files > summary { min-height: 24px; font-size: 13px; color: var(--muted); }
+.out-of-step .step-files ul { list-style: none; margin: 4px 0 0; padding: 0 0 0 16px; display: grid; gap: 4px; }
+.step-bang { font-family: var(--font-display); font-weight: 700; font-size: 12px; width: 18px; height: 18px; border-radius: 999px; background: var(--amber-soft); color: var(--amber-ink); display: inline-grid; place-items: center; vertical-align: middle; }
 .chip.bad { background: var(--bad-soft); color: var(--bad-ink); }
 .chip.asg { background: var(--asg-bg); color: var(--asg-ink); }
 .chip.lec { background: var(--lec-bg); color: var(--lec-ink); }
@@ -829,6 +836,9 @@ table.marks th .th-fold:hover { text-decoration: underline; }
 .op-facts p { margin: 0; }
 .hint-pop .para { display: block; }
 .hint-pop .para + .para { margin-top: 6px; }
+/* A popover's bulleted list (`Hint` `items`, or a `<ul>` child): compact, under the paragraphs. */
+.hint-pop ul { display: block; margin: 6px 0 0; padding-left: 18px; list-style: disc; }
+.hint-pop li + li { margin-top: 4px; }
 table.marks tr.nosub td { color: var(--muted); }
 table.marks tr.team-row td { background: var(--sunk); font-weight: 600; border-top: 1px solid var(--rule-strong); }
 table.marks tr.member-row td { font-weight: 400; }
@@ -1307,8 +1317,8 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .rh-foot { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; border-top: 1px solid var(--rule); padding-top: 12px; }
 .rh-foot .rh-count { font-size: 13.5px; color: var(--muted); margin-right: auto; }
 .rh-foot .hint-wrap { margin-left: 0; }
-.rh-foot .rh-sched { flex-basis: 100%; text-align: right; margin-top: -4px; }
-.rh-foot .rh-sched .textlink { font-size: 12.5px; min-height: 0; padding: 0 2px; }
+.files-panel > .rh-sched { color: var(--ink-2); margin: 0 0 10px; }
+.files-panel > .rh-sched .textlink { min-height: 0; padding: 0 2px; }
 .files-withhold { gap: 10px; }
 
 /* The repo pickers. */
@@ -1322,6 +1332,7 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .rp-new .sub-h { margin: 0; }
 .modal .picker .savebar { justify-content: flex-end; }
 /* Withhold view: the institution's default groups above the pattern box, read-only (decision B). */
-.withhold-defaults { padding: 8px 10px; background: var(--sunk); border: 1px solid var(--rule); border-radius: 6px; color: var(--muted); }
-.withhold-defaults .defaults-list { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 2px; }
-.withhold-defaults code { color: var(--ink-2); }
+.withhold-defaults { margin-bottom: 12px; }
+.withhold-defaults ul { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.withhold-defaults .defaults-hard code { color: var(--muted); background: none; }
+.withhold-defaults .defaults-content .chip { cursor: pointer; font-family: var(--font-code); }
