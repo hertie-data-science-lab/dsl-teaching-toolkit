@@ -7,6 +7,9 @@
 // the name struck through (`ft-out`), the kind chip on kind folders. A folder with something
 // withheld inside says how much. `control` swaps the
 // per-row control for the caller's own. `SelectionEditor` wraps it for every "which files" setting.
+// The Files panel (plan 2026-11-04, decisions 1 and 3) adds what sits beside a row: `side` (its
+// state chips), `rowClick` (a click on a file row toggles its tick), `tickDisabled` (why a tick
+// cannot change) and `nameLink` (the name opening the viewer, in Browse).
 
 import type { ComponentChildren } from 'preact';
 import { useState } from 'preact/hooks';
@@ -29,10 +32,19 @@ export interface PatternTreeProps {
   kinds?: Record<string, string>;
   /** The row's own control in place of the withhold toggle (null: none on that row). */
   control?: (path: string, dir: boolean) => ComponentChildren;
+  /** Drawn after the chips on a file row and a folder summary (state chips, roll-ups). */
+  side?: (path: string, dir: boolean) => ComponentChildren;
+  /** A click anywhere on a file row toggles its tick; folder summaries still open and close by name. */
+  rowClick?: boolean;
+  /** Why the withhold toggle cannot change here (its title), or null; the toggle is then disabled. */
+  tickDisabled?: (path: string, dir: boolean) => string | null;
+  /** The file's name as the caller draws it (a button opening the viewer); null keeps the plain name. */
+  nameLink?: (path: string) => ComponentChildren;
+  /** The class of the withheld and fixed chips (default `amber`). */
+  wordClass?: string;
 }
 
-interface Ctx extends Required<Pick<PatternTreeProps, 'patterns' | 'onChange' | 'mode' | 'withheldWord' | 'releasedWord' | 'fixed' | 'kinds'>> {
-  control?: PatternTreeProps['control'];
+interface Ctx extends Required<Pick<PatternTreeProps, 'patterns' | 'onChange' | 'mode' | 'withheldWord' | 'releasedWord' | 'fixed' | 'kinds' | 'wordClass'>>, Pick<PatternTreeProps, 'control' | 'side' | 'rowClick' | 'tickDisabled' | 'nameLink'> {
   rules: Rule[];
   note: { path: string; text: string } | null;
   setNote: (n: { path: string; text: string } | null) => void;
@@ -63,15 +75,28 @@ function Control({ n, dir, s, c }: { n: TreeNode; dir: boolean; s: Standing; c: 
     c.onChange(t.lines);
   };
   const what = `${n.path}${dir ? '/' : ''}`;
+  const off = c.tickDisabled?.(n.path, dir) ?? null;
   if (c.mode === 'select') {
     const blocked = s.kind === 'broader' && !s.legal;
-    return <input type="checkbox" class="ft-tick" checked={!out} aria-label={`Include ${what}`} title={blocked ? 'Inside a folder that is left out: include the folder first.' : undefined} onClick={click} />;
+    return <input type="checkbox" class="ft-tick" checked={!out} disabled={off !== null} aria-label={`Include ${what}`} title={off ?? (blocked ? 'Inside a folder that is left out: include the folder first.' : undefined)} onClick={click} />;
   }
-  return <button class="btn small quiet ft-toggle" type="button" aria-label={`${out ? 'Include' : 'Withhold'} ${what}`} onClick={click}>{out ? 'Include' : 'Withhold'}</button>;
+  return <button class="btn small quiet ft-toggle" type="button" disabled={off !== null} title={off ?? undefined} aria-label={`${out ? 'Include' : 'Withhold'} ${what}`} onClick={click}>{out ? 'Include' : 'Withhold'}</button>;
 }
 
 function Why({ s, word }: { s: Standing; word: string }) {
   return s.kind === 'broader' ? <span class="footnote">{word} by <code>{s.rule}</code></span> : null;
+}
+
+/** What a row click leaves to its own target: the tick itself, links, buttons, chips with popovers, the note. */
+const OWN_CLICK = 'input, button, a, select, textarea, label, .hint-wrap, .ft-note';
+
+/** A click on a file row (`rowClick`) clicks its tick, unless it landed on something with its own click. */
+function rowToggle(e: MouseEvent) {
+  const t = e.target as HTMLElement | null;
+  if (!t || t.closest(OWN_CLICK)) return;
+  const li = e.currentTarget as HTMLElement;
+  const box = [...li.children].find((x): x is HTMLInputElement => x instanceof HTMLInputElement && x.classList.contains('ft-tick'));
+  if (box && !box.disabled) box.click();
 }
 
 function Node({ n, depth, c }: { n: TreeNode; depth: number; c: Ctx }) {
@@ -84,11 +109,12 @@ function Node({ n, depth, c }: { n: TreeNode; depth: number; c: Ctx }) {
   if (!dir) {
     const word = fixed ?? (out ? c.withheldWord : c.releasedWord);
     return (
-      <li class={`ft-file${fixed || out ? ' ft-out' : ''}`}>
+      <li class={`ft-file${fixed || out ? ' ft-out' : ''}`} onClick={c.rowClick ? rowToggle : undefined}>
         {c.mode === 'select' ? control : null}
-        <FileHead name={n.name} />
-        {word ? <span class={`chip ${fixed || out ? 'amber' : ''}`}>{word}</span> : null}
+        <FileHead name={n.name}>{c.nameLink?.(n.path) ?? undefined}</FileHead>
+        {word ? <span class={`chip ${fixed || out ? c.wordClass : ''}`}>{word}</span> : null}
         <Why s={s} word={c.withheldWord} />
+        {c.side?.(n.path, false)}
         {c.mode === 'exclude' ? control : null}
         {note}
       </li>
@@ -102,8 +128,9 @@ function Node({ n, depth, c }: { n: TreeNode; depth: number; c: Ctx }) {
           {c.mode === 'select' ? control : null}
           <FolderHead name={n.name} />
           {c.kinds[n.path] ? <span class="chip">{c.kinds[n.path]}</span> : null}
-          {fixed ? <span class="chip amber">{fixed}</span> : out ? <span class="chip amber">{c.withheldWord}</span> : count ? <span class="chip amber">{count} {c.withheldWord}</span> : null}
+          {fixed ? <span class={`chip ${c.wordClass}`}>{fixed}</span> : out ? <span class={`chip ${c.wordClass}`}>{c.withheldWord}</span> : count ? <span class={`chip ${c.wordClass}`}>{count} {c.withheldWord}</span> : null}
           <Why s={s} word={c.withheldWord} />
+          {c.side?.(n.path, true)}
           {c.mode === 'exclude' ? control : null}
           {note}
         </summary>
@@ -119,8 +146,8 @@ export function PatternTree(p: PatternTreeProps) {
   const c: Ctx = {
     patterns: p.patterns, onChange: p.onChange, mode: p.mode ?? 'exclude',
     withheldWord: p.withheldWord ?? 'withheld', releasedWord: p.releasedWord ?? 'released to students',
-    fixed: p.fixed ?? defaultFixed, kinds: p.kinds ?? {}, rules: compileAll(p.patterns),
-    control: p.control, note, setNote,
+    fixed: p.fixed ?? defaultFixed, kinds: p.kinds ?? {}, rules: compileAll(p.patterns), wordClass: p.wordClass ?? 'amber',
+    control: p.control, side: p.side, rowClick: p.rowClick, tickDisabled: p.tickDisabled, nameLink: p.nameLink, note, setNote,
   };
   return <ul class={`file-tree${c.mode === 'select' ? ' select' : ''}`}>{buildTree(p.files).map((n) => <Node n={n} depth={0} c={c} />)}</ul>;
 }

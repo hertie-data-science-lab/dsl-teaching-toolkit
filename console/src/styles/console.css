@@ -1210,3 +1210,109 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .pick-typed input { flex: 1; min-width: 0; }
 .picker { display: grid; gap: 12px; padding: 16px 18px; overflow-y: auto; }
 .danger-quiet { color: var(--bad-ink); }
+
+/* ===== Files panel (decisions 1-8, 2026-11-04) ===== */
+/* Browse | Withhold | Release, the From / To row, the tree beside its right column with the bar between,
+   the manifest and its footer, the state chips and their popovers, the repo pickers. Ported from the
+   mock-ups' MOCK-UP ADDITIONS block; tokens only. */
+.seg { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--rule-strong); border-radius: 8px; background: var(--surface-2); }
+.seg button { font-family: var(--font-display); font-weight: 600; font-size: 13px; line-height: 1.3; padding: 3px 14px; min-height: 28px; border: 0; border-radius: 6px; background: none; color: var(--ink-2); cursor: pointer; }
+.seg button:hover { color: var(--ink); background: var(--sunk); }
+.seg button[aria-selected="true"] { background: var(--btn-bg); color: var(--btn-ink); }
+.seg button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.files-panel { display: grid; gap: 12px; }
+.panel-fold > summary { list-style: none; display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.panel-fold > summary::-webkit-details-marker { display: none; }
+.panel-fold > summary::before { content: ""; width: 8px; height: 8px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform 0.15s; flex: none; margin-right: 2px; }
+.panel-fold[open] > summary::before { transform: rotate(45deg); margin-top: -4px; }
+.panel-fold > summary:hover::before { border-color: var(--ink); }
+.panel-fold > summary h2 { margin: 0; }
+.panel-fold:not([open]) { padding-block: 14px; }
+.panel-fold[open] > summary { margin-bottom: 12px; }
+
+/* The two columns and the bar: the ratio sits on .split-panes as --lf / --rf, so the heads follow it. */
+.split-panes { display: grid; gap: 8px; }
+.files-split { display: grid; grid-template-columns: minmax(0, var(--lf, 55fr)) 6px minmax(0, var(--rf, 45fr)); column-gap: 8px; align-items: start; }
+.files-split > * { min-width: 0; }
+.files-split > .splitter { align-self: stretch; width: 6px; border-radius: 3px; cursor: col-resize; touch-action: none; background: transparent; transition: background 120ms ease; }
+.files-split > .splitter:hover, .files-split > .splitter.dragging, .files-split > .splitter:focus-visible { background: var(--rule-strong); outline: none; }
+.files-split > .materials-tree > .file-tree { height: 640px; max-height: 640px; overflow: auto; }
+.files-split > .materials-file { max-height: 640px; overflow: auto; }
+.files-split .manifest-wrap { height: 640px; }
+.files-split .mf-scroll { height: 100%; overflow: auto; padding-right: 2px; }
+.split-heads { min-height: 48px; align-items: center; margin: 0; }
+.split-heads > .rh-row { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; min-width: 0; }
+.split-heads .split-lbl { font-weight: 400; font-size: 13.5px; color: var(--muted); flex: none; }
+.split-heads select { flex: 1 1 auto; width: auto; min-width: 0; max-width: 320px; }
+.split-heads .mf-into { flex: none; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 1060px) {
+  .files-split { grid-template-columns: minmax(0, 1fr); row-gap: 12px; }
+  .files-split > .splitter, .files-split > .split-gap { display: none; }
+  .split-heads > .rh-row { flex-wrap: wrap; }
+  .files-split > .materials-tree > .file-tree, .files-split .manifest-wrap { height: auto; max-height: 640px; }
+}
+
+/* The tree's rows in the panel: a gap where a row has no tick, the name as the viewer's button, greyed up to date. */
+.file-tree .ft-gap { width: 13px; flex: none; }
+.file-tree input.ft-tick:disabled { cursor: not-allowed; }
+.file-tree button.ft-name { font: inherit; font-family: var(--font-code); font-size: 12.5px; color: var(--link); background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
+.file-tree button.ft-name:hover { text-decoration: underline; }
+.file-tree button.ft-name[aria-current] { font-weight: 700; }
+.file-tree li.ft-file:has(> [data-kind="up_to_date"]) > .ft-name { color: var(--muted); }
+.file-tree:not(.select) li.ft-file { cursor: default; }
+.files-panel .file-tree.select li.ft-file { cursor: pointer; }
+.files-panel .file-tree.select li.ft-file:hover { background: var(--sunk); border-radius: 6px; }
+.file-tree .chip { white-space: normal; }
+
+/* Chips: muted (up to date, withheld, never copied, only if named) and the semester's purple (ahead). */
+.chip.muted { background: var(--sunk); color: var(--muted); font-weight: 400; }
+.chip.semester { background: var(--semester-bg); color: var(--semester-ink); }
+.hint-wrap.chip-hint { margin-left: 0; font-size: 12px; line-height: 1.6; }
+.chip-hint > button.chip { border: 0; cursor: help; font: inherit; font-family: var(--font-display); font-weight: 600; font-size: 12px; line-height: 1.6; padding: 0 9px; }
+.chip-hint > button.chip:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.hint-pop .textlink { min-height: 0; padding: 0; font-size: 14px; }
+
+/* The manifest and the Release footer. */
+.mf-into { font-family: var(--font-code); font-size: 13px; color: var(--muted); white-space: nowrap; }
+.mf-into + select.mf-repo, select.mf-repo { width: auto; min-height: 28px; padding: 2px 6px; font-size: 13px; }
+.manifest { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.mf-repo-h { margin: 10px 0 6px; font-family: var(--font-code); }
+.mf-repo-h:first-child { margin-top: 0; }
+.mf-group { border: 1px solid var(--rule); border-radius: 8px; padding: 8px 12px; background: var(--surface-2); }
+.mf-group.other { box-shadow: inset 3px 0 0 var(--amber); }
+.mf-head { font-size: 13.5px; color: var(--ink-2); }
+.mf-head code { font-family: var(--font-code); font-size: 12.5px; font-weight: 700; color: var(--ink); }
+.mf-rows { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; }
+.mf-rows li { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: center; }
+.mf-rows li + li { margin-top: 2px; }
+.mf-rows li .mf-src { flex-basis: 100%; }
+.mf-rows code, .mf-dest { font-family: var(--font-code); font-size: 12.5px; overflow-wrap: anywhere; }
+.mf-dest, .mf-arrow { color: var(--muted); }
+.mf-dest.mf-diff { color: var(--amber-ink); background: var(--amber-soft); border-radius: 4px; padding: 0 4px; }
+.mf-warn { font-family: var(--font-display); font-weight: 700; font-size: 12px; color: var(--amber-ink); cursor: help; }
+.mf-rows li.mf-out > code { color: var(--muted); text-decoration: line-through; }
+.mf-group .fold.mf-adv { margin-top: 8px; padding-top: 4px; }
+.mf-group .fold.mf-adv > summary { font-size: 13px; min-height: 26px; color: var(--muted); }
+.mf-group .fold.mf-adv .fold-body { padding-top: 6px; }
+.mf-group .fold.mf-adv input { font-family: var(--font-code); font-size: 13px; min-height: 32px; }
+.mf-dest-fields { grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 10px; }
+.mf-dest-fields select { min-height: 32px; font-size: 13px; }
+@media (max-width: 560px) { .mf-dest-fields { grid-template-columns: minmax(0, 1fr); } }
+.empty-note { border: 1.5px dashed var(--rule-strong); border-radius: 8px; padding: 14px; font-size: 13.5px; color: var(--muted); }
+.rh-foot { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; border-top: 1px solid var(--rule); padding-top: 12px; }
+.rh-foot .rh-count { font-size: 13.5px; color: var(--muted); margin-right: auto; }
+.rh-foot .hint-wrap { margin-left: 0; }
+.rh-foot .rh-sched { flex-basis: 100%; text-align: right; margin-top: -4px; }
+.rh-foot .rh-sched .textlink { font-size: 12.5px; min-height: 0; padding: 0 2px; }
+.files-withhold { gap: 10px; }
+
+/* The repo pickers. */
+.rp-list { display: grid; gap: 2px; border: 1px solid var(--rule); border-radius: 8px; padding: 4px; }
+.rp-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 7px 10px; border-radius: 6px; cursor: pointer; }
+.rp-row:hover { background: var(--sunk); }
+.rp-row:has(input:checked) { background: var(--sunk); box-shadow: inset 3px 0 0 var(--ink); }
+.rp-name { font-family: var(--font-code); font-size: 13.5px; }
+.rp-note { font-size: 12.5px; color: var(--muted); }
+.rp-new { border-top: 1px solid var(--rule); padding-top: 12px; display: grid; gap: 8px; }
+.rp-new .sub-h { margin: 0; }
+.modal .picker .savebar { justify-content: flex-end; }
