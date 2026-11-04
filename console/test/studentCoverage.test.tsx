@@ -156,8 +156,8 @@ describe('3. the whole receipts thread', () => {
     expect(t).toContain('updated data/train.csv');
     expect(t).toContain('Every comment on Submission receipts 3');
     expect(t).toContain('Files updated');
-    // A file row: GitHub draws markdown, so View here opens the blob page; Edit in browser edits it.
-    expect(t).toContain('Fill in CONTRIBUTIONS.md ▾ View here on GitHub View on GitHub course repo Edit in browser course repo Edit in VS Code set up in Profile in your team repo before the deadline.');
+    // A file row: outside a materials repo, GitHub and github.dev; the editor waits on Profile.
+    expect(t).toContain('Fill in CONTRIBUTIONS.md ▾ In the browser On GitHub On github.dev On your computer Set up your editor in Profile in your team repo before the deadline.');
     expect(render(v)).toContain(`href="https://github.com/${ORG}/assignment-3-project-team-latency/blob/HEAD/CONTRIBUTIONS.md" role="menuitem" tabindex="-1" target="_blank" rel="noopener">`);
   });
 
@@ -339,11 +339,11 @@ describe('7. readings per session', () => {
     expect(sched).toContain(`href="${href}"`);
     expect(sched).toContain('Readings to come.');
     const html = render(<ReadingsView org={ORG} facts={f} now={NOW} />);
-    // Each reading file gets the menu (decision 0035 rule 10): View on GitHub; a pdf's Edit greyed.
+    // Each reading file gets the menu (decision 0035 rule 10): On GitHub; a pdf's github.dev and editor greyed.
     expect(html).toContain(`href="${href}"`);
     expect(html).toContain('class="file-chev"');
-    expect(html).toContain('</svg>View on GitHub</span>');
-    expect(html).toContain('>Edit in browser</span><small>not an editable format</small>');
+    expect(html).toContain('<span>On GitHub</span>');
+    expect(html).toContain('<span class="pm-sub pm-off">Not an editable format</span>');
     const mat = text(<ReadingsView org={ORG} facts={f} now={NOW} />);
     expect(mat).toMatch(/Session 1 ?: Deep learning in public policy/);
     expect(mat).toContain('Session 1 readings');

@@ -13,7 +13,7 @@ import { homeText, unsetSiteKeys } from '../model/siteText';
 import type { Outcome } from '../model/types';
 import { outcomePath } from '../ops/adapter';
 import { updateSite } from '../ops/defs';
-import { OpButtons } from '../ops/Panel';
+import { OpOpen } from '../ops/Panel';
 import { CheckLine, Loading, OpsList } from '../ui/bits';
 import { Hint } from '../ui/Hint';
 import { SaveBar, SaveLine } from '../ui/edit';
@@ -116,7 +116,7 @@ function Site(p: ReadyProps) {
       <div class="page-head">
         <div><h2 class="h1">Student site <Hint doc="11-configure-cohort-site.md">The home text and announcements are yours. The schedule, lectures, assignments and instructors pages are rewritten on every update.</Hint></h2><p class="lede">Deployed semester page for the semester. Most of it is auto-populated from the schedule, instructors and materials.</p></div>
         <div class="actions">
-          <OpButtons def={updateSite(cohortScope(p))} verbCls="btn outline" />
+          <OpOpen def={updateSite(cohortScope(p))} cls="btn outline" />
           <a class="btn quiet" href={url} target="_blank" rel="noopener">Open the student site <Ext /></a>
         </div>
       </div>

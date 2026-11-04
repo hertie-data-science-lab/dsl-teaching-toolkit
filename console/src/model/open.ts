@@ -1,5 +1,5 @@
 // Where a course repo opens: on GitHub, on github.dev, in VS Code, in GitHub Desktop, in
-// another editor by its link scheme. One Open button for both
+// another editor by its link scheme. One Open split button (`ui/OpenSplit.tsx`) for both
 // roles (decisions 0017, 0027): instructors on their course screens, students in Profile. A
 // released file's Edit items (decision 0035 rule 10) come from here too. The
 // folder and editor come from Profile (`model/prefs.ts`); nothing here reads storage.
@@ -138,7 +138,7 @@ export function openItems(r: RepoRef, setup: Setup | null, cloned?: boolean): Op
   const scheme = setup?.editor === 'other' ? (setup.scheme ?? '').trim() : '';
   // Another editor opens a folder or nothing: with no folder set up, the menu's last line
   // ("Set up a local folder") is its way in.
-  if (canOpen && schemeOk(scheme)) items.push({ choice: 'editor', label: 'Open in your editor', href: scheme.replace('{path}', urlPath(inside)), group: 'local' });
+  if (canOpen && schemeOk(scheme)) items.push({ choice: 'editor', label: `Open in ${editorName(setup) || 'your editor'}`, href: scheme.replace('{path}', urlPath(inside)), group: 'local' });
   return items;
 }
 
@@ -180,6 +180,9 @@ export function mainLabel(item: OpenItem, cloned?: boolean): string {
   if (item.group === 'online') return item.label;
   return cloned === false ? 'Clone' : cloned === true ? 'Open' : 'Open or clone';
 }
+
+/** An item's words in the menu, under its section's heading: "On GitHub" for the main part's "Open on GitHub". */
+export const menuLabel = (item: OpenItem) => (item.group === 'online' ? item.label.replace(/^Open on /, 'On ') : item.label);
 
 /** Whether a link leaves for a web page (a new tab) rather than an app's own scheme (no empty tab left behind). */
 export const isWeb = (href: string) => /^https?:/i.test(href);

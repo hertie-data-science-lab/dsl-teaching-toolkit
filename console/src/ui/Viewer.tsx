@@ -1,6 +1,9 @@
 // The in-app file viewer both consoles use (decision 0035 rules 10-11, decision 0040 rule 6): a
 // file from a repo, read with the signed-in person's own token and drawn here (see
 // model/materials.ts for how each kind is shown), never gated by any selection or hosted copy.
+// A PDF draws inline (materials-release decision 10) in an unsandboxed frame over a blob: URL
+// whose type is forced to application/pdf, so nothing but the browser's PDF viewer loads there
+// (Chrome refuses that viewer in any sandboxed frame); an HTML page keeps its sandboxed srcdoc.
 // The header carries the file's GitHub link and a full-screen toggle (the projector case: the
 // file fills the screen; Escape or the button leaves). `Split` keeps a list beside the open
 // file: in a left column on wide screens, above the file on narrow ones.
@@ -98,7 +101,8 @@ export function FileView({ org, repo, entry, tree }: { org: string; repo: string
 
 export function ShownView({ shown, name }: { shown: Shown; name: string }) {
   const bytes = shown.kind === 'file' || shown.kind === 'image' ? shown.bytes : shown.kind === 'page' || shown.kind === 'deck' ? shown.file : null;
-  const mime = shown.kind === 'file' || shown.kind === 'image' ? shown.mime : 'text/html';
+  // A PDF's Blob type is forced, never the file's own: its frame is unsandboxed.
+  const mime = shown.kind === 'file' && shown.pdf ? 'application/pdf' : shown.kind === 'file' || shown.kind === 'image' ? shown.mime : 'text/html';
   const url = useObjectUrl(bytes, mime);
   const save = url ? <a class="btn outline small" href={url} download={name}>Download</a> : null;
   switch (shown.kind) {
@@ -129,11 +133,14 @@ export function ShownView({ shown, name }: { shown: Shown; name: string }) {
         </div>
       );
     case 'file':
-      return (
-        <p class="actions">
-          {shown.pdf && url ? <a class="btn small" href={url} target="_blank" rel="noopener">Open in a new tab</a> : null}
-          {save}
-        </p>
-      );
+      if (shown.pdf && url) {
+        return (
+          <>
+            <iframe class="page-frame pdf-frame" src={url} title={name} />
+            <p class="footnote actions"><a class="btn small" href={url} target="_blank" rel="noopener">Open in a new tab</a> {save}</p>
+          </>
+        );
+      }
+      return <p class="actions">{save}</p>;
   }
 }

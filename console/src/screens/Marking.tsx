@@ -22,7 +22,7 @@ import { marksDraft, marksSubFolded, marksWidths, saveMarksDraft, saveMarksSubFo
 import { parseRoster, teamColumn, type RosterRow } from '../model/people';
 import type { Assignment } from '../model/types';
 import { returnMarks, teamsWindow, type AsgRef, type LateReturn, type PerQuestion } from '../ops/defs';
-import { OpButtons, OpOpen } from '../ops/Panel';
+import { OpOpen } from '../ops/Panel';
 import type { OpDef } from '../ops/session';
 import { assignmentHref, replaceHash, tabHref } from '../router';
 import { CheckLine, Loading } from '../ui/bits';
@@ -455,7 +455,7 @@ export function MarksTab(p: TabProps) {
     <>
       <div class="page-head">
         <div>{title}{lede}</div>
-        <div class="actions"><OpButtons def={returnMarks(scope, asgRef(a, group), a.marks.filled, name, late, undefined, undefined, perQuestionOf(p, a, env))} /></div>
+        <div class="actions"><OpOpen def={returnMarks(scope, asgRef(a, group), a.marks.filled, name, late, undefined, undefined, perQuestionOf(p, a, env))} /></div>
       </div>
       {p.tabs}
     </>
@@ -1200,7 +1200,7 @@ export function TeamsTab(p: TabProps) {
             </p>
             {window === 'never' && a.state === 'declared' ? <div class="actions"><HandOutNow p={p} a={a} small /></div> : null}
             {assigned ? null : <p class="footnote">The window runs from hand out until the late cutoff: the due date plus the late window.</p>}
-            {window === 'open' && free.length ? <div class="actions"><OpButtons def={teamsWindow(cohortScope(p), asgRef(a, true), fmtDay(closes, tz, year))} small label={`Email ${free.length} without a team`} /></div> : null}
+            {window === 'open' && free.length ? <div class="actions"><OpOpen def={teamsWindow(cohortScope(p), asgRef(a, true), fmtDay(closes, tz, year))} label={`Email ${free.length} without a team`} cls="btn small" /></div> : null}
             <a class="textlink" href={`#schedule-${a.slug}`}>Change the dates in the schedule</a>
           </section>
           <section class="panel section">

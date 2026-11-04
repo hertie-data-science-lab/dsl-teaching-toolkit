@@ -9,7 +9,7 @@ import { needsANumber, parseSchedule, scheduleRows, weekGroups, weekOf, weekStar
 import type { Assignment, Problem, Status } from '../model/types';
 import { submissionsOf } from '../model/assignment';
 import { checkAccess, checkNow, releaseEarly, type ReleaseRef } from '../ops/defs';
-import { OpButtons, OpOpen } from '../ops/Panel';
+import { OpOpen } from '../ops/Panel';
 import type { Release } from '../model/types';
 import { OpsList, ProblemCards, ReleaseMarks, fixHref, ghUrl } from '../ui/bits';
 import { Verdict, readinessTabs, type Link, type SetupItem } from '../ui/SetupPanel';
@@ -189,7 +189,7 @@ function RowItem({ r, status, p, marks }: { r: Row; status: Status; p: CohortPro
     detail = releaseDetail(status, rel, m, tz);
     buttons = (
       <>
-        {ref && rel?.state === 'planned' ? <OpButtons def={releaseEarly(cohortScope(p), ref)} small label={`Release ${r.ident} early`} /> : null}
+        {ref && rel?.state === 'planned' ? <OpOpen def={releaseEarly(cohortScope(p), ref)} label={`Release ${r.ident} early`} cls="btn small" /> : null}
         <a class="textlink" href={`#release-${r.entry}`}>Details</a>
       </>
     );
@@ -484,7 +484,7 @@ function Overview(p: ReadyProps) {
           <h2 class="h1">Dashboard <Hint doc="07-schedule-releases.md">What this semester has planned and what needs fixing before it can happen. Pick weeks in the strip to show only those weeks.</Hint></h2>
           {header ? <p class="lede"><span>{header}</span></p> : null}
         </div>
-        <div class="actions"><OpButtons def={checkNow(cohortScope(p))} /><MoreMenu p={p} /></div>
+        <div class="actions"><OpOpen def={checkNow(cohortScope(p))} /><MoreMenu p={p} /></div>
       </div>
       {/* The verdict is the page's one problem count, and its link to the Problems tab (decision 0034). */}
       <Verdict v={verdict} onOpen={() => showTab(setTab, verdictTab(verdict))} />

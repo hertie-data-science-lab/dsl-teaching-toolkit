@@ -44,7 +44,7 @@ import { Loading, ghUrl } from './ui/bits';
 import { ScreenBoundary } from './ui/boundary';
 import { forgetRendered } from './ui/rendered';
 import { forgetShown } from './model/materials';
-import { CourseBanner, Footer, Sidenav, Topbar, type CourseSubPages, type SubWanted } from './ui/shell';
+import { CourseBanner, Footer, NavHandle, Sidenav, Topbar, menuPress, saveNavCollapsed, savedNavCollapsed, type CourseSubPages, type SubWanted } from './ui/shell';
 import { fmtDay } from './model/format';
 import { DEFAULT_TIMEZONE } from './model/policy';
 import type { SemesterStatus } from './model/types';
@@ -71,7 +71,7 @@ export function createDeps(): AppDeps {
 
 /**
  * The console route a click follows in place (`?...` links), or null to leave it to the
- * browser: a link with a target (`View here` opens a new tab), and a modifier or non-primary
+ * browser: a link with a target (`In the console` opens a new tab), and a modifier or non-primary
  * click (new tab or window), keep the browser's own behaviour.
  */
 export function inAppHref(e: MouseEvent): string | null {
@@ -121,8 +121,7 @@ export function App({ state: s }: { state: AppState }) {
     }
   }, [moved]);
   useEffect(() => {
-    document.body.classList.remove('nav-open');
-    s.navOpen.value = false;
+    s.closeNav();
     const el = route.screen === 'schedule' && route.entry ? document.querySelector('.trow.current') : null;
     if (el) el.scrollIntoView({ block: route.screen === 'schedule' ? 'center' : 'start' });
     else window.scrollTo(0, 0);
@@ -205,8 +204,9 @@ export function App({ state: s }: { state: AppState }) {
     const back = `?cohort=${stu.semester.org}#dashboard`;
     return (
       <EnvCtx.Provider value={s.env(user)}>
-        <Topbar user={user} title={stu.studentView ? 'Student view (preview)' : title} titleHref={stu.studentView ? back : undefined} onSignOut={s.signOut} navOpen={s.navOpen.value} onMenu={s.toggleNav} guide={guide} />
+        <Topbar user={user} title={stu.studentView ? 'Student view (preview)' : title} titleHref={stu.studentView ? back : undefined} onSignOut={s.signOut} navOpen={s.navOpen.value} onMenu={menuPress(s.toggleNav, s.navCollapsed.value, s.toggleCollapsed)} guide={guide} />
         <div class="shell">
+          <NavHandle collapsed={s.navCollapsed.value} onToggle={s.toggleCollapsed} />
           <aside class="sidenav" id="sidenav-wrap" aria-label="Semester navigation">
             <StudentSideNav root={root} semesters={semesters} semester={stu.semester} current={studentNavKey(key)} studentView={stu.studentView} now={s.now.value} />
           </aside>
@@ -309,8 +309,9 @@ export function App({ state: s }: { state: AppState }) {
   const appLevel = FULL_WIDTH.includes(screen);
   return (
     <EnvCtx.Provider value={s.env(user)}>
-      <Topbar user={user} title={title} onSignOut={s.signOut} navOpen={s.navOpen.value} onMenu={appLevel ? undefined : s.toggleNav} guide={guide} />
+      <Topbar user={user} title={title} onSignOut={s.signOut} navOpen={s.navOpen.value} onMenu={appLevel ? undefined : menuPress(s.toggleNav, s.navCollapsed.value, s.toggleCollapsed)} guide={guide} />
       <div class="shell" style={appLevel ? 'grid-template-columns:minmax(0,1fr)' : undefined}>
+        {appLevel ? null : <NavHandle collapsed={s.navCollapsed.value} onToggle={s.toggleCollapsed} />}
         {appLevel ? null : (
           <aside class="sidenav" id="sidenav-wrap" aria-label="Console navigation">
             <Sidenav courses={courses} course={ctx.course} cohort={semesterPage ? ctx.cohort : undefined} site={ctx.cohort} cohortStates={cohortStates} current={navKey} sub={sub} entry={route.entry} now={s.now.value} />
@@ -424,6 +425,8 @@ export function createState({ auth, client }: AppDeps) {
     search,
     now: signal(Date.now()),
     navOpen: signal(false),
+    /** The side nav hidden by its handle (decision 9), as this browser keeps it. */
+    navCollapsed: signal(savedNavCollapsed()),
     statuses,
     files,
     ops,
@@ -516,6 +519,17 @@ export function createState({ auth, client }: AppDeps) {
     toggleNav() {
       st.navOpen.value = !st.navOpen.value;
       document.body.classList.toggle('nav-open', st.navOpen.value);
+    },
+    closeNav() {
+      st.navOpen.value = false;
+      document.body.classList.remove('nav-open');
+    },
+    /** The handle (or the Menu on a wide screen): hide or show the side nav, keep the choice, close an open drawer. */
+    toggleCollapsed() {
+      const next = !st.navCollapsed.value;
+      saveNavCollapsed(next);
+      st.closeNav();
+      st.navCollapsed.value = next;
     },
   };
   auth.onLost = () => st.signOut();
