@@ -30,6 +30,14 @@
   In the Files panel these rows show `withheld` like a line's, footnoted "withheld by default";
   in Withhold they start unticked, and a tick writes the `!` line ("released by `!solutions/`").
   The public website keeps the content group off whatever a `!` line says.
+- Hand releases and Release again take an **Overwrite** option (`replace`): the course version
+  of the copied paths goes onto the branch students read instead of being merged, so a semester
+  edit or removal is undone without a pull request.
+- **Keep for future semesters** and **PR into source** can carry back named paths (`paths`),
+  hand and early releases included; successive per-path runs add to the open proposal, while a
+  full run regenerates it.
+- One **Open** split button for repos and files in both consoles: the main part opens, the
+  caret lists In the browser, On your computer and Change your profile.
 
 ## 0.11.0 (unreleased)
 
