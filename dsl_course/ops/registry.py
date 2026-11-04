@@ -200,6 +200,10 @@ _DEPLOY_FIELDS = {
     "semester_dest_path": _string(
         PATH_LIST_PATTERN, "Destination path(s), comma-separated"
     ),
+    "replace": _boolean(
+        "Take the course version of exactly these paths, discarding the semester's "
+        "edits to them, instead of merging"
+    ),
 }
 
 
@@ -214,6 +218,11 @@ def _course_semester(request: Request) -> list[str]:
     return ["--course-org", request.course_org, "--semester-org", request.semester_org]
 
 
+def _propagate(request: Request) -> list[str]:
+    paths = ["--paths", _a(request, "paths")] if _a(request, "paths") else []
+    return [*_course_semester(request), *paths]
+
+
 def _status_refresh(request: Request) -> list[str]:
     # The check REFRESHES status.json: `status` previews unless told --no-preview.
     return [*_course_semester(request), "--no-preview"]
@@ -226,11 +235,13 @@ def _scheduler(request: Request) -> list[str]:
 def _deploy(request: Request) -> list[str]:
     # `remove_deleted`: Release again's "also remove the files deleted from the course
     # copy" (decision 0043 rule 6). Spelt on either branch: deploy refuses it with paths.
-    remove = ["--remove-deleted"] if _a(request, "remove_deleted") else []
+    flags = ["--remove-deleted"] if _a(request, "remove_deleted") else []
+    # `replace`: the hard overwrite - the course version of the copied paths, no merge.
+    flags += ["--replace"] if _a(request, "replace") else []
     if _a(request, "entry") and not _a(request, "course_source_repo"):
         # A schedule entry by its key: deploy reads every copy off the plan and releases
         # them in one batch with one site sync, however many source repos they draw on.
-        return [*_course_semester(request), "--entry", _a(request, "entry"), *remove]
+        return [*_course_semester(request), "--entry", _a(request, "entry"), *flags]
     return [
         "--course-org",
         request.course_org,
@@ -245,7 +256,7 @@ def _deploy(request: Request) -> list[str]:
         _a(request, "semester_dest_repo", ""),
         "--semester-dest-path",
         _a(request, "semester_dest_path", ""),
-        *remove,
+        *flags,
     ]
 
 
@@ -480,12 +491,20 @@ _OPS = (
         name="release.propagate_back",
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
-        args_schema=_args(),
+        args_schema=_args(
+            {
+                "paths": _string(
+                    PATH_LIST_PATTERN,
+                    "Only these semester-side paths, comma-separated: `<dest repo>/<path>`, "
+                    "or `<path>` in the semester's materials repo; each inside a released copy",
+                )
+            }
+        ),
         help="Keep this semester's edits for future terms: one pull request per source repo.",
         done_text="Semester edits checked for future terms.",
         doc="docs/08-release-materials-to-cohort.md",
         module="propagate",
-        argv=_course_semester,
+        argv=_propagate,
         preview_flag="--preview",
         real_flag="--no-preview",
     ),

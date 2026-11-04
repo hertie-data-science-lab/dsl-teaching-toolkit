@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 import pytest
 
 from dsl_course import ghcli, propagate
+from dsl_course.ops.registry import REGISTRY, Request
 from dsl_course.schedule import Deploy, Release, Schedule
 from tests.conftest import BareOrigins, PullsFake
 
@@ -41,8 +42,10 @@ class World(BareOrigins):
     def plan(self, *releases: Release) -> None:
         self.releases = list(releases)
 
-    def run(self, now: datetime = NOW, dry_run: bool = False) -> propagate.Propagated:
-        return propagate.propagate(COURSE, SEMESTER, now, dry_run=dry_run)
+    def run(
+        self, now: datetime = NOW, dry_run: bool = False, paths: list[str] | None = None
+    ) -> propagate.Propagated:
+        return propagate.propagate(COURSE, SEMESTER, now, dry_run=dry_run, paths=paths)
 
     def branches(self, name: str) -> list[str]:
         return self.refs(name)
@@ -388,3 +391,120 @@ def test_a_semester_with_nothing_released_yet_does_nothing(world):
     world.plan()
     assert world.run().errors == 0
     assert world.pulls.calls == []
+
+
+# ------------------------------------------------------------------ a per-path run
+
+
+def _two_labs(world) -> None:
+    world.commit("cm", {"lectures/01/lab.md": "lab", "lectures/01/notes.md": "notes"})
+    world.commit(
+        "materials",
+        {"lectures/01/lab.md": "lab, fixed", "lectures/01/notes.md": "notes, fixed"},
+    )
+    world.plan(_release("lecture-1", FIRED, Deploy("cm", "lectures/01", "materials")))
+
+
+def test_a_per_path_run_carries_only_the_named_paths(world):
+    _two_labs(world)
+
+    assert world.run(paths=["lectures/01/lab.md"]).errors == 0
+    assert world.read("lectures/01/lab.md") == "lab, fixed"
+    assert world.read("lectures/01/notes.md") == "notes"
+    assert world.proposed() == ["propagate: lectures/01/lab.md from Semester-Org"]
+    body = world.pulls.calls[0]["body"]
+    assert "only the paths below" in body
+    assert "`materials/lectures/01/lab.md` -> `lectures/01/lab.md`" in body
+    assert "notes.md" not in body
+
+
+def test_a_per_path_run_regenerates_the_branch_a_full_run_left(world):
+    # The pull request always reflects the LATEST run, full or per-path.
+    _two_labs(world)
+    assert world.run().errors == 0
+    assert world.run(paths=["materials/lectures/01/notes.md"]).errors == 0
+    assert world.proposed() == ["propagate: lectures/01/notes.md from Semester-Org"]
+    assert world.read("lectures/01/lab.md") == "lab"
+
+
+def test_a_per_path_run_maps_through_a_non_default_dest_and_a_renamed_folder(world):
+    world.commit("cm", {"labs/01/lab.md": "lab one", "labs/01/data.csv": "a"})
+    world.commit("extras", {"week01/lab.md": "lab one, fixed", "week01/data.csv": "b"})
+    world.plan(
+        _release("lab-1", FIRED, Deploy("cm", "labs/01", "extras", "week01")),
+    )
+
+    assert world.run(paths=["extras/week01/lab.md"]).errors == 0
+    assert world.read("labs/01/lab.md") == "lab one, fixed"
+    assert world.read("labs/01/data.csv") == "a"
+    assert "`extras/week01/lab.md` -> `labs/01/lab.md`" in world.pulls.calls[0]["body"]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "lectures/02/lab.md",
+        "extras/lectures/01/lab.md",
+        "lectures/01/../02",
+        "lectures",
+    ],
+)
+def test_a_path_outside_every_released_copy_is_refused_by_name(world, capsys, path):
+    _two_labs(world)
+    world.commit("cm", {"lectures/02/lab.md": "week two"})
+    world.commit("materials", {"lectures/02/lab.md": "edited early"})
+    world.plan(
+        _release("lecture-1", FIRED, Deploy("cm", "lectures/01", "materials")),
+        _release("lecture-2", LATER, Deploy("cm", "lectures/02", "materials")),
+    )
+
+    for dry_run in (True, False):
+        done = world.run(dry_run=dry_run, paths=["lectures/01/lab.md", path])
+        assert done.errors == 1
+        assert f"`{path}` is not inside anything already released" in (
+            capsys.readouterr().err
+        )
+    assert world.pulls.calls == []
+    assert world.branches("cm") == ["main"]
+
+
+def test_a_per_path_preview_lists_only_the_chosen_pairs(world, capsys):
+    world.plan(
+        _release(
+            "lecture-1",
+            FIRED,
+            Deploy("cm", "lectures/01", "materials", "wk01"),
+            Deploy("labs", "labs/01", "extras"),
+        )
+    )
+
+    done = world.run(dry_run=True, paths=["wk01/lab.md", "extras/labs/01"])
+    assert (done.errors, done.checked) == (0, 2)
+    out = capsys.readouterr().out
+    assert (
+        "Semester-Org/materials/wk01/lab.md -> Course-Org/cm/lectures/01/lab.md" in out
+    )
+    assert "Semester-Org/extras/labs/01 -> Course-Org/labs/labs/01" in out
+    assert "Course-Org/cm/lectures/01 " not in out
+    assert not (world.origins / "cm.git").exists()
+
+
+def test_no_paths_is_the_full_run(world):
+    _two_labs(world)
+    for paths in (None, []):
+        assert world.run(paths=paths).errors == 0
+        assert world.proposed() == ["propagate: lectures/01 from Semester-Org"]
+    assert "in the order the semester ran" in world.pulls.calls[-1]["body"]
+
+
+def test_the_console_op_spells_paths():
+    op = REGISTRY["release.propagate_back"]
+
+    def argv(**args) -> list[str]:
+        return op.argv(Request(op.name, "prof", "C", "S", args, False))
+
+    assert "--paths" not in argv()
+    assert argv(paths="lectures/01/lab.md, extras/wk01")[-2:] == [
+        "--paths",
+        "lectures/01/lab.md, extras/wk01",
+    ]

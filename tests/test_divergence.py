@@ -304,7 +304,7 @@ def test_the_cli_removes_what_the_record_lists(monkeypatch):
     monkeypatch.setattr(deploy.release_record, "load", lambda org: record)
     seen = {}
 
-    def fake(c, s, deploys, sync=True, remove=None):
+    def fake(c, s, deploys, sync=True, remove=None, replace=False):
         seen["remove"] = remove
         return deploy.Batch(0, True, [])
 
@@ -377,7 +377,7 @@ def test_the_cli_never_removes_what_a_nested_copy_lands(monkeypatch):
     monkeypatch.setattr(deploy.release_record, "load", lambda org: record)
     seen = {}
 
-    def fake(c, s, deploys, sync=True, remove=None):
+    def fake(c, s, deploys, sync=True, remove=None, replace=False):
         seen["remove"] = remove
         return deploy.Batch(0, True, [])
 

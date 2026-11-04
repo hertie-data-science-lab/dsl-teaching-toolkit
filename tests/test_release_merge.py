@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from dsl_course import deploy, ghcli
+from dsl_course import deploy, ghcli, release_record
 from dsl_course.course import FACULTY_ONLY_HEADING
 from dsl_course.gh_contents import blob_sha
 from dsl_course.schedule import Deploy
@@ -32,15 +32,16 @@ class World(BareOrigins):
         super().__init__(root)
         self.pulls = pulls_fake
 
-    def release(self, *paths: str) -> tuple[int, bool]:
-        return self.batch(*paths)[:2]
+    def release(self, *paths: str, replace: bool = False) -> tuple[int, bool]:
+        return self.batch(*paths, replace=replace)[:2]
 
-    def batch(self, *paths: str) -> deploy.Batch:
+    def batch(self, *paths: str, replace: bool = False) -> deploy.Batch:
         return deploy.deploy_many(
             "Course-Org",
             "Semester-Org",
             [Deploy("cm", p, "materials", None) for p in paths],
             sync=False,
+            replace=replace,
         )
 
     def branches(self, name: str = "materials") -> list[str]:
@@ -357,3 +358,94 @@ def test_a_copy_held_at_a_conflict_has_not_landed(world):
     world.commit("cm", {"lectures/01/extra.md": "more"}, "more")
     (copy,) = world.batch("lectures/01").copies
     assert copy.outcome == deploy.HELD and not copy.landed
+
+
+# ------------------------------------------------------------- the hard overwrite
+
+
+def _edited_on_both_sides(world) -> None:
+    """Released once, then edited in the semester AND rewritten in the course on the same
+    line, beside a second released folder the semester also edited."""
+    world.commit(
+        "cm", {"lectures/01/lab.md": "version one\n", "lectures/02/lab.md": "two\n"}
+    )
+    world.commit("materials", {"README.md": "the semester"})
+    world.release("lectures/01", "lectures/02")
+    world.commit(
+        "materials",
+        {
+            "lectures/01/lab.md": "the semester's fix\n",
+            "lectures/01/extra.md": "added in class\n",
+            "lectures/02/lab.md": "two, edited\n",
+        },
+        "semester edits",
+    )
+    world.commit("cm", {"lectures/01/lab.md": "version two\n"}, "rewrite")
+
+
+def test_replace_discards_the_semester_edit_without_a_pull_request(world, capsys):
+    _edited_on_both_sides(world)
+
+    batch = world.batch("lectures/01", replace=True)
+    assert (batch.errors, batch.changed) == (0, True)
+    assert world.read("main", "lectures/01/lab.md") == "version two"
+    assert world.pulls.calls == []
+    assert [c.landed for c in batch.copies] == [True]
+    # Fully merged: the next ordinary release has nothing held to re-offer.
+    assert world.subjects("materials", "upstream..main")[-1].startswith(
+        "release: merge"
+    )
+    assert "replaced with the course version" in capsys.readouterr().out
+    assert world.release("lectures/01") == (0, False)
+
+
+def test_replace_leaves_paths_outside_the_copy_and_added_files_alone(world):
+    _edited_on_both_sides(world)
+
+    assert world.release("lectures/01", replace=True) == (0, True)
+    assert world.read("main", "lectures/02/lab.md") == "two, edited"
+    assert world.read("main", "README.md") == "the semester"
+    # An addition is not an edit to the released version: it is not on `upstream`.
+    assert world.read("main", "lectures/01/extra.md") == "added in class"
+
+
+def test_replace_also_ships_when_another_path_is_held(world):
+    # A conflict already standing for one path does not hold the path being replaced.
+    _edited_on_both_sides(world)
+    assert world.release("lectures/01") == (0, False)  # held
+    world.commit("cm", {"lectures/02/lab.md": "two, rewritten\n"}, "rewrite two")
+
+    batch = world.batch("lectures/02", replace=True)
+    assert (batch.errors, batch.changed) == (0, True)
+    assert world.read("main", "lectures/02/lab.md") == "two, rewritten"
+    assert world.read("main", "lectures/01/lab.md") == "the semester's fix"
+    assert world.pulls.calls[-1]["head"] == deploy.UPSTREAM_BRANCH
+
+
+def test_without_replace_the_same_edit_is_still_held_for_review(world):
+    _edited_on_both_sides(world)
+
+    assert world.release("lectures/01") == (0, False)
+    assert world.read("main", "lectures/01/lab.md") == "the semester's fix"
+    assert len(world.pulls.calls) == 1
+
+
+def test_replace_with_remove_deleted_drops_what_the_course_no_longer_has(world):
+    world.commit("cm", {"lectures/01/lab.md": "one\n", "lectures/01/old.md": "old\n"})
+    world.commit("materials", {"README.md": "the semester"})
+    world.release("lectures/01")
+    world.commit("materials", {"lectures/01/old.md": "old, edited\n"}, "edit")
+    world.commit("cm", {"lectures/01/old.md": None}, "drop old")
+
+    d = Deploy("cm", "lectures/01", "materials", None)
+    batch = deploy.deploy_many(
+        "Course-Org",
+        "Semester-Org",
+        [d],
+        sync=False,
+        remove={release_record.key_of(d): ["old.md"]},
+        replace=True,
+    )
+    assert batch.errors == 0
+    assert "lectures/01/old.md" not in world.files("main")
+    assert world.pulls.calls == []

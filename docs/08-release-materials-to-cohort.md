@@ -26,10 +26,10 @@ from their source files** ([below](#released-materials-that-differ-from-their-so
 1. **From**: pick a course repo. Its tree is on the left.
 2. Tick files or folders (a click anywhere on a file's row ticks it). Each row's chip says where
    it stands against the semester:
-   - **up to date**: the semester has this version; nothing to release.
+   - **released** (the name greyed): the semester already has this version; nothing to release.
    - **behind**: the course copy changed since its release; a release updates the semester.
    - **ahead**: edited in the semester since its release; a release merges onto that edit. Its
-     **Keep for future semesters** carries the edit back to the course ([below](#carrying-cohort-edits-back)).
+     **PR into source** carries the edit back to the course ([below](#carrying-cohort-edits-back)).
    - **diverged**: changed in both; a release opens a pull request ([below](#fixing-something-you-have-already-released)).
    - **not released**: not in the semester yet.
    - **withheld**: a `.releaseignore` line keeps it from students ("withheld by `drafts/`"), or the
@@ -59,11 +59,14 @@ students with one plain **withheld** chip; **Withhold** says why.
 A folded panel listing every released folder whose files differ between the course copy and
 the semester's, its count the differing files: **ahead** (edited in the semester, a file added there included), **behind** (changed in the course since the
 release, a file added there included) or **diverged** (both). A filter narrows it to one kind.
-Each folder has **Release again** (the course version, merged onto the semester's edit; a
-conflict opens a pull request) and **Keep for future semesters**
-([below](#carrying-cohort-edits-back)), and opens to its differing files, each with its open
-menu on the semester copy, a **Diff** fold showing what changed (text files), and, for an
-edited one, **Compare on GitHub** at that file. Nothing changes until you choose.
+**PR into source** opens one pull request per course repo carrying every semester edit back
+([below](#carrying-cohort-edits-back)). Under each folder, each differing file has
+**Re-release** (that file's course version, merged onto the semester's edit; a conflict opens a
+pull request), **Open**, and **Diff**, which shows what changed under the row (text files), with
+**Compare on GitHub** for an edited one. Nothing changes until you choose.
+
+On a course repo's **Files** → **Release**, a notice says when the chosen semester has edited
+released files from that repo, with **PR into source** and **See which**.
 
 ### The ops
 
@@ -114,6 +117,14 @@ Further releases keep adding to `upstream` and re-use that same pull request; cl
 unresolved does not settle anything, because the conflict is still there and the next
 release opens the question again.
 
+**To overwrite instead of merge**, release with `replace` (`release.entry` or
+`release.adhoc`). The release still lands on `upstream`, but the branch students read then
+takes the course version of exactly the released paths, in one commit, so the semester's edits
+to them are discarded and no conflict can arise. Files the semester added under those paths
+stay, and nothing outside them changes; with `remove_deleted` the files the course copy no
+longer has go too. A conflict pull request already open for other paths stays open. Carry any
+semester edit you want to keep back first (below).
+
 **The first release after upgrading is the exception.** A semester released before this
 version of the toolkit has no `upstream` yet, so that first release cuts it from the branch
 students read as it stands and lands on top of it - which overwrites an edit typed into the
@@ -144,6 +155,14 @@ What it does and does not carry:
   missing what the course org has already released; the pull request names what was left;
 - the branch is regenerated on every run, so re-running after more edits refreshes the same
   pull request rather than stacking on it.
+
+To carry back only some files, give `paths`: a comma-separated list of semester-side paths,
+each `<dest repo>/<path>` or, in the semester's materials repo, just `<path>` (for example
+`lectures/01/lab.md, extras/week01`). Each must lie inside something already released; one
+that does not refuses the run and is named. Each is mapped back through its release to the
+course path it came from, and the pull request lists exactly those paths. The branch is
+still regenerated, so the pull request always shows the latest run: a per-path run replaces
+what a full run proposed, and the next full run replaces it again.
 
 Archiving a semester runs it first, so the semester's corrections are offered back before the repos
 are frozen.

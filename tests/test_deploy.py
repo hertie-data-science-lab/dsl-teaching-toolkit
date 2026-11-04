@@ -15,6 +15,7 @@ import pytest
 from dsl_course import access, course, deploy, ghcli, records, repos, selection
 from dsl_course import repos as repo_mod
 from dsl_course.fs import copy_tree
+from dsl_course.ops.registry import REGISTRY, Request
 from dsl_course.schedule import Deploy, Release, Schedule
 
 
@@ -142,7 +143,7 @@ def test_cli_releases_several_repos_in_one_batch(monkeypatch, site_syncs, capsys
     monkeypatch.setattr(
         deploy,
         "deploy_many",
-        lambda org, sem, deploys, sync=True, remove=None: (
+        lambda org, sem, deploys, sync=True, remove=None, replace=False: (
             seen.append(deploys) or deploy.Batch(0, True, [])
         ),
     )
@@ -168,7 +169,7 @@ def _hand_release(monkeypatch, sched: Schedule, *extra: str) -> tuple[int, list]
     monkeypatch.setattr(
         deploy,
         "deploy_many",
-        lambda org, sem, deploys, sync=True, remove=None: (
+        lambda org, sem, deploys, sync=True, remove=None, replace=False: (
             seen.append(deploys) or deploy.Batch(0, False, [])
         ),
     )
@@ -212,7 +213,7 @@ def test_the_consoles_hand_release_with_no_dest_repo_lands_in_materials_repo(
     monkeypatch.setattr(
         deploy,
         "deploy_many",
-        lambda org, sem, deploys, sync=True, remove=None: (
+        lambda org, sem, deploys, sync=True, remove=None, replace=False: (
             seen.append(deploys) or deploy.Batch(0, False, [])
         ),
     )
@@ -272,7 +273,9 @@ def test_cli_builds_one_deploy_per_pair_and_one_batch(monkeypatch, site_syncs):
     # through ONE deploy_many call - so each repo is cloned once for the whole batch.
     seen = {}
 
-    def fake_deploy_many(course_org, semester_org, deploys, sync=True, remove=None):
+    def fake_deploy_many(
+        course_org, semester_org, deploys, sync=True, remove=None, replace=False
+    ):
         seen.update(
             course_org=course_org, semester_org=semester_org, deploys=deploys, sync=sync
         )
@@ -349,7 +352,7 @@ def test_an_entry_is_released_in_one_batch_with_one_sync(monkeypatch, site_syncs
     monkeypatch.setattr(
         deploy,
         "deploy_many",
-        lambda org, sem, deploys, sync=True, remove=None: (
+        lambda org, sem, deploys, sync=True, remove=None, replace=False: (
             calls.append((deploys, sync)) or deploy.Batch(0, True, [])
         ),
     )
@@ -1129,3 +1132,55 @@ def test_a_content_name_named_outright_still_ships(monkeypatch):
     )
     assert errors == 0
     assert snaps["materials"]["solutions/key.md"] == "solutions/key.md"
+
+
+def test_replace_reaches_deploy_many_and_the_summary_says_replaced(monkeypatch):
+    seen = {}
+
+    def fake(org, sem, deploys, sync=True, remove=None, replace=False):
+        seen["replace"] = replace
+        return deploy.Batch(0, True, [])
+
+    monkeypatch.setattr(deploy, "deploy_many", fake)
+    monkeypatch.setattr(deploy, "_record", lambda *a: 0)
+    monkeypatch.setattr(deploy, "_sync_site", lambda *a: 0)
+    monkeypatch.setattr(deploy, "unnumbered_release", lambda *a: None)
+    base = [
+        "deploy",
+        "--course-org",
+        "Course",
+        "--course-source-repo",
+        "cm",
+        "--semester-org",
+        "Semester-f2026",
+        "--course-source-path",
+        "lectures/02",
+        "--no-preview",
+    ]
+    monkeypatch.setattr("sys.argv", [*base, "--replace"])
+    out = deploy.main()
+    assert seen["replace"] is True
+    assert out.text.startswith("Replaced 1 item from cm in materials")
+    monkeypatch.setattr("sys.argv", base)
+    assert deploy.main().text.startswith("Released")
+    assert seen["replace"] is False
+
+
+@pytest.mark.parametrize(
+    ("op", "args"),
+    [
+        ("release.entry", {"entry": "lab-08"}),
+        (
+            "release.adhoc",
+            {"course_source_repo": "cm", "course_source_path": "labs/08"},
+        ),
+    ],
+)
+def test_the_console_ops_spell_replace(op, args):
+    def argv(**extra) -> list[str]:
+        return REGISTRY[op].argv(
+            Request(op, "prof", "C", "S", {**args, **extra}, False)
+        )
+
+    assert "--replace" not in argv()
+    assert argv(replace=True)[-1] == "--replace"

@@ -268,6 +268,10 @@ Things whose *literal spelling* is depended on from outside Python:
   nothing in the package may start listing branches to find released
   content: every reader resolves `repos.default_branch`, which is exactly what keeps
   `upstream` invisible to the site, discovery and status.
+  `deploy_many(replace=True)` (`deploy --replace`, the console's `replace`) is the one
+  overwrite: before the merge it checks out `upstream`'s version of exactly the copied paths
+  onto the default branch as ONE ordinary commit, then merges as usual. Never a `-s ours`
+  merge: that would mark every other path `upstream` holds - a standing conflict - as merged.
 
 ## A student who switched GitHub account
 
