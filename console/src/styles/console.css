@@ -1246,6 +1246,11 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .file-chip .pub { font-family: var(--font-display); font-weight: 600; font-size: 11px; border: 1px solid var(--rule-strong); border-radius: 999px; background: var(--surface); color: var(--muted); padding: 0 7px; cursor: pointer; }
 .file-chip .pub.on { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
 .file-chip .x { font-size: 16px; min-width: 24px; min-height: 24px; }
+/* The Releases settings' chip lists (plan 2026-11-04, decision 7): an inherited repo grey, not removable. */
+.rel-chips { align-items: center; }
+.rel-chips .chip.fixed { background: var(--sunk); color: var(--muted); padding: 2px 9px; }
+.rel-chips .chip.fixed .sub { font-family: var(--font-body); }
+.rel-section .field + .field { margin-top: 4px; }
 .chip-settings { border: 1px solid var(--rule); border-radius: 8px; padding: 10px 12px; background: var(--surface-2); }
 .pct { display: inline-flex; align-items: center; gap: 4px; }
 .pct input { width: 80px; }

@@ -69,6 +69,12 @@ One file for the course, in course org → `.github`. Worked example: [`example-
 
 A default resolves nearest first, per key: the assignment's `schedule.yml` entry, the semester's `semester.yml`, this file, then the institution's `institution.yml`. The console shows each effective value and where it came from.
 
+The console's **Course details** (under Advanced) has a **Releases** section:
+
+- **Release from**: the course repos a release may copy from. Adding one gives it the `dsl-materials` topic; removing one takes the topic off.
+- **Release into**: the semester repos a release may write into (`release_destinations`); `materials` is always allowed.
+- **Default destination** (`materials_repo`): where a release lands when neither its schedule entry nor a hand release names a repo.
+
 ## Next
 
 - [Add materials](02-add-materials-to-course.md) and [Add assignment](03-add-assignment-to-course.md) to the course org.
