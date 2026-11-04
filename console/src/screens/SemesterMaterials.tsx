@@ -193,8 +193,15 @@ function Released(p: ReadyProps) {
   );
 }
 
-const STEP_HINT =
-  'For each released folder the toolkit compares the course copy with the semester’s and lists every file that differs. A folder is listed when the two differ: edited in the semester (ahead), changed in the course since the release (behind), or both (diverged). Release again copies the course version over, merged onto the semester’s edit; a conflict opens a pull request for the instructors. Keep for future semesters opens a pull request carrying the semester’s edit back into the course. Nothing changes until you choose.';
+/** The panel's `?`: what is compared, the three states, the two ways to settle one. */
+const STEP_HINT = 'For each released folder the toolkit compares the course copy with the semester’s and lists every file that differs. Nothing changes until you choose.';
+const STEP_HINT_ITEMS = [
+  <><b>Edited in semester</b> (ahead): the semester’s copy was changed after the release.</>,
+  <><b>Edited in course</b> (behind): the course copy changed since the release, additions included.</>,
+  <><b>Both</b> (diverged): changed on both sides.</>,
+  <><b>Release again</b> copies the course version over, merged onto the semester’s edit; a conflict opens a pull request for the instructors.</>,
+  <><b>Keep for future semesters</b> opens a pull request carrying the semester’s edit back into the course.</>,
+];
 
 const STEP_TABS: [FolderStep | 'all', string][] = [['all', 'All'], ['ahead', 'Edited in semester'], ['behind', 'Edited in course'], ['diverged', 'Both']];
 
@@ -219,7 +226,7 @@ function OutOfStepPanel(p: ReadyProps & { def: string }) {
       {/* The ? inside the summary must not fold the panel. */}
       <summary>
         <h2>Released materials that differ from their source files <span class="step-bang" aria-hidden="true">!</span> <span class="chip amber">{plural(differing, 'released file differs', 'released files differ')}</span>{' '}
-          <span onClick={(e) => e.preventDefault()}><Hint label="About released materials that differ">{STEP_HINT}</Hint></span></h2>
+          <span onClick={(e) => e.preventDefault()}><Hint label="About released materials that differ" items={STEP_HINT_ITEMS}>{STEP_HINT}</Hint></span></h2>
       </summary>
       <div class="seg" role="tablist" aria-label="Show">
         {STEP_TABS.map(([k, label]) => (
