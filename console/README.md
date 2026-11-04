@@ -239,11 +239,44 @@ Schedule on the calendar link opens the Schedule's new supporting-files entry wi
 `#materials` is this page (`screenOf`); `?course=` with `#materials`, and `#materials-<repo>`
 under either, are the course's, so the course nav's Course materials link names the course.
 
+A course materials repo's **settings page** (`?course=<org>#materials-<repo>`) keeps its
+checklist and Syllabus panels; its **Files** panel (`ui/FilesPanel.tsx`, materials-release
+decisions 1-8) replaces the Withheld panel. One tree, one right column, a `Browse | Withhold |
+Release` control, Browse first. Browse: a name opens the viewer in the right column. Withhold:
+ticked reaches students, an untick writes a `.releaseignore` line, the pattern box on the right,
+the Save bar below. Release: ticks pick what to copy now, `Release into [semester]` (the
+course's live semesters, newest first) over the tree, the manifest (`ui/ReleaseManifest.tsx`) on
+the right. In Withhold and Release a click on a file row toggles its tick; folder names open and
+close in every view; a splitter (`ui/Splitter.tsx`) sizes the columns, 25-75%, double-click
+resets. Chips (`ui/StateChip.tsx`): Browse and Withhold chip only what a release leaves
+behind; Release shows each file's state against the run's destination, three-way
+(`model/releaseState.ts` `fileStates`: the course blob against the semester repo's `upstream`
+branch and its default branch; two-way with no `upstream`): up to date, behind, ahead, diverged,
+not released, plus withheld. Behind, ahead and diverged open a popover with one action (tick the
+row; Keep for future semesters, `release.propagate_back`; the open pull request). A folder
+rolls its rows up in the same words. The manifest groups picks by immediate parent folder in
+tree order (`groupPicks`); each group's Edit destination sets its To repo (the run's, the
+semester's `release_destinations`, the repos its releases wrote to, or Choose a repo…,
+`ui/RepoPickerModal.tsx`, which refuses config, `.github`, site, join, `grades-*` and student
+repos inline) and To path; a group to another repo than the run's is amber with `(!)`. Picks
+may span course repos and destinations: one `release.adhoc` run (`releasePicked`,
+`requestOf`'s four paired lists), after which the destination trees are re-read. The run's
+default repo is the semester's effective `materials_repo` from `status.json`, never the
+constant. The panel is drawn only for those who can change the course.
+
+**Course details**' Advanced fold has a **Releases** section: Release from (the course's
+materials repos; a chip's × unsets the `dsl-materials` topic and Add a repo… sets it, both
+written at once, outside the page's Save), Release into (`release_destinations` chips, the
+institution's greyed) and Default destination (`materials_repo`, a select over that list,
+relabelled from "Repo a release lands in").
+
 **Semester defaults** (decision 0043; `#defaults`, "Defaults" in the semester nav between Site and
 Operations) edits the semester's settings: three open folds, each heading
 carrying its line with the effective value and source from `status.json`: Assignments
 (semester.yml `defaults:`, the run defaults as `defaultsLine` words them), Releases
-(`autosync_released_edits`, "Send fixes to released files automatically") and Semester dates
+(`autosync_released_edits`, "Send fixes to released files automatically"; the Release into
+chips, `release_destinations`, the course's greyed; and the Default destination,
+`materials_repo`, moved here from Assignments) and Semester dates
 (schedule.yml's `semester:` block). The heading's `?` explains the cascade; the late window and
 late penalty each carry a `?` saying they are defaults a marker can waive or override per late
 unit on the Marks tab (a per-key `hint` added to the tiers). Each inherits on its own: a window
@@ -427,8 +460,9 @@ a first visit, mostly free 304s after).
 - Screens that show a file read it directly: `schedule.yml` (Details, events),
   `semester.yml`, `students.csv`, a template's `grading_config.yml`, the site's `index.md`.
 - Course materials: the course org's repo list (`GET /orgs/{org}/repos`) for Other repos and
-  last changes; a materials repo's recursive tree, badged from its `.releaseignore` on its
-  settings page. The index lists each materials repo's files under its row as a read-only folder
+  last changes; a materials repo's recursive tree with each blob's sha, badged from its
+  `.releaseignore` in the settings page's Files panel. The Release view also reads each
+  destination repo's tree on `upstream` and on its default branch. The index lists each materials repo's files under its row as a read-only folder
   tree (`ui/MaterialsTree.tsx`): every folder collapsed, "N files" beside it while it is, a
   GitHub link to its tree page; each file is the student screens' file row (`ui/FileRow.tsx`),
   its name opening the file in the console's viewer, `?file=<repo>/<path>#materials`, its repo's
@@ -442,7 +476,8 @@ a first visit, mostly free 304s after).
   `grading_sheets/<slug>.yml`, `.github/course.yml` (its `open_course_site:` is the public
   website), a template's `grading_config.yml` (on `solution`), a materials repo's `.releaseignore`,
   the site's `index.md`, `_announcements/` and the institution keys of its `_config.yml`. "Treat as course materials" on an Other repos
-  row adds the `dsl-materials` topic to that repo (`PUT /repos/{o}/{r}/topics`). YAML is edited in place (`src/edit/yamlText.ts`):
+  row adds the `dsl-materials` topic to that repo (`PUT /repos/{o}/{r}/topics`), as do Add a
+  course repo… and Course details' Release from, whose × removes it. YAML is edited in place (`src/edit/yamlText.ts`):
   only the changed values' bytes move, so comments and their columns survive. After a write the
   console follows the commit's checks and says what they found.
 - Operations, through the course org's Console workflow (`.github/.github/workflows/console.yml`,
@@ -495,7 +530,9 @@ slash (`#assignment-<slug>/teams`, `/marks`); the schedule editor also opens `#s
 `#schedule-semester` and `#schedule-archive`. Old hashes no longer redirect (decision 0042).
 Wizards: `#new-course-1..4`, `#new-semester-1..3`, `#new-assignment-1..4`, `#new-materials`; a
 step past the first unfinished one opens that one instead. `?template=<repo>#schedule-new`
-opens a new assignment entry for that template; `?cohort=<org>#new-assignment-1` offers that
+opens a new assignment entry for that template; `?cohort=<org>&from=&paths=&to=&at=#schedule-new`
+(comma lists paired by index, `to`/`at` blank for the default; `scheduleNewHref`) a new
+supporting-files entry with those files, from Schedule on the calendar; `?cohort=<org>#new-assignment-1` offers that
 semester first at the wizard's end; `?folder=<repo>/<path>#materials` the materials
 index with that folder open; `?wizard=new-semester-3` adds a link back.
 A problem's `fix {screen, entry}` is `#<screen>-<entry>`.

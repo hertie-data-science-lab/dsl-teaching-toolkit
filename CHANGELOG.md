@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased
+
+- A course materials repo's settings page has a **Files** panel in place of the Withheld panel:
+  the repo's tree with **Browse** (a name opens the file beside the tree), **Withhold** (untick
+  what never reaches students; the pattern box and Save as before) and **Release** (tick files
+  or folders and release them into a chosen semester now). A splitter sizes the two columns.
+- The semester's **Materials** page folds Released materials this semester and adds **Release
+  by hand** below it: From a course repo, ticks in its tree, and a manifest of what lands where,
+  each folder group with its own Edit destination. Each file carries a chip against the
+  semester: `up to date`, `behind`, `ahead`, `diverged`, `not released` or `withheld`; behind,
+  ahead and diverged open a popover with one action. One **Release** copies every pick, from
+  several course repos into several semester repos, in one run (`release.adhoc` takes comma
+  lists of repos paired in order with the paths). **Schedule on the calendar** opens a new
+  Schedule entry with the same files. The tree rows no longer link their Release page.
+- Course details and Semester defaults gain a **Releases** section: Release from (the
+  `dsl-materials` topic), Release into (`release_destinations`, a new `defaults:` list, a
+  semester's adding to the course's) and **Default destination** (`materials_repo`, relabelled
+  from "Repo a release lands in" and moved out of the Assignments fold). The console names the
+  semester's effective default, not `materials`.
+- PDFs draw inline in the viewer (the console's policy allows `frame-src blob:`), with Open in a
+  new tab and Download under them.
+- The side nav hides behind a handle on its edge; the choice is kept per browser.
+- A page shows an operation's verb alone; its panel offers the preview, never requires it.
+- The institution's withheld names split in two. **Never released** (`.git`, `.system`, `.env`,
+  `.env.*`, `grading_config.yml`, `grading.yml`): no route ships one, and naming one outright is
+  refused. **Content** (`solution`, `solutions`, `tests`): withheld from a folder release unless
+  a `!` line in the repo's `.releaseignore` re-includes it; naming one outright still ships it.
+  In Withhold these rows start unticked as `default withheld`, and a tick writes the `!` line.
+
 ## 0.11.0 (unreleased)
 
 - The late window and the late penalty inherit each on its own, like every other default

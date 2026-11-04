@@ -16,6 +16,38 @@ A `files:` item of a `schedule.yml` entry releases exactly what the ops below do
 
 ## Release by hand
 
+### From the console
+
+In the semester nav, **Materials** opens two folds: **Released materials this semester** (each
+semester repo as students have it, every file opening in the viewer) and **Release by hand**:
+
+1. **From**: pick a course repo. Its tree is on the left.
+2. Tick files or folders (a click anywhere on a file's row ticks it). Each row's chip says where
+   it stands against the semester:
+   - **up to date**: the semester has this version; nothing to release.
+   - **behind**: the course copy changed since its release; a release updates the semester.
+   - **ahead**: edited in the semester since its release; a release merges onto that edit. Its
+     **Keep for future semesters** carries the edit back to the course ([below](#carrying-cohort-edits-back)).
+   - **diverged**: changed in both; a release opens a pull request ([below](#fixing-something-you-have-already-released)).
+   - **not released**: not in the semester yet.
+   - **withheld**: `.releaseignore` keeps it from students ([below](#withholding-files-with-releaseignore)).
+3. On the right, the manifest lists every file the release copies and where it lands, grouped
+   by folder. **To** over it is the semester repo (the semester's Default destination to start
+   with). A group's **Edit destination** sends it to another repo or path; a group going to a
+   different repo is marked `(!)`.
+4. **Release** opens the run's panel; run it there.
+
+Picks from several course repos (switch **From**; earlier picks stay in the manifest) into
+several semester repos go out as one run. **Schedule on the calendar**, under the button, opens
+a new Schedule entry with the same files instead, to release them at a time
+([07](07-schedule-releases.md)).
+
+The same view is on each course repo's settings page (**Course materials** → the repo →
+**Files** → **Release**), with **Release into** choosing the semester
+([02](02-add-materials-to-course.md)).
+
+### The ops
+
 Two ops, in the console or on the CLI:
 
 - **`release.entry`** (`python -m dsl_course release.entry`) - ships one schedule entry's files now, ahead of their time.
@@ -28,8 +60,6 @@ Two ops, in the console or on the CLI:
 - **The whole repo**: `/` (or `.`), minus `.git`, `.github` and `.system/` (your operating notes `MAINTAINING.md` and the syllabus example - never released).
 
 Re-releasing is safe - copies are additive and idempotent. A release made here is recorded like a scheduled one, so the scheduler does not copy it again - even a copy whose planned time is still to come: releasing it by hand is its release, and its `release_datetime` becomes the time it went out.
-
-The console's semester **Materials** page shows each semester repo as students have it, each released folder linked to its Release page.
 
 ### Phased code release
 
@@ -117,13 +147,22 @@ Its syntax is **exactly `.gitignore`'s** - patterns, `**`, character classes, `!
 re-include, `/` to anchor or to mean a directory, `#` comments.
 
 It applies to every copy out of the repo it sits in: the semester release, the public
-website and the assignment handout. Before it, a folder release leaves the institution
-denylist behind: any folder or file inside it named `solution`, `solutions`, `tests`,
-`grading_config.yml`, `.env*`, `.git` or `.system`, and clutter such as `.DS_Store`. To
-release a solution, name its own path (`from_path: solutions/labs/02_lab`): a path named
-outright ships exactly what it names. `--validate` warns when a folder leaves one behind. The
-sites then choose what they show on top (`student_site.host`, `open_course_site.publish`:
-[11](11-configure-cohort-site.md#what-the-public-sites-show)).
+website and the assignment handout. The institution withholds two groups by default, at
+any depth, whatever the case:
+
+- **Never released**: `.git`, `.system`, `.env`, `.env.*`, `grading_config.yml`,
+  `grading.yml`. No copy carries one, no `!` line re-includes one, and a release that names
+  one outright is refused with a warning on the run summary.
+- **Content**: `solution`, `solutions`, `tests`. A folder release leaves them behind unless a
+  `!` line in this repo's `.releaseignore` re-includes them (`!solutions/`; the last matching
+  line wins and anchoring works as for any other line, so `!/solutions/` means the root one
+  only). A path named outright ships exactly what it names (`from_path:
+  solutions/labs/02_lab`). `--validate` warns when a folder leaves one behind.
+
+Clutter such as `.DS_Store` is never copied either. The sites then choose what they show on
+top (`student_site.host`, `open_course_site.publish`:
+[11](11-configure-cohort-site.md#what-the-public-sites-show)); the semester site never hosts
+either group, even once released.
 
 An assignment is not a materials copy: its template copy and its solution push carry exactly the
 template's files, `tests/` and grading files included. The denylist and the sites' selections

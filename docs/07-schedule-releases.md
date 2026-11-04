@@ -68,7 +68,7 @@ Each slot is a row on the Schedule; the files ship once, an hour before the firs
 |---|---|---|---|
 | `from_course_repo` | **yes** | - | the repo in the COURSE org to copy from |
 | `from_path` | **yes** | - | the folder or file to copy, or `/` for the whole repo |
-| `to_semester_repo` | no | `materials` | the semester repo to copy into - created on first release |
+| `to_semester_repo` | no | the Default destination (`materials_repo`, `materials` unless set) | the semester repo to copy into - created on first release |
 | `to_path` | no | `from_path` | where it lands in `to_semester_repo` |
 | `release_datetime` | no | an hour before the first slot (a whole-day slot: the day's start) | ship this copy at another time. After a release it is the time the copy actually went out, when that beat the plan |
 
@@ -93,6 +93,8 @@ Folder names mean nothing: the block says what the entry is. A release only ever
 ```
 
 No `files:` key: a session with nothing to ship (a row, never "not yet released"). `files: []`: files still to write - a to-do on the Dashboard.
+
+In the console, **Schedule on the calendar** under a hand release ([08](08-release-materials-to-cohort.md#from-the-console)) opens a new `assets:` entry with the picked paths already in its `files:` (and any destination you changed); give it a date and save.
 
 NB: `from_path: /` releases the whole repo, less `.github` and `.system/`. A root `README.md` or `SYLLABUS.md` still carrying the scaffold's placeholder is **withheld** - see [08](08-release-materials-to-cohort.md#the-unwritten-root-stubs-are-withheld-until-you-write-them).
 
