@@ -77,7 +77,7 @@ import json
 import os
 import re
 import sys
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
@@ -100,6 +100,7 @@ from .course import (
     is_repo_root,
     pages_repo,
 )
+from .discovery import reserved_destination
 from .faults import (
     NOT_MIGRATED,
     NOTIFY_FROM,
@@ -123,9 +124,9 @@ from .gh_contents import (
     yaml_mark_line,
 )
 from .log import CLIParser, log, log_err
-from .releaseignore import RELEASEIGNORE, excluded_in_tree
+from .releaseignore import RELEASEIGNORE, Tree, from_tree
 from .repos import default_branch, repo_missing
-from .selection import swept
+from .selection import CONTENT, HARD, RELEASE, defaulted, part_groups
 
 SCHEDULE_PATH = SCHEDULE_FILE
 
@@ -578,6 +579,9 @@ class Schedule:
     semester_end_title: str = SEMESTER_END_TITLE
     semester_end_details: str = ""
     assignments: dict[str, AssignmentEntry] = field(default_factory=dict)
+    # Where a copy naming no `to_semester_repo` lands: the semester's effective
+    # `materials_repo` (`settings.Instance`), which a hand release defaults to as well.
+    materials_repo: str = DEFAULT_DEST_REPO
     # The `semester:` block's `type: break` entries, in date order.
     breaks: list[Break] = field(default_factory=list)
     # The display rows: each `exams:` and `events:` entry written with no `files:` (one
@@ -988,11 +992,18 @@ def _flagged_details(
 
 
 def _parse_files(
-    raw: object, tz: ZoneInfo, drops: Drops, where: str, dest: str = DEFAULT_DEST_REPO
+    raw: object,
+    tz: ZoneInfo,
+    drops: Drops,
+    where: str,
+    dest: str = DEFAULT_DEST_REPO,
+    stems: tuple[str, ...] = (),
 ) -> list[Deploy]:
     """Parse an entry's `files:` - a list (or a single mapping) of copies from a course
     repo into a semester repo (decision 0038 amendment, rule 5). A copy missing
-    `from_course_repo`/`from_path` is skipped (nothing to copy). A malformed
+    `from_course_repo`/`from_path` is skipped (nothing to copy), as is one whose
+    `to_semester_repo` the semester uses for something else (`reserved_destination`,
+    `stems` the plan's assignment keys). A malformed
     `release_datetime` parses to None - the copy ships at the entry's default
     (`_default_ship_times`), and the unusable value is flagged (see `_flag_bad_value`)."""
     items = [raw] if isinstance(raw, dict) else (raw or [])
@@ -1013,6 +1024,17 @@ def _parse_files(
                 "this copy never ships",
                 lines,
                 "from_path",
+            )
+            continue
+        dest_repo = str(d.get("to_semester_repo") or dest)
+        if reserved := reserved_destination(dest_repo, stems):
+            _drop(
+                drops,
+                here,
+                f"`to_semester_repo: {dest_repo}` is reserved for {reserved}",
+                "this copy never ships",
+                lines,
+                "to_semester_repo",
             )
             continue
         _flag_unknown_keys(
@@ -1038,7 +1060,7 @@ def _parse_files(
             Deploy(
                 course_source_repo=str(src_repo),
                 course_source_path=str(src_path),
-                semester_dest_repo=str(d.get("to_semester_repo") or dest),
+                semester_dest_repo=dest_repo,
                 semester_dest_path=str(dest_path) if dest_path else None,
                 deploy_datetime=_flagged_datetime(
                     d,
@@ -1144,6 +1166,7 @@ def _parse_block(
     drops: Drops,
     taken: dict[str, str],
     dest: str = DEFAULT_DEST_REPO,
+    stems: tuple[str, ...] = (),
 ) -> tuple[list[Release], list[Event]]:
     """One kind's block (decision 0038): `key -> entry`, the kind the block's. The KEY
     names what the toolkit makes for the entry (its row file, its problem ids) and is
@@ -1257,7 +1280,7 @@ def _parse_block(
             continue
         dated = [(slot, written) for slot, written in slots if slot.when is not None]
         first = min(dated, key=lambda p: p[0].when) if dated else None
-        deploys = _parse_files(entry.get("files"), tz, drops, where, dest)
+        deploys = _parse_files(entry.get("files"), tz, drops, where, dest, stems)
         _default_ship_times(deploys, first[1] if first else None)
         guide = entry.get("reading_guide")
         if guide is not None and not isinstance(guide, str):
@@ -1875,9 +1898,14 @@ def parse(meta: dict, instance: settings.Instance | None = None) -> Schedule:
     releases: list[Release] = []
     events: list[Event] = []
     taken: dict[str, str] = {}
+    # The assignment keys, which name the student repos no copy may land in.
+    raw_assignments = meta.get("assignments")
+    stems = (
+        tuple(map(str, raw_assignments)) if isinstance(raw_assignments, dict) else ()
+    )
     for block in BLOCKS:
         got = _parse_block(
-            block, meta.get(block), tz, drops, taken, instance.materials_repo
+            block, meta.get(block), tz, drops, taken, instance.materials_repo, stems
         )
         releases += got[0]
         events += got[1]
@@ -1905,6 +1933,7 @@ def parse(meta: dict, instance: settings.Instance | None = None) -> Schedule:
         breaks=breaks,
         assignments=_parse_assignments(meta.get("assignments"), tz, drops),
         events=events,
+        materials_repo=instance.materials_repo,
         archive=archive,
         dropped=drops.report
         + [f"{SEMESTER_FILE} {f.label}: {f.what}" for f in instance.faults],
@@ -2487,22 +2516,27 @@ def source_repo_shas(course_org: str, repo: str) -> dict[str, str] | None:
     return _repo_shas(course_org, repo)
 
 
-def source_withheld(
-    course_org: str, repo: str, paths: Collection[str]
-) -> frozenset[str]:
-    """Which of a source repo's `paths` (its tree) its `.releaseignore` files withhold, a
-    withheld folder as each of its paths. Only a `.releaseignore` the tree lists is read
-    (each read once a run). Empty when an ignore file cannot be read: a repo that cannot
-    be READ is passed over, and a missing source is still reported where it is checked."""
+def release_tree(
+    paths: Collection[str], read: Callable[[str], str | None] = lambda _p: None
+) -> Tree:
+    """A repo tree's `.releaseignore` files (`read`, none by default) as a release judges
+    by: faculty's lines over the content names' default (`selection.RELEASE`), so
+    `Tree.carries` says what a copy takes."""
+    return from_tree(paths, read, defaulted(RELEASE))
+
+
+def source_withheld(course_org: str, repo: str, paths: Collection[str]) -> Tree:
+    """A source repo's `.releaseignore` files over its `paths` (its tree), as a release
+    judges by (`release_tree`). Only a `.releaseignore` the tree lists is read (each read
+    once a run). Faculty's lines read as none when an ignore file cannot be read: a repo
+    that cannot be READ is passed over, and a missing source is still reported where it
+    is checked."""
     try:
-        return frozenset(
-            excluded_in_tree(
-                paths,
-                lambda p: get_file_content(course_org, repo, p, confirm_absent=True),
-            )
+        return release_tree(
+            paths, lambda p: get_file_content(course_org, repo, p, confirm_absent=True)
         )
     except RuntimeError:
-        return frozenset()
+        return release_tree(paths)
 
 
 def _window_blurb() -> str:
@@ -2550,6 +2584,33 @@ class _Wanted(NamedTuple):
 
     def lineno(self, field: str) -> int | None:
         return line_of(self.lines, field)
+
+
+def _left_behind(below: list[str], folder: str, tree: Tree) -> str:
+    """What a folder copy of `folder` leaves behind of the institution denylist, in words
+    ("" when nothing): the content names (`solutions`, `tests`) no `!` line re-includes,
+    which naming their own path or a `!` line releases, and the never-released names
+    (grading files, secrets), which nothing does. `below` is the folder's paths, relative."""
+    hard = content = 0
+    for p in below:
+        groups = part_groups(p)
+        if HARD in groups:
+            hard += 1
+        elif CONTENT in groups and not tree.carries(folder, f"{folder}/{p}"):
+            content += 1
+    said = []
+    if content:
+        said.append(
+            f"{content} file(s) in it are solutions or tests, which a folder release "
+            "leaves behind - release them by naming their own path, or re-include "
+            f"them with a ! line in {RELEASEIGNORE}"
+        )
+    if hard:
+        said.append(
+            f"{hard} file(s) in it are grading files or secrets, which are never "
+            "released"
+        )
+    return "; ".join(said)
 
 
 def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
@@ -2622,7 +2683,7 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
         # repo, off the tree already fetched above (`source_withheld`). A read failure
         # degrades to "no withheld paths known": the commit-time validator must not
         # traceback on faculty's own push over a transient 429.
-        withheld = source_withheld(course_org, repo, paths)
+        tree = source_withheld(course_org, repo, paths)
         for w in wanted[repo]:
             # "" is the assignment case: the repo IS the source, so its existence is all
             # there is to check. `/` and `.` mean the whole repo, likewise - and which
@@ -2631,37 +2692,33 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
             if is_repo_root(w.path):
                 continue
             clean = w.path.strip("/").strip()
-            if clean in withheld:
+
+            below = [p[len(clean) + 1 :] for p in paths if p.startswith(f"{clean}/")]
+            if HARD in part_groups(clean):
+                # Refused by the release itself (`deploy._warn_never_released`), in its
+                # words: no line releases one, so the copy ships nothing either way.
+                withheld = f"never released: {clean} is on the institution's list"
+            elif clean in paths and not tree.carries(clean, clean):
                 # The file EXISTS, so nothing looks wrong - which is why this is worth
                 # saying here rather than leaving to the `::warning::` a green release run
                 # buries. Same rung as a missing source: the copy ships nothing either way.
-                out.append(
-                    SourceFault(
-                        w.where,
-                        f"the files exist but {repo}/{RELEASEIGNORE} keeps them back",
-                        w.fires,
-                        field="from_path",
-                        kind=FaultKind.WITHHELD,
-                        file=SCHEDULE_PATH,
-                        ceiling=Severity.WARNING,
-                        lineno=w.lineno("from_path"),
-                        repo=repo,
-                        path=clean,
-                    )
-                )
-                continue
+                withheld = f"the files exist but {repo}/{RELEASEIGNORE} keeps them back"
             # A folder copy leaves the institution denylist behind (decision 0040): said
-            # here, so a lab folder holding its `solutions/` is not a surprise. Naming the
-            # denylisted path itself ships it, and is never warned about.
-            below = [p[len(clean) + 1 :] for p in paths if p.startswith(f"{clean}/")]
-            left = [p for p in below if swept(p)]
-            if left:
+            # here, so a lab folder holding its `solutions/` is not a surprise. Naming a
+            # content name itself ships it, and is never warned about; nor is one a `!`
+            # line re-includes (decision B), which the copy carries. A never-released
+            # name ships by no route, so it is only said to stay behind.
+            elif left := _left_behind(below, clean, tree):
+                withheld = left
+            elif clean in paths or below:
+                continue
+            else:
+                withheld = ""
+            if withheld:
                 out.append(
                     SourceFault(
                         w.where,
-                        f"{len(left)} file(s) in it are solutions, tests, grading files "
-                        "or secrets, which a folder release leaves behind - release them "
-                        "by naming their own path",
+                        withheld,
                         w.fires,
                         field="from_path",
                         kind=FaultKind.WITHHELD,
@@ -2672,8 +2729,6 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
                         path=clean,
                     )
                 )
-                continue
-            if clean in paths or below:
                 continue
             out.append(
                 SourceFault(

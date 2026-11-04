@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import rules from '../schemas/selection.json';
 import demo from './fixtures/demo-hosting.json';
-import { HOST_DEFAULT, PUBLISH_DEFAULT, exactPattern, hostable, keeps, kindOfLanded, landings, readSel, rootIgnore, select, withDefaults, withPublic, type Sel } from '../src/model/selection';
+import { HOST_DEFAULT, PUBLISH_DEFAULT, clutter, exactPattern, hostable, keeps, kindOfLanded, landings, readSel, rootIgnore, select, withDefaults, withPublic, type Sel } from '../src/model/selection';
 
 describe('the selection rule', () => {
+  it('copies a .gitkeep (it ships an empty folder); clutter stays out', () => {
+    expect(clutter('labs/01/.gitkeep')).toBe(false);
+    expect(clutter('labs/01/.DS_Store')).toBe(true);
+    expect(select(['labs/01/.gitkeep', 'labs/01/.DS_Store'], () => null)).toEqual(['labs/01/.gitkeep']);
+  });
+
   // The engine answered each case (`selection.select`); the console must agree.
   for (const c of rules.cases)
     it(`agrees with the engine: ${c.name}`, () => {

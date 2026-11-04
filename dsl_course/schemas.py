@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 
 from . import (
+    discovery,
     legacy,
     materials,
     opencourse,
@@ -92,6 +93,7 @@ from .schedule import (
 from .settings import (
     DEFAULT_FILE_KEYS,
     FILE_NAMES,
+    MERGED_KEYS,
     RUN_KEYS,
     SOURCES,
 )
@@ -379,15 +381,35 @@ def status_schema(*, closed: bool = True) -> dict:
         },
         ("id", "kind", "repo", "text", "need"),
     )
-    # Every `defaults:` key's effective value and the layer that gave it (`settings`).
+    # Every `defaults:` key's effective value and the layer that gave it (`settings`); a
+    # merged list (`release_destinations`) is every layer's items, its source the nearest
+    # layer adding any, and each item with the layer that added it.
     effective = obj(
         {
-            "value": {"type": ["string", "integer", "boolean", "null"]},
+            "value": {
+                "type": ["string", "integer", "boolean", "null", "array"],
+                "items": {"type": "string"},
+            },
             "source": _enum(SOURCES),
         },
         ("value", "source"),
     )
-    defaults = obj({key: effective for key in DEFAULT_FILE_KEYS})
+    merged = obj(
+        {
+            **effective["properties"],
+            "items": {
+                "type": "array",
+                "items": obj(
+                    {"value": _str(), "source": _enum(SOURCES)}, ("value", "source")
+                ),
+            },
+        },
+        # `items` optional: a status.json rendered before it was added still validates.
+        ("value", "source"),
+    )
+    defaults = obj(
+        {key: merged if key in MERGED_KEYS else effective for key in DEFAULT_FILE_KEYS}
+    )
     course = obj(
         {
             "org": _str(),
@@ -753,6 +775,10 @@ def _defaults(keys) -> dict:
         "timezone": _str(),
         "archive_grace_days": {"type": "integer"},
         "materials_repo": {"type": "string", "pattern": r"^[\w.-]+$"},
+        "release_destinations": {
+            "type": "array",
+            "items": {"type": "string", "pattern": r"^[\w.-]+$"},
+        },
         "autosync_released_edits": {"type": "boolean"},
     }
     out = _obj(_keys(keys, types))
@@ -884,17 +910,44 @@ WITHHOLD_CASES = (
     ("comments and blanks", ("# a note", "", "readings/**/*.md")),
     ("a folder, unanchored", ("data/",)),
     ("an escaped bracket", ("a\\[b]/*",)),
+    # Decision B: the content names re-included by a `!` line, the never-released not.
+    ("a default re-included", ("!solutions/",)),
+    ("a default re-included, case as written", ("!tests/",)),
+    ("a never-released name stays", ("!.env.local", "!grading_config.yml")),
 )
 
 
 def withheld_paths(paths: tuple[str, ...], lines: tuple[str, ...]) -> list[str]:
     """Which of `paths` a root `.releaseignore` of `lines` withholds, by the engine's own
     rule (`releaseignore.listed`: git's, pruning included)."""
-    dirs = {
-        "/".join(p.split("/")[:i]) for p in paths for i in range(1, p.count("/") + 1)
-    }
-    ignore = releaseignore.listed(lines)
-    return sorted(p for p in paths if ignore.excludes(p, lambda rel: rel in dirs))
+    tree = _listed_tree(paths, lines)
+    return sorted(p for p in paths if not tree.carries(p, p))
+
+
+def _listed_tree(
+    paths: tuple[str, ...], lines: tuple[str, ...], default=None
+) -> releaseignore.Tree:
+    """`paths` under a root `.releaseignore` of `lines` (`releaseignore.listed`)."""
+    dirs = releaseignore.ancestors(paths)
+    return releaseignore.Tree(
+        releaseignore.listed(lines, default), lambda rel: rel in dirs
+    )
+
+
+def copied_paths(paths: tuple[str, ...], lines: tuple[str, ...]) -> list[str]:
+    """Which of `paths` a release's folder copy of the repo root carries under a root
+    `.releaseignore` of `lines`, by the engine's own rule (`selection.deny`): never the
+    never-released names or clutter, the content names only where a `!` line says so."""
+    tree = _listed_tree(paths, lines, selection.defaulted(selection.RELEASE))
+    return sorted(
+        p
+        for p in paths
+        if selection.kept(
+            p,
+            withheld=lambda rel: not tree.carries("", rel),
+            reincludable=selection.RELEASE,
+        )
+    )
 
 
 def materials_json() -> dict:
@@ -909,6 +962,7 @@ def materials_json() -> dict:
                 "paths": list(_TREE),
                 "patterns": list(lines),
                 "withheld": withheld_paths(_TREE, lines),
+                "copied": copied_paths(_TREE, lines),
             }
             for name, lines in WITHHOLD_CASES
         ],
@@ -969,10 +1023,7 @@ SELECTION_CASES: tuple[tuple[str, dict | None, tuple[str, ...], dict | None], ..
 def _selected(
     use: dict | str | None, lines: tuple[str, ...], limit: dict | None
 ) -> list[str]:
-    dirs = {
-        "/".join(p.split("/")[:i]) for p in _TREE for i in range(1, p.count("/") + 1)
-    }
-    ignore = releaseignore.listed(lines)
+    tree = _listed_tree(_TREE, lines)
     if use == "host":
         sel = selection.host_default()
     elif use == "publish":
@@ -984,7 +1035,7 @@ def _selected(
             _TREE,
             lambda p: _KIND_OF.get(p.split("/")[0]),
             use=sel,
-            withheld=lambda p: ignore.excludes(p, lambda rel: rel in dirs),
+            withheld=lambda p: not tree.carries(p, p),
             limit=selection.Floor(**{k: tuple(v) for k, v in limit.items()})
             if limit
             else None,
@@ -997,8 +1048,18 @@ def selection_json() -> dict:
     denylist and clutter names, the kinds, each use's defaults, the institution's floors,
     and golden vectors answered by `selection.select`."""
     return {
-        "denylist": list(selection.DENYLIST),
+        # Decision B: never released by any route / withheld by default, a `!` aside.
+        "denylist": {
+            "hard": list(selection.DENYLIST_HARD),
+            "content": list(selection.DENYLIST_CONTENT),
+        },
         "clutter": sorted(selection.CLUTTER),
+        # The semester repo names no release lands in (`discovery.reserved_destination`;
+        # a student's `<stem>-<handle>` repo the console knows from the semester's own).
+        "reserved": {
+            "names": list(discovery.RESERVED_NAMES),
+            "patterns": list(discovery.RESERVED_PATTERNS),
+        },
         "kinds": list(selection.kind_names()),
         "readings": selection.READINGS,
         "type_aliases": {"htm": "html"},

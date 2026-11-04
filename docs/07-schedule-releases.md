@@ -68,7 +68,7 @@ Each slot is a row on the Schedule; the files ship once, an hour before the firs
 |---|---|---|---|
 | `from_course_repo` | **yes** | - | the repo in the COURSE org to copy from |
 | `from_path` | **yes** | - | the folder or file to copy, or `/` for the whole repo |
-| `to_semester_repo` | no | `materials` | the semester repo to copy into - created on first release |
+| `to_semester_repo` | no | the Default destination (`materials_repo`, `materials` unless set) | the semester repo to copy into - created on first release |
 | `to_path` | no | `from_path` | where it lands in `to_semester_repo` |
 | `release_datetime` | no | an hour before the first slot (a whole-day slot: the day's start) | ship this copy at another time. After a release it is the time the copy actually went out, when that beat the plan |
 

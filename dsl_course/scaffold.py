@@ -1628,7 +1628,7 @@ def main() -> int:
         args.submit_via = answers["submit_via"]
     # The `--format` box, refused here - before the repo exists, so a mistyped answer
     # costs a re-run and nothing else. Caught on its OWN, the way `deploy.main` catches
-    # `parse_path_pairs`: a ValueError from anywhere deeper is a bug and still earns its
+    # `parse_deploy_lists`: a ValueError from anywhere deeper is a bug and still earns its
     # traceback, rather than being printed as though a faculty member had mistyped a box.
     formats: list[str] = []
     if args.cmd == "assignment":

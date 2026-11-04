@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from dsl_course import releaseignore
+from dsl_course import releaseignore, selection
 from dsl_course.fs import copy_tree
 
 # name -> {relpath: contents}. A `.releaseignore` entry is the rules; everything else is
@@ -456,3 +456,30 @@ def test_a_nested_ignore_file_works_through_the_tree_adapter():
         "w1/.releaseignore",
         "w1/other.md",
     )
+
+
+def test_a_tree_carries_a_default_name_only_where_a_bang_line_re_includes_it():
+    paths = [
+        ".releaseignore",
+        "labs/01/solutions/a.md",
+        "labs/02/solutions/b.md",
+        "tests/t.py",
+    ]
+    body = {".releaseignore": "!solutions/\nlabs/02/solutions/\n"}
+    tree = releaseignore.from_tree(
+        paths, body.get, selection.defaulted(selection.RELEASE)
+    )
+    assert tree.carries("labs/01", "labs/01/solutions/a.md")
+    assert not tree.carries("labs/02", "labs/02/solutions/b.md")  # the last line wins
+    assert not tree.carries("", "tests/t.py")  # withheld by default
+    # The default judges only BELOW the copy's own path: named outright, it ships.
+    assert tree.carries("tests", "tests/t.py")
+    # A faculty line judges the named path itself.
+    assert not tree.carries("labs/02/solutions", "labs/02/solutions/b.md")
+    # Without a default only faculty's lines judge.
+    plain = releaseignore.from_tree(paths, body.get)
+    assert plain.carries("", "tests/t.py")
+
+
+def test_ancestors_are_every_folder_above_each_path():
+    assert releaseignore.ancestors(["a/b/c.md", "d.md", "/e/f/"]) == {"a", "a/b", "e"}

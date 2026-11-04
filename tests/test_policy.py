@@ -30,6 +30,8 @@ def test_the_shipped_policy_carries_hertie_values():
         "assignment_repo_visibility": "private",
         "archive_grace_days": 60,
         "materials_repo": "materials",
+        # The console's list of further destinations: none at the institution.
+        "release_destinations": [],
         # Decision 0043: a release is one copy unless a course or semester turns this on.
         "autosync_released_edits": False,
         "marks_per_question": True,

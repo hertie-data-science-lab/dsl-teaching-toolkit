@@ -356,3 +356,10 @@ def test_a_duplicate_number_names_the_kind_by_its_policy_plural():
     assert schedule_plan.duplicate_text("readings", 2, ["a", "b"]).startswith(
         "Two readings are numbered 2"
     )
+
+
+def test_outermost_drops_what_another_path_holds_and_keeps_the_order():
+    assert schedule_plan.outermost(
+        ["labs/03/solutions", "labs/03", "labs/030", "labs/03"]
+    ) == ["labs/03", "labs/030"]
+    assert schedule_plan.outermost(["labs/03", ""]) == [""]

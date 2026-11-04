@@ -19,7 +19,9 @@ A `files:` item of a `schedule.yml` entry releases exactly what the ops below do
 Two ops, in the console or on the CLI:
 
 - **`release.entry`** (`python -m dsl_course release.entry`) - ships one schedule entry's files now, ahead of their time.
-- **`release.adhoc`** (`python -m dsl_course release.adhoc`) - copies a path no entry names. Its arguments are a `files:` item's under their op names: `course_source_repo` (`from_course_repo`), `course_source_path` (`from_path`, comma-separated for several), `semester_dest_repo` (`to_semester_repo`; created if missing, private, `students` + `auditors` read) and `semester_dest_path` (`to_path`, default: the source path).
+- **`release.adhoc`** (`python -m dsl_course release.adhoc`) - copies a path no entry names. Its arguments are a `files:` item's under their op names: `course_source_repo` (`from_course_repo`), `course_source_path` (`from_path`, comma-separated for several), `semester_dest_repo` (`to_semester_repo`, default: the semester's `materials_repo`; created if missing, private, `students` + `auditors` read) and `semester_dest_path` (`to_path`, default: the source path). Either repo may also be a comma-separated list, paired in order with the paths (one item applies to all), so one run can draw on several course repos and land in several semester repos.
+
+No release lands in a repo the semester uses for something else: `semester-config`, `.github`, `join`, the `*.github.io` website, a `grades-*` gradebook or a student's `<assignment>-<handle>` repo. `release.adhoc` refuses one, `--validate` drops a `files:` copy naming one, and a `materials_repo` or `release_destinations` default naming one is ignored.
 
 ### How to specify release paths
 
@@ -63,6 +65,14 @@ Further releases keep adding to `upstream` and re-use that same pull request; cl
 unresolved does not settle anything, because the conflict is still there and the next
 release opens the question again.
 
+**To overwrite instead of merge**, release with `replace` (`release.entry` or
+`release.adhoc`). The release still lands on `upstream`, but the branch students read then
+takes the course version of exactly the released paths, in one commit, so the semester's edits
+to them are discarded and no conflict can arise. Files the semester added under those paths
+stay, and nothing outside them changes; with `remove_deleted` the files the course copy no
+longer has go too. A conflict pull request already open for other paths stays open. Carry any
+semester edit you want to keep back first (below).
+
 **The first release after upgrading is the exception.** A semester released before this
 version of the toolkit has no `upstream` yet, so that first release cuts it from the branch
 students read as it stands and lands on top of it - which overwrites an edit typed into the
@@ -91,8 +101,17 @@ What it does and does not carry:
 - a semester repo that is **behind its latest release** - one with the conflict pull request
   above still open - is skipped until that pull request is merged, because its copy is
   missing what the course org has already released; the pull request names what was left;
-- the branch is regenerated on every run, so re-running after more edits refreshes the same
+- a full run regenerates the branch, so re-running after more edits refreshes the same
   pull request rather than stacking on it.
+
+To carry back only some files, give `paths`: a comma-separated list of semester-side paths,
+each `<dest repo>/<path>` or, in the semester's materials repo, just `<path>` (for example
+`lectures/01/lab.md, extras/week01`). Each must lie inside something already released -
+on schedule, early, or by hand; one that does not refuses the run and is named. Each is
+mapped back through the release record to the course path it came from. Per-path runs add
+up: while their pull request is open, the next one adds its paths as further commits, so
+proposing two files in turn proposes both. A full run starts the branch again, and so does a
+per-path run after a full one, or after the pull request was merged or closed.
 
 Archiving a semester runs it first, so the semester's corrections are offered back before the repos
 are frozen.
@@ -117,13 +136,25 @@ Its syntax is **exactly `.gitignore`'s** - patterns, `**`, character classes, `!
 re-include, `/` to anchor or to mean a directory, `#` comments.
 
 It applies to every copy out of the repo it sits in: the semester release, the public
-website and the assignment handout. Before it, a folder release leaves the institution
-denylist behind: any folder or file inside it named `solution`, `solutions`, `tests`,
-`grading_config.yml`, `.env*`, `.git` or `.system`, and clutter such as `.DS_Store`. To
-release a solution, name its own path (`from_path: solutions/labs/02_lab`): a path named
-outright ships exactly what it names. `--validate` warns when a folder leaves one behind. The
-sites then choose what they show on top (`student_site.host`, `open_course_site.publish`:
-[11](11-configure-cohort-site.md#what-the-public-sites-show)).
+website and the assignment handout. The institution withholds two groups by default, at
+any depth, whatever the case:
+
+- **Never released**: `.git`, `.system`, `.env`, `.env.*`, `grading_config.yml`,
+  `grading.yml`. No copy carries one, no `!` line re-includes one, and a release that names
+  one outright is refused with a warning on the run summary.
+- **Content**: `solution`, `solutions`, `tests`. A folder release leaves them behind unless a
+  `!` line in this repo's `.releaseignore` re-includes them (`!solutions/`; the last matching
+  line wins and anchoring works as for any other line, so `!/solutions/` means the root one
+  only). A path named outright ships exactly what it names (`from_path:
+  solutions/labs/02_lab`). `--validate` warns when a folder leaves one behind. The public
+  website never takes a `!` line's word for these: its copy leaves them behind whatever
+  `.releaseignore` says, the open internet being a different audience from enrolled students.
+
+Clutter such as `.DS_Store` is never copied either. A `.gitkeep` is copied (it is how an empty
+folder ships) but never listed on a site. The sites then choose what they show on
+top (`student_site.host`, `open_course_site.publish`:
+[11](11-configure-cohort-site.md#what-the-public-sites-show)); the semester site never hosts
+either group, even once released.
 
 An assignment is not a materials copy: its template copy and its solution push carry exactly the
 template's files, `tests/` and grading files included. The denylist and the sites' selections

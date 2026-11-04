@@ -237,9 +237,10 @@ Things whose *literal spelling* is depended on from outside Python:
   `include_lectures`, `withhold`) and a materials repo's `publish.yml` are `legacy` rows the
   0.11.0 migration folds (`migrate.fold_open_site`, `migrate.publish_host`).
 - **`selection`** is the one rule for every outbound copy (decision 0040): the institution
-  denylist (`DENYLIST`, `CLUTTER`; on a release it judges only what lies BELOW the named
-  path, so `from_path: solutions/labs/02` ships while a lab folder's `solutions/` stays
-  behind), then `.releaseignore`, then the use's Selection
+  denylist (`DENYLIST`, `CLUTTER`, one name's group by `group_of`; `UNLISTED` `.gitkeep` is
+  copied but never listed, `listable` / `publishable`; on a release it judges
+  only what lies BELOW the named path, so `from_path: solutions/labs/02` ships while a lab
+  folder's `solutions/` stays behind), then `.releaseignore`, then the use's Selection
   (`semester.yml student_site.host`, `open_course_site.publish`; a release has none but
   the root `.github/` and unwritten stubs), then `institution.yml selection_floor`. `select`
   answers a path list, `deny` a `copytree` walk. A file's kind is the schedule block of the
@@ -248,6 +249,12 @@ Things whose *literal spelling* is depended on from outside Python:
   in `console/schemas/selection.json` and to the demo fixture's hosting
   (`console/test/fixtures/demo-hosting.json`, both checked by `tests/test_selection.py`).
   `propagate` keeps its own plumbing filter: it carries edits IN, so the denylist is not its.
+  The whole denylist is every copy's floor unless the caller passes `reincludable=RELEASE`:
+  only a semester release (`deploy`, and `divergence`/`schedule` judging as it does through
+  `releaseignore.Tree.carries`) lets a `!solutions/` line re-include the content names; the
+  public website never does. `discovery.reserved_destination` names the semester repos no
+  release lands in (`deploy`, the schedule parse, the `materials_repo` /
+  `release_destinations` readers; exported to `selection.json` as `reserved`).
   An assignment's copies are outside it too (decision 0040 amendment): the template copy
   (`assign.withhold_from_template`) and the solution push (`assign.push_solution`) carry exactly
   the template's files, `tests/` and grading files included, less only what the template's own
@@ -261,6 +268,10 @@ Things whose *literal spelling* is depended on from outside Python:
   nothing in the package may start listing branches to find released
   content: every reader resolves `repos.default_branch`, which is exactly what keeps
   `upstream` invisible to the site, discovery and status.
+  `deploy_many(replace=True)` (`deploy --replace`, the console's `replace`) is the one
+  overwrite: before the merge it checks out `upstream`'s version of exactly the copied paths
+  onto the default branch as ONE ordinary commit, then merges as usual. Never a `-s ours`
+  merge: that would mark every other path `upstream` holds - a standing conflict - as merged.
 
 ## A student who switched GitHub account
 
@@ -300,7 +311,10 @@ In both, a listing that could not be READ raises rather than answering "there is
 inventing that answer opens a duplicate on every tick, for as long as the outage lasts.
 `propagate` is the second consumer of `pulls`, with `refresh_body=True` (its body is a
 running summary of what its branch now holds); the release's conflict PR is written once
-and left alone.
+and left alone. A per-path propagate also reads `find_pr`: it adds to the existing branch
+only while that branch's PR is open onto the base and every commit on it carries the
+`Propagate-Path:` trailer (`propagate.PATH_TRAILER`, which the body's path list is rebuilt
+from); otherwise, and on every full run, the branch is cut fresh.
 
 ## The grading sandbox's two outward contracts
 
@@ -721,11 +735,14 @@ drop it; the public website neither hosts nor links its files, since it hosts by
 
 One hand-edited file per level (decision 0039), each with the same fixed `defaults:` key set:
 `timezone`, `late_window_days`, `late_penalty_per_day`, `max_team_size`,
-`assignment_repo_visibility`, `archive_grace_days`, `materials_repo`, `autosync_released_edits`,
-`marks_per_question`, and `team_formation` from the course level down (none at the institution:
-absent everywhere is `none`, no team forms, `settings.TEAM_FORMATION_FALLBACK`).
-`formats` is not a default: New assignment asks. A key resolves nearest first, per key never per
-block, and `settings.resolve` returns `(value, source)`:
+`assignment_repo_visibility`, `archive_grace_days`, `materials_repo`, `release_destinations`,
+`autosync_released_edits`, `marks_per_question`, and `team_formation` from the course level down
+(none at the institution: absent everywhere is `none`, no team forms,
+`settings.TEAM_FORMATION_FALLBACK`). `formats` is not a default: New assignment asks. A key
+resolves nearest first, per key never per block, and `settings.resolve` returns `(value, source)`;
+`release_destinations` (`settings.MERGED_KEYS`, the console's "Release into" list; the engine only
+reports it in status.json) is instead every layer's names together, the source the nearest layer
+adding any, and status.json's `items` each name with the layer that added it (`settings.merged_items`):
 
 | Source | File | Key |
 |---|---|---|

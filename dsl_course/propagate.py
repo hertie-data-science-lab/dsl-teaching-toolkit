@@ -28,17 +28,23 @@ generous about what it copies and deliberately explicit about what it does not:
   release the branch students read has not merged - a held conflict pull request - so
   copying that branch back would offer the course org its own newer content as a semester
   edit, and merging it would revert the fix. Those paths are named, not carried.
-- The branch is REGENERATED from the course repo's default branch on every run and
-  force-pushed, so a run always proposes what the semester has now rather than accumulating.
+- A full run REGENERATES the branch from the course repo's default branch and
+  force-pushes it, so it proposes what the semester has now rather than accumulating.
   The pull request is reused and its body rewritten (`pulls.upsert_pr`), so a re-run is
   one conversation and not a second one.
+- `--paths` RESTRICTS a run to some semester-side files or folders, each inside a released
+  copy - the release record's, so a hand release counts - and mapped back through it to
+  its course source. Per-path runs ACCUMULATE: while the pull request a per-path run left
+  is open, the next adds its paths to that branch (`_per_path_lines`). A full run, or a
+  per-path run after one, starts the branch again.
 
 Nothing here names a person. The semester repo is readable by the whole semester and its
 history has student pull requests in it; what is propagated is a path, and the pull
 request says so in paths.
 
 Usage:
-    python3 -m dsl_course.propagate --course-org COURSE --semester-org SEMESTER [--preview]
+    python3 -m dsl_course.propagate --course-org COURSE --semester-org SEMESTER
+        [--paths 'materials/lectures/01/lab.md,extras/labs/02'] [--preview]
 """
 
 from __future__ import annotations
@@ -51,7 +57,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import NamedTuple
 
-from . import pulls, schedule
+from . import pulls, release_record, schedule
 from .course import PROPOSAL_BRANCH_PREFIX, UPSTREAM_BRANCH, is_repo_root
 from .deploy import _resolve_within
 from .fs import Deny, copy_tree
@@ -60,6 +66,7 @@ from .log import (
     CLIParser,
     Summary,
     add_preview_flag,
+    comma_items,
     log,
     log_err,
     log_ok,
@@ -67,8 +74,9 @@ from .log import (
     plural,
 )
 from .records import SYSTEM_DIR
+from .release_record import Key
 from .schedule import Deploy
-from .schedule_plan import deploy_dest
+from .schedule_plan import deploy_dest, within
 from .selection import ROOT_RELEASE_EXCLUDED, is_clutter
 
 
@@ -113,7 +121,7 @@ class Propagated(NamedTuple):
     checked: int = 0
 
 
-def due_deploys(semester_org: str, now: datetime) -> list[Deploy]:
+def due_deploys(sched: schedule.Schedule, now: datetime) -> list[Deploy]:
     """Every copy this semester's plan has already fired, in the plan's own order.
 
     The plan's releases are sorted by `event_datetime` and each entry's `deploy:` list is
@@ -123,7 +131,59 @@ def due_deploys(semester_org: str, now: datetime) -> list[Deploy]:
     Assignment handouts are not here: an assignment is handed out from a TEMPLATE repo
     into per-student repos, and a student repo is somebody's work, not a released path
     with a course-side original to carry an edit back to."""
-    return [d for r in schedule.load(semester_org).releases for d in r.due_deploys(now)]
+    return [d for r in sched.releases for d in r.due_deploys(now)]
+
+
+def _carry_of(copies: dict[Key, dict], repo: str, path: str) -> Deploy | None:
+    """The one-path copy that carries `repo`/`path` back, mapped through the recorded copy
+    that holds it (`release_record`), or None when no copy into `repo` does.
+
+    The deepest holder wins, and of two equally deep ones the later shipped: that is the
+    copy whose content the semester's file last came from."""
+    held = [
+        (k, rest)
+        for k in copies
+        if k[2] == repo and (rest := within(k[3], path)) is not None
+    ]
+    if not held:
+        return None
+    k, rest = max(
+        held,
+        key=lambda h: (len(h[0][3]), copies[h[0]].get("last_shipped_at") or ""),
+    )
+    course = "/".join(p for p in (k[1], rest) if p)
+    # `/` for the repo root, because a blank dest path means "mirror the source path".
+    return Deploy(k[0], course or "/", repo, path or "/")
+
+
+def select_paths(
+    copies: dict[Key, dict], paths: list[str], default_repo: str
+) -> list[Deploy]:
+    """The copies a per-path run carries: one per named SEMESTER-side path, in the order
+    named, each mapped through the copy the release record says shipped it - a scheduled
+    release or one made by hand (`release_record`).
+
+    A path is `<dest repo>/<path>`, or just `<path>` in the semester's `default_repo`
+    (its `materials_repo`); a leading segment naming a released dest repo is read as the
+    repo first. A path inside no released copy - not released, not due yet, or spelt with
+    a `.`/`..` segment - is a ValueError naming it: carrying "something near it" back
+    would propose an edit nobody asked for."""
+    dest_repos = {k[2] for k in copies}
+    out: dict[tuple[str, str], Deploy] = {}
+    for raw in paths:
+        parts = [p for p in raw.strip().split("/") if p]
+        found = None
+        if parts and not {".", ".."} & set(parts):
+            if parts[0] in dest_repos:
+                found = _carry_of(copies, parts[0], "/".join(parts[1:]))
+            found = found or _carry_of(copies, default_repo, "/".join(parts))
+        if found is None:
+            raise ValueError(
+                f"`{raw.strip()}` is not inside anything already released to this "
+                f"semester - name a file or folder of a released copy"
+            )
+        out.setdefault(release_record.key_of(found)[2:], found)
+    return list(out.values())
 
 
 def _deny(path: Path, clone_root: Path) -> Deny:
@@ -220,14 +280,55 @@ class Source:
     dests: set[str] = field(default_factory=set)
 
 
-def _prepare_source(
-    course_org: str, repo: str, branch: str, root: Path
-) -> Source | None:
-    """Clone one course source repo and cut `branch` from its default branch.
+# The trailer a per-path run's commit carries, naming the path pair it carried: what
+# tells the next per-path run the branch is one to add to, and what that run's body lists.
+PATH_TRAILER = "Propagate-Path"
 
-    `-B`, so a branch left by a previous run is thrown away rather than added to: this
-    proposes what the semester has NOW, and a branch that accumulated would keep re-offering
-    an edit faculty had already declined."""
+
+def _carried_line(where: str, course_rel: str) -> str:
+    """One `Source.carried` line: the semester path and the course path it went to."""
+    return f"- `{where}` -> `{course_rel or '(repo root)'}`"
+
+
+def _per_path_lines(sd: Path, slug: str, base: str, branch: str) -> list[str] | None:
+    """The carried lines of the per-path branch a previous run left under an open pull
+    request, oldest first - or None when there is nothing to add to: no such branch, no
+    open pull request onto `base` for it (closed, merged or retargeted: settled), or a
+    commit on it that is not a per-path one (a full run's branch is regenerated)."""
+    remote = f"refs/remotes/origin/{branch}"
+    if git("-C", str(sd), "rev-parse", "--verify", "-q", remote)[0] != 0:
+        return None
+    pr = pulls.find_pr(slug, branch)
+    if pr is None or pr.base != base:
+        return None
+    code, out = git(
+        "-C", str(sd), "log", "--reverse", "--format=%B%x00", f"{base}..{remote}"
+    )
+    if code != 0:
+        return None
+    lines = []
+    for message in (m for m in out.split("\0") if m.strip()):
+        pairs = [
+            v.strip().split(" -> ", 1)
+            for line in message.splitlines()
+            if (v := line.removeprefix(f"{PATH_TRAILER}: ")) != line
+        ]
+        if not pairs or any(len(pair) != 2 for pair in pairs):
+            return None
+        lines += [_carried_line(w, c) for w, c in pairs]
+    return lines or None
+
+
+def _prepare_source(
+    course_org: str, repo: str, branch: str, root: Path, per_path: bool
+) -> Source | None:
+    """Clone one course source repo and put it on `branch`.
+
+    A full run cuts `branch` fresh from the default branch (`-B`), so a branch left by a
+    previous run is thrown away rather than added to: this proposes what the semester has
+    NOW, and a branch that accumulated would keep re-offering an edit faculty had already
+    declined. A `per_path` run ADDS to a per-path branch still open for review
+    (`_per_path_lines`), so pressing the button on two files in turn proposes both."""
     sd = root / "course" / repo
     if not clone(course_org, repo, sd):
         log_err(f"could not clone source {course_org}/{repo}")
@@ -236,11 +337,20 @@ def _prepare_source(
     if base is None:
         log_err(f"{course_org}/{repo} has no commits - nothing to propagate into")
         return None
-    code, out = git("-C", str(sd), *GIT_ENV, "checkout", "-B", branch, base)
+    earlier = (
+        _per_path_lines(sd, f"{course_org}/{repo}", base, branch) if per_path else None
+    )
+    start = f"origin/{branch}" if earlier else base
+    code, out = git("-C", str(sd), *GIT_ENV, "checkout", "-B", branch, start)
     if code != 0:
         log_err(f"could not cut `{branch}` in {course_org}/{repo} - {out[:200]}")
         return None
-    return Source(sd, base)
+    source = Source(sd, base)
+    for line in earlier or ():
+        source.carried.append(line)
+        # The semester repo is the first segment of the line's semester path.
+        source.dests.add(line.split("`", 2)[1].split("/", 1)[0])
+    return source
 
 
 def _semester_repos(dests: set[str]) -> str:
@@ -254,12 +364,13 @@ def _semester_repos(dests: set[str]) -> str:
     return f"its {joined} repo{'' if len(names) == 1 else 's'}"
 
 
-def _body(semester_org: str, source: Source, branch: str) -> str:
+def _body(semester_org: str, source: Source, branch: str, carries: str) -> str:
     """The pull request's body: what was carried, what was deliberately left, what to do.
 
     Rewritten on every run (`refresh_body`), because it is a summary of what the branch
-    now holds and the branch is regenerated every run - a body describing a previous run's
-    branch is worse than none."""
+    now holds - a full run regenerates the branch and a per-path run adds to it, and a
+    body describing a previous run's branch is worse than none. `carries` is the
+    sentence saying which kind of run it was (`_carries`)."""
     kept = (
         "\n\nThese paths are in this repo but not in the semester's copy - never released "
         "there (withheld by a `.releaseignore`, or still an unwritten stub), or deleted "
@@ -281,9 +392,7 @@ def _body(semester_org: str, source: Source, branch: str) -> str:
         f"workflow.\n\n"
         f"The semester org `{semester_org}`, bootstrapped from this course org, has edits to "
         f"content in {_semester_repos(source.dests)} that this repo released to it (the "
-        f"result of student pull requests, or instructors' own pushes). This branch "
-        f"carries them back, one commit per released path, in the order the semester "
-        f"ran:\n\n"
+        f"result of student pull requests, or instructors' own pushes). {carries}:\n\n"
         f"{chr(10).join(source.carried)}"
         f"{kept}{behind}\n\n"
         f"Merge it, cherry-pick the commits you want, or close it.\n"
@@ -291,9 +400,21 @@ def _body(semester_org: str, source: Source, branch: str) -> str:
         f"- To take specific edits: cherry-pick the commits you want (one per path) "
         f"onto `{source.base}`, or edit this branch and then merge it.\n"
         f"- To reject every edit: close it. Nothing is changed in this repo.\n\n"
-        f"`{branch}` is cut fresh from `{source.base}` and force-pushed on every run, so "
-        f"closing this settles nothing: the next run proposes whatever the semester has "
-        f"then.\n"
+        f"A full run cuts `{branch}` fresh from `{source.base}` and force-pushes it, so "
+        f"this pull request then shows that run only; a run for some paths adds them to "
+        f"a branch an earlier one left open. Closing it settles nothing: the next run "
+        f"proposes whatever the semester has then.\n"
+    )
+
+
+def _carries(restricted: bool) -> str:
+    """What a pull request body says the run carried: the paths it was asked for, or
+    every released path."""
+    if restricted:
+        return "Only the paths asked for are carried back, one commit each"
+    return (
+        "This branch carries them back, one commit per released path, in the "
+        "order the semester ran"
     )
 
 
@@ -316,7 +437,12 @@ def _commit(sd: Path, message: str) -> bool:
 
 
 def _open_pr(
-    course_org: str, repo: str, semester_org: str, source: Source, branch: str
+    course_org: str,
+    repo: str,
+    semester_org: str,
+    source: Source,
+    branch: str,
+    carries: str,
 ) -> Propagated:
     """Push the branch and keep ONE pull request for it.
 
@@ -342,7 +468,7 @@ def _open_pr(
         head=branch,
         base=source.base,
         title=f"Semester edits from {semester_org}",
-        body=_body(semester_org, source, branch),
+        body=_body(semester_org, source, branch, carries),
         refresh_body=True,
     )
     if opened.url:
@@ -355,17 +481,33 @@ def propagate(
     semester_org: str,
     now: datetime | None = None,
     dry_run: bool = False,
+    paths: list[str] | None = None,
 ) -> Propagated:
     """Propose `semester_org`'s edits to its released material back into `course_org`.
+
+    `paths` restricts the run to those semester-side files or folders, mapped through the
+    release record (`select_paths`), so a copy released by hand carries back too; one
+    outside every released copy refuses the whole run, previewed or not. A full run
+    carries every copy the plan has fired (`due_deploys`).
 
     A semester with nothing due, or with nothing changed, opens nothing and says so in one
     line: this runs from a button and from the teardown, and a pull request per run saying
     "no change" would be the fastest way to make faculty stop reading them."""
     now = now or datetime.now(timezone.utc)
-    deploys = due_deploys(semester_org, now)
+    sched = schedule.load(semester_org)
+    if not paths:
+        deploys = due_deploys(sched, now)
+    else:
+        try:
+            copies = release_record.load(semester_org).copies
+            deploys = select_paths(copies, paths, sched.materials_repo)
+        except ValueError as exc:
+            log_err(f"{exc}.")
+            return Propagated(1)
     log_step(
         f"Propagating {semester_org} -> {course_org}"
-        f"{' (preview)' if dry_run else ''}: {len(deploys)} released path(s)"
+        f"{' (preview)' if dry_run else ''}: {len(deploys)} "
+        f"{'chosen' if paths else 'released'} path(s)"
     )
     if not deploys:
         log_ok(
@@ -382,6 +524,7 @@ def propagate(
         return Propagated(checked=len(deploys))
 
     branch = branch_for(semester_org)
+    carries = _carries(bool(paths))
     errors = 0
     urls: list[str] = []
     with tempfile.TemporaryDirectory() as work:
@@ -412,7 +555,7 @@ def propagate(
             dests[repo] = dd
         sources: dict[str, Source] = {}
         for repo in sorted({d.course_source_repo for d in deploys}):
-            prepared = _prepare_source(course_org, repo, branch, root)
+            prepared = _prepare_source(course_org, repo, branch, root, bool(paths))
             if prepared is not None:
                 sources[repo] = prepared
         for d in deploys:
@@ -467,11 +610,15 @@ def propagate(
                 log_err(f"could not copy `{where}` from {semester_org}: {exc}")
                 errors += 1
                 continue
-            if _commit(
-                source.dir,
-                f"propagate: {course_rel or 'the repo root'} from {semester_org}",
-            ):
-                source.carried.append(f"- `{where}` -> `{course_rel or '(repo root)'}`")
+            message = f"propagate: {course_rel or 'the repo root'} from {semester_org}"
+            if paths:
+                message += (
+                    f"\n\n{PATH_TRAILER}: {where} -> {course_rel or '(repo root)'}"
+                )
+            if _commit(source.dir, message):
+                line = _carried_line(where, course_rel)
+                if line not in source.carried:
+                    source.carried.append(line)
                 source.dests.add(d.semester_dest_repo)
 
         for repo in sorted(sources):
@@ -479,7 +626,7 @@ def propagate(
             if not source.carried:
                 log_ok(f"  {course_org}/{repo}: no semester edits to carry back")
                 continue
-            opened = _open_pr(course_org, repo, semester_org, source, branch)
+            opened = _open_pr(course_org, repo, semester_org, source, branch, carries)
             errors += opened.errors
             urls += list(opened.urls)
     return Propagated(errors, tuple(urls), tuple(sorted(behind)), len(deploys))
@@ -523,11 +670,22 @@ def main() -> int:
         parser,
         "Print the semester -> course path pairs and exit, cloning nothing (default).",
     )
+    parser.add_argument(
+        "--paths",
+        default="",
+        help="Only these semester-side paths, comma-separated: `<dest repo>/<path>`, or "
+        "`<path>` in the semester's materials repo. Each must lie inside a released copy.",
+    )
     args = parser.parse_args()
     # A read helper that couldn't reach the API raises; in an Actions log a one-line
     # error beats a traceback, and the run still goes red.
     try:
-        done = propagate(args.course_org, args.semester_org, dry_run=args.preview)
+        done = propagate(
+            args.course_org,
+            args.semester_org,
+            dry_run=args.preview,
+            paths=comma_items(args.paths),
+        )
     except RuntimeError as exc:
         log_err(str(exc))
         return 1

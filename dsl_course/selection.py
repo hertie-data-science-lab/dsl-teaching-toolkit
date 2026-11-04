@@ -14,8 +14,13 @@ Three uses: the materials repo's `.releaseignore` (exclude only: what students n
 materials - a release, a hosted copy, the open site - asks `select` (a path list) or `deny`
 (a `copytree` walk), which compose the same layers in a fixed order:
 
-    1. the institution denylist (`DENYLIST`, `CLUTTER`): never copied anywhere
-    2. the repo's `.releaseignore` files
+    1. the institution's never-released names (`DENYLIST_HARD`) and `CLUTTER`: never
+       copied anywhere, and a release naming one outright is refused (`deploy`)
+    2. the repo's `.releaseignore` files. For a semester release (`RELEASE`) they sit
+       over the institution's content names (`DENYLIST_CONTENT`), withheld from a folder
+       copy by default as an implied first line, so a `!solutions/` there releases them
+       for that repo (decision B, 2026-11-04); for every other copy - the public sites -
+       the content names are floor, like layer 1
     3. the use-site selection
     4. `institution.yml selection_floor` for that use: a hard limit, applied last
 
@@ -35,7 +40,7 @@ the institution's floor (`policy`).
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass
 from fnmatch import fnmatch
 from functools import cached_property
@@ -44,34 +49,42 @@ from pathlib import Path
 from . import policy
 from .faults import Unusable
 from .fs import Deny
-from .releaseignore import Ignore, deny_for, excludes, listed
+from .releaseignore import Ignore, deny_with, excludes, listed, local
 
 KEYS = ("kinds", "types", "include", "exclude")
 
-# The institution denylist (decision 0040 rule 3): path COMPONENTS no copy ever carries,
-# matched by name at every depth, case-insensitively, as globs (`.env.local`). Solutions,
-# hidden tests, grading files, secrets, git metadata and the toolkit's own `.system/`. A
-# release, a hosted copy and the open site all refuse them; no pattern re-includes one.
-DENYLIST = (
+# The institution denylist (decision 0040 rule 3): path COMPONENTS a folder copy leaves
+# behind, matched by name at every depth, case-insensitively, as globs (`.env.local`). Two
+# groups (decision B, 2026-11-04):
+#
+# HARD: secrets, git metadata, grading files and the toolkit's own `.system/`. Never
+# released by any route: a folder copy skips them, no `!` line re-includes one, and a
+# release that names one outright is refused (`deploy`). Nothing in one is course material.
+DENYLIST_HARD = (
+    ".git",
     ".system",
-    "solution",
-    "solutions",
-    "grading_config.yml",
-    "grading.yml",  # the pre-rename name; the engine stopped reading it, this list has not
-    "tests",
     ".env",
     ".env.*",
-    ".git",
+    "grading_config.yml",
+    "grading.yml",  # the pre-rename name; the engine stopped reading it, this list has not
 )
+# CONTENT: solutions and hidden tests. Withheld from a semester release's folder copy by
+# default, as if the root `.releaseignore` began with them, so a `!solutions/` line there
+# releases them for that repo (last match wins, anchored like any other line); a release
+# naming one outright ships it (decision 0040, coordinator ruling on PR #478). Every other
+# copy - the public sites - never carries one (`RELEASE`).
+DENYLIST_CONTENT = ("solution", "solutions", "tests")
+# Both, for the callers that ask only "is this on the institution's list": the public
+# semester site and the student status file never name either group, released or not.
+DENYLIST = DENYLIST_HARD + DENYLIST_CONTENT
 
 # Never course material, in any course, on any page: what a file manager or an interpreter
 # leaves in a folder. Kept apart from DENYLIST because nothing here leaks anything (it is
-# clutter), and a closed list of NAMES is the only honest form of the rule. Not "never
-# committed": `.gitkeep` still holds an unwritten session folder open in a source repo.
+# clutter), and a closed list of NAMES is the only honest form of the rule. `.gitkeep` is
+# not on it: it is how an empty folder ships, so every copy carries it (`UNLISTED`).
 CLUTTER = frozenset(
     {
         ".DS_Store",
-        ".gitkeep",
         "Thumbs.db",
         "desktop.ini",
         "__pycache__",
@@ -79,6 +92,13 @@ CLUTTER = frozenset(
     }
 )
 _CLUTTER_FOLDED = frozenset(n.casefold() for n in CLUTTER)
+
+# Copied, never listed: a `.gitkeep` ships an empty folder (a release, a hand-out, a publish
+# carries it like any file), but nobody wants to see it listed as course material, so the
+# listings (`listable`: a site's materials index, the student status file, a reading list,
+# `site_repo.shape_links`) drop it with the clutter.
+UNLISTED = frozenset({".gitkeep"})
+_NEVER_LISTED = frozenset(n.casefold() for n in UNLISTED) | _CLUTTER_FOLDED
 
 # Skipped when the WHOLE repo is released (`course_source_path: /`), and only at the repo
 # root: `.github` holds the Release workflows and their bot-token wiring - the toolkit's
@@ -97,25 +117,67 @@ FLOOR_USES = (HOST, PUBLISH)
 _TYPE_ALIASES = {"htm": "html"}
 
 
+# The groups a name can be in (`group_of`): layer 1's, and the content names a release
+# lets a `!` line re-include.
+HARD = "hard"
+CONTENT = "content"
+CLUTTER_GROUP = "clutter"
+# What a semester release lets a `.releaseignore` `!` line re-include (decision B): the
+# content names, whose default is then layer 2's implied first line. Every other copy
+# re-includes nothing, the whole denylist its floor.
+RELEASE = (CONTENT,)
+
+
 def is_clutter(name: str) -> bool:
     """Whether one path COMPONENT is never course material (case-insensitive)."""
     return name.casefold() in _CLUTTER_FOLDED
 
 
-def is_denied(name: str) -> bool:
-    """Whether one path COMPONENT is on the institution denylist (case-insensitive)."""
+def group_of(name: str) -> str | None:
+    """Which of the institution's lists one path COMPONENT is on (case-insensitive):
+    `HARD`, `CONTENT`, `CLUTTER_GROUP`, or None for course material."""
     folded = name.casefold()
-    return any(fnmatch(folded, pattern) for pattern in DENYLIST)
+    if any(fnmatch(folded, pattern) for pattern in DENYLIST_HARD):
+        return HARD
+    if any(fnmatch(folded, pattern) for pattern in DENYLIST_CONTENT):
+        return CONTENT
+    return CLUTTER_GROUP if folded in _CLUTTER_FOLDED else None
+
+
+def part_groups(path: str) -> set[str]:
+    """The groups `path`'s components are in (`group_of`); empty for course material."""
+    return {g for part in path.split("/") if part and (g := group_of(part))}
+
+
+def defaulted(reincludable: Collection[str]) -> Callable[[str], bool] | None:
+    """The `.releaseignore` default a copy that re-includes the `reincludable` groups
+    reads by: a name in one is withheld unless a `!` line says otherwise."""
+    if not reincludable:
+        return None
+    return lambda name: group_of(name) in reincludable
+
+
+def release_ignore(root: Path) -> Ignore:
+    """The `.releaseignore` reading of the clone at `root` a semester release judges by:
+    faculty's lines over the content names' default (`RELEASE`)."""
+    return local(root, defaulted(RELEASE))
 
 
 def denied(path: str) -> bool:
     """Whether any component of `path` is on the denylist or is clutter: layer 1."""
-    return any(is_denied(p) or is_clutter(p) for p in path.split("/") if p)
+    return bool(part_groups(path))
+
+
+def listable(path: str) -> bool:
+    """Whether a path is ever LISTED as material: no component is clutter or `UNLISTED`
+    (a `.gitkeep` is copied but never listed)."""
+    return not any(p.casefold() in _NEVER_LISTED for p in path.split("/") if p)
 
 
 def publishable(path: str) -> bool:
-    """Whether a path may be listed or copied at all, whatever a selection says."""
-    return not denied(path)
+    """Whether a path may be listed at all, whatever a selection says: nothing `denied`,
+    and `listable`."""
+    return not denied(path) and listable(path)
 
 
 def _type(ext: str) -> str:
@@ -307,10 +369,12 @@ def kept(
     use: Selection | None = None,
     withheld: Callable[[str], bool] | None = None,
     limit: Floor | None = None,
+    reincludable: Collection[str] = (),
 ) -> bool:
     """Whether one path survives every layer. `withheld` is layer 2 (a `.releaseignore`
-    predicate), `use` layer 3, `limit` layer 4; any left out is no filter."""
-    if denied(path):
+    predicate), `use` layer 3, `limit` layer 4; any left out is no filter. A group in
+    `reincludable` (`RELEASE`) is not layer 1's but `withheld`'s to judge."""
+    if part_groups(path) - set(reincludable):
         return False
     if withheld is not None and withheld(path):
         return False
@@ -346,19 +410,27 @@ def deny(
     use: Selection | None = None,
     kind_of: KindOf = _no_kind,
     limit: Floor | None = None,
+    reincludable: Collection[str] = (),
+    ignore: Ignore | None = None,
 ) -> Deny:
     """The layers as a `copytree` filter over the clone at `root`. The denylist judges the
     names BELOW the path a copy names, never that path's own ancestors: it stops a folder
     copy SWEEPING up a `solutions/`, while a copy that names `solutions/labs/02` ships
-    exactly that (decision 0040, coordinator ruling on PR #478). A denied,
-    `.releaseignore`-withheld or `use`-excluded name is pruned (nothing inside it is
-    walked), and each FILE must also be kept by `use` and `limit`. A folder is never
+    exactly that (decision 0040, coordinator ruling on PR #478). The whole denylist and
+    clutter are skipped whatever any line says - the public website's copy
+    (`public_site`), whose audience is the open internet. A semester release passes
+    `reincludable=RELEASE`: its content names (`DENYLIST_CONTENT`) are then the
+    `.releaseignore` layer's implied first line, so a `!` there re-includes them
+    (decision B), and `ignore` is its `release_ignore(root)` when it already has one. A
+    denied, `.releaseignore`-withheld or `use`-excluded name is pruned (nothing inside it
+    is walked), and each FILE must also be kept by `use` and `limit`. A folder is never
     dropped for its kind: an `include` may name a file inside one whose kind is out."""
-    ignored = deny_for(root)
+    ignored = deny_with(root, ignore or local(root, defaulted(reincludable)))
+    reinclude = set(reincludable)
 
-    def ignore(dirpath: str, names: list[str]) -> set[str]:
+    def deny_names(dirpath: str, names: list[str]) -> set[str]:
         here = Path(dirpath)
-        skip = {n for n in names if is_denied(n) or is_clutter(n)}
+        skip = {n for n in names if (g := group_of(n)) and g not in reinclude}
         skip |= ignored(dirpath, names)
         if use is None and limit is None:
             return skip
@@ -376,13 +448,7 @@ def deny(
                 skip.add(name)
         return skip
 
-    return ignore
-
-
-def swept(path: str) -> bool:
-    """Whether a path BELOW the one a copy names has a denylisted component (clutter
-    aside): what a folder copy leaves behind (`schedule`'s warning)."""
-    return any(is_denied(p) for p in path.split("/") if p)
+    return deny_names
 
 
 def release_use(whole_repo: bool, stubs: Iterable[str] = ()) -> Selection:

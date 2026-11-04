@@ -32,6 +32,7 @@ defaults:
   assignment_repo_visibility: private   # private | public | student_choice: the repos students work in
   archive_grace_days: 60        # archive date = semester_end + this, unless the schedule sets one
   materials_repo: materials     # where a release lands when its entry names no repo
+  release_destinations: []      # more semester repos a hand release may land in (course + semester add theirs)
   autosync_released_edits: false   # true: an edit to a released course folder re-ships on the next run
   marks_per_question: true      # returned marks show each question's mark and feedback
   # team_formation is not an institutional matter: set it in course.yml, semester.yml or
