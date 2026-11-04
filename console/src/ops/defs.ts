@@ -179,7 +179,10 @@ export function releasePicked(s: Scope, groups: Group[], run: { defaultDestRepo:
     args: toArgs(rows),
     target: destUrl(s.cohortOrg ?? s.courseOrg, first?.destRepo || run.defaultDestRepo, first ? destPathOf(first, first.folder) : ''),
     options: REPLACE,
-    ...(run.removed ? { nothingExtra: REMOVED_NOTHING, introExtra: (v: Record<string, unknown>) => (v.replace ? undefined : removedPicked(run.removed!)) } : {}),
+    ...(run.removed ? {
+      confirm: (v: Record<string, unknown>) => (v.replace ? undefined : removedPicked(run.removed!)),
+      outcomeExtra: (c: string | undefined) => (c === 'nothing_to_do' ? REMOVED_NOTHING : null),
+    } : {}),
   };
 }
 

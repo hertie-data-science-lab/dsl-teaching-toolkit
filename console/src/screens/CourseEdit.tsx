@@ -7,7 +7,7 @@ import { useEnv, type Env } from '../env';
 import { invalidText, useSave, type SaveState } from '../edit/save';
 import { YamlText, blank, compact, deepEqual, isObj, obj, render, type Path } from '../edit/yamlText';
 import { SchemaForm, fieldErrors } from '../forms/Form';
-import { termRank } from '../model/catalogue';
+import { byNewestTerm } from '../model/catalogue';
 import { defaultsOf, placeBlock, statedDefaults, uncommentIn, withDefaults } from '../model/config';
 import { courseBlock } from '../model/discovery';
 import { sameHandle } from '../model/people';
@@ -412,7 +412,7 @@ export function folderKindOf(path: string): string {
  * name, oldest first, so its first one is never the default. Without a dated repo, the first one.
  */
 export function newestRepo(repos: string[]): string | undefined {
-  return repos.reduce<string | undefined>((best, r) => (best === undefined || termRank(r) > termRank(best) ? r : best), undefined);
+  return byNewestTerm(repos)[0];
 }
 
 /** A course fact the website shows, read-only here: its value, or that it is not set. */

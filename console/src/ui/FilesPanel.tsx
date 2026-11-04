@@ -30,7 +30,7 @@
 
 import type { ComponentChildren } from 'preact';
 import { useMemo, useRef, useState } from 'preact/hooks';
-import { badgeFiles, bucket, buildTree, tally, treeModel, type RowModel } from '../edit/badges';
+import { append, badgeFiles, bucket, buildTree, tally, treeModel, type RowModel } from '../edit/badges';
 import { compileAll, type Rule } from '../edit/glob';
 import type { SaveState } from '../edit/save';
 import type { FileState as SavedFile, Files, TreePath, TreeState } from '../model/files';
@@ -38,7 +38,7 @@ import { plural } from '../model/format';
 import { DENYLIST_CONTENT, DENYLIST_HARD } from '../model/selection';
 import { withMark } from '../model/materialsRepo';
 import {
-  assignmentStems, COMMA_TITLE, countsWords, editedState, effectiveDestRepo, fileStates, foldersCopied, groupPicks, destPathOf, outOfStep, releaseBlocked, requestOf, semesterAdded,
+  assignmentStems, COMMA_TITLE, countsWords, editedFiles, effectiveDestRepo, fileStates, foldersCopied, groupPicks, destPathOf, outOfStep, releaseBlocked, requestOf,
   type FileState as ReleaseState, type Group, type ReleasePick, type ReleaseRow,
 } from '../model/releaseState';
 import type { Loaded } from '../model/status';
@@ -85,8 +85,6 @@ export interface FilesPanelProps {
   sources?: { materials: string[]; others: string[]; onAdd?: (repo: string) => void };
   /** The Schedule editor's new entry with the picks prefilled. */
   scheduleHref?: (semOrg: string, rows: ReleaseRow[]) => string;
-  /** The `?` after Schedule on the calendar; default `SCHEDULE_LINK_LEAD` (bold) and `SCHEDULE_LINK_REST`. */
-  scheduleHint?: ComponentChildren;
   /** An ahead chip's Keep for future semesters: the caller opens `keepFuture`. */
   onKeep?: (semester: SemesterRef) => void;
   /** A diverged file's open pull request; default: the destination repo's pull requests. */
@@ -112,7 +110,6 @@ const defaultOut = (d: string) => withMark(d.endsWith('\n') || !d ? d : `${d}\n`
 /** The `?` after Schedule on the calendar: its first sentence in bold, then the rest. */
 export const SCHEDULE_LINK_LEAD = 'You do not need finished materials to automate their release in advance.';
 export const SCHEDULE_LINK_REST = 'A schedule entry simply names a path and a date; the copy happens at that snapshot date, from whatever is in the path at that time. You can specify not-yet-existent file paths, or half-finished files, then keep editing in the course repo until the release time. Only what is there at that moment reaches students. Pre-scheduled entries also appear on the students’ calendar in advance, so the class can see what is coming.';
-const scheduleLinkHint = () => <><b>{SCHEDULE_LINK_LEAD}</b> {SCHEDULE_LINK_REST}</>;
 
 const FILES_HINT = 'The repo’s files. Browse: a name opens the file here. Withhold: a tick means the file reaches students; untick a file or folder to withhold it (.releaseignore), then Save. Release: tick files or folders and Release to copy them to the chosen semester’s materials repo now, at the same paths; copies are additive and nothing is added to the schedule. Each row says whether that semester already has the file.';
 const RBH_HINT = 'Copies what you tick from the course repo to this semester’s materials repo now, at the same paths. Copies are additive and idempotent; files withheld by the repo’s .releaseignore never ship. Each row compares the course file with the semester’s repo the run writes to, at the same path; a group sent to another repo or path (Edit destination) is compared there in the manifest.';
@@ -232,6 +229,13 @@ interface RowState {
   tick: 'none' | 'gap' | { off: string | null; title?: string };
 }
 
+/** `xs` as it was last time while it holds the same items, so a memo can key on the list as one dep. */
+function useSame<T>(xs: T[]): T[] {
+  const last = useRef(xs);
+  if (last.current.length !== xs.length || xs.some((x, i) => x !== last.current[i])) last.current = xs;
+  return last.current;
+}
+
 export function FilesPanel(p: FilesPanelProps) {
   if (!p.write && p.mode !== 'course') return null;
   return <Panel {...p} />;
@@ -287,20 +291,29 @@ function Panel(p: FilesPanelProps) {
 
   const pickedRepos = into ? [...new Set(picks.map((x) => x.repo))] : [];
   const reads = pickedRepos.map((r) => (r === repo ? here : repoOf(p.files, p.courseOrg, r)));
+  const readStates = useSame(reads.flatMap((o) => [o.tree, o.ign]));
   const groups = useMemo(() => {
     if (!into) return [];
     const trees = Object.fromEntries(pickedRepos.map((r, i) => [r, { files: reads[i].paths, rules: savedRules(reads[i].ign) }]));
     return groupPicks(picks, trees).map((g) => ({ ...g, ...overrides[groupKey(g)] }));
-  }, [!!into, picks, overrides, ...reads.flatMap((o) => [o.tree, o.ign])]);
+  }, [!!into, picks, overrides, readStates]);
 
+  // Each row worked out once per draw: its chip, tick and pick control all read it.
+  const drawn = new Map<string, RowState>();
   const rowState = (path: string, dir: boolean): RowState => {
+    const k = `${dir ? 'd' : 'f'}\0${path}`;
+    let r = drawn.get(k);
+    if (!r) drawn.set(k, (r = rowOf(path, dir)));
+    return r;
+  };
+  const rowOf = (path: string, dir: boolean): RowState => {
     const row = model.get(path)!;
     const s = row.s;
     const never = s.kind === 'never_released' || s.kind === 'never_copied' ? s.kind : null;
     const out = bucket(s) === 'withheld';
     const state = !dir && !never && !out ? states[path] : undefined;
     // Browse: whatever does not reach students reads withheld, nothing more.
-    const chip: ChipKind | null = view === 'browse' ? (never || out ? 'withheld' : null) : never ?? (out ? 'withheld' : state === 'up_to_date' ? 'released' : state && state !== 'unknown' ? state : null);
+    const chip: ChipKind | null = view === 'browse' ? (never || out ? 'withheld' : null) : never ?? (out ? 'withheld' : state && state !== 'unknown' ? state : null);
     if (!release) return { chip, row, tick: 'none' };
     // Withheld by a line, or never material: no tick. A content name withheld by default ships when ticked (named outright).
     if (s.kind === 'own' || s.kind === 'broader' || s.kind === 'never_copied') return { chip, row, tick: 'gap' };
@@ -310,19 +323,18 @@ function Panel(p: FilesPanelProps) {
   };
 
   // Each group's states at its own destination, worked out once per change of its inputs: the
-  // group, the run's repo and the three trees it compares (each tree state a stable object until it is read again).
-  const groupTrees = groups.map((g) => {
+  // groups, the run's repo and the three trees each compares (each tree state a stable object until it is read again).
+  const groupTrees = useSame(groups.flatMap((g) => {
     const to = g.destRepo || runRepo;
-    return into ? [p.files.tree(p.courseOrg, g.repo), p.files.tree(into.org, to, 'upstream'), p.files.tree(into.org, to)] as const : null;
-  });
+    return into ? [p.files.tree(p.courseOrg, g.repo), p.files.tree(into.org, to, 'upstream'), p.files.tree(into.org, to)] : [];
+  }));
   const groupStates = useMemo(() => new Map(groups.map((g, i) => {
-    const t = groupTrees[i];
-    if (!t) return [groupKey(g), NO_STATES];
-    const [courseTree, up, at] = t;
+    if (!groupTrees.length) return [groupKey(g), NO_STATES];
+    const [courseTree, up, at] = groupTrees.slice(i * 3, i * 3 + 3);
     const ship = new Set(g.ship);
     const blobs = filesOf(courseTree).blobs.filter((b) => ship.has(b.path));
     return [groupKey(g), fileStates(blobs, up, at, { destPath: (x) => destPathOf(g, x) })];
-  })), [groups, runRepo, ...groupTrees.flat()]);
+  })), [groups, runRepo, groupTrees]);
   const stateOf = (g: Group, path: string) => groupStates.get(groupKey(g))?.[path];
   // A plain release of a file the semester removed copies nothing: the run's panel says so, and Overwrite restores it.
   const removed = groups.reduce((n, g) => n + g.ship.filter((x) => stateOf(g, x) === 'removed').length, 0);
@@ -335,7 +347,7 @@ function Panel(p: FilesPanelProps) {
     const words = release && dir && r.chip === null ? countsWords(r.row.states) : '';
     return (
       <>
-        {r.chip ? <StateChip kind={r.chip} onTick={r.chip === 'behind' && !isPicked(path, false) && !inPicked(path) ? () => togglePick(path, false) : undefined} onKeep={keep} prUrl={r.chip === 'diverged' ? prOf(runRepo, path) : undefined} /> : null}
+        {r.chip ? <StateChip kind={r.chip} tree onTick={r.chip === 'behind' && !isPicked(path, false) && !inPicked(path) ? () => togglePick(path, false) : undefined} onKeep={keep} prUrl={r.chip === 'diverged' ? prOf(runRepo, path) : undefined} /> : null}
         {/* A folder's roll-up, about its contents: shown only while it is closed (`.ft-rollup`); its own chip above shows either way. */}
         {dir && r.chip === null && (r.row.withheld || words) ? (
           <span class="ft-rollup">
@@ -346,11 +358,13 @@ function Panel(p: FilesPanelProps) {
       </>
     );
   };
-  // Course Release view: the files this repo released that the semester edited (ahead, diverged or removed), as their chips say,
-  // and the files the semester added under this repo's released folders (no course row: listed under the notice).
-  const edited = course && release && live ? here.paths.filter((f) => editedState(rowState(f, false).chip as ReleaseState)) : NO_PATHS;
+  // Course Release view: what the semester edited (`editedFiles`, as the course index counts it): the files this repo released
+  // that it edited or removed, those that reach students (as their chips say), and the files it added under this repo's released
+  // folders (no course row: listed under the notice). `outOfStep` is worked out once per set of reads.
   const status = into?.loaded?.kind === 'ready' ? into.loaded.status : undefined;
-  const added = course && release && status && into ? semesterAdded(outOfStep(status, p.files, p.courseOrg, into.org, defaultDest), repo, runRepo) : NO_PATHS;
+  const notice = course && release && into && live ? editedFiles(states, status ? outOfStep(status, p.files, p.courseOrg, into.org, defaultDest) : [], repo, runRepo) : null;
+  const edited = notice ? notice.coursePaths.filter((f) => rowState(f, false).chip === states[f]) : NO_PATHS;
+  const added = notice?.added ?? NO_PATHS;
   const changed = edited.length + added.length;
   const narrowed = onlyEdited && changed > 0;
   const editedKey = edited.join('\n');
@@ -391,8 +405,7 @@ function Panel(p: FilesPanelProps) {
   };
   // A content-name chip: its `!name/` line last, once.
   const addLine = (line: string) => {
-    if (lines.some((l) => l.trim() === line)) return;
-    fromTree(lines.length && !lines[lines.length - 1].trim() ? [...lines.slice(0, -1), line] : [...lines, line]);
+    if (!lines.some((l) => l.trim() === line)) fromTree(append(lines, line));
   };
   const out = (p.ignoreOut ?? defaultOut)(draft ?? here.saved);
   const saveIgn = async () => {
@@ -511,7 +524,7 @@ function Panel(p: FilesPanelProps) {
   const sched = into && p.scheduleHref ? (
     <p class="lede rh-sched">
       Want to automate these releases? <a class="textlink" href={p.scheduleHref(into.org, rows)}>Schedule on the calendar →</a>{' '}
-      <Hint small label="About scheduling these releases">{p.scheduleHint ?? scheduleLinkHint()}</Hint>
+      <Hint small label="About scheduling these releases"><b>{SCHEDULE_LINK_LEAD}</b> {SCHEDULE_LINK_REST}</Hint>
     </p>
   ) : null;
   const hint = <><span class="para">{course ? FILES_HINT : RBH_HINT}</span><ChipMeanings /></>;

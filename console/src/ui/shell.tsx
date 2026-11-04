@@ -4,7 +4,7 @@
 // heading every course and semester page, the footer.
 
 import type { ComponentChildren } from 'preact';
-import { useEffect, useLayoutEffect, useState } from 'preact/hooks';
+import { useLayoutEffect, useState } from 'preact/hooks';
 import { readText, safeStorage, writeText } from '../auth/types';
 import type { GhUser } from '../github/client';
 import type { Course, CohortRef, Semester } from '../model/discovery';
@@ -51,15 +51,16 @@ function useTheme(): [boolean, () => void] {
 
 const NAV_KEY = 'console-nav';
 
-/** The handle's Show navigation while the nav is collapsed, else null. */
-let showNav: (() => void) | null = null;
+/** Whether the side nav is hidden by its handle, as this browser keeps it. */
+export const savedNavCollapsed = () => readText(safeStorage('local'), NAV_KEY) === 'collapsed';
+export const saveNavCollapsed = (collapsed: boolean) => writeText(safeStorage('local'), NAV_KEY, collapsed ? 'collapsed' : 'open');
 
 /**
- * The top bar's Menu: on a wide screen with the nav collapsed, the handle's Show navigation (the
- * nav back in place, the choice kept); otherwise, below 860px, `drawer` (the drawer).
+ * The top bar's Menu: on a wide screen with the nav `collapsed`, `show` (the handle's Show
+ * navigation: the nav back in place, the choice kept); otherwise, below 860px, `drawer`.
  */
-export const menuPress = (drawer: () => void) => () => {
-  if (showNav && !globalThis.matchMedia?.('(max-width: 860px)').matches) showNav();
+export const menuPress = (drawer: () => void, collapsed: boolean, show: () => void) => () => {
+  if (collapsed && !globalThis.matchMedia?.('(max-width: 860px)').matches) show();
   else drawer();
 };
 
@@ -68,28 +69,18 @@ export const menuPress = (drawer: () => void) => () => {
  * boundary. Pressed, the nav hides (`body.nav-collapsed`) and the content spans the shell; the
  * handle moves to the left edge to bring it back, and the top bar's Menu (`menuPress`) brings it
  * back in place too. The choice is kept in this browser. Below 860px the drawer applies and the
- * handle is hidden (styles/shell.css). `onToggle` closes an open drawer.
+ * handle is hidden (styles/shell.css). `collapsed` is the app's (`savedNavCollapsed` at start);
+ * `onToggle` flips it, keeps the choice (`saveNavCollapsed`) and closes an open drawer.
  */
-export function NavHandle({ onToggle }: { onToggle: () => void }) {
-  const [collapsed, setCollapsed] = useState(() => readText(safeStorage('local'), NAV_KEY) === 'collapsed');
+export function NavHandle({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
   // Before paint, so a collapsed nav never flashes open on load.
   useLayoutEffect(() => {
     document.body.classList.toggle('nav-collapsed', collapsed);
     return () => document.body.classList.remove('nav-collapsed');
   }, [collapsed]);
   const word = collapsed ? 'Show navigation' : 'Hide navigation';
-  const toggle = () => {
-    const next = !collapsed;
-    writeText(safeStorage('local'), NAV_KEY, next ? 'collapsed' : 'open');
-    onToggle();
-    setCollapsed(next);
-  };
-  useEffect(() => {
-    showNav = collapsed ? toggle : null;
-    return () => void (showNav = null);
-  });
   return (
-    <button class="nav-handle" type="button" aria-controls="sidenav-wrap" aria-expanded={!collapsed} aria-label={word} data-tip={word} onClick={toggle}>
+    <button class="nav-handle" type="button" aria-controls="sidenav-wrap" aria-expanded={!collapsed} aria-label={word} data-tip={word} onClick={onToggle}>
       <span class="nh-pill" aria-hidden="true"><span class="nh-chev" /></span>
     </button>
   );

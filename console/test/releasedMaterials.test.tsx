@@ -435,9 +435,9 @@ describe('Released materials', () => {
     expect([prFile('lab.ipynb').disabled, prFile('lab.ipynb').title]).toEqual([true, 'Nothing edited in the semester for this file.']);
     expect([prFile('new.md').disabled, prFile('new.md').title]).toEqual([true, 'Nothing edited in the semester for this file.']);
     await act(() => prFile('notes.md').click());
-    // That one path, in the semester's default materials repo: no repo prefix.
+    // That one path, its repo named even in the semester's default materials repo (the engine reads a leading repo name as the repo).
     expect(open.mock.calls[1][0]).toMatchObject({
-      op: 'release.propagate_back', name: 'PR into source', title: 'lectures/05_trees/notes.md', args: { paths: 'lectures/05_trees/notes.md' },
+      op: 'release.propagate_back', name: 'PR into source', title: 'materials/lectures/05_trees/notes.md', args: { paths: 'materials/lectures/05_trees/notes.md' },
       intro: 'Opens a pull request carrying this file’s semester edit back into the course repo, so next semester starts from it.',
     });
     // One panel-level PR into source (all), beside the filter, with its ?: the full run.
@@ -469,7 +469,8 @@ describe('Released materials', () => {
   it('marks a file whose release waits in an open pull request from upstream, with Open PR and Overwrite in place of Re-release', async () => {
     const open = vi.fn();
     const url = `https://github.com/${ORG}/materials/pull/7`;
-    const gh = new FakeGitHub().on('GET', `/repos/${ORG}/materials/pulls?head=${encodeURIComponent(`${ORG}:upstream`)}&state=open&per_page=30`, [{ number: 7, html_url: url, title: 'Release', head: { ref: 'upstream' } }]);
+    const gh = new FakeGitHub().on('GET', `/repos/${ORG}/materials/pulls?head=${encodeURIComponent(`${ORG}:upstream`)}&state=open&per_page=30`, [{ number: 7, html_url: url, title: 'Release', head: { ref: 'upstream' } }])
+      .on('GET', `/repos/${ORG}/materials/pulls/7/files?per_page=100`, [{ filename: 'lectures/05_trees/notes.md' }]);
     root = document.createElement('div');
     document.body.appendChild(root);
     const env = { user: { login: 'prof', id: 1, name: 'P', email: null, avatar_url: '' }, client: new GitHubClient({ token: () => 't', fetch: gh.fetch }), ops: { open } } as unknown as Env;
@@ -498,6 +499,39 @@ describe('Released materials', () => {
     expect(buttons(row('lab.ipynb'))).toContain('Re-release');
     // The ? says so in one line.
     expect(root.querySelector('details.out-of-step summary .hint-pop')!.textContent).toContain('Release pending in a pull request: a re-release that conflicted waits there');
+  });
+
+  it('marks pending only the files the open pull request changes: an edited file it leaves alone keeps Re-release’s row, with Overwrite', async () => {
+    const url = `https://github.com/${ORG}/materials/pull/7`;
+    const gh = new FakeGitHub().on('GET', `/repos/${ORG}/materials/pulls?head=${encodeURIComponent(`${ORG}:upstream`)}&state=open&per_page=30`, [{ number: 7, html_url: url, title: 'Release', head: { ref: 'upstream' } }])
+      .on('GET', `/repos/${ORG}/materials/pulls/7/files?per_page=100`, [{ filename: 'lectures/05_trees/other.md' }]);
+    const el = await mount(<SemesterMaterialsScreen {...props({ files: stepFiles() })} />, gh);
+    expect(gh.seen.filter((x) => x.url.includes('/pulls/7/files'))).toHaveLength(1);
+    expect(el.querySelector('details.out-of-step .dif-pending')).toBeNull();
+  });
+
+  it('offers Overwrite on a file edited in the semester or on both sides, beside Re-release', async () => {
+    const open = vi.fn();
+    root = document.createElement('div');
+    document.body.appendChild(root);
+    const env = { user: { login: 'prof', id: 1, name: 'P', email: null, avatar_url: '' }, client: new GitHubClient({ token: () => 't', fetch: new FakeGitHub().fetch }), ops: { open } } as unknown as Env;
+    const row = (name: string) => [...root!.querySelectorAll<HTMLElement>('details.out-of-step li.dif-file')].find((li) => li.querySelector('.dif-name')!.textContent === name)!;
+    const btn = (li: HTMLElement, label: string) => [...li.querySelectorAll<HTMLButtonElement>('.dif-right > button.btn')].find((b) => b.textContent === label);
+    // notes.md ahead: Re-release stays disabled, Overwrite takes the course version.
+    await act(() => render(<EnvCtx.Provider value={env}><SemesterMaterialsScreen {...props({ files: stepFiles() })} /></EnvCtx.Provider>, root!));
+    expect(btn(row('notes.md'), 'Re-release')!.disabled).toBe(true);
+    await act(() => btn(row('notes.md'), 'Overwrite')!.click());
+    expect(open.mock.calls[0][0]).toMatchObject({
+      op: 'release.adhoc', confirm: 'Replaces the semester’s copy of this file with the course version; its edit is lost.',
+      args: { course_source_path: 'lectures/05_trees/notes.md', semester_dest_path: 'lectures/05_trees/notes.md', replace: true },
+    });
+    // A file edited in the course only: no Overwrite.
+    expect(btn(row('lab.ipynb'), 'Overwrite')).toBeUndefined();
+    // notes.md diverged (the course changed it too): Re-release and Overwrite both.
+    await act(() => render(<EnvCtx.Provider value={env}><SemesterMaterialsScreen {...props({ files: stepFiles({ 'lectures/05_trees/notes.md': 'new' }) })} /></EnvCtx.Provider>, root!));
+    expect(row('notes.md').querySelector('.chip')!.textContent).toBe('diverged');
+    expect(btn(row('notes.md'), 'Re-release')!.disabled).toBe(false);
+    expect(btn(row('notes.md'), 'Overwrite')!.disabled).toBe(false);
   });
 
   it('draws no pending notice without an open pull request from upstream', async () => {

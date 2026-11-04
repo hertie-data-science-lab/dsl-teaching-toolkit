@@ -151,7 +151,7 @@ export function toggle(lines: string[], path: string, isDir: boolean, o: Compile
 }
 
 /** `lines` with `line` last (the last match wins), in place of a trailing blank line. */
-const append = (lines: string[], line: string) => [...(lines.length && !lines[lines.length - 1].trim() ? lines.slice(0, -1) : lines), line];
+export const append = (lines: string[], line: string) => [...(lines.length && !lines[lines.length - 1].trim() ? lines.slice(0, -1) : lines), line];
 
 export interface TreeNode {
   name: string;

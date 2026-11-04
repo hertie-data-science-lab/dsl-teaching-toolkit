@@ -663,6 +663,11 @@ export class GitHubClient {
     return (await this.getOrNull<GhPull[]>(`/repos/${owner}/${repo}/pulls?head=${encodeURIComponent(`${owner}:${q.head}`)}&state=${q.state}&per_page=30`)) ?? [];
   }
 
+  /** The paths a pull request changes (its first 100 files: a re-release's pull request carries one file or a folder's few). */
+  async listPullFiles(owner: string, repo: string, pull: number): Promise<string[]> {
+    return ((await this.getOrNull<{ filename: string }[]>(`/repos/${owner}/${repo}/pulls/${pull}/files?per_page=100`)) ?? []).map((f) => f.filename);
+  }
+
   /** An issue's comments, oldest first (up to 100: a Submission receipts issue stays well under). */
   async listIssueComments(owner: string, repo: string, issue: number): Promise<GhComment[]> {
     return (await this.getOrNull<GhComment[]>(`/repos/${owner}/${repo}/issues/${issue}/comments?per_page=100`)) ?? [];

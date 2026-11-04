@@ -241,7 +241,7 @@ describe('the Files panel', () => {
       await click(t);
       expect([...el.querySelectorAll<HTMLElement>('.mf-rows li')].map(shown)).toContain('labs/week01/data.csv→labs/week01/data.csvremoved in semester');
       await click(el.querySelector<HTMLButtonElement>('.rh-foot .btn')!);
-      expect(open.mock.calls[0][0].nothingExtra).toBe('Nothing copied: the semester removed these files; use Overwrite to restore them.');
+      expect(open.mock.calls[0][0].outcomeExtra('nothing_to_do')).toBe('Nothing copied: the semester removed these files; use Overwrite to restore them.');
     });
 
     it('counts both in the notice, and See which lists the added file with its chip and Open on the semester copy', async () => {

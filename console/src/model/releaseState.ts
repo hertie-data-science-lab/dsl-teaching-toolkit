@@ -23,7 +23,7 @@ import type { Release, Status } from './types';
 import { fnmatch } from './selection';
 import { COURSE_REPO, JOIN_REPO, CONFIG_REPO } from './names';
 import { REPO_NAME_RE, effectiveOf, semesterDefaults } from './settings';
-import { termRank } from './catalogue';
+import { byNewestTerm } from './catalogue';
 
 export type FileState = 'up_to_date' | 'behind' | 'ahead' | 'diverged' | 'removed' | 'not_released' | 'unknown';
 
@@ -41,7 +41,7 @@ const SHAS = new WeakMap<TreeState, Map<string, string>>();
 const NONE = new Map<string, string>();
 
 /** A tree's blob shas by path (worked out once per tree read), or null while it cannot be read. */
-function blobs(t: TreeState): Map<string, string> | null {
+export function blobs(t: TreeState): Map<string, string> | null {
   if (t.kind === 'absent') return NONE;
   if (t.kind !== 'ready') return null;
   let m = SHAS.get(t);
@@ -83,17 +83,19 @@ export function fileStates(
 /** A released folder against the course: edited in the semester, changed in the course since the release, or both. */
 export type FolderStep = 'ahead' | 'behind' | 'diverged';
 
+/** A differing file's step (not `up_to_date` or `unknown`): removed in the semester counts as edited there, a file the course added (not released) as edited in the course. */
+export const fileStep = (s: FileState): FolderStep => (s === 'removed' ? 'ahead' : s === 'ahead' || s === 'diverged' ? s : 'behind');
+
 /**
- * A released folder's step from its files' states (`fileStates`): `ahead` when a file is ahead (or
- * removed in the semester, a semester edit) and none behind, `behind` when a file is behind (or the course added one) and none ahead,
- * `diverged` when a file diverged or both; null when in step, or while any state is unknown.
+ * A released folder's step from its files' states (`fileStates`), each differing file's `fileStep`:
+ * `ahead` or `behind` when every one steps that way, `diverged` when one diverged or both show;
+ * null when in step, or while any state is unknown.
  */
 export function folderStep(states: FileState[]): FolderStep | null {
   if (states.includes('unknown')) return null;
-  const ahead = states.some((x) => x === 'ahead' || x === 'removed');
-  const behind = states.some((x) => x === 'behind' || x === 'not_released');
-  if (states.includes('diverged') || (ahead && behind)) return 'diverged';
-  return ahead ? 'ahead' : behind ? 'behind' : null;
+  const steps = new Set(states.filter((x) => x !== 'up_to_date').map(fileStep));
+  if (steps.has('diverged') || (steps.has('ahead') && steps.has('behind'))) return 'diverged';
+  return steps.has('ahead') ? 'ahead' : steps.has('behind') ? 'behind' : null;
 }
 
 export type Counts = Partial<Record<FileState, number>>;
@@ -152,7 +154,7 @@ export interface Group {
 
 export const TOP_LEVEL = '(top level)';
 
-const parentOf = (path: string) => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '');
+export const parentOf = (path: string) => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '');
 const under = (path: string, folder: string) => !folder || path.startsWith(`${folder}/`);
 const join = (folder: string, name: string) => (folder && name ? `${folder}/${name}` : folder || name);
 const trim = (p: string) => p.replace(/^\/+|\/+$/g, '');
@@ -376,116 +378,164 @@ export interface OutOfStep {
   files: { path: string; state: FileState; from?: string; added?: true }[];
 }
 
-/** One released folder being worked out: its copies (course path to semester path), and whether a tree it needs is still being read. */
+/** One released folder being worked out: its copies (course path to semester path), the files only the semester has under it, and whether a tree it needs is still being read. */
 interface Fold {
   r?: Release;
   src: string;
   repo: string;
   path: string;
+  /** A release's folder: the course path it copies, and whether that names a file (unknown while its course tree is read). */
+  from?: string;
+  file?: boolean;
   copies: Map<string, string>;
-  /** Semester paths released whose course counterpart is gone. */
-  orphans: string[];
+  /** Semester paths students have that no course file is copied to: released, its course file gone since, or added in the semester. */
+  extra: string[];
   unknown?: true;
 }
+
+type Reader = Pick<Files, 'tree' | 'file'>;
+interface Memo {
+  /** Each read the rows were worked out from, and what it gave. */
+  reads: Map<string, { again: () => unknown; got: unknown }>;
+  rows: OutOfStep[];
+}
+const MEMO = new WeakMap<Reader, WeakMap<Status, Map<string, Memo>>>();
 
 /**
  * Every released folder whose files differ between the course copy and the semester's, three-way
  * (`fileStates`: the course tree, the semester repo's `upstream` branch and its default branch),
- * in each destination repo (`def` and every repo a release names). The released copies are what
- * the releases copy (`groupPicks`: a folder copy under the course repo's `.releaseignore` and the
- * institution's defaults; a folder more than one release wrote judged once, by the last) and
- * every file on `upstream`, the record of all the engine landed: a release by hand included. A
- * file `upstream` has under a release's folder comes from that release's source; any other, in a
- * folder (a top-level file is the repo's own, not a release's), from the same path in the newest
- * course repo that has it (materials repos and release sources, newest term first), else the newest. A released file the
- * course no longer has is only in the semester (`added`, ahead), as is a file the default branch
- * adds under a released folder. Nothing is listed for a folder whose trees are still being read.
+ * in each destination repo (`def` and every repo a release names). `upstream` is the record of
+ * all the engine landed, a release by hand included: a file on it under a release's folder (the
+ * deepest; a folder more than one release wrote judged once, by the last) comes from that
+ * release's source; any other, in a folder (a top-level file is the repo's own, not a release's),
+ * from the same path in the newest course repo that has it (materials repos and release sources,
+ * newest term first), else the newest. What a release copies and `upstream` lacks (`groupPicks`:
+ * a folder copy under the course repo's `.releaseignore` and the institution's defaults) is a
+ * course addition, or released before `upstream` existed. A released file the course no longer
+ * has is only in the semester (`added`, ahead), as is a file the default branch adds under a
+ * released folder. Nothing is listed for a folder whose trees are still being read.
+ *
+ * Worked out once per status and set of reads: a call whose every read gives what it gave last
+ * time returns the rows it returned then.
  */
-export function outOfStep(status: Status, files: Files, courseOrg: string, semOrg: string, def: string): OutOfStep[] {
+export function outOfStep(status: Status, files: Reader, courseOrg: string, semOrg: string, def: string): OutOfStep[] {
+  let byStatus = MEMO.get(files);
+  if (!byStatus) MEMO.set(files, (byStatus = new WeakMap()));
+  let byArgs = byStatus.get(status);
+  if (!byArgs) byStatus.set(status, (byArgs = new Map()));
+  const key = [courseOrg, semOrg, def].join('\0');
+  const seen = byArgs.get(key);
+  if (seen && [...seen.reads.values()].every((r) => r.again() === r.got)) return seen.rows;
+  const reads: Memo['reads'] = new Map();
+  const rec = <T>(k: string, again: () => T): T => {
+    const got = again();
+    reads.set(k, { again, got });
+    return got;
+  };
+  const reader: Reader = {
+    tree: (...a) => rec(`t\0${a.join('\0')}`, () => files.tree(...a)),
+    file: (...a) => rec(`f\0${a.join('\0')}`, () => files.file(...a)),
+  };
+  const rows = outOfStepOf(status, reader, courseOrg, semOrg, def);
+  byArgs.set(key, { reads, rows });
+  return rows;
+}
+
+function outOfStepOf(status: Status, files: Reader, courseOrg: string, semOrg: string, def: string): OutOfStep[] {
   const last = new Map<string, Release>();
   for (const r of releasedOf(status)) {
     const d = destOf(r, def);
     if (r.source && d.path) last.set(`${d.repo}\0${d.path}`, r);
   }
-  // Newest first (Release by hand's From default, `newestRepo`'s rule); the sort is stable, so the course's materials repos lead within a term.
-  const candidates = [...new Set([...(status.course?.materials ?? []).map((m) => m.repo), ...(status.releases ?? []).map((r) => r.source?.repo ?? '')].filter(Boolean))]
-    .sort((a, b) => termRank(b) - termRank(a));
+  // Newest first (Release by hand's From default, `newestRepo`'s rule); the course's materials repos lead within a term.
+  const candidates = byNewestTerm([...new Set([...(status.course?.materials ?? []).map((m) => m.repo), ...(status.releases ?? []).map((r) => r.source?.repo ?? '')].filter(Boolean))]);
   const shas = (repo: string) => (repo ? blobs(files.tree(courseOrg, repo)) : NONE);
+  // Each source repo's `.releaseignore` with the institution's defaults, compiled once (null while it is read).
+  const rulesBy = new Map<string, Rule[] | null>();
+  const rulesOf = (repo: string) => {
+    if (!rulesBy.has(repo)) {
+      const ign = files.file(courseOrg, repo, '.releaseignore');
+      rulesBy.set(repo, ign.kind === 'loading' ? null : compileAll((ign.kind === 'ready' ? ign.text : '').split('\n'), { defaults: true }));
+    }
+    return rulesBy.get(repo)!;
+  };
+  // Every candidate's tree, asked for at the first file no release covers.
+  let reads: (readonly [string, TreeState])[] | null = null;
   const out: OutOfStep[] = [];
   for (const repo of [...new Set([def, ...(status.releases ?? []).map((r) => destOf(r, def).repo)])]) {
     const up = files.tree(semOrg, repo, 'upstream'), live = files.tree(semOrg, repo);
+    const landed = blobs(up) ?? NONE, liveShas = blobs(live);
     const folds: Fold[] = [];
-    // Each release's folder, with a way back from a semester path under it to its course path.
-    const covers: { fold: Fold; file: boolean; from: string }[] = [];
+    // What each release copies, course path to semester path.
+    const ships = new Map<Fold, [string, string][]>();
     for (const r of last.values()) {
       const d = destOf(r, def);
       if (d.repo !== repo) continue;
       const src = r.source!;
       const from = trim(src.path);
-      const fold: Fold = { r, src: src.repo, repo, path: d.path, copies: new Map(), orphans: [] };
       const course = files.tree(courseOrg, src.repo);
-      const ign = files.file(courseOrg, src.repo, '.releaseignore');
-      const blobsOf = course.kind === 'ready' ? course.paths.filter((x) => !x.dir).map((x) => x.path) : [];
-      const file = blobsOf.includes(from);
-      covers.push({ fold, file, from });
+      const rules = rulesOf(src.repo);
+      const file = !!blobs(course)?.has(from);
+      const fold: Fold = { r, src: src.repo, repo, path: d.path, from, file, copies: new Map(), extra: [] };
       folds.push(fold);
-      if (!from || course.kind !== 'ready' || ign.kind === 'loading') { fold.unknown = true; continue; }
-      const rules = compileAll((ign.kind === 'ready' ? ign.text : '').split('\n'), { defaults: true });
-      const g = groupPicks([{ repo: src.repo, path: from, dir: !file }], { [src.repo]: { files: blobsOf, rules } })[0];
-      for (const x of g?.ship ?? []) fold.copies.set(x, file ? d.path : destPathOf({ ...g, destPath: d.path }, x));
+      if (!from || course.kind !== 'ready' || !rules) { fold.unknown = true; continue; }
+      const g = groupPicks([{ repo: src.repo, path: from, dir: !file }], { [src.repo]: { files: [...blobs(course)!.keys()], rules } })[0];
+      ships.set(fold, (g?.ship ?? []).map((x) => [x, file ? d.path : destPathOf({ ...g, destPath: d.path }, x)]));
     }
-    // Every file on `upstream` a release's copies do not name: a copy released by hand, or one the course has since dropped.
-    const landed = new Set(folds.flatMap((f) => [...f.copies.values()]));
-    // A release's folder or file covers its own path and everything under it (whether it named a file is unknown while its course tree is read).
-    const coverOf = (p: string) => covers.filter((c) => p === c.fold.path || p.startsWith(`${c.fold.path}/`)).sort((a, b) => b.fold.path.length - a.fold.path.length)[0];
+    // A release's folder or file covers its own path and everything under it, the deepest first.
+    const covers = folds.filter((f) => f.r).sort((a, b) => b.path.length - a.path.length);
+    const coverOf = (p: string) => covers.find((c) => p === c.path || p.startsWith(`${c.path}/`));
     for (const b of up.kind === 'ready' ? up.paths : []) {
-      if (b.dir || landed.has(b.path) || neverMaterial(b.path)) continue;
+      if (b.dir || neverMaterial(b.path)) continue;
       const c = coverOf(b.path);
       let fold: Fold, from: string;
       if (c) {
-        if (c.fold.unknown) continue;
-        fold = c.fold;
-        from = c.file ? c.from : join(c.from, b.path.slice(c.fold.path.length + 1));
+        if (c.unknown) continue;
+        fold = c;
+        from = c.file ? c.from! : join(c.from!, b.path.slice(c.path.length + 1));
       } else {
         if (!b.path.includes('/')) continue;
         from = b.path;
-        // Every candidate's tree is asked for (the cache reads it, the page draws again once it lands): the first read
-        // that has the file wins; while none does and one is still being read, the folder waits; a read lacking it is passed over.
-        const reads = candidates.map((x) => [x, files.tree(courseOrg, x)] as const);
-        const has = reads.find(([, t]) => t.kind === 'ready' && t.paths.some((e) => !e.dir && e.path === from));
+        // The first candidate read that has the file wins; while none does and one is still being read, the folder waits; a read lacking it is passed over.
+        reads ??= candidates.map((x) => [x, files.tree(courseOrg, x)] as const);
+        const has = reads.find(([, t]) => blobs(t)?.has(from));
         const waiting = !has && reads.some(([, t]) => t.kind === 'loading');
         const src = has?.[0] ?? candidates[0] ?? '';
         const folder = parentOf(b.path);
-        fold = folds.find((f) => !f.r && f.path === folder && f.src === src) ?? (folds.push({ src, repo, path: folder, copies: new Map(), orphans: [] }), folds[folds.length - 1]);
+        fold = folds.find((f) => !f.r && f.path === folder && f.src === src) ?? (folds.push({ src, repo, path: folder, copies: new Map(), extra: [] }), folds[folds.length - 1]);
         if (waiting) fold.unknown = true;
       }
       if (shas(fold.src)?.has(from)) fold.copies.set(from, b.path);
-      else fold.orphans.push(b.path);
+      // Released, its course file gone: only in the semester while students still have it.
+      else if (liveShas?.has(b.path)) fold.extra.push(b.path);
+    }
+    // What a release copies that `upstream` lacks, in the release's own folder (not a deeper release's).
+    const added = new Set<string>();
+    for (const [fold, ship] of ships) {
+      for (const [x, to] of ship) {
+        if (landed.has(to) || coverOf(to) !== fold) continue;
+        fold.copies.set(x, to);
+        added.add(to);
+      }
     }
     // A file the default branch adds under a released folder (the deepest that holds it).
-    const all = new Set([...landed, ...folds.flatMap((f) => [...f.copies.values(), ...f.orphans])]);
-    const added = new Map<Fold, string[]>();
-    const dirs = folds.filter((f) => !covers.some((c) => c.fold === f && c.file)).sort((a, b) => b.path.length - a.path.length);
+    const dirs = folds.filter((f) => !f.file).sort((a, b) => b.path.length - a.path.length);
     for (const p of live.kind === 'ready' ? live.paths : []) {
-      if (p.dir || all.has(p.path) || neverMaterial(p.path)) continue;
-      const f = dirs.find((x) => x.path && p.path.startsWith(`${x.path}/`));
-      if (f) added.set(f, [...(added.get(f) ?? []), p.path]);
+      if (p.dir || landed.has(p.path) || added.has(p.path) || neverMaterial(p.path)) continue;
+      dirs.find((x) => x.path && p.path.startsWith(`${x.path}/`))?.extra.push(p.path);
     }
-    const liveShas = blobs(live);
     for (const f of folds) {
       if (f.unknown) continue;
       const course = shas(f.src);
       if (!course) continue;
       const states = fileStates([...f.copies.keys()].map((path) => ({ path, sha: course.get(path)! })), up, live, { destPath: (x) => f.copies.get(x)! });
-      // Released, its course file gone: only in the semester while students still have it.
-      const extra = [...f.orphans.filter((p) => liveShas?.has(p)), ...(added.get(f) ?? [])];
-      const step = folderStep([...Object.values(states), ...extra.map((): FileState => 'ahead')]);
+      const step = folderStep([...Object.values(states), ...f.extra.map((): FileState => 'ahead')]);
       if (!step) continue;
       out.push({
         ...(f.r ? { r: f.r } : {}), src: f.src, repo, path: f.path, step,
         files: [
           ...Object.entries(states).filter(([, x]) => x !== 'up_to_date').map(([path, state]) => ({ path: f.copies.get(path)!, state, from: path })),
-          ...extra.map((path) => ({ path, state: 'ahead' as const, added: true as const })),
+          ...f.extra.map((path) => ({ path, state: 'ahead' as const, added: true as const })),
         ],
       });
     }
@@ -493,13 +543,22 @@ export function outOfStep(status: Status, files: Files, courseOrg: string, semOr
   return out;
 }
 
-/** A course file the semester changed: edited there (`ahead`, `diverged`) or removed there. */
-export const editedState = (s: FileState | undefined) => s === 'ahead' || s === 'diverged' || s === 'removed';
+/** A course file edited in the semester (`ahead`, `diverged`): an edit PR into source carries back. */
+export const semesterEdited = (s: FileState | undefined) => s === 'ahead' || s === 'diverged';
+
+/** A course file the semester changed: edited there (`semesterEdited`) or removed there. */
+export const editedState = (s: FileState | undefined) => semesterEdited(s) || s === 'removed';
 
 /**
- * The files only the semester has under `repo`'s released folders in `destRepo` (`outOfStep`'s
- * `added`, semester paths): they have no row in the course tree, so the course side lists them.
+ * What the semester edited of `srcRepo`'s files in `destRepo`, the one count the course index chip
+ * and the Files panel's notice share: the course paths whose state at the same path (`states`,
+ * `fileStates`) is edited or removed there (`editedState`), and the files only the semester has
+ * under `srcRepo`'s released folders (`outOfStep`'s `added`, semester paths: no row in the course
+ * tree, so the course side lists them).
  */
-export function semesterAdded(rows: OutOfStep[], repo: string, destRepo: string): string[] {
-  return [...new Set(rows.filter((x) => x.src === repo && x.repo === destRepo).flatMap((x) => x.files.filter((f) => f.added).map((f) => f.path)))];
+export function editedFiles(states: Record<string, FileState>, rows: OutOfStep[], srcRepo: string, destRepo: string): { coursePaths: string[]; added: string[] } {
+  return {
+    coursePaths: Object.keys(states).filter((k) => editedState(states[k])),
+    added: [...new Set(rows.filter((x) => x.src === srcRepo && x.repo === destRepo).flatMap((x) => x.files.filter((f) => f.added).map((f) => f.path)))],
+  };
 }

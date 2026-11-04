@@ -235,23 +235,25 @@ files (its chip counts the differing files): each released folder
 (`status.json` `releases`, the last release per destination, and every file the semester repo's
 `upstream` branch holds, so a release by hand counts too: its folder is the file's own, its source
 the same path in the newest course materials repo that has it) whose files differ, worked out
-three-way in the page (`outOfStep`: the release's folder copy as `groupPicks` takes it, then
-`fileStates`; a file only the semester has, added there or released and since dropped by the
+three-way in the page (`outOfStep`, worked out once per status and set of reads: every file on
+`upstream` mapped to its source through the deepest release covering it, and what a release's
+folder copy takes (`groupPicks`) that `upstream` lacks, then `fileStates`; a file only the semester has, added there or released and since dropped by the
 course, counts ahead, "added in the semester"; `folderStep` ahead / behind / diverged), its files filtered by step (`.seg`, counts of
 files; a file the course added is behind), beside one PR into source (all) (`keepFuture`, the
 full run, greyed when nothing is ahead or diverged). Each folder is a fold, open at first, headed by its path alone;
 under it each differing file is a row: its name, chip, a muted "+A −D" once its diff is read
 (`useDiff`; "binary" for a document or image), Re-release (`reRelease`: `releasePicked` of that one file onto
 its released copy, Options the advanced Overwrite, `replace`; greyed for ahead and for a file only the semester has),
-PR into source (`keepFuturePaths`: `release.propagate_back` with `paths`, `<repo>/<path>` or just
-`<path>` in the semester's default repo; greyed for behind), the Open split button
+Overwrite beside it for a file removed, ahead or diverged (Re-release with `replace` set, and a confirm line),
+PR into source (`keepFuturePaths`: `release.propagate_back` with `paths`, always `<repo>/<path>`,
+as the engine reads a leading repo name as the repo; greyed for behind), the Open split button
 (`ui/OpenSplit.tsx`: the semester copy on GitHub, its arrow `useMenu` with GitHub, github.dev and
 the editor from Profile) and a Diff toggle drawing `ui/FileDiff.tsx` under the row (the course
 blob against the semester's default-branch blob as a unified diff, the `diff` package imported on
 first open, text only, capped at 2000 lines; headed by the path, what it compares, and Compare on
 GitHub `compare/upstream...<default>#diff-<sha256 of the path>` for ahead and diverged). A release that conflicted waits in an open pull request from the semester
-repo's `upstream` branch (`listPulls`, read once per repo listed): each ahead or diverged file whose
-`upstream` blob differs from the default branch's then has, in place of Re-release, an amber "Release
+repo's `upstream` branch (`listPulls`, read once per repo listed, and `listPullFiles`, the files it
+changes, once per pull request): each ahead or diverged file that pull request changes then has, in place of Re-release, an amber "Release
 pending in a pull request" with Open PR and Overwrite (Re-release with `replace` set, and a confirm
 line). The engine's `DIVERGED_RELEASED` lines stay on the Dashboard. Below it, for those who can change the course, the Release by hand fold: the Files
 panel's Release view (`ui/FilesPanel.tsx`) from the course's materials repos and Other repos
@@ -286,7 +288,7 @@ greyed, a muted chip), behind, ahead, diverged, removed in semester (`upstream` 
 diverged open a popover with one action (tick the row; PR into source, `release.propagate_back`;
 the open pull request). A folder rolls its rows up in the same words, up to date left out (a
 folder all released has no chip). On the course page, when the chosen semester edited released
-files of the repo (ahead, diverged or removed, and the semester-only files under its released folders, `semesterAdded`), a notice over the tree counts them, with PR into source and
+files of the repo (ahead, diverged or removed, and the semester-only files under its released folders: `editedFiles`, the count the index chip shares), a notice over the tree counts them, with PR into source and
 See which (the tree narrowed to them; Show all). The Course materials index chips each repo with
 the files the newest live semester edited (`editedIn`). The manifest groups picks by immediate parent folder in
 tree order (`groupPicks`); each group's Edit destination sets its To repo (the run's, the

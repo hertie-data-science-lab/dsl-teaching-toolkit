@@ -5,7 +5,7 @@
 // reading on its own, so a row can show its line counts (`lineCounts`) once its diff is read. `diffAnchor` is GitHub's
 // per-file anchor on a compare page (`#diff-<sha256 hex of the path>`).
 
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { StructuredPatch } from 'diff';
 import type { FileState, Files } from '../model/files';
 
@@ -71,19 +71,19 @@ export function useDiff(files: Files, course: Side | null, semester: Side | null
     void loadDiff().then((m) => live && setMod(m));
     return () => void (live = false);
   }, [want]);
+  // Nothing is read until wanted.
+  const a = want ? (course ? sideText(files.file(...course)) : '') : undefined;
+  const b = want ? (semester ? sideText(files.file(...semester)) : '') : undefined;
+  // The diff worked out once per pair of texts.
+  const ready = useMemo((): DiffResult | null => {
+    if (typeof a !== 'string' || typeof b !== 'string' || !mod) return null;
+    const patch = mod.structuredPatch('course', 'semester', a, b, '', '', { context: 3 });
+    const lines = patch.hunks.flatMap((h) => h.lines);
+    return { kind: 'ready', ...diffRows(patch), add: lines.filter((l) => l[0] === '+').length, del: lines.filter((l) => l[0] === '-').length };
+  }, [a, b, mod]);
   if (!want) return { kind: 'loading' };
-  const a = course ? sideText(files.file(...course)) : '';
-  const b = semester ? sideText(files.file(...semester)) : '';
   if (a === null || b === null) return { kind: 'not_diffable' };
-  if (a === undefined || b === undefined || !mod) return { kind: 'loading' };
-  const patch = mod.structuredPatch('course', 'semester', a, b, '', '', { context: 3 });
-  const lines = patch.hunks.flatMap((h) => h.lines);
-  return { kind: 'ready', ...diffRows(patch), add: lines.filter((l) => l[0] === '+').length, del: lines.filter((l) => l[0] === '-').length };
-}
-
-/** The course copy against the semester's, as `useDiff` reads them. */
-export function FileDiff({ files, course, semester }: { files: Files; course: Side | null; semester: Side | null }) {
-  return <DiffView d={useDiff(files, course, semester)} />;
+  return ready ?? { kind: 'loading' };
 }
 
 /** A diff `useDiff` worked out, drawn. */

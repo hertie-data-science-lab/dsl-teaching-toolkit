@@ -972,7 +972,7 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
   const last = (status.operations ?? []).find((o) => o.op.startsWith('release.') && o.summary.includes(`${ident}:`));
   const dest = rel.dest?.repo || DEFAULT_DEST_REPO, destPath = rel.dest?.path || ref.source.path;
   // A TBC entry's console release offers its session date in the result panel (decision 0043 rule 5).
-  const dated = (def: OpDef): OpDef => (rel.when === null ? { ...def, doneExtra: <SessionDate p={p} rel={rel} id="op-sd" /> } : def);
+  const dated = (def: OpDef): OpDef => (rel.when === null ? { ...def, outcomeExtra: (c: string | undefined) => (c === 'failed' ? null : <SessionDate p={p} rel={rel} id="op-sd" />) } : def);
   return (
     <>
       <div class="page-head">

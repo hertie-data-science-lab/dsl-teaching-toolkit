@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
 import { afterEach, describe, expect, it } from 'vitest';
-import { FileDiff, NOT_DIFFABLE, diffAnchor, diffRows } from '../src/ui/FileDiff';
+import { DiffView, NOT_DIFFABLE, diffAnchor, diffRows, useDiff, type Side } from '../src/ui/FileDiff';
 import { StaticFiles } from './staticFiles';
 
 let root: HTMLElement | null = null;
@@ -17,7 +17,12 @@ afterEach(() => {
   root = null;
 });
 
-async function mount(files: StaticFiles, course: [string, string, string] | null, semester: [string, string, string] | null) {
+/** A diff as the Released materials panel draws one: `useDiff`'s reading, drawn by `DiffView`. */
+function FileDiff({ files, course, semester }: { files: StaticFiles; course: Side | null; semester: Side | null }) {
+  return <DiffView d={useDiff(files, course, semester)} />;
+}
+
+async function mount(files: StaticFiles, course: Side | null, semester: Side | null) {
   root = document.createElement('div');
   document.body.appendChild(root);
   await act(() => render(<FileDiff files={files} course={course} semester={semester} />, root!));

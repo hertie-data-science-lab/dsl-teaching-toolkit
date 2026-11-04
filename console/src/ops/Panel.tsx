@@ -246,11 +246,11 @@ export function OpPanel() {
     foot = <div class="actions"><button class="btn small quiet" type="button" disabled={c.stopping} onClick={() => void ops.cancel()}>{c.stopping ? 'Stopping…' : d.cancel}</button></div>;
   } else if (c.phase === 'done' && c.result) {
     const target = targetOf(d, values);
+    const extra = d.outcomeExtra?.(c.result.outcome?.conclusion);
     body = (
       <>
         <OutcomeView result={c.result} def={d} url={c.progress?.htmlUrl} stopped={c.stopped} />
-        {d.doneExtra && c.result.outcome?.conclusion !== 'failed' ? d.doneExtra : null}
-        {d.nothingExtra && c.result.outcome?.conclusion === 'nothing_to_do' ? <p class="op-confirm">{d.nothingExtra}</p> : null}
+        {extra ? (typeof extra === 'string' ? <p class="op-confirm">{extra}</p> : extra) : null}
         <p class="footnote">Written to <a href="#operations">All operations</a>.</p>
       </>
     );
@@ -262,11 +262,11 @@ export function OpPanel() {
     );
   } else {
     const allowed = ops.canRun({ ...c, values }) && !invalid;
+    const confirm = typeof d.confirm === 'function' ? d.confirm(values) : d.confirm;
     body = (
       <>
         <p class="op-intro">{d.intro}</p>
-        {d.confirm ? <p class="op-confirm">{d.confirm}</p> : null}
-        {d.introExtra?.(values) ? <p class="op-confirm">{d.introExtra(values)}</p> : null}
+        {confirm ? <p class="op-confirm">{confirm}</p> : null}
         {d.facts?.length ? <div class="op-facts">{d.facts.map((f) => <p>{f}</p>)}</div> : null}
         <Options c={c} ops={ops} />
         {c.error ? <p class="check-line bad"><span>{c.error}</span></p> : null}

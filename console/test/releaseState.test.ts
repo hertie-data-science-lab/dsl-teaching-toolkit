@@ -170,7 +170,7 @@ describe('the manifest’s groups', () => {
     expect(def).toMatchObject({ op: 'release.adhoc', name: 'Release by hand', title: '3 paths from 2 repos', verb: 'Release 3 paths', cancel: 'Stop before copying' });
     expect(Object.keys(def.options!)).toEqual(['replace']);
     expect(def.options!.replace).toMatchObject({ tier: 'advanced', label: 'Overwrite the semester’s copy, discarding its edits', default: false });
-    expect(def.introExtra).toBeUndefined();
+    expect(def.confirm).toBeUndefined();
     expect(def.facts).toEqual(['labs/ · all 2 files → materials/labs/', 'lectures/01_intro/ · 1 of 3 files → materials/lectures/01_intro/', '(top level) · 1 of 1 file → materials/']);
     expect(def.args.semester_dest_repo).toBe('materials,materials,materials');
     expect(def.target).toBe(`https://github.com/${ORG}/materials/tree/main/labs`);

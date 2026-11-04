@@ -25,17 +25,14 @@ export interface OpDef {
   where: string; // eyebrow, after the comma: "Fall 2026"
   title: string;
   intro: string;
-  confirm?: string; // a warning line under the intro ("Their old codes stop working.")
-  /** A line under the intro read from the Options' values as they stand (none: no line). */
-  introExtra?: (values: Record<string, unknown>) => string | undefined;
+  /** A warning line under the intro ("Their old codes stop working."), or one read from the Options' values as they stand (none: no line). */
+  confirm?: string | ((values: Record<string, unknown>) => string | undefined);
   /** Lines of figures under the intro ("Final: median 38, range 22–47, 2 held"). */
   facts?: string[];
   /** Shown under a preview's outcome, read afresh after each preview (who would be emailed). */
   dryExtra?: ComponentChildren;
-  /** Shown under the verb's outcome unless it failed (a released TBC entry's session date). */
-  doneExtra?: ComponentChildren;
-  /** A line under the engine's words when the run had nothing to do (why, and what would). */
-  nothingExtra?: string;
+  /** Shown under the verb's outcome, by its conclusion (a released TBC entry's session date; why a run had nothing to do); a string is a line of its own. */
+  outcomeExtra?: (conclusion: string | undefined) => ComponentChildren;
   verb: string;
   /** A `?` beside the verb, wherever it shows: its name, and one paragraph per string. */
   verbHint?: { label: string; text: string[] };
