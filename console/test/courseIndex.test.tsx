@@ -251,7 +251,7 @@ describe('materials settings file tree', () => {
     expect([...out.matchAll(/<option value="([^"]+)"[^>]*>([^<]+)<\/option>/g)].filter((m) => m[1].startsWith('hertie-dsl-demo-f')).map((m) => m[2])).toEqual(['Fall 2026']);
     expect(out).toContain('id="rel-into"');
     // Schedule on the calendar is the Release view's lede, picks or none (its link is the filesPanel test's).
-    expect(out).toContain('Want to pre-automate these releases?');
+    expect(out).toContain('Want to automate these releases?');
   });
   it('warns on a truncated tree and does not flag rules as matching nothing', async () => {
     const part: Files = Object.assign(Object.create(files), { tree: (o: string, r: string) => ({ ...files.tree(o, r), truncated: true }) });

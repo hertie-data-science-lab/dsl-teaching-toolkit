@@ -76,6 +76,8 @@ export interface FilesPanelProps {
   sources?: { materials: string[]; others: string[]; onAdd?: (repo: string) => void };
   /** The Schedule editor's new entry with the picks prefilled. */
   scheduleHref?: (semOrg: string, rows: ReleaseRow[]) => string;
+  /** The `?` after Schedule on the calendar; default `SCHEDULE_LINK_HINT`. */
+  scheduleHint?: string;
   /** An ahead chip's Keep for future semesters: the caller opens `keepFuture`. */
   onKeep?: (semester: SemesterRef) => void;
   /** A diverged file's open pull request; default: the destination repo's pull requests. */
@@ -96,6 +98,9 @@ const NEVER_FOLDER = 'A folder release never copies these files; tick the file i
 const linesOf = (text: string) => text.split('\n');
 const textOf = (lines: string[]) => lines.join('\n');
 const defaultOut = (d: string) => withMark(d.endsWith('\n') || !d ? d : `${d}\n`);
+
+/** The `?` after Schedule on the calendar. */
+export const SCHEDULE_LINK_HINT = 'You do not need finished materials to automate their release in advance. A schedule entry simply names a path and a date; the copy happens at that snapshot date, from whatever is in the path at that time. You can specify not-yet-existent file paths, or half-finished files, then keep editing in the course repo until the release time. Only what is there at that moment reaches students. Pre-scheduled entries also appear on the students’ calendar in advance, so the class can see what is coming.';
 
 const FILES_HINT = 'The repo’s files. Browse: a name opens the file here. Withhold: a tick means the file reaches students; untick a file or folder to withhold it (.releaseignore), then Save. Release: tick files or folders and Release to copy them to the chosen semester’s materials repo now, at the same paths; copies are additive and nothing is added to the schedule. Each row says whether that semester already has the file.';
 const RBH_HINT = 'Copies what you tick from the course repo to this semester’s materials repo now, at the same paths. Copies are additive and idempotent; files withheld by the repo’s .releaseignore never ship. Each row compares the course file with the semester’s repo the run writes to, at the same path; a group sent to another repo or path (Edit destination) is compared there in the manifest.';
@@ -435,7 +440,12 @@ function Panel(p: FilesPanelProps) {
     </>
   );
   // The panel's lede in Release (the semester page's always): the picks, or none, as a new schedule entry.
-  const sched = into && p.scheduleHref ? <p class="lede rh-sched">Want to pre-automate these releases? <a class="textlink" href={p.scheduleHref(into.org, rows)}>Schedule on the calendar →</a></p> : null;
+  const sched = into && p.scheduleHref ? (
+    <p class="lede rh-sched">
+      Want to automate these releases? <a class="textlink" href={p.scheduleHref(into.org, rows)}>Schedule on the calendar →</a>{' '}
+      <Hint small label="About scheduling these releases">{p.scheduleHint ?? SCHEDULE_LINK_HINT}</Hint>
+    </p>
+  ) : null;
   const hint = <><span class="para">{course ? FILES_HINT : RBH_HINT}</span><ChipMeanings /></>;
 
   if (!course) {

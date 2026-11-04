@@ -143,12 +143,20 @@ main { min-width: 0; }
 .chip { display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-display); font-weight: 600; font-size: 12px; line-height: 1.6; padding: 0 9px; border-radius: 999px; background: var(--sunk); color: var(--ink-2); white-space: nowrap; }
 .chip.ok { background: var(--ok-soft); color: var(--ok); }
 .chip.amber { background: var(--amber-soft); color: var(--amber-ink); }
-/* The Released materials page's "Out of step with the course": an amber round !, the filter, each folder's files. */
+/* The Released materials page's "Released materials that differ from their source files": an amber round !, the filter, each folder's files. */
 .out-of-step .seg { margin-bottom: 8px; }
 .out-of-step .seg .cnt { font-weight: 400; opacity: 0.75; }
 .out-of-step .step-files { grid-column: 1 / -1; border-top: 0; padding-top: 0; }
 .out-of-step .step-files > summary { min-height: 24px; font-size: 13px; color: var(--muted); }
 .out-of-step .step-files ul { list-style: none; margin: 4px 0 0; padding: 0 0 0 16px; display: grid; gap: 4px; }
+.out-of-step .file-diff-fold { border-top: 0; padding-top: 0; margin-left: 16px; }
+.out-of-step .file-diff-fold > summary { min-height: 22px; font-size: 12.5px; color: var(--muted); }
+.file-diff { font-family: var(--font-code); font-size: 12.5px; line-height: 1.45; max-height: 420px; overflow: auto; margin: 4px 0 0; padding: 6px 0; background: var(--sunk); border: 1px solid var(--rule); border-radius: 6px; }
+.file-diff > span { display: block; padding: 0 10px; white-space: pre; }
+.file-diff .fd-add { background: var(--ok-soft); }
+.file-diff .fd-del { background: var(--bad-soft); }
+.file-diff .fd-hunk { color: var(--muted); }
+.file-diff .fd-hunk:not(:first-child) { margin-top: 6px; border-top: 1px solid var(--rule); padding-top: 4px; }
 .step-bang { font-family: var(--font-display); font-weight: 700; font-size: 12px; width: 18px; height: 18px; border-radius: 999px; background: var(--amber-soft); color: var(--amber-ink); display: inline-grid; place-items: center; vertical-align: middle; }
 .chip.bad { background: var(--bad-soft); color: var(--bad-ink); }
 .chip.asg { background: var(--asg-bg); color: var(--asg-ink); }

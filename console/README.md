@@ -230,16 +230,21 @@ per materials repo (`materials`, then any other repo a released entry of `status
 `releases` wrote to), with its count of releases, last change, Open, and the index's tree
 (`RepoFiles`, `MaterialsTree` with `at="cohort"`), each file opening in the viewer beside it
 (`?file=`, `?folder=` as on the index), in a fold titled Released materials this semester. Then,
-collapsed and drawn only when there is one, Out of step with the course: each released folder
+collapsed and drawn only when there is one, Released materials that differ from their source
+files (its chip counts the differing files): each released folder
 (`status.json` `releases`, the last release per destination) whose files differ, worked out
 three-way in the page (`outOfStep`: the release's folder copy as `groupPicks` takes it, then
-`fileStates`; `folderStep` ahead / behind / diverged), filtered by step (`.seg`), each with
+`fileStates`, plus `semesterOnly`: a file only the semester copy has counts ahead, "added in the
+semester"; `folderStep` ahead / behind / diverged), filtered by step (`.seg`), each with
 Release again (`releaseAgain`), Keep for future semesters (`keepFuture`) and its differing files
-(the semester copy's `FileRow`, Compare on GitHub `compare/upstream...<default>` for ahead and
-diverged); the engine's `DIVERGED_RELEASED` lines stay on the Dashboard. Below it, for those who can change the course, the Release by hand fold: the Files
+(the semester copy's `FileRow`, Compare on GitHub `compare/upstream...<default>#diff-<sha256 of
+the path>` for ahead and diverged, and a Diff fold: `ui/FileDiff.tsx`, the course blob against the
+semester's default-branch blob as a unified diff, the `diff` package imported on first open,
+text only, capped at 2000 lines); the engine's `DIVERGED_RELEASED` lines stay on the Dashboard. Below it, for those who can change the course, the Release by hand fold: the Files
 panel's Release view (`ui/FilesPanel.tsx`) from the course's materials repos and Other repos
 (Add a course repo sets the `dsl-materials` topic, as Treat as course materials does); its
-lede, Schedule on the calendar (always shown; the course page's Files panel shows it in Release
+lede, "Want to automate these releases? Schedule on the calendar →" with its `?`
+(`SCHEDULE_LINK_HINT`, or the `scheduleHint` prop; always shown; the course page's Files panel shows it in Release
 only), opens the Schedule's new supporting-files entry with the picks
 (`?from=&paths=&to=&at=`, `scheduleNewHref`). `?cohort=` with
 `#materials` is this page (`screenOf`); `?course=` with `#materials`, and `#materials-<repo>`

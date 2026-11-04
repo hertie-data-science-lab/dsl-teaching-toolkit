@@ -1,11 +1,12 @@
 // @vitest-environment happy-dom
 // A semester's Released materials (`?cohort=<org>#materials`): its materials repo with the tree,
-// a file opening in the viewer, the released folders out of step with the course in their own
-// folded panel (three-way, filtered by step, Release again and Keep for future semesters, each
+// a file opening in the viewer, the released materials that differ from their source files in
+// their own folded panel (three-way, filtered by step, Release again and Keep for future semesters, each
 // folder's differing files), Release by hand below for those who can change the course (adding a course repo sets its
 // topic), the empty states, the nav and the route that keeps it apart from the course's
 // `#materials` / `#materials-<repo>`.
 
+import { createHash } from 'node:crypto';
 import { render } from 'preact';
 import { render as html } from 'preact-render-to-string';
 import { act } from 'preact/test-utils';
@@ -53,12 +54,12 @@ const files = (trees: Record<string, string[]> = { [`${ORG}/materials`]: PATHS }
 // semester (ahead), lab.ipynb changed in the course and new.md added there (behind), slides.pdf
 // as released. `course` overrides a course blob's sha (`undefined` drops the file).
 const COURSE_PATHS = ['lectures/05_trees/notes.md', 'lectures/05_trees/slides.pdf', 'labs/lab-1/lab.ipynb', 'labs/lab-1/new.md', 'labs/lab-1/solutions/key.md'];
-function stepFiles(course: Record<string, string | undefined> = {}): Files {
+function stepFiles(course: Record<string, string | undefined> = {}, semesterExtra: string[] = []): Files {
   const shas: Record<string, string> = { [`${ORG}/materials/lectures/05_trees/notes.md`]: 'edited', [`${COURSE_ORG}/course-materials-f2026/labs/lab-1/lab.ipynb`]: 'new' };
   const paths = COURSE_PATHS.filter((x) => !(x in course) || course[x] !== undefined);
   for (const [k, v] of Object.entries(course)) if (v) shas[`${COURSE_ORG}/course-materials-f2026/${k}`] = v;
   const up = new StaticFiles({}, {}, { [`${ORG}/materials`]: PATHS });
-  const live = new StaticFiles({}, {}, { [`${ORG}/materials`]: PATHS, [`${COURSE_ORG}/course-materials-f2026`]: paths }, {
+  const live = new StaticFiles({}, {}, { [`${ORG}/materials`]: [...PATHS, ...semesterExtra], [`${COURSE_ORG}/course-materials-f2026`]: paths }, {
     [ORG]: [{ name: 'materials', pushed_at: '2026-09-22T14:38:46Z' }], [COURSE_ORG]: [{ name: 'course-materials-f2026' }],
   }, {}, shas);
   return Object.assign(Object.create(live), { tree: (o: string, r: string, ref?: string) => (ref ? up.tree(o, r) : live.tree(o, r)) });
@@ -166,8 +167,8 @@ describe('Released materials', () => {
   it('works out each released folder out of step with the course, three-way', () => {
     const st = (RELEASED as Extract<Loaded, { kind: 'ready' }>).status;
     expect(outOfStep(st, stepFiles(), COURSE_ORG, ORG, 'materials').map((x) => [x.path, x.step, x.files])).toEqual([
-      ['lectures/05_trees', 'ahead', [{ path: 'lectures/05_trees/notes.md', state: 'ahead' }]],
-      ['labs/lab-1', 'behind', [{ path: 'labs/lab-1/lab.ipynb', state: 'behind' }, { path: 'labs/lab-1/new.md', state: 'not_released' }]],
+      ['lectures/05_trees', 'ahead', [{ path: 'lectures/05_trees/notes.md', state: 'ahead', from: 'lectures/05_trees/notes.md' }]],
+      ['labs/lab-1', 'behind', [{ path: 'labs/lab-1/lab.ipynb', state: 'behind', from: 'labs/lab-1/lab.ipynb' }, { path: 'labs/lab-1/new.md', state: 'not_released', from: 'labs/lab-1/new.md' }]],
     ]);
     // solutions/key.md, withheld by default, is no difference; nor, once gone, is new.md.
     expect(outOfStep(st, stepFiles({ 'labs/lab-1/new.md': undefined }), COURSE_ORG, ORG, 'materials')[1].files.map((f) => f.path)).toEqual(['labs/lab-1/lab.ipynb']);
@@ -176,15 +177,35 @@ describe('Released materials', () => {
     expect(outOfStep(st, files(), COURSE_ORG, ORG, 'materials')).toEqual([]);
   });
 
+  it('counts a file only the semester copy has as ahead, added in the semester, and lists it with its Open menu', async () => {
+    const st = (RELEASED as Extract<Loaded, { kind: 'ready' }>).status;
+    // slides.pdf as released, notes.md edited: in step but for the added files.
+    const f = stepFiles({ 'lectures/05_trees/notes.md': undefined }, ['lectures/05_trees/extra.md', 'lectures/05_trees/.DS_Store']);
+    const lec = outOfStep(st, f, COURSE_ORG, ORG, 'materials')[0];
+    expect(lec.step).toBe('ahead');
+    expect(lec.files).toEqual([{ path: 'lectures/05_trees/notes.md', state: 'ahead', added: true }, { path: 'lectures/05_trees/extra.md', state: 'ahead', added: true }]);
+    // Course-changed plus semester-added: diverged.
+    expect(outOfStep(st, stepFiles({}, ['labs/lab-1/mine.md']), COURSE_ORG, ORG, 'materials')[1].step).toBe('diverged');
+    const el = await mount(<SemesterMaterialsScreen {...props({ files: f })} />);
+    const row = el.querySelector<HTMLElement>('details.out-of-step ul.rows > li')!;
+    expect(row.querySelector('.r-sub.footnote')!.textContent).toBe('2 added in the semester');
+    const extra = [...row.querySelectorAll('details.step-files li')].find((li) => li.querySelector('code')!.textContent === 'extra.md')!;
+    expect(extra.querySelector('.chip')!.textContent).toBe('ahead');
+    expect(extra.querySelector('a.ft-name')!.getAttribute('href')).toBe(fileViewHref(ORG, 'materials', 'lectures/05_trees/extra.md', 'cohort'));
+    expect(extra.querySelector('.file-menu')).not.toBeNull();
+  });
+
   it('lists the released folders out of step in their own folded panel, filtered by step', async () => {
     const el = await mount(<SemesterMaterialsScreen {...props({ files: stepFiles() })} />);
     const folds = [...el.querySelectorAll<HTMLDetailsElement>(':scope > details.panel-fold')];
-    expect(folds.map((d) => d.querySelector('summary h2')!.firstChild!.textContent!.trim())).toEqual(['Released materials this semester', 'Out of step with the course', 'Release by hand']);
+    expect(folds.map((d) => d.querySelector('summary h2')!.firstChild!.textContent!.trim())).toEqual(['Released materials this semester', 'Released materials that differ from their source files', 'Release by hand']);
     const panel = el.querySelector<HTMLDetailsElement>('details.out-of-step')!;
     expect(panel.open).toBe(false);
     const sum = panel.querySelector('summary h2')!;
     expect(sum.querySelector('.step-bang')!.textContent).toBe('!');
-    expect(sum.querySelector('.chip.amber')!.textContent).toBe('2 released folders out of step');
+    // Counts files: notes.md, then lab.ipynb and new.md.
+    expect(sum.querySelector('.chip.amber')!.textContent).toBe('3 released files differ');
+    expect(sum.querySelector('.hint-pop')!.textContent).toMatch(/^For each released folder the toolkit compares the course copy with the semester’s and lists every file that differs\. A folder is listed/);
     expect(sum.querySelector('.hint-pop')!.textContent).toContain('Nothing changes until you choose.');
     // The engine's DIVERGED_RELEASED line is the Dashboard's, not this page's.
     expect(el.textContent).not.toContain('The released copy of Lecture 5 was edited');
@@ -193,7 +214,7 @@ describe('Released materials', () => {
     const rows = () => [...panel.querySelectorAll<HTMLElement>('ul.rows > li')];
     expect(rows().map((li) => li.querySelector('.r-title code')!.textContent)).toEqual(['lectures/05_trees/', 'labs/lab-1/']);
     expect(rows().map((li) => li.querySelector('.r-title .chip')!.textContent)).toEqual(['ahead', 'behind']);
-    expect(rows().map((li) => li.querySelector('.r-sub.footnote')!.textContent)).toEqual(['1 changed', '1 changed, 1 added']);
+    expect(rows().map((li) => li.querySelector('.r-sub.footnote')!.textContent)).toEqual(['1 changed', '1 changed, 1 added in the course']);
     expect(rows().map((li) => [...li.querySelectorAll('.r-side button.btn.small.quiet')].map((b) => b.textContent))).toEqual([
       ['Release again', 'Keep for future semesters'], ['Release again', 'Keep for future semesters'],
     ]);
@@ -209,7 +230,11 @@ describe('Released materials', () => {
     expect(notes.querySelector('a.ft-name code')!.textContent).toBe('notes.md');
     expect(notes.querySelector('.file-menu')).not.toBeNull();
     expect(notes.querySelector('.chip')!.textContent).toBe('ahead');
-    expect(notes.querySelector<HTMLAnchorElement>('a.textlink[href*="compare"]')!.getAttribute('href')).toBe(`https://github.com/${ORG}/materials/compare/upstream...main`);
+    // Compare on GitHub opens at the file's own diff: GitHub's anchor, the path's sha256.
+    const anchor = createHash('sha256').update('lectures/05_trees/notes.md').digest('hex');
+    for (let i = 0; i < 4; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(notes.querySelector<HTMLAnchorElement>('a.textlink[href*="compare"]')!.getAttribute('href')).toBe(`https://github.com/${ORG}/materials/compare/upstream...main#diff-${anchor}`);
+    expect(notes.querySelector('details.file-diff-fold > summary')!.textContent).toBe('Diff');
     const labRows = [...lab.querySelectorAll('li')];
     expect(labRows.map((li) => li.querySelector('code')!.textContent)).toEqual(['lab.ipynb', 'new.md']);
     expect(labRows[0].querySelector('a[href*="compare"]')).toBeNull();
@@ -231,10 +256,10 @@ describe('Released materials', () => {
     expect(open.mock.calls[1][0]).toMatchObject({ op: 'release.propagate_back', name: 'Keep for future semesters' });
   });
 
-  it('draws no Out of step panel when every released folder is in step', () => {
+  it('draws no differing-materials panel when every released folder is in step', () => {
     const out = html(<SemesterMaterialsScreen {...props()} />);
     expect(out).not.toContain('out-of-step');
-    expect(out).not.toContain('Out of step with the course');
+    expect(out).not.toContain('Released materials that differ from their source files');
   });
 
   it('says when nothing is released yet, no repo exists yet, or the files cannot be read', () => {

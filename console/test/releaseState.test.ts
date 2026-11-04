@@ -10,7 +10,7 @@ import { LiveFiles, type TreeState } from '../src/model/files';
 import { DEFAULT_DEST_REPO } from '../src/model/policy';
 import {
   assignmentStems, COMMA_TITLE, countsWords, destPathOf, destRepos, effectiveDestRepo, eligibleDestination, entryDestRepos, fileStates, foldersCopied, groupPicks, LIST_MAX,
-  releaseBlocked, requestOf, toArgs, TOO_MANY, type FileState, type Group, folderStep, stepWords,
+  releaseBlocked, requestOf, toArgs, TOO_MANY, type FileState, type Group, folderStep, semesterOnly, stepWords,
 } from '../src/model/releaseState';
 
 describe('a released folder’s step', () => {
@@ -22,8 +22,15 @@ describe('a released folder’s step', () => {
     expect(folderStep(['diverged'])).toBe('diverged');
     expect(folderStep(['up_to_date'])).toBeNull();
     expect(folderStep(['ahead', 'unknown'])).toBeNull();
-    expect(stepWords(['behind', 'ahead', 'not_released', 'up_to_date'])).toBe('2 changed, 1 added');
-    expect(stepWords(['not_released'])).toBe('1 added');
+    expect(stepWords(['behind', 'ahead', 'not_released', 'up_to_date'])).toBe('2 changed, 1 added in the course');
+    expect(stepWords(['not_released'])).toBe('1 added in the course');
+    expect(stepWords(['ahead', 'behind'], 156)).toBe('2 changed, 156 added in the semester');
+  });
+
+  it('finds the files only the semester copy has under a folder, clutter aside', () => {
+    const t: TreeState = { kind: 'ready', truncated: false, paths: ['a/x.md', 'a/new.md', 'a/.DS_Store', 'ab/y.md', 'a/sub'].map((path) => ({ path, dir: path === 'a/sub', sha: 's' })) };
+    expect(semesterOnly(t, 'a', new Set(['a/x.md']))).toEqual(['a/new.md']);
+    expect(semesterOnly({ kind: 'loading' }, 'a', new Set())).toEqual([]);
   });
 });
 import { fnmatch } from '../src/model/selection';

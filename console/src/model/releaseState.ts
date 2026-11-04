@@ -91,11 +91,25 @@ export function folderStep(states: FileState[]): FolderStep | null {
   return ahead ? 'ahead' : behind ? 'behind' : null;
 }
 
-/** "2 changed, 1 added": a folder's differing files, a file the course added since the release counted as added. */
-export function stepWords(states: FileState[]): string {
+/**
+ * "2 changed, 1 added in the course, 156 added in the semester": a released folder's differing
+ * files, from its course files' states and the number of files only the semester copy has
+ * (`semesterOnly`, each counted `ahead` in `folderStep`).
+ */
+export function stepWords(states: FileState[], semesterAdded = 0): string {
   const changed = states.filter((x) => x === 'behind' || x === 'ahead' || x === 'diverged').length;
   const added = states.filter((x) => x === 'not_released').length;
-  return [changed ? `${changed} changed` : '', added ? `${added} added` : ''].filter(Boolean).join(', ');
+  return [changed ? `${changed} changed` : '', added ? `${added} added in the course` : '', semesterAdded ? `${semesterAdded} added in the semester` : ''].filter(Boolean).join(', ');
+}
+
+/**
+ * The files under a released `folder` that only the semester copy has (`landed`: where the
+ * course's files land), clutter aside: added in the semester, `ahead` as the engine's divergence
+ * reads a released-only file. Empty while the semester tree cannot be read.
+ */
+export function semesterOnly(students: TreeState, folder: string, landed: Set<string>): string[] {
+  if (students.kind !== 'ready') return [];
+  return students.paths.filter((x) => !x.dir && x.path.startsWith(`${folder}/`) && !landed.has(x.path) && !neverMaterial(x.path)).map((x) => x.path);
 }
 
 export type Counts = Partial<Record<FileState, number>>;

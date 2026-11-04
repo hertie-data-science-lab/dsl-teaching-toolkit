@@ -19,8 +19,8 @@ A `files:` item of a `schedule.yml` entry releases exactly what the ops below do
 ### From the console
 
 In the semester nav, **Materials** opens **Released materials this semester** (each semester
-repo as students have it, every file opening in the viewer), **Out of step with the course**
-([below](#out-of-step-with-the-course)) when a released folder differs from the course copy, and
+repo as students have it, every file opening in the viewer), **Released materials that differ
+from their source files** ([below](#released-materials-that-differ-from-their-source-files)) when a released folder differs from the course copy, and
 **Release by hand**:
 
 1. **From**: pick a course repo. Its tree is on the left.
@@ -45,7 +45,7 @@ repo as students have it, every file opening in the viewer), **Out of step with 
    their folders instead, or release in two goes.
 
 Picks from several course repos (switch **From**; earlier picks stay in the manifest) into
-several semester repos go out as one run. **Schedule on the calendar**, under the panel's title,
+several semester repos go out as one run. **Want to automate these releases? Schedule on the calendar**, under the panel's title,
 opens a new Schedule entry with the same files (or an empty one, with nothing ticked) instead, to
 release them at a time ([07](07-schedule-releases.md)).
 
@@ -54,16 +54,16 @@ The same view is on each course repo's settings page (**Course materials** → t
 ([02](02-add-materials-to-course.md)). Its **Browse** view marks whatever does not reach
 students with one plain **withheld** chip; **Withhold** says why.
 
-### Out of step with the course
+### Released materials that differ from their source files
 
 A folded panel listing every released folder whose files differ between the course copy and
-the semester's: **ahead** (edited in the semester), **behind** (changed in the course since the
+the semester's, its count the differing files: **ahead** (edited in the semester, a file added there included), **behind** (changed in the course since the
 release, a file added there included) or **diverged** (both). A filter narrows it to one kind.
 Each folder has **Release again** (the course version, merged onto the semester's edit; a
 conflict opens a pull request) and **Keep for future semesters**
 ([below](#carrying-cohort-edits-back)), and opens to its differing files, each with its open
-menu on the semester copy and, for an edited one, **Compare on GitHub**. Nothing changes until
-you choose.
+menu on the semester copy, a **Diff** fold showing what changed (text files), and, for an
+edited one, **Compare on GitHub** at that file. Nothing changes until you choose.
 
 ### The ops
 

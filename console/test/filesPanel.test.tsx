@@ -15,7 +15,7 @@ import { GitHubClient } from '../src/github/client';
 import type { FileState, TreeState } from '../src/model/files';
 import type { Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
-import { FilesPanel, type FilesPanelProps } from '../src/ui/FilesPanel';
+import { FilesPanel, SCHEDULE_LINK_HINT, type FilesPanelProps } from '../src/ui/FilesPanel';
 import { FakeGitHub, fileBody } from './fake';
 import example from './fixtures/status.example.json';
 import { StaticFiles } from './staticFiles';
@@ -336,7 +336,9 @@ describe('the Files panel', () => {
     const { el } = await mount({ scheduleHref });
     await click(tab(el, 'Release'));
     const lede = () => el.querySelector<HTMLElement>('.files-panel > p.lede.rh-sched')!;
-    expect(lede().textContent).toBe('Want to pre-automate these releases? Schedule on the calendar →');
+    expect(shown(lede())).toBe('Want to automate these releases? Schedule on the calendar → ?');
+    // The ? right after the link: the placeholder wording, or the caller's.
+    expect(lede().querySelector('a.textlink + .hint-wrap .hint-pop')!.textContent).toBe(SCHEDULE_LINK_HINT);
     expect(lede().querySelector('a')!.getAttribute('href')).toBe(`?cohort=${SEM}#schedule-0`);
     // Before the tree and its heads, not in the footer.
     expect(lede().nextElementSibling!.querySelector('.file-tree')).not.toBeNull();
