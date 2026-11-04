@@ -37,7 +37,8 @@ export const HOST_DEFAULT: Sel = rules.defaults.host;
 export const PUBLISH_DEFAULT: Sel = rules.defaults.publish;
 export const FLOORS: Record<string, Floor> = rules.floor;
 
-const fnmatch = (p: string) => new RegExp(`^${p.replace(/[.+^${}()|\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`);
+/** An fnmatch pattern as an anchored RegExp: `*` any run, `?` one character, `[...]` a class. */
+export const fnmatch = (p: string) => new RegExp(`^${p.replace(/[.+^${}()|\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`);
 /** Never released by any route (`selection.DENYLIST_HARD`, decision B): `.git`, `.system`, `.env*`, grading files. */
 export const DENYLIST_HARD: string[] = rules.denylist.hard;
 /** Withheld from a folder copy by default, a `!` line re-including them (`selection.DENYLIST_CONTENT`). */

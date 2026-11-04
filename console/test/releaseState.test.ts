@@ -9,8 +9,12 @@ import { compileAll } from '../src/edit/glob';
 import { LiveFiles, type TreeState } from '../src/model/files';
 import { DEFAULT_DEST_REPO } from '../src/model/policy';
 import {
-  countsWords, destPathOf, destRepos, effectiveDestRepo, eligibleDestination, fileStates, foldersCopied, groupPicks, requestOf, toArgs, type FileState, type Group,
+  assignmentStems, COMMA_TITLE, countsWords, destPathOf, destRepos, effectiveDestRepo, eligibleDestination, entryDestRepos, fileStates, foldersCopied, groupPicks, LIST_MAX,
+  releaseBlocked, requestOf, toArgs, TOO_MANY, type FileState, type Group,
 } from '../src/model/releaseState';
+import { fnmatch } from '../src/model/selection';
+import { validateArgs } from '../src/ops/adapter';
+import { opSpec } from '../src/ops/registry';
 import type { Loaded } from '../src/model/status';
 import { releaseAdhoc, releasePicked } from '../src/ops/defs';
 import { StaticFiles } from './staticFiles';
@@ -177,7 +181,7 @@ describe('a disabled folder tick', () => {
 });
 
 describe('a destination name', () => {
-  const known = { org: ORG, students: ['assignment-1-octocat'] };
+  const known = { org: ORG, stems: ['assignment-1'] };
   it('refuses the semester’s reserved names and student repos', () => {
     expect(eligibleDestination('semester-config', known)).toBe('That name is reserved for the semester’s config.');
     expect(eligibleDestination('.github', known)).toMatch(/^That name is reserved for /);
@@ -190,6 +194,55 @@ describe('a destination name', () => {
     expect(eligibleDestination('other-org.github.io', known)).toBe('That name is reserved for the semester.');
     expect(eligibleDestination('Join', known)).toBe('That name is reserved for the enrolment page.');
     expect(eligibleDestination('slides', known)).toBeNull();
+  });
+
+  it('refuses any `<assignment stem>-` name, made or not, as the engine does', () => {
+    // A repo not made yet is still a student's, when they accept (`discovery.reserved_destination`).
+    expect(eligibleDestination('assignment-1-nobody-yet', known)).toBe('That name is reserved for a student’s repo.');
+    expect(eligibleDestination('assignment-1', known)).toBeNull();
+    expect(eligibleDestination('assignment-10-x', known)).toBeNull();
+    // The stems: each assignment's key, and its semester-side name where that differs.
+    const status = { assignments: [{ slug: 'hw1', semester_name: 'hw1-f2026' }, { slug: 'Project' }] } as never;
+    expect(assignmentStems(status)).toEqual(['hw1', 'hw1-f2026', 'project']);
+    expect(eligibleDestination('project-team-a', { org: ORG, stems: assignmentStems(status) })).toBe('That name is reserved for a student’s repo.');
+    expect(assignmentStems(undefined)).toEqual([]);
+  });
+
+  it('matches the reserved globs with the one fnmatch builder', () => {
+    expect(fnmatch('*.github.io').test('x.github.io')).toBe(true);
+    expect(fnmatch('*.github.io').test('xgithubio')).toBe(false);
+    expect(fnmatch('grades-*').test('grades-octocat')).toBe(true);
+    expect(fnmatch('grades-*').test('my-grades-x')).toBe(false);
+    expect(eligibleDestination('Grades-Octocat', known)).toBe('That name is reserved for students’ marks.');
+  });
+});
+
+describe('one release by hand', () => {
+  const row = (path: string, toPath = path) => ({ repo: 'course-materials-f2026', path, toRepo: 'materials', toPath });
+  it('caps each list at the engine’s LIST_MAX, and refuses a path with a comma', () => {
+    // The schema's cap and the console's are one number.
+    const props = opSpec('release.adhoc').args_schema.properties as Record<string, { pattern: string }>;
+    for (const k of ['course_source_repo', 'course_source_path', 'semester_dest_repo', 'semester_dest_path']) expect(props[k].pattern).toContain(`{1,${LIST_MAX}}`);
+    const files = Array.from({ length: 40 }, (_, i) => row(`lectures/01_intro/notebooks/part_${i}.ipynb`));
+    expect(toArgs(files).course_source_path.length).toBeGreaterThan(1024);
+    expect(releaseBlocked(files)).toBeNull();
+    expect(validateArgs('release.adhoc', toArgs(files))).toEqual([]);
+    const many = Array.from({ length: 300 }, (_, i) => row(`lectures/01_intro/notebooks/part_${i}.ipynb`));
+    expect(releaseBlocked(many)).toBe(TOO_MANY);
+    expect(validateArgs('release.adhoc', toArgs(many))).not.toEqual([]);
+    expect(releaseBlocked([row('labs/a,b.md')])).toBe(COMMA_TITLE);
+    expect(releaseBlocked([row('labs/a.md', 'x,y')])).toBe(COMMA_TITLE);
+    expect(COMMA_TITLE).toBe('A path with a comma cannot be released from here; rename it.');
+    expect(TOO_MANY).toBe('Too many paths for one release: tick folders instead, or release in two goes.');
+  });
+
+  it('reads a cleared To path as no override: the group lands at its own path', () => {
+    const g: Group = { repo: 'r', head: 'labs/', folder: 'labs', kind: 'all', files: 1, sources: ['labs'], ship: ['labs/a.md'], withheld: [] };
+    for (const blank of ['', '  ']) {
+      const rows = requestOf([{ ...g, destPath: blank }, { ...g, folder: 'lectures', sources: ['lectures'], destPath: 'slides' }], { defaultDestRepo: 'materials' });
+      expect(toArgs(rows).semester_dest_path).toBe('labs,slides');
+    }
+    expect(destPathOf({ ...g, destPath: '' }, 'labs/a.md')).toBe('labs/a.md');
   });
 });
 
@@ -216,6 +269,20 @@ describe('after a release', () => {
     files.refreshTree.mockClear();
     refreshAfterRun({ ...def, op: 'semester.check' }, statuses, files, {}, 'materials');
     expect(files.refreshTree).not.toHaveBeenCalled();
+  });
+
+  it('after a schedule entry, reads again the repo that entry wrote to, else every one known', () => {
+    const files = { refresh: vi.fn(), refreshUnder: vi.fn(), refreshTree: vi.fn() };
+    const statuses = { reload: vi.fn(async () => {}) };
+    const def = { ...releaseAdhoc({ courseOrg: 'c', cohortOrg: ORG, where: 'Fall 2026' }, ['course-materials-f2026']), op: 'release.entry' };
+    const rel = (id: string, repo: string) => ({ id, dest: { repo, path: '' } }) as never;
+    const releases = [rel('s1', 'materials'), rel('code-1', 'lecture-code'), rel('s2', 'materials')];
+    refreshAfterRun(def, statuses, files, { entry: 'code-1' }, 'materials', releases);
+    expect(files.refreshTree.mock.calls).toEqual([[ORG, 'lecture-code']]);
+    files.refreshTree.mockClear();
+    refreshAfterRun(def, statuses, files, { entry: 'gone' }, 'materials', releases);
+    expect(files.refreshTree.mock.calls).toEqual([[ORG, 'materials'], [ORG, 'lecture-code']]);
+    expect(entryDestRepos('x', [], 'materials')).toEqual(['materials']);
   });
 
   it('LiveFiles reads a held tree again at every ref, into the same state, with its shas', async () => {

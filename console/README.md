@@ -262,9 +262,13 @@ rolls its rows up in the same words. The manifest groups picks by immediate pare
 tree order (`groupPicks`); each group's Edit destination sets its To repo (the run's, the
 semester's `release_destinations`, the repos its releases wrote to, or Choose a repo…,
 `ui/RepoPickerModal.tsx`, which refuses the engine's reserved names (`schemas/selection.json`
-`reserved`) and student repos inline) and To path; a group to another repo than the run's is amber with `(!)`. Picks
+`reserved`) and any `<assignment stem>-` name inline, `eligibleDestination`) and To path (blank:
+the group's own path); a group to another repo than the run's is amber with `(!)`. Picks
 may span course repos and destinations: one `release.adhoc` run (`releasePicked`,
-`requestOf`'s four paired lists), after which the destination trees are re-read. The run's
+`requestOf`'s four paired lists), after which the destination trees are re-read (after
+`release.entry`, the entry's destination from `status.json`). The lists are comma-joined, so a
+path with a comma has no tick, and each list is capped at `LIST_MAX` (8192, the registry's
+`PATH_LIST_PATTERN`): past it the footer disables Release with a note (`releaseBlocked`). The run's
 default repo is the semester's effective `materials_repo` from `status.json`, never the
 constant. The semester's panel is drawn only for those who can change the course; on the repo
 settings page a read-only viewer gets Browse alone (no view control, no ticks). Decision B's

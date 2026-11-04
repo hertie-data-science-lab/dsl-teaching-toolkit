@@ -9,9 +9,10 @@
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as releaseState from '../src/model/releaseState';
 import { EnvCtx, type Env } from '../src/env';
 import { GitHubClient } from '../src/github/client';
-import type { TreeState } from '../src/model/files';
+import type { FileState, TreeState } from '../src/model/files';
 import type { Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
 import { FilesPanel, type FilesPanelProps } from '../src/ui/FilesPanel';
@@ -48,20 +49,35 @@ const upstream: TreeState = {
 
 /** StaticFiles with a tree per ref (the semester's `upstream` branch). */
 class RefFiles extends StaticFiles {
-  constructor(private readonly refs: Record<string, TreeState>) {
+  constructor(private readonly refs: Record<string, TreeState>, course = COURSE) {
     super(
       { [`${COURSE_ORG}/${REPO}/.releaseignore`]: 'drafts/\n' },
       {},
-      { [`${COURSE_ORG}/${REPO}`]: COURSE, [`${SEM}/materials`]: STUDENTS },
+      { [`${COURSE_ORG}/${REPO}`]: course, [`${SEM}/materials`]: STUDENTS },
       { [SEM]: [{ name: 'materials' }, { name: 'lecture-code' }, { name: 'semester-config' }], [COURSE_ORG]: [{ name: REPO }] },
       {},
       { ...COURSE_SHAS, ...SEM_SHAS },
     );
   }
+  // Each read answers the same object until it changes, as LiveFiles' signals do.
+  private readonly held = new Map<string, unknown>();
+  private once<T>(key: string, read: () => T): T {
+    if (!this.held.has(key)) this.held.set(key, read());
+    return this.held.get(key) as T;
+  }
   tree(owner: string, repo: string, ref?: string): TreeState {
-    return ref ? (this.refs[`${owner}/${repo}@${ref}`] ?? { kind: 'absent' }) : super.tree(owner, repo);
+    return this.once(`${owner}/${repo}@${ref ?? ''}`, () => (ref ? (this.refs[`${owner}/${repo}@${ref}`] ?? { kind: 'absent' }) : super.tree(owner, repo)));
+  }
+  file(owner: string, repo: string, path: string): FileState {
+    return this.once(`${owner}/${repo}/${path}`, () => super.file(owner, repo, path));
   }
 }
+
+// A pass-through spy: the manifest's states are worked out once per change of their inputs.
+vi.mock('../src/model/releaseState', async (importOriginal) => {
+  const m = await importOriginal<typeof import('../src/model/releaseState')>();
+  return { ...m, fileStates: vi.fn(m.fileStates) };
+});
 
 const loaded = { kind: 'ready', sha: 's', stale: [], status: { ...(example as unknown as Status), releases: [] } } as unknown as Loaded;
 const semester = { org: SEM, termLabel: 'Fall 2026', loaded };
@@ -91,11 +107,16 @@ async function mount(over: Partial<FilesPanelProps> = {}) {
   };
   root = document.createElement('div');
   document.body.appendChild(root);
-  await act(() => render(<EnvCtx.Provider value={env}>{<FilesPanel {...props} />}</EnvCtx.Provider>, root!));
+  const draw = () => act(() => render(<EnvCtx.Provider value={env}>{<FilesPanel {...props} />}</EnvCtx.Provider>, root!));
+  await draw();
   await settle();
-  return { el: root, open };
+  return { el: root, open, rerender: draw };
 }
 
+const type = (input: HTMLInputElement, value: string) => act(() => {
+  input.value = value;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+});
 const tab = (el: HTMLElement, name: string) => [...el.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((b) => b.textContent === name)!;
 const click = (x: Element) => act(() => (x as HTMLElement).click());
 /** A file row by its path's last part, and a folder's summary by its name. */
@@ -301,6 +322,45 @@ describe('the Files panel', () => {
     expect(g.querySelector('.mf-warn')!.getAttribute('title')).toBe('This file is being released to a different repo: lecture-code');
     await click(el.querySelector('.rh-foot .btn')!);
     expect(open.mock.calls[0][0].args.semester_dest_repo).toBe('lecture-code');
+  });
+
+  it('a path with a comma has no live tick: the lists the op takes are comma-separated', async () => {
+    const files = new RefFiles({ [`${SEM}/materials@upstream`]: upstream }, [...COURSE, 'labs/a,b.md', 'odd,name/x.md']);
+    const { el } = await mount({ files });
+    await click(tab(el, 'Release'));
+    for (const t of [tick(fileRow(el, 'a,b.md'))!, tick(folder(el, 'odd,name'))!]) {
+      expect(t.disabled).toBe(true);
+      expect(t.title).toBe('A path with a comma cannot be released from here; rename it.');
+    }
+    expect(tick(fileRow(el, 'lab.ipynb'))!.disabled).toBe(false);
+  });
+
+  it('a cleared To path is no override; a To path with a comma stops Release with a note', async () => {
+    const { el, open } = await mount();
+    await click(tab(el, 'Release'));
+    await click(tick(folder(el, 'labs'))!);
+    await click(fileRow(el, 'slides.pdf'));
+    const to = el.querySelectorAll<HTMLInputElement>('.mf-adv input[type="text"]');
+    await type(to[0], '');
+    await type(to[1], 'slides');
+    await click(el.querySelector('.rh-foot .btn')!);
+    // Two paths, two landings: the cleared one at its own path.
+    expect(open.mock.calls[0][0].args.semester_dest_path).toBe('labs,slides/slides.pdf');
+    await type(to[1], 'a,b');
+    expect(el.querySelector<HTMLButtonElement>('.rh-foot .btn')!.disabled).toBe(true);
+    expect(el.querySelector('.rh-foot .check-line')!.textContent).toBe('A path with a comma cannot be released from here; rename it.');
+  });
+
+  it('works the manifest’s states out once, not on every render', async () => {
+    const { el, rerender } = await mount();
+    await click(tab(el, 'Release'));
+    await click(fileRow(el, 'slides.pdf'));
+    const spy = vi.mocked(releaseState.fileStates);
+    spy.mockClear();
+    await rerender();
+    await rerender();
+    expect(spy).not.toHaveBeenCalled();
+    expect([...el.querySelectorAll<HTMLElement>('.mf-rows li')].map(shown)).toContain('lectures/01_intro/slides.pdf→lectures/01_intro/slides.pdfbehind');
   });
 
   it('semester mode: Release by hand only, From the course repos', async () => {

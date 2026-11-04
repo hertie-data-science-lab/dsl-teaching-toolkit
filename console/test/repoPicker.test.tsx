@@ -9,7 +9,7 @@ import { RepoPickerModal } from '../src/ui/RepoPickerModal';
 
 const SEM = 'hertie-dsl-demo-f2026';
 const rows = [{ name: 'materials', note: 'the default' }, { name: 'lecture-code', note: '2 releases' }, { name: 'datasets', note: 'no releases yet' }];
-const reserved = { org: SEM, students: ['a1-octocat'] };
+const reserved = { org: SEM, stems: ['a1'] };
 
 let root: HTMLElement | null = null;
 afterEach(() => {

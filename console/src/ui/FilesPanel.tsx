@@ -31,7 +31,7 @@ import { plural } from '../model/format';
 import { DENYLIST_CONTENT, DENYLIST_HARD } from '../model/selection';
 import { withMark } from '../model/materialsRepo';
 import {
-  countsWords, effectiveDestRepo, fileStates, foldersCopied, groupPicks, destPathOf, requestOf,
+  assignmentStems, COMMA_TITLE, countsWords, effectiveDestRepo, fileStates, foldersCopied, groupPicks, destPathOf, releaseBlocked, requestOf,
   type FileState as ReleaseState, type Group, type ReleasePick, type ReleaseRow,
 } from '../model/releaseState';
 import type { Loaded } from '../model/status';
@@ -40,7 +40,7 @@ import { CheckLine, Loading, ghUrl } from './bits';
 import { SaveBar } from './edit';
 import { Hint } from './Hint';
 import { PatternTree } from './PatternTree';
-import { studentRepos, destinationRows } from './ReleaseChips';
+import { destinationRows } from './ReleaseChips';
 import { ReleaseFoot, ReleaseManifest, RepoSelect, groupKey, type Dests } from './ReleaseManifest';
 import { RepoPickerModal } from './RepoPickerModal';
 import { SplitPanes } from './Splitter';
@@ -272,7 +272,7 @@ function Panel(p: FilesPanelProps) {
     if (!release) return { chip, row, tick: 'none' };
     // Withheld by a line, or never material: no tick. A content name withheld by default ships when ticked (named outright).
     if (s.kind === 'own' || s.kind === 'broader' || s.kind === 'never_copied') return { chip, row, tick: 'gap' };
-    const off = never ? NEVER_RELEASED_TITLE : inPicked(path) ? 'Picked with its folder'
+    const off = never ? NEVER_RELEASED_TITLE : inPicked(path) ? 'Picked with its folder' : path.includes(',') ? COMMA_TITLE
       : dir ? (copied.has(path) ? null : NEVER_FOLDER) : state === 'up_to_date' ? NOTHING : null;
     return { chip, row, tick: { off } };
   };
@@ -410,7 +410,7 @@ function Panel(p: FilesPanelProps) {
         </div>
       ) : null}
       {into ? (
-        <ReleaseFoot paths={rows.length} files={groups.reduce((n, g) => n + g.ship.length, 0)} def={releasePicked({ courseOrg: p.courseOrg, cohortOrg: into.org, where: into.termLabel }, groups, { defaultDestRepo: runRepo })}
+        <ReleaseFoot paths={rows.length} blocked={releaseBlocked(rows)} files={groups.reduce((n, g) => n + g.ship.length, 0)} def={releasePicked({ courseOrg: p.courseOrg, cohortOrg: into.org, where: into.termLabel }, groups, { defaultDestRepo: runRepo })}
           scheduleHref={p.scheduleHref?.(into.org, rows)} />
       ) : null}
       {adding && p.sources?.onAdd ? (
@@ -461,8 +461,8 @@ function destsOf(p: FilesPanelProps, into: SemesterRef, defaultDest: string, cho
   const options = [...new Set([defaultDest, ...(into.destinations ?? []), ...wrote, ...chosen].filter(Boolean))];
   const repos = p.files.repos(into.org);
   const list = repos.kind === 'ready' ? repos.repos : [];
-  // status.json names no student repo: the semester's repos named after an assignment.
-  const reserved = { org: into.org, students: studentRepos(list.filter((r) => r.name).map((r) => r.name), st) };
+  // Any `<assignment stem>-...` name is a student's repo, made or not (the engine's rule).
+  const reserved = { org: into.org, stems: assignmentStems(st) };
   const note = (name: string) => {
     const n = wrote.filter((r) => r === name).length;
     return name === defaultDest ? 'the default' : n ? plural(n, 'release') : 'no releases yet';
@@ -480,17 +480,19 @@ function Release({ p, into, runRepo, dests, groups, prOf, keep, onGroupDest }: {
   prOf: (destRepo: string, path: string) => string | undefined; keep?: () => void;
   onGroupDest: (key: string, patch: { destRepo?: string; destPath?: string }) => void;
 }) {
-  const groupStates = new Map<string, Record<string, ReleaseState>>();
-  const stateOf = (g: Group, path: string) => {
-    const k = groupKey(g);
-    if (!groupStates.has(k)) {
-      const ship = new Set(g.ship);
-      const blobs = filesOf(p.files.tree(p.courseOrg, g.repo)).blobs.filter((b) => ship.has(b.path));
-      const to = g.destRepo || runRepo;
-      groupStates.set(k, fileStates(blobs, p.files.tree(into.org, to, 'upstream'), p.files.tree(into.org, to), { destPath: (x) => destPathOf(g, x) }));
-    }
-    return groupStates.get(k)![path];
-  };
+  // Each group's states, worked out once per change of its inputs: the group, the run's repo and
+  // the three trees it compares (each tree state a stable object until it is read again).
+  const trees = groups.map((g) => {
+    const to = g.destRepo || runRepo;
+    return [p.files.tree(p.courseOrg, g.repo), p.files.tree(into.org, to, 'upstream'), p.files.tree(into.org, to)] as const;
+  });
+  const groupStates = useMemo(() => new Map(groups.map((g, i) => {
+    const [course, upstream, live] = trees[i];
+    const ship = new Set(g.ship);
+    const blobs = filesOf(course).blobs.filter((b) => ship.has(b.path));
+    return [groupKey(g), fileStates(blobs, upstream, live, { destPath: (x) => destPathOf(g, x) })];
+  })), [groups, runRepo, ...trees.flat()]);
+  const stateOf = (g: Group, path: string) => groupStates.get(groupKey(g))?.[path];
   return (
     <ReleaseManifest groups={groups} runRepo={runRepo} dests={dests} stateOf={stateOf} onKeep={keep}
       prUrl={(g, path) => prOf(g.destRepo || runRepo, destPathOf(g, path))} onGroupDest={onGroupDest} />

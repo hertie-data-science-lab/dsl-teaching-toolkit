@@ -38,7 +38,9 @@ semester repo as students have it, every file opening in the viewer) and **Relea
    by folder. **To** over it is the semester repo (the semester's Default destination to start
    with). A group's **Edit destination** sends it to another repo or path; a group going to a
    different repo is marked `(!)`.
-4. **Release** opens the run's panel; run it there.
+4. **Release** opens the run's panel; run it there. A path with a comma in it cannot be ticked
+   (rename it), and a release of several hundred individual files is too long for one run: tick
+   their folders instead, or release in two goes.
 
 Picks from several course repos (switch **From**; earlier picks stay in the manifest) into
 several semester repos go out as one run. **Schedule on the calendar**, under the button, opens

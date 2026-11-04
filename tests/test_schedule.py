@@ -3611,6 +3611,31 @@ def test_a_folder_whose_solutions_a_bang_line_re_includes_is_no_fault(
     assert all(f"{left} file(s) in it" in f.line() for f in faults)
 
 
+def test_a_folder_s_never_released_files_are_not_said_to_ship_by_their_own_path(
+    monkeypatch,
+):
+    # Decision B: naming a grading file is refused, so the advice to release by naming
+    # the path goes with the content names only.
+    _org(
+        monkeypatch,
+        {
+            "cm": [
+                "labs/01/lab.ipynb",
+                "labs/01/solutions/a.ipynb",
+                "labs/01/grading_config.yml",
+                "labs/01/.env",
+            ]
+        },
+    )
+    s = Schedule(releases=[_release("lab-1", "labs/01")])
+    (fault,) = schedule.source_faults(s, "Course-Org")
+    content, hard = fault.line().split("; ")
+    assert "1 file(s) in it are solutions or tests" in content
+    assert "naming their own path, or re-include them with a ! line" in content
+    assert "2 file(s) in it are grading files or secrets" in hard
+    assert "never released" in hard and "naming" not in hard
+
+
 def test_naming_a_never_released_path_is_flagged_in_the_deploy_s_words(monkeypatch):
     _org(monkeypatch, {"cm": ["labs/01/lab.ipynb", "labs/01/grading_config.yml"]})
     s = Schedule(releases=[_release("lab-1", "labs/01/grading_config.yml")])

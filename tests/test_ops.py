@@ -210,6 +210,33 @@ def test_the_contract_example_parses():
     )
 
 
+def test_a_hand_release_lists_are_capped_as_a_whole_not_per_path():
+    # Release by hand names every file it ticks: 40 files overflow one path's 1024 but
+    # are one release; a list past the cap is refused.
+    from dsl_course.ops.registry import LIST_MAX
+    from dsl_course.schema_check import validate
+
+    schema = REGISTRY["release.adhoc"].args_schema
+    paths = ",".join(
+        f"lectures/01_intro/notebooks/part_{i:02d}.ipynb" for i in range(40)
+    )
+    assert len(paths) > 1024
+    args = {
+        "course_source_repo": ",".join(["course-materials-f2026"] * 40),
+        "course_source_path": paths,
+        "semester_dest_repo": "materials",
+        "semester_dest_path": paths,
+    }
+    assert validate(args, schema) == []
+    over = {**args, "course_source_path": "a" * (LIST_MAX + 1)}
+    assert validate(over, schema) == [
+        "$.course_source_path: does not match the expected form"
+    ]
+    long_repos = {**args, "course_source_repo": ",".join(["r" * 99] * 90)}
+    assert len(long_repos["course_source_repo"]) > LIST_MAX
+    assert validate(long_repos, schema)
+
+
 @pytest.mark.parametrize(
     ("raw", "code"),
     [

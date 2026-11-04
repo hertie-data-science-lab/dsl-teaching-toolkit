@@ -10,6 +10,7 @@ import { plural } from '../model/format';
 import { destPathOf, type FileState as ReleaseState, type Group, type Reserved } from '../model/releaseState';
 import type { OpDef } from '../ops/session';
 import { OpOpen } from '../ops/Panel';
+import { CheckLine } from './bits';
 import { Hint } from './Hint';
 import { RepoPickerModal, type RepoRow } from './RepoPickerModal';
 import { StateChip } from './StateChip';
@@ -108,6 +109,7 @@ function GroupCard({ g, p }: { g: Group; p: ManifestProps }) {
           </div>
           <div class="field">
             <label for={`${id}-p`}>To path</label>
+            {/* A cleared box is no override (`destPathOf`): the group lands at its own path. */}
             <input type="text" id={`${id}-p`} value={g.destPath ?? g.folder} onInput={(e) => p.onGroupDest(key, { destPath: (e.target as HTMLInputElement).value })} />
           </div>
         </div>
@@ -136,16 +138,17 @@ export function ReleaseManifest(p: ManifestProps) {
   );
 }
 
-/** The Release footer: the count, the one verb and its `?`, then the way to the Schedule. */
-export function ReleaseFoot({ paths, files, def, scheduleHref }: { paths: number; files: number; def: OpDef; scheduleHref?: string }) {
+/** The Release footer: the count, the one verb and its `?` (off with `blocked`'s note when the picks cannot go as one release), then the way to the Schedule. */
+export function ReleaseFoot({ paths, files, def, scheduleHref, blocked = null }: { paths: number; files: number; def: OpDef; scheduleHref?: string; blocked?: string | null }) {
   return (
     <div class="rh-foot">
       <span class="rh-count">{plural(paths, 'path')} picked · {plural(files, 'file')}</span>
-      <OpOpen def={def} label={`Release ${plural(paths, 'path')}`} disabled={!paths} />
+      <OpOpen def={def} label={`Release ${plural(paths, 'path')}`} disabled={!paths || !!blocked} />
       <Hint label="About Release">
         <b class="para">Release</b>
         <span class="para">Copies every listed file now, to its destination in the semester. A file already up to date is left as it is; a semester edit is merged with, and an edit on both sides opens a pull request. Nothing is deleted, and nothing is added to the schedule.</span>
       </Hint>
+      {blocked && paths ? <CheckLine cls="warn">{blocked}</CheckLine> : null}
       {scheduleHref && paths ? <p class="footnote rh-sched">Want to pre-automate these releases? <a class="textlink" href={scheduleHref}>Schedule on the calendar →</a></p> : null}
     </div>
   );

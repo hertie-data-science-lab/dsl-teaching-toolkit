@@ -8,7 +8,7 @@ import { useState } from 'preact/hooks';
 import type { GhRepo } from '../github/client';
 import type { ReposState } from '../model/files';
 import { DEFAULTS } from '../model/policy';
-import { eligibleDestination, type Reserved } from '../model/releaseState';
+import { assignmentStems, eligibleDestination, type Reserved } from '../model/releaseState';
 import { SOURCE_NAME, effectiveOf, type Effective, type Effectives } from '../model/settings';
 import type { Status } from '../model/types';
 import { Hint } from './Hint';
@@ -39,12 +39,6 @@ export function inheritedInto(dest: Effective, into: Effective | undefined, near
 /** A level's own `release_destinations`, as its form holds them. */
 export const ownInto = (v: unknown): string[] => (Array.isArray(v) ? v.map(String).filter(Boolean) : []);
 
-/** Student, team and marks repo names in a semester's repo list (the stems of its assignments), refused as destinations. */
-export function studentRepos(names: string[], status: Status | null | undefined): string[] {
-  const stems = (status?.assignments ?? []).map((a) => `${(a.semester_name ?? a.slug).toLowerCase()}-`);
-  return names.filter((n) => stems.some((s) => n.toLowerCase().startsWith(s)));
-}
-
 /** The picker's rows: the semester's repos a release may write into, not listed already, archived ones aside, by name. */
 export function destinationRows(repos: GhRepo[], listed: string[], reserved: Reserved): RepoRow[] {
   const have = new Set(listed.map((n) => n.toLowerCase()));
@@ -57,15 +51,15 @@ export function destinationRows(repos: GhRepo[], listed: string[], reserved: Res
 /**
  * A level's Release into, worked out once for its page: the chips it inherits from `inherited`
  * (named by `nearest` where nothing says who), its own list `own` (as its form holds it), every
- * name listed, the semester `org`'s names it refuses (`repos`, its repo list, and `status`, for
- * the student repos) and the picker's rows.
+ * name listed, the semester `org`'s names it refuses (`status` for its assignment stems: any
+ * `<stem>-...` is a student's repo), its repo list `repos` and the picker's rows.
  */
 export function releaseIntoOf(o: { inherited: Effectives; nearest: 'the course' | 'the institution'; own: unknown; org: string; repos: ReposState | null; status: Status | null | undefined }) {
   const fixed = inheritedInto(effectiveOf(o.inherited, 'materials_repo'), o.inherited.release_destinations, o.nearest);
   const own = ownInto(o.own);
   const into = [...fixed.map((c) => c.name), ...own];
   const list = o.repos?.kind === 'ready' ? o.repos.repos : [];
-  const reserved: Reserved = { org: o.org, students: studentRepos(list.map((r) => r.name), o.status) };
+  const reserved: Reserved = { org: o.org, stems: assignmentStems(o.status) };
   return { fixed, own, into, reserved, rows: destinationRows(list, into, reserved) };
 }
 

@@ -19,7 +19,7 @@ const trees = {
   [A]: { files: ['README.md', 'SYLLABUS.md', 'labs/week01/lab.ipynb', 'labs/week01/data.csv', 'labs/week01/solutions/lab.ipynb', 'labs/notes.md', 'drafts/x.md'], rules: compileAll(['labs/notes.md'], { defaults: true }) },
   [B]: { files: ['demo.py'], rules: compileAll([], { defaults: true }) },
 };
-const dests: Dests = { options: ['materials', 'lecture-code'], rows: [{ name: 'materials', note: 'the default' }], reserved: { org: SEM, students: [] } };
+const dests: Dests = { options: ['materials', 'lecture-code'], rows: [{ name: 'materials', note: 'the default' }], reserved: { org: SEM, stems: [] } };
 const scope = { courseOrg: 'hertie-dsl-demo-course-e1234', cohortOrg: SEM, where: 'Fall 2026' };
 
 let root: HTMLElement | null = null;

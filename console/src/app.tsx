@@ -47,8 +47,8 @@ import { forgetShown } from './model/materials';
 import { CourseBanner, Footer, NavHandle, Sidenav, Topbar, type CourseSubPages, type SubWanted } from './ui/shell';
 import { fmtDay } from './model/format';
 import { DEFAULT_TIMEZONE } from './model/policy';
-import { destRepos, effectiveDestRepo } from './model/releaseState';
-import type { SemesterStatus } from './model/types';
+import { destRepos, effectiveDestRepo, entryDestRepos } from './model/releaseState';
+import type { Release, SemesterStatus } from './model/types';
 import type { Files } from './model/files';
 import type { Course } from './model/discovery';
 import { CONFIG_REPO, COURSE_REPO, RETURNED_DIR, STATUS_PATH } from './model/names';
@@ -375,8 +375,9 @@ export type AppState = ReturnType<typeof createState>;
  * schedule.yml (a release or hand-out writes the moment it went out back into it, decision 0043
  * rule 3 - held at the old sha, the next save there would always conflict), the course's status, and after Return marks the "last told" record(s) it rewrote - its sheet's,
  * or every one held for an unscoped run - so the Marks tab's count of who it would email is fresh.
- * After a release that copies (`release.adhoc`, `release.entry`), the trees of the repos it wrote to
- * (`args`' destinations, blank being the semester's effective `defaultDest`).
+ * After a release that copies, the trees of the repos it wrote to: `release.adhoc`'s from `args`
+ * (blank being the semester's effective `defaultDest`), `release.entry`'s from the semester's
+ * status (`releases`: the entry's destination, else every one it knows, `entryDestRepos`).
  */
 /** The ops that copy into a semester's repos (not `release.propagate_back`, which writes to the course). */
 const COPIES = new Set(['release.adhoc', 'release.entry']);
@@ -387,10 +388,13 @@ export function refreshAfterRun(
   files: Pick<LiveFiles, 'refresh' | 'refreshUnder' | 'refreshTree'>,
   args: Record<string, unknown> = def.args,
   defaultDest = '',
+  releases: Release[] = [],
 ): void {
   if (def.cohortOrg) {
     // A release rewrote its destination repos: their trees (and so the state chips) are read again.
-    if (COPIES.has(def.op)) for (const repo of destRepos(args, defaultDest)) if (repo) files.refreshTree(def.cohortOrg, repo);
+    const wrote = def.op === 'release.entry' ? entryDestRepos(String(args.entry ?? ''), releases, defaultDest)
+      : COPIES.has(def.op) ? destRepos(args, defaultDest) : [];
+    for (const repo of wrote) if (repo) files.refreshTree(def.cohortOrg, repo);
     void statuses.reload(def.cohortOrg, CONFIG_REPO);
     files.refresh(def.cohortOrg, CONFIG_REPO, outcomePath(def.op));
     files.refresh(def.cohortOrg, CONFIG_REPO, 'schedule.yml');
@@ -415,7 +419,11 @@ export function createState({ auth, client }: AppDeps) {
   const gates = new Map<string, ReturnType<typeof signal<{ on: boolean; courseName: string } | undefined>>>();
   let env: Env | null = null;
   const ops = new OpsSession(new DispatchAdapter(client, () => st.user.value?.login ?? ''), {
-    onFinished: (def, args) => refreshAfterRun(def, statuses, files, args, def.cohortOrg ? effectiveDestRepo(statuses.cohort(def.cohortOrg, false).value) : ''),
+    onFinished: (def, args) => {
+      const loaded = def.cohortOrg ? statuses.cohort(def.cohortOrg, false).value : undefined;
+      const releases = loaded?.kind === 'ready' ? loaded.status.releases ?? [] : [];
+      refreshAfterRun(def, statuses, files, args, def.cohortOrg ? effectiveDestRepo(loaded) : '', releases);
+    },
   });
   const estate = signal<Estate | null>(null);
   // Back from installing the console app: drop GitHub's two parameters and reopen the wizard's

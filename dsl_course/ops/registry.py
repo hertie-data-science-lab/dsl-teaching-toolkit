@@ -21,7 +21,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from .. import policy
 from ..course import (
     ASSIGNMENT_TYPES,
     COURSE_ADMIN_TEAM,
@@ -50,10 +49,14 @@ VIA_WORKFLOW = "workflow:"
 ORG_PATTERN = r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$"
 _REPO = r"(?!-)[A-Za-z0-9._-]{1,100}"
 REPO_PATTERN = rf"^{_REPO}$"
-# One repo, or a comma-separated list of them (a hand release's repos, paired with its
-# paths by index).
-REPO_LIST_PATTERN = rf"^{_REPO}(?:\s*,\s*{_REPO})*$"
 PATH_PATTERN = r"^(?!-)[^\x00-\x1f]{1,1024}$"
+# A hand release's four lists, paired by index: one repo or path, or a comma-separated list.
+# It names each file it ticks, so a list is capped as a whole (`LIST_MAX`, which the
+# console's `LIST_MAX` mirrors), not per path.
+LIST_MAX = 8192
+_LIST_CAP = rf"(?=[\s\S]{{1,{LIST_MAX}}}$)"
+REPO_LIST_PATTERN = rf"^{_LIST_CAP}{_REPO}(?:\s*,\s*{_REPO})*$"
+PATH_LIST_PATTERN = rf"^{_LIST_CAP}(?!-)[^\x00-\x1f]+$"
 KEY_PATTERN = r"^(?!-)[A-Za-z0-9_.-]{1,100}$"
 SEMESTER_PATTERN = r"^[fs][0-9]{4}$"
 FORMATS_PATTERN = (
@@ -182,17 +185,21 @@ _TEMPLATE = _string(REPO_PATTERN, "The course-org assignment template repo")
 _ENTRY = _string(
     KEY_PATTERN, "The schedule.yml assignments key, when two entries share the template"
 )
+
+
 _DEPLOY_FIELDS = {
     "course_source_repo": _string(
         REPO_LIST_PATTERN,
         "Course-org repo(s) to release from, comma-separated: one per path, or one for all",
     ),
-    "course_source_path": _string(PATH_PATTERN, "Path(s), comma-separated"),
+    "course_source_path": _string(PATH_LIST_PATTERN, "Path(s), comma-separated"),
     "semester_dest_repo": _string(
         REPO_LIST_PATTERN,
         "Semester repo(s) to release into, comma-separated: one per path, or one for all",
     ),
-    "semester_dest_path": _string(PATH_PATTERN, "Destination path(s), comma-separated"),
+    "semester_dest_path": _string(
+        PATH_LIST_PATTERN, "Destination path(s), comma-separated"
+    ),
 }
 
 
@@ -233,8 +240,9 @@ def _deploy(request: Request) -> list[str]:
         request.semester_org,
         "--course-source-path",
         _a(request, "course_source_path"),
+        # Blank: deploy resolves it to the semester's effective `materials_repo`.
         "--semester-dest-repo",
-        _a(request, "semester_dest_repo", policy.defaults()["materials_repo"]),
+        _a(request, "semester_dest_repo", ""),
         "--semester-dest-path",
         _a(request, "semester_dest_path", ""),
         *remove,

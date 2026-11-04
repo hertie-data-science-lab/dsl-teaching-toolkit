@@ -8,7 +8,7 @@
 import { useState } from 'preact/hooks';
 import type { Files } from '../model/files';
 import { Modal } from './Modal';
-import { neverMaterial } from '../edit/badges';
+import { hardDenied, neverMaterial } from '../edit/badges';
 import { PatternTree } from './PatternTree';
 
 export interface Picked {
@@ -26,8 +26,12 @@ export function pathVerdict(files: Files, org: string, repo: string, path: strin
 }
 
 const noChange = () => {};
-/** A schedule entry that names a denylisted path ships it (`selection.deny`), so only never-material names are fixed here. */
-const pickFixed = (path: string) => (neverMaterial(path) ? 'never copied' : null);
+/**
+ * The rows no tick can pick: never-material names, and the never-released names (`hardDenied`,
+ * decision B), which the engine refuses even when an entry names them. A content name (solutions,
+ * tests) named outright ships, so it stays pickable.
+ */
+const pickFixed = (path: string) => (hardDenied(path) ? 'never released' : neverMaterial(path) ? 'never copied' : null);
 
 export function FilePicker({ files, org, repos, others = [], onPick, onClose }: { files: Files; org: string; repos: string[]; others?: string[]; onPick: (p: Picked[]) => void; onClose: () => void }) {
   const all = [...repos, ...others];
@@ -40,7 +44,7 @@ export function FilePicker({ files, org, repos, others = [], onPick, onClose }: 
   const paths = tree?.kind === 'ready' ? tree.paths.filter((x) => !x.dir && !x.path.startsWith('.')).map((x) => x.path) : [];
   const isOn = (path: string) => chosen.some((c) => c.repo === repo && c.path === path);
   const toggle = (path: string) => setChosen(isOn(path) ? chosen.filter((c) => !(c.repo === repo && c.path === path)) : [...chosen, { repo, path }]);
-  const tick = (path: string, dir: boolean) => <input type="checkbox" class="ft-tick" checked={isOn(path)} aria-label={`Pick ${path}${dir ? '/' : ''}`} onChange={() => toggle(path)} />;
+  const tick = (path: string, dir: boolean) => pickFixed(path) ? null : <input type="checkbox" class="ft-tick" checked={isOn(path)} aria-label={`Pick ${path}${dir ? '/' : ''}`} onChange={() => toggle(path)} />;
   return (
     <Modal title="Pick from course materials" onClose={onClose}>
       <div class="picker">

@@ -189,6 +189,39 @@ def test_a_blank_dest_repo_is_the_semesters_materials_repo(monkeypatch):
     assert out == 0 and [d.semester_dest_repo for d in seen[0]] == ["handouts"]
 
 
+def test_the_consoles_hand_release_with_no_dest_repo_lands_in_materials_repo(
+    monkeypatch,
+):
+    # The Console's argv (the registry's) leaves a missing repo blank for deploy to
+    # resolve, rather than supplying the institution's default.
+    from dsl_course.ops.registry import REGISTRY, Request, command
+
+    req = Request(
+        "release.adhoc",
+        "prof",
+        "Course",
+        "Semester-f2026",
+        {"course_source_repo": "src", "course_source_path": "lectures/01"},
+        False,
+    )
+    argv = command(REGISTRY["release.adhoc"], req)
+    seen: list = []
+    monkeypatch.setattr(
+        deploy.schedule, "load", lambda org: Schedule(materials_repo="lecture-code")
+    )
+    monkeypatch.setattr(
+        deploy,
+        "deploy_many",
+        lambda org, sem, deploys, sync=True, remove=None: (
+            seen.append(deploys) or deploy.Batch(0, False, [])
+        ),
+    )
+    monkeypatch.setattr(deploy, "unnumbered_release", lambda *a: None)
+    monkeypatch.setattr("sys.argv", ["deploy", *argv])
+    assert deploy.main() == 0
+    assert [d.semester_dest_repo for d in seen[0]] == ["lecture-code"]
+
+
 @pytest.mark.parametrize(
     ("dest", "why"),
     [

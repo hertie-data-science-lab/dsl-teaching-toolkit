@@ -2586,6 +2586,33 @@ class _Wanted(NamedTuple):
         return line_of(self.lines, field)
 
 
+def _left_behind(below: list[str], folder: str, tree: Tree) -> str:
+    """What a folder copy of `folder` leaves behind of the institution denylist, in words
+    ("" when nothing): the content names (`solutions`, `tests`) no `!` line re-includes,
+    which naming their own path or a `!` line releases, and the never-released names
+    (grading files, secrets), which nothing does. `below` is the folder's paths, relative."""
+    hard = content = 0
+    for p in below:
+        groups = part_groups(p)
+        if HARD in groups:
+            hard += 1
+        elif CONTENT in groups and not tree.carries(folder, f"{folder}/{p}"):
+            content += 1
+    said = []
+    if content:
+        said.append(
+            f"{content} file(s) in it are solutions or tests, which a folder release "
+            "leaves behind - release them by naming their own path, or re-include "
+            f"them with a ! line in {RELEASEIGNORE}"
+        )
+    if hard:
+        said.append(
+            f"{hard} file(s) in it are grading files or secrets, which are never "
+            "released"
+        )
+    return "; ".join(said)
+
+
 def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
     """Every source the plan names that is not in the course org RIGHT NOW.
 
@@ -2677,20 +2704,12 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
                 # buries. Same rung as a missing source: the copy ships nothing either way.
                 withheld = f"the files exist but {repo}/{RELEASEIGNORE} keeps them back"
             # A folder copy leaves the institution denylist behind (decision 0040): said
-            # here, so a lab folder holding its `solutions/` is not a surprise. Naming the
-            # denylisted path itself ships it, and is never warned about; nor is a
-            # content name a `!` line re-includes (decision B), which the copy carries.
-            elif left := [
-                p
-                for p in below
-                if HARD in (groups := part_groups(p))
-                or (CONTENT in groups and not tree.carries(clean, f"{clean}/{p}"))
-            ]:
-                withheld = (
-                    f"{len(left)} file(s) in it are solutions, tests, grading files "
-                    "or secrets, which a folder release leaves behind - release them "
-                    "by naming their own path"
-                )
+            # here, so a lab folder holding its `solutions/` is not a surprise. Naming a
+            # content name itself ships it, and is never warned about; nor is one a `!`
+            # line re-includes (decision B), which the copy carries. A never-released
+            # name ships by no route, so it is only said to stay behind.
+            elif left := _left_behind(below, clean, tree):
+                withheld = left
             elif clean in paths or below:
                 continue
             else:

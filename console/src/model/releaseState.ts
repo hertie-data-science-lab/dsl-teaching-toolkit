@@ -17,6 +17,8 @@ import { buildTree, hardDenied, neverMaterial, type TreeNode } from '../edit/bad
 import { withheldBy, type Rule } from '../edit/glob';
 import type { TreeState } from './files';
 import type { Loaded } from './status';
+import type { Release, Status } from './types';
+import { fnmatch } from './selection';
 import { COURSE_REPO, JOIN_REPO, CONFIG_REPO } from './names';
 import { REPO_NAME_RE, effectiveOf, semesterDefaults } from './settings';
 
@@ -134,9 +136,9 @@ const under = (path: string, folder: string) => !folder || path.startsWith(`${fo
 const join = (folder: string, name: string) => (folder && name ? `${folder}/${name}` : folder || name);
 const trim = (p: string) => p.replace(/^\/+|\/+$/g, '');
 
-/** Where a group's course path lands: its folder's place swapped for the group's `destPath`. */
+/** Where a group's course path lands: its folder's place swapped for the group's `destPath` (a blank one is no override). */
 export function destPathOf(g: Group, path: string): string {
-  const to = trim(g.destPath ?? g.folder);
+  const to = trim(g.destPath?.trim() ? g.destPath.trim() : g.folder);
   const rest = g.folder ? path.slice(g.folder.length).replace(/^\//, '') : path;
   return join(to, rest);
 }
@@ -222,6 +224,17 @@ export function requestOf(groups: Group[], run: { defaultDestRepo: string }): Re
   return groups.flatMap((g) => g.sources.map((path) => ({ repo: g.repo, path, toRepo: g.destRepo || run.defaultDestRepo, toPath: destPathOf(g, path) })));
 }
 
+/** The longest list `release.adhoc` takes in one field (`registry.PATH_LIST_PATTERN`'s cap). */
+export const LIST_MAX = 8192;
+export const COMMA_TITLE = 'A path with a comma cannot be released from here; rename it.';
+export const TOO_MANY = 'Too many paths for one release: tick folders instead, or release in two goes.';
+
+/** Why these rows cannot go as one `release.adhoc`, or null: a comma in a path would mis-pair the lists, and a list over `LIST_MAX` is refused. */
+export function releaseBlocked(rows: ReleaseRow[]): string | null {
+  if (rows.some((r) => r.path.includes(',') || r.toPath.includes(','))) return COMMA_TITLE;
+  return Object.values(toArgs(rows)).some((v) => v.length > LIST_MAX) ? TOO_MANY : null;
+}
+
 /** `release.adhoc`'s four lists, paired by index (`deploy.parse_path_pairs`). */
 export function toArgs(rows: ReleaseRow[]) {
   return {
@@ -242,6 +255,17 @@ export function effectiveDestRepo(loaded: Loaded | undefined): string {
 export function destRepos(args: Record<string, unknown>, fallback: string): string[] {
   const named = String(args.semester_dest_repo ?? '').split(',').map((x) => x.trim()).filter(Boolean);
   return [...new Set(named.length ? named : [fallback])];
+}
+
+/**
+ * The destination repos a `release.entry` run of `entry` writes to, as the semester's status
+ * knows them (`releases`, each row's first copy): the entry's own, else every destination the
+ * status names and `fallback` (the semester's default), each once.
+ */
+export function entryDestRepos(entry: string, releases: Release[], fallback: string): string[] {
+  const own = releases.find((r) => r.id === entry)?.dest?.repo;
+  if (own) return [own];
+  return [...new Set([fallback, ...releases.map((r) => r.dest?.repo ?? '')].filter(Boolean))];
 }
 
 /**
@@ -273,16 +297,21 @@ function sweptOut(rules: Rule[], folder: string, f: string): Left | null {
 export interface Reserved {
   /** The semester org: its site repo is `<org>.github.io`. */
   org: string;
-  /** Student and team repo names (`<slug>-<handle>`, `grades-<handle>`, ...). */
-  students: string[];
+  /** The assignment stems: any `<stem>-...` name is a student's or team's repo (`discovery.reserved_destination`). */
+  stems: string[];
+}
+
+/** A semester's assignment stems: each assignment's key, and its semester-side name where that differs. */
+export function assignmentStems(status: Status | null | undefined): string[] {
+  return [...new Set((status?.assignments ?? []).flatMap((a) => [a.slug, a.semester_name ?? a.slug].map((x) => x.toLowerCase())))];
 }
 
 /** The engine's reserved names (`schemas/selection.json` `reserved`): exact names, and globs. */
 const RESERVED = selectionRules.reserved;
-const glob = (p: string) => new RegExp(`^${p.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`, 'i');
-const RESERVED_GLOBS = RESERVED.patterns.map(glob);
+// The name is lowercased before the test, as the engine's `fnmatchcase` on the folded name.
+const RESERVED_GLOBS = RESERVED.patterns.map((x) => fnmatch(x));
 
-/** What a reserved name is for, in words ("the semester" where it has none of its own); null when it is not reserved (a student repo aside). */
+/** What a reserved name is for, in words ("the semester" where it has none of its own); null when it is not reserved (a student repo aside). `n` is lowercased. */
 function reservedFor(n: string, org: string): string | null {
   if (!RESERVED.names.some((x) => x.toLowerCase() === n) && !RESERVED_GLOBS.some((re) => re.test(n))) return null;
   return n === CONFIG_REPO.toLowerCase() ? 'the semester’s config'
@@ -297,6 +326,6 @@ function reservedFor(n: string, org: string): string | null {
 export function eligibleDestination(name: string, known: Reserved): string | null {
   const n = name.trim().toLowerCase();
   if (n && !REPO_NAME_RE.test(n)) return 'A repo name takes letters, digits, “.”, “-” and “_” only.';
-  const what = reservedFor(n, known.org.toLowerCase()) ?? (known.students.some((s) => s.toLowerCase() === n) ? 'a student’s repo' : null);
+  const what = reservedFor(n, known.org.toLowerCase()) ?? (known.stems.some((s) => n.startsWith(`${s.toLowerCase()}-`)) ? 'a student’s repo' : null);
   return what ? `That name is reserved for ${what}.` : null;
 }
