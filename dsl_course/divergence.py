@@ -13,9 +13,10 @@ can have happened since, each a different remedy:
   gone from it - students lack a file they were given (Release again puts it back).
 
 The course side is filtered exactly as a copy would be (`source_files`): the institution
-denylist below the copy's own path, `.releaseignore`, and for a whole-repo copy the root
-plumbing and any root stub still the placeholder. A path another copy lands at inside
-this one (a lab's `solutions/` copy) is that copy's, and left out of all three sides.
+denylist below the copy's own path (a content name a `!` line re-includes aside),
+`.releaseignore`, and for a whole-repo copy the root plumbing and any root stub still
+the placeholder. A path another copy lands at inside this one (a lab's `solutions/` copy)
+is that copy's, and left out of all three sides.
 
 Pure: the trees come in as `{path: blob sha}`, read once per repo by the status render.
 Repo, path and sha only - nothing here names a person.
@@ -30,8 +31,9 @@ from typing import NamedTuple
 from .course import is_repo_root
 from .gh_contents import WITHHELD_ROOT_STUBS
 from .release_record import inside
+from .releaseignore import Tree
 from .schedule_plan import within
-from .selection import kept, release_use
+from .selection import RELEASE, kept, release_use
 
 COURSE = "DIVERGED_COURSE"
 DELETED = "DIVERGED_DELETED"
@@ -65,28 +67,34 @@ def source_files(
     src_path: str,
     dest_path: str,
     blobs: Mapping[str, str],
-    withheld: Collection[str],
+    tree: Tree,
     unwritten: Collection[str],
 ) -> dict[str, str]:
     """What a copy of `src_path` would take from a course repo's files now, keyed as its
     manifest is (`deploy._copy_listed`): relative to the copy, a single file by its
-    destination name. `withheld` is the repo's `.releaseignore` verdict (repo paths);
-    `unwritten` the root stubs still the placeholder, left out of a whole-repo copy."""
+    destination name. `tree` is the repo's `.releaseignore` reading as a release judges
+    by (`schedule.source_withheld`); `unwritten` the root stubs still the placeholder,
+    left out of a whole-repo copy."""
     src = src_path.strip("/")
     root = is_repo_root(src)
-    if not root and src in withheld:
+    base = "" if root else src
+    if not root and not tree.carries(src, src):
         return {}  # the copy's own path is withheld: it copies nothing
     if not root and src in blobs:
         if src in WITHHELD_ROOT_STUBS and src in unwritten:
             return {}
         return {dest_path.rsplit("/", 1)[-1] or src: blobs[src]}
     use = release_use(root, unwritten)  # what `deploy` copies through, layer 3
-    out = {}
-    for path, sha in blobs.items():
-        rel = within(src, path)
-        if rel and path not in withheld and kept(rel, use=use):
-            out[rel] = sha
-    return out
+
+    def withheld(rel: str) -> bool:
+        return not tree.carries(base, f"{base}/{rel}" if base else rel)
+
+    return {
+        rel: sha
+        for path, sha in blobs.items()
+        if (rel := within(src, path))
+        and kept(rel, use=use, withheld=withheld, reincludable=RELEASE)
+    }
 
 
 def dest_files(

@@ -38,12 +38,12 @@
         "properties": {
           "course_source_path": {
             "description": "Path(s), comma-separated",
-            "pattern": "^(?!-)[^\\x00-\\x1f]{1,1024}$",
+            "pattern": "^(?=[\\s\\S]{1,8192}$)(?=[^,\\x00-\\x1f])(?!\\s*-)[^,\\x00-\\x1f]*(?:,(?!\\s*-)[^,\\x00-\\x1f]*)*$",
             "type": "string"
           },
           "course_source_repo": {
-            "description": "Course-org repo to release from",
-            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
+            "description": "Course-org repo(s) to release from, comma-separated: one per path, or one for all",
+            "pattern": "^(?=[\\s\\S]{1,8192}$)(?!-)[A-Za-z0-9._-]{1,100}(?:\\s*,\\s*(?!-)[A-Za-z0-9._-]{1,100})*$",
             "type": "string"
           },
           "entry": {
@@ -55,14 +55,18 @@
             "description": "Also remove the released files the course copy no longer has",
             "type": "boolean"
           },
+          "replace": {
+            "description": "Take the course version of exactly these paths, discarding the semester's edits to them, instead of merging",
+            "type": "boolean"
+          },
           "semester_dest_path": {
             "description": "Destination path(s), comma-separated",
-            "pattern": "^(?!-)[^\\x00-\\x1f]{1,1024}$",
+            "pattern": "^(?=[\\s\\S]{1,8192}$)(?=[^,\\x00-\\x1f])(?!\\s*-)[^,\\x00-\\x1f]*(?:,(?!\\s*-)[^,\\x00-\\x1f]*)*$",
             "type": "string"
           },
           "semester_dest_repo": {
-            "description": "Semester repo to release into",
-            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
+            "description": "Semester repo(s) to release into, comma-separated: one per path, or one for all",
+            "pattern": "^(?=[\\s\\S]{1,8192}$)(?!-)[A-Za-z0-9._-]{1,100}(?:\\s*,\\s*(?!-)[A-Za-z0-9._-]{1,100})*$",
             "type": "string"
           }
         },
@@ -86,22 +90,26 @@
         "properties": {
           "course_source_path": {
             "description": "Path(s), comma-separated",
-            "pattern": "^(?!-)[^\\x00-\\x1f]{1,1024}$",
+            "pattern": "^(?=[\\s\\S]{1,8192}$)(?=[^,\\x00-\\x1f])(?!\\s*-)[^,\\x00-\\x1f]*(?:,(?!\\s*-)[^,\\x00-\\x1f]*)*$",
             "type": "string"
           },
           "course_source_repo": {
-            "description": "Course-org repo to release from",
-            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
+            "description": "Course-org repo(s) to release from, comma-separated: one per path, or one for all",
+            "pattern": "^(?=[\\s\\S]{1,8192}$)(?!-)[A-Za-z0-9._-]{1,100}(?:\\s*,\\s*(?!-)[A-Za-z0-9._-]{1,100})*$",
             "type": "string"
+          },
+          "replace": {
+            "description": "Take the course version of exactly these paths, discarding the semester's edits to them, instead of merging",
+            "type": "boolean"
           },
           "semester_dest_path": {
             "description": "Destination path(s), comma-separated",
-            "pattern": "^(?!-)[^\\x00-\\x1f]{1,1024}$",
+            "pattern": "^(?=[\\s\\S]{1,8192}$)(?=[^,\\x00-\\x1f])(?!\\s*-)[^,\\x00-\\x1f]*(?:,(?!\\s*-)[^,\\x00-\\x1f]*)*$",
             "type": "string"
           },
           "semester_dest_repo": {
-            "description": "Semester repo to release into",
-            "pattern": "^(?!-)[A-Za-z0-9._-]{1,100}$",
+            "description": "Semester repo(s) to release into, comma-separated: one per path, or one for all",
+            "pattern": "^(?=[\\s\\S]{1,8192}$)(?!-)[A-Za-z0-9._-]{1,100}(?:\\s*,\\s*(?!-)[A-Za-z0-9._-]{1,100})*$",
             "type": "string"
           }
         },
@@ -123,7 +131,13 @@
     {
       "args_schema": {
         "additionalProperties": false,
-        "properties": {},
+        "properties": {
+          "paths": {
+            "description": "Only these semester-side paths, comma-separated: `<dest repo>/<path>`, or `<path>` in the semester's materials repo; each inside a released copy",
+            "pattern": "^(?=[\\s\\S]{1,8192}$)(?=[^,\\x00-\\x1f])(?!\\s*-)[^,\\x00-\\x1f]*(?:,(?!\\s*-)[^,\\x00-\\x1f]*)*$",
+            "type": "string"
+          }
+        },
         "required": [],
         "type": "object"
       },

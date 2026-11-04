@@ -21,7 +21,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from .. import policy
 from ..course import (
     ASSIGNMENT_TYPES,
     COURSE_ADMIN_TEAM,
@@ -48,8 +47,18 @@ VIA_WORKFLOW = "workflow:"
 # The patterns every free-text argument is held to. No value may start with `-`: argparse
 # would read it as a flag, and a request is user text.
 ORG_PATTERN = r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$"
-REPO_PATTERN = r"^(?!-)[A-Za-z0-9._-]{1,100}$"
+_REPO = r"(?!-)[A-Za-z0-9._-]{1,100}"
+REPO_PATTERN = rf"^{_REPO}$"
 PATH_PATTERN = r"^(?!-)[^\x00-\x1f]{1,1024}$"
+# A hand release's four lists, paired by index: one repo or path, or a comma-separated list.
+# It names each file it ticks, so a list is capped as a whole (`LIST_MAX`, which the
+# console's `LIST_MAX` mirrors), not per path.
+LIST_MAX = 8192
+_LIST_CAP = rf"(?=[\s\S]{{1,{LIST_MAX}}}$)"
+REPO_LIST_PATTERN = rf"^{_LIST_CAP}{_REPO}(?:\s*,\s*{_REPO})*$"
+# No item may start with `-` (a flag, once `comma_items` strips it), not just the first.
+_PATH_ITEM = r"(?!\s*-)[^,\x00-\x1f]*"
+PATH_LIST_PATTERN = rf"^{_LIST_CAP}(?=[^,\x00-\x1f]){_PATH_ITEM}(?:,{_PATH_ITEM})*$"
 KEY_PATTERN = r"^(?!-)[A-Za-z0-9_.-]{1,100}$"
 SEMESTER_PATTERN = r"^[fs][0-9]{4}$"
 FORMATS_PATTERN = (
@@ -178,11 +187,25 @@ _TEMPLATE = _string(REPO_PATTERN, "The course-org assignment template repo")
 _ENTRY = _string(
     KEY_PATTERN, "The schedule.yml assignments key, when two entries share the template"
 )
+
+
 _DEPLOY_FIELDS = {
-    "course_source_repo": _string(REPO_PATTERN, "Course-org repo to release from"),
-    "course_source_path": _string(PATH_PATTERN, "Path(s), comma-separated"),
-    "semester_dest_repo": _string(REPO_PATTERN, "Semester repo to release into"),
-    "semester_dest_path": _string(PATH_PATTERN, "Destination path(s), comma-separated"),
+    "course_source_repo": _string(
+        REPO_LIST_PATTERN,
+        "Course-org repo(s) to release from, comma-separated: one per path, or one for all",
+    ),
+    "course_source_path": _string(PATH_LIST_PATTERN, "Path(s), comma-separated"),
+    "semester_dest_repo": _string(
+        REPO_LIST_PATTERN,
+        "Semester repo(s) to release into, comma-separated: one per path, or one for all",
+    ),
+    "semester_dest_path": _string(
+        PATH_LIST_PATTERN, "Destination path(s), comma-separated"
+    ),
+    "replace": _boolean(
+        "Take the course version of exactly these paths, discarding the semester's "
+        "edits to them, instead of merging"
+    ),
 }
 
 
@@ -197,6 +220,11 @@ def _course_semester(request: Request) -> list[str]:
     return ["--course-org", request.course_org, "--semester-org", request.semester_org]
 
 
+def _propagate(request: Request) -> list[str]:
+    paths = _a(request, "paths")
+    return [*_course_semester(request), *(["--paths", paths] if paths else [])]
+
+
 def _status_refresh(request: Request) -> list[str]:
     # The check REFRESHES status.json: `status` previews unless told --no-preview.
     return [*_course_semester(request), "--no-preview"]
@@ -209,11 +237,13 @@ def _scheduler(request: Request) -> list[str]:
 def _deploy(request: Request) -> list[str]:
     # `remove_deleted`: Release again's "also remove the files deleted from the course
     # copy" (decision 0043 rule 6). Spelt on either branch: deploy refuses it with paths.
-    remove = ["--remove-deleted"] if _a(request, "remove_deleted") else []
+    flags = ["--remove-deleted"] if _a(request, "remove_deleted") else []
+    # `replace`: the hard overwrite - the course version of the copied paths, no merge.
+    flags += ["--replace"] if _a(request, "replace") else []
     if _a(request, "entry") and not _a(request, "course_source_repo"):
         # A schedule entry by its key: deploy reads every copy off the plan and releases
         # them in one batch with one site sync, however many source repos they draw on.
-        return [*_course_semester(request), "--entry", _a(request, "entry"), *remove]
+        return [*_course_semester(request), "--entry", _a(request, "entry"), *flags]
     return [
         "--course-org",
         request.course_org,
@@ -223,11 +253,12 @@ def _deploy(request: Request) -> list[str]:
         request.semester_org,
         "--course-source-path",
         _a(request, "course_source_path"),
+        # Blank: deploy resolves it to the semester's effective `materials_repo`.
         "--semester-dest-repo",
-        _a(request, "semester_dest_repo", policy.defaults()["materials_repo"]),
+        _a(request, "semester_dest_repo", ""),
         "--semester-dest-path",
         _a(request, "semester_dest_path", ""),
-        *remove,
+        *flags,
     ]
 
 
@@ -462,12 +493,20 @@ _OPS = (
         name="release.propagate_back",
         scope=SEMESTER,
         required_team=INSTRUCTORS_TEAM,
-        args_schema=_args(),
+        args_schema=_args(
+            {
+                "paths": _string(
+                    PATH_LIST_PATTERN,
+                    "Only these semester-side paths, comma-separated: `<dest repo>/<path>`, "
+                    "or `<path>` in the semester's materials repo; each inside a released copy",
+                )
+            }
+        ),
         help="Keep this semester's edits for future terms: one pull request per source repo.",
         done_text="Semester edits checked for future terms.",
         doc="docs/08-release-materials-to-cohort.md",
         module="propagate",
-        argv=_course_semester,
+        argv=_propagate,
         preview_flag="--preview",
         real_flag="--no-preview",
     ),

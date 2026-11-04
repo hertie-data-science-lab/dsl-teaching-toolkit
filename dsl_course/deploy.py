@@ -17,8 +17,11 @@ clones it once, not 27 times. Both callers arrive here - the hourly scheduler
 manual "Release materials" workflow (via `main` below, whose five inputs are deliberately the
 same five fields as a `deploy:` entry).
 
-The workflow's `course_source_path`/`semester_dest_path` are comma-separated PARALLEL lists
-paired by index (parse_path_pairs) - one Deploy per pair, one deploy_many call for the batch.
+The workflow's four inputs are comma-separated PARALLEL lists paired by index
+(parse_deploy_lists): the paths pair one to one, and a repo list of one item applies to
+every pair - so one hand release may draw on several source repos and land in several
+destination repos, the semester's `materials_repo` when it names none. One Deploy per
+pair, one deploy_many call for the batch.
 
 `--entry KEY` releases one schedule.yml entry instead: every copy it lists, from every
 source repo it draws on, in ONE deploy_many call with one site sync.
@@ -60,6 +63,7 @@ from .course import (
     UPSTREAM_BRANCH,
     is_repo_root,
 )
+from .discovery import reserved_destination
 from .fs import copy_tree
 from .gh_contents import (
     WITHHELD_ROOT_STUBS,
@@ -71,6 +75,7 @@ from .log import (
     CLIParser,
     Summary,
     add_preview_flag,
+    comma_items,
     log,
     log_err,
     log_ok,
@@ -89,11 +94,12 @@ from .schedule import DEFAULT_DEST_REPO, Deploy
 from .schedule_plan import (
     covered_copies,
     deploy_dest,
+    outermost,
     refuse_unnumbered,
     unnumbered_release,
 )
+from .selection import HARD, RELEASE, part_groups, release_ignore, release_use
 from .selection import deny as selection_deny
-from .selection import release_use
 
 
 def _warn_withheld_stub(course_org: str, repo: str, path: str) -> None:
@@ -127,6 +133,19 @@ def _warn_ignored_source(course_org: str, repo: str, path: str) -> None:
         f"{course_org}/{repo}/{path} was NOT released - a `{RELEASEIGNORE}` excludes it. "
         "Everything else in this release shipped. Drop the pattern that matches it, or "
         "release a path that is not excluded."
+    )
+
+
+def _warn_never_released(course_org: str, repo: str, path: str) -> None:
+    """Say that a release's own source path is on the institution's never-released list
+    (`selection.DENYLIST_HARD`: secrets, git metadata, grading files, `.system/`).
+
+    Refused out loud for `_warn_ignored_source`'s reason, on its channel. Unlike that one
+    there is nothing for faculty to drop: no pattern releases these (decision B)."""
+    log_withheld(
+        f"{course_org}/{repo}/{path} was NOT released - never released: "
+        f"{path.strip('/')} is on the institution's list. Everything else in this "
+        "release shipped."
     )
 
 
@@ -336,6 +355,78 @@ RELEASED, UNCHANGED, HELD, FAILED = "released", "unchanged", "held", "failed"
 LANDED = frozenset({RELEASED, UNCHANGED})
 
 
+class Replacement(NamedTuple):
+    """What a `--replace` release overwrites in one dest: the paths copied into it and the
+    files `--remove-deleted` took off `upstream` there."""
+
+    paths: list[str]
+    dropped: list[str]
+
+
+def _replace_paths(dd: Path, base: str, replace: Replacement) -> int:
+    """Take the released version of exactly `replace.paths` onto `base`, as one commit:
+    what a `--replace` release does before its merge - the hard overwrite.
+
+    One `git checkout upstream -- <path>...` of the outermost paths `upstream` has (a copy
+    nested in another is already inside it), then `git rm` of `replace.dropped`. A file the
+    semester ADDED under a path is not on `upstream`, so it stays - this discards edits,
+    not additions. Answers -1 on a git failure, else whether a commit was made (1) or not
+    (0). The merge that follows then has nothing to conflict on at these paths: both
+    sides agree."""
+    code, out = git("-C", str(dd), *GIT_ENV, "checkout", "-q", base)
+    if code != 0:
+        log_err(f"  could not check out `{base}` - {out[:200]}")
+        return -1
+    paths = outermost(replace.paths)
+    # `.` for the root, alone after `outermost`: listed, it is present when `upstream`
+    # has anything at all. A path not there had nothing of it released (everything
+    # excluded).
+    specs = [p or "." for p in paths]
+    code, out = git(
+        "-C", str(dd), "ls-tree", "-z", "--name-only", UPSTREAM_BRANCH, "--", *specs
+    )
+    if code != 0:
+        log_err(f"  could not list `{UPSTREAM_BRANCH}` - {out[:200]}")
+        return -1
+    listed = {n for n in out.split("\0") if n}
+    present = [s for s in specs if s in listed or (s == "." and listed)]
+    if present:
+        code, out = git(
+            "-C", str(dd), *GIT_ENV, "checkout", UPSTREAM_BRANCH, "--", *present
+        )
+        if code != 0:
+            log_err(f"  could not take {', '.join(present)} - {out[:200]}")
+            return -1
+    if replace.dropped:
+        git(
+            "-C",
+            str(dd),
+            *GIT_ENV,
+            "rm",
+            "-q",
+            "--ignore-unmatch",
+            "--",
+            *replace.dropped,
+        )
+    if git("-C", str(dd), "diff", "--cached", "--quiet")[0] == 0:
+        return 0
+    named = ", ".join(p or "(repo root)" for p in paths)
+    code, out = git(
+        "-C",
+        str(dd),
+        *GIT_ENV,
+        "commit",
+        "-q",
+        "--no-verify",
+        "-m",
+        f"release: replace {named} with the course version",
+    )
+    if code != 0:
+        log_err(f"  commit failed - {out[:200]}")
+        return -1
+    return 1
+
+
 def _merge_and_push(
     semester_org: str,
     repo: str,
@@ -343,8 +434,15 @@ def _merge_and_push(
     touched: set[str],
     *,
     committed: bool,
+    replace: Replacement | None = None,
 ) -> tuple[int, str]:
     """Merge one dest's `UPSTREAM_BRANCH` into the branch students read and push both.
+
+    `replace` - a `--replace` release - first takes the released version
+    of those paths onto the branch students read (`_replace_paths`), discarding the
+    semester's edits to them, so the merge cannot conflict there. The merge then runs as
+    usual for everything else `upstream` holds; if THAT conflicts (a pull request already
+    standing for other paths), the replaced paths still ship and the pull request stays.
 
     `(errors, outcome)` - `RELEASED` only when the branch students read actually moved,
     so a release held at a pull request (`HELD`) does not report itself as a change.
@@ -356,6 +454,15 @@ def _merge_and_push(
     dd = dest.dir
     if dest.unborn and not committed:
         return 0, UNCHANGED  # an empty dest nothing could be copied into
+    replaced = False
+    if replace and dest.upstream_on_remote:
+        # A dest with no `upstream` yet - empty, or never released to by merge - has
+        # nothing to replace: its first release lands on top of `base` anyway.
+        made = _replace_paths(dd, dest.base, replace)
+        if made < 0:
+            log_err(f"  {repo}: could not replace the released paths")
+            return 1, FAILED
+        replaced = made == 1
     if dest.unborn:
         # A dest this run created: there is nothing to merge into, so the branch students
         # read simply starts where the released copy now is. No `-f`: `base` cannot exist
@@ -367,6 +474,7 @@ def _merge_and_push(
     elif (
         git("-C", str(dd), "merge-base", "--is-ancestor", UPSTREAM_BRANCH, dest.base)[0]
         == 0
+        and not replaced
     ):
         # Everything released is already in the branch students read - the idempotent
         # no-op, and the only reason to say so is that somebody pressed the button and is
@@ -422,8 +530,10 @@ def _merge_and_push(
             # pull request.
             git("-C", str(dd), *GIT_ENV, "merge", "--abort")
             # Only when this run added to `upstream`: a re-offered merge has nothing new
-            # on it, so the local branch is already what the remote holds.
-            if committed and _push(dd, UPSTREAM_BRANCH) != 0:
+            # on it, so the local branch is already what the remote holds. A replace
+            # moved the branch students read as well, and it ships with it.
+            pushed = (UPSTREAM_BRANCH, dest.base) if replaced else (UPSTREAM_BRANCH,)
+            if (committed or replaced) and _push(dd, *pushed) != 0:
                 log_err(f"  {repo}: push failed")
                 return 1, FAILED
             opened = pulls.upsert_pr(
@@ -436,11 +546,16 @@ def _merge_and_push(
             )
             if opened.url:
                 log(f"  {repo}: held for review - {opened.url}")
+            if replaced:
+                log_ok(f"  {repo}: replaced with the course version")
+                return opened.errors, RELEASED
             return opened.errors, HELD
     if _push(dd, UPSTREAM_BRANCH, dest.base) != 0:
         log_err(f"  {repo}: push failed")
         return 1, FAILED
-    log_ok(f"  {repo}: released")
+    log_ok(
+        f"  {repo}: {'replaced with the course version' if replaced else 'released'}"
+    )
     return 0, RELEASED
 
 
@@ -525,6 +640,7 @@ def deploy_many(
     deploys: list[Deploy],
     sync: bool = True,
     remove: Mapping[release_record.Key, Collection[str]] | None = None,
+    replace: bool = False,
 ) -> Batch:
     """Apply a batch of Deploy copies, cloning each unique source and dest repo ONCE.
 
@@ -542,7 +658,11 @@ def deploy_many(
     `remove` (decision 0043 rule 6, Release again's "also remove"): per copy, by its record
     key, paths relative to the copy to delete from its destination before the merge - each
     only when the copy no longer carries it (`_remove_dropped`), so a file the course still
-    releases is never removed. A folder copy only."""
+    releases is never removed. A folder copy only.
+
+    `replace` (the hard overwrite): instead of merging the semester's edits to the copied
+    paths with the release, take the released version of exactly those paths onto the
+    branch students read (`_replace_paths`); every other path is merged as usual."""
     deploys = [d for d in deploys if d]
     if not deploys:
         return Batch(0, False, [])
@@ -565,6 +685,9 @@ def deploy_many(
             else:
                 src_dirs[repo] = sd
                 commits[repo] = git("-C", str(sd), "rev-parse", "HEAD")[1].strip()
+        # Each source's `.releaseignore` files, read once for every copy out of it: the
+        # copy's own path is judged by them (`excludes`), and its folder walk too.
+        ignores = {repo: release_ignore(sd.resolve()) for repo, sd in src_dirs.items()}
 
         # 2. clone (create if needed) each unique dest repo once (semester org)
         dests: dict[str, Dest] = {}
@@ -600,6 +723,8 @@ def deploy_many(
 
         # 3. apply every copy against the already-cloned trees
         touched: set[str] = set()
+        # Per dest, for `replace` only: what it overwrites there.
+        replaced_paths: dict[str, Replacement] = {}
         for d in deploys:
             if (
                 d.course_source_repo not in src_dirs
@@ -636,12 +761,22 @@ def deploy_many(
                 )
                 errors += 1
                 continue
-            if excludes(src_root, srcp):
+            ignore = ignores[d.course_source_repo]
+            if srcp != src_root and HARD in part_groups(
+                srcp.relative_to(src_root).as_posix()
+            ):
+                # Never released, by any route (decision B): a release naming a `.env`, a
+                # grading file or `.system/` - or a path inside one - copies nothing.
+                _warn_never_released(
+                    course_org, d.course_source_repo, d.course_source_path
+                )
+                continue
+            if excludes(src_root, srcp, ignore):
                 # The source path is itself excluded - so is everything under it, and no
                 # `!` deeper down can re-include any of it. Nothing else was asked for, so
-                # this copy is a no-op rather than a partial one. (A path on the
-                # institution denylist named outright DOES ship: the denylist only stops
-                # a folder copy sweeping one up - `selection.deny`.)
+                # this copy is a no-op rather than a partial one. (A content name -
+                # `solutions/`, `tests/` - named outright DOES ship: the default only
+                # stops a folder copy sweeping one up - `selection.deny`.)
                 _warn_ignored_source(
                     course_org, d.course_source_repo, d.course_source_path
                 )
@@ -675,7 +810,10 @@ def deploy_many(
                         srcp,
                         destp,
                         selection_deny(
-                            src_root, use=release_use(srcp == src_root, withheld)
+                            src_root,
+                            use=release_use(srcp == src_root, withheld),
+                            reincludable=RELEASE,
+                            ignore=ignore,
                         ),
                     )
                 elif is_withheld_stub(
@@ -712,6 +850,12 @@ def deploy_many(
                         f"- {d.semester_dest_repo}/{dest_rel}/{rel}".replace("//", "/")
                     )
             touched.add(d.semester_dest_repo)
+            if replace:
+                at = replaced_paths.setdefault(
+                    d.semester_dest_repo, Replacement([], [])
+                )
+                at.paths.append(dest_rel)
+                at.dropped.extend(f"{dest_rel}/{rel}".lstrip("/") for rel in removed)
             applied.append((d, commits[d.course_source_repo], files, tuple(removed)))
 
         # 4. one commit on `upstream` per dest, then merge it into the branch students
@@ -750,7 +894,12 @@ def deploy_many(
                     continue
                 committed = True
             merge_errors, outcomes[repo] = _merge_and_push(
-                semester_org, repo, dest, touched, committed=committed
+                semester_org,
+                repo,
+                dest,
+                touched,
+                committed=committed,
+                replace=replaced_paths.get(repo),
             )
             errors += merge_errors
             changed = changed or outcomes[repo] == RELEASED
@@ -779,36 +928,58 @@ def _sync_site(course_org: str, semester_org: str) -> int:
     return 0
 
 
-def _items(spec: str) -> list[str]:
-    """Split a comma-separated input into stripped, non-empty items - so
-    "a, b," is ["a", "b"] and "" is []."""
-    return [item.strip() for item in spec.split(",") if item.strip()]
+def _per_pair(repos: list[str], n: int, what: str) -> list[str]:
+    """`repos` spread over `n` path pairs: one repo applies to every pair, otherwise one
+    per pair - the same loud mismatch as the paths'."""
+    if len(repos) == 1:
+        return repos * n
+    if len(repos) != n:
+        raise ValueError(
+            f"{len(repos)} {what}s but {n} course_source_paths - give one {what} per "
+            f"course_source_path (paired in order), or one {what} for them all"
+        )
+    return repos
 
 
-def parse_path_pairs(
-    source_paths: str, dest_paths: str = ""
-) -> list[tuple[str, str | None]]:
-    """Pair the Release materials workflow's two comma-separated lists by index.
+def parse_deploy_lists(
+    source_repos: str,
+    source_paths: str,
+    dest_repos: str = "",
+    dest_paths: str = "",
+    default_dest: str = DEFAULT_DEST_REPO,
+) -> list[Deploy]:
+    """The Release materials workflow's four comma-separated lists as one Deploy per
+    source path, paired by index.
 
     A blank `dest_paths` mirrors every source path (`None` dest, exactly what an omitted
-    `semester_dest_path:` means in schedule.yml). Otherwise the counts MUST match: unlike the
-    schedule (which drops what it can't pair, on an unattended cron), a workflow run has an
-    operator watching it, so a mismatch is a loud ValueError naming both counts rather
-    than a silently short release. Surrounding whitespace is stripped and empty items
-    (a trailing comma) are ignored on both sides."""
-    sources = _items(source_paths)
-    if not sources:
+    `semester_dest_path:` means in schedule.yml). Otherwise the counts MUST match: unlike
+    the schedule (which drops what it can't pair, on an unattended cron), a workflow run
+    has an operator watching it, so a mismatch is a loud ValueError naming both counts
+    rather than a silently short release. A repo list of one applies to every path; a
+    blank `dest_repos` is `default_dest` (the semester's `materials_repo`) for every
+    path. Surrounding whitespace is stripped and empty items (a trailing comma) are
+    ignored throughout."""
+    paths = comma_items(source_paths)
+    if not paths:
         raise ValueError("--course-source-path is empty")
-    dests = _items(dest_paths)
-    if not dests:
-        return [(s, None) for s in sources]
-    if len(dests) != len(sources):
+    landings: list[str | None] = comma_items(dest_paths) or [None] * len(paths)
+    if len(landings) != len(paths):
         raise ValueError(
-            f"{len(sources)} course_source_paths but {len(dests)} semester_dest_paths - give "
-            f"one semester_dest_path per course_source_path (paired in order), or leave "
-            f"semester_dest_path blank to mirror every course_source_path"
+            f"{len(paths)} course_source_paths but {len(landings)} semester_dest_paths - "
+            f"give one semester_dest_path per course_source_path (paired in order), or "
+            f"leave semester_dest_path blank to mirror every course_source_path"
         )
-    return list(zip(sources, dests))
+    sources = comma_items(source_repos)
+    if not sources:
+        raise ValueError("--course-source-repo is empty")
+    sources = _per_pair(sources, len(paths), "course_source_repo")
+    dests = _per_pair(
+        comma_items(dest_repos) or [default_dest], len(paths), "semester_dest_repo"
+    )
+    return [
+        Deploy(repo, src, dest_repo, dest)
+        for repo, src, dest_repo, dest in zip(sources, paths, dests, landings)
+    ]
 
 
 def _entry_of(sched: schedule.Schedule, label: str) -> schedule.Release | str:
@@ -868,22 +1039,31 @@ def _record(
     return 0
 
 
-def _named(names: list[str], what: str) -> str:
-    """One repo by name, or several by count - the Summary's subject or object."""
+def _named(org: str, names: list[str], what: str) -> tuple[str, str]:
+    """One repo by name, or several by count - the Summary's subject or object - and the
+    log's words for it: `org/repo`, or "2 source repos in org"."""
     unique = list(dict.fromkeys(names))
-    return unique[0] if len(unique) == 1 else plural(len(unique), what)
+    if len(unique) == 1:
+        return unique[0], f"{org}/{unique[0]}"
+    named = plural(len(unique), what)
+    return named, f"{named} in {org}"
 
 
 def main() -> int:
     parser = CLIParser(description=__doc__)
     parser.add_argument("--course-org", required=True, help="Course org (source)")
-    parser.add_argument("--course-source-repo", help="Source repo holding the path(s)")
+    parser.add_argument(
+        "--course-source-repo",
+        help="Source repo holding the path(s), or a comma-separated list paired with "
+        "--course-source-path by index (one repo applies to every path)",
+    )
     parser.add_argument("--semester-org", required=True, help="Semester org (target)")
     parser.add_argument(
         "--semester-dest-repo",
-        default=DEFAULT_DEST_REPO,
-        help="Target repo in the semester org, created if missing "
-        f"(default: {DEFAULT_DEST_REPO})",
+        default="",
+        help="Target repo in the semester org, created if missing, or a "
+        "comma-separated list paired with --course-source-path by index (one repo "
+        "applies to every path; default: the semester's materials_repo)",
     )
     parser.add_argument(
         "--course-source-path",
@@ -906,6 +1086,12 @@ def main() -> int:
         action="store_true",
         help="With --entry: also remove from each copy's destination the files the "
         "release record lists that the course copy no longer has",
+    )
+    parser.add_argument(
+        "--replace",
+        action="store_true",
+        help="Take the course version of exactly the copied paths onto the branch "
+        "students read, discarding the semester's edits to them, instead of merging",
     )
     add_preview_flag(
         parser,
@@ -933,15 +1119,25 @@ def main() -> int:
         if not (args.course_source_repo and args.course_source_path):
             log_err("give --entry, or --course-source-repo and --course-source-path.")
             return 1
-        dest_repo = args.semester_dest_repo.strip() or DEFAULT_DEST_REPO
         try:
-            pairs = parse_path_pairs(args.course_source_path, args.semester_dest_path)
+            deploys = parse_deploy_lists(
+                args.course_source_repo,
+                args.course_source_path,
+                args.semester_dest_repo,
+                args.semester_dest_path,
+                sched.materials_repo,
+            )
         except ValueError as e:
             log_err(f"{e}.")
             return 1
-        deploys = [
-            Deploy(args.course_source_repo, src, dest_repo, dest) for src, dest in pairs
-        ]
+    # A release never lands in a repo the semester uses for something else: its config,
+    # site or enrolment page, a gradebook, a student's repo (`reserved_destination`).
+    for dest in dict.fromkeys(d.semester_dest_repo for d in deploys):
+        if reserved := reserved_destination(dest, sched.assignments):
+            log_err(
+                f"{dest} cannot take a release: that name is reserved for {reserved}."
+            )
+            return 1
     if any(
         (args.course_org, d.course_source_repo)
         == (args.semester_org, d.semester_dest_repo)
@@ -960,14 +1156,16 @@ def main() -> int:
         if refusal:
             return refuse_unnumbered(refusal)
 
-    sources = _named([d.course_source_repo for d in deploys], "source repo")
-    dests = _named([d.semester_dest_repo for d in deploys], "repo")
+    sources, from_words = _named(
+        args.course_org, [d.course_source_repo for d in deploys], "source repo"
+    )
+    dests, to_words = _named(
+        args.semester_org, [d.semester_dest_repo for d in deploys], "repo"
+    )
+    route = f"from {from_words} -> {to_words}"
     what = plural(len(deploys), "item")
     if args.preview:
-        log_step(
-            f"PREVIEW release {len(deploys)} path(s) from {args.course_org}/{sources} "
-            f"-> {args.semester_org}/{dests}"
-        )
+        log_step(f"PREVIEW release {len(deploys)} path(s) {route}")
         # The cheap structural checks need no clone, so catch them here: a source path that
         # contains `..` (rejected at run for resolving to the root or escaping the clone).
         # (The full clone-relative escape-check stays at copy time in deploy_many.)
@@ -998,10 +1196,7 @@ def main() -> int:
             {"items": len(deploys)},
         )
 
-    log_step(
-        f"Releasing {len(deploys)} path(s) from {args.course_org}/{sources} -> "
-        f"{args.semester_org}/{dests}"
-    )
+    log_step(f"Releasing {len(deploys)} path(s) {route}")
     remove = None
     if args.remove_deleted:
         # Every file the record lists for each copy: `deploy_many` removes only those the
@@ -1031,7 +1226,12 @@ def main() -> int:
     # the render dates the rows this release shipped (`released_at`).
     try:
         errors, changed, copies = deploy_many(
-            args.course_org, args.semester_org, deploys, sync=False, remove=remove
+            args.course_org,
+            args.semester_org,
+            deploys,
+            sync=False,
+            remove=remove,
+            replace=args.replace,
         )
     except RuntimeError as e:
         log_err(str(e))
@@ -1049,8 +1249,13 @@ def main() -> int:
             {"items": len(deploys)},
             conclusion="nothing_to_do",
         )
+    verb, prep, tail = (
+        ("Replaced", "in", " with the course version")
+        if args.replace
+        else ("Released", "to", "")
+    )
     return Summary(
-        f"Released {what} from {sources} to {dests}.",
+        f"{verb} {what} from {sources} {prep} {dests}{tail}.",
         {"items": len(deploys)},
     )
 

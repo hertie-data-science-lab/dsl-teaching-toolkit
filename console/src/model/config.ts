@@ -18,8 +18,11 @@ const COMMENT_COLUMN = 44;
 /** What a commented `team_formation` says when no level below states one (`settings._SKELETON_HINTS`). */
 const TEAM_FORMATION_HINT = 'self_select | assigned';
 
-/** One value as a YAML flow scalar on one line, as the engine's `_yaml_scalar` writes it. */
-export const scalar = (v: unknown): string => stringify(v, { lineWidth: 0 }).trim();
+/**
+ * One value as a YAML flow scalar on one line, as the engine's `_yaml_scalar` writes it: a list
+ * (`release_destinations`) in flow style, `[materials, lecture-code]`.
+ */
+export const scalar = (v: unknown): string => stringify(v, { lineWidth: 0, collectionStyle: 'flow', flowCollectionPadding: false }).trim();
 
 /** A form's values as the `defaults:` keys they state: file spellings, blanks dropped. */
 export function statedDefaults(values: Block): Block {

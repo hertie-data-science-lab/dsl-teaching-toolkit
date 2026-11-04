@@ -423,6 +423,14 @@ class PullsFake:
         self.calls.append({"repo": repo, **kwargs})
         return pulls.Upserted(0, self.url)
 
+    def find_pr(self, repo: str, head: str) -> pulls.PullRequest | None:
+        """The pull request the last upsert for `head` left open; clear `calls` to close
+        it."""
+        for call in reversed(self.calls):
+            if (call["repo"], call["head"]) == (repo, head):
+                return pulls.PullRequest(1, self.url, call["base"])
+        return None
+
 
 class BareOrigins:
     """GitHub repositories as bare git repositories on disk, and the reads a test makes of

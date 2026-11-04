@@ -16,8 +16,10 @@ and `effective` says which layer answered. A RUN setting (`RUN_KEYS`: how teams 
 team cap, the late window and penalty, the repo visibility, the external submit link, whether returned
 marks show each question) has all four; a SEMESTER-WIDE one (`SEMESTER_KEYS`: timezone,
 archive grace, the default materials repo; and `autosync_released_edits`, which the release
-engine reads through `effective`) has no entry layer. `team_formation` has no
-institution layer (decision 0039 rule 2). The late window and the penalty resolve each on
+engine reads through `effective`) has no entry layer. `release_destinations` (the semester
+repos a hand release may land in, which the console keeps) is a list MERGED across the
+layers (`MERGED_KEYS`) rather than answered by the nearest; the engine only reports it.
+`team_formation` has no institution layer (decision 0039 rule 2). The late window and the penalty resolve each on
 its own, like every other key: a layer stating the window alone keeps the penalty below
 (`late_window_days: 0` is no late work). The files spell `visibility` as `assignment_repo_visibility` (`FILE_NAMES`). A template's
 `grading_config.yml` states no run setting (a run key there is RUN_SETTING_IN_TEMPLATE).
@@ -48,7 +50,7 @@ from .course import (
     SEMESTER_FILE,
     STUDENT_SITE_BLOCK,
 )
-from .discovery import course_org_for_semester, org_meta
+from .discovery import course_org_for_semester, org_meta, reserved_destination
 from .faults import ConfigFault, Unusable
 from .gh_contents import (
     line_of,
@@ -89,10 +91,15 @@ DEFAULT_KEYS = (
     "visibility",
     "archive_grace_days",
     "materials_repo",
+    "release_destinations",
     "autosync_released_edits",
     "marks_per_question",
     "team_formation",
 )
+# The keys whose value is every layer's list together (institution first, then course,
+# then semester additions), not the nearest layer's: a semester adds destinations to its
+# course's, it does not replace them.
+MERGED_KEYS = ("release_destinations",)
 # The same, as the files spell them, in the order the seeded skeletons write them.
 DEFAULT_FILE_KEYS = tuple(FILE_NAMES.get(key, key) for key in DEFAULT_KEYS)
 # `team_formation` when no layer states it: none, so no team is formed and the assignment
@@ -131,19 +138,43 @@ def _grace_days(value: object, where: str, dropped: list[str]) -> int | None:
     return days
 
 
-def _materials_repo(value: object, where: str, dropped: list[str]) -> str | None:
-    name = str(value or "").strip()
-    if REPO_NAME.match(name):
+def _repo_name(value: object, key: str, where: str, dropped: list) -> str | None:
+    """One semester repo a release may land in, or None (recorded in `dropped`): a repo
+    name, and not one the semester uses for something else (`reserved_destination`)."""
+    name = str(value if value is not None else "").strip()
+    if not REPO_NAME.match(name):
+        why = "is not a repo name (letters, digits, `.`, `_`, `-`)"
+    elif reserved := reserved_destination(name, ()):
+        why = f"is reserved for {reserved}"
+    else:
         return name
-    dropped.append(
-        Dropped(
-            where,
-            "materials_repo",
-            f"`materials_repo: {value}` is not a repo name (letters, digits, `.`, `_`, "
-            f"`-`) - ignored",
-        )
-    )
+    dropped.append(Dropped(where, key, f"`{key}: {value}` {why} - ignored"))
     return None
+
+
+def _materials_repo(value: object, where: str, dropped: list[str]) -> str | None:
+    return _repo_name(value, "materials_repo", where, dropped)
+
+
+def _release_destinations(
+    value: object, where: str, dropped: list[str]
+) -> list[str] | None:
+    """`release_destinations`: semester repo names, each held to `materials_repo`'s rule
+    (`_repo_name`). A name that is not one is dropped and the rest kept; a value that is
+    not a list states nothing. Blank (`release_destinations:`) is no destinations."""
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        dropped.append(
+            Dropped(
+                where,
+                "release_destinations",
+                f"`release_destinations: {value}` is not a list of repo names - ignored",
+            )
+        )
+        return None
+    names = (_repo_name(item, "release_destinations", where, dropped) for item in value)
+    return [name for name in names if name]
 
 
 def _autosync(value: object, where: str, dropped: list[str]) -> bool | None:
@@ -169,6 +200,7 @@ _SEMESTER_READERS = {
     "timezone": _timezone,
     "archive_grace_days": _grace_days,
     "materials_repo": _materials_repo,
+    "release_destinations": _release_destinations,
     "autosync_released_edits": _autosync,
 }
 
@@ -612,8 +644,23 @@ def _states(block: Mapping, key: str) -> bool:
     return block.get(key) not in (None, "")
 
 
+def merged_items(key: str, stack: Sequence[Layer]) -> list[tuple[object, str]]:
+    """A `MERGED_KEYS` list's items, each once with the layer that added it first
+    (institution first, then course, then semester)."""
+    items: dict = {}
+    for source, block in reversed(stack):
+        for item in block.get(key) or ():
+            items.setdefault(item, source)
+    return list(items.items())
+
+
 def resolve(key: str, stack: Sequence[Layer]) -> tuple[object, str]:
-    """`(value, source)` for `key`: the nearest layer that states it."""
+    """`(value, source)` for `key`: the nearest layer that states it - or, for a
+    `MERGED_KEYS` list, every layer's items together (`merged_items`) and the nearest
+    layer adding any."""
+    if key in MERGED_KEYS:
+        source = next((s for s, block in stack if block.get(key)), "institution")
+        return [item for item, _ in merged_items(key, stack)], source
     for source, block in stack:
         if _states(block, key):
             return block.get(key), source
@@ -654,12 +701,19 @@ def effective_defaults(
 ) -> dict[str, dict[str, object]]:
     """Every `defaults:` key's effective value at the semester level (or the course level,
     with no semester), as the files spell the keys: `{key: {"value", "source"}}` - what
-    status.json carries and the console shows as each input's placeholder."""
+    status.json carries and the console shows as each input's placeholder. A merged list
+    (`MERGED_KEYS`) also carries `items`, each `{"value", "source"}`: which layer added
+    it."""
     stack = layers(course_org, semester_org)[1:]
     out = {}
     for key in DEFAULT_KEYS:
         value, source = resolve(key, stack)
         out[FILE_NAMES.get(key, key)] = {"value": value, "source": source}
+        if key in MERGED_KEYS:
+            out[key]["items"] = [
+                {"value": item, "source": layer}
+                for item, layer in merged_items(key, stack)
+            ]
     return out
 
 

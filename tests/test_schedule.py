@@ -3590,6 +3590,63 @@ def test_a_solution_released_by_its_own_path_is_no_fault(monkeypatch):
     assert schedule.source_faults(s, "Course-Org") == []
 
 
+_BANG_TREE = [".releaseignore", "labs/01/lab.ipynb", "labs/01/solutions/a.ipynb"]
+
+
+@pytest.mark.parametrize(
+    ("extra", "left"), [((), 0), (("labs/01/tests/t.py",), 1)], ids=["only", "tests"]
+)
+def test_a_folder_whose_solutions_a_bang_line_re_includes_is_no_fault(
+    monkeypatch, extra, left
+):
+    # Decision B: `!solutions/` in the repo's `.releaseignore` releases them with their
+    # folder, so the copy leaves nothing behind and nothing is said. `tests/` still is.
+    _org(monkeypatch, {"cm": [*_BANG_TREE, *extra]})
+    monkeypatch.setattr(
+        schedule, "get_file_content", lambda org, repo, path, **k: "!solutions/\n"
+    )
+    s = Schedule(releases=[_release("lab-1", "labs/01")])
+    faults = schedule.source_faults(s, "Course-Org")
+    assert len(faults) == left
+    assert all(f"{left} file(s) in it" in f.line() for f in faults)
+
+
+def test_a_folder_s_never_released_files_are_not_said_to_ship_by_their_own_path(
+    monkeypatch,
+):
+    # Decision B: naming a grading file is refused, so the advice to release by naming
+    # the path goes with the content names only.
+    _org(
+        monkeypatch,
+        {
+            "cm": [
+                "labs/01/lab.ipynb",
+                "labs/01/solutions/a.ipynb",
+                "labs/01/grading_config.yml",
+                "labs/01/.env",
+            ]
+        },
+    )
+    s = Schedule(releases=[_release("lab-1", "labs/01")])
+    (fault,) = schedule.source_faults(s, "Course-Org")
+    content, hard = fault.line().split("; ")
+    assert "1 file(s) in it are solutions or tests" in content
+    assert "naming their own path, or re-include them with a ! line" in content
+    assert "2 file(s) in it are grading files or secrets" in hard
+    assert "never released" in hard and "naming" not in hard
+
+
+def test_naming_a_never_released_path_is_flagged_in_the_deploy_s_words(monkeypatch):
+    _org(monkeypatch, {"cm": ["labs/01/lab.ipynb", "labs/01/grading_config.yml"]})
+    s = Schedule(releases=[_release("lab-1", "labs/01/grading_config.yml")])
+    (fault,) = schedule.source_faults(s, "Course-Org")
+    assert (
+        "never released: labs/01/grading_config.yml is on the institution's list"
+        in (fault.line())
+    )
+    assert fault.severity(datetime(2026, 9, 8, 9, 0, tzinfo=BERLIN)) is Severity.WARNING
+
+
 def test_a_copy_may_be_made_public_and_anything_else_is_flagged():
     # `public: true` (the console's per-file toggle on a readings entry) hosts the copy
     # on the semester site whatever `student_site.host` says (decision 0040).
@@ -3602,3 +3659,49 @@ def test_a_copy_may_be_made_public_and_anything_else_is_flagged():
     out = schedule._parse_files(files, BERLIN, drops, "readings.r1")
     assert [d.public for d in out] == [True, False, False]
     assert len(drops.report) == 1 and "public" in drops.report[0]
+
+
+@pytest.mark.parametrize(
+    ("dest", "why"),
+    [
+        ("semester-config", "the semester's config"),
+        ("Sem.github.io", "the semester's website"),
+        ("grades-alice", "students' marks"),
+        ("hw1-alice", "a student's repo"),
+    ],
+)
+def test_a_copy_into_a_reserved_repo_is_dropped_at_parse(dest, why):
+    files = [
+        {"from_course_repo": "cm", "from_path": "labs/01", "to_semester_repo": dest}
+    ]
+    sched = _parse(
+        {
+            "labs": {"lab-1": {"event_datetime": "2026-09-15T14:00", "files": files}},
+            "assignments": {"hw1": {"template": "hw1-t", "due_datetime": "2026-10-13"}},
+        }
+    )
+    assert sched.releases[0].deploy == []
+    (fault,) = [f for f in sched.faults if f.field == "to_semester_repo"]
+    assert f"`to_semester_repo: {dest}` is reserved for {why}" in fault.what
+
+
+def test_validate_fails_on_a_copy_into_a_reserved_repo(monkeypatch, capsys, tmp_path):
+    f = tmp_path / "schedule.yml"
+    f.write_text(
+        "lectures:\n"
+        "  lecture-1:\n"
+        "    event_datetime: 2099-09-08T10:00\n"
+        "    files:\n"
+        "      - from_course_repo: cm\n"
+        "        from_path: lectures/01\n"
+        "        to_semester_repo: join\n"
+    )
+    monkeypatch.setattr("sys.argv", ["schedule", "--file", str(f), "--validate"])
+    assert schedule.main() == 1
+    assert "is reserved for the enrolment page" in capsys.readouterr().out
+
+
+def test_the_plan_carries_the_semesters_materials_repo():
+    instance = settings.Instance(materials_repo="handouts")
+    assert parse({}, instance).materials_repo == "handouts"
+    assert parse({}).materials_repo == schedule.DEFAULT_DEST_REPO

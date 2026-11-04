@@ -62,11 +62,15 @@
                     "type": "string"
                   },
                   "value": {
+                    "items": {
+                      "type": "string"
+                    },
                     "type": [
                       "string",
                       "integer",
                       "boolean",
-                      "null"
+                      "null",
+                      "array"
                     ]
                   }
                 },
@@ -88,11 +92,15 @@
                     "type": "string"
                   },
                   "value": {
+                    "items": {
+                      "type": "string"
+                    },
                     "type": [
                       "string",
                       "integer",
                       "boolean",
-                      "null"
+                      "null",
+                      "array"
                     ]
                   }
                 },
@@ -114,11 +122,15 @@
                     "type": "string"
                   },
                   "value": {
+                    "items": {
+                      "type": "string"
+                    },
                     "type": [
                       "string",
                       "integer",
                       "boolean",
-                      "null"
+                      "null",
+                      "array"
                     ]
                   }
                 },
@@ -140,11 +152,15 @@
                     "type": "string"
                   },
                   "value": {
+                    "items": {
+                      "type": "string"
+                    },
                     "type": [
                       "string",
                       "integer",
                       "boolean",
-                      "null"
+                      "null",
+                      "array"
                     ]
                   }
                 },
@@ -166,11 +182,15 @@
                     "type": "string"
                   },
                   "value": {
+                    "items": {
+                      "type": "string"
+                    },
                     "type": [
                       "string",
                       "integer",
                       "boolean",
-                      "null"
+                      "null",
+                      "array"
                     ]
                   }
                 },
@@ -192,11 +212,15 @@
                     "type": "string"
                   },
                   "value": {
+                    "items": {
+                      "type": "string"
+                    },
                     "type": [
                       "string",
                       "integer",
                       "boolean",
-                      "null"
+                      "null",
+                      "array"
                     ]
                   }
                 },
@@ -218,11 +242,15 @@
                     "type": "string"
                   },
                   "value": {
+                    "items": {
+                      "type": "string"
+                    },
                     "type": [
                       "string",
                       "integer",
                       "boolean",
-                      "null"
+                      "null",
+                      "array"
                     ]
                   }
                 },
@@ -325,11 +353,15 @@
                   "type": "string"
                 },
                 "value": {
+                  "items": {
+                    "type": "string"
+                  },
                   "type": [
                     "string",
                     "integer",
                     "boolean",
-                    "null"
+                    "null",
+                    "array"
                   ]
                 }
               },
@@ -351,11 +383,15 @@
                   "type": "string"
                 },
                 "value": {
+                  "items": {
+                    "type": "string"
+                  },
                   "type": [
                     "string",
                     "integer",
                     "boolean",
-                    "null"
+                    "null",
+                    "array"
                   ]
                 }
               },
@@ -377,11 +413,15 @@
                   "type": "string"
                 },
                 "value": {
+                  "items": {
+                    "type": "string"
+                  },
                   "type": [
                     "string",
                     "integer",
                     "boolean",
-                    "null"
+                    "null",
+                    "array"
                   ]
                 }
               },
@@ -403,11 +443,15 @@
                   "type": "string"
                 },
                 "value": {
+                  "items": {
+                    "type": "string"
+                  },
                   "type": [
                     "string",
                     "integer",
                     "boolean",
-                    "null"
+                    "null",
+                    "array"
                   ]
                 }
               },
@@ -429,11 +473,15 @@
                   "type": "string"
                 },
                 "value": {
+                  "items": {
+                    "type": "string"
+                  },
                   "type": [
                     "string",
                     "integer",
                     "boolean",
-                    "null"
+                    "null",
+                    "array"
                   ]
                 }
               },
@@ -455,11 +503,15 @@
                   "type": "string"
                 },
                 "value": {
+                  "items": {
+                    "type": "string"
+                  },
                   "type": [
                     "string",
                     "integer",
                     "boolean",
-                    "null"
+                    "null",
+                    "array"
                   ]
                 }
               },
@@ -481,11 +533,15 @@
                   "type": "string"
                 },
                 "value": {
+                  "items": {
+                    "type": "string"
+                  },
                   "type": [
                     "string",
                     "integer",
                     "boolean",
-                    "null"
+                    "null",
+                    "array"
                   ]
                 }
               },
@@ -507,11 +563,69 @@
                   "type": "string"
                 },
                 "value": {
+                  "items": {
+                    "type": "string"
+                  },
                   "type": [
                     "string",
                     "integer",
                     "boolean",
-                    "null"
+                    "null",
+                    "array"
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "source"
+              ],
+              "type": "object"
+            },
+            "release_destinations": {
+              "properties": {
+                "items": {
+                  "items": {
+                    "properties": {
+                      "source": {
+                        "enum": [
+                          "entry",
+                          "semester",
+                          "course",
+                          "institution"
+                        ],
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "value",
+                      "source"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "source": {
+                  "enum": [
+                    "entry",
+                    "semester",
+                    "course",
+                    "institution"
+                  ],
+                  "type": "string"
+                },
+                "value": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": [
+                    "string",
+                    "integer",
+                    "boolean",
+                    "null",
+                    "array"
                   ]
                 }
               },
@@ -533,11 +647,15 @@
                   "type": "string"
                 },
                 "value": {
+                  "items": {
+                    "type": "string"
+                  },
                   "type": [
                     "string",
                     "integer",
                     "boolean",
-                    "null"
+                    "null",
+                    "array"
                   ]
                 }
               },
@@ -559,11 +677,15 @@
                   "type": "string"
                 },
                 "value": {
+                  "items": {
+                    "type": "string"
+                  },
                   "type": [
                     "string",
                     "integer",
                     "boolean",
-                    "null"
+                    "null",
+                    "array"
                   ]
                 }
               },
@@ -1173,11 +1295,15 @@
                   "type": "string"
                 },
                 "value": {
+                  "items": {
+                    "type": "string"
+                  },
                   "type": [
                     "string",
                     "integer",
                     "boolean",
-                    "null"
+                    "null",
+                    "array"
                   ]
                 }
               },
@@ -1199,11 +1325,15 @@
                   "type": "string"
                 },
                 "value": {
+                  "items": {
+                    "type": "string"
+                  },
                   "type": [
                     "string",
                     "integer",
                     "boolean",
-                    "null"
+                    "null",
+                    "array"
                   ]
                 }
               },
@@ -1225,11 +1355,15 @@
                   "type": "string"
                 },
                 "value": {
+                  "items": {
+                    "type": "string"
+                  },
                   "type": [
                     "string",
                     "integer",
                     "boolean",
-                    "null"
+                    "null",
+                    "array"
                   ]
                 }
               },
@@ -1251,11 +1385,15 @@
                   "type": "string"
                 },
                 "value": {
+                  "items": {
+                    "type": "string"
+                  },
                   "type": [
                     "string",
                     "integer",
                     "boolean",
-                    "null"
+                    "null",
+                    "array"
                   ]
                 }
               },
@@ -1277,11 +1415,15 @@
                   "type": "string"
                 },
                 "value": {
+                  "items": {
+                    "type": "string"
+                  },
                   "type": [
                     "string",
                     "integer",
                     "boolean",
-                    "null"
+                    "null",
+                    "array"
                   ]
                 }
               },
@@ -1303,11 +1445,15 @@
                   "type": "string"
                 },
                 "value": {
+                  "items": {
+                    "type": "string"
+                  },
                   "type": [
                     "string",
                     "integer",
                     "boolean",
-                    "null"
+                    "null",
+                    "array"
                   ]
                 }
               },
@@ -1329,11 +1475,15 @@
                   "type": "string"
                 },
                 "value": {
+                  "items": {
+                    "type": "string"
+                  },
                   "type": [
                     "string",
                     "integer",
                     "boolean",
-                    "null"
+                    "null",
+                    "array"
                   ]
                 }
               },
@@ -1355,11 +1505,69 @@
                   "type": "string"
                 },
                 "value": {
+                  "items": {
+                    "type": "string"
+                  },
                   "type": [
                     "string",
                     "integer",
                     "boolean",
-                    "null"
+                    "null",
+                    "array"
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "source"
+              ],
+              "type": "object"
+            },
+            "release_destinations": {
+              "properties": {
+                "items": {
+                  "items": {
+                    "properties": {
+                      "source": {
+                        "enum": [
+                          "entry",
+                          "semester",
+                          "course",
+                          "institution"
+                        ],
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "value",
+                      "source"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "source": {
+                  "enum": [
+                    "entry",
+                    "semester",
+                    "course",
+                    "institution"
+                  ],
+                  "type": "string"
+                },
+                "value": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": [
+                    "string",
+                    "integer",
+                    "boolean",
+                    "null",
+                    "array"
                   ]
                 }
               },
@@ -1381,11 +1589,15 @@
                   "type": "string"
                 },
                 "value": {
+                  "items": {
+                    "type": "string"
+                  },
                   "type": [
                     "string",
                     "integer",
                     "boolean",
-                    "null"
+                    "null",
+                    "array"
                   ]
                 }
               },
@@ -1407,11 +1619,15 @@
                   "type": "string"
                 },
                 "value": {
+                  "items": {
+                    "type": "string"
+                  },
                   "type": [
                     "string",
                     "integer",
                     "boolean",
-                    "null"
+                    "null",
+                    "array"
                   ]
                 }
               },

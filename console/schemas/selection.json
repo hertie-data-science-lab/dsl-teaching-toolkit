@@ -532,7 +532,6 @@
   ],
   "clutter": [
     ".DS_Store",
-    ".gitkeep",
     ".ipynb_checkpoints",
     "Thumbs.db",
     "__pycache__",
@@ -574,17 +573,21 @@
       ]
     }
   },
-  "denylist": [
-    ".system",
-    "solution",
-    "solutions",
-    "grading_config.yml",
-    "grading.yml",
-    "tests",
-    ".env",
-    ".env.*",
-    ".git"
-  ],
+  "denylist": {
+    "content": [
+      "solution",
+      "solutions",
+      "tests"
+    ],
+    "hard": [
+      ".git",
+      ".system",
+      ".env",
+      ".env.*",
+      "grading_config.yml",
+      "grading.yml"
+    ]
+  },
   "floor": {
     "open_course_site_publish": {
       "exclude": [],
@@ -605,6 +608,17 @@
     "events"
   ],
   "readings": "readings",
+  "reserved": {
+    "names": [
+      "semester-config",
+      ".github",
+      "join"
+    ],
+    "patterns": [
+      "*.github.io",
+      "grades-*"
+    ]
+  },
   "type_aliases": {
     "htm": "html"
   }

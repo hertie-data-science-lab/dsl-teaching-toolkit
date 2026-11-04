@@ -80,6 +80,7 @@ def _seed_source(root: Path) -> None:
         # would ever think to name. A `.gitkeep` holds an empty folder open in the SOURCE
         # repo; the rest is a file manager and a notebook editor.
         "labs/01_first-lab/.gitkeep": "",
+        "readings/01_first-lab/.gitkeep": "",
         "labs/01_first-lab/.DS_Store": "\x00bud1",
         "readings/01_first-lab/.ipynb_checkpoints/paper-checkpoint.pdf": "%PDF stale",
         "labs/01_first-lab/draft-notes.md": "half-written, not for students",
@@ -356,11 +357,12 @@ def test_junk_a_machine_left_behind_is_never_published_as_material(published):
     # Neither list above would refuse these: nothing leaks, and no faculty member would
     # think to write `.DS_Store` into a `.releaseignore`. A session folder is copied
     # wholesale, so a semester site listed a `.gitkeep` and a `.DS_Store` among its course
-    # materials and counted them into its session totals.
+    # materials and counted them into its session totals. A `.gitkeep` is copied (it is how an
+    # empty folder ships) but, like the junk, never listed (`selection.UNLISTED`).
     files = published(kinds=WITH_READINGS, reading_lists=False)
     assert f"{SERVED}/session-1/labs/lab.ipynb" in files  # the material still ships
+    assert f"{SERVED}/session-1/labs/.gitkeep" in files
     for junk in (
-        f"{SERVED}/session-1/labs/.gitkeep",
         f"{SERVED}/session-1/labs/.DS_Store",
         f"{SERVED}/session-1/readings/.ipynb_checkpoints/paper-checkpoint.pdf",
     ):
@@ -374,6 +376,7 @@ def test_reading_list_mode_does_not_name_junk_either(published):
     page = published()["_lectures/session-01.md"]
     assert "Smith 2020" in page  # the citation list still publishes
     assert "checkpoint" not in page
+    assert ".gitkeep" not in page
 
 
 def test_a_reading_list_does_not_name_a_withheld_reading(published):
@@ -383,6 +386,25 @@ def test_a_reading_list_does_not_name_a_withheld_reading(published):
     page = files["_lectures/session-01.md"]
     assert "Smith 2020" in page  # the citation list still publishes
     assert "embargoed" not in page
+
+
+def test_a_bang_line_that_releases_solutions_to_students_does_not_publish_them(
+    published, monkeypatch
+):
+    # `!solution/` and `!tests/` re-include those for the semester release (decision B);
+    # the public website is the open internet, so the content group stays a floor there.
+    seed = _seed_source
+
+    def seeded(root: Path) -> None:
+        seed(root)
+        (root / ".releaseignore").write_text("draft-*\n*.key\n!solution/\n!tests/\n")
+
+    monkeypatch.setattr(sys.modules[__name__], "_seed_source", seeded)
+    files = published(kinds=WITH_READINGS, reading_lists=False)
+    assert f"{SERVED}/session-1/labs/lab.ipynb" in files  # the material still ships
+    assert f"{SERVED}/session-1/labs/solution/answers.ipynb" not in files
+    assert f"{SERVED}/session-2/labs/tests/test_hidden.py" not in files
+    assert "answers" not in files["_lectures/lab-01.md"]
 
 
 def test_the_releaseignore_itself_is_never_published(published):

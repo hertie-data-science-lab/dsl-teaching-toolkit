@@ -42,7 +42,7 @@ from .materials import folder_kind
 from .opencourse import OPENCOURSE_FILE, OpenCourse
 from .opencourse import read as read_opencourse
 from .readings import readings_block
-from .selection import PUBLISH, Selection, denied, deny, floor, kept
+from .selection import PUBLISH, Selection, deny, floor, kept, listable, publishable
 from .selection import releaseignored as releaseignored_in
 from .site_repo import (
     ROW_NOUN,
@@ -139,11 +139,12 @@ def _public_links(local_dir: Path, url_prefix: str) -> list[Link]:
     files = sorted(q for q in local_dir.rglob("*") if q.is_file())
     # Denylisted paths are already absent from a folder THIS run copied (`selection`),
     # so this is the second lock on the same door - and the one that holds if a file
-    # ever reaches the served tree by another route.
+    # ever reaches the served tree by another route. `publishable` also leaves out the
+    # `.gitkeep` the copy carried: served, never listed (`selection.UNLISTED`).
     rels = [
         rel
         for rel in (q.relative_to(local_dir).as_posix() for q in files)
-        if not denied(rel)
+        if publishable(rel)
     ]
     if any("/" not in rel for rel in rels):
         rels = [rel for rel in rels if "/" not in rel]
@@ -244,6 +245,9 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
             # One rule (`selection`): the institution denylist, faculty's
             # `.releaseignore`, `publish:` and the institution's floor, anchored at the
             # CLONE root even though what gets copied is a session folder deep inside it.
+            # The whole denylist is a floor here (`deny` re-includes nothing unless asked):
+            # a `!solutions/` that releases solutions to a semester's students does not
+            # publish them to the open internet.
             def withhold(section: str):
                 kind = _section_kind(section)
                 return deny(src, use=sel, kind_of=lambda _rel: kind, limit=limit)
@@ -309,10 +313,10 @@ def sync_public_site(course_org: str, oc: OpenCourse) -> int:
                     if oc.reading_lists:
                         reading_list_md = _reading_list_md(
                             read_src,
-                            lambda p: kept(
-                                p.relative_to(src).as_posix(),
-                                use=listed_names,
-                                withheld=withheld,
+                            # Named, never a `.gitkeep` (`listable`).
+                            lambda p: (
+                                listable(rel := p.relative_to(src).as_posix())
+                                and kept(rel, use=listed_names, withheld=withheld)
                             ),
                         )
 

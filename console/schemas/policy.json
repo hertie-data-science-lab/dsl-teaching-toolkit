@@ -8,6 +8,7 @@
     "marks_per_question": true,
     "materials_repo": "materials",
     "max_team_size": 5,
+    "release_destinations": [],
     "timezone": "Europe/Berlin"
   },
   "institution": {

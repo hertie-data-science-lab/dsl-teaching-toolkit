@@ -1,6 +1,6 @@
-"""deploy.parse_path_pairs turns the Release materials button's two
-comma-separated inputs into (course_source_path, semester_dest_path) pairs, and the read
-grant covers both semester role teams.
+"""deploy.parse_deploy_lists turns the Release materials button's comma-separated inputs
+into one Deploy per (course_source_path, semester_dest_path) pair, and the read grant
+covers both semester role teams.
 
 (Session-directory discovery/matching lives in course.py - see test_course.py; the deploy
 batching itself is exercised in test_scheduler.py, which drives the same
@@ -15,6 +15,7 @@ import pytest
 from dsl_course import access, course, deploy, ghcli, records, repos, selection
 from dsl_course import repos as repo_mod
 from dsl_course.fs import copy_tree
+from dsl_course.ops.registry import REGISTRY, Request
 from dsl_course.schedule import Deploy, Release, Schedule
 
 
@@ -25,19 +26,24 @@ def _no_plan(monkeypatch):
     monkeypatch.setattr(deploy.schedule, "load", lambda org: Schedule())
 
 
+def _pairs(source_paths: str, dest_paths: str = "") -> list[tuple[str, str | None]]:
+    return [
+        (d.course_source_path, d.semester_dest_path)
+        for d in deploy.parse_deploy_lists("src", source_paths, "", dest_paths)
+    ]
+
+
 def test_a_single_path_with_no_comma_still_works():
     # The overwhelmingly common case: one folder, mirrored.
-    assert deploy.parse_path_pairs("lectures/02_intro") == [("lectures/02_intro", None)]
+    assert _pairs("lectures/02_intro") == [("lectures/02_intro", None)]
     # ...and one folder with an explicit destination.
-    assert deploy.parse_path_pairs("lectures/02_intro", "week02") == [
-        ("lectures/02_intro", "week02")
-    ]
+    assert _pairs("lectures/02_intro", "week02") == [("lectures/02_intro", "week02")]
 
 
 def test_blank_dest_path_mirrors_every_source_path():
     # Blank dest path means the same thing here as an omitted `semester_dest_path:` in
     # schedule.yml: mirror the source path (None = let deploy_many mirror it).
-    assert deploy.parse_path_pairs("lectures/02,labs/02,readings/02") == [
+    assert _pairs("lectures/02,labs/02,readings/02") == [
         ("lectures/02", None),
         ("labs/02", None),
         ("readings/02", None),
@@ -45,7 +51,7 @@ def test_blank_dest_path_mirrors_every_source_path():
 
 
 def test_equal_length_lists_are_paired_by_index():
-    assert deploy.parse_path_pairs(
+    assert _pairs(
         "lectures/02,labs/02,readings/02", "week02/lecture,week02/lab,week02/reading"
     ) == [
         ("lectures/02", "week02/lecture"),
@@ -61,19 +67,17 @@ def test_mismatched_counts_fail_loudly_naming_both_counts():
     with pytest.raises(
         ValueError, match="3 course_source_paths but 2 semester_dest_paths"
     ):
-        deploy.parse_path_pairs("a,b,c", "x,y")
+        _pairs("a,b,c", "x,y")
     with pytest.raises(
         ValueError, match="2 course_source_paths but 3 semester_dest_paths"
     ):
-        deploy.parse_path_pairs("a,b", "x,y,z")
+        _pairs("a,b", "x,y,z")
 
 
 def test_whitespace_and_trailing_commas_are_tolerated():
     # Faculty type these into a GitHub text box: spaces after commas and a stray
     # trailing comma must not change the pairing (or trip the count check).
-    assert deploy.parse_path_pairs(
-        " lectures/02 , labs/02 ,", "week02/lecture , week02/lab , "
-    ) == [
+    assert _pairs(" lectures/02 , labs/02 ,", "week02/lecture , week02/lab , ") == [
         ("lectures/02", "week02/lecture"),
         ("labs/02", "week02/lab"),
     ]
@@ -81,7 +85,160 @@ def test_whitespace_and_trailing_commas_are_tolerated():
 
 def test_an_empty_source_path_is_an_error_not_an_empty_batch():
     with pytest.raises(ValueError, match="course-source-path is empty"):
-        deploy.parse_path_pairs("  ,  ")
+        _pairs("  ,  ")
+
+
+def _rows(deploys):
+    return [
+        (
+            d.course_source_repo,
+            d.course_source_path,
+            d.semester_dest_repo,
+            d.semester_dest_path,
+        )
+        for d in deploys
+    ]
+
+
+def test_one_repo_on_each_side_applies_to_every_pair():
+    assert _rows(deploy.parse_deploy_lists("src", "a,b", "handouts", "x,y")) == [
+        ("src", "a", "handouts", "x"),
+        ("src", "b", "handouts", "y"),
+    ]
+
+
+def test_repo_lists_pair_with_the_paths_by_index():
+    # A hand release drawing on two course repos into two semester repos: one run.
+    got = deploy.parse_deploy_lists(
+        "materials-src, datasets-src", "lectures/01,data/01", "materials,datasets", ""
+    )
+    assert _rows(got) == [
+        ("materials-src", "lectures/01", "materials", None),
+        ("datasets-src", "data/01", "datasets", None),
+    ]
+
+
+def test_a_blank_dest_repo_is_the_default_for_every_pair():
+    got = deploy.parse_deploy_lists("a-src,b-src", "x,y", "  ")
+    assert [d.semester_dest_repo for d in got] == [deploy.DEFAULT_DEST_REPO] * 2
+    got = deploy.parse_deploy_lists("a-src", "x,y", "", default_dest="handouts")
+    assert [d.semester_dest_repo for d in got] == ["handouts"] * 2
+
+
+@pytest.mark.parametrize(
+    ("sources", "dests", "message"),
+    [
+        ("a,b,c", "", "3 course_source_repos but 2 course_source_paths"),
+        ("a", "m,n,o", "3 semester_dest_repos but 2 course_source_paths"),
+        (" , ", "", "course-source-repo is empty"),
+    ],
+)
+def test_unpaired_repo_lists_fail_loudly_naming_the_counts(sources, dests, message):
+    with pytest.raises(ValueError, match=message):
+        deploy.parse_deploy_lists(sources, "p,q", dests)
+
+
+def test_cli_releases_several_repos_in_one_batch(monkeypatch, site_syncs, capsys):
+    seen = []
+    monkeypatch.setattr(
+        deploy,
+        "deploy_many",
+        lambda org, sem, deploys, sync=True, remove=None, replace=False: (
+            seen.append(deploys) or deploy.Batch(0, True, [])
+        ),
+    )
+    monkeypatch.setattr(deploy, "unnumbered_release", lambda *a: None)
+    argv = ["deploy", "--course-org", "Course", "--semester-org", "Semester-f2026"]
+    argv += ["--course-source-repo", "materials-src,datasets-src"]
+    argv += ["--semester-dest-repo", "materials,datasets"]
+    argv += ["--course-source-path", "lectures/01,data/01", "--no-preview"]
+    monkeypatch.setattr("sys.argv", argv)
+    out = deploy.main()
+    assert out == 0 and len(seen) == 1
+    assert [d.semester_dest_repo for d in seen[0]] == ["materials", "datasets"]
+    assert (
+        "2 source repos in Course -> 2 repos in Semester-f2026"
+        in capsys.readouterr().out
+    )
+    assert out.text == "Released 2 items from 2 source repos to 2 repos."
+
+
+def _hand_release(monkeypatch, sched: Schedule, *extra: str) -> tuple[int, list]:
+    seen: list = []
+    monkeypatch.setattr(deploy.schedule, "load", lambda org: sched)
+    monkeypatch.setattr(
+        deploy,
+        "deploy_many",
+        lambda org, sem, deploys, sync=True, remove=None, replace=False: (
+            seen.append(deploys) or deploy.Batch(0, False, [])
+        ),
+    )
+    monkeypatch.setattr(deploy, "unnumbered_release", lambda *a: None)
+    argv = ["deploy", "--course-org", "Course", "--semester-org", "Semester-f2026"]
+    argv += ["--course-source-repo", "src", "--course-source-path", "lectures/01"]
+    monkeypatch.setattr("sys.argv", [*argv, *extra, "--no-preview"])
+    return deploy.main(), seen
+
+
+def test_a_blank_dest_repo_is_the_semesters_materials_repo(monkeypatch):
+    # Not the institution's constant: the semester's effective `materials_repo`, the
+    # repo a schedule copy naming no `to_semester_repo` lands in too.
+    sched = Schedule(materials_repo="handouts")
+    out, seen = _hand_release(monkeypatch, sched, "--semester-dest-repo", " ")
+    assert out == 0 and [d.semester_dest_repo for d in seen[0]] == ["handouts"]
+    out, seen = _hand_release(monkeypatch, sched)
+    assert out == 0 and [d.semester_dest_repo for d in seen[0]] == ["handouts"]
+
+
+def test_the_consoles_hand_release_with_no_dest_repo_lands_in_materials_repo(
+    monkeypatch,
+):
+    # The Console's argv (the registry's) leaves a missing repo blank for deploy to
+    # resolve, rather than supplying the institution's default.
+    from dsl_course.ops.registry import REGISTRY, Request, command
+
+    req = Request(
+        "release.adhoc",
+        "prof",
+        "Course",
+        "Semester-f2026",
+        {"course_source_repo": "src", "course_source_path": "lectures/01"},
+        False,
+    )
+    argv = command(REGISTRY["release.adhoc"], req)
+    seen: list = []
+    monkeypatch.setattr(
+        deploy.schedule, "load", lambda org: Schedule(materials_repo="lecture-code")
+    )
+    monkeypatch.setattr(
+        deploy,
+        "deploy_many",
+        lambda org, sem, deploys, sync=True, remove=None, replace=False: (
+            seen.append(deploys) or deploy.Batch(0, False, [])
+        ),
+    )
+    monkeypatch.setattr(deploy, "unnumbered_release", lambda *a: None)
+    monkeypatch.setattr("sys.argv", ["deploy", *argv])
+    assert deploy.main() == 0
+    assert [d.semester_dest_repo for d in seen[0]] == ["lecture-code"]
+
+
+@pytest.mark.parametrize(
+    ("dest", "why"),
+    [
+        ("semester-config", "the semester's config"),
+        (".github", "the organisation's profile"),
+        ("Semester-f2026.github.io", "the semester's website"),
+        ("join", "the enrolment page"),
+        ("grades-alice", "students' marks"),
+        ("hw1-alice", "a student's repo"),
+    ],
+)
+def test_a_hand_release_never_lands_in_a_reserved_repo(monkeypatch, capsys, dest, why):
+    sched = Schedule(assignments={"hw1": object()})
+    out, seen = _hand_release(monkeypatch, sched, "--semester-dest-repo", dest)
+    assert out == 1 and seen == []
+    assert f"reserved for {why}" in capsys.readouterr().err
 
 
 def test_cli_rejects_a_count_mismatch_with_a_nonzero_exit(monkeypatch, capsys):
@@ -116,7 +273,9 @@ def test_cli_builds_one_deploy_per_pair_and_one_batch(monkeypatch, site_syncs):
     # through ONE deploy_many call - so each repo is cloned once for the whole batch.
     seen = {}
 
-    def fake_deploy_many(course_org, semester_org, deploys, sync=True, remove=None):
+    def fake_deploy_many(
+        course_org, semester_org, deploys, sync=True, remove=None, replace=False
+    ):
         seen.update(
             course_org=course_org, semester_org=semester_org, deploys=deploys, sync=sync
         )
@@ -193,7 +352,7 @@ def test_an_entry_is_released_in_one_batch_with_one_sync(monkeypatch, site_syncs
     monkeypatch.setattr(
         deploy,
         "deploy_many",
-        lambda org, sem, deploys, sync=True, remove=None: (
+        lambda org, sem, deploys, sync=True, remove=None, replace=False: (
             calls.append((deploys, sync)) or deploy.Batch(0, True, [])
         ),
     )
@@ -475,7 +634,7 @@ def test_the_dotgithub_description_says_the_opposite_thing_per_tier(monkeypatch)
 
 # The one definition of "this means the repo root". Blank is included because that is what
 # an empty `semester_dest_path` reduces to internally; neither front door accepts it as a
-# SOURCE (parse_path_pairs and schedule.py both reject an empty course_source_path).
+# SOURCE (parse_deploy_lists and schedule.py both reject an empty course_source_path).
 ROOT_SPELLINGS = ["/", ".", "", "./", "//"]
 
 
@@ -509,7 +668,9 @@ def _release_filter(root: Path, names: list[str], whole: bool, at: Path | None =
             (here / n).mkdir()
         else:
             (here / n).write_text("x")
-    ignore = selection.deny(root, use=selection.release_use(whole))
+    ignore = selection.deny(
+        root, use=selection.release_use(whole), reincludable=selection.RELEASE
+    )
     return ignore(str(here), names)
 
 
@@ -561,7 +722,9 @@ def test_a_solution_named_outright_ships_exactly_what_it_names(tmp_path):
     copy_tree(
         src / "solutions/labs/02_lab",
         dest,
-        selection.deny(src, use=selection.release_use(False)),
+        selection.deny(
+            src, use=selection.release_use(False), reincludable=selection.RELEASE
+        ),
     )
     assert sorted(
         p.relative_to(dest).as_posix() for p in dest.rglob("*") if p.is_file()
@@ -595,8 +758,9 @@ def test_junk_never_travels_with_a_release_at_any_depth(tmp_path):
         tmp_path, names, whole=False, at=tmp_path / "labs" / "01_session-1"
     )
     # `.Rprofile` is course material an R course's students need - the rule is a closed
-    # list of names, never a rule about dots.
-    assert skipped == set(names) - {"lab.ipynb", ".Rprofile"}
+    # list of names, never a rule about dots. A `.gitkeep` is how an empty folder ships: it
+    # travels with the copy (the site listings still leave it out, `selection.UNLISTED`).
+    assert skipped == set(names) - {"lab.ipynb", ".Rprofile", ".gitkeep"}
 
 
 def test_junk_is_matched_however_the_machine_that_wrote_it_spelled_it(tmp_path):
@@ -910,3 +1074,113 @@ def test_release_now_refuses_a_copy_of_an_entry_with_no_number(
         ]
     else:
         assert out == 0
+
+
+# ----------------------------------- decision B: never released, or withheld by default
+
+
+def _lab_with_answers(src):
+    for rel in (
+        "labs/01/lab.ipynb",
+        "labs/01/solutions/a.ipynb",
+        "labs/01/.env",
+        "solutions/key.md",
+    ):
+        (src / rel).parent.mkdir(parents=True, exist_ok=True)
+        (src / rel).write_text(rel)
+
+
+def test_a_bang_line_releases_a_content_name_with_its_folder(monkeypatch):
+    def build(src):
+        _lab_with_answers(src)
+        (src / ".releaseignore").write_text("!solutions/\n!.env\n")
+
+    snaps = _stub_deploy_many(monkeypatch, build)
+    errors, _changed, _copies = deploy.deploy_many(
+        "COURSE", "SEMESTER", [_deploy("labs/01")], sync=False
+    )
+    assert errors == 0
+    got = snaps["materials"]
+    assert got["labs/01/solutions/a.ipynb"] == "labs/01/solutions/a.ipynb"
+    assert "labs/01/.env" not in got  # no `!` line releases a never-released name
+
+
+def test_without_a_bang_line_a_folder_copy_leaves_the_content_names(monkeypatch):
+    snaps = _stub_deploy_many(monkeypatch, _lab_with_answers)
+    deploy.deploy_many("COURSE", "SEMESTER", [_deploy("labs/01")], sync=False)
+    assert "labs/01/lab.ipynb" in snaps["materials"]
+    assert "labs/01/solutions/a.ipynb" not in snaps["materials"]
+
+
+def test_a_never_released_path_named_outright_is_refused(monkeypatch, capsys):
+    snaps = _stub_deploy_many(monkeypatch, _lab_with_answers)
+    errors, _changed, _copies = deploy.deploy_many(
+        "COURSE", "SEMESTER", [_deploy("labs/01/.env"), _deploy("labs/01")], sync=False
+    )
+    assert errors == 0  # a refusal on a green run, as a `.releaseignore` one is
+    assert "labs/01/.env" not in snaps["materials"]
+    assert "labs/01/lab.ipynb" in snaps["materials"]  # the rest still shipped
+    err = capsys.readouterr().err
+    assert "::warning::" in err
+    assert "never released: labs/01/.env is on the institution's list" in err
+
+
+def test_a_content_name_named_outright_still_ships(monkeypatch):
+    snaps = _stub_deploy_many(monkeypatch, _lab_with_answers)
+    errors, _changed, _copies = deploy.deploy_many(
+        "COURSE", "SEMESTER", [_deploy("solutions")], sync=False
+    )
+    assert errors == 0
+    assert snaps["materials"]["solutions/key.md"] == "solutions/key.md"
+
+
+def test_replace_reaches_deploy_many_and_the_summary_says_replaced(monkeypatch):
+    seen = {}
+
+    def fake(org, sem, deploys, sync=True, remove=None, replace=False):
+        seen["replace"] = replace
+        return deploy.Batch(0, True, [])
+
+    monkeypatch.setattr(deploy, "deploy_many", fake)
+    monkeypatch.setattr(deploy, "_record", lambda *a: 0)
+    monkeypatch.setattr(deploy, "_sync_site", lambda *a: 0)
+    monkeypatch.setattr(deploy, "unnumbered_release", lambda *a: None)
+    base = [
+        "deploy",
+        "--course-org",
+        "Course",
+        "--course-source-repo",
+        "cm",
+        "--semester-org",
+        "Semester-f2026",
+        "--course-source-path",
+        "lectures/02",
+        "--no-preview",
+    ]
+    monkeypatch.setattr("sys.argv", [*base, "--replace"])
+    out = deploy.main()
+    assert seen["replace"] is True
+    assert out.text.startswith("Replaced 1 item from cm in materials")
+    monkeypatch.setattr("sys.argv", base)
+    assert deploy.main().text.startswith("Released")
+    assert seen["replace"] is False
+
+
+@pytest.mark.parametrize(
+    ("op", "args"),
+    [
+        ("release.entry", {"entry": "lab-08"}),
+        (
+            "release.adhoc",
+            {"course_source_repo": "cm", "course_source_path": "labs/08"},
+        ),
+    ],
+)
+def test_the_console_ops_spell_replace(op, args):
+    def argv(**extra) -> list[str]:
+        return REGISTRY[op].argv(
+            Request(op, "prof", "C", "S", {**args, **extra}, False)
+        )
+
+    assert "--replace" not in argv()
+    assert argv(replace=True)[-1] == "--replace"

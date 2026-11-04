@@ -82,7 +82,7 @@ def _shipping(monkeypatch, outcome=RELEASED, files=FILES):
     """deploy_many as seen from the scheduler: every copy applied, its dest `outcome`."""
     calls: list[list[Deploy]] = []
 
-    def fake(course_org, semester_org, deploys, sync=True, remove=None):
+    def fake(course_org, semester_org, deploys, sync=True, remove=None, replace=False):
         calls.append(list(deploys))
         copies = [Copied(d, "c1", files, outcome) for d in deploys]
         return Batch(0, outcome == RELEASED, copies)
@@ -380,7 +380,7 @@ def _cli(monkeypatch, argv, files=FILES, outcome=RELEASED):
     monkeypatch.setattr(deploy.schedule, "load", lambda org: _sched())
     batches = []
 
-    def fake(course_org, semester_org, deploys, sync=True, remove=None):
+    def fake(course_org, semester_org, deploys, sync=True, remove=None, replace=False):
         batches.append(list(deploys))
         return Batch(0, True, [Copied(d, "c9", files, outcome) for d in deploys])
 
@@ -540,7 +540,7 @@ def test_a_hand_release_ahead_of_schedule_is_that_copys_release(monkeypatch):
     monkeypatch.setattr(
         deploy,
         "deploy_many",
-        lambda c, s, deploys, sync=True, remove=None: Batch(
+        lambda c, s, deploys, sync=True, remove=None, replace=False: Batch(
             0,
             True,
             [Copied(d, "c", {"08_session-8/a": "1"}, RELEASED) for d in deploys],

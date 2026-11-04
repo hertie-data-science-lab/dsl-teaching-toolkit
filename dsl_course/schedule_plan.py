@@ -72,10 +72,9 @@ class PlannedRow:
         """The semester-side `repo/path`s its copies land in, deduped, in plan order. A
         path under another one listed (`labs/03_lab/solutions` beside `labs/03_lab`) is
         dropped: the pending-row sentence would otherwise link the same tree twice."""
-        paths = dict.fromkeys(
+        return outermost(
             f"{d.semester_dest_repo}/{deploy_dest(d)}" for d in self.deploys
         )
-        return [p for p in paths if not any(p.startswith(f"{q}/") for q in paths)]
 
 
 def planned_rows(sched: schedule.Schedule) -> list[PlannedRow]:
@@ -395,6 +394,15 @@ def within(wanted: str, path: str) -> str | None:
     if path == wanted:
         return ""
     return path[len(wanted) + 1 :] if path.startswith(f"{wanted}/") else None
+
+
+def outermost(paths: Iterable[str]) -> list[str]:
+    """`paths` deduped, in order, without any that lies inside another one listed
+    (`within`: `labs/03/solutions` beside `labs/03`; everything beside the root "")."""
+    found = list(dict.fromkeys(paths))
+    return [
+        p for p in found if not any(q != p and within(q, p) is not None for q in found)
+    ]
 
 
 def unnumbered_release(

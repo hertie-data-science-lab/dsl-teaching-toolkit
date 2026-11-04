@@ -57,9 +57,9 @@ export interface Problem {
   aside?: boolean;
 }
 
-/** One value's effective answer and the layer that gave it (`settings.SOURCES`). */
+/** One value's effective answer and the layer that gave it (`settings.SOURCES`); a list for `release_destinations`. */
 export interface EffectiveValue {
-  value: string | number | boolean | null;
+  value: string | number | boolean | null | string[];
   source: 'entry' | 'semester' | 'course' | 'institution';
 }
 /** Every effective value at one level, keyed as the files spell them (`assignment_repo_visibility`). */
