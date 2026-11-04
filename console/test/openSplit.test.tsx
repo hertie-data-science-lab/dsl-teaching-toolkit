@@ -41,6 +41,7 @@ describe('OpenSplit', () => {
     expect(menu(el)).toEqual({
       hidden: false,
       heads: ['In the browser', 'On your computer'],
+      // Set up your editor already links Profile: no Change your profile under it.
       items: [
         ['On GitHub', 'https://github.com/sem/materials/blob/HEAD/lectures/05/notes.md'],
         ['On github.dev', 'https://github.dev/sem/materials/blob/HEAD/lectures/05/notes.md'],
@@ -52,15 +53,44 @@ describe('OpenSplit', () => {
   it('offers the editor Profile names once it has a folder', async () => {
     const el = await mount('notes.md', { folder: '/Users/a/courses', editor: 'vscode' });
     await act(() => el.querySelector<HTMLButtonElement>('button.split-caret')!.click());
-    const last = menu(el).items.at(-1)!;
-    expect(last[0]).toBe('In VS Code');
-    expect(last[1]).toMatch(/^vscode:\/\/file\/.*\/materials\/notes\.md$/);
+    const [editor, profile] = menu(el).items.slice(-2);
+    expect(editor[0]).toBe('In VS Code');
+    expect(editor[1]).toMatch(/^vscode:\/\/file\/.*\/materials\/notes\.md$/);
+    expect(profile).toEqual(['Change your profile', '?cohort=sem#profile']);
   });
 
   it('lists no github.dev or editor for a document no editor opens', async () => {
     const el = await mount('slides.pdf', { folder: '/Users/a/courses', editor: 'vscode' });
     await act(() => el.querySelector<HTMLButtonElement>('button.split-caret')!.click());
-    expect(menu(el).items.map((i) => i[0])).toEqual(['On GitHub']);
-    expect(el.querySelector('.open-menu .pm-off')!.textContent).toBe('Not an editable format');
+    expect(menu(el).items.map((i) => i[0])).toEqual(['On GitHub', 'Change your profile']);
+    expect([...el.querySelectorAll('.open-menu .pm-off')].map((x) => x.textContent)).toEqual(['Not an editable format', 'Not an editable format']);
+  });
+
+  it('draws a repo the same way: its sections, the browser rows worded as a file’s, and the way to Profile last', async () => {
+    root = document.createElement('div');
+    document.body.appendChild(root);
+    await act(() => render(<OpenSplit kind="repo" org="course" repo="materials" small quiet />, root!));
+    const caret = root.querySelector<HTMLButtonElement>('.split.small > button.btn.quiet.small.split-caret')!;
+    expect(caret.getAttribute('aria-label')).toBe('More ways to open materials');
+    await act(() => caret.click());
+    const m = menu(root);
+    expect(m.heads).toEqual(['In the browser', 'On your computer']);
+    expect(m.items.map((i) => i[0])).toEqual(['On GitHub', 'On github.dev', 'Clone in VS Code', 'Open in GitHub Desktop', 'Set up a local folder']);
+  });
+
+  it('draws only the chevron and the menu for a file row', async () => {
+    root = document.createElement('div');
+    document.body.appendChild(root);
+    await act(() => render(<OpenSplit org="sem" repo="materials" path="a/notes.md" name="notes.md" view="?v" forkOwner="octo" setup={null} profile="?p" caretOnly />, root!));
+    expect(root.querySelector('.split-main')).toBeNull();
+    const chev = root.querySelector<HTMLButtonElement>('.file-menu > button.file-chev')!;
+    expect(chev.getAttribute('aria-label')).toBe('More ways to open notes.md');
+    await act(() => chev.click());
+    expect(menu(root).items).toEqual([
+      ['In the console', '?v'],
+      ['On GitHub', 'https://github.com/sem/materials/blob/HEAD/a/notes.md'],
+      ['On github.dev, in your fork', 'https://github.dev/octo/materials/blob/HEAD/a/notes.md'],
+      ['Set up your editor in Profile', '?p'],
+    ]);
   });
 });

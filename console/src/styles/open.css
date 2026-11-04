@@ -1,4 +1,4 @@
-/* ================= the Open split button (ui/OpenButton.tsx) ================= */
+/* ================= the Open split button (ui/OpenSplit.tsx) ================= */
 .split { position: relative; display: inline-flex; align-items: stretch; }
 .split > .split-main { border-top-right-radius: 0; border-bottom-right-radius: 0; padding-right: 12px; }
 .split > .split-caret { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1.5px; padding: 0 11px; border-left-color: color-mix(in srgb, currentColor 35%, transparent); }

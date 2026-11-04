@@ -60,12 +60,12 @@ describe('the course materials tree', () => {
     const name = li.querySelector<HTMLAnchorElement>('a.ft-name')!;
     expect(name.getAttribute('href')).toBe(fileViewHref(ORG, MAT, 'SYLLABUS.md'));
     expect(name.getAttribute('target')).toBeNull();
-    const items = [...li.querySelectorAll('.file-menu-list > a, .file-menu-list > .fm-off')];
-    expect(items.map((a) => a.querySelector('.fm-lbl')!.textContent)).toEqual(['View here', 'View on GitHub', 'Edit in browser', 'Edit in VS Code']);
+    const items = [...li.querySelectorAll('.open-menu [role="menuitem"]')];
+    expect(items.map((a) => a.textContent)).toEqual(['In the console', 'On GitHub', 'On github.dev', 'Set up your editor in Profile']);
     expect(items[0].getAttribute('href')).toBe(fileViewHref(ORG, MAT, 'SYLLABUS.md'));
     expect(items[1].getAttribute('href')).toBe(`https://github.com/${ORG}/${MAT}/blob/HEAD/SYLLABUS.md`);
     // The editor row points at the course's Profile, not a semester's.
-    expect(li.querySelector('.fm-off a')!.getAttribute('href')).toBe(`?course=${ORG}#profile`);
+    expect(items[3].getAttribute('href')).toBe(`?course=${ORG}#profile`);
   });
 
   it('marks the open file and opens the folders above it', async () => {

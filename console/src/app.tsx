@@ -72,7 +72,7 @@ export function createDeps(): AppDeps {
 
 /**
  * The console route a click follows in place (`?...` links), or null to leave it to the
- * browser: a link with a target (`View here` opens a new tab), and a modifier or non-primary
+ * browser: a link with a target (`In the console` opens a new tab), and a modifier or non-primary
  * click (new tab or window), keep the browser's own behaviour.
  */
 export function inAppHref(e: MouseEvent): string | null {

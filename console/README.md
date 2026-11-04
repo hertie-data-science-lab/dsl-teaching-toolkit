@@ -236,16 +236,22 @@ files (its chip counts the differing files): each released folder
 three-way in the page (`outOfStep`: the release's folder copy as `groupPicks` takes it, then
 `fileStates`, plus `semesterOnly`: a file only the semester copy has counts ahead, "added in the
 semester"; `folderStep` ahead / behind / diverged), its files filtered by step (`.seg`, counts of
-files; a file the course added is behind), beside one PR into source (`keepFuture`, greyed when
-nothing is ahead or diverged). Each folder is a fold, open at first, headed by its path alone;
+files; a file the course added is behind), beside one PR into source (all) (`keepFuture`, the
+full run, greyed when nothing is ahead or diverged). Each folder is a fold, open at first, headed by its path alone;
 under it each differing file is a row: its name, chip, a muted "+A −D" once its diff is read
-(`useDiff`; "binary" for a document or image), Re-release (`releasePicked` of that one file onto
-its released copy; greyed for ahead and for a file only the semester has), the Open split button
+(`useDiff`; "binary" for a document or image), Re-release (`reRelease`: `releasePicked` of that one file onto
+its released copy, Options the advanced Overwrite, `replace`; greyed for ahead and for a file only the semester has),
+PR into source (`keepFuturePaths`: `release.propagate_back` with `paths`, `<repo>/<path>` or just
+`<path>` in the semester's default repo; greyed for behind), the Open split button
 (`ui/OpenSplit.tsx`: the semester copy on GitHub, its arrow `useMenu` with GitHub, github.dev and
 the editor from Profile) and a Diff toggle drawing `ui/FileDiff.tsx` under the row (the course
 blob against the semester's default-branch blob as a unified diff, the `diff` package imported on
 first open, text only, capped at 2000 lines; headed by the path, what it compares, and Compare on
-GitHub `compare/upstream...<default>#diff-<sha256 of the path>` for ahead and diverged); the engine's `DIVERGED_RELEASED` lines stay on the Dashboard. Below it, for those who can change the course, the Release by hand fold: the Files
+GitHub `compare/upstream...<default>#diff-<sha256 of the path>` for ahead and diverged). A release that conflicted waits in an open pull request from the semester
+repo's `upstream` branch (`listPulls`, read once per repo listed): each ahead or diverged file whose
+`upstream` blob differs from the default branch's then has, in place of Re-release, an amber "Release
+pending in a pull request" with Open PR and Overwrite (Re-release with `replace` set, and a confirm
+line). The engine's `DIVERGED_RELEASED` lines stay on the Dashboard. Below it, for those who can change the course, the Release by hand fold: the Files
 panel's Release view (`ui/FilesPanel.tsx`) from the course's materials repos and Other repos
 (Add a course repo sets the `dsl-materials` topic, as Treat as course materials does); its
 lede, "Want to automate these releases? Schedule on the calendar →" with its `?`
@@ -406,18 +412,17 @@ the gradebook, from the same reads as a live one. No operation runs against it.
 assignment page's files and CONTRIBUTIONS.md, the Home syllabus and Updates box, the latter
 with the name in brackets and nothing after it) is the file's name, opening it in
 the console when it lives in a materials repo (in All materials; in the tab itself on a kind
-tab), else on GitHub, then one chevron, "More ways to open", the semester site's file menu
-(decision 0035 rule 10). Its **Open** section: `view` (in a new tab: the same console view, for
-a file the name opens there and the viewer draws: markdown, notebook, html, pdf, image; else
-GitHub's blob page, for a file GitHub draws: markdown, notebook, pdf, image, whose `GitHub` then
-takes `?plain=1` for markdown and notebooks) and `GitHub` (the blob). Its **Edit** section:
-`in browser` (github.dev, in the student's fork when they forked the repo, else the org's) and
-the editor from Profile by name (`VS Code`, or another editor its link's scheme names, such as
-`Cursor`; else `local`), at `<semester folder>/<repo>/<path>`. Edit only for a file an editor
-opens (not pdf, pptx, docx, xlsx, zip); the editor only once Profile has a folder and VS Code or
-an editor link with `{path}` (GitHub Desktop opens repos, not files), and until then a "Set up
-your editor in Profile" item in its place. The menu is the instructor Open button's
-(`ui/OpenButton.tsx` `useMenu`): it closes on a click outside, on Escape, and on Tab, so one is
+tab), else on GitHub, then one chevron, "More ways to open", the Open split button's menu
+(`ui/OpenSplit.tsx`, decision 0035 rule 10). **In the browser**: `In the console` (in a new
+tab, for a file the name opens there and the viewer draws: markdown, notebook, html, pdf,
+image), `On GitHub` (the blob) and `On github.dev` (in the student's fork when they forked the
+repo, else the org's). **On your computer**: the editor from Profile by name (`In VS Code`, or
+another editor its link's scheme names, such as `In Cursor`; else `In your editor`), at
+`<semester folder>/<repo>/<path>`, only once Profile has a folder and VS Code or an editor link
+with `{path}` (GitHub Desktop opens repos, not files), and until then "Set up your editor in
+Profile". A file no editor opens (pdf, pptx, docx, xlsx, zip) has "Not an editable format"
+greyed in place of github.dev and the editor. Last, "Change your profile" (but after the set-up line). The menu's
+behaviour is `useMenu` (`ui/OpenSplit.tsx`), the repo Open button's too: it closes on a click outside, on Escape, and on Tab, so one is
 open at a time. The row is `ui/FileRow.tsx`, the one the course materials tree draws too
 (decision 0040 rule 6). Whether the student forked a repo is
 read once per session, when a row first needs it, and Profile's fork check refreshes it.

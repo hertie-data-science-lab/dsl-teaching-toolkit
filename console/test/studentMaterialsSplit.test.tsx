@@ -58,18 +58,17 @@ it('keeps every repo’s tree beside the open file, the file marked and its fold
   expect(split.querySelector('.materials-file h2')!.textContent).toBe('labs/01/lab.md');
 });
 
-it('gives each tree row the menu, the same four rows, a pdf’s Edit greyed', async () => {
+it('gives each tree row the menu, a pdf’s github.dev and editor greyed', async () => {
   const el = await mount();
   expect(el.querySelector('.materials-split')).toBeNull();
   const row = (name: string) => [...el.querySelectorAll('.ft-file')].find((li) => li.querySelector('.ft-name')!.textContent === name)!;
-  const items = (li: Element) => [...li.querySelectorAll('.file-menu-list > a, .file-menu-list > .fm-off')];
-  const words = (li: Element) => items(li).map((a) => a.querySelector('.fm-lbl')!.textContent);
-  const live = (li: Element) => items(li).filter((a) => !a.classList.contains('fm-off')).map((a) => a.querySelector('.fm-lbl')!.textContent);
-  expect(words(row('SYLLABUS.md'))).toEqual(['View here', 'View on GitHub', 'Edit in browser', 'Edit in VS Code']);
-  expect(live(row('SYLLABUS.md'))).toEqual(['View here', 'View on GitHub', 'Edit in browser']);
+  const items = (li: Element) => [...li.querySelectorAll('.open-menu [role="menuitem"]')];
+  const words = (li: Element) => items(li).map((a) => a.textContent);
+  const greyed = (li: Element) => [...li.querySelectorAll('.open-menu .pm-off')].map((x) => x.textContent);
+  expect(words(row('SYLLABUS.md'))).toEqual(['In the console', 'On GitHub', 'On github.dev', 'Set up your editor in Profile']);
   expect(items(row('SYLLABUS.md'))[1].getAttribute('href')).toBe(`https://github.com/${ORG}/materials/blob/HEAD/SYLLABUS.md`);
-  expect(words(row('notes.pdf'))).toEqual(['View here', 'View on GitHub', 'Edit in browser', 'Edit in VS Code']);
-  expect(live(row('notes.pdf'))).toEqual(['View here', 'View on GitHub']);
+  expect(words(row('notes.pdf'))).toEqual(['In the console', 'On GitHub', 'Change your profile']);
+  expect(greyed(row('notes.pdf'))).toEqual(['Not an editable format', 'Not an editable format']);
   expect(row('notes.pdf').querySelector('.ft-name')!.getAttribute('href')).toContain('#materials-');
 });
 
