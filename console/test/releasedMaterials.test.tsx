@@ -205,7 +205,7 @@ describe('Released materials', () => {
     expect(sum.querySelector('.step-bang')!.textContent).toBe('!');
     // Counts files: notes.md, then lab.ipynb and new.md.
     expect(sum.querySelector('.chip.amber')!.textContent).toBe('3 released files differ');
-    expect(sum.querySelector('.hint-pop')!.textContent).toMatch(/^For each released folder the toolkit compares the course copy with the semester’s and lists every file that differs\. A folder is listed/);
+    expect(sum.querySelector('.hint-pop')!.textContent).toMatch(/^For each released folder the toolkit compares the course copy with the semester’s and lists every file that differs\. Nothing changes until you choose\./);
     expect(sum.querySelector('.hint-pop')!.textContent).toContain('Nothing changes until you choose.');
     // The engine's DIVERGED_RELEASED line is the Dashboard's, not this page's.
     expect(el.textContent).not.toContain('The released copy of Lecture 5 was edited');
