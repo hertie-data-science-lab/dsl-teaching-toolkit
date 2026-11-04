@@ -248,13 +248,15 @@ describe('the Assignments index', () => {
 });
 
 describe('entry releases', () => {
-  it('offer no destination: the engine takes it from the schedule', () => {
+  it('offer no destination: the engine takes it from the schedule; Release again alone offers Overwrite', () => {
     const scope = { courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' };
     const r = { id: 's5', ident: 'Session 5', title: 'Trees', when: 'Thu 8 Oct 10:00', source: { repo: 'course-materials-f2026', path: 'lectures/05' } };
-    for (const def of [releaseNow(scope, r), releaseEarly(scope, r), releaseAgain(scope, r)]) {
-      expect(def.args).toEqual({ entry: 's5' });
-      expect(Object.keys(def.options ?? {})).toEqual([]);
-    }
+    for (const def of [releaseNow(scope, r), releaseEarly(scope, r), releaseAgain(scope, r)]) expect(def.args).toEqual({ entry: 's5' });
+    expect(Object.keys(releaseNow(scope, r).options ?? {})).toEqual([]);
+    expect(Object.keys(releaseEarly(scope, r).options ?? {})).toEqual([]);
+    expect(releaseAgain(scope, r).options).toEqual({
+      replace: { tier: 'advanced', widget: 'checkbox', default: false, label: 'Overwrite the semester’s copy, discarding its edits', reason: 'A conflict then cannot happen; the semester’s edit to this file is lost.' },
+    });
     expect(Object.keys(releaseAdhoc(scope, ['course-materials-f2026']).options ?? {})).toContain('semester_dest_repo');
   });
 });

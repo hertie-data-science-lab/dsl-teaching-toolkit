@@ -12,6 +12,8 @@ export class StaticFiles implements Files {
     private readonly treeMap: Record<string, string[]> = {},
     private readonly repoMap: Record<string, Partial<GhRepo>[]> = {},
     private readonly changeMap: Record<string, string> = {},
+    /** Blob shas keyed `owner/repo/path`; a path not listed has `sha-<path>`. */
+    private readonly shaMap: Record<string, string> = {},
   ) {}
   lastChange(owner: string, repo: string, path: string): string | null {
     return this.changeMap[`${owner}/${repo}/${path}`] ?? null;
@@ -25,8 +27,10 @@ export class StaticFiles implements Files {
     if (!t) return { kind: 'absent' };
     const dirs = new Set<string>();
     for (const p of t) p.split('/').slice(0, -1).forEach((_, i, a) => dirs.add(a.slice(0, i + 1).join('/')));
-    return { kind: 'ready', paths: [...[...dirs].map((path) => ({ path, dir: true })), ...t.map((path) => ({ path, dir: false }))], truncated: false };
+    const sha = (path: string) => this.shaMap[`${owner}/${repo}/${path}`] ?? `sha-${path}`;
+    return { kind: 'ready', paths: [...[...dirs].map((path) => ({ path, dir: true, sha: sha(path) })), ...t.map((path) => ({ path, dir: false, sha: sha(path) }))], truncated: false };
   }
+  refreshTree(): void {}
   put(owner: string, repo: string, path: string, _ref: string | undefined, text: string | null): void {
     if (text === null) delete this.map[`${owner}/${repo}/${path}`];
     else this.map[`${owner}/${repo}/${path}`] = text;

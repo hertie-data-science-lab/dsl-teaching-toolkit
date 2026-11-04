@@ -26,6 +26,7 @@ import { NOTHING_TO_RELEASE, markClass, releaseRef, rowMark } from './Cohort';
 import { NotFound } from './Assignments';
 import { CheckNow, WithStatus, cohortScope, gradingConfig, todayOf, tzOf, yearOf } from './common';
 import type { CohortProps, ReadyProps } from './types';
+import { effectiveDestRepo, type ReleaseRow } from '../model/releaseState';
 import { CONFIG_REPO } from '../model/names';
 import { RUN_KEYS, TEAM_FORMATION, TEAM_FORMATIONS, VISIBILITIES, VISIBILITY, effectiveOf, validSchedule, yamlBoolean } from '../model/settings';
 import { HandOutDialog, HandOutNow, ManualWaiting, NO_LATE_WINDOW, SolutionNote, canHoldSolution, cutoffOf, draftHandout, entryBelow, forcedVisibility, waitingHandOut, waitsByHand, windowDays } from './RunSettings';
@@ -256,6 +257,14 @@ function Slots({ id, d, set, errors }: { id: string; d: EntryDraft; set: Set_<En
       {d.tbc ? null : <div><button class="btn small quiet" type="button" onClick={() => set({ slots: [...d.slots, { date: d.slots[0]?.date ?? '', time: d.slots[0]?.time ?? '', location: '', details: '' }] })}>+ Another time slot (a second group, a repeat)</button></div>}
     </>
   );
+}
+
+/** A new release entry with a hand release's picks as its files; a destination that is the default (the semester's repo, the source's path) stays blank. */
+export function releasePrefilled(d: EntryDraft, rows: ReleaseRow[], defaultRepo: string): EntryDraft {
+  const files = rows.map((r): FileDraft => ({
+    repo: r.repo, path: r.path, toRepo: r.toRepo === defaultRepo ? '' : r.toRepo, toPath: r.toPath === r.path ? '' : r.toPath, atDate: '', atTime: '', public: false,
+  }));
+  return { ...d, files };
 }
 
 /** Release files to repo / to path, for every file of the entry (the path only with one file). */
@@ -687,8 +696,13 @@ function View(p: ReadyProps) {
   const handedOut = (k: string) => { const a = assignmentOf.get(k); return !!a?.handout && Date.parse(a.handout) <= now; };
 
   const baseOf = (k: string): Draft | null => (k === 'new' ? null : readDraft(doc, k));
-  // `?template=` opens a new assignment entry for that template (New assignment's last step).
-  const prefilled = (): Draft | null => (p.prefill && key === 'new' && sf ? { ...(newDraft('assignment', doc) as AssignmentDraft), template: p.prefill } : null);
+  // `?template=` opens a new assignment entry for that template (New assignment's last step);
+  // `?from=&paths=` a new supporting-files release with those files (the Files panel's "Schedule on the calendar").
+  const prefilled = (): Draft | null => {
+    if (key !== 'new' || !sf) return null;
+    if (p.prefill?.kind === 'template') return { ...(newDraft('assignment', doc) as AssignmentDraft), template: p.prefill.repo };
+    return p.prefill?.kind === 'files' ? releasePrefilled(newDraft('assets', doc) as EntryDraft, p.prefill.rows, effectiveDestRepo(p.loaded)) : null;
+  };
   const draftOf = (k: string): Draft | null => drafts[k] ?? (k === 'new' ? prefilled() : baseOf(k));
   const dirtyKeys = Object.keys(drafts).filter((k) => k === 'new' || !deepEqual(drafts[k], baseOf(k)));
   const dirty = dirtyKeys.length + removed.length;
@@ -958,7 +972,7 @@ function ReleaseDetail(p: ReadyProps & { rel: Release }) {
   const last = (status.operations ?? []).find((o) => o.op.startsWith('release.') && o.summary.includes(`${ident}:`));
   const dest = rel.dest?.repo || DEFAULT_DEST_REPO, destPath = rel.dest?.path || ref.source.path;
   // A TBC entry's console release offers its session date in the result panel (decision 0043 rule 5).
-  const dated = (def: OpDef): OpDef => (rel.when === null ? { ...def, doneExtra: <SessionDate p={p} rel={rel} id="op-sd" /> } : def);
+  const dated = (def: OpDef): OpDef => (rel.when === null ? { ...def, outcomeExtra: (c: string | undefined) => (c === 'failed' ? null : <SessionDate p={p} rel={rel} id="op-sd" />) } : def);
   return (
     <>
       <div class="page-head">

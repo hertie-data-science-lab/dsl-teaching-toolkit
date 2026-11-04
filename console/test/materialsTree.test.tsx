@@ -3,6 +3,7 @@
 // kept per repo for the session, a `?folder=` deep link opening its folder, folders' GitHub links
 // and files opening in the console's viewer.
 
+import { readFileSync } from 'node:fs';
 import { render as mount } from 'preact';
 import { act } from 'preact/test-utils';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -48,7 +49,9 @@ describe('the materials folder tree', () => {
     const { details, folder, toggle } = await mounted();
     await toggle('lectures');
     expect(details('lectures').open).toBe(true);
-    expect(folder('lectures').querySelector(':scope > details > summary .ft-count')).toBeNull();
+    // The count is a roll-up: CSS hides it while the folder is open (`details[open] > summary .ft-rollup`).
+    expect(folder('lectures').querySelector(':scope > details > summary .ft-rollup .ft-count')!.textContent).toBe('3 files');
+    expect(readFileSync(`${__dirname}/../src/styles/console.css`, 'utf8')).toContain('.file-tree details[open] > summary .ft-rollup { display: none; }');
     expect(details('lectures/01').open).toBe(false);
     await toggle('lectures/01');
     expect(details('lectures/01').open).toBe(true);

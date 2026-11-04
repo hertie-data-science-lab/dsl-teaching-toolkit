@@ -20,6 +20,7 @@ import { MaterialsScreen } from '../src/screens/CourseEdit';
 import { StudentsScreen } from '../src/screens/People';
 import { ScheduleScreen } from '../src/screens/Schedule';
 import type { CohortProps } from '../src/screens/types';
+import { parseSearch, scheduleNewHref } from '../src/router';
 import example from './fixtures/status.example.json';
 import { FakeGitHub, json, type Seen } from './fake';
 import { rosterFiles } from './roster';
@@ -225,7 +226,7 @@ describe('the schedule editor’s forms, clicked through (forms mock-up v3)', ()
 
   it('adds an assignment with its changed run settings inline, in one commit', async () => {
     const gh = github(), f = files();
-    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'new', prefill: 'assignment-4-f2026' })} />);
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'new', prefill: { kind: 'template', repo: 'assignment-4-f2026' } })} />);
     await type('#e-hod', '2026-10-01');
     await type('#e-due', '2026-10-10');
     await type('#e-lw', '3');
@@ -234,6 +235,35 @@ describe('the schedule editor’s forms, clicked through (forms mock-up v3)', ()
     expect(out.assignments['assignment-3']).toEqual({ number: 3, template: 'assignment-4-f2026', handout_datetime: '2026-10-01T14:00', due_datetime: '2026-10-10T23:59', late_window_days: 3 });
     await settle(() => false);
     expect(gh.seen.filter((s) => s.method === 'PUT').map((s) => s.url.split('/contents/')[1])).toEqual(['schedule.yml']);
+  });
+
+  it('opens a new release with the Files panel’s picks and destinations prefilled (Schedule on the calendar)', async () => {
+    const href = scheduleNewHref(COHORT_ORG, [
+      { repo: 'course-materials-f2026', path: 'labs/week01', toRepo: 'materials', toPath: 'labs/week01' },
+      { repo: 'lecture-code-f2026', path: 'demo.py', toRepo: 'lecture-code', toPath: 'code/demo.py' },
+    ]);
+    expect(href.endsWith('#schedule-new')).toBe(true);
+    const prefill = parseSearch(href.split('#')[0]).prefill;
+    expect(prefill).toEqual({ kind: 'files', rows: [
+      { repo: 'course-materials-f2026', path: 'labs/week01', toRepo: 'materials', toPath: 'labs/week01' },
+      { repo: 'lecture-code-f2026', path: 'demo.py', toRepo: 'lecture-code', toPath: 'code/demo.py' },
+    ] });
+    const gh = github(), f = files();
+    // The semester's default repo and the source's own path are left blank in the entry.
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'new', prefill })} />);
+    expect(root!.textContent).toContain('Release supporting files');
+    await type('#e-title', 'Week 1 lab');
+    await type('#e-date0', '2026-10-01');
+    await type('#e-time0', '09:00');
+    await click(button('Add'));
+    const out = await saved(gh);
+    expect(Object.values(out.assets)).toEqual([expect.objectContaining({
+      title: 'Week 1 lab',
+      files: [
+        { from_course_repo: 'course-materials-f2026', from_path: 'labs/week01' },
+        { from_course_repo: 'lecture-code-f2026', from_path: 'demo.py', to_semester_repo: 'lecture-code', to_path: 'code/demo.py' },
+      ],
+    })]);
   });
 });
 
@@ -248,7 +278,7 @@ const declared: Loaded = { ...ready, status: { ...ready.status, assignments: [{ 
 describe('Save on an assignment entry handed out by hand', () => {
   async function addManual(gh: FakeGitHub, f: StaticFiles) {
     const env = envOf(gh, f);
-    await mount(env, <ScheduleScreen {...props(f, { entry: 'new', prefill: 'assignment-4-f2026' })} />);
+    await mount(env, <ScheduleScreen {...props(f, { entry: 'new', prefill: { kind: 'template', repo: 'assignment-4-f2026' } })} />);
     await handOut('hand');
     await type('#e-due', '2026-10-10');
     await click(button('Add assignment'));
@@ -305,7 +335,7 @@ describe('Save on an assignment entry handed out by hand', () => {
     const env = envOf(gh, f);
     await mount(env, <ScheduleScreen {...props(f, { entry: 'assignment-2', loaded: declared })} />);
     await handOut('hand');
-    await act(() => render(<EnvCtx.Provider value={env}><ScheduleScreen {...props(f, { entry: 'new', prefill: 'assignment-4-f2026', loaded: declared })} /></EnvCtx.Provider>, root!));
+    await act(() => render(<EnvCtx.Provider value={env}><ScheduleScreen {...props(f, { entry: 'new', prefill: { kind: 'template', repo: 'assignment-4-f2026' }, loaded: declared })} /></EnvCtx.Provider>, root!));
     await handOut('hand');
     await type('#e-due', '2026-10-10');
     await click(button('Add assignment'));
@@ -410,7 +440,7 @@ describe('Hand out now beside a saved entry handed out by hand', () => {
     await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'assignment-3', loaded: loaded({ ...waiting, state: 'open', handout: '2026-09-20T10:00:00+02:00' }) })} />);
     expect(handOutNow()).toBe(0);
     render(null, root!);
-    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'new', prefill: 'assignment-4-f2026', loaded: loaded(waiting) })} />);
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'new', prefill: { kind: 'template', repo: 'assignment-4-f2026' }, loaded: loaded(waiting) })} />);
     await handOut('hand');
     expect(handOutNow()).toBe(0);
   });
@@ -617,12 +647,14 @@ describe('Save on a materials repo’s settings starts Refresh', () => {
   const DISPATCH = `/repos/${COURSE_ORG}/.github/actions/workflows/console.yml/dispatches`;
   const mat = () => new StaticFiles({ [`${COURSE_ORG}/${MAT}/.releaseignore`]: '# seeded, every line a comment\n' }, {}, { [`${COURSE_ORG}/${MAT}`]: ['SYLLABUS.md', 'labs/01/lab.pdf'] });
   const cp = (f: StaticFiles, c: Course = course) => ({ course: c, loaded: { kind: 'absent' } as Loaded, cohortStates: {}, files: f, now: NOW, entry: MAT });
-  const withheldSave = () => [...root!.querySelectorAll('section')].find((s) => s.querySelector('h2')?.textContent?.startsWith('Withheld from students'))!;
+  // The Files panel, whose Withhold view holds the .releaseignore Save.
+  const withheldSave = () => root!.querySelector<HTMLElement>('section.files-panel')!;
   const dispatches = (gh: FakeGitHub) => gh.seen.filter((s) => s.method === 'POST' && s.url.endsWith(DISPATCH));
 
   async function saveWithheld(gh: FakeGitHub, c: Course = course) {
     const env = envOf(gh, mat());
     await mount(env, <MaterialsScreen {...cp(env.files as StaticFiles, c)} />);
+    await click(withheldSave().querySelector<HTMLButtonElement>('#files-tab-withhold')!);
     const save = [...withheldSave().querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Save')!;
     await click(save);
     await settle(() => /checklist updates/.test(withheldSave().textContent ?? ''));

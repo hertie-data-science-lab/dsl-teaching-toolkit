@@ -2,19 +2,31 @@
 
 ## Unreleased
 
+- A course materials repo's settings page has a **Files** panel in place of the Withheld panel:
+  the repo's tree with **Browse** (a name opens the file beside the tree), **Withhold** (untick
+  what never reaches students; the pattern box and Save as before) and **Release** (tick files
+  or folders and release them into a chosen semester now). A splitter sizes the two columns.
+- The semester's **Materials** page folds Released materials this semester and adds **Release
+  by hand** below it: From a course repo, ticks in its tree, and a manifest of what lands where,
+  each folder group with its own Edit destination. Each file carries a chip against the
+  semester: `up to date`, `behind`, `ahead`, `diverged`, `not released` or `withheld`; behind,
+  ahead and diverged open a popover with one action. One **Release** copies every pick, from
+  several course repos into several semester repos, in one run (`release.adhoc` takes comma
+  lists of repos paired in order with the paths). **Schedule on the calendar** opens a new
+  Schedule entry with the same files. The tree rows no longer link their Release page.
 - PDFs draw inline in the viewer (the console's policy allows `frame-src blob:`), with Open in a
   new tab and Download under them.
 - The side nav hides behind a handle on its edge; the choice is kept per browser.
 - A page shows an operation's verb alone; its panel offers the preview, never requires it.
-- `release.adhoc` takes comma lists of course and semester repos, paired in order with the
-  paths, so one run copies from several course repos into several semester repos.
-  `release_destinations` is a new `defaults:` list of the semester repos a hand release may land
-  in, a semester's adding to the course's; `materials_repo` and `release_destinations` never
-  name a reserved repo.
+- `release_destinations` is a new `defaults:` list of the semester repos a hand release may
+  land in, a semester's adding to the course's; `materials_repo` and `release_destinations`
+  never name a reserved repo.
 - The institution's withheld names split in two. **Never released** (`.git`, `.system`, `.env`,
   `.env.*`, `grading_config.yml`, `grading.yml`): no route ships one, and naming one outright is
   refused. **Content** (`solution`, `solutions`, `tests`): withheld from a folder release unless
   a `!` line in the repo's `.releaseignore` re-includes it; naming one outright still ships it.
+  In the Files panel these rows show `withheld` like a line's, footnoted "withheld by default";
+  in Withhold they start unticked, and a tick writes the `!` line ("released by `!solutions/`").
   The public website keeps the content group off whatever a `!` line says.
 - Hand releases and Release again take an **Overwrite** option (`replace`): the course version
   of the copied paths goes onto the branch students read instead of being merged, so a semester

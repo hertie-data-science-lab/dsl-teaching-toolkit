@@ -217,3 +217,6 @@ export function termRank(org: string): number {
   const k = seasonOf(termOf(org).term);
   return k ? k.year * 10 + SEASON_ORDER[k.season] : 0;
 }
+
+/** `repos` newest term first (`termRank`); the sort is stable, so repos of one term keep their order. */
+export const byNewestTerm = (repos: string[]) => [...repos].sort((a, b) => termRank(b) - termRank(a));

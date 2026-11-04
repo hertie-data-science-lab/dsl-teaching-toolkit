@@ -15,9 +15,16 @@ export type FileState =
 
 export type DirState = { kind: 'loading' } | { kind: 'absent' } | { kind: 'error'; message: string } | { kind: 'ready'; entries: DirEntry[] };
 
+/** One path of a repo's tree: `dir` for a folder; `sha` its git object (a blob's sha compares file contents). */
+export interface TreePath {
+  path: string;
+  dir: boolean;
+  sha: string;
+}
+
 /** A repo's whole tree at a ref: every path, with `dir` for folders. */
 /** `truncated`: GitHub returned only part of the tree (its recursive listing has a size cap). */
-export type TreeState = { kind: 'loading' } | { kind: 'absent' } | { kind: 'error'; message: string } | { kind: 'ready'; paths: { path: string; dir: boolean }[]; truncated: boolean };
+export type TreeState = { kind: 'loading' } | { kind: 'absent' } | { kind: 'error'; message: string } | { kind: 'ready'; paths: TreePath[]; truncated: boolean };
 
 /** An org's repos as the user sees them. */
 export type ReposState = { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'ready'; repos: GhRepo[] };
@@ -39,6 +46,8 @@ export interface Files {
   put(owner: string, repo: string, path: string, ref: string | undefined, text: string | null, sha: string): void;
   /** Read a file again (after a conflict), and a directory listing. */
   refresh(owner: string, repo: string, path: string, ref?: string): void;
+  /** Read a repo's tree again at every ref held (a release wrote to it), into the same state: no flicker. */
+  refreshTree(owner: string, repo: string): void;
 }
 
 /** Files read live through the client, each on first ask. */
@@ -114,11 +123,28 @@ export class LiveFiles implements Files {
     for (const k of [...this.files.keys()]) if (k.startsWith(under)) this.files.delete(k);
   }
 
+  private async readTree(owner: string, repo: string, ref: string): Promise<TreeState> {
+    const t = await this.client.listTree(owner, repo, ref, true);
+    return t ? { kind: 'ready', paths: t.tree.filter((e) => e.type !== 'commit').map((e) => ({ path: e.path, dir: e.type === 'tree', sha: e.sha })), truncated: t.truncated === true } : { kind: 'absent' };
+  }
+
   tree(owner: string, repo: string, ref = 'HEAD'): TreeState {
-    return this.ask(this.trees, `${owner}/${repo}@${ref}`, async (): Promise<TreeState> => {
-      const t = await this.client.listTree(owner, repo, ref, true);
-      return t ? { kind: 'ready', paths: t.tree.filter((e) => e.type !== 'commit').map((e) => ({ path: e.path, dir: e.type === 'tree' })), truncated: t.truncated === true } : { kind: 'absent' };
-    });
+    return this.ask(this.trees, `${owner}/${repo}@${ref}`, () => this.readTree(owner, repo, ref));
+  }
+
+  refreshTree(owner: string, repo: string): void {
+    const at = `${owner}/${repo}@`;
+    for (const [k, sig] of this.trees) {
+      if (!k.startsWith(at)) continue;
+      // The old tree stands until the new one answers; a failure leaves it as it was.
+      this.readTree(owner, repo, k.slice(at.length)).then(
+        (v) => {
+          sig.value = v;
+          this.failedAt.delete(sig);
+        },
+        () => {},
+      );
+    }
   }
 
   repos(org: string): ReposState {

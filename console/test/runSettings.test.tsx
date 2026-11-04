@@ -334,7 +334,7 @@ describe('the wizards', () => {
 
   it('adding it to a semester’s schedule prewrites the run settings from the cascade (forms mock-up v3)', () => {
     const files = filesWith({ [`${COURSE_ORG}/assignment-4-f2026/grading_config.yml`]: 'type: group\n' });
-    const out = html(<ScheduleScreen {...props({ entry: 'new', prefill: 'assignment-4-f2026', files })} />);
+    const out = html(<ScheduleScreen {...props({ entry: 'new', prefill: { kind: 'template', repo: 'assignment-4-f2026' }, files })} />);
     expect(out).toContain('How this semester runs it');
     expect(out).toContain('(all inherited from the semester’s default config values unless changed here)');
     expect(out).toMatch(/id="e-ts"[^>]*value="4"/);

@@ -8,10 +8,12 @@ import { plural } from '../model/format';
 import { COURSE_REPO } from '../model/names';
 import { ghUrl } from '../ui/bits';
 import { DEFAULT_DEST_REPO } from '../model/policy';
-import { HANDOUT, RETURN_MARKS, RETURN_MARKS_ABOUT, RETURN_MARKS_ALWAYS, SEND_CODES_ABOUT, releaseAdhoc as adhocTiers, returnMarksTiers, updateCopies as copiesTiers } from '../tiers/ops';
+import { HANDOUT, REPLACE, RETURN_MARKS, RETURN_MARKS_ABOUT, RETURN_MARKS_ALWAYS, SEND_CODES_ABOUT, releaseAdhoc as adhocTiers, returnMarksTiers, updateCopies as copiesTiers } from '../tiers/ops';
 import type { Source } from '../model/settings';
+import { destPathOf, requestOf, toArgs, type Group } from '../model/releaseState';
 import type { ComponentChildren } from 'preact';
 import type { OpDef } from './session';
+import type { Tiers } from '../tiers/types';
 
 export interface Scope {
   courseOrg: string;
@@ -59,6 +61,19 @@ export function keepFuture(s: Scope): OpDef {
   };
 }
 
+/**
+ * PR into source for exactly `paths` (semester-side, `<dest repo>/<path>`, or `<path>` in the
+ * semester's default materials repo): `release.propagate_back` carrying only those back.
+ */
+export function keepFuturePaths(s: Scope, paths: string[]): OpDef {
+  return {
+    ...keepFuture(s), key: `paths:${paths.join(',')}`, name: 'PR into source', title: paths.join(', '),
+    intro: 'Opens a pull request carrying this file’s semester edit back into the course repo, so next semester starts from it.',
+    verb: 'Open the pull request', running: 'Opening the pull request',
+    args: { paths: paths.join(',') },
+  };
+}
+
 export interface ReleaseRef {
   id: string;
   ident: string; // "Session 5"
@@ -69,9 +84,10 @@ export interface ReleaseRef {
   dest?: { repo: string; path: string } | null;
 }
 
-// One engine op, `release.entry`, in three wordings: early, again, now. No Options: the
-// engine rebuilds a schedule entry's source and destination from schedule.yml
-// (`console.entry_requests`), so a destination typed here would be dropped.
+// One engine op, `release.entry`, in three wordings: early, again, now. No destination
+// options: the engine rebuilds a schedule entry's source and destination from schedule.yml
+// (`console.entry_requests`), so a destination typed here would be dropped. Release again
+// alone offers Overwrite (`replace`).
 function releaseDef(s: Scope, r: ReleaseRef, copy: Pick<OpDef, 'name' | 'intro' | 'verb' | 'running' | 'cancel' | 'where'>): OpDef {
   const target = destUrl(s.cohortOrg ?? s.courseOrg, r.dest?.repo || DEFAULT_DEST_REPO, r.dest?.path ?? '');
   return { ...base(s, 'release.entry', r.id), ...copy, title: `${r.ident}: ${r.title}`, args: { entry: r.id }, previewProposed: false, target };
@@ -86,8 +102,8 @@ export function releaseEarly(s: Scope, r: ReleaseRef): OpDef {
 
 /**
  * Release again, with what differs from the course copy (decision 0043 rule 6): one line per
- * kind in `facts`, and - when files were deleted from the course copy - the unticked choice to
- * remove them from the released copy too (`remove_deleted`).
+ * kind in `facts`, the advanced Overwrite (`replace`, off), and - when files were deleted from
+ * the course copy - the unticked choice to remove them from the released copy too (`remove_deleted`).
  */
 export function releaseAgain(s: Scope, r: ReleaseRef, drift: { facts: string[]; deleted: number; edited?: boolean } = { facts: [], deleted: 0 }): OpDef {
   const def = releaseDef(s, r, {
@@ -97,15 +113,16 @@ export function releaseAgain(s: Scope, r: ReleaseRef, drift: { facts: string[]; 
   if (drift.facts.length) def.facts = drift.facts;
   // A release merges into the released copy: a file both sides changed waits as a pull request, never overwritten blind.
   if (drift.edited) def.confirm = 'The released copy has its own edits: they stay, and a file the course also changed waits in a pull request for you to resolve. Keep them for future semesters first if they should last.';
-  if (drift.deleted) {
-    def.options = {
+  def.options = {
+    ...(drift.deleted ? {
       remove_deleted: {
         tier: 'ask', widget: 'checkbox', default: false,
         label: `Also remove the ${plural(drift.deleted, 'file')} deleted from the course copy`,
         reason: 'Off: they stay in the released copy, as a release only ever adds.',
       },
-    };
-  }
+    } : {}),
+    ...REPLACE,
+  } as Tiers;
   return def;
 }
 
@@ -127,6 +144,45 @@ export function releaseAdhoc(s: Scope, repos: string[]): OpDef {
       const path = String(a.semester_dest_path || a.course_source_path || '');
       return destUrl(s.cohortOrg ?? s.courseOrg, String(a.semester_dest_repo || DEFAULT_DEST_REPO), path.includes(',') ? '' : path);
     },
+  };
+}
+
+/** A group's line in the panel: "labs/ · all 4 files → materials/labs/". */
+function groupFact(g: Group, defaultDestRepo: string): string {
+  const what = g.kind === 'all' ? `all ${plural(g.files, 'file')}` : `${g.files} of ${plural(g.of ?? g.files, 'file')}`;
+  const to = g.destRepo || defaultDestRepo;
+  const at = destPathOf(g, g.folder);
+  return `${g.head} · ${what} → ${to}/${at ? `${at}/` : ''}`;
+}
+
+/**
+ * Release by hand (plan 2026-11-04 decisions 5-6): the manifest's groups in one `release.adhoc`
+ * run, each source paired with its destination (the manifest set every destination). Its one
+ * Option is Overwrite (`replace`, advanced, off), which restores a file the semester removed and
+ * takes the course version over a semester edit. `removed`: how many picked files the semester
+ * removed; while Overwrite is off the intro says a plain release leaves them out, and a run with
+ * nothing to do says why.
+ */
+export const REMOVED_NOTHING = 'Nothing copied: the semester removed these files; use Overwrite to restore them.';
+export const removedPicked = (n: number) => `${plural(n, 'picked file')} ${n === 1 ? 'was' : 'were'} removed in the semester: a plain release leaves them out; tick Overwrite to restore them.`;
+export function releasePicked(s: Scope, groups: Group[], run: { defaultDestRepo: string; removed?: number }): OpDef {
+  const rows = requestOf(groups, run);
+  const n = rows.length;
+  const repos = [...new Set(groups.map((g) => g.repo))];
+  const first = groups[0];
+  return {
+    ...base(s, 'release.adhoc', 'picked'), name: 'Release by hand', where: s.where,
+    title: `${plural(n, 'path')} from ${repos.length === 1 ? repos[0] : `${repos.length} repos`}`,
+    intro: 'Copies the picked files and folders to students now. Nothing is added to the schedule.',
+    facts: groups.map((g) => groupFact(g, run.defaultDestRepo)),
+    verb: `Release ${plural(n, 'path')}`, running: `Releasing ${plural(n, 'path')}`, cancel: 'Stop before copying',
+    args: toArgs(rows),
+    target: destUrl(s.cohortOrg ?? s.courseOrg, first?.destRepo || run.defaultDestRepo, first ? destPathOf(first, first.folder) : ''),
+    options: REPLACE,
+    ...(run.removed ? {
+      confirm: (v: Record<string, unknown>) => (v.replace ? undefined : removedPicked(run.removed!)),
+      outcomeExtra: (c: string | undefined) => (c === 'nothing_to_do' ? REMOVED_NOTHING : null),
+    } : {}),
   };
 }
 

@@ -1261,7 +1261,7 @@ describe('moderation', () => {
 
 describe('after a run finishes', () => {
   const def = (op: string, args: Record<string, unknown>) => ({ ...returnMarks({ courseOrg: COURSE_ORG, cohortOrg: COHORT_ORG, where: 'Fall 2026' }, { slug: 'a', title: 'A', template: 't', units: 1, group: false, when: 'Marking' }, 1, 'a'), op, args });
-  const spy = () => ({ refresh: vi.fn(), refreshUnder: vi.fn() });
+  const spy = () => ({ refresh: vi.fn(), refreshUnder: vi.fn(), refreshTree: vi.fn() });
   const statuses = { reload: vi.fn(async () => {}) };
 
   it('reads again the last-told record Return marks rewrote: its sheet’s, or every one held', () => {
