@@ -85,9 +85,11 @@ def sync(
     now,
     dry_run: bool = False,
     resolve_mention=None,
+    partial: bool = False,
 ) -> DigestResult:
     """schedule.yml's digest, for everything wrong with it: the sources
-    `schedule.source_faults` found missing AND the entries `schedule.parse` had to drop."""
+    `schedule.source_faults` found missing AND the entries `schedule.parse` had to drop.
+    `partial`: the file did not parse - see `config_digest.sync`."""
     return _sync(
         SCHEDULE,
         semester_org,
@@ -97,6 +99,7 @@ def sync(
         dry_run=dry_run,
         resolve_mention=resolve_mention,
         absorb=ABSORBED,
+        partial=partial,
     )
 
 

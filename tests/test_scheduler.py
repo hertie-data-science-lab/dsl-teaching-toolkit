@@ -2696,11 +2696,10 @@ def test_an_unparseable_plan_leaves_the_exit_code_alone_and_keeps_the_digest_ope
 
     assert scheduler.run("Course-Org", "Semester-Org", now) == 0
 
-    unreadable, no_archive = synced["faults"]
+    # Alone: the empty plan it reads as says nothing about an archive date (or anything
+    # else), so it earns no advisory of its own.
+    (unreadable,) = synced["faults"]
     assert unreadable.file == "schedule.yml" and "not valid YAML" in unreadable.what
-    # A file nobody can parse declares no archive date either, so it earns that advisory
-    # in the same digest.
-    assert "ever archive it" in no_archive.what
     captured = capsys.readouterr()
     assert "is NOT valid YAML" in captured.err
     assert "0/0 release(s) due" in captured.out
@@ -3254,7 +3253,9 @@ def test_a_registry_nobody_can_parse_releases_nothing_and_stays_green(
 ARCHIVES = date(2027, 2, 16)
 
 
-def _preflight(monkeypatch, faults, now=WHEN, dry_run=False, digest=None, extra=()):
+def _preflight(
+    monkeypatch, faults, now=WHEN, dry_run=False, digest=None, extra=(), sched=None
+):
     """Drive _preflight_sources with a fixed fault list, capturing every call it makes.
 
     Routing is stubbed too: it reads blame and semester.yml over the API, and what these
@@ -3286,7 +3287,7 @@ def _preflight(monkeypatch, faults, now=WHEN, dry_run=False, digest=None, extra=
     rc = scheduler._preflight_sources(
         "Course-Org",
         "Semester-Org",
-        Schedule(archive=ArchiveRow(when=ARCHIVES)),
+        sched or Schedule(archive=ArchiveRow(when=ARCHIVES)),
         now,
         dry_run,
         extra,
@@ -3425,6 +3426,36 @@ def test_preflight_passes_dry_run_through(monkeypatch):
         monkeypatch, [source_fault("releases.a", fires=WHEN)], dry_run=True
     )
     assert seen["kw"]["dry_run"] is True
+
+
+@pytest.mark.parametrize("extra", [(), None])
+def test_an_unparseable_plan_is_reported_alone_and_holds_the_rest(monkeypatch, extra):
+    # The empty plan it reads as has no archive date, no windows and no sources: synced
+    # as the whole truth, that filed a spurious fault and Cleared every standing one.
+    unreadable = scheduler.schedule._unreadable_fault("not valid YAML", lineno=4)
+    sched = Schedule(unparseable=True, faults=[unreadable])
+    stray = source_fault("releases.a", fires=WHEN)
+    _, seen = _preflight(monkeypatch, [], extra=extra, sched=sched)
+    assert seen["args"][2] == [unreadable]
+    assert seen["kw"]["partial"] is True
+    _, seen = _preflight(monkeypatch, [], extra=[stray], sched=sched)
+    assert seen["args"][2] == [unreadable]
+
+
+def test_an_unparseable_plan_leaves_the_plan_reading_digests_alone(monkeypatch):
+    # The roster's team columns are the plan's assignments: read against an empty plan,
+    # every team column is "no assignment" - a fault and a mail about nothing.
+    monkeypatch.setattr(
+        scheduler.sync_faculty, "read_semester_people", lambda org, found: None
+    )
+
+    def refused(*a, **k):
+        raise AssertionError("read against an empty plan")
+
+    monkeypatch.setattr(scheduler.roster, "load", refused)
+    sched = Schedule(unparseable=True)
+    out = scheduler._config_faults("Course-Org", "Semester-Org", sched)
+    assert list(out) == [scheduler.config_digest.PEOPLE]
 
 
 def _seed_source(path: Path, readme: str) -> None:
