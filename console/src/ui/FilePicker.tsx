@@ -3,7 +3,8 @@
 // file tree (`PatternTree`), a tick on every file and folder, each withheld file marked from
 // the repo's `.releaseignore`. Several at once, across repos. A path that is not there yet may
 // be typed: copies run at the release time, so a folder still being written is fine. Returns
-// what was picked as {repo, path}; the caller turns each into a chip.
+// what was picked as {repo, path}; the caller turns each into a chip. `only` narrows the files
+// shown (the reading list's picker: markdown files).
 
 import { useState } from 'preact/hooks';
 import type { Files } from '../model/files';
@@ -33,7 +34,7 @@ const noChange = () => {};
  */
 const pickFixed = (path: string) => (hardDenied(path) ? 'never released' : neverMaterial(path) ? 'never copied' : null);
 
-export function FilePicker({ files, org, repos, others = [], onPick, onClose }: { files: Files; org: string; repos: string[]; others?: string[]; onPick: (p: Picked[]) => void; onClose: () => void }) {
+export function FilePicker({ files, org, repos, others = [], onPick, onClose, only }: { files: Files; org: string; repos: string[]; others?: string[]; onPick: (p: Picked[]) => void; onClose: () => void; only?: (path: string) => boolean }) {
   const all = [...repos, ...others];
   const [repo, setRepo] = useState(all[0] ?? '');
   const [chosen, setChosen] = useState<Picked[]>([]);
@@ -41,7 +42,7 @@ export function FilePicker({ files, org, repos, others = [], onPick, onClose }: 
   const tree = repo ? files.tree(org, repo) : null;
   const ign = repo ? files.file(org, repo, '.releaseignore') : null;
   const patterns = ign?.kind === 'ready' ? ign.text.split('\n') : [];
-  const paths = tree?.kind === 'ready' ? tree.paths.filter((x) => !x.dir && !x.path.startsWith('.')).map((x) => x.path) : [];
+  const paths = tree?.kind === 'ready' ? tree.paths.filter((x) => !x.dir && !x.path.startsWith('.') && (!only || only(x.path))).map((x) => x.path) : [];
   const isOn = (path: string) => chosen.some((c) => c.repo === repo && c.path === path);
   const toggle = (path: string) => setChosen(isOn(path) ? chosen.filter((c) => !(c.repo === repo && c.path === path)) : [...chosen, { repo, path }]);
   const tick = (path: string, dir: boolean) => pickFixed(path) ? null : <input type="checkbox" class="ft-tick" checked={isOn(path)} aria-label={`Pick ${path}${dir ? '/' : ''}`} onChange={() => toggle(path)} />;

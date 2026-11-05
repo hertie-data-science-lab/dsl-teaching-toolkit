@@ -39,7 +39,7 @@ import copy
 import json
 import re
 from collections import Counter
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -102,6 +102,7 @@ from .faults import ConfigFault, FaultKind, Unusable
 from .gh_commits import last_commit_at
 from .gh_contents import (
     WITHHELD_ROOT_STUBS,
+    folder_files,
     get_file_content,
     is_untouched_stub,
     line_of,
@@ -121,6 +122,7 @@ from .opencourse import load as load_opencourse
 from .opencourse import parse as parse_opencourse
 from .ops.outcome import OUTCOMES_DIR
 from .ops.registry import STATUS_SCHEMA
+from .readings import READING_OVERLAY_FILE
 from .releaseignore import RELEASEIGNORE, Tree, reviewed
 from .repos import default_branch
 from .schedule_plan import (
@@ -130,6 +132,7 @@ from .schedule_plan import (
     duplicate_numbers,
     duplicate_text,
     give_a_due_date,
+    list_dest,
     planned_rows,
     site_rows,
     unnumbered,
@@ -207,6 +210,43 @@ class TemplateFacts:
     main_edited: str | None = None
 
 
+# Decision 0046 rule 5: the folder whose subfolders each hold one session's readings.
+READINGS_DIR = "readings"
+
+
+@dataclass(frozen=True)
+class ReadingFolder:
+    """A folder directly under `readings/`: its files directly inside (dot files and
+    folders not counted) and whether one of them is a `READINGS.md` (any case)."""
+
+    path: str
+    files: int
+    has_list: bool
+
+
+def reading_folders(paths: Iterable[str]) -> list[ReadingFolder]:
+    """Decision 0046 rules 5-6: every `readings/<name>/` folder among the repo file
+    `paths`, sorted. The console's `readingFolderState` (model/readingFolders.ts) is the
+    same rule for its tree's chip; change both together."""
+    found: dict[str, list[str]] = {}
+    for path in paths:
+        top, _, rest = path.partition("/")
+        name, _, below = rest.partition("/")
+        if top != READINGS_DIR or not name or not below:
+            continue
+        names = found.setdefault(f"{READINGS_DIR}/{name}", [])
+        if "/" not in below and not below.startswith("."):
+            names.append(below)
+    return [
+        ReadingFolder(
+            folder,
+            len(names),
+            any(n.lower() == READING_OVERLAY_FILE.lower() for n in names),
+        )
+        for folder, names in sorted(found.items())
+    ]
+
+
 @dataclass
 class MaterialsFacts:
     """One materials repo (topic `dsl-materials`), as far as C4 asks about it.
@@ -218,6 +258,8 @@ class MaterialsFacts:
     syllabus_path: str = DEFAULT_SYLLABUS
     # The top-level `.releaseignore`'s text; None when there is none.
     releaseignore: str | None = None
+    # Decision 0046 rule 6: the folders directly under `readings/`.
+    reading_folders: list[ReadingFolder] = field(default_factory=list)
 
 
 @dataclass
@@ -883,12 +925,22 @@ def _syllabus_why(m: MaterialsFacts) -> str:
     return f"{file}, and the weekly plan (written from the schedule) is not in it yet."
 
 
+# Decision 0046 rule 6: a readings folder's check id is `reading_list:<folder>`; its
+# to-do's `check` is the part before the colon, the schedule's `NO_READING_LIST`.
+READING_LIST_CHECK = "reading_list"
+READING_FOLDER_WHY = (
+    "The folder has reading files but no READINGS.md. Students see the files only; "
+    "a list says what to read and how."
+)
+
+
 def materials_checks(m: MaterialsFacts) -> list[dict]:
     """Decision 0022 rule 5: a materials repo's checklist - the syllabus with the weekly
     plan it carries (one check, decision 0034), and the withheld patterns, both suggested
     (decision 0034: releases run without either). Folders carry no kind (decision 0038:
-    the schedule says what each entry is), so there is no folder check. `why` names what
-    is missing, None once the check is done."""
+    the schedule says what each entry is), so there is no folder check - save one
+    suggested `reading_list:<folder>` per readings folder with files and no READINGS.md
+    (decision 0046 rule 6). `why` names what is missing, None once the check is done."""
     rows = (
         (
             "syllabus",
@@ -904,6 +956,19 @@ def materials_checks(m: MaterialsFacts) -> list[dict]:
             reviewed(m.releaseignore),
             "Check that what is withheld from students is right.",
         ),
+    )
+    # Decision 0046 rule 6: one suggestion per readings folder with files and no list;
+    # a folder with its list is not listed (only the two above show done).
+    rows += tuple(
+        (
+            f"{READING_LIST_CHECK}:{f.path}",
+            f"{f.path}: reading list",
+            SUGGESTED,
+            False,
+            READING_FOLDER_WHY,
+        )
+        for f in m.reading_folders
+        if f.files and not f.has_list
     )
     return [
         {
@@ -1210,10 +1275,17 @@ def no_due_date_todo(
             text=give_a_due_date(key),
             screen="schedule",
             entry=key,
+            fix=_schedule_fix(facts.org, key, line_of(entry.lines, "")),
         )
         for key, entry in facts.sched.assignments.items()
         if entry.due_datetime is None
     ]
+
+
+def _entry_name(kind: str, number: int | None, title: str, key: str) -> str:
+    """What a schedule to-do calls an entry: "Lab 8" when it is numbered, else its
+    `title`, else its key."""
+    return policy.numbered_title(kind, number) if number else (title or key)
 
 
 # Decision 0043 rule 5: a TBC entry released (by hand, from Actions or the CLI, or early
@@ -1236,8 +1308,8 @@ def released_tbc_todo(
             kind="schedule",
             check=RELEASED_STILL_TBC,
             repo=schedule.CONFIG_REPO,
-            text=f"{policy.numbered_title(r['kind'], r['number']) if r['number'] else r['id']}"
-            " is released; its session date is still TBC.",
+            text=f"{_entry_name(r['kind'], r['number'], r['title'], r['id'])} is released; its "
+            "session date is still TBC.",
             screen="release",
             entry=r["id"],
         )
@@ -1262,7 +1334,7 @@ def no_files_todo(
             for w in faulted
         ):
             continue
-        name = policy.numbered_title(r.kind, r.number) if r.number else r.label
+        name = _entry_name(r.kind, r.number, r.title, r.label)
         out.append(
             _todo(
                 SUGGESTED,
@@ -1275,6 +1347,47 @@ def no_files_todo(
                 screen="schedule",
                 entry=r.label,
                 when=r.when.isoformat(),
+                fix=_schedule_fix(facts.org, r.label, line_of(r.lines, "")),
+            )
+        )
+    return out
+
+
+# A readings entry that ships reading files with no `reading_list:` beside them: a quiet
+# to-do (decision 0034 tiers), dated at its session when it has one.
+NO_READING_LIST = "reading_list"
+NO_READING_LIST_TODO = "has reading files but no reading list."
+
+
+def no_reading_list_todo(
+    facts: SemesterFacts, now: datetime, aside: frozenset[str] = frozenset()
+) -> list[dict]:
+    """`schedule:reading_list:<label>` for each readings entry still to come (or
+    undated) that ships files but has no reading list. One whose `reading_list:` is
+    written but unusable is not (`Release.reading_list_written`): its fault is the
+    problem."""
+    out = []
+    for r in facts.sched.releases:
+        if r.kind != schedule.READINGS_KIND or not r.deploy:
+            continue
+        if r.reading_list is not None or r.reading_list_written:
+            continue
+        if r.when and r.when <= now:
+            continue
+        name = _entry_name(r.kind, r.number, r.title, r.label)
+        out.append(
+            _todo(
+                SUGGESTED,
+                aside,
+                id=f"schedule:{NO_READING_LIST}:{r.label}",
+                kind="schedule",
+                check=NO_READING_LIST,
+                repo=schedule.CONFIG_REPO,
+                text=f"{name} {NO_READING_LIST_TODO}",
+                screen="schedule",
+                entry=r.label,
+                fix=_schedule_fix(facts.org, r.label, line_of(r.lines, "")),
+                **({"when": r.when.isoformat()} if r.when else {}),
             )
         )
     return out
@@ -2078,9 +2191,30 @@ def render_releases(
                 else None,
                 "show_on_site": r.show_on_site,
                 "tbc": r.tbc,
+                **(
+                    {"reading_list": _reading_list_of(r)}
+                    if r.kind == schedule.READINGS_KIND
+                    else {}
+                ),
             }
         )
     return rows
+
+
+def _reading_list_of(r: schedule.Release) -> dict | None:
+    """A readings entry's reading list for the console (decision 0044 point 5): the
+    course file it names and where it lands in the semester (`released_*`, the copy that
+    ships it, landed or not), `{"inline": true}` for legacy text, or None."""
+    f = r.reading_list
+    if isinstance(f, schedule.Deploy):
+        repo, path = list_dest(f, r.deploy)
+        return {
+            "repo": f.course_source_repo,
+            "path": f.course_source_path,
+            "released_repo": repo,
+            "released_path": path,
+        }
+    return {"inline": True} if f else None
 
 
 def _local_midnight(now: datetime, tz: ZoneInfo) -> datetime:
@@ -2664,6 +2798,7 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
     todo = semester_todo(facts, today, set_aside_ids(course.meta))
     todo += no_files_todo(facts, now, set_aside_ids(course.meta))
     todo += no_due_date_todo(facts, set_aside_ids(course.meta))
+    todo += no_reading_list_todo(facts, now, set_aside_ids(course.meta))
     todo += released_tbc_todo(releases, set_aside_ids(course.meta))
     week, weeks = semester_weeks(sched.semester_start, sched.semester_end, today)
     tag = semester_of(facts.org)
@@ -2739,8 +2874,10 @@ def _syllabus_path(top: Collection[str]) -> str:
 
 def _materials_facts(course_org: str, repo: str) -> MaterialsFacts:
     """A materials repo's C4 facts: its syllabus (markdown read, anything else only looked
-    for) and its `.releaseignore`. The top is listed, never the whole tree: a repo too
-    large for one recursive listing must not fail the course's status."""
+    for), its `.releaseignore` and its readings folders. The top is listed, never the whole
+    tree: a repo too large for one recursive listing must not fail the course's status.
+    The readings folders are `readings/`'s own tree, read only when the top has it, and
+    an unreadable one is no folders (`folder_files`: a suggestion, never a fault)."""
     top = top_level(course_org, repo)
     path = _syllabus_path(top)
     if path not in top:
@@ -2754,7 +2891,15 @@ def _materials_facts(course_org: str, repo: str) -> MaterialsFacts:
         if RELEASEIGNORE in top
         else None
     )
-    return MaterialsFacts(repo, syllabus, path, releaseignore=releaseignore)
+    # Decision 0046 rule 6: one read of `readings/`'s own tree, only when there is one.
+    folders = (
+        reading_folders(folder_files(course_org, repo, READINGS_DIR))
+        if top.get(READINGS_DIR) == "dir"
+        else []
+    )
+    return MaterialsFacts(
+        repo, syllabus, path, releaseignore=releaseignore, reading_folders=folders
+    )
 
 
 def gather_course(course_org: str) -> CourseFacts:

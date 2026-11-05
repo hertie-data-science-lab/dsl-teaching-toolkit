@@ -19,6 +19,25 @@ describe('md', () => {
   it('keeps lists and escapes HTML', () => {
     expect(md('- a\n- <b>')).toBe('<ul><li>a</li><li>&lt;b&gt;</li></ul>');
   });
+  it('renders a reading list as GitHub does: headings, one list, autolinks (the demo student view)', () => {
+    const src = '### Session 1 readings\n#### Required Readings\n- Chatsiou, K. (2020). Text classification with deep learning. <https://example.org/chatsiou?a=1&b=2>\n- Jurafsky, D., & Martin, J. H. (2024). *Speech and language processing* (Ch. 2). [PDF](s1-jurafsky.pdf)\n\n#### Additional Readings\n* Manning, C. (2008). [Introduction to IR](https://nlp.stanford.edu/IR-book/).';
+    expect(md(src)).toBe(
+      '<h3>Session 1 readings</h3><h4>Required Readings</h4>'
+      + '<ul><li>Chatsiou, K. (2020). Text classification with deep learning. <a href="https://example.org/chatsiou?a=1&amp;b=2" target="_blank" rel="noopener">https://example.org/chatsiou?a=1&amp;b=2</a></li>'
+      + '<li>Jurafsky, D., &amp; Martin, J. H. (2024). <i>Speech and language processing</i> (Ch. 2). [PDF](s1-jurafsky.pdf)</li></ul>'
+      + '<h4>Additional Readings</h4>'
+      + '<ul><li>Manning, C. (2008). <a href="https://nlp.stanford.edu/IR-book/" target="_blank" rel="noopener">Introduction to IR</a>.</li></ul>',
+    );
+  });
+  it('reads a heading only with whitespace after its #s, levels 1 to 6, closing #s dropped', () => {
+    expect(md('# One #\n###### Six')).toBe('<h1>One</h1><h6>Six</h6>');
+    expect(md('#hashtag and ####### seven')).toBe('<p>#hashtag and ####### seven</p>');
+    expect(md('Intro\n## Next\ntext')).toBe('<p>Intro</p><h2>Next</h2><p>text</p>');
+  });
+  it('continues an item with a following plain line; *emphasis* at a line start is no item', () => {
+    expect(md('- a long\n  citation\n- b')).toBe('<ul><li>a long citation</li><li>b</li></ul>');
+    expect(md('*Note:* read this')).toBe('<p><i>Note:</i> read this</p>');
+  });
 });
 
 describe('assignment names', () => {

@@ -2970,8 +2970,16 @@ def _mirror(
 
 def _landed_link(path: str, hosted) -> Link:
     """The one link a released file lands as on a row, through the shared listing rule."""
-    links, _overlays = site_repo.landed_links(
-        "Semester-f2026", "materials", "main", (path,), path, frozenset(), False, hosted
+    links = site_repo.landed_links(
+        "Semester-f2026",
+        "materials",
+        "main",
+        (path,),
+        path,
+        frozenset(),
+        (),
+        "",
+        hosted,
     )
     return links[0]
 
@@ -3470,3 +3478,52 @@ def test_each_slot_is_a_row_with_the_entrys_number_title_and_files(
     assert "/lectures/" in plan.files["_data/nav.yml"]
     events = plan.collections["_events"]
     assert any("MidTerm" in text for text in events.values())
+
+
+# Jan's layout (decision 0044): the readings entry's list lives in the lecture's folder
+# and ships a week before the lecture does.
+JAN = {
+    "timezone": "Europe/Berlin",
+    "readings": {
+        "readings-1": {
+            "event_datetime": "2026-09-01T10:00",
+            "reading_list": {
+                "from_course_repo": "cm",
+                "from_path": "lectures/01/READINGS.md",
+            },
+        }
+    },
+    "lectures": {
+        "lecture-1": {
+            "session": 1,
+            "event_datetime": "2026-09-08T10:00",
+            "files": [{"from_course_repo": "cm", "from_path": "lectures/01"}],
+        }
+    },
+}
+
+
+def test_a_reading_list_kept_in_a_lecture_folder_does_not_release_the_lecture(
+    monkeypatch, tmp_path
+):
+    sched = site.schedule.parse(JAN)
+
+    def rows(tree: tuple[str, ...]) -> dict[str, str]:
+        plan = _plan(
+            monkeypatch,
+            tmp_path,
+            sched,
+            trees={"materials": tree},
+            content=lambda *a, **k: "- Bishop (2006).",
+        )
+        return plan.collections["_lectures"]
+
+    early = rows(("lectures/01/READINGS.md",))
+    lecture = next(t for f, t in early.items() if f.startswith("lecture-1"))
+    readings = next(t for f, t in early.items() if f.startswith("readings-1"))
+    assert "unreleased: true" in lecture and "READINGS.md" not in lecture
+    assert "- Bishop (2006)." in readings and "unreleased" not in readings
+    later = rows(("lectures/01/READINGS.md", "lectures/01/slides.pdf"))
+    lecture = next(t for f, t in later.items() if f.startswith("lecture-1"))
+    assert "unreleased" not in lecture and "slides.pdf" in lecture
+    assert "READINGS.md" not in lecture

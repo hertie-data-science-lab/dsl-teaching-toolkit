@@ -38,9 +38,9 @@ def _tree(name: str) -> tuple[str, ...]:
 def _migrated(name: str) -> tuple[str, list[str], list[str]]:
     tree = set(_tree(name))
 
-    def reading_list(repo: str, path: str) -> str:
+    def reading_list(repo: str, path: str) -> list[tuple[str, str]]:
         overlay = f"{path.strip('/')}/READINGS.md"
-        return _overlay(overlay) if overlay in tree else ""
+        return [(overlay, _overlay(overlay))] if overlay in tree else []
 
     text, _instance, notes, stops = migrate.schedule_shape(
         (FIX / f"{name}-schedule-0.10.yml").read_text(), None, reading_list=reading_list
@@ -68,7 +68,16 @@ def _render(monkeypatch, tmp_path, sched) -> dict:
     # The goldens predate dating a released TBC row by when its files landed: no history
     # to read, so such a row renders as it did then (no `date:`, no `announce:`).
     monkeypatch.setattr(test_site.release_record, "first_landed", lambda *a: None)
-    plan = _plan(monkeypatch, tmp_path, sched, trees={"materials": _TREE})
+    # The entry names its READINGS.md (decision 0044): the site reads the landed copy.
+    plan = _plan(
+        monkeypatch,
+        tmp_path,
+        sched,
+        trees={"materials": _TREE},
+        content=lambda org, repo, path, **k: (
+            _overlay(path) if path.endswith("/READINGS.md") else ""
+        ),
+    )
     return {
         "lectures": plan.collections["_lectures"],
         "events": plan.collections["_events"],
@@ -246,7 +255,7 @@ def test_a_session_s_copy_into_a_readings_folder_becomes_its_readings_entry():
         "        course_source_path: readings/01\n"
     )
     text, _after, notes, stops = migrate.schedule_shape(
-        old, reading_list=lambda repo, path: "- A paper.\n"
+        old, reading_list=lambda repo, path: [(f"{path}/READINGS.md", "- A paper.\n")]
     )
     assert stops == []
     data = yaml.safe_load(text)
@@ -257,7 +266,10 @@ def test_a_session_s_copy_into_a_readings_folder_becomes_its_readings_entry():
         "session": 1,
         "event_datetime": "2026-09-07T10:00",
         "files": [{"from_course_repo": "cm", "from_path": "readings/01"}],
-        "reading_guide": "- A paper.",
+        "reading_list": {
+            "from_course_repo": "cm",
+            "from_path": "readings/01/READINGS.md",
+        },
     }
     assert any("lecture-1-readings" in n for n in notes)
     sched = schedule.parse(load_yaml_lines(text))
@@ -291,13 +303,149 @@ def test_the_term_s_dates_become_the_semester_block():
     assert sched.dropped == [] and sched.archive.when.isoformat() == "2027-02-16"
 
 
+def _readings_shaped(
+    overlays: dict[str, list[tuple[str, str]]], stopped: list[str] | None = None
+) -> dict:
+    old = (
+        "releases:\n"
+        "  readings-1:\n"
+        "    kind: readings\n"
+        "    event_datetime: 2026-09-07T10:00\n"
+        "    deploy:\n"
+        "      - course_source_repo: cm\n"
+        "        course_source_path: readings/01\n"
+        "      - course_source_repo: cm\n"
+        "        course_source_path: extra/01\n"
+    )
+    text, _after, _notes, stops = migrate.schedule_shape(
+        old, reading_list=lambda repo, path: overlays.get(path, [])
+    )
+    assert stops == (stopped or [])
+    sched = schedule.parse(load_yaml_lines(text))
+    assert sched.dropped == [] and sched.faults == []
+    return yaml.safe_load(text)["readings"]["readings-1"]
+
+
+def test_the_migration_names_a_readings_folder_s_overlay_as_the_reading_list():
+    # Decision 0044 point 1: the file stays where it is and the entry names it.
+    entry = _readings_shaped({"readings/01": [("readings/01/READINGS.md", "- A.")]})
+    assert entry["reading_list"] == {
+        "from_course_repo": "cm",
+        "from_path": "readings/01/READINGS.md",
+    }
+    # No overlay, or an empty one: no reading list (the entry is the to-do).
+    assert "reading_list" not in _readings_shaped({})
+    empty = {"readings/01": [("readings/01/READINGS.md", "  \n")]}
+    assert "reading_list" not in _readings_shaped(empty)
+
+
+def test_several_overlays_stop_the_migration_naming_them():
+    # One entry names one file: overlays in two copied folders, or two in one folder,
+    # are for a person to settle; the entry is written without a list.
+    stop = (
+        "readings-1: its files hold 2 reading lists (cm/{}, cm/{}) - an entry names "
+        "one: keep one and migrate again"
+    )
+    two = ("readings/01/READINGS.md", "extra/01/READINGS.md")
+    entry = _readings_shaped(
+        {
+            "readings/01": [(two[0], "- A.\n")],
+            "extra/01": [(two[1], "- B.")],
+        },
+        [stop.format(*two)],
+    )
+    assert "reading_list" not in entry
+    one = ("readings/01/READINGS.bib", "readings/01/READINGS.md")
+    entry = _readings_shaped(
+        {"readings/01": [(one[0], "@book{a}"), (one[1], "- A.")]},
+        [stop.format(*one)],
+    )
+    assert "reading_list" not in entry
+
+
+def test_a_shaped_file_renames_its_reading_guides_in_place():
+    # Its term dates already a `semester:` block: only the two `reading_guide:` lines
+    # change; faculty's comments, order and blank lines stay byte for byte.
+    old = (
+        "# Our plan - Jan's notes below.\n"
+        "semester:\n  start: {type: start, event_datetime: 2026-09-07}\n"
+        "\n"
+        "readings:\n"
+        "  r1:  # week one\n    session: 1\n    event_datetime: 2026-09-01\n"
+        "    reading_guide: '- A.'  # short\n"
+        "  r2:\n    event_datetime: 2026-09-08\n"
+        "    reading_guide: |\n      # Week 2\n      - B.\n"
+        "# lectures follow\n"
+        "lectures:\n  l1:\n    session: 1\n    event_datetime: 2026-09-01\n"
+    )
+    text, after, notes, stops = migrate.schedule_shape(old)
+    assert (after, notes, stops) == (None, [], [])
+    changed = [
+        (a, b) for a, b in zip(old.split("\n"), text.split("\n"), strict=True) if a != b
+    ]
+    assert changed == [
+        ("    reading_guide: '- A.'  # short", "    reading_list: '- A.'  # short"),
+        ("    reading_guide: |", "    reading_list: |"),
+    ]
+    sched = schedule.parse(load_yaml_lines(text))
+    assert sched.dropped == [] and sched.faults == []
+
+
+_INLINED = (
+    "# Our plan.\n"
+    "semester:\n  start: {type: start, event_datetime: 2026-09-07}\n"
+    "readings:\n"
+    "  same:  # week one\n"
+    "    event_datetime: 2026-09-01\n"
+    "    files:\n      - {from_course_repo: cm, from_path: readings/01}\n"
+    "    reading_list: |\n      # Week 1\n\n      - A.\n"
+    "    # kept\n"
+    "\n"
+    "  differs:\n"
+    "    event_datetime: 2026-09-08\n"
+    "    files: [{from_course_repo: cm, from_path: readings/02}]\n"
+    "    reading_list: '- B, edited.'\n"
+    "  none:\n"
+    "    event_datetime: 2026-09-15\n"
+    "    files: [{from_course_repo: cm, from_path: readings/03}]\n"
+    "    reading_list: '- C.'\n"
+)
+
+
+def test_an_inline_list_its_folders_readings_md_says_is_named_as_that_file():
+    # A 0.11.0 migration inlined each folder's READINGS.md; unnamed, the file is listed
+    # as a reading beside the list. Identical text (stripped) is named in place;
+    # different text, or no file, stays inline with a note naming the entry.
+    overlays = {
+        "readings/01": [("readings/01/READINGS.md", "# Week 1\n\n- A.\n\n")],
+        "readings/02": [("readings/02/READINGS.md", "- B.")],
+    }
+    text, after, notes, stops = migrate.schedule_shape(
+        _INLINED, reading_list=lambda repo, path: overlays.get(path, [])
+    )
+    assert (after, stops) == (None, [])
+    assert text == _INLINED.replace(
+        "    reading_list: |\n      # Week 1\n\n      - A.\n",
+        "    reading_list:\n      from_course_repo: cm\n"
+        "      from_path: readings/01/READINGS.md\n",
+    )
+    assert [n.split(":")[0] for n in notes] == ["differs", "none"]
+    entries = yaml.safe_load(text)["readings"]
+    assert entries["same"]["reading_list"] == {
+        "from_course_repo": "cm",
+        "from_path": "readings/01/READINGS.md",
+    }
+    assert entries["differs"]["reading_list"] == "- B, edited."
+    assert entries["none"]["reading_list"] == "- C."
+
+
 def test_a_file_already_one_block_per_kind_takes_only_the_amendment_s_renames():
     # Shaped before amendment 2: the blocks stay as they are, the term's dates move into
-    # `semester:` and `reading_list` becomes `reading_guide`.
+    # `semester:` and 0.11.0's `reading_guide` becomes `reading_list`.
     old = (
         "semester_start: 2026-09-07\n"
         "readings:\n  r1:\n    session: 1\n    event_datetime: 2026-09-01\n"
-        "    reading_list: '- A.'\n"
+        "    reading_guide: '- A.'\n"
         "lectures:\n  l1:\n    session: 1\n    event_datetime: 2026-09-01\n"
         "assignments:\n  a1:\n    number: 1\n    template: t\n"
         "    due_datetime: 2026-10-13\n"
@@ -305,7 +453,8 @@ def test_a_file_already_one_block_per_kind_takes_only_the_amendment_s_renames():
     text, after, _notes, stops = migrate.schedule_shape(old)
     assert (stops, after) == ([], None)
     data = yaml.safe_load(text)
-    assert data["readings"]["r1"]["reading_guide"] == "- A."
+    assert data["readings"]["r1"]["reading_list"] == "- A."
+    assert "reading_guide" not in data["readings"]["r1"]
     assert data["lectures"]["l1"] == {
         "session": 1,
         "event_datetime": date(2026, 9, 1),

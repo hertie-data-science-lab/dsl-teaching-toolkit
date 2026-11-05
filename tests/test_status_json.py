@@ -19,6 +19,7 @@ from dsl_course import (
     discovery,
     distribute,
     gh_commits,
+    gh_contents,
     ghcli,
     grading_sheet,
     grading_spec,
@@ -2094,6 +2095,118 @@ def test_the_checklist_order_and_what_blocks():
     assert checks[1]["label"] == "Withheld patterns reviewed"
 
 
+# Decision 0046 rules 5-6: a readings folder with files and no READINGS.md.
+READING_PATHS = [
+    "readings/01_intro/READINGS.md",
+    "readings/01_intro/paper.pdf",
+    "readings/02_trees/Breiman.pdf",
+    "readings/02_trees/.gitkeep",
+    "readings/02_trees/extra/deep.pdf",
+    "readings/03_empty/.gitkeep",
+    "readings/04_nested/more/x.pdf",
+    "readings/.gitkeep",
+    "readings/loose.pdf",
+    "lectures/01_intro/slides.pdf",
+]
+
+
+def test_the_readings_folders_are_the_folders_directly_under_readings():
+    assert status_json.reading_folders(READING_PATHS) == [
+        status_json.ReadingFolder("readings/01_intro", 2, True),
+        # Files directly inside only: neither the dot file nor the subfolder's file.
+        status_json.ReadingFolder("readings/02_trees", 1, False),
+        status_json.ReadingFolder("readings/03_empty", 0, False),
+        status_json.ReadingFolder("readings/04_nested", 0, False),
+    ]
+    # Any case of the name is the list.
+    (f,) = status_json.reading_folders(["readings/05/readings.md", "readings/05/a.pdf"])
+    assert f.has_list
+
+
+def test_a_readings_folder_without_a_list_is_one_suggestion_after_the_fixed_two():
+    m = _materials(
+        "m",
+        PLANNED,
+        releaseignore="solutions/\n",
+        reading_folders=status_json.reading_folders(READING_PATHS),
+    )
+    checks = status_json.materials_checks(m)
+    # The folder with its list, and the folders with no files, are not listed at all.
+    assert [c["id"] for c in checks] == [
+        "syllabus",
+        "withheld",
+        "reading_list:readings/02_trees",
+    ]
+    assert checks[2] == {
+        "id": "reading_list:readings/02_trees",
+        "label": "readings/02_trees: reading list",
+        "done": False,
+        "why": (
+            "The folder has reading files but no READINGS.md. Students see the files "
+            "only; a list says what to read and how."
+        ),
+        "need": "suggested",
+    }
+    # Never needed: the repo stays ready.
+    assert status_json.materials_state(m, checks) == "ready"
+
+
+def _tree_gh(answer: tuple[int, str], calls: list):
+    """A `gh` stub answering the readings tree read."""
+
+    def gh(*args, **_kw):
+        calls.append(args)
+        assert args[1].endswith("/git/trees/HEAD:readings?recursive=1"), args
+        return answer
+
+    return gh
+
+
+def test_the_gatherer_reads_the_readings_tree_once_and_only_when_there_is_one(
+    monkeypatch,
+):
+    monkeypatch.setattr(status_json, "get_file_content", lambda *a, **k: None)
+    top = {"SYLLABUS.md": "file", "readings": "dir"}
+    monkeypatch.setattr(status_json, "top_level", _repo_tree({"": top}))
+    calls = []
+    listing = "01_intro/READINGS.md\n01_intro/a.pdf\n02_trees/b.pdf\n"
+    monkeypatch.setattr(gh_contents, "gh", _tree_gh((0, listing), calls))
+    facts = status_json._materials_facts(COURSE, "nlp-materials")
+    assert len(calls) == 1
+    assert facts.reading_folders == [
+        status_json.ReadingFolder("readings/01_intro", 2, True),
+        status_json.ReadingFolder("readings/02_trees", 1, False),
+    ]
+    # A tree that cannot be read is no folders and no fault: a suggestion, not a check.
+    monkeypatch.setattr(gh_contents, "gh", _tree_gh((1, "HTTP 502"), calls))
+    assert status_json._materials_facts(COURSE, "nlp-materials").reading_folders == []
+    # No `readings/` at the top: nothing is read.
+    del top["readings"]
+    calls.clear()
+    assert status_json._materials_facts(COURSE, "nlp-materials").reading_folders == []
+    assert calls == []
+
+
+def test_a_readings_folder_to_do_names_its_check_and_validates():
+    course = _course(
+        materials=[
+            _materials(
+                "course-materials-a",
+                PLANNED,
+                releaseignore="drafts/\n",
+                reading_folders=[
+                    status_json.ReadingFolder("readings/02_trees", 1, False)
+                ],
+            )
+        ]
+    )
+    doc = status_json.render_course_file(course, NOW)
+    (todo,) = [t for t in doc["course"]["todo"] if t["kind"] == "materials"]
+    assert todo["id"] == "materials:course-materials-a:reading_list:readings/02_trees"
+    assert (todo["check"], todo["need"]) == ("reading_list", "suggested")
+    assert validate(doc, schemas.status_schema()) == []
+
+
 def test_the_seeded_releaseignore_is_not_reviewed_and_a_pattern_or_the_mark_is():
     stub = scaffold._RELEASEIGNORE_STUB
     for text, reviewed in (
@@ -3258,10 +3371,112 @@ def test_an_entry_written_with_no_files_is_a_quiet_to_do_dated_at_its_session():
     assert lecture["text"] == "Lecture 9 has no files yet."
     assert lecture["when"] == "2026-11-05T10:00:00+01:00"
     assert (lecture["screen"], lecture["entry"]) == ("schedule", "lecture_9")
+    _fixed_on_its_entry(lecture, "lecture_9")
     assert lab["text"] == "Lab 2 has no files yet."
     # Past: nothing to say.
     ids = [t["id"] for t in _no_files(datetime(2026, 10, 9, 9, 0, tzinfo=UTC))]
     assert ids == ["schedule:files:lecture_9"]
+
+
+def _fixed_on_its_entry(todo: dict, key: str, line: int | None = None) -> None:
+    """A schedule to-do's `fix` opens its entry (the console's `#schedule-<key>`), at
+    the entry's line in schedule.yml."""
+    fix = todo["fix"]
+    assert (fix["screen"], fix["entry"]) == ("schedule", key)
+    assert fix["path"] == "schedule.yml" and fix["repo"].endswith("/semester-config")
+    assert isinstance(fix["line"], int)
+    if line is not None:
+        assert fix["line"] == line
+
+
+READINGS = """\
+readings:
+  readings-3:
+    number: 3
+    event_datetime: 2026-10-20T10:00
+    files:
+      - {from_course_repo: cm, from_path: readings/03}
+  inline:
+    event_datetime: 2026-10-20T10:00
+    files: [{from_course_repo: cm, from_path: readings/04}]
+    reading_list: "- A."
+  named:
+    event_datetime: 2026-10-20T10:00
+    files: [{from_course_repo: cm, from_path: readings/05}]
+    reading_list: {from_course_repo: cm, from_path: readings/05/READINGS.md}
+  old-name:
+    event_datetime: 2026-10-20T10:00
+    files: [{from_course_repo: cm, from_path: readings/06}]
+    reading_guide: "- B."
+  bad:
+    event_datetime: 2026-10-20T10:00
+    files: [{from_course_repo: cm, from_path: readings/07}]
+    reading_list: {from_course_repo: cm}
+  no-files:
+    event_datetime: 2026-10-20T10:00
+  past:
+    event_datetime: 2026-09-01T10:00
+    files: [{from_course_repo: cm, from_path: readings/01}]
+"""
+
+
+def test_reading_files_with_no_reading_list_are_a_quiet_to_do():
+    # Decision 0034 tiers: suggested, fixed on the schedule screen. A list written inline
+    # or as a file is one; a list written under an old name or unusable is its fault.
+    facts = _semester(sched=_sched(READINGS))
+    now = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
+    (todo,) = status_json.no_reading_list_todo(facts, now)
+    assert todo["id"] == "schedule:reading_list:readings-3"
+    assert (todo["kind"], todo["check"], todo["need"]) == (
+        "schedule",
+        "reading_list",
+        "suggested",
+    )
+    assert todo["text"] == "Readings 3 has reading files but no reading list."
+    assert (todo["screen"], todo["entry"]) == ("schedule", "readings-3")
+    _fixed_on_its_entry(todo, "readings-3", 3)
+    assert todo["when"] == "2026-10-20T10:00:00+02:00"
+    doc = _render(_course(), facts, now)
+    assert "schedule:reading_list:readings-3" in {
+        t["id"] for t in doc["semester"]["todo"]
+    }
+    assert not any("reading_list" in p["id"] for p in doc["problems"])
+
+
+def test_a_readings_row_says_where_its_reading_list_is():
+    # Decision 0044 point 5: the console finds the file to edit, or legacy text, or none.
+    # Only a readings row carries the key.
+    own_copy = (
+        "  own-copy:\n"
+        "    event_datetime: 2026-10-20T10:00\n"
+        "    files: [{from_course_repo: cm, from_path: readings/08}]\n"
+        "    reading_list: {from_course_repo: cm, from_path: lists/08.md,\n"
+        "      to_semester_repo: reading-lists, to_path: week-8/READINGS.md}\n"
+    )
+    sched = _sched(
+        READINGS.replace("  no-files:\n", own_copy + "  no-files:\n")
+        + "lectures:\n  lecture-1:\n    event_datetime: 2026-10-20\n"
+    )
+    doc = _render(_course(), _semester(sched=sched), datetime(2026, 10, 1, tzinfo=UTC))
+    lists = {r["id"]: r.get("reading_list", "absent") for r in doc["releases"]}
+    # Where it lands, landed or not: with the folder that carries it, or as its own
+    # copy at its `to_path`.
+    assert lists["named"] == {
+        "repo": "cm",
+        "path": "readings/05/READINGS.md",
+        "released_repo": "materials",
+        "released_path": "readings/05/READINGS.md",
+    }
+    assert lists["own-copy"] == {
+        "repo": "cm",
+        "path": "lists/08.md",
+        "released_repo": "reading-lists",
+        "released_path": "week-8/READINGS.md",
+    }
+    assert lists["inline"] == {"inline": True}
+    assert lists["readings-3"] is None
+    assert lists["bad"] is None
+    assert lists["lecture-1"] == "absent"
 
 
 def test_an_assignment_with_no_due_date_is_a_quiet_to_do():
@@ -3279,6 +3494,7 @@ def test_an_assignment_with_no_due_date_is_a_quiet_to_do():
         "suggested",
     )
     assert todo["text"] == "Give project a due date."
+    _fixed_on_its_entry(todo, "project", 3)
 
 
 def test_an_entry_whose_copies_were_all_dropped_is_not_a_to_do():
@@ -3456,3 +3672,11 @@ def test_the_release_destinations_ride_beside_the_default_destination(monkeypatc
         ],
     }
     assert validate(doc, schemas.status_schema()) == []
+
+
+def test_a_schedule_to_do_names_an_entry_by_number_then_title_then_key():
+    assert status_json._entry_name("readings", 3, "Week 3", "r3") == "Readings 3"
+    assert status_json._entry_name("readings", None, "Validation", "r12") == (
+        "Validation"
+    )
+    assert status_json._entry_name("readings", None, "", "r12") == "r12"

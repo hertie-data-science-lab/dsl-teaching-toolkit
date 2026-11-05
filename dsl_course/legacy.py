@@ -138,13 +138,15 @@ ROWS: tuple[Old, ...] = (
         NOT_MIGRATED,
         "its times are read in the semester's `defaults:` timezone",
     ),
+    # 0.11.0 named it `reading_guide` (decision 0038 amendment 2); the name went back
+    # to `reading_list` when a list could be a course file (0.12.0).
     Old(
-        "reading_list",
         "reading_guide",
+        "reading_list",
         SCHEDULE_ENTRY,
-        "0.11.0",
+        "0.12.0",
         NOT_MIGRATED,
-        "the row shows no reading guide",
+        "the row shows no reading list",
     ),
     Old(
         "deploy",

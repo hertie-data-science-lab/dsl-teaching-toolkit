@@ -7,10 +7,11 @@ off a folder name.
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from dsl_course import schedule_plan
+from dsl_course import schedule, schedule_plan
 from dsl_course.schedule import Deploy, Release, Schedule, Slot
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -363,3 +364,96 @@ def test_outermost_drops_what_another_path_holds_and_keeps_the_order():
         ["labs/03/solutions", "labs/03", "labs/030", "labs/03"]
     ) == ["labs/03", "labs/030"]
     assert schedule_plan.outermost(["labs/03", ""]) == [""]
+
+
+def test_a_reading_list_shows_once_the_entry_has_released():
+    # Decision 0044 point 2, the ONE rule the semester site and the student file apply:
+    # a course file's landed copy; inline text once a copy landed, else from `opens`.
+    copy = {"from_course_repo": "cm", "from_path": "readings/01"}
+    sched = schedule.parse(
+        {
+            "readings": {
+                "file": {
+                    "event_datetime": "2026-09-10T12:30",
+                    "files": [copy],
+                    "reading_list": {
+                        "from_course_repo": "cm",
+                        "from_path": "readings/01/READINGS.md",
+                    },
+                },
+                "text": {
+                    "event_datetime": "2026-09-10T12:30",
+                    "files": [copy],
+                    "reading_list": "- B.",
+                },
+                "bare": {
+                    "event_datetime": ["2026-09-10T12:30", "2026-09-17T12:30"],
+                    "reading_list": "- C.",
+                },
+                "day": {"event_datetime": "2026-09-11", "reading_list": "- D."},
+                "undated": {"session": 1, "reading_list": "- E."},
+            }
+        }
+    )
+    rows = schedule_plan.planned_rows(sched)
+    row = {r.key: r for r in reversed(rows)}
+    tree = {("materials", "readings/01/READINGS.md")}
+
+    def shown(r, now, landed=False, host=None, there=tree):
+        return schedule_plan.shown_list(
+            r,
+            host,
+            landed,
+            now,
+            lambda *rp: rp in there,
+            lambda *rp: "/".join(rp),
+            lambda *rp: "url:" + "/".join(rp),
+        )
+
+    opens = _at(10, 11) + timedelta(minutes=30)
+    before = opens - timedelta(minutes=1)
+    # A course file: its landed copy, whenever that is.
+    assert shown(row["file"], before) == "materials/readings/01/READINGS.md"
+    assert shown(row["file"], opens, there=set()) == ""
+    # Inline text with files: once one of them has landed.
+    assert shown(row["text"], opens) == ""
+    assert shown(row["text"], before, landed=True) == "- B."
+    # With none: an hour before the first slot, every slot alike.
+    second = next(r for r in rows if r.key == "bare" and r.slot == 1)
+    assert shown(row["bare"], before) == shown(second, before) == ""
+    assert shown(row["bare"], opens) == shown(second, opens) == "- C."
+    # A whole-day entry: the day's start.
+    day = datetime(2026, 9, 11, tzinfo=BERLIN)
+    assert shown(row["day"], day - timedelta(minutes=1)) == ""
+    assert shown(row["day"], day) == "- D."
+    # Undated: its unit's first row's moment, else never.
+    assert shown(row["undated"], opens) == ""
+    assert shown(row["undated"], opens, host=row["bare"]) == "- E."
+
+
+def test_a_reading_list_files_relative_links_point_at_the_released_copies():
+    # Inline text has no folder: its links are left as written.
+    named = Deploy("cm", "readings/01/READINGS.md")
+    row = schedule_plan.PlannedRow(
+        "r1", "readings", None, date(2026, 9, 1), deploys=(named,), reading_list=named
+    )
+    text = "[PDF](s1.pdf) [up](../x.pdf)"
+
+    def shown(r):
+        return schedule_plan.shown_list(
+            r,
+            None,
+            True,
+            _at(10),
+            lambda *rp: True,
+            lambda *rp: text,
+            lambda repo, path: f"https://gh/{repo}/{path}",
+        )
+
+    assert shown(row) == (
+        "[PDF](https://gh/materials/readings/01/s1.pdf) "
+        "[up](https://gh/materials/readings/x.pdf)"
+    )
+    inline = dataclasses.replace(row, reading_list=text, deploys=())
+    inline = dataclasses.replace(inline, opens=_at(1))
+    assert shown(inline) == text

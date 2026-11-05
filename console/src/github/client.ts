@@ -608,7 +608,8 @@ export class GitHubClient {
     return got;
   }
 
-  private async fetchBytes(owner: string, repo: string, path: string, sha: string, size: number): Promise<Uint8Array> {
+  /** A file's bytes as `getBytes` reads them, but never kept: a one-off read (Generate draft's PDFs) evicts nothing. */
+  async fetchBytes(owner: string, repo: string, path: string, sha: string, size: number): Promise<Uint8Array> {
     const url = this.url(size > ONE_MB ? `/repos/${owner}/${repo}/git/blobs/${sha}` : `/repos/${owner}/${repo}/contents/${encPath(path)}`);
     const res = await this.fetchFn(url, { method: 'GET', headers: this.headers(), cache: 'no-store' });
     this.noteRateLimit(res);

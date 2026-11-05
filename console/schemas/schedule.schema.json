@@ -1049,10 +1049,54 @@
             "minimum": 1,
             "type": "integer"
           },
-          "reading_guide": {
-            "type": [
-              "string",
-              "null"
+          "reading_list": {
+            "oneOf": [
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "from_course_repo": {
+                    "type": "string"
+                  },
+                  "from_path": {
+                    "type": "string"
+                  },
+                  "public": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "release_datetime": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "to_path": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "to_semester_repo": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "from_course_repo",
+                  "from_path"
+                ],
+                "type": "object"
+              }
             ]
           },
           "session": {

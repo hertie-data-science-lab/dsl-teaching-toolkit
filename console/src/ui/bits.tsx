@@ -115,7 +115,7 @@ function whereOf(p: Problem): string {
   return p.fix.line ? `${file}, line ${p.fix.line}` : (file ?? '');
 }
 
-export function fixHref(p: Problem): string | null {
+export function fixHref(p: Pick<Problem, 'fix'>): string | null {
   const f = p.fix;
   if (!f?.screen) return null;
   return `#${f.screen}${f.entry ? `-${f.entry}` : ''}`;

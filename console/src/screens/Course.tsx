@@ -35,6 +35,7 @@ import { CONFIG_REPO, COURSE_FILE, COURSE_REPO, STATUS_PATH } from '../model/nam
 import { useSetAside } from './SetAside';
 import { REFRESH_HINT, courseScope, questionFiles, tzOf, yearOf, useGradingConfigEdit } from './common';
 import { weekWords } from '../model/week';
+import { readingListFolder, readingListHref } from '../model/readingFolders';
 
 /** The status that carries the course block: the course's own, else a semester's. */
 function courseStatus(p: Pick<CourseProps, 'loaded' | 'cohortStates'>): Status | null {
@@ -110,8 +111,10 @@ const STEP_HINT: Record<string, string> = {
   C6: 'Optional: an open version of this course and its materials, available to anyone on the internet.',
 };
 
-/** Where a to-do is done: the repo's settings page. */
-export function todoHref(t: Todo): string {
+/** Where a to-do is done: the repo's settings page; a readings folder's list (decision 0046 rule 6), the editor on it in course `org`. */
+export function todoHref(t: Todo, org: string): string {
+  const folder = t.kind === 'materials' ? readingListFolder(t.id) : null;
+  if (folder) return readingListHref(org, t.repo, folder);
   if (t.kind === 'materials' || t.kind === 'template') return `#${t.kind}-${t.repo}`;
   return `#${t.screen ?? 'details'}${t.entry ? `-${t.entry}` : ''}`;
 }
@@ -162,7 +165,7 @@ export function courseItems(c: CourseStatus, tiered: Tiered[], list: string[] | 
       hintLabel: line.label === SYLLABUS_LABEL ? 'About the syllabus' : 'About this to-do',
       why: line.label === t.text ? undefined : t.text,
       when: t.kind === 'template' && t.check ? handoutWords(tiered, t.repo, t.check, now, horizon) : undefined,
-      link: { href: todoHref(t), label: 'Open settings', aria: `Open ${t.repo} settings` },
+      link: { href: todoHref(t, c.org), ...(t.kind === 'materials' && readingListFolder(t.id) ? { label: WRITE_LIST } : { label: 'Open settings', aria: `Open ${t.repo} settings` }) },
       aside: todoAside(t, list),
     };
   });
@@ -186,9 +189,14 @@ export function RepoChecklist({ items }: { items: SetupItem[] }) {
   );
 }
 
-/** A materials repo's whole checklist, ticks included: the settings screen's head. */
-export function MaterialsChecklist({ checks }: { checks: MaterialsCheck[] }) {
+/** The link on a readings folder's check and to-do (decision 0046 rule 6). */
+const WRITE_LIST = 'Write reading list';
+
+/** A materials repo's whole checklist, ticks included: the settings screen's head. `at`: the repo, for a readings folder's link to its list. */
+export function MaterialsChecklist({ checks, at }: { checks: MaterialsCheck[]; at?: { org: string; repo: string } }) {
+  const folder = (id: string) => (at ? readingListFolder(id) : null);
   const items: SetupItem[] = checks.map((c) => ({
+    link: folder(c.id) ? { href: readingListHref(at!.org, at!.repo, folder(c.id)!), label: WRITE_LIST } : undefined,
     id: c.id, label: c.label, kind: 'step', need: c.need ?? 'needed', state: c.done ? 'done' : 'open', why: c.done ? undefined : c.why ?? undefined, hint: c.id === 'syllabus' ? SYLLABUS_HINT : CHECK_HINT[c.id],
     hintLabel: c.id === 'syllabus' ? 'About the syllabus' : 'About this check',
   }));

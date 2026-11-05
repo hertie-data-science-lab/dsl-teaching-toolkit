@@ -20,6 +20,8 @@ export interface TreePath {
   path: string;
   dir: boolean;
   sha: string;
+  /** Bytes, for a file (GitHub's tree listing gives it): the client reads a file over 1 MB by blob. */
+  size?: number;
 }
 
 /** A repo's whole tree at a ref: every path, with `dir` for folders. */
@@ -48,6 +50,15 @@ export interface Files {
   refresh(owner: string, repo: string, path: string, ref?: string): void;
   /** Read a repo's tree again at every ref held (a release wrote to it), into the same state: no flicker. */
   refreshTree(owner: string, repo: string): void;
+}
+
+/** The folder a repo path is in ('' at the top). */
+export const parentOf = (path: string) => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '');
+
+/** Whether `repo`'s tree, as read so far, has a file at `path` (false while it is read). */
+export function fileInTree(files: Files, org: string, repo: string, path: string): boolean {
+  const t = files.tree(org, repo);
+  return t.kind === 'ready' && t.paths.some((x) => !x.dir && x.path === path);
 }
 
 /** Files read live through the client, each on first ask. */
@@ -125,7 +136,7 @@ export class LiveFiles implements Files {
 
   private async readTree(owner: string, repo: string, ref: string): Promise<TreeState> {
     const t = await this.client.listTree(owner, repo, ref, true);
-    return t ? { kind: 'ready', paths: t.tree.filter((e) => e.type !== 'commit').map((e) => ({ path: e.path, dir: e.type === 'tree', sha: e.sha })), truncated: t.truncated === true } : { kind: 'absent' };
+    return t ? { kind: 'ready', paths: t.tree.filter((e) => e.type !== 'commit').map((e) => ({ path: e.path, dir: e.type === 'tree', sha: e.sha, size: e.size })), truncated: t.truncated === true } : { kind: 'absent' };
   }
 
   tree(owner: string, repo: string, ref = 'HEAD'): TreeState {

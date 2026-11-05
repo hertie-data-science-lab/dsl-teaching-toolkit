@@ -1,14 +1,18 @@
 """A reading list: how its prose nests under the heading above it (`demote_headings`,
 for a schedule entry's `reading_list:`, decision 0038 rule 5).
 
-WP-P removes the rest: the `READINGS.md` overlay - a file in a readings folder inlined as
-prose - is read only by the open site (`public_site`) and the parked student console
-(`student_status`). The semester site and the syllabus read `reading_list:` instead.
+The `READINGS.md` overlay - a file in a readings folder inlined as prose by its NAME - is
+read only by the open site (`public_site`), which has no schedule. The semester site, the
+student file and the syllabus read `reading_list:` (text, or the course file it names)
+instead; `migrate` reads the overlay to write it.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import posixpath
+import re
+from collections.abc import Callable, Iterable
+from urllib.parse import unquote
 
 # A session's OPTIONAL prose reading list, the one file in a `readings/NN_.../` folder that
 # is inlined as text rather than listed as a download. Named once here because `scaffold`
@@ -19,9 +23,9 @@ from collections.abc import Callable
 # `lecture-notes.md` or `refs.bib` - a reading in its own right - get swallowed into the page
 # as prose instead of listed as a file a student can download.
 READING_OVERLAY_FILE = "READINGS.md"
-READING_OVERLAY_NAMES = frozenset(
-    {"readings.md", "readings.markdown", "readings.txt", "readings.bib"}
-)
+# Its spellings' suffixes, the one list.
+READING_OVERLAY_SUFFIXES = ("md", "markdown", "txt", "bib")
+READING_OVERLAY_NAMES = frozenset(f"readings.{s}" for s in READING_OVERLAY_SUFFIXES)
 
 
 # The overlay is OPTIONAL - a session with only PDFs needs nothing written - and additive:
@@ -81,6 +85,13 @@ def readings_block(names: list[str], read_overlay: Callable[[str], str | None]) 
 HEADING_SHIFT = 2
 
 
+def join_lists(texts: Iterable[str]) -> str:
+    """The reading list a row inlines: the list of each readings entry it shows (its
+    own, or those attached to it), blank ones dropped, headings demoted to nest under
+    the row's. The semester site and the student file both join them so."""
+    return "\n\n".join(demote_headings(t.strip()) for t in texts if t.strip())
+
+
 def demote_headings(text: str, shift: int = HEADING_SHIFT) -> str:
     """Push every ATX heading in faculty-written markdown down `shift` levels.
 
@@ -101,5 +112,40 @@ def demote_headings(text: str, shift: int = HEADING_SHIFT) -> str:
             rest = stripped[hashes:]
             if rest[:1] in (" ", "\t", ""):
                 line = "#" * min(hashes + shift, 6) + rest
+        out.append(line)
+    return "\n".join(out)
+
+
+# A markdown link or image's target (`[text](target "title")`), and a reference
+# definition's (`[id]: target`).
+_LINK = re.compile(r"(!?\[[^\]]*\]\(\s*)([^)\s]+)")
+_REF_DEF = re.compile(r"^(\s{0,3}\[[^\]]+\]:\s*)(\S+)")
+_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
+
+
+def absolute_links(text: str, folder: str, url: Callable[[str], str]) -> str:
+    """A reading-list file's markdown with each RELATIVE link target (`s1.pdf`,
+    `../other.pdf`: no scheme, no leading `/`, not `#anchor`, not a `<...>` autolink)
+    made `url(path)` of where it sits beside the file, which lives in `folder` - so a
+    link the file's own folder resolves still resolves on a page that is not there.
+    A target that climbs out of the repo, and anything in a fenced code block, is left
+    as written."""
+
+    def fix(target: str) -> str:
+        if target.startswith(("/", "#", "<")) or _SCHEME.match(target):
+            return target
+        path, sep, anchor = target.partition("#")
+        joined = posixpath.normpath(posixpath.join(folder, unquote(path)))
+        if joined == ".." or joined.startswith("../"):
+            return target
+        return url(joined.removeprefix("./")) + sep + anchor
+
+    out, fenced = [], False
+    for line in text.split("\n"):
+        if line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+        elif not fenced:
+            line = _REF_DEF.sub(lambda m: m.group(1) + fix(m.group(2)), line)
+            line = _LINK.sub(lambda m: m.group(1) + fix(m.group(2)), line)
         out.append(line)
     return "\n".join(out)

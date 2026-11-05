@@ -15,6 +15,7 @@ import { GitHubClient } from '../src/github/client';
 import type { FileState, TreeState } from '../src/model/files';
 import type { Loaded } from '../src/model/status';
 import type { Status } from '../src/model/types';
+import { readingListHref } from '../src/model/readingFolders';
 import { FilesPanel, SCHEDULE_LINK_LEAD, SCHEDULE_LINK_REST, type FilesPanelProps } from '../src/ui/FilesPanel';
 import { FakeGitHub, fileBody } from './fake';
 import example from './fixtures/status.example.json';
@@ -514,6 +515,24 @@ describe('the Files panel', () => {
     await rerender();
     expect(spy).not.toHaveBeenCalled();
     expect([...el.querySelectorAll<HTMLElement>('.mf-rows li')].map(shown)).toContain('lectures/01_intro/slides.pdf→lectures/01_intro/slides.pdfbehind');
+  });
+
+  it('Browse on the course: a readings folder with files and no list says so, and readings/ rolls them up while closed; Release and the semester say nothing', async () => {
+    const READS = ['readings/01_intro/READINGS.md', 'readings/01_intro/a.pdf', 'readings/02_trees/b.pdf', 'readings/03_svm/c.pdf'];
+    const files = () => new RefFiles({ [`${SEM}/materials@upstream`]: upstream }, [...COURSE, ...READS]);
+    const { el } = await mount({ files: files() });
+    const href = (name: string) => folder(el, name).querySelector(':scope > details > summary > a.chip')?.getAttribute('href') ?? null;
+    expect(chips(folder(el, '02_trees'))).toEqual(['no reading list']);
+    expect(href('02_trees')).toBe(readingListHref(COURSE_ORG, REPO, 'readings/02_trees'));
+    expect(href('03_svm')).toBe(readingListHref(COURSE_ORG, REPO, 'readings/03_svm'));
+    expect(chips(folder(el, '01_intro'))).toEqual([]);
+    // The roll-up sits in `.ft-rollup`, which the stylesheet hides once the folder is open.
+    expect(folder(el, 'readings').querySelector(':scope > details > summary > .ft-rollup > .chip.muted')!.textContent).toBe('2 folders without a reading list');
+    await click(tab(el, 'Release'));
+    expect(el.querySelector('.file-tree')!.textContent).not.toContain('reading list');
+    render(null, root!);
+    const sem = await mount({ files: files(), mode: 'semester', semester, semesters: undefined, sources: { materials: [REPO], others: [] } });
+    expect(sem.el.querySelector('.file-tree')!.textContent).not.toContain('reading list');
   });
 
   it('semester mode: Release by hand only, From the course repos', async () => {

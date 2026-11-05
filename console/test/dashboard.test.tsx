@@ -11,7 +11,7 @@ import type { Course } from '../src/model/discovery';
 import { StaticFiles } from './staticFiles';
 import { parseSchedule, scheduleRows, termOf, weekGroups, weekOf } from '../src/model/schedule';
 import type { Status } from '../src/model/types';
-import { CohortScreen, headerLine } from '../src/screens/Cohort';
+import { CohortScreen, headerLine, semesterItems, todoLink } from '../src/screens/Cohort';
 import example from './fixtures/status.example.json';
 import { heldStatus } from './heldReleases';
 
@@ -475,5 +475,23 @@ describe('the Students panel', () => {
       h.remove();
       host = null;
     }
+  });
+});
+
+describe('a to-do’s link is its fix', () => {
+  const todo = { id: 'schedule:reading_list:readings-3', kind: 'schedule' as const, repo: 'semester-config', text: 'Readings 3 has reading files but no reading list.', need: 'suggested' as const, screen: 'schedule' };
+  it('goes to the fix when the engine names one, else the screen (an entry only on a screen with no link of its own)', () => {
+    expect(todoLink({ ...todo, entry: 'readings-3', fix: { repo: 'org/semester-config', path: 'schedule.yml', screen: 'schedule', entry: 'readings-4' } })!.href).toBe('#schedule-readings-4');
+    expect(todoLink({ ...todo, entry: 'readings-3' })).toEqual({ href: '#schedule', label: 'Edit schedule' });
+    expect(todoLink({ ...todo, screen: 'materials' })).toEqual({ href: '#materials', label: 'Open' });
+    expect(todoLink({ ...todo, screen: 'release', entry: 'lab-8' })).toEqual({ href: '#release-lab-8', label: 'Open' });
+    expect(todoLink({ ...todo, screen: undefined })).toBeUndefined();
+  });
+
+  it('reaches the Setup & To do rows', () => {
+    const s = example as unknown as Status;
+    const st = { ...s, semester: { ...s.semester!, todo: [{ ...todo, entry: 'readings-3', fix: { repo: 'org/semester-config', path: 'schedule.yml', screen: 'schedule', entry: 'readings-3' } }] } } as Status;
+    const row = semesterItems(st, []).find((i) => i.id === todo.id)!;
+    expect(row.link!.href).toBe('#schedule-readings-3');
   });
 });

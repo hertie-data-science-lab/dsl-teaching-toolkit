@@ -16,7 +16,8 @@ import { Hint } from '../ui/Hint';
 import { Ext } from '../ui/icons';
 import { MaterialsTree } from '../ui/MaterialsTree';
 import { OpenButton } from '../ui/OpenButton';
-import { RepoFile, Split } from '../ui/Viewer';
+import { Split } from '../ui/Viewer';
+import { CourseFile, namedLists } from '../ui/ReadingList';
 import { courseOf, liveSemesters, useCourseView } from './Course';
 import { RepoChip, RepoWhy, TemplateSub } from '../ui/SetupPanel';
 import { materialsReadiness, templateReadinessIn } from '../model/readiness';
@@ -140,13 +141,14 @@ export function fileIn(file: string | undefined, repos: string[]): { repo: strin
 /** A materials file open in the viewer, its repo's tree beside it (decision 0040 rule 6: the student All materials split). */
 function MaterialsFile({ p, at }: { p: CourseProps; at: { repo: string; path: string } }) {
   const org = p.course.org;
+  const lists = namedLists(p.cohortStates, at.repo);
   return (
     <>
       <div class="page-head">
         <div><h2 class="h1">Course materials</h2><p class="lede"><a class="textlink" href={`?course=${org}#materials`}>All course materials</a></p></div>
       </div>
       <Split label={at.repo} side={<section class="panel section" aria-label={at.repo}><h2>{at.repo}</h2><RepoFiles files={p.files} org={org} repo={at.repo} current={at.path} /></section>}>
-        <RepoFile org={org} at={at} />
+        <CourseFile org={org} at={at} files={p.files} named={lists} write={p.course.write} />
       </Split>
     </>
   );
@@ -181,7 +183,7 @@ export function MaterialsIndexScreen(p: CourseProps) {
                 const edits = live ? editedIn(files, course.org, m.repo, live.org, p.cohortStates[live.org]!) : null;
                 return (
                   <li>
-                    <span class="r-title"><a class="textlink" href={`#materials-${m.repo}`}>{m.repo}</a> <RepoChip r={r} />{term ? <span class="chip term">{term}</span> : null}
+                    <span class="r-title"><a class="textlink" href={`#materials-${m.repo}`}>{m.repo}</a> <RepoChip r={r} link={{ href: `#materials-${m.repo}`, label: `Open ${m.repo} settings` }} />{term ? <span class="chip term">{term}</span> : null}
                       {edits ? <> <a class="chip muted" href={`#materials-${m.repo}`}>{plural(edits, 'file')} edited in {live!.termLabel}</a></> : null}</span>
                     <RepoWhy r={r} />
                     {gh?.pushed_at ? <span class="r-sub">Last change {fmtDay(gh.pushed_at)} ({ago(gh.pushed_at, p.now)}).</span> : null}

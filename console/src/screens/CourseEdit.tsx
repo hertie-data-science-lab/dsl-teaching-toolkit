@@ -38,6 +38,7 @@ import { addMaterialsTopic, otherRepos, removeMaterialsTopic } from './CourseInd
 import { releaseIntoOf, ReleaseInto, RepoChips } from '../ui/ReleaseChips';
 import { RepoPickerModal } from '../ui/RepoPickerModal';
 import { CONFIG_REPO, COURSE_FILE, COURSE_REPO, DEFAULT_SYLLABUS, SEMESTER_FILE } from '../model/names';
+import { namedLists } from '../ui/ReadingList';
 
 /** `course.yml`'s public-website block. */
 const OPEN_SITE = 'open_course_site';
@@ -577,7 +578,7 @@ export function MaterialsScreen(p: CourseProps) {
       <div class="stack">
         {m?.checks?.length ? (
           <section class="panel section">
-            <MaterialsChecklist checks={m.checks} />
+            <MaterialsChecklist checks={m.checks} at={{ org: course.org, repo }} />
           </section>
         ) : r ? <RepoWhy r={r} /> : null}
         <section class="panel section">
@@ -614,7 +615,7 @@ export function MaterialsScreen(p: CourseProps) {
             </div>
           ) : <p class="footnote">Needs a semester: the plan is built from its schedule.</p>}
         </section>
-        <FilesPanel files={p.files} courseOrg={course.org} repo={repo} mode="course" write={course.write} semesters={semesters} scheduleHref={scheduleNewHref}
+        <FilesPanel files={p.files} courseOrg={course.org} repo={repo} mode="course" write={course.write} semesters={semesters} scheduleHref={scheduleNewHref} readingLists={namedLists(p.cohortStates, repo)}
           onKeep={(s) => env?.ops.open(keepFuture({ courseOrg: course.org, cohortOrg: s.org, where: s.termLabel }))}
           onSaveIgnore={saveIgn} ignoreSave={ignSave}
           withholdExtra={reviewCheck && !reviewCheck.done ? (

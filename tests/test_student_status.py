@@ -27,6 +27,7 @@ from dsl_course.gh_contents import load_yaml_lines
 from dsl_course.schema_check import validate
 from dsl_course.status_json import CourseFacts, SemesterFacts
 from tests.conftest import fake_config, repo_row
+from tests.test_site import JAN
 
 # The console's student-model tests read this render (`console/test/studentStatus.test.tsx`).
 CONSOLE_FIXTURE = (
@@ -75,6 +76,9 @@ readings:
       - from_course_repo: course-materials-f2026
         from_path: readings/01_intro
         to_semester_repo: materials
+    reading_list:
+      from_course_repo: course-materials-f2026
+      from_path: readings/01_intro/READINGS.md
 exams:
   midterm:
     event_datetime: 2026-10-28T09:00
@@ -204,9 +208,7 @@ def _extra(facts: SemesterFacts) -> student_status.StudentFacts:
             "assignment-3": README_3,
         },
         caps={"assignment-2-project": 3},
-        overlays={
-            ("materials", "readings/01_intro/READINGS.md"): "# Read\n\nChapter 1."
-        },
+        reading_lists={"readings_01": "# Read\n\nChapter 1."},
         syllabus=("materials", "SYLLABUS.md"),
         cards=student_status.people_cards(INSTRUCTORS, semester=True),
         home=facts.site_home or "",
@@ -485,6 +487,42 @@ def test_a_released_row_links_its_files_and_carries_its_readings():
     )
 
 
+def test_a_reading_list_shows_its_landed_copy_as_on_the_site():
+    # `schedule_plan.shown_list`, read off the semester's listed paths.
+    facts = _facts()
+    (row,) = [
+        r for r in student_status.planned_rows(facts.sched) if r.key == "readings_01"
+    ]
+    shown = student_status._shown_list(
+        facts, row, None, False, NOW, lambda *rp: f"[A]({rp[0]}.pdf)"
+    )
+    # Its relative links point at the released copies.
+    assert shown == (
+        f"[A](https://github.com/{SEMESTER}/materials/blob/main/readings/01_intro/"
+        "materials.pdf)"
+    )
+
+
+def test_a_reading_list_kept_in_a_lecture_folder_does_not_release_the_lecture():
+    # Decision 0044, Jan's layout: the list ships a week early into the lecture's
+    # folder; the lecture stays unreleased until its own files land, as on the site.
+    facts = SemesterFacts(org=SEMESTER, sched=schedule.parse(JAN))
+    facts.dest_paths = {"materials": {"lectures/01/READINGS.md"}}
+
+    def rows() -> dict[str, dict]:
+        out = student_status.release_rows(facts, _extra(facts))
+        return {r["id"]: r for r in out}
+
+    early = rows()
+    assert early["lecture-1"]["released"] is False
+    assert early["lecture-1"]["links"] == []
+    assert early["readings-1"]["released"] is True
+    facts.dest_paths["materials"].add("lectures/01/slides.pdf")
+    later = rows()["lecture-1"]
+    assert later["released"] is True
+    assert [k["name"] for k in later["links"]] == ["slides.pdf"]
+
+
 def test_a_row_lists_its_files_as_the_semester_site_does():
     # One listing rule (`site_repo.landed_links`): the tree's folders are not files, the
     # course's `site_link_extensions` narrows the list, and URLs carry the branch.
@@ -688,7 +726,8 @@ def test_gather_reads_briefs_only_for_what_is_out(monkeypatch):
     assert extra.announcements == [
         {"when": "2026-09-20", "title": "Room", "details": "B1"}
     ]
-    assert extra.overlays == {("materials", "readings/01_intro/READINGS.md"): "prose"}
+    # The reading list is the LANDED copy of the file the entry names.
+    assert extra.reading_lists == {"readings_01": "prose"}
     assert extra.syllabus == ("materials", "SYLLABUS.md")
     assert extra.caps == {"assignment-2-project": 3}
     assert extra.previous_offerings == [{"title": "F25", "url": "https://a.b/"}]

@@ -33,3 +33,38 @@ def test_demote_headings_leaves_code_and_prose_alone():
 def test_demote_headings_clamps_at_six():
     assert readings.demote_headings("##### deep").startswith("###### deep")
     assert readings.demote_headings("###### deepest").startswith("###### deepest")
+
+
+def test_a_rows_reading_lists_are_joined_nested_under_the_row():
+    assert readings.join_lists(["# Week 1\n\n- Blitzstein.\n", "  "]) == (
+        "### Week 1\n\n- Blitzstein."
+    )
+    assert readings.join_lists(["  "]) == ""
+
+
+def test_a_reading_lists_relative_links_are_made_absolute():
+    def url(path: str) -> str:
+        return f"https://github.com/S/materials/blob/main/{path}"
+
+    def fixed(text: str) -> str:
+        return readings.absolute_links(text, "readings/01", url)
+
+    assert fixed("[PDF](s1-jurafsky.pdf)") == (
+        "[PDF](https://github.com/S/materials/blob/main/readings/01/s1-jurafsky.pdf)"
+    )
+    assert fixed("![fig](../figs/a.png)") == (
+        "![fig](https://github.com/S/materials/blob/main/readings/figs/a.png)"
+    )
+    assert fixed("[a](./b.pdf#page=3)") == (
+        "[a](https://github.com/S/materials/blob/main/readings/01/b.pdf#page=3)"
+    )
+    for kept in (
+        "[web](https://example.org/a.pdf)",
+        "[mail](mailto:a@b.c)",
+        "[top](#week-1)",
+        "[root](/abs.pdf)",
+        "[auto](<s1.pdf>)",
+        "[out](../../../x.pdf)",
+        "```\n[code](s1.pdf)\n```",
+    ):
+        assert fixed(kept) == kept

@@ -777,6 +777,18 @@ def is_repo_root(path: str) -> bool:
     return path.strip("/").strip() in ("", ".")
 
 
+def within(wanted: str, path: str) -> str | None:
+    """Where `path` sits inside a release of `wanted` (both source paths): "" for the path
+    itself, its relative path when it is inside the folder (the whole repo holds
+    everything), None when the release does not copy it."""
+    wanted, path = wanted.strip("/"), path.strip("/")
+    if is_repo_root(wanted):
+        return "" if is_repo_root(path) else path
+    if path == wanted:
+        return ""
+    return path[len(wanted) + 1 :] if path.startswith(f"{wanted}/") else None
+
+
 # WP-P removes (with the open site's rebuild on the schedule, plan 0.11.0 section 2): the
 # `NN_` session-folder rule below is read by `public_site` alone. Nothing on the semester
 # side gives a folder name any meaning (decision 0038).

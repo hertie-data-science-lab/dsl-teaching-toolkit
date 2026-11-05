@@ -110,6 +110,7 @@ main { min-width: 0; }
 .hint-pop::before { content: ""; position: absolute; left: 0; right: 0; top: -9px; height: 9px; }
 .hint-pop.flip-y::before { top: auto; bottom: -9px; }
 .lbl-row { display: flex; align-items: center; gap: 0; flex-wrap: wrap; }
+.lbl-row > .lbl-note { margin-left: 6px; }
 .fold > summary::before, .a-card > summary.a-sum::before { content: ""; width: 7px; height: 7px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform 0.15s; margin-right: 2px; flex: none; }
 .fold[open] > summary::before, .a-card[open] > summary.a-sum::before { transform: rotate(45deg); }
 .lives { font-size: 12.5px; color: var(--muted); }
@@ -295,6 +296,7 @@ button.wk { font: inherit; text-align: left; cursor: pointer; align-content: sta
 @media (max-width: 760px) { .ptab-coming li { grid-template-columns: 80px minmax(0, 1fr); } .ptab-coming li .row-acts { grid-column: 2; display: flex; gap: 12px; } }
 /* Repo chips: not ready is grey in a row, red on a settings page's head; suggestions dotted, never coloured. */
 .chip.suggest { background: transparent; border: 1.5px dotted var(--idle); color: var(--ink-2); font-weight: 500; }
+a.chip.suggest { text-decoration: none; cursor: pointer; }
 .chip.notready { background: var(--sunk); color: var(--ink-2); }
 .page-head .actions > .chip.notready { background: var(--bad-soft); color: var(--bad-ink); }
 .page-note { color: var(--ink-2); font-size: 14px; margin: -6px 0 18px; max-width: 80ch; }
@@ -1243,9 +1245,9 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .file-chip.bad { box-shadow: inset 0 0 0 1.5px var(--amber-ink); }
 .file-chip.current { box-shadow: inset 0 0 0 1.5px var(--ink-2); }
 .file-chip .chip-open { font: inherit; color: inherit; background: none; border: 0; padding: 2px 4px; cursor: pointer; text-align: left; }
-.file-chip .pub { font-family: var(--font-display); font-weight: 600; font-size: 11px; border: 1px solid var(--rule-strong); border-radius: 999px; background: var(--surface); color: var(--muted); padding: 0 7px; cursor: pointer; }
+.file-chip .pub { flex-shrink: 0; white-space: nowrap; font-family: var(--font-display); font-weight: 600; font-size: 11px; border: 1px solid var(--rule-strong); border-radius: 999px; background: var(--surface); color: var(--muted); padding: 0 7px; cursor: pointer; }
 .file-chip .pub.on { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
-.file-chip .x { font-size: 16px; min-width: 24px; min-height: 24px; }
+.file-chip .x { flex-shrink: 0; font-size: 16px; min-width: 24px; min-height: 24px; }
 /* The Releases settings' chip lists (plan 2026-11-04, decision 7): an inherited repo grey, not removable. */
 .rel-chips { align-items: center; }
 .rel-chips .chip.fixed { background: var(--sunk); color: var(--muted); padding: 2px 9px; }
@@ -1382,3 +1384,36 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 /* A file row's chevron opens the Open split button's menu (ui/OpenSplit.tsx `caretOnly`): from the chevron, rightwards. */
 .file-menu .open-menu { left: 0; right: auto; top: calc(100% + 6px); width: 300px; max-width: calc(100vw - 32px); }
 .open-menu .pm-off { cursor: default; }
+/* The reading-list editor (ui/ReadingList.tsx, decision 0044): editor and preview side by side where the sheet or pane is wide. */
+.reading-list-editor { container-type: inline-size; }
+/* The list's file, under Generate draft: footnote-sized and muted. */
+.rl-file { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12.5px; color: var(--muted); }
+.rl-file .mono { font-size: 12px; }
+.rl-file input { flex: 1 1 220px; min-width: 0; font-size: 12px; }
+.rl-file .actions { margin-left: auto; }
+/* No list yet (decision 0046): the offer of one, one footnote-sized line. */
+.rl-offer { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12.5px; color: var(--muted); }
+.rl-edit { display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr); }
+.rl-edit textarea { width: 100%; resize: vertical; font-family: var(--font-code); font-size: 13px; }
+.rl-preview { border: 1px solid var(--rule); border-radius: 6px; padding: 8px 10px; min-width: 0; }
+@container (min-width: 720px) { .rl-edit { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+/* Generate draft (ui/ReadingDraft.tsx, decision 0044 point 6): the slot under the editor and the dialog's per-file panels. */
+.rd-slot { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+.rd-slot .check-line { flex-basis: 100%; }
+.rd-file { border: 1px solid var(--rule); border-radius: 8px; padding: 10px 12px; display: grid; gap: 6px; }
+.rd-head { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; justify-content: space-between; }
+.rd-head .mono { overflow-wrap: anywhere; }
+.rd-sec { font-size: 13px; color: var(--ink-2); }
+.rd-line { display: flex; gap: 8px; align-items: center; }
+.rd-line input { flex: 1 1 auto; min-width: 0; font-family: var(--font-code); font-size: 12.5px; }
+.rd-tick { flex: none; width: 30px; height: 30px; border-radius: 50%; border: 1.5px solid var(--rule-strong); background: var(--surface); color: var(--muted); cursor: pointer; font-weight: 700; }
+.rd-tick.on { background: var(--ok); border-color: var(--ok); color: var(--surface); }
+.rd-unknown { margin: 0; display: flex; gap: 6px; align-items: center; color: var(--bad-ink); font-size: 13px; }
+.rd-bang { flex: none; display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid currentColor; font-weight: 700; font-size: 12px; }
+.rd-notes { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; font-size: 12.5px; color: var(--ink-2); }
+.rd-notes li { overflow-wrap: anywhere; }
+.rd-file .rd-more { justify-self: start; min-height: 0; padding: 0 2px; font-size: 12.5px; }
+.rd-foot { justify-content: flex-end; position: sticky; bottom: -16px; background: var(--surface); padding: 8px 0; }
+.rd-count { margin-right: auto; font-size: 13px; color: var(--muted); }
+/* The entry sheet's Full screen: the sheet over the whole view. */
+.entry.entry-full { position: fixed; inset: 0; z-index: 40; max-width: none; max-height: none; margin: 0; border-radius: 0; }

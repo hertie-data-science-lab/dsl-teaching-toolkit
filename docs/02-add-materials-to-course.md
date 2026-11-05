@@ -6,7 +6,7 @@ by default. What makes a repo a materials repo is its `dsl-materials` topic, whi
 add the topic to a repo you made by hand to have it listed as one (the console's **Handout
 materials** page does it: **Treat as course materials** on the repo's row). The same page shows each materials repo's
 files as a folder tree: open a folder to see inside it; a folder links to GitHub, and a file opens in
-the console (its GitHub link and a **Full screen** button in its header, for presenting).
+the console (its GitHub link and a **Full screen** icon (⤢) in its header, for presenting).
 
 Each repo's own settings page (its name under **Course materials** in the course nav) has a
 **Files** panel: the repo's tree, and three views of it.
@@ -50,8 +50,8 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
 
    ```
    lectures/01_intro/   any files - slides, demo code, notebooks …
-   readings/01_intro/   the readings; the reading list itself is the schedule entry's
-                        `reading_guide:` (07), shown on the site
+   readings/01_intro/   the readings; the reading list is the schedule entry's
+                        `reading_list:` (07): text, or a file here (READINGS.md)
    labs/01_intro/       any files
    SYLLABUS.md          optional - or any name you like (SYLLABUS.pdf, ...)
    ```
@@ -63,6 +63,8 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
    *NB: this repo stays private - students never see it. Only the sessions you **actively release** reach the semester org, so you can privately stage the whole course here.*
 
    *NB: to withhold a file from every release, name it in `.releaseignore` - `.gitignore` syntax, in any folder ([08](08-release-materials-to-cohort.md#withholding-files-with-releaseignore)). A folder release leaves `solutions/`, `tests/`, grading files and `.env*` inside it behind; name a solution's own path to release it.*
+
+   *NB: a folder under `readings/` with files and no `READINGS.md` is flagged **no reading list** in the repo's **Files › Browse** on its Course materials settings page; click it to write the list.*
 
    *NB: a session folder is released whole, subfolders included ([11](11-configure-cohort-site.md)).*
 

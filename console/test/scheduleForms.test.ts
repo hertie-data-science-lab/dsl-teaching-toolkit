@@ -16,13 +16,16 @@ import G_SEMESTER from './fixtures/schedule-forms/semester.yml?raw';
 import { YamlText } from '../src/edit/yamlText';
 import { cutoffOf } from '../src/screens/RunSettings';
 import {
-  applyChanges, changesOf, defaultReleaseAt, draftErrors, emptyTwin, newDraft, newlyManual, nextNumber, nextSession, readDraft, releaseAt, writeDraft,
-  type AssignmentDraft, type EntryDraft, type SemesterDraft, type SemesterEntryDraft,
+  applyChanges, changesOf, defaultListPath, defaultReleaseAt, draftErrors, emptyTwin, listWrites, newDraft, newlyManual, nextNumber, nextSession, readDraft, releaseAt, twinUsed, writeDraft,
+  type AssignmentDraft, type EntryDraft, type ListDraft, type SemesterDraft, type SemesterEntryDraft,
 } from '../src/model/scheduleEdit';
 
 const doc = (t: string) => (parse(t) ?? {}) as Record<string, unknown>;
-const save = (t: string, d: EntryDraft | AssignmentDraft | SemesterEntryDraft, base: EntryDraft | AssignmentDraft | SemesterEntryDraft | null = null, removed: string[] = [], handedOut = false) =>
-  applyChanges(t, doc(t), changesOf([d], [base]), removed, { handedOut: () => handedOut });
+/** A reading list written in the schedule (the legacy inline form, decision 0044). */
+const inlineList = (text: string): ListDraft => ({ repo: '', path: '', inline: true, text });
+type Exists = (repo: string, path: string) => boolean;
+const save = (t: string, d: EntryDraft | AssignmentDraft | SemesterEntryDraft, base: EntryDraft | AssignmentDraft | SemesterEntryDraft | null = null, removed: string[] = [], handedOut = false, exists?: Exists) =>
+  applyChanges(t, doc(t), changesOf([d], [base]), removed, { handedOut: () => handedOut, exists });
 
 const BASE = `timezone: Europe/Berlin
 lectures:
@@ -42,7 +45,7 @@ describe('the forms write the mock-up’s YAML', () => {
         { repo: 'course-materials-f2026', path: 'lectures/05_regularisation', toRepo: '', toPath: '', atDate: '', atTime: '', public: false },
         { repo: 'lecture-code-f2026', path: 'mlpkg/regularise', toRepo: '', toPath: '', atDate: '', atTime: '', public: false },
       ],
-      twin: { ...emptyTwin({ ...d, slots: [{ date: '2026-10-05', time: '09:00', location: '', details: '' }] }), guide: '- Goodfellow et al. (2016), ch. 7.\n', files: [{ repo: 'course-materials-f2026', path: 'readings/05', toRepo: '', toPath: '', atDate: '', atTime: '', public: false }] },
+      twin: { ...emptyTwin({ ...d, slots: [{ date: '2026-10-05', time: '09:00', location: '', details: '' }] }), list: inlineList('- Goodfellow et al. (2016), ch. 7.\n'), files: [{ repo: 'course-materials-f2026', path: 'readings/05', toRepo: '', toPath: '', atDate: '', atTime: '', public: false }] },
     };
     const out = save(BASE, filled);
     expect(out.keys).toEqual(['lecture-5', 'readings-5']);
@@ -61,7 +64,7 @@ readings:
   readings-5:
     session: 5
     event_datetime: 2026-10-05T09:00
-    reading_guide: |
+    reading_list: |
       - Goodfellow et al. (2016), ch. 7.
     files:
       - from_course_repo: course-materials-f2026
@@ -87,14 +90,14 @@ readings:
   });
 
   it('Readings on their own: title, date and time, reading guide; no session', () => {
-    const d = { ...(newDraft('readings', doc(BASE)) as EntryDraft), title: 'Background reading', slots: [{ date: '2026-08-25', time: '09:00', location: '', details: '' }], guide: '- Any linear algebra refresher.' };
+    const d = { ...(newDraft('readings', doc(BASE)) as EntryDraft), title: 'Background reading', slots: [{ date: '2026-08-25', time: '09:00', location: '', details: '' }], list: inlineList('- Any linear algebra refresher.') };
     const out = save(BASE, d);
     expect(out.keys).toEqual(['readings-background']);
     expect(out.text.slice(BASE.length)).toBe(`readings:
   readings-background:
     title: Background reading
     event_datetime: 2026-08-25T09:00
-    reading_guide: "- Any linear algebra refresher."
+    reading_list: "- Any linear algebra refresher."
 `);
   });
 
@@ -103,6 +106,14 @@ readings:
       files: [{ repo: 'course-materials-f2026', path: 'readings/05/goodfellow-ch6.pdf', toRepo: '', toPath: '', atDate: '', atTime: '', public: false }, { repo: 'course-materials-f2026', path: 'readings/05/lecture-notes.pdf', toRepo: '', toPath: '', atDate: '', atTime: '', public: true }] };
     const out = parse(save(BASE, d).text).readings['readings-5'];
     expect(out.files).toEqual([{ from_course_repo: 'course-materials-f2026', from_path: 'readings/05/goodfellow-ch6.pdf' }, { from_course_repo: 'course-materials-f2026', from_path: 'readings/05/lecture-notes.pdf', public: true }]);
+  });
+
+  it('Readings: a reading list naming a course file is kept as the file has it', () => {
+    const t = `${BASE}readings:\n  readings-4:\n    session: 4\n    reading_list:\n      from_course_repo: course-materials-f2026\n      from_path: readings/04/READINGS.md\n`;
+    const d = readDraft(doc(t), 'readings-4') as EntryDraft;
+    expect(d.list).toEqual({ repo: 'course-materials-f2026', path: 'readings/04/READINGS.md', inline: false, text: null });
+    const out = parse(save(t, { ...d, title: 'Week 4' }, d).text).readings['readings-4'];
+    expect(out.reading_list).toEqual({ from_course_repo: 'course-materials-f2026', from_path: 'readings/04/READINGS.md' });
   });
 
   it('Exam: title, date and time, location, details; the key from the title', () => {
@@ -210,7 +221,7 @@ describe('golden files: each form writes the mock-up’s YAML', () => {
     const filled: EntryDraft = {
       ...d, session: 5, title: 'Regularisation', slots: [at('2026-10-06', '10:00', 'Room 1.10')], details: 'Ridge, lasso and early stopping.',
       files: [file('course-materials-f2026', 'lectures/05_regularisation'), file('lecture-code-f2026', 'mlpkg/regularise')],
-      twin: { ...emptyTwin(d), slots: [at('2026-10-05', '09:00')], guide: '- Goodfellow, Bengio & Courville (2016), ch. 7.\n', files: [file('course-materials-f2026', 'readings/05')] },
+      twin: { ...emptyTwin(d), slots: [at('2026-10-05', '09:00')], list: inlineList('- Goodfellow, Bengio & Courville (2016), ch. 7.\n'), files: [file('course-materials-f2026', 'readings/05')] },
     };
     expect(save(TZ, filled).text).toBe(G_LECTURE);
   });
@@ -222,7 +233,7 @@ describe('golden files: each form writes the mock-up’s YAML', () => {
   });
 
   it('Readings on their own', () => {
-    const d = { ...(newDraft('readings', doc(TZ)) as EntryDraft), title: 'Background reading', slots: [at('2026-08-25', '09:00')], guide: '- Any linear algebra refresher.' };
+    const d = { ...(newDraft('readings', doc(TZ)) as EntryDraft), title: 'Background reading', slots: [at('2026-08-25', '09:00')], list: inlineList('- Any linear algebra refresher.') };
     expect(save(TZ, d).text).toBe(G_READINGS);
   });
 
@@ -362,7 +373,7 @@ describe('validation as you type', () => {
 
   it('checks the readings twin with the lecture', () => {
     const d = { ...(newDraft('lecture', {}) as EntryDraft), slots: [{ date: '2026-10-06', time: '10:00', location: '', details: '' }] };
-    const twin = { ...emptyTwin(d), slots: [{ date: '', time: '', location: '', details: '' }], guide: 'x' };
+    const twin = { ...emptyTwin(d), slots: [{ date: '', time: '', location: '', details: '' }], list: inlineList('x') };
     expect(draftErrors({ ...d, twin })['twin.date']).toBe('Give the date, or turn on Date TBC.');
   });
 });
@@ -418,5 +429,123 @@ describe('kept from the 0.10 editor (baby rule)', () => {
     expect(parse(save('', fresh).text).semester).toEqual({ archive: { type: 'archive' } });
     expect(parse(save('', { ...fresh, graceDays: 90 }).text).semester).toEqual({ archive: { type: 'archive', grace_days: 90 } });
     expect(draftErrors({ ...fresh, graceDays: -1 }).graceDays).toBe('A whole number of days, 0 or more.');
+  });
+});
+
+describe('the reading list as a course file (decision 0044)', () => {
+  const REPO = 'course-materials-f2026';
+  const t = `${BASE}readings:\n  readings-4:\n    session: 4\n    reading_list:\n      from_course_repo: ${REPO}\n      from_path: readings/04/READINGS.md\n      to_path: week4/READINGS.md\n`;
+  const file = (path: string) => ({ repo: REPO, path, toRepo: '', toPath: '', atDate: '', atTime: '', public: false });
+  const ready = (text: string) => () => ({ kind: 'ready' as const, text, sha: 'blob1' });
+
+  it('reads a file ref untouched: its text is the file’s, read from the cache', () => {
+    const d = readDraft(doc(t), 'readings-4') as EntryDraft;
+    expect(d.list).toEqual({ repo: REPO, path: 'readings/04/READINGS.md', inline: false, text: null });
+  });
+
+  it('writes a file as {from_course_repo, from_path} over the keys the file had, never into files:', () => {
+    const d = readDraft(doc(t), 'readings-4') as EntryDraft;
+    const moved = { ...d, list: { ...d.list!, path: 'lectures/04/READINGS.md' } };
+    const out = parse(save(t, moved, d).text).readings['readings-4'];
+    expect(out.reading_list).toEqual({ from_course_repo: REPO, from_path: 'lectures/04/READINGS.md', to_path: 'week4/READINGS.md' });
+    expect(out.files).toBeUndefined();
+  });
+
+  it('writes nothing for a new file with nothing typed, the file a chosen path names, and Move to a file as a file ref', () => {
+    const d = { ...(newDraft('readings', doc(BASE)) as EntryDraft), session: 6 as const, slots: [{ date: '2026-10-20', time: '', location: '', details: '' }] };
+    const empty = { ...d, list: { repo: REPO, path: 'readings/06/READINGS.md', inline: false, text: '' } };
+    expect(parse(save(BASE, empty).text).readings['readings-6'].reading_list).toBeUndefined();
+    // Choose another: an existing file, untouched.
+    const chosen = { ...d, list: { repo: REPO, path: 'lectures/06/list.md', inline: false, text: null } };
+    expect(parse(save(BASE, chosen, null, [], false, (_, path) => path === 'lectures/06/list.md').text).readings['readings-6'].reading_list).toEqual({ from_course_repo: REPO, from_path: 'lectures/06/list.md' });
+    const inline = `${BASE}readings:\n  readings-5:\n    session: 5\n    reading_list: "- Old."\n`;
+    const legacy = readDraft(doc(inline), 'readings-5') as EntryDraft;
+    expect(legacy.list).toEqual(inlineList('- Old.'));
+    const moved = { ...legacy, list: { ...legacy.list!, inline: false, repo: REPO, path: 'readings/05/READINGS.md' } };
+    expect(parse(save(inline, moved, legacy).text).readings['readings-5'].reading_list).toEqual({ from_course_repo: REPO, from_path: 'readings/05/READINGS.md' });
+  });
+
+  it('reads an unmigrated reading_guide: as legacy text, and writes it back as reading_list: alone', () => {
+    const old = `${BASE}readings:\n  readings-5:\n    session: 5\n    reading_guide: "- Old."\n`;
+    const d = readDraft(doc(old), 'readings-5') as EntryDraft;
+    expect(d.list).toEqual(inlineList('- Old.'));
+    const kept = parse(save(old, { ...d, title: 'Week 5' }, d).text).readings['readings-5'];
+    expect(kept).toEqual({ session: 5, title: 'Week 5', reading_list: '- Old.' });
+    const moved = { ...d, list: { ...d.list!, inline: false, repo: REPO, path: 'readings/05/READINGS.md' } };
+    const out = parse(save(old, moved, d).text).readings['readings-5'];
+    expect(out.reading_list).toEqual({ from_course_repo: REPO, from_path: 'readings/05/READINGS.md' });
+    expect('reading_guide' in out).toBe(false);
+    // An entry already on reading_list: keeps it; reading_guide: is never written.
+    const t2 = `${BASE}readings:\n  readings-6:\n    session: 6\n    reading_list: "- New."\n`;
+    const d2 = readDraft(doc(t2), 'readings-6') as EntryDraft;
+    expect(parse(save(t2, { ...d2, title: 'Week 6' }, d2).text).readings['readings-6']).toEqual({ session: 6, title: 'Week 6', reading_list: '- New.' });
+  });
+
+  it('never takes a READINGS.md at the default path unasked (decision 0046): no list writes no key, its twin included', () => {
+    const there = (_: string, path: string) => path === 'readings/06/READINGS.md' || path === 'readings/03/READINGS.md';
+    const at = `${BASE}readings:\n  readings-6:\n    session: 6\n    files:\n      - from_course_repo: ${REPO}\n        from_path: readings/06/a.pdf\n`;
+    const base = readDraft(doc(at), 'readings-6') as EntryDraft;
+    expect(base.list).toBeNull();
+    expect(parse(save(at, { ...base, title: 'Week 6' }, base, [], false, there).text).readings['readings-6'].reading_list).toBeUndefined();
+    const tw = `lectures:\n  lecture-3:\n    session: 3\nreadings:\n  readings-3:\n    session: 3\n    files:\n      - from_course_repo: ${REPO}\n        from_path: readings/03\n`;
+    const unit = readDraft(doc(tw), 'lecture-3') as EntryDraft;
+    expect(changesOf([unit], [unit]).map((c) => c.from)).toEqual(['lecture-3']);
+    expect(parse(save(tw, { ...unit, title: 'Trees' }, unit, [], false, there).text).readings['readings-3'].reading_list).toBeUndefined();
+  });
+
+  it('Detach drops the key and nothing else; Generate one with nothing typed keeps the key out', () => {
+    const d = readDraft(doc(t), 'readings-4') as EntryDraft;
+    const out = parse(save(t, { ...d, list: null }, d).text).readings['readings-4'];
+    expect(out).toEqual({ session: 4 });
+    expect(listWrites([{ ...d, list: null }], ready('- A.\n'))).toEqual([]);
+    // Generate one, then nothing typed: no file, no key (a twin too).
+    const fresh = { ...d, list: { repo: REPO, path: 'readings/04/READINGS.md', inline: false, text: '' } };
+    expect(listWrites([fresh], () => ({ kind: 'absent' }))).toEqual([]);
+    expect(parse(save(t, fresh, d).text).readings['readings-4'].reading_list).toBeUndefined();
+  });
+
+  it('writes a new twin whose only content is a chosen list file', () => {
+    const tw = `lectures:\n  lecture-3:\n    session: 3\n`;
+    const unit = readDraft(doc(tw), 'lecture-3') as EntryDraft;
+    const chosen = { ...unit, twin: { ...emptyTwin(unit), list: { repo: REPO, path: 'lectures/03/list.md', inline: false, text: null } } };
+    expect(changesOf([chosen], [unit]).map((c) => c.from)).toEqual(['lecture-3', '']);
+    const out = parse(save(tw, chosen, unit, [], false, (_, path) => path === 'lectures/03/list.md').text);
+    expect(Object.values(out.readings)).toEqual([expect.objectContaining({ session: 3, reading_list: { from_course_repo: REPO, from_path: 'lectures/03/list.md' } })]);
+  });
+
+  it('counts a twin with Generate one left empty as unused: no date asked, no entry; one typed line makes it used', () => {
+    const tw = `lectures:\n  lecture-3:\n    session: 3\n`;
+    const unit = readDraft(doc(tw), 'lecture-3') as EntryDraft;
+    const written = (text: string) => ({ ...unit, twin: { ...emptyTwin(unit), list: { repo: REPO, path: 'readings/03/READINGS.md', inline: false, text } } });
+    for (const text of ['', '  \n']) {
+      expect(twinUsed(written(text).twin)).toBe(false);
+      expect(changesOf([written(text)], [unit]).map((c) => c.from)).toEqual(['lecture-3']);
+      expect(Object.keys(draftErrors(written(text))).filter((k) => k.startsWith('twin.'))).toEqual([]);
+      expect(parse(save(tw, written(text), unit).text).readings).toBeUndefined();
+    }
+    const typed = written('- Breiman (2001).');
+    expect(twinUsed(typed.twin)).toBe(true);
+    expect(changesOf([typed], [unit]).map((c) => c.from)).toEqual(['lecture-3', '']);
+    expect(draftErrors(typed)['twin.date']).toBe('Give the date, or turn on Date TBC.');
+  });
+
+  it('defaults the path beside the first reading file, else readings/<NN>_<slug>/READINGS.md', () => {
+    const d = newDraft('readings', doc(BASE)) as EntryDraft;
+    expect(defaultListPath({ ...d, files: [file('readings/04/a.pdf')] })).toBe('readings/04/READINGS.md');
+    expect(defaultListPath({ ...d, files: [file('readings/04_week/')] })).toBe('readings/04_week/READINGS.md');
+    expect(defaultListPath({ ...d, session: 3, title: 'Neural nets' })).toBe('readings/03_neural-nets/READINGS.md');
+    expect(defaultListPath({ ...d, session: 3 }, 'Trees')).toBe('readings/03_trees/READINGS.md');
+  });
+
+  it('lists the files a Save writes, over the cache’s sha: a changed file, a new file with text; not an untouched or unchanged one', () => {
+    const base = readDraft(doc(t), 'readings-4') as EntryDraft;
+    const read = ready('- A.\n');
+    expect(listWrites([base], read)).toEqual([]);
+    expect(listWrites([{ ...base, list: { ...base.list!, text: '- A.\n' } }], read)).toEqual([]);
+    expect(listWrites([{ ...base, list: { ...base.list!, text: '- B.\n' } }], read)).toEqual([{ repo: REPO, path: 'readings/04/READINGS.md', text: '- B.\n', sha: 'blob1' }]);
+    expect(listWrites([{ ...base, list: { ...base.list!, text: '- B.\n' } }], () => ({ kind: 'loading' }))).toEqual([]);
+    const fresh = { ...base, list: { repo: REPO, path: 'readings/07/READINGS.md', inline: false, text: '- C.' } };
+    expect(listWrites([fresh], () => ({ kind: 'absent' }))).toEqual([{ repo: REPO, path: 'readings/07/READINGS.md', text: '- C.', sha: null }]);
+    expect(listWrites([{ ...fresh, list: { ...fresh.list, text: '  ' } }], () => ({ kind: 'absent' }))).toEqual([]);
   });
 });

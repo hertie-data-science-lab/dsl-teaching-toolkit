@@ -8,6 +8,7 @@
 // file fills the screen; Escape or the button leaves). `Split` keeps a list beside the open
 // file: in a left column on wide screens, above the file on narrow ones.
 
+import type { Ref } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import type { TreeEntry } from '../github/client';
@@ -35,18 +36,18 @@ export function Split({ label, side, children, bar, box }: { label: string; side
 }
 
 /** The file `at` from its repo's tree, or a note when the tree has no such file. */
-export function OpenFile({ org, at, tree }: { org: string; at: { repo: string; path: string }; tree: TreeEntry[] }) {
+export function OpenFile({ org, at, tree, actions }: { org: string; at: { repo: string; path: string }; tree: TreeEntry[]; actions?: preact.ComponentChildren }) {
   const e = tree.find((t) => t.path === at.path && t.type === 'blob');
-  return e ? <FileView org={org} repo={at.repo} entry={e} tree={tree} /> : <p class="footnote">{at.path} is not in {at.repo}.</p>;
+  return e ? <FileView org={org} repo={at.repo} entry={e} tree={tree} actions={actions} /> : <p class="footnote">{at.path} is not in {at.repo}.</p>;
 }
 
-/** The file `at`, its repo's tree read for it (one recursive read, ETag-cached). */
-export function RepoFile({ org, at }: { org: string; at: { repo: string; path: string } }) {
+/** The file `at`, its repo's tree read for it (one recursive read, ETag-cached); `actions` join its header's. */
+export function RepoFile({ org, at, actions }: { org: string; at: { repo: string; path: string }; actions?: preact.ComponentChildren }) {
   const env = useEnv();
   const tree = useLoad(env ? () => env.client.listTree(org, at.repo, 'HEAD', true) : null, [org, at.repo, at.path]);
   return tree.kind === 'loading' ? <Loading what="Reading the materials" />
     : tree.kind === 'failed' ? <CheckLine cls="bad">The materials could not be read: {tree.error}</CheckLine>
-    : <OpenFile org={org} at={at} tree={tree.value?.tree ?? []} />;
+    : <OpenFile org={org} at={at} tree={tree.value?.tree ?? []} actions={actions} />;
 }
 
 /** An object URL for bytes, revoked when the view goes. */
@@ -63,10 +64,10 @@ function useObjectUrl(bytes: Uint8Array | string | null, mime: string): string |
 
 /**
  * Full screen for `el`: the panel covers the window (`.viewer-full`) and, where the browser
- * allows, the screen itself. Escape leaves (the browser's own Escape ends its full screen, which
- * this follows), as does the button.
+ * allows and `screen` is on, the screen itself. Escape leaves (the browser's own Escape ends its
+ * full screen, which this follows), as does the button (`FullScreenButton`).
  */
-function useFullScreen(el: { current: HTMLElement | null }): [boolean, () => void] {
+export function useFullScreen(el: { current: HTMLElement | null }, screen = true): [boolean, () => void] {
   const [full, setFull] = useState(false);
   useEffect(() => {
     if (!full) return;
@@ -75,7 +76,7 @@ function useFullScreen(el: { current: HTMLElement | null }): [boolean, () => voi
     const change = () => !document.fullscreenElement && setFull(false);
     document.addEventListener('keydown', key);
     document.addEventListener('fullscreenchange', change);
-    if (node?.requestFullscreen && !document.fullscreenElement) node.requestFullscreen().catch(() => undefined);
+    if (screen && node?.requestFullscreen && !document.fullscreenElement) node.requestFullscreen().catch(() => undefined);
     return () => {
       document.removeEventListener('keydown', key);
       document.removeEventListener('fullscreenchange', change);
@@ -85,7 +86,12 @@ function useFullScreen(el: { current: HTMLElement | null }): [boolean, () => voi
   return [full, () => setFull((f) => !f)];
 }
 
-export function FileView({ org, repo, entry, tree }: { org: string; repo: string; entry: TreeEntry; tree: TreeEntry[] }) {
+/** The Full screen icon of the file viewer's header, the schedule entry sheet's and the marks sheet's. */
+export function FullScreenButton({ full, toggle, btnRef }: { full: boolean; toggle: () => void; btnRef?: Ref<HTMLButtonElement> }) {
+  return <button class="icon-btn full-toggle" type="button" ref={btnRef} aria-label={full ? 'Exit full screen' : 'Full screen'} title={full ? 'Exit full screen (Esc)' : 'Full screen'} onClick={toggle}>{full ? '⤡' : '⤢'}</button>;
+}
+
+export function FileView({ org, repo, entry, tree, actions }: { org: string; repo: string; entry: TreeEntry; tree: TreeEntry[]; actions?: preact.ComponentChildren }) {
   const env = useEnv();
   const shown = useLoad(env ? () => showFile(env.client, org, repo, entry, tree) : null, [org, repo, entry.sha]);
   const panel = useRef<HTMLElement>(null);
@@ -96,8 +102,9 @@ export function FileView({ org, repo, entry, tree }: { org: string; repo: string
       <div class="a-head">
         <h2 class="mono">{entry.path}</h2>
         <span class="actions">
+          {actions}
           <a class="textlink" href={ghUrl(org, repo, entry.path, 'HEAD')} target="_blank" rel="noopener">On GitHub <Ext /></a>
-          <button class="btn small quiet" type="button" aria-pressed={full} onClick={toggleFull}>{full ? 'Leave full screen' : 'Full screen'}</button>
+          <FullScreenButton full={full} toggle={toggleFull} />
         </span>
       </div>
       {shown.kind === 'loading' ? <Loading what={`Reading ${name}`} /> : shown.kind === 'failed' ? <CheckLine cls="bad">{name} could not be read: {shown.error}</CheckLine> : <ShownView shown={shown.value} name={name} />}

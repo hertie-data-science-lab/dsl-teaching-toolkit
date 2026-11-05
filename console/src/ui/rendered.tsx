@@ -1,13 +1,16 @@
 // Markdown an instructor wrote at length (an assignment brief, the home text), rendered by
 // GitHub's own `/markdown` (sanitised by GitHub, headings and tables included), and the
 // console's small renderer (`Md`) while that is on its way, when it fails, or with no
-// session. Rendered once per text: the result is kept for the page's life.
+// session. Rendered once per text: the most recent KEPT renderings are kept (a reading list's
+// preview renders each settled text).
 
 import { useEffect, useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import { Md } from './bits';
 
 const rendered = new Map<string, Promise<string>>();
+/** How many renderings are kept, the least recently shown dropped first. */
+const KEPT = 20;
 
 /** Drop every rendering (sign-out). */
 export const forgetRendered = () => rendered.clear();
@@ -21,10 +24,15 @@ export function GhMd({ src, context, class: cls }: { src: string; context?: stri
     if (!env || !src.trim()) return;
     let live = true;
     let p = rendered.get(key);
+    rendered.delete(key); // most recently shown last
     if (!p) {
       p = env.client.renderMarkdown(src, context);
-      rendered.set(key, p);
       p.catch(() => rendered.delete(key));
+    }
+    rendered.set(key, p);
+    for (const k of rendered.keys()) {
+      if (rendered.size <= KEPT) break;
+      rendered.delete(k);
     }
     p.then((h) => live && setHtml(h), () => {});
     return () => {

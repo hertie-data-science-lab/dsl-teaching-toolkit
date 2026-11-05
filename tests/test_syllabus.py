@@ -133,7 +133,7 @@ def test_a_unit_is_one_session_whatever_its_entries(wired):
 
 
 def test_uploaded_files_are_named_after_the_reading_list(wired):
-    # The entry's `reading_guide:` leads, and the files follow by NAME - never their
+    # The entry's `reading_list:` leads, and the files follow by NAME - never their
     # bytes. Listing them is what stops a session whose readings are PDFs coming out as a
     # bare heading.
     out = wired()
@@ -157,6 +157,32 @@ def test_a_pdf_only_session_is_not_invisible(monkeypatch, wired):
     out = wired()
     assert "- x.pdf" in out
     assert "### Session 1: Probability Theory" in out
+
+
+def test_a_reading_list_in_a_course_file_is_read_from_the_course(monkeypatch, wired):
+    # Written before anything ships: the course's file, never listed as a reading too.
+    reads = []
+    monkeypatch.setattr(
+        syllabus,
+        "repo_tree",
+        lambda o, r, b, k: (
+            "readings/01_week-1/READINGS.md",
+            "readings/01_week-1/blitzstein.pdf",
+        ),
+    )
+    monkeypatch.setattr(
+        syllabus,
+        "get_file_content",
+        lambda org, repo, path: reads.append((org, repo, path)) or READING,
+    )
+    entry = syllabus.schedule.load("Semester-f2026").releases[0]
+    entry.reading_list = Deploy(
+        "cm", "readings/01_week-1/READINGS.md", "materials", None
+    )
+    out = wired()
+    assert reads == [("Course", "cm", "readings/01_week-1/READINGS.md")]
+    assert "##### Required Readings" in out and "- blitzstein.pdf" in out
+    assert "READINGS.md" not in out
 
 
 BLOCK = "### Session 1\n\nNew.\n"

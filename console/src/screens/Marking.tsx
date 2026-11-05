@@ -28,6 +28,7 @@ import type { OpDef } from '../ops/session';
 import { assignmentHref, replaceHash, tabHref } from '../router';
 import { CheckLine, Loading } from '../ui/bits';
 import { Modal } from '../ui/Modal';
+import { FullScreenButton } from '../ui/Viewer';
 import { Hint } from '../ui/Hint';
 import { SaveBar, SaveLine } from '../ui/edit';
 import { Check } from '../ui/icons';
@@ -932,7 +933,7 @@ export function MarksTab(p: TabProps) {
         ) : null}
         {sheet.group ? null : <button class="chip adj-chip" type="button" aria-expanded={adjOpen} onClick={() => setAdjChoice(!adjOpen)}>Adjustments {adjOpen ? '▾' : '▸'}</button>}
         {Object.keys(widths).length ? <button class="btn small quiet reset-widths" type="button" onClick={() => { setWidths({}); setFoldChoice(null); }}>Reset widths</button> : null}
-        <button class="icon-btn full-toggle" type="button" ref={fullBtn} aria-label={full ? 'Exit full screen' : 'Full screen'} title={full ? 'Exit full screen (Esc)' : 'Full screen'} onClick={() => (full ? exitFull() : setFull(true))}>{full ? '⤡' : '⤢'}</button>
+        <FullScreenButton full={full} btnRef={fullBtn} toggle={() => (full ? exitFull() : setFull(true))} />
       </div>
       <div class="marks-tools">
         {points.file.kind === 'ready' && !pointsOpen ? <button class="btn small quiet points-toggle" type="button" onClick={() => { points.setSave({ kind: 'idle' }); setPointsOpen(true); }}>{qs.length ? 'Edit points per question' : 'Set points per question'}</button> : null}

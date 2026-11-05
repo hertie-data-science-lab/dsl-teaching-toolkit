@@ -6,7 +6,7 @@ import {
   gapLabel,
 } from '../model/format';
 import { needsANumber, parseSchedule, scheduleRows, weekGroups, weekOf, weekStart, type Row, type Schedule, type Term, type WeekGroup, type WeekKey, termOf } from '../model/schedule';
-import type { Assignment, Problem, Status } from '../model/types';
+import type { Assignment, Problem, SemesterTodo, Status } from '../model/types';
 import { submissionsOf } from '../model/assignment';
 import { checkAccess, checkNow, releaseEarly, type ReleaseRef } from '../ops/defs';
 import { OpOpen } from '../ops/Panel';
@@ -301,6 +301,16 @@ const SCREEN_LINK: Record<string, Link> = {
 };
 const K_SCREEN: Record<string, string> = { K3: 'instructors', K4: 'schedule', K5: 'students', K6: 'site' };
 
+/**
+ * Where a to-do is done: its `fix` (the engine's, to the entry), else its screen's link, else its
+ * screen and entry (`schedule:released_tbc` opens `#release-<key>`: it carries no fix).
+ */
+export function todoLink(t: SemesterTodo): Link | undefined {
+  const fixed = fixHref(t);
+  if (fixed) return { href: fixed, label: 'Open' };
+  return t.screen ? SCREEN_LINK[t.screen] ?? { href: `#${t.screen}${t.entry ? `-${t.entry}` : ''}`, label: 'Open' } : undefined;
+}
+
 /** A semester to-do's line, by its check; its sentence goes under it. */
 const TODO_LABEL: Record<string, string> = { home: 'Site home page written', archive_date: 'Archive date declared', email: 'Instructor emails' };
 
@@ -317,7 +327,7 @@ export function semesterItems(status: Status, tiered: Tiered[], list: string[] |
     return {
       id: t.id, label: label ?? t.text, kind: 'todo', need: t.need ?? 'needed', state: 'open',
       why: label ? t.text : undefined,
-      link: t.screen ? SCREEN_LINK[t.screen] ?? { href: `#${t.screen}${t.entry ? `-${t.entry}` : ''}`, label: 'Open' } : undefined,
+      link: todoLink(t),
       aside: todoAside(t, list),
     };
   });

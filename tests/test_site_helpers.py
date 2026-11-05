@@ -354,7 +354,7 @@ def _deploy(path, repo="materials", dest=None):
 def _landed(monkeypatch, deploy, gh=_tree_gh):
     monkeypatch.setattr(site, "default_branch", lambda org, repo, **k: "main")
     monkeypatch.setattr(gh_contents, "gh", gh)
-    return site._landed("Semester-f2026", deploy, frozenset(), {})
+    return site._landed("Semester-f2026", deploy, frozenset(), {}, {}, "")
 
 
 def test_a_landed_folder_links_its_files_and_folds_its_subfolders(monkeypatch):
@@ -428,10 +428,9 @@ _READINGS_TREE = (
 
 
 def test_a_readings_folder_lists_every_file_it_holds(monkeypatch):
-    # Decision 0038 rule 5: the reading list is the schedule's `reading_guide:`, so a
-    # READINGS.md in the folder is a file like any other.
+    # A READINGS.md the entry does not name is a file like any other.
     monkeypatch.setattr(site, "_repo_tree", lambda org, repo: ("main", _READINGS_TREE))
-    landed = site._landed("C", _deploy("readings/01_week-1"), frozenset(), {})
+    landed = site._landed("C", _deploy("readings/01_week-1"), frozenset(), {}, {}, "")
     assert sorted(x.name for x in landed.links) == [
         "READINGS.md",
         "ch1.pdf",
@@ -440,16 +439,86 @@ def test_a_readings_folder_lists_every_file_it_holds(monkeypatch):
     ]
 
 
-def test_a_reading_list_is_the_entries_text_nested_under_the_row():
+def test_the_named_reading_list_file_is_never_a_link(monkeypatch):
+    monkeypatch.setattr(site, "_repo_tree", lambda org, repo: ("main", _READINGS_TREE))
+    named = Deploy("cm", "readings/01_week-1/READINGS.md", "materials")
     row = schedule_plan.PlannedRow(
-        "readings.week-1",
+        "readings-1",
         "readings",
         None,
         date(2026, 9, 1),
-        reading_list="# Week 1\n\n- Blitzstein.\n",
+        deploys=(_deploy("readings/01_week-1"),),
+        reading_list=named,
     )
-    assert site._reading_list([row]) == "### Week 1\n\n- Blitzstein."
-    assert site._reading_list([dataclasses.replace(row, reading_list="  ")]) == ""
+    marks = schedule_plan.landings([row])
+    live = frozenset({"materials"})
+    (landed,) = site._row_landed("C", row, frozenset(), live, {}, marks)
+    assert sorted(x.name for x in landed.links) == ["ch1.pdf", "notes.md", "refs.bib"]
+    # The file alone, landed: the copy has landed, and links nothing.
+    alone = dataclasses.replace(row, deploys=(named,))
+    marks = schedule_plan.landings([alone])
+    (landed,) = site._row_landed("C", alone, frozenset(), live, {}, marks)
+    assert landed.links == []
+
+
+def test_a_separate_entrys_copy_inside_a_lab_folder_still_lists_on_the_lab(
+    monkeypatch,
+):
+    # Only a reading-list file is attributed elsewhere: a hidden entry releasing
+    # `labs/03/solutions/` leaves those files on lab-3's row, as on main.
+    tree = ("labs/03/lab.ipynb", "labs/03/solutions/a.ipynb")
+    monkeypatch.setattr(site, "_repo_tree", lambda org, repo: ("main", tree))
+    lab = schedule_plan.PlannedRow(
+        "lab-3", "lab", None, date(2026, 9, 1), deploys=(_deploy("labs/03"),)
+    )
+    solutions = schedule_plan.PlannedRow(
+        "solutions-3",
+        "lab",
+        None,
+        date(2026, 9, 8),
+        shown=False,
+        deploys=(_deploy("labs/03/solutions"),),
+    )
+    marks = schedule_plan.landings([lab, solutions])
+    live = frozenset({"materials"})
+    (landed,) = site._row_landed("C", lab, frozenset(), live, {}, marks)
+    assert [x.name for x in landed.links] == ["lab.ipynb", "solutions/ (1 file)"]
+
+
+_NOW = datetime(2026, 9, 10, 12, 0, tzinfo=ZoneInfo("Europe/Berlin"))
+_LIVE = frozenset({"materials"})
+
+
+def test_a_course_file_reading_list_shows_its_landed_copy_only(monkeypatch):
+    # Decision 0044: students see the RELEASED copy, read from the semester repo.
+    reads = []
+    tree = ("readings/01/READINGS.md",)
+    monkeypatch.setattr(site, "_repo_tree", lambda org, repo: ("main", tree))
+    monkeypatch.setattr(
+        site,
+        "get_file_content",
+        lambda org, repo, path, confirm_absent: reads.append(path) or "- [A](a.pdf)",
+    )
+    named = Deploy(
+        "cm", "lectures/01/READINGS.md", "materials", "readings/01/READINGS.md"
+    )
+    row = schedule_plan.PlannedRow(
+        "readings-1",
+        "readings",
+        None,
+        date(2026, 9, 1),
+        deploys=(named,),
+        reading_list=named,
+    )
+    # Its relative links point at the released copies.
+    assert site._shown_list("C", row, None, True, _NOW, _LIVE) == (
+        "- [A](https://github.com/C/materials/blob/main/readings/01/a.pdf)"
+    )
+    assert reads == ["readings/01/READINGS.md"]
+    # Not landed yet: no list, and nothing read.
+    tree = ()
+    assert site._shown_list("C", row, None, False, _NOW, _LIVE) == ""
+    assert reads == ["readings/01/READINGS.md"]
 
 
 def _syllabus(monkeypatch, releases, tree, declared=""):

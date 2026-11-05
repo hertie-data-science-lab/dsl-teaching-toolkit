@@ -5,7 +5,7 @@
 
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parse } from 'yaml';
 import { EnvCtx, type Env } from '../src/env';
 import { GitHubClient, decodeBase64 } from '../src/github/client';
@@ -18,7 +18,9 @@ import { OpsSession } from '../src/ops/session';
 import { AssignmentScreen } from '../src/screens/Assignments';
 import { MaterialsScreen } from '../src/screens/CourseEdit';
 import { StudentsScreen } from '../src/screens/People';
-import { ScheduleScreen } from '../src/screens/Schedule';
+import { ScheduleScreen, noListRows } from '../src/screens/Schedule';
+import { DRAFT_TEXT } from '../src/ui/ReadingDraft';
+import { LIST_TEXT } from '../src/ui/ReadingList';
 import type { CohortProps } from '../src/screens/types';
 import { parseSearch, scheduleNewHref } from '../src/router';
 import example from './fixtures/status.example.json';
@@ -191,11 +193,19 @@ describe('the schedule editor’s forms, clicked through (forms mock-up v3)', ()
     await type('#e-title', 'Trees');
     await type('#e-date0', '2026-09-15');
     await type('#e-time0', '10:00');
-    await type('#r-guide', '- Breiman (2001).');
+    await click(button(LIST_TEXT.writeOne));
+    await type('#r-rl', '- Breiman (2001).');
     await click(button('Add lecture'));
     const out = await saved(gh);
     expect(out.lectures).toEqual({ 'lecture-1': { session: 1, event_datetime: '2026-09-08T10:00' }, 'lecture-2': { session: 2, title: 'Trees', event_datetime: '2026-09-15T10:00' } });
-    expect(out.readings).toEqual({ 'readings-2': { session: 2, event_datetime: '2026-09-15T10:00', reading_guide: '- Breiman (2001).' } });
+    // The reading list is a new course file, named after the session and the unit's title (decision 0044), written first.
+    const list = { from_course_repo: 'course-materials-f2026', from_path: 'readings/02_trees/READINGS.md' };
+    expect(out.readings).toEqual({ 'readings-2': { session: 2, event_datetime: '2026-09-15T10:00', reading_list: list } });
+    const order = gh.seen.filter((s) => s.method === 'PUT').map((s) => s.url.split('/repos/')[1]);
+    expect(order).toEqual([`${COURSE_ORG}/course-materials-f2026/contents/readings/02_trees/READINGS.md`, `${COHORT_ORG}/semester-config/contents/schedule.yml`]);
+    expect(body(puts(gh, 'readings/02_trees/READINGS.md')[0])).toBe('- Breiman (2001).');
+    expect((puts(gh, 'readings/02_trees/READINGS.md')[0].body as { message: string; sha?: string })).toMatchObject({ message: 'readings: edit readings/02_trees/READINGS.md, from the DSL Teaching Console' });
+    expect((puts(gh, 'readings/02_trees/READINGS.md')[0].body as { sha?: string }).sha).toBeUndefined();
   });
 
   it('renumbers a saved lab: the key follows the session', async () => {
@@ -700,5 +710,261 @@ describe('Save on a materials repo’s settings starts Refresh', () => {
     expect(body(puts(gh, 'semester.yml')[0])).toContain('syllabus: PLAN.md');
     expect(dispatches(gh)).toEqual([]);
     expect(sylSave().textContent).not.toContain('checklist updates');
+  });
+});
+
+describe('the reading list in the schedule entry sheet (decisions 0044, 0046)', () => {
+  const LIST = 'readings/04_week/READINGS.md';
+  const sched = `readings:\n  readings-4:\n    session: 4\n    event_datetime: 2026-10-06T09:00\n    files:\n      - from_course_repo: course-materials-f2026\n        from_path: readings/04_week\n    reading_list:\n      from_course_repo: course-materials-f2026\n      from_path: ${LIST}\n  readings-5:\n    session: 5\n    event_datetime: 2026-10-13T09:00\n    reading_list: "- Old text."\n  readings-6:\n    session: 6\n    event_datetime: 2026-10-20T09:00\n    files:\n      - from_course_repo: course-materials-f2026\n        from_path: readings/06/paper.pdf\n`;
+  const withList = (over: Record<string, string> = {}) => new StaticFiles(
+    { [`${COHORT_ORG}/semester-config/schedule.yml`]: sched, [`${COURSE_ORG}/course-materials-f2026/${LIST}`]: '- Bishop (2006), ch. 5.\n', ...over },
+    {}, { [`${COURSE_ORG}/course-materials-f2026`]: ['readings/04_week/bishop.pdf', 'readings/04_week/murphy.pdf', LIST, 'readings/06/paper.pdf'] },
+  );
+  const listPuts = (gh: FakeGitHub) => gh.seen.filter((s) => s.method === 'PUT').map((s) => s.url.split('/contents/')[1]);
+
+  it('loads the named file as an Existing file, and Save writes it (sha-conditional) before schedule.yml', async () => {
+    const gh = github(), f = withList();
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'readings-4' })} />);
+    expect(root!.textContent).toContain('File: course-materials-f2026 / readings/04_week/READINGS.md');
+    expect(root!.textContent).toContain('Existing file');
+    expect(q<HTMLTextAreaElement>('#e-rl').value).toBe('- Bishop (2006), ch. 5.\n');
+    // Generate draft reads the entry's PDF reading files (decision 0044 point 6).
+    expect(buttons(DRAFT_TEXT.button)[0].disabled).toBe(false);
+    // The files the text does not cite get the notice.
+    expect(root!.textContent).toContain('2 reading files not in the reading list: bishop.pdf, murphy.pdf. Students still get the file; it just isn’t cited here.');
+    expect(root!.querySelector('.unsaved')).toBeNull();
+    await type('#e-rl', '- Bishop (2006), ch. 5: bishop.pdf\n');
+    expect(root!.textContent).toContain('1 reading file not in the reading list: murphy.pdf.');
+    expect(root!.querySelector('.unsaved')!.textContent).toContain('1 unsaved change');
+    await click(buttons('Save')[0]);
+    await settle(() => listPuts(gh).length > 0 && !root!.querySelector('.unsaved'));
+    expect(listPuts(gh)).toEqual([LIST]);
+    const put = puts(gh, LIST)[0].body as { sha?: string };
+    expect(put.sha).toBe('static');
+    expect(body(puts(gh, LIST)[0])).toBe('- Bishop (2006), ch. 5: bishop.pdf\n');
+  });
+
+  it('stops before schedule.yml when the list file conflicts, with the shared conflict text', async () => {
+    const gh = github([LIST]), f = withList();
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'readings-4' })} />);
+    await type('#e-title', 'Week four');
+    await type('#e-rl', 'changed');
+    await click(buttons('Save')[0]);
+    await settle(() => root!.textContent!.includes('This file changed on GitHub'));
+    expect(listPuts(gh)).toEqual([LIST]);
+    expect(root!.textContent).toContain('This file changed on GitHub since you opened it, so nothing was saved.');
+  });
+
+  it('keeps legacy text written in the schedule, and Move to a file makes it a new file at the default path', async () => {
+    const gh = github(), f = withList();
+    const put = vi.spyOn(f, 'put'), refreshTree = vi.spyOn(f, 'refreshTree');
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'readings-5' })} />);
+    expect(root!.textContent).toContain('Written in the schedule');
+    expect(q<HTMLTextAreaElement>('#e-rl').value).toBe('- Old text.');
+    // No reading files: nothing to draft from, and the slot says so.
+    expect(buttons(DRAFT_TEXT.button)[0].disabled).toBe(true);
+    expect(root!.textContent).toContain(DRAFT_TEXT.noPdfs);
+    await click(button('Move to a file'));
+    expect(root!.textContent).toContain('New file');
+    expect(q<HTMLInputElement>('#e-rl-path').value).toBe('readings/05/READINGS.md');
+    await type('#e-rl-path', 'lectures/05/READINGS.md');
+    await click(buttons('Save')[0]);
+    const out = await (async () => { await settle(() => puts(gh, 'schedule.yml').length > 0); return parse(body(puts(gh, 'schedule.yml')[0])); })();
+    expect(listPuts(gh)).toEqual(['lectures/05/READINGS.md', 'schedule.yml']);
+    expect(body(puts(gh, 'lectures/05/READINGS.md')[0])).toBe('- Old text.');
+    expect(out.readings['readings-5'].reading_list).toEqual({ from_course_repo: 'course-materials-f2026', from_path: 'lectures/05/READINGS.md' });
+    // The new file's text and sha are in the cache, and it joins its repo's tree.
+    expect(put.mock.calls.filter((c) => c[2] === 'lectures/05/READINGS.md')).toEqual([[COURSE_ORG, 'course-materials-f2026', 'lectures/05/READINGS.md', undefined, '- Old text.', expect.any(String)]]);
+    expect(refreshTree.mock.calls).toEqual([[COURSE_ORG, 'course-materials-f2026']]);
+  });
+
+  it('offers Generate one when no list file is beside the reading files: a New file at their folder, no file and no key while it is empty', async () => {
+    const gh = github(), f = withList();
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'readings-6' })} />);
+    // The none state: the offer alone, the sheet clean.
+    expect(root!.textContent).toContain(LIST_TEXT.creates('course-materials-f2026', 'readings/06/READINGS.md'));
+    expect(root!.textContent).not.toContain(LIST_TEXT.none);
+    expect(button(LIST_TEXT.useIt)).toBeUndefined();
+    expect(button(LIST_TEXT.chooseFile)).toBeDefined();
+    expect(root!.querySelector('#e-rl')).toBeNull();
+    expect(root!.textContent).not.toContain('File: ');
+    expect(buttons(DRAFT_TEXT.button)).toEqual([]);
+    expect(root!.querySelector('.unsaved')).toBeNull();
+    await click(button(LIST_TEXT.writeOne));
+    expect(root!.textContent).toContain('New file');
+    expect(q<HTMLInputElement>('#e-rl-path').value).toBe('readings/06/READINGS.md');
+    expect(q<HTMLTextAreaElement>('#e-rl').value).toBe('');
+    expect(root!.textContent).toContain('No reading list: students see the reading files only. That is fine.');
+    expect(root!.textContent).toContain('In course-materials-f2026. Saving creates this file next to the reading files; edit the path to put it elsewhere (a lecture folder, say).');
+    await type('#e-title', 'Week six');
+    await click(buttons('Save')[0]);
+    const out = await (async () => { await settle(() => puts(gh, 'schedule.yml').length > 0); return parse(body(puts(gh, 'schedule.yml')[0])); })();
+    expect(listPuts(gh)).toEqual(['schedule.yml']);
+    expect(out.readings['readings-6'].reading_list).toBeUndefined();
+  });
+
+  it('marks the rows the Suggested to-do names: the readings row, and its unit’s row', () => {
+    const d = parse(`${sched}lectures:\n  lecture-6:\n    session: 6\n  lecture-4:\n    session: 4\n  lecture-7:\n    session: 7\n`) as Record<string, unknown>;
+    const todo = { id: 'schedule:reading_list:readings-6', kind: 'schedule' as const, repo: 'semester-config', text: 'Readings 6 has reading files but no reading list.', need: 'suggested' as const, check: 'reading_list', screen: 'schedule', entry: 'readings-6' };
+    const noList = noListRows([todo, { ...todo, id: 'site:home', check: 'home', entry: 'readings-4' }], d);
+    expect(noList({ type: 'readings', entry: 'readings-6' })).toBe(true);
+    expect(noList({ type: 'lecture', entry: 'lecture-6' })).toBe(true);
+    for (const [type, entry] of [['readings', 'readings-4'], ['readings', 'readings-5'], ['lecture', 'lecture-4'], ['lecture', 'lecture-7'], ['exam', 'readings-6']]) expect(noList({ type, entry })).toBe(false);
+    expect(noListRows([], d)({ type: 'readings', entry: 'readings-6' })).toBe(false);
+    // Set aside: no chip, on either row.
+    const aside = noListRows([{ ...todo, set_aside: true }], d);
+    expect(aside({ type: 'readings', entry: 'readings-6' })).toBe(false);
+    expect(aside({ type: 'lecture', entry: 'lecture-6' })).toBe(false);
+  });
+
+  it('loads a typed path that is already in the repo as that Existing file, and saves over its sha', async () => {
+    const gh = github(), f = withList();
+    const put = vi.spyOn(f, 'put'), refreshTree = vi.spyOn(f, 'refreshTree');
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'readings-6' })} />);
+    await click(button(LIST_TEXT.writeOne));
+    expect(root!.textContent).toContain('New file');
+    await type('#e-rl-path', LIST);
+    expect(root!.textContent).toContain('Existing file');
+    expect(root!.querySelector('#e-rl-path')).toBeNull();
+    expect(q<HTMLTextAreaElement>('#e-rl').value).toBe('- Bishop (2006), ch. 5.\n');
+    await type('#e-rl', '- Bishop (2006), ch. 5.\n- Murphy (2012).\n');
+    await click(buttons('Save')[0]);
+    await settle(() => puts(gh, 'schedule.yml').length > 0);
+    expect(listPuts(gh)).toEqual([LIST, 'schedule.yml']);
+    expect((puts(gh, LIST)[0].body as { sha?: string }).sha).toBe('static');
+    expect(parse(body(puts(gh, 'schedule.yml')[0])).readings['readings-6'].reading_list).toEqual({ from_course_repo: 'course-materials-f2026', from_path: LIST });
+    // An existing file is already in the tree: only its cache entry changes.
+    expect(put.mock.calls.filter((c) => c[2] === LIST)).toEqual([[COURSE_ORG, 'course-materials-f2026', LIST, undefined, '- Bishop (2006), ch. 5.\n- Murphy (2012).\n', expect.any(String)]]);
+    expect(refreshTree).not.toHaveBeenCalled();
+  });
+
+  it('moves legacy text onto a default path that exists as the edit: the editor shows the schedule text, and Save writes it over the file', async () => {
+    const gh = github(), f = withList({ [`${COURSE_ORG}/course-materials-f2026/readings/05/READINGS.md`]: '- Already here.\n' });
+    const tree = (f as unknown as { treeMap: Record<string, string[]> }).treeMap[`${COURSE_ORG}/course-materials-f2026`];
+    tree.push('readings/05/READINGS.md');
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'readings-5' })} />);
+    await click(button('Move to a file'));
+    expect(root!.textContent).toContain('Existing file');
+    expect(q<HTMLTextAreaElement>('#e-rl').value).toBe('- Old text.');
+    await click(buttons('Save')[0]);
+    await settle(() => puts(gh, 'schedule.yml').length > 0);
+    expect(listPuts(gh)).toEqual(['readings/05/READINGS.md', 'schedule.yml']);
+    expect(body(puts(gh, 'readings/05/READINGS.md')[0])).toBe('- Old text.');
+    expect((puts(gh, 'readings/05/READINGS.md')[0].body as { sha?: string }).sha).toBe('static');
+  });
+
+  it('offers a READINGS.md already at the default path, never takes it on open; Use it loads it and Save names it, with no file written', async () => {
+    const gh = github(), f = withList({ [`${COURSE_ORG}/course-materials-f2026/readings/06/READINGS.md`]: '- Already here.\n' });
+    (f as unknown as { treeMap: Record<string, string[]> }).treeMap[`${COURSE_ORG}/course-materials-f2026`].push('readings/06/READINGS.md');
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'readings-6' })} />);
+    expect(root!.textContent).toContain(LIST_TEXT.none);
+    expect(button(LIST_TEXT.writeOne)).toBeUndefined();
+    expect(root!.querySelector('#e-rl')).toBeNull();
+    expect(root!.querySelector('.unsaved')).toBeNull();
+    await click(button(LIST_TEXT.useIt));
+    expect(root!.textContent).toContain('Existing file');
+    expect(root!.textContent).toContain('File: course-materials-f2026 / readings/06/READINGS.md');
+    expect(q<HTMLTextAreaElement>('#e-rl').value).toBe('- Already here.\n');
+    expect(root!.querySelector('.unsaved')!.textContent).toContain('1 unsaved change');
+    await click(buttons('Save')[0]);
+    await settle(() => puts(gh, 'schedule.yml').length > 0);
+    expect(listPuts(gh)).toEqual(['schedule.yml']);
+    expect(parse(body(puts(gh, 'schedule.yml')[0])).readings['readings-6'].reading_list).toEqual({ from_course_repo: 'course-materials-f2026', from_path: 'readings/06/READINGS.md' });
+  });
+
+  it('Detach takes the list off at once and Save drops the key only: the file is not written', async () => {
+    const gh = github(), f = withList();
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'readings-4' })} />);
+    await click(button(LIST_TEXT.detach));
+    // The list was the default path's file, so the offer is to use it again.
+    expect(root!.textContent).toContain(LIST_TEXT.none);
+    expect(root!.querySelector('#e-rl')).toBeNull();
+    expect(root!.querySelector('.unsaved')!.textContent).toContain('1 unsaved change');
+    await click(buttons('Save')[0]);
+    await settle(() => puts(gh, 'schedule.yml').length > 0);
+    expect(listPuts(gh)).toEqual(['schedule.yml']);
+    const out = parse(body(puts(gh, 'schedule.yml')[0])).readings['readings-4'];
+    expect('reading_list' in out).toBe(false);
+    expect(out.files).toEqual([{ from_course_repo: 'course-materials-f2026', from_path: 'readings/04_week' }]);
+  });
+
+  it('offers the list the same way in a lecture’s Readings for this session, and takes nothing on open', async () => {
+    const lec = `lectures:\n  lecture-6:\n    session: 6\n    event_datetime: 2026-10-20T09:00\n${sched}`;
+    let gh = github(), f = withList({ [`${COHORT_ORG}/semester-config/schedule.yml`]: lec });
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'lecture-6' })} />);
+    expect(root!.textContent).toContain(LIST_TEXT.creates('course-materials-f2026', 'readings/06/READINGS.md'));
+    expect(button(LIST_TEXT.writeOne)).toBeDefined();
+    expect(root!.querySelector('.unsaved')).toBeNull();
+    if (root) render(null, root);
+    gh = github();
+    f = withList({ [`${COHORT_ORG}/semester-config/schedule.yml`]: lec, [`${COURSE_ORG}/course-materials-f2026/readings/06/READINGS.md`]: '- Already here.\n' });
+    (f as unknown as { treeMap: Record<string, string[]> }).treeMap[`${COURSE_ORG}/course-materials-f2026`].push('readings/06/READINGS.md');
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'lecture-6' })} />);
+    expect(root!.textContent).toContain(LIST_TEXT.none);
+    expect(root!.querySelector('.unsaved')).toBeNull();
+    await click(button(LIST_TEXT.useIt));
+    expect(q<HTMLTextAreaElement>('#r-rl').value).toBe('- Already here.\n');
+    expect(button(LIST_TEXT.detach)).toBeDefined();
+    await click(buttons('Save')[0]);
+    await settle(() => puts(gh, 'schedule.yml').length > 0);
+    expect(listPuts(gh)).toEqual(['schedule.yml']);
+    expect(parse(body(puts(gh, 'schedule.yml')[0])).readings['readings-6'].reading_list).toEqual({ from_course_repo: 'course-materials-f2026', from_path: 'readings/06/READINGS.md' });
+  });
+
+  it('reads no file for a default path the repo tree does not hold', async () => {
+    const gh = github(), f = withList();
+    const asked: string[] = [];
+    const spy = Object.assign(Object.create(f), { file: (o: string, r: string, path: string) => { asked.push(path); return f.file(o, r, path); } });
+    await mount(envOf(gh, spy), <ScheduleScreen {...props(spy, { entry: 'readings-6' })} />);
+    expect(button(LIST_TEXT.writeOne)).toBeDefined();
+    expect(asked).not.toContain('readings/06/READINGS.md');
+  });
+
+  it('asks for a course materials repo first when there is none to write a list file in; text in the schedule still edits', async () => {
+    const gh = github(), f = withList();
+    const bare: Loaded = { ...ready, status: { ...ready.status!, course: { ...ready.status!.course!, materials: [] } } } as Loaded;
+    // Nothing yet: the footnote alone.
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'new', loaded: bare })} />);
+    await click(button('Readings'));
+    expect(root!.textContent).toContain('Add a course materials repo first');
+    expect(root!.querySelector('#e-rl')).toBeNull();
+    expect(root!.textContent).not.toContain('File: ');
+    if (root) render(null, root);
+    // Legacy text: shown and editable as written in the schedule; Move and Choose give way to the footnote.
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'readings-5', loaded: bare })} />);
+    expect(root!.textContent).toContain('Written in the schedule');
+    expect(q<HTMLTextAreaElement>('#e-rl').value).toBe('- Old text.');
+    expect(q<HTMLTextAreaElement>('#e-rl').disabled).toBe(false);
+    expect(root!.textContent).toContain('Add a course materials repo first');
+    expect(button('Move to a file')).toBeUndefined();
+    expect(button('Choose another…')).toBeUndefined();
+  });
+
+  it('says why a list file could not be read, with Retry, never a stuck Reading…', async () => {
+    const gh = github(), f = withList();
+    let failing = true;
+    const flaky = Object.assign(Object.create(f), {
+      file: (o: string, r: string, path: string) => (failing && path === LIST ? { kind: 'error', message: 'Server Error' } : f.file(o, r, path)),
+      refresh: () => { failing = false; },
+    });
+    await mount(envOf(gh, flaky), <ScheduleScreen {...props(flaky, { entry: 'readings-4' })} />);
+    expect(root!.textContent).toContain(`Could not read ${LIST}: Server Error`);
+    expect(root!.textContent).not.toContain('Reading readings/');
+    expect(q<HTMLTextAreaElement>('#e-rl').disabled).toBe(true);
+    await click(button('Retry'));
+    expect(root!.textContent).not.toContain('Could not read');
+    expect(root!.textContent).toContain('Existing file');
+    expect(q<HTMLTextAreaElement>('#e-rl').value).toBe('- Bishop (2006), ch. 5.\n');
+  });
+
+  it('widens the sheet with Full screen, the file viewer’s control', async () => {
+    const gh = github(), f = withList();
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'readings-6' })} />);
+    const sheet = q('.entry');
+    expect(sheet.classList.contains('entry-full')).toBe(false);
+    await click(q<HTMLButtonElement>('.entry button[aria-label="Full screen"]'));
+    expect(q('.entry').classList.contains('entry-full')).toBe(true);
+    await click(q<HTMLButtonElement>('.entry button[aria-label="Exit full screen"]'));
+    expect(q('.entry').classList.contains('entry-full')).toBe(false);
   });
 });

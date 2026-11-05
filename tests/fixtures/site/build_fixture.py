@@ -429,6 +429,7 @@ def _lectures(hosted: site_repo.Hosted) -> tuple[dict[str, str], list[str]]:
         frozenset(),
         frozenset({MATERIALS}),
         hosted,
+        BERLIN,
     )
 
 

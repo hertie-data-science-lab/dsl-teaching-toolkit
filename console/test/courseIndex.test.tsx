@@ -174,7 +174,8 @@ describe('index screens', () => {
     }
     // The ready fixture shows the chip and a dotted count of its suggestions.
     const out = render(<MaterialsIndexScreen {...cp()} />);
-    expect(out).toContain('<span class="chip ok">Ready</span><span class="chip suggest">1 suggestion</span>');
+    // The count links to the repo page, where the suggestions are listed (decision 0046 amendment 1 rule 11).
+    expect(out).toContain(`<span class="chip ok">Ready</span><a class="chip suggest" href="#materials-${m.repo}" aria-label="Open ${m.repo} settings">1 suggestion</a>`);
     expect(out).not.toContain('Syllabus written');
   });
   it('shows a template still being written as Not ready, not as a problem', () => {
@@ -210,6 +211,7 @@ describe('index screens', () => {
 describe('materials settings file tree', () => {
   it('heads the settings with the checklist by need, ticks included, and the chips in the page head', () => {
     const out = render(<MaterialsScreen {...cp({ entry: MAT })} />);
+    // On the repo page itself the count is no link.
     expect(out).toContain('<span class="chip ok">Ready</span><span class="chip suggest">1 suggestion</span>');
     expect(out).toContain('<p class="sub-h">Needed</p>');
     expect(out).toContain('<p class="sub-h">Suggested</p>');

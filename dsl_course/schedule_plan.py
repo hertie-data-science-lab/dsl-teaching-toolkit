@@ -11,14 +11,16 @@ from __future__ import annotations
 from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
+from typing import NamedTuple
 from zoneinfo import ZoneInfo
 
 from . import policy, schedule
-from .course import is_repo_root
+from .course import is_repo_root, within
 from .faults import ConfigFault
 from .gh_contents import line_of
 from .log import Summary, log_err
 from .materials import ASSETS_KIND, DEFAULT_SYLLABUS
+from .readings import absolute_links
 
 # The kind whose entries attach to a unit's first row (decision 0038 rule 5).
 READINGS_KIND = "readings"
@@ -64,17 +66,48 @@ class PlannedRow:
     deploys: tuple[schedule.Deploy, ...] = ()
     unit: str = ""
     location: str = ""
-    reading_list: str = ""
+    # The entry's `Release.reading_list`: inline text, the course file, or None.
+    reading_list: str | schedule.Deploy | None = None
     slot: int = 0
+    # The entry's `Release.opens`: every slot's inline reading list shows from then.
+    opens: datetime | None = None
+
+    @property
+    def reading_list_dest(self) -> tuple[str, str] | None:
+        """`(repo, path)` its named reading-list file lands at in the semester, or None."""
+        f = self.reading_list
+        return list_dest(f, self.deploys) if isinstance(f, schedule.Deploy) else None
 
     @property
     def dests(self) -> list[str]:
         """The semester-side `repo/path`s its copies land in, deduped, in plan order. A
         path under another one listed (`labs/03_lab/solutions` beside `labs/03_lab`) is
-        dropped: the pending-row sentence would otherwise link the same tree twice."""
+        dropped: the pending-row sentence would otherwise link the same tree twice. Its
+        reading-list file is no place a student opens, so it is not named."""
+        named = self.reading_list_dest
         return outermost(
-            f"{d.semester_dest_repo}/{deploy_dest(d)}" for d in self.deploys
+            f"{d.semester_dest_repo}/{deploy_dest(d)}"
+            for d in self.deploys
+            if (d.semester_dest_repo, deploy_dest(d)) != named
         )
+
+
+def list_dest(
+    listed: schedule.Deploy, deploys: Collection[schedule.Deploy]
+) -> tuple[str, str]:
+    """`(repo, path)` where a readings entry's course-file reading list
+    (`Release.reading_list`) lands in the semester. Shipped as one of the entry's
+    `deploys` itself, its own destination; else inside the copy whose source holds it
+    (its folder): that copy's destination plus the rest of its path."""
+    if not any(d is listed for d in deploys):
+        for d in deploys:
+            if d.course_source_repo != listed.course_source_repo:
+                continue
+            rest = within(d.course_source_path, listed.course_source_path)
+            if rest is not None:
+                to = "" if is_repo_root(deploy_dest(d)) else deploy_dest(d)
+                return d.semester_dest_repo, "/".join(p for p in (to, rest) if p)
+    return listed.semester_dest_repo, deploy_dest(listed)
 
 
 def planned_rows(sched: schedule.Schedule) -> list[PlannedRow]:
@@ -100,6 +133,7 @@ def planned_rows(sched: schedule.Schedule) -> list[PlannedRow]:
             location=slot.location or r.location,
             reading_list=r.reading_list,
             slot=i,
+            opens=r.opens,
         )
 
     slots = [(r, i, slot) for r in sched.releases for i, slot in enumerate(r.row_slots)]
@@ -173,6 +207,53 @@ def unit_hosts(rows: list[PlannedRow]) -> dict[str, PlannedRow]:
         if r.unit and r.shown and r.kind not in (READINGS_KIND, ASSETS_KIND):
             hosts.setdefault(r.unit, r)
     return hosts
+
+
+def shown_list(
+    row: PlannedRow,
+    host: PlannedRow | None,
+    landed: bool,
+    now: datetime,
+    present: Callable[[str, str], bool],
+    read: Callable[[str, str], str | None],
+    url: Callable[[str, str], str],
+) -> str:
+    """The reading list readings entry `row` shows now, or "" - the ONE rule the semester
+    site and the student file both apply (decision 0044 point 2: students see the RELEASED
+    copy). A course file's is the text of its copy in the semester (`read(repo, path)`),
+    once that is there (`present`), its relative links made the released copies' URLs
+    (`url(repo, path)`, `readings.absolute_links`). Inline text (no folder) is left as
+    written; it shows once the entry has released: one of
+    its copies landed (`landed`), or, for an entry that ships none, at its `opens` (an
+    undated one attached to a unit: its `host` row's)."""
+    if (named := row.reading_list_dest) is not None:
+        if not present(*named):
+            return ""
+        repo, path = named
+        folder = path.rpartition("/")[0]
+        return absolute_links(read(repo, path) or "", folder, lambda p: url(repo, p))
+    opens = row.opens if row.opens is not None or host is None else host.opens
+    released = landed if row.deploys else opens is not None and opens <= now
+    return (row.reading_list or "") if released else ""
+
+
+class Landing(NamedTuple):
+    """Where a readings entry's reading-list file lands in its semester repo, and the
+    entry's key: shown as text on that row, never linked."""
+
+    path: str
+    key: str
+
+
+def landings(rows: Iterable[PlannedRow]) -> dict[str, tuple[Landing, ...]]:
+    """Every reading-list file `rows` land (`PlannedRow.reading_list_dest`), per
+    semester repo: the paths `site_repo.landed_links` never links, and counts as landed
+    only for the row whose list it is."""
+    out: dict[str, dict[Landing, None]] = {}
+    for r in rows:
+        if (named := r.reading_list_dest) is not None:
+            out.setdefault(named[0], {})[Landing(named[1], r.key)] = None
+    return {repo: tuple(found) for repo, found in out.items()}
 
 
 def site_rows(rows: list[PlannedRow]) -> list[SiteRow]:
@@ -382,18 +463,6 @@ def unnumbered_assignment(
         if entry.number is None:
             return give_a_number(key)
     return None
-
-
-def within(wanted: str, path: str) -> str | None:
-    """Where `path` sits inside a release of `wanted` (both source paths): "" for the path
-    itself, its relative path when it is inside the folder (the whole repo holds
-    everything), None when the release does not copy it."""
-    wanted, path = wanted.strip("/"), path.strip("/")
-    if is_repo_root(wanted):
-        return "" if is_repo_root(path) else path
-    if path == wanted:
-        return ""
-    return path[len(wanted) + 1 :] if path.startswith(f"{wanted}/") else None
 
 
 def outermost(paths: Iterable[str]) -> list[str]:

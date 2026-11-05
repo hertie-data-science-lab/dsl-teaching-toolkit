@@ -308,11 +308,10 @@ describe('S6 schedule and S11 release', () => {
 
   it('says every ? and hint verbatim from the forms review and mock-up v3', () => {
     const out = html(<ScheduleScreen {...props({ entry: 's5' })} />).replace(/&quot;/g, '"');
-    for (const t of [FORM_TEXT.files, ...FORM_TEXT.filesBullets, FORM_TEXT.number, FORM_TEXT.provisional, FORM_TEXT.tbc, FORM_TEXT.readingsSub, FORM_TEXT.guide, FORM_TEXT.readingsFilesSub, FORM_TEXT.perFile]) expect(out).toContain(t);
+    for (const t of [FORM_TEXT.files, ...FORM_TEXT.filesBullets, FORM_TEXT.number, FORM_TEXT.provisional, FORM_TEXT.tbc, FORM_TEXT.readingsSub, FORM_TEXT.readingsFiles, FORM_TEXT.perFile]) expect(out).toContain(t);
     expect(FORM_TEXT.files).toBe('Copies run AT the release time, not now: whatever is in the folder then is what students get. The path does not have to exist yet: schedule a folder you are still writing, or a file you will add later.');
     expect(FORM_TEXT.number).toBe('The row word: Lecture 3. Same as the session unless this kind counts on its own (Maths labs start a week late).');
-    expect(FORM_TEXT.guide).toBe('(markdown: any URL links, guidance as to what to read, chapters or pages, how to approach it, etc. This is publicly visible even when the hosted readings files are private)');
-    expect(FORM_TEXT.readingsSub).toBe('Writes a second entry under Readings, attached to this session. The reading materials go in Files (private to students); the Reading guide is what every student sees (and the only readings content on the public site).');
+    expect(FORM_TEXT.readingsSub).toBe('Writes a second entry under Readings, attached to this session. The reading materials go in Files (private to students); the Reading list is a course file every student sees once these readings release (and the only readings content on the public site).');
     for (const l of ['Show on student site', 'Date provisional', 'Date TBC', 'Readings for this session', 'Advanced (readings)', 'Pick from course materials…', '+ Another time slot (a second group, a repeat)']) expect(out).toContain(l);
     // A course with the console on says so on the switch.
     const on = html(<ScheduleScreen {...props({ entry: 's5', course: { ...course, meta: { student_console: true } } })} />);

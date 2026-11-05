@@ -1,18 +1,18 @@
 // S6 Schedule with its editor (one form per kind, decision 0038 and the forms mock-up v3) and S11 Release detail.
 
-import { useMemo, useState } from 'preact/hooks';
+import { useMemo, useRef, useState } from 'preact/hooks';
 import { parse } from 'yaml';
 import { useEnv } from '../env';
-import { invalidText, saveSteps, type SaveState, type Step } from '../edit/save';
+import { invalidText, saveSteps, saveText, type SaveState, type Step } from '../edit/save';
 import { YamlText, deepEqual, obj } from '../edit/yamlText';
 import { Invalid } from '../forms/Form';
 import { RELEASE_WORD, TYPE_CLASS, siteRowWord, fmtDay, fmtTime, fmtWhen, heldSentence, markWord, releaseIdent, repoWords, sortKey } from '../model/format';
 import { needsANumber, parseSchedule, scheduleRows, type Block, type Row } from '../model/schedule';
 import {
-  READINGS_KIND, SESSION_KINDS, applyChanges, blockOf, changesOf, defaultReleaseAt, draftErrors, emptyTwin, hiddenKind, newDraft, newlyManual, nextNumber, nextSession, numberedField, readDraft, releaseAt, writeDraft,
-  type AssignmentDraft, type Draft, type EntryDraft, type FileDraft, type SemesterDraft, type SemesterEntryDraft, type SemesterType, type Slot,
+  READINGS_KIND, SESSION_KINDS, applyChanges, blockOf, changesOf, defaultListPath, defaultReleaseAt, draftErrors, emptyTwin, hiddenKind, listFile, listWrites, newDraft, newlyManual, nextNumber, nextSession, numberedField, readDraft, readingFilesOf, releaseAt, twinUsed, writeDraft,
+  type AssignmentDraft, type Draft, type EntryDraft, type FileDraft, type ListDraft, type SemesterDraft, type SemesterEntryDraft, type SemesterType, type Slot,
 } from '../model/scheduleEdit';
-import type { Assignment, Release } from '../model/types';
+import type { Assignment, Release, SemesterTodo } from '../model/types';
 import { archive, keepFuture, releaseAdhoc, releaseAgain, releaseEarly, releaseNow, scheduledPreview } from '../ops/defs';
 import { OpOpen } from '../ops/Panel';
 import type { OpDef } from '../ops/session';
@@ -20,6 +20,9 @@ import { RUN_REASON } from '../tiers/runSettings';
 import { CheckLine, DueSubmit, EditFile, Md, ProblemCards, ReleaseMarks, ghUrl } from '../ui/bits';
 import { FilePicker, pathVerdict } from '../ui/FilePicker';
 import { Hint } from '../ui/Hint';
+import { LIST_TEXT, ReadingList, listMessage } from '../ui/ReadingList';
+import { fileInTree } from '../model/files';
+import { FullScreenButton, useFullScreen } from '../ui/Viewer';
 import { SaveLine, UnsavedBar, lineOf } from '../ui/edit';
 import { releaseMarks, releaseProblems, templateReadinessIn, tier, type ReleaseMark, type Tiered } from '../model/readiness';
 import { NOTHING_TO_RELEASE, markClass, releaseRef, rowMark } from './Cohort';
@@ -123,10 +126,8 @@ export const FORM_TEXT = {
   tbc: 'Date TBC clears and disables the date: the row reads TBC and nothing runs.',
   showConsole: '"Show on student site" reads "Show in student console" for a course with the console on.',
   perFile: 'Per-file release time: click a file chip to set its own time (default: an hour before the first slot).',
-  readingsSub: 'Writes a second entry under Readings, attached to this session. The reading materials go in Files (private to students); the Reading guide is what every student sees (and the only readings content on the public site).',
-  guide: '(markdown: any URL links, guidance as to what to read, chapters or pages, how to approach it, etc. This is publicly visible even when the hosted readings files are private)',
-  readingsFilesSub: 'the reading materials; private unless a file is made public here',
-  readingsFiles: 'private unless a file is made public (per-file toggle on its chip)',
+  readingsSub: 'Writes a second entry under Readings, attached to this session. The reading materials go in Files (private to students); the Reading list is a course file every student sees once these readings release (and the only readings content on the public site).',
+  readingsFiles: 'private unless toggled to public',
   attach: 'Attached readings show on that session’s row and under its heading on the Readings tab; None gives them a dated row of their own.',
   examFiles: 'Files to release (rare for an exam: a past paper, a formula sheet):',
   assetsName: '(for you; never a row)',
@@ -229,7 +230,7 @@ function FilesField({ p, id, files, set, first, readings = false, showTime = tru
       ) : null}
       {picking ? <FilePicker files={p.files} org={p.course.org} repos={sources.materials} others={sources.others} onClose={() => setPicking(false)}
         onPick={(got) => set([...files, ...got.filter((g) => !files.some((x) => x.repo === g.repo && x.path === g.path)).map((g) => ({ repo: g.repo, path: g.path, toRepo: '', toPath: '', atDate: '', atTime: '', public: false }))])} /> : null}
-      <PickButton onClick={() => setPicking(true)} short={false} />
+      <div class="actions"><PickButton onClick={() => setPicking(true)} short={false} /></div>
     </>
   );
 }
@@ -313,7 +314,7 @@ interface FormProps<T> {
 function UnitForm({ p, d, set, errors, consoleOn, sources }: FormProps<EntryDraft>) {
   const tw = d.twin ?? emptyTwin(d);
   const setTwin: Set_<EntryDraft> = (x) => set({ twin: { ...tw, ...x } });
-  const used = !!d.twin && (!!d.twin.id || !!d.twin.files.length || !!d.twin.guide.trim() || !!d.twin.title.trim());
+  const used = !!d.twin && twinUsed(d.twin);
   const twinErr = sub(errors, 'twin.');
   return (
     <>
@@ -345,11 +346,11 @@ function UnitForm({ p, d, set, errors, consoleOn, sources }: FormProps<EntryDraf
           <div class="field"><Lbl for="r-time" strong>Time</Lbl><input id="r-time" type="time" value={tw.tbc ? '' : tw.slots[0].time} disabled={tw.tbc} onInput={(e) => setTwin({ slots: [{ ...tw.slots[0], time: val(e) }] })} /></div>
           <div class="field"><Lbl for="r-title">Title</Lbl><input id="r-title" type="text" placeholder={`Readings for session ${d.session || 'N'}`} value={tw.title} onInput={(e) => setTwin({ title: val(e) })} /></div>
         </div>
-        <Guide id="r" d={tw} set={setTwin} />
         <div class="field">
-          <span class="lbl-row"><b>Files</b><span class="hint"> {FORM_TEXT.readingsFilesSub}</span></span>
+          <span class="lbl-row"><b>Files</b><span class="hint lbl-note">{FORM_TEXT.readingsFiles}</span></span>
           <FilesField p={p} id="r-file" files={tw.files} set={(files) => setTwin({ files })} first={tw.slots[0]} readings showTime={false} sources={sources} />
         </div>
+        <ListField p={p} id="r" d={tw} set={setTwin} sources={sources} title={d.title} />
         <Fold summary="Advanced (readings)">
           <div class="row-adv">
             <NumberInput id="r" d={tw} set={setTwin} errors={twinErr} />
@@ -362,13 +363,17 @@ function UnitForm({ p, d, set, errors, consoleOn, sources }: FormProps<EntryDraf
   );
 }
 
-function Guide({ id, d, set }: { id: string; d: EntryDraft; set: Set_<EntryDraft> }) {
+/** A readings entry's Reading list (decisions 0044, 0046): the shared editor; with none, the offer of one at the entry's default path. */
+function ListField({ p, id, d, set, sources, title }: { p: ReadyProps; id: string; d: EntryDraft; set: Set_<EntryDraft>; sources: { materials: string[] }; title?: string }) {
+  const listPath = d.list && !d.list.inline ? d.list.path : '';
+  const trees = [...new Set(d.files.map((f) => f.repo))].map((repo) => p.files.tree(p.course.org, repo));
+  const reading = useMemo(() => readingFilesOf(p.files, p.course.org, d.files, listPath), [d.files, listPath, ...trees]);
+  const repo = (d.list && !d.list.inline ? d.list.repo : '') || d.files[0]?.repo || sources.materials[0];
+  // A list is a file in a course materials repo: with none, there is nowhere to write it (text in the schedule still shows and edits).
+  if (!repo && !d.list?.inline) return <div class="field"><span class="lbl-row"><b>{LIST_TEXT.label}</b></span><p class="footnote">{LIST_TEXT.noRepo}</p></div>;
   return (
-    <div class="field">
-      <Lbl for={`${id}-guide`} strong hint={FORM_TEXT.guide}>Reading guide</Lbl>
-      <span class="hint">{FORM_TEXT.guide}</span>
-      <textarea id={`${id}-guide`} rows={3} value={d.guide} onInput={(e) => set({ guide: val(e) })} />
-    </div>
+    <ReadingList id={id} list={d.list} defaultRepo={repo ?? ''} noRepo={!repo} defaultPath={defaultListPath(d, d.title || title)}
+      org={p.course.org} repos={sources.materials} files={p.files} readingFiles={reading} onChange={(list) => set({ list })} onDetach={() => set({ list: null })} />
   );
 }
 
@@ -391,11 +396,11 @@ function ReadingsForm({ p, d, set, errors, consoleOn, sources, doc }: FormProps<
         <div class="field"><Lbl for="e-date0" strong>Date</Lbl><input id="e-date0" type="date" value={d.tbc ? '' : d.slots[0].date} disabled={d.tbc} onInput={(e) => set({ slots: [{ ...d.slots[0], date: val(e) }] })} /><Err e={errors.date} /></div>
         <div class="field"><Lbl for="e-time0" strong>Time</Lbl><input id="e-time0" type="time" value={d.tbc ? '' : d.slots[0].time} disabled={d.tbc} onInput={(e) => set({ slots: [{ ...d.slots[0], time: val(e) }] })} /></div>
       </div>
-      <Guide id="e" d={d} set={set} />
       <div class="field">
-        <span class="lbl-row"><b>Files</b><span class="hint"> {FORM_TEXT.readingsFiles}</span></span>
+        <span class="lbl-row"><b>Files</b><span class="hint lbl-note">{FORM_TEXT.readingsFiles}</span></span>
         <FilesField p={p} id="e-file" files={d.files} set={(files) => set({ files })} first={d.slots[0]} readings showTime={false} sources={sources} />
       </div>
+      <ListField p={p} id="e" d={d} set={set} sources={sources} />
       <Fold summary="Advanced" open={d.number !== ''}>
         <div class="row-adv">
           <NumberInput id="e" d={d} set={set} errors={errors} />
@@ -659,6 +664,20 @@ function addWord(d: Draft): string {
 
 // ------------------------------------------------------------------ the page
 
+/** The Suggested to-do of a readings entry with files and no list (`status_json.NO_READING_LIST`). */
+const NO_READING_LIST = 'reading_list';
+
+/**
+ * The rows that carry the `no reading list` chip (decision 0044): the readings entries the
+ * Suggested to-do names, and the units they attach to (by session); a set-aside one marks nothing.
+ */
+export function noListRows(todo: SemesterTodo[], doc: Record<string, unknown>): (r: Pick<Row, 'type' | 'entry'>) => boolean {
+  const keys = new Set(todo.flatMap((t) => (t.check === NO_READING_LIST && t.entry && !t.set_aside ? [t.entry] : [])));
+  const sessionOf = (type: string, k: string) => obj(obj(doc[pluralOf(type)])[k]).session;
+  const sessions = new Set([...keys].map((k) => sessionOf(READINGS_KIND, k)).filter(Number.isInteger));
+  return (r) => (r.type === READINGS_KIND ? keys.has(r.entry) : SESSION_KINDS.includes(r.type) && sessions.has(sessionOf(r.type, r.entry)));
+}
+
 function View(p: ReadyProps) {
   const { status, now } = p;
   const env = useEnv();
@@ -684,6 +703,7 @@ function View(p: ReadyProps) {
   const doc = sf?.doc ?? {};
   const sched = useMemo(() => (sf && !sf.error ? parseSchedule(sf.text) : null), [sf?.text]);
   const rows = scheduleRows(status, sched, now, tz);
+  const noList = noListRows(status.semester?.todo ?? [], doc);
   const assignmentOf = new Map((status.assignments ?? []).map((a) => [a.slug, a]));
   // An assignment set to hand out by hand that has not gone out: its rows carry the tag.
   const waiting = (slug: string) => { const a = assignmentOf.get(slug); return a !== undefined && waitsByHand(a); };
@@ -703,8 +723,13 @@ function View(p: ReadyProps) {
     if (p.prefill?.kind === 'template') return { ...(newDraft('assignment', doc) as AssignmentDraft), template: p.prefill.repo };
     return p.prefill?.kind === 'files' ? releasePrefilled(newDraft('assets', doc) as EntryDraft, p.prefill.rows, effectiveDestRepo(p.loaded)) : null;
   };
-  const draftOf = (k: string): Draft | null => drafts[k] ?? (k === 'new' ? prefilled() : baseOf(k));
-  const dirtyKeys = Object.keys(drafts).filter((k) => k === 'new' || !deepEqual(drafts[k], baseOf(k)));
+  const draftOf = (k: string): Draft | null => (k in drafts ? drafts[k] : k === 'new' ? prefilled() : baseOf(k));
+  // Reading lists (decision 0044): a list file's text and sha are the files cache's, read here and at save.
+  const readList = (l: ListDraft) => listFile(p.files, p.course.org, l);
+  const inTree = (repo: string, path: string) => fileInTree(p.files, p.course.org, repo, path);
+  // Every draft this render, once: the edited ones and the open entry.
+  const drafted = new Map([...Object.keys(drafts), ...(key && key !== 'new' && key !== 'semester' && sf ? [key] : [])].map((k) => [k, draftOf(k)]));
+  const dirtyKeys = [...drafted.keys()].filter((k) => { const d = drafted.get(k)!; return k === 'new' || (d !== null && !deepEqual(d, baseOf(k))); });
   const dirty = dirtyKeys.length + removed.length;
   const setDraft = (k: string, d: Draft) => {
     setDrafts({ ...drafts, [k]: d });
@@ -729,39 +754,53 @@ function View(p: ReadyProps) {
     return e;
   };
   const errorsOf = (d: Draft) => ({ ...draftErrors(d, { doc, removed }, cutoffFor(d)), ...runErrorsOf(d) });
+  const sheetBox = useRef<HTMLDivElement>(null);
+  const [full, toggleFull] = useFullScreen(sheetBox, false);
 
   /** Save every change; `handOutKey`, an entry newly handed out by hand, then opens Hand out on it once the save lands. */
   const doSave = async (handOutKey?: string) => {
     if (!sf || sf.error) return;
-    const firstBad = dirtyKeys.map((k) => Object.values(errorsOf(drafts[k]))[0]).find(Boolean);
+    const at = (k: string) => drafted.get(k)!;
+    const firstBad = dirtyKeys.map((k) => Object.values(errorsOf(at(k)))[0]).find(Boolean);
     if (firstBad) return setSave({ kind: 'bad', text: firstBad });
     // The dates sheet first, then every entry: new keys generated, renumbered ones renamed, blocks re-sorted.
     const y = new YamlText(sf.text);
-    const dates = dirtyKeys.map((k) => drafts[k]).find((d) => d.kind === 'semester');
+    const dates = dirtyKeys.map(at).find((d) => d.kind === 'semester');
     if (dates) writeDraft(y, dates, doc);
-    const entryKeys = dirtyKeys.filter((k) => drafts[k].kind !== 'semester');
-    const out = applyChanges(y.text, (y.toJS() ?? {}) as Record<string, unknown>, changesOf(entryKeys.map((k) => drafts[k]), entryKeys.map((k) => baseOf(k))), removed, { handedOut });
+    const entryKeys = dirtyKeys.filter((k) => at(k).kind !== 'semester');
+    const out = applyChanges(y.text, (y.toJS() ?? {}) as Record<string, unknown>, changesOf(entryKeys.map(at), entryKeys.map(baseOf)), removed, { handedOut, exists: inTree });
     if (!validSchedule(parse(out.text) ?? {})) return setSave({ kind: 'bad', text: invalidText('the schedule', validSchedule) });
     // The key a draft was written under: a new entry's is generated, a renumbered one's renamed.
-    const writtenKey = (k: string) => out.keys[changesOf(entryKeys.slice(0, entryKeys.indexOf(k)).map((x) => drafts[x]), entryKeys.slice(0, entryKeys.indexOf(k)).map((x) => baseOf(x))).length];
+    const writtenKey = (k: string) => out.keys[changesOf(entryKeys.slice(0, entryKeys.indexOf(k)).map(at), entryKeys.slice(0, entryKeys.indexOf(k)).map(baseOf)).length];
     const newId = entryKeys.includes('new') ? writtenKey('new') : null;
     const what = dirty === 1 && dirtyKeys.length === 1 ? (dirtyKeys[0] === 'new' ? `add ${newId}` : `edit ${dirtyKeys[0]}`) : dirtyKeys.length === 0 ? `remove ${removed.join(', ')}` : `${dirty} changes`;
     const first: Step = { target: { owner: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }, text: out.text, sha: sf.sha, opts: { message: `schedule: ${what}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] } };
-    const hoDraft = handOutKey && entryKeys.includes(handOutKey) ? drafts[handOutKey] : undefined;
+    const hoDraft = handOutKey && entryKeys.includes(handOutKey) ? at(handOutKey) : undefined;
     const ho = hoDraft?.kind === 'assignments' ? { ...hoDraft, id: writtenKey(handOutKey!) } : undefined;
-    const saved = await saveSteps(env, setSave, first, null, '', () => {
+    const done = () => {
       setDrafts({});
       setRemoved([]);
       if (newId && typeof location !== 'undefined') location.hash = `#schedule-${newId}`;
-    });
+    };
+    // Each reading-list file first (decision 0044), then schedule.yml: a list that fails stops the save.
+    // A written file is in the cache with its new text and sha, so a retry never writes it twice.
+    const lists = env ? listWrites(dirtyKeys.map(at), readList) : [];
+    for (const w of lists) {
+      if (!(await saveText(env!, { owner: p.course.org, repo: w.repo, path: w.path }, w.text, w.sha, { message: listMessage(w.path), checks: false }, setSave))) return;
+      // A new file joins its repo's tree, so the sheet reads it as the file it now is.
+      if (!w.sha) p.files.refreshTree(p.course.org, w.repo);
+    }
+    // Only the list changed: schedule.yml is as it was, so there is nothing more to commit.
+    if (lists.length && out.text === sf.text) return done();
+    const saved = await saveSteps(env, setSave, first, null, '', done);
     // The op's own panel, as Hand out now opens it: its preview and confirmation; it never runs by itself.
     if (saved && ho) env?.ops.open(draftHandout(p, ho));
   };
 
   // An assignment newly handed out by hand asks first: until Hand out now, nothing reaches students.
-  const manualKeys = dirtyKeys.filter((k) => newlyManual(drafts[k], baseOf(k), assignmentOf.get(k)?.state));
+  const manualKeys = dirtyKeys.filter((k) => newlyManual(drafted.get(k)!, baseOf(k), assignmentOf.get(k)?.state));
   const requestSave = () => {
-    if (manualKeys.length && !dirtyKeys.some((k) => Object.keys(errorsOf(drafts[k])).length)) setAskManual(true);
+    if (manualKeys.length && !dirtyKeys.some((k) => Object.keys(errorsOf(drafted.get(k)!)).length)) setAskManual(true);
     else void doSave();
   };
 
@@ -797,7 +836,7 @@ function View(p: ReadyProps) {
       <li class={`trow ${TYPE_CLASS[r.type] ?? 'evt'}${markClass(m)}${key === rk ? ' current' : ''}${gone ? ' removed' : ''}${r.show ? '' : ' off-site'}`} data-entry={r.entry}>
         <span class="k">{siteRowWord(r.type)}</span>
         <span class="d">{r.when ? fmtDay(r.when, tz, year) : 'No date yet'}{r.when && fmtTime(r.when, tz) ? <span>{fmtTime(r.when, tz)}{r.tbc ? ' (TBC)' : ''}</span> : r.tbc && r.when ? <span>(TBC)</span> : null}</span>
-        <span class="ttl"><a href={`#schedule-${rk}`}><b>{r.ident}</b>: {r.name}</a></span>
+        <span class="ttl"><a href={`#schedule-${rk}`}><b>{r.ident}</b>: {r.name}</a>{noList(r) ? <> <span class="chip muted">no reading list</span></> : null}</span>
         <Details r={r} a={r.block === 'assignments' ? assignmentOf.get(r.entry) : undefined} now={now} />
         <span class="st">{st}</span>
       </li>,
@@ -827,7 +866,7 @@ function View(p: ReadyProps) {
       const firstProblem = Object.values(errors)[0];
       const fp = { p, errors, consoleOn, sources };
       sheet = (
-        <div class="entry" role="dialog" aria-labelledby="entry-title">
+        <div class={`entry${full ? ' entry-full' : ''}`} role="dialog" aria-labelledby="entry-title" ref={sheetBox}>
           <div class="entry-head">
             <div>
               <div class="eyebrow"><span class="kind-dot" style={head.colour ? `background:${head.colour}` : undefined} />{head.eyebrow}</div>
@@ -836,7 +875,7 @@ function View(p: ReadyProps) {
               {d.kind === 'assignments' && d.number ? <div class="hint">Number {d.number} <Hint small label="About the number">{FORM_TEXT.number.replace('Lecture 3', 'Assignment 3')}</Hint></div> : null}
               {rel ? <div style="margin-top:6px"><StateChip state={rel.state} m={marks.get(rel.id) ?? null} /></div> : null}
             </div>
-            {close}
+            <span class="actions"><FullScreenButton full={full} toggle={toggleFull} />{close}</span>
           </div>
           <div class="entry-body">
             {probs.length && rel?.state !== 'will_be_skipped' ? <ProblemCards list={probs} /> : null}

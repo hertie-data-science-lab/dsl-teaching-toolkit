@@ -191,7 +191,7 @@ readings:
     files:
       - from_course_repo: course-materials-f2026
         from_path: readings/01_deep-learning-in-public-policy
-    reading_guide: |
+    reading_list: |
       ## Readings
 
       The list in `readings/01_deep-learning-in-public-policy/READINGS.md`.
@@ -202,7 +202,7 @@ readings:
     files:
       - from_course_repo: course-materials-f2026
         from_path: readings/02_deep-neural-networks-1
-    reading_guide: |
+    reading_list: |
       ## Readings
 
       The list in `readings/02_deep-neural-networks-1/READINGS.md`.
@@ -213,7 +213,7 @@ readings:
     files:
       - from_course_repo: course-materials-f2026
         from_path: readings/03_deep-neural-networks-2
-    reading_guide: |
+    reading_list: |
       ## Readings
 
       The list in `readings/03_deep-neural-networks-2/READINGS.md`.
@@ -224,7 +224,7 @@ readings:
     files:
       - from_course_repo: course-materials-f2026
         from_path: readings/04_computer-vision-1-cnns
-    reading_guide: |
+    reading_list: |
       ## Readings
 
       The list in `readings/04_computer-vision-1-cnns/READINGS.md`.
@@ -235,7 +235,7 @@ readings:
     files:
       - from_course_repo: course-materials-f2026
         from_path: readings/05_computer-vision-2-modern-cnns
-    reading_guide: |
+    reading_list: |
       ## Readings
 
       The list in `readings/05_computer-vision-2-modern-cnns/READINGS.md`.
@@ -246,7 +246,7 @@ readings:
     files:
       - from_course_repo: course-materials-f2026
         from_path: readings/08_nlp-2-encoder-decoder-and-attention
-    reading_guide: |
+    reading_list: |
       ## Readings
 
       The list in `readings/08_nlp-2-encoder-decoder-and-attention/READINGS.md`.
@@ -264,7 +264,7 @@ readings:
     files:
       - from_course_repo: course-materials-f2026
         from_path: readings/10_policy-approaches-and-responsible-implementation
-    reading_guide: |
+    reading_list: |
       ## Readings
 
       The list in `readings/10_policy-approaches-and-responsible-implementation/READINGS.md`.

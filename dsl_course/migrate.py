@@ -138,7 +138,7 @@ from .materials import (
 from .opencourse import READING_LISTS, OpenCourse
 from .opencourse import seed_text as opencourse_text
 from .profile_readme import profile_files, update_profile_readme
-from .readings import is_reading_overlay
+from .readings import READING_OVERLAY_FILE, is_reading_overlay
 from .repos import (
     current_description,
     default_branch,
@@ -1260,8 +1260,8 @@ def fold_open_site(data: object) -> object:
 # ids), its kind is written by the block it lands in (today's inference, once), lectures
 # and labs get `session:` (their number today), a readings entry the site joins to a
 # lecture gets that lecture's `session:`, `number:` only where it differs, a lab's second
-# group becomes a slot of its lab, the copies' fields are renamed, a READINGS.md becomes
-# the entry's `reading_list:`, and each assignment's `assignments.yml` block moves onto
+# group becomes a slot of its lab, the copies' fields are renamed, a READINGS.md is named
+# by the entry's `reading_list:`, and each assignment's `assignments.yml` block moves onto
 # its entry. Rendered rows stay as they were, except what 0038 drops.
 SHAPE_COMMIT = "migrate: schedule shape"
 SHAPE_HEADER = """\
@@ -1309,12 +1309,145 @@ def _semester_block(old: dict) -> dict:
     return block
 
 
-def _guide(entry: dict) -> dict:
-    """A readings entry with `reading_list:` renamed `reading_guide:` (amendment 2)."""
-    if "reading_list" not in entry:
+def _shaped(old: dict) -> bool:
+    """A schedule already one block per kind (shaped before amendment 2)."""
+    return "releases" not in old and any(
+        isinstance(old.get(b), dict) for b in schedule.BLOCKS if b not in ("events",)
+    )
+
+
+def _in_place(
+    text: str, old: dict, reading_list: ReadingList, notes: list[str]
+) -> str | None:
+    """A shaped schedule (`_shaped`, `old` its parse) rewritten line by line, all else
+    byte for byte (the keys step's own line rewrites, `schedule_keys` and
+    `schedule_timing`, applied as ever): every `reading_guide:` key of its blocks
+    renamed `reading_list:`, and each readings entry's inline list that says what the
+    `READINGS.md` directly inside its first copy's folder says named as that file
+    (`_named_lists`). None when a whole rewrite is still needed (top-level term dates to
+    move into `semester:`) or nothing changes."""
+    if any(top in old for top in _SEMESTER_KEYS):
+        return None
+    base = schedule_timing(schedule_keys(text))
+    out, section = [], ""
+    scalar: int | None = None  # the column of the key whose block scalar this is in
+    old_key = re.compile(rf"^(\s+){schedule.OLD_READING_LIST}:")
+    for line in base.split("\n"):
+        if scalar is not None and (not line.strip() or _indent(line) > scalar):
+            out.append(line)
+            continue
+        scalar = None
+        if top := _TOP_KEY.match(line):
+            section = top.group(1)
+        if section in schedule.BLOCKS and (key := old_key.match(line)):
+            line = f"{key.group(1)}{schedule.READING_LIST}:{line[key.end() :]}"
+        if block := _BLOCK_SCALAR.match(line):
+            scalar = len(block.group(1))
+        out.append(line)
+    new = _named_lists("\n".join(out), old, reading_list, notes)
+    return None if new == text else new
+
+
+# Why an inline list stays inline, after its entry's key.
+_UNNAMED = (
+    f"its reading list stays inline: no {READING_OVERLAY_FILE} beside its first "
+    "files says the same"
+)
+
+
+def _named_lists(
+    text: str, old: dict, reading_list: ReadingList, notes: list[str]
+) -> str:
+    """`text` with each readings entry's inline `reading_list:` replaced, on its own
+    lines, by `{from_course_repo, from_path}` naming the `READINGS.md` directly inside
+    its FIRST copy's folder, when that file says the same (both `strip()`ped): a 0.11.0
+    migration inlined it, and unnamed it is listed as a reading beside the list. An
+    inline list that differs, has no such file, or is not written as its own key line
+    stays as written, and `notes` names its entry (the key only)."""
+    block = next(b for b, k in schedule.BLOCKS.items() if k == schedule.READINGS_KIND)
+    entries = old.get(block)
+    if not isinstance(entries, dict):
+        return text
+    wanted: dict[str, dict[str, str]] = {}
+    for key, entry in entries.items():
+        if not isinstance(entry, dict):
+            continue
+        inline = entry.get(schedule.READING_LIST, entry.get(schedule.OLD_READING_LIST))
+        if not isinstance(inline, str) or not inline.strip():
+            continue
+        files = entry.get("files")
+        first = files[0] if isinstance(files, list) and files else None
+        if first is None:
+            continue  # nothing ships beside it: inline is its only form
+        if isinstance(first, dict) and first.get("from_course_repo"):
+            repo = str(first["from_course_repo"])
+            folder = str(first.get("from_path") or "").strip("/")
+            path = "/".join(p for p in (folder, READING_OVERLAY_FILE) if p)
+            texts = dict(reading_list(repo, folder))
+            if path in texts and texts[path].strip() == inline.strip():
+                wanted[str(key)] = {"from_course_repo": repo, "from_path": path}
+                continue
+        notes.append(f"{key}: {_UNNAMED}")
+    if not wanted:
+        return text
+    lines, out = text.split("\n"), []
+    section, entry_col, entry, i = "", None, "", 0
+    while i < len(lines):
+        line = lines[i]
+        if top := _TOP_KEY.match(line):
+            section, entry_col, entry = top.group(1), None, ""
+        elif section == block and line.strip() and not line.lstrip().startswith("#"):
+            col = _indent(line)
+            if entry_col is None or col <= entry_col:
+                entry_col, entry = col, line.strip().split(":", 1)[0].strip("'\"")
+            elif entry in wanted and line.lstrip().startswith(
+                f"{schedule.READING_LIST}:"
+            ):
+                end = i + 1  # its value: every line deeper than the key, blanks inside
+                while end < len(lines) and (
+                    not lines[end].strip() or _indent(lines[end]) > col
+                ):
+                    end += 1
+                while end > i + 1 and not lines[end - 1].strip():
+                    end -= 1  # trailing blank lines separate entries: kept
+                ref, pad = wanted[entry], " " * col
+                out += [
+                    f"{pad}{schedule.READING_LIST}:",
+                    f"{pad}  from_course_repo: {ref['from_course_repo']}",
+                    f"{pad}  from_path: {ref['from_path']}",
+                ]
+                i = end
+                continue
+        out.append(line)
+        i += 1
+    new = "\n".join(out)
+    # Only what reads back as the named file stands; else the file stays as written.
+    got = (yaml.load(new, _Verbatim) or {}).get(block) or {}
+    named = {
+        k
+        for k, ref in wanted.items()
+        if (got.get(k) or {}).get(schedule.READING_LIST) == ref
+    }
+    if any(
+        (got.get(k) or {}).get(schedule.READING_LIST)
+        != entries[k].get(
+            schedule.READING_LIST, entries[k].get(schedule.OLD_READING_LIST)
+        )
+        for k in wanted.keys() - named
+    ):
+        notes += [f"{k}: {_UNNAMED}" for k in wanted]
+        return text
+    notes += [f"{k}: {_UNNAMED}" for k in wanted.keys() - named]
+    return new
+
+
+def _renamed_list(entry: dict) -> dict:
+    """A readings entry with its 0.11.0 `reading_guide:` renamed `reading_list:`."""
+    if schedule.OLD_READING_LIST not in entry:
         return entry
     return {
-        ("reading_guide" if k == "reading_list" else k): v for k, v in entry.items()
+        (schedule.READING_LIST if k == schedule.OLD_READING_LIST else k): v
+        for k, v in entry.items()
     }
 
 
@@ -1389,6 +1522,7 @@ def _readings_twin(
     new: dict,
     aliases: Aliases,
     reading_list: ReadingList,
+    stops: list[str],
 ) -> tuple[str, dict] | None:
     """A lecture's or lab's copies that land in a readings section, moved off `new` into a
     readings entry of the same session (`<key>-readings`): under 0.11 the block says what
@@ -1410,14 +1544,9 @@ def _readings_twin(
     if "tbc" in new:
         twin["tbc"] = new["tbc"]
     twin["files"] = moved
-    texts = [
-        t.strip()
-        for f in moved
-        if (t := reading_list(str(f.get("from_course_repo")), str(f.get("from_path"))))
-        and t.strip()
-    ]
-    if texts:
-        twin["reading_guide"] = "\n\n".join(texts) + "\n"
+    twin[schedule.READING_LIST] = _list_of(
+        f"{key}-readings", moved, reading_list, stops
+    )
     return f"{key}-readings", {k: v for k, v in twin.items() if v not in (None, "")}
 
 
@@ -1438,33 +1567,68 @@ def _hour_before(text: str, tz) -> str | None:
 
 # A source repo's `materials.yml` folder aliases (None: it does not parse).
 Aliases = Callable[[str], Mapping[str, str] | None]
-ReadingList = Callable[[str, str], str]
+# `(path, text)` of each reading-list overlay a copy of `path` from `repo` carries.
+ReadingList = Callable[[str, str], list[tuple[str, str]]]
+
+
+def _list_of(
+    key: str, copies: list[dict], reading_list: ReadingList, stops: list[str]
+) -> dict | None:
+    """Readings entry `key`'s `reading_list:` from the overlays its copies carry
+    (decision 0044 point 1): the one course file itself, left where it is; None for
+    none. An empty overlay is none: the entry is then the "no reading list" to-do, not a
+    list naming an empty file. An entry names one file, so several (in one folder or in
+    several) are a stop naming them: a person keeps one."""
+    found = [
+        (repo, path)
+        for f in copies
+        for repo in [str(f.get("from_course_repo"))]
+        for path, text in reading_list(repo, str(f.get("from_path")))
+        if text.strip()
+    ]
+    if len(found) > 1:
+        names = ", ".join(f"{repo}/{path}" for repo, path in found)
+        stops.append(
+            f"{key}: its files hold {len(found)} reading lists ({names}) - an entry "
+            f"names one: keep one and migrate again"
+        )
+        return None
+    return (
+        {"from_course_repo": found[0][0], "from_path": found[0][1]} if found else None
+    )
 
 
 def schedule_shape(
     text: str,
     instance_text: str | None = None,
     aliases: Aliases = lambda repo: {},
-    reading_list: ReadingList = lambda repo, path: "",
+    reading_list: ReadingList = lambda repo, path: [],
 ) -> tuple[str, str | None, list[str], list[str]]:
     """`(schedule.yml, assignments.yml or None when it has no `assignments:` block,
     notes, stops)` for a 0.10 `text` (and the `assignments.yml` beside it): the 0.11 shape
     (decision 0038), rows unchanged but for what 0038 drops. `aliases(repo)` are a source
     repo's `materials.yml` folder aliases (today's kind inference); `reading_list(repo,
-    path)` the READINGS.md text a copy of `path` from `repo` carries ("" for none).
+    path)` the READINGS.md overlays a copy of `path` from `repo` carries (`_list_of`:
+    one is the entry's `reading_list:`, several a stop).
     `stops` are what a person must settle first; `notes` what changes for them to check."""
     notes: list[str] = []
     stops: list[str] = []
     old = yaml.load(schedule_timing(schedule_keys(text)), _Verbatim) or {}
     if not isinstance(old, dict):
         return text, instance_text, notes, ["schedule.yml is not a mapping"]
-    if "releases" not in old and any(
-        isinstance(old.get(b), dict) for b in schedule.BLOCKS if b not in ("events",)
-    ):
+    if _shaped(old):
         # Already one block per kind (a file shaped before amendment 2): only the term's
-        # dates and the readings guide take their new names.
+        # dates and the reading list take their new names. With the dates already a
+        # `semester:` block, the reading list's rename is a line rewrite: faculty's
+        # comments and layout stay as they are.
+        if (renamed := _in_place(text, old, reading_list, notes)) is not None:
+            return renamed, None, notes, stops
+        notes.clear()
         shaped = {
-            b: {k: _guide(e) if isinstance(e, dict) else e for k, e in old[b].items()}
+            b: {
+                k: _renamed_list(e) if isinstance(e, dict) else e
+                for k, e in old[b].items()
+            }
             for b in schedule.BLOCKS
             if isinstance(old.get(b), dict)
         }
@@ -1526,22 +1690,13 @@ def schedule_shape(
         }
         if "deploy" in entry or kind in schedule.DISPLAY_KINDS:
             new["files"] = _copies(entry)
-        twin = _readings_twin(key, kind, entry, new, aliases, reading_list)
+        twin = _readings_twin(key, kind, entry, new, aliases, reading_list, stops)
         if twin:
             twins.append(twin)
-        if kind == "readings":
-            texts = [
-                t.strip()
-                for f in new.get("files", [])
-                if (
-                    t := reading_list(
-                        str(f.get("from_course_repo")), str(f.get("from_path"))
-                    )
-                )
-                and t.strip()
-            ]
-            if texts:
-                new["reading_guide"] = "\n\n".join(texts) + "\n"
+        if kind == "readings" and (
+            listed := _list_of(key, new.get("files", []), reading_list, stops)
+        ):
+            new[schedule.READING_LIST] = listed
         blocks[policy.plural_of(kind)][key] = new
         if n and entry.get("show_on_site") is not False:
             hosts.setdefault((kind, n), key)
@@ -3692,9 +3847,9 @@ class Semester:
         """A source repo's `materials.yml` folder aliases, as 0.10 inferred kinds by."""
         return old_materials(self.course, repo)[1]
 
-    def _reading_list(self, repo: str, path: str) -> str:
-        """The READINGS.md (or .txt/.bib) text a copy of `path` from the course's `repo`
-        carries: the file itself, or each one directly inside the folder."""
+    def _reading_list(self, repo: str, path: str) -> list[tuple[str, str]]:
+        """`(path, text)` of each READINGS.md (or .txt/.bib) a copy of `path` from the
+        course's `repo` carries: the file itself, or each one directly inside the folder."""
         path = path.strip("/")
         found = [
             p
@@ -3704,8 +3859,7 @@ class Semester:
                 p == path or p.rsplit("/", 1)[0] == path or (not path and "/" not in p)
             )
         ]
-        texts = [(get_file_content(self.course, repo, p) or "").strip() for p in found]
-        return "\n\n".join(t for t in texts if t)
+        return [(p, get_file_content(self.course, repo, p) or "") for p in found]
 
     def shape_work(
         self,
@@ -3714,8 +3868,19 @@ class Semester:
         stops)`; nothing to rewrite (None) once the schedule reads clean."""
         text = get_file_content(self.org, self.config(), schedule.SCHEDULE_PATH)
         instance = self.instance_text()
-        if text is None or _schedule_clean(text, instance, quiet=True, zone_ok=True):
+        if text is None:
             return text, None, None, [], []
+        if _schedule_clean(text, instance, quiet=True, zone_ok=True):
+            # Clean, but an inline list a 0.11.0 migration copied out of its folder's
+            # READINGS.md is still named as that file (`_named_lists`).
+            notes: list[str] = []
+            old = yaml.load(schedule_timing(schedule_keys(text)), _Verbatim)
+            new = (
+                _in_place(text, old, self._reading_list, notes)
+                if isinstance(old, dict) and _shaped(old)
+                else None
+            )
+            return text, new, None, notes if new else [], []
         new, after, notes, stops = schedule_shape(
             text, instance, self._aliases, self._reading_list
         )
@@ -3731,6 +3896,27 @@ class Semester:
                 f"{CONFIG_REPO}/{schedule.SCHEDULE_PATH}: one block per kind - {when}"
             ]
         text, new, after, notes, _ = self.shape_work()
+        old = yaml.load(schedule_timing(schedule_keys(text or "")), _Verbatim)
+        if (
+            new is not None
+            and isinstance(old, dict)
+            and _shaped(old)
+            and _in_place(text or "", old, self._reading_list, []) == new
+        ):
+            return [
+                (
+                    f"{CONFIG_REPO}/{schedule.SCHEDULE_PATH}: reading lists renamed "
+                    f"`{schedule.READING_LIST}:` or named as their folder's "
+                    f"{READING_OVERLAY_FILE} in place, comments and layout kept"
+                ),
+                # The new lines only: the old lines are faculty's own words.
+                *(
+                    line
+                    for line in _diff(schedule.SCHEDULE_PATH, text or "", new)
+                    if not line.startswith("  -")
+                ),
+                *(f"  {note}" for note in notes),
+            ]
         out = [
             (
                 f"{CONFIG_REPO}/{schedule.SCHEDULE_PATH}: one block per kind (decision "

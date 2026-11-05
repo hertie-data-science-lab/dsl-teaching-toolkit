@@ -6,7 +6,8 @@
 // (`?folder=<repo>/<path>`) opens that folder and its parents, and scrolls it into view;
 // `current`, the file open beside the tree, is marked and its folders opened. `at` names whose
 // page the links open: the course's materials index, or a semester's Released materials
-// (`?cohort=`).
+// (`?cohort=`). A pure browser: the reading-list chips live on the repo page's Files panel
+// (decision 0046 amendment 1).
 
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { readJson, safeStorage, writeJson } from '../auth/types';

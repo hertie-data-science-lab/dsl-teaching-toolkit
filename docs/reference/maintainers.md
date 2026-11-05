@@ -506,7 +506,9 @@ Decision 0034 (need, time, verdict), all computed by the engine so the console h
   and K1-K6 are needed; C4-C6 suggested (there is no K7: the archive date is a to-do only).
   A materials repo needs nothing once it exists (decision 0038: folders carry no kind); the
   syllabus and its weekly plan are ONE suggested check, `syllabus`, and the reviewed
-  `.releaseignore` (`withheld`, confirmed by `materials.confirm_withheld`) another. An entry
+  `.releaseignore` (`withheld`, confirmed by `materials.confirm_withheld`) another; each
+  `readings/<name>/` folder with files and no `READINGS.md` is a suggested
+  `reading_list:<folder>` (decision 0046; its to-do's `check` is `reading_list`). An entry
   written with `files: []` is the suggested to-do `schedule:files:<key>` (`check` `files`),
   dated by the entry. A template's brief and starter are
   needed. The semester's suggested to-dos (`semester.todo[]`) are `site:home`,
@@ -835,6 +837,65 @@ whose template does not exist yet locks to `none` and refuses every team - the c
 a2-a4 were in, and the reason the button that creates a template writes its
 `grading_config.yml` for you.
 
+## Reading lists
+
+A readings entry's `reading_list:` is markdown or a course file, ONE field
+(`Release.reading_list`: the text, or the file's source `Deploy`; `schedule._parse_reading_list`).
+The file is one of the entry's `deploy` unless a `files:` folder carries it, so releases,
+source checks, divergence and PR into source cover it unchanged (`source_faults` checks a
+carried file by name); where it lands is derived, never stored (`schedule_plan.list_dest`).
+Students see the released copy only: the semester site (`site._shown_list`) and the student
+file (`student_status._shown_list`) read the file's landed copy in the semester; inline text
+shows once a copy of the entry has landed, or, with no copies, at `Release.opens` (when its
+copies would ship; an undated attached entry takes its host row's); both apply
+`schedule_plan.shown_list`. `site_repo.landed_links` never links a reading-list file
+(`schedule_plan.landings`, every row's, built once per build), never `READINGS.md` by name,
+and a copy that landed only such files has landed for the row whose list it is only (a list
+kept in a lecture folder does not release the lecture). The open course site has no schedule, so
+it keeps inlining a readings folder's `READINGS.md` by name (`readings.readings_block`). The
+syllabus reads the course file (it is written before anything ships).
+`status.json` readings rows say where the list is (`reading_list`: the course file plus
+`released_repo` / `released_path`, where the engine ships it, landed or not; `{inline: true}`;
+or null), so the console never re-derives the placement; `no_reading_list_todo` is the
+Suggested to-do (none for a list written but unusable: `Release.reading_list_written`, its
+fault is the problem). The migration names a folder's one overlay as the file; several
+overlays are a stop naming them (`migrate._list_of`).
+
+The console edits the course file only (decision 0044): `ui/ReadingList.tsx` is ONE component,
+mounted in the schedule entry sheet (`Schedule.tsx` `ListField`) and in the course Materials file
+view (`CourseFile`, saved alone). Keep one set of words (`LIST_TEXT`) for both. In the sheet the
+list is a `ListDraft` (`scheduleEdit.ts`) holding only the instructor's edit (`text`, null when
+untouched): the file's saved text and sha are the files cache's (`listFile`), read at render and
+at save, and `doSave` writes each changed file (`listWrites`) before `schedule.yml`. A list is
+offered, never adopted (decision 0046): a null list renders the none state (Use it on a
+`READINGS.md` at the default path, else Generate one; Choose a file… either way), and only a click
+sets one. A null list writes no `reading_list:` key, so Detach (`onDetach`) drops it; a new file
+with nothing typed writes neither the file nor the key (`listValue`).
+Both mounts take the entry's reading files from `readingFilesOf` (in Materials: the files of the
+entry that names the list, else the PDFs beside it). The Schedule row's *no reading list* chip
+reads the Suggested to-do (`check: reading_list`), never the schedule. A path a status
+readings row names (`reading_list.path`) is marked in the repo page's Files › Browse, and its released copy
+(`released_repo` / `released_path`) links to the entry.
+
+The course side knows no schedule (decision 0046 rules 5-8): a `readings/<name>/` folder with
+files and no `READINGS.md` gets a *no reading list* chip in the repo page's Files › Browse
+(course mode only; `readings/` closed carries the roll-up *N folders without a reading list*)
+(`model/readingFolders.ts` `readingFolderState`, the same rule as `status_json.reading_folders`:
+change both together) and the suggested check `reading_list:<folder>`; both link to the course
+file view on `<folder>/READINGS.md`, where `CourseFile` opens a list not in the tree straight in
+the editor as a New file. The Course materials index tree (`MaterialsTree`) is a pure browser and
+carries none of these chips (amendment 1); its repo row's *N suggestions* chip links to the repo page.
+
+Generate draft (0044 point 6) sits under the editor in both mounts: `ui/ReadingDraft.tsx` fetches
+the entry's PDF bytes four at a time through `client.fetchBytes` (uncached, so the viewer's kept
+files stay; contents API, blob API over 1 MB: tree paths carry `size`), parses them in order in
+`model/pdfText.ts` (pdf.js takes the bytes without a copy and empties them), and drafts the lines in `model/readingDraft.ts`
+(pure, tested on fixture text; heuristics from the 5 Nov trial). A part that leaves a free-standing `?` in the line
+gets a `?` note where the part is decided (0046 rule 14; `authorsNote` for initials), and `byLevel` sorts
+the notes `?`, guess, check, found (rule 15). `pdfText.ts` is the only module
+that imports `pdfjs-dist`, and only by dynamic `import()`, so pdf.js stays out of the main chunk
+and its worker is a same-origin asset (the CSP allows no other script source). Keep it lazy.
+
 ## Config faults
 
 Every file faculty edit by hand can be wrong in a way the toolkit detects and only a human
@@ -1155,8 +1216,8 @@ marks (`course.py`), the archive notice prefixes (`teardown.py`) and the digest 
 | `schedule.yml` `releases:` / `events:` entries and their `kind:` (0.11.0) | one block per kind (`lectures:`, `labs:`, ..., `events:` for `other`); a second group's event a slot of its entry (decision 0038) | rewritten by the schedule shape step |
 | `deploy:` `course_source_repo`, `course_source_path`, `semester_dest_repo`, `semester_dest_path`, `deploy_datetime` (0.11.0) | `files:` `from_course_repo`, `from_path`, `to_semester_repo`, `to_path`, `release_datetime` | the same |
 | assignment `course_source_repo`; `assignments.yml` `assignments.<k>` blocks and `semester_dest_repo` (0.11.0) | `template`; the run settings on the entry, `repo_name` | the same |
-| a readings folder's `READINGS.md`; `materials.yml` `kinds:` (0.11.0) | the entry's `reading_guide:`; the block | the same writes `reading_guide:`; `kinds:` is ignored |
-| `schedule.yml` top-level `semester_start`, `semester_end`, `archive:`; a readings entry's `reading_list` (0.11.0, 0038 amendment 2) | `semester:` entries of `type: start`, `end`, `archive`; `reading_guide` | the same; a file already one block per kind takes only these renames |
+| a readings folder's `READINGS.md`; `materials.yml` `kinds:` (0.11.0) | the entry's `reading_list:`; the block | the same names the file in `reading_list:` (several overlays are a stop naming them); `kinds:` is ignored |
+| `schedule.yml` top-level `semester_start`, `semester_end`, `archive:` (0.11.0); a readings entry's `reading_guide` (0.12.0, the 0.11.0 name) | `semester:` entries of `type: start`, `end`, `archive`; `reading_list` | the same; a file already one block per kind takes only these renames |
 | site front matter `type:` | `kind:`, written beside `type:` until the pinned theme's next release reads `kind` | the semester and course websites (rewritten on every sync) |
 | `status.json` release and this-week rows `type` | `kind` | `dsl.status/1` |
 | CLI `--master-org` (assign, collect), `--source-org` (deploy); env `MASTER_ORG`, `SRC_ORG` | `--course-org`; `COURSE_ORG` | every CLI; rendered workflows |
@@ -1273,8 +1334,8 @@ the new one, the pointer moved in, samples deleted - one `migrate: layout` commi
 templates said, in one commit, both re-read with this engine: zero `NOT_MIGRATED`), schedule
 shape (decision 0038, `migrate.schedule_shape`: one block per kind, keys unchanged, `session:`
 from the number each lecture and lab showed, `number:` only where it differs, a second
-group's event a slot of its entry, `deploy:` fields renamed into `files:`, a READINGS.md's
-text into `reading_guide:`, the term's dates into the `semester:` block, `template:` / `repo_name:` and `assignments.yml`'s blocks onto each
+group's event a slot of its entry, `deploy:` fields renamed into `files:`, a READINGS.md
+named by `reading_list:` (decision 0044), the term's dates into the `semester:` block, `template:` / `repo_name:` and `assignments.yml`'s blocks onto each
 assignment; comments are not carried, and the preview prints only the new lines - one
 `migrate: schedule shape` commit), config layers (decision 0039: `instructors.yml` and
 `assignments.yml` `defaults:` folded into `semester.yml` - faculty's `people:` lines kept as

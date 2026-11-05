@@ -19,7 +19,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import type { CohortRef } from '../model/discovery';
 import { ago, fmtDay, plural } from '../model/format';
-import { destOf, effectiveDestRepo, fileStep, outOfStep, parentOf, releasedOf, semesterEdited, TOP_LEVEL, type Group, type FolderStep, type OutOfStep } from '../model/releaseState';
+import { destOf, effectiveDestRepo, fileStep, outOfStep, releasedOf, semesterEdited, TOP_LEVEL, type Group, type FolderStep, type OutOfStep } from '../model/releaseState';
 import { effectiveOf, semesterDefaults } from '../model/settings';
 import type { Loaded } from '../model/status';
 import type { Release, Status } from '../model/types';
@@ -36,6 +36,8 @@ import { StateChip, type ChipKind } from '../ui/StateChip';
 import { Hint } from '../ui/Hint';
 import { OpenButton } from '../ui/OpenButton';
 import { RepoFile, Split } from '../ui/Viewer';
+import { listFileOf } from '../ui/ReadingList';
+import { parentOf } from '../model/files';
 import { RepoFiles, addMaterialsTopic, fileIn, focusIn, repoOf } from './CourseIndex';
 import { newestRepo } from './CourseEdit';
 import { sourceRepos } from './Schedule';
@@ -98,10 +100,13 @@ function Released(p: ReadyProps) {
   const repos = semesterMaterialsRepos(p.status, def);
   const open = fileIn(p.file, repos);
   if (open) {
+    // A released reading list is edited in its schedule entry, never here (decision 0044).
+    const entry = (p.status.releases ?? []).find((r) => { const f = listFileOf(r); return f?.released_repo === open.repo && f.released_path === open.path; });
     return (
       <>
         <Head org={org} back />
         <Split label={open.repo} side={<section class="panel section" aria-label={open.repo}><h2>{open.repo}</h2><RepoFiles files={p.files} org={org} repo={open.repo} current={open.path} at="cohort" /></section>}>
+          {entry ? <p class="footnote"><a class="textlink" href={`?cohort=${org}#schedule-${entry.id}`}>Edit this in the schedule entry</a></p> : null}
           <RepoFile org={org} at={open} />
         </Split>
       </>
