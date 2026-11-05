@@ -9,7 +9,7 @@ instead; `migrate` reads the overlay to write it.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 
 # A session's OPTIONAL prose reading list, the one file in a `readings/NN_.../` folder that
 # is inlined as text rather than listed as a download. Named once here because `scaffold`
@@ -80,6 +80,13 @@ def readings_block(names: list[str], read_overlay: Callable[[str], str | None]) 
 # shape opens with `# Session 1 readings` and sub-heads `## Required Readings`; at their
 # written levels those outrank the page's own `<h2>Session 1`, which is exactly backwards.
 HEADING_SHIFT = 2
+
+
+def join_lists(texts: Iterable[str]) -> str:
+    """The reading list a row inlines: the list of each readings entry it shows (its
+    own, or those attached to it), blank ones dropped, headings demoted to nest under
+    the row's. The semester site and the student file both join them so."""
+    return "\n\n".join(demote_headings(t.strip()) for t in texts if t.strip())
 
 
 def demote_headings(text: str, shift: int = HEADING_SHIFT) -> str:

@@ -487,13 +487,6 @@ def test_a_path_is_listed_under_the_row_whose_copy_lands_it_deepest():
     assert names("lectures/01", "lecture-1", blobs[:1]) is None
 
 
-def test_a_reading_list_is_the_entries_text_nested_under_the_row():
-    assert site._reading_list(["# Week 1\n\n- Blitzstein.\n", "  "]) == (
-        "### Week 1\n\n- Blitzstein."
-    )
-    assert site._reading_list(["  "]) == ""
-
-
 _NOW = datetime(2026, 9, 10, 12, 0, tzinfo=ZoneInfo("Europe/Berlin"))
 _LIVE = frozenset({"materials"})
 

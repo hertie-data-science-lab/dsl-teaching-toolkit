@@ -33,3 +33,10 @@ def test_demote_headings_leaves_code_and_prose_alone():
 def test_demote_headings_clamps_at_six():
     assert readings.demote_headings("##### deep").startswith("###### deep")
     assert readings.demote_headings("###### deepest").startswith("###### deepest")
+
+
+def test_a_rows_reading_lists_are_joined_nested_under_the_row():
+    assert readings.join_lists(["# Week 1\n\n- Blitzstein.\n", "  "]) == (
+        "### Week 1\n\n- Blitzstein."
+    )
+    assert readings.join_lists(["  "]) == ""

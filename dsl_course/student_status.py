@@ -63,7 +63,7 @@ from .course import (
 from .discovery import handed_out_assignments
 from .gh_contents import get_file_content, repo_tree
 from .materials import semester_syllabus
-from .readings import demote_headings
+from .readings import join_lists
 from .repos import default_branch
 from .schedule_plan import (
     Landing,
@@ -360,12 +360,6 @@ def _landed(
     return links, landed
 
 
-def _reading_list(extra: StudentFacts, rows: list[PlannedRow]) -> str:
-    """The reading lists `rows` show now (`gather`), headings nested under the row's."""
-    texts = [(extra.reading_lists.get(r.key) or "").strip() for r in rows]
-    return "\n\n".join(demote_headings(t) for t in texts if t)
-
-
 def _shown_list(
     facts: SemesterFacts,
     row: PlannedRow,
@@ -505,7 +499,11 @@ def release_rows(facts: SemesterFacts, extra: StudentFacts) -> list[dict]:
                 off_schedule=not r.shown,
                 links=links + readings,
                 readings=links if own else readings,
-                reading_list=_reading_list(extra, ([r] if own else []) + sr.readings),
+                # The reading lists these rows show now (`gather`).
+                reading_list=join_lists(
+                    extra.reading_lists.get(x.key, "")
+                    for x in ([r] if own else []) + sr.readings
+                ),
                 readings_pending=pending,
                 # Readings attached, landed or not: the site's own test.
                 tabs=row_tabs(r.kind, bool(sr.readings)),

@@ -79,7 +79,7 @@ from .grading_spec import load_grading_spec, total_points
 from .log import CLIParser, log, log_err, log_step, log_withheld
 from .materials import semester_syllabus
 from .public_site import publish as publish_public_site
-from .readings import demote_headings
+from .readings import join_lists
 from .repos import (
     default_branch,
 )
@@ -473,12 +473,6 @@ def _row_landed(
         if landed is not None:
             out.append(landed)
     return out
-
-
-def _reading_list(texts: list[str]) -> str:
-    """The reading list a row inlines: the list of each readings entry it shows (its
-    own, or those attached to it), headings demoted to nest under the row's."""
-    return "\n\n".join(demote_headings(t.strip()) for t in texts if t.strip())
 
 
 def _shown_list(
@@ -966,7 +960,7 @@ def _site_rows(
             readings_pending=pending,
             dests=list(dict.fromkeys([*r.dests, *pending_dests])),
             location=r.location,
-            reading_list=_reading_list(lists),
+            reading_list=join_lists(lists),
             chip=sr.chip,
             repeat=r.slot > 0,
         )
