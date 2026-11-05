@@ -6,7 +6,8 @@
 // (`?folder=<repo>/<path>`) opens that folder and its parents, and scrolls it into view;
 // `current`, the file open beside the tree, is marked and its folders opened. `at` names whose
 // page the links open: the course's materials index, or a semester's Released materials
-// (`?cohort=`).
+// (`?cohort=`). `lists`, on the course's trees: the paths readings entries name, marked with
+// every `READINGS.md` as a `reading list` (decision 0044).
 
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { readJson, safeStorage, writeJson } from '../auth/types';
@@ -17,6 +18,7 @@ import { ghUrl } from './bits';
 import { FileRow, useYourSetup } from './FileRow';
 import { FileHead, FolderHead } from './FileTree';
 import { Ext } from './icons';
+import { isReadingList } from './ReadingList';
 
 const storeKey = (org: string, repo: string) => `dsl.materialsTree.${org}/${repo}`;
 
@@ -49,13 +51,14 @@ export const fileViewHref = (org: string, repo: string, path: string, at: TreeAt
 /** The folders above `path`. */
 const parentsOf = (path: string) => withParents(path).slice(0, -1);
 
-export function MaterialsTree({ org, repo, paths, focus, current, at = 'course' }: {
+export function MaterialsTree({ org, repo, paths, focus, current, at = 'course', lists }: {
   org: string;
   repo: string;
   paths: { path: string; dir: boolean }[];
   focus?: string;
   current?: string;
   at?: TreeAt;
+  lists?: readonly string[];
 }) {
   const setup = useYourSetup();
   const [open, setOpen] = useState<Set<string>>(() => {
@@ -88,6 +91,7 @@ export function MaterialsTree({ org, repo, paths, focus, current, at = 'course' 
         <li class={`ft-file${current === n.path ? ' current' : ''}`}>
           <FileHead name={n.name}>
             <FileRow org={org} link={{ name: n.name, repo, path: n.path, url: ghUrl(org, repo, n.path, 'HEAD') }} here={fileViewHref(org, repo, n.path, at)} setup={setup} profile={profileHref(org)} cls="ft-name" current={current === n.path} />
+            {lists && isReadingList(n.path, lists) ? <span class="chip muted">reading list</span> : null}
           </FileHead>
         </li>
       );

@@ -84,6 +84,8 @@ export interface SaveOptions {
   onCommit?: () => void;
   /** Once the save is good: a follow-up whose sentence ends the saved line. It must not throw. */
   after?: () => Promise<string>;
+  /** False: follow no check runs (a course file no check reads, a reading list). */
+  checks?: boolean;
 }
 
 /** Write `text` over `sha` (null for a new file), then report the checks. */
@@ -109,7 +111,7 @@ export async function saveText(env: Env, t: Target, text: string | null, sha: st
   report({ kind: 'busy', text: 'Checking…' });
   const sr = opts.statusRepo;
   const before = sr ? statusProblems(env, sr, t).length : 0;
-  const v = await verdict(env.client, t.owner, t.repo, commit, { pollMs: env.pollMs });
+  const v: Verdict = opts.checks === false ? { ok: null, text: '' } : await verdict(env.client, t.owner, t.repo, commit, { pollMs: env.pollMs });
   if (v.ok === false) {
     report({ kind: 'bad', text: `Saved, but ${v.text}` });
     return true;

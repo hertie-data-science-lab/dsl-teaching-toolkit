@@ -36,6 +36,7 @@ import { StateChip, type ChipKind } from '../ui/StateChip';
 import { Hint } from '../ui/Hint';
 import { OpenButton } from '../ui/OpenButton';
 import { RepoFile, Split } from '../ui/Viewer';
+import { listFileOf } from '../ui/ReadingList';
 import { RepoFiles, addMaterialsTopic, fileIn, focusIn, repoOf } from './CourseIndex';
 import { newestRepo } from './CourseEdit';
 import { sourceRepos } from './Schedule';
@@ -98,10 +99,13 @@ function Released(p: ReadyProps) {
   const repos = semesterMaterialsRepos(p.status, def);
   const open = fileIn(p.file, repos);
   if (open) {
+    // A released reading list is edited in its schedule entry, never here (decision 0044).
+    const entry = (p.status.releases ?? []).find((r) => { const f = listFileOf(r); return f?.released_repo === open.repo && f.released_path === open.path; });
     return (
       <>
         <Head org={org} back />
         <Split label={open.repo} side={<section class="panel section" aria-label={open.repo}><h2>{open.repo}</h2><RepoFiles files={p.files} org={org} repo={open.repo} current={open.path} at="cohort" /></section>}>
+          {entry ? <p class="footnote"><a class="textlink" href={`?cohort=${org}#schedule-${entry.id}`}>Edit this in the schedule entry</a></p> : null}
           <RepoFile org={org} at={open} />
         </Split>
       </>

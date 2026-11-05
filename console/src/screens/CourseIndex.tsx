@@ -16,7 +16,8 @@ import { Hint } from '../ui/Hint';
 import { Ext } from '../ui/icons';
 import { MaterialsTree } from '../ui/MaterialsTree';
 import { OpenButton } from '../ui/OpenButton';
-import { RepoFile, Split } from '../ui/Viewer';
+import { Split } from '../ui/Viewer';
+import { CourseFile, namedLists } from '../ui/ReadingList';
 import { courseOf, liveSemesters, useCourseView } from './Course';
 import { RepoChip, RepoWhy, TemplateSub } from '../ui/SetupPanel';
 import { materialsReadiness, templateReadinessIn } from '../model/readiness';
@@ -116,7 +117,7 @@ export function OtherRepoRow({ org, repo, write }: { org: string; repo: GhRepo; 
 export const focusIn = (folder: string | undefined, repo: string) => (folder?.startsWith(`${repo}/`) ? folder.slice(repo.length + 1).replace(/\/+$/, '') || undefined : undefined);
 
 /** A materials repo's files under its row, as a folder tree; `current`, a file open beside it; `at` as `MaterialsTree` takes it. */
-export function RepoFiles({ files, org, repo, focus, current, at }: { files: Files; org: string; repo: string; focus?: string; current?: string } & Pick<Parameters<typeof MaterialsTree>[0], 'at'>) {
+export function RepoFiles({ files, org, repo, focus, current, at, lists }: { files: Files; org: string; repo: string; focus?: string; current?: string } & Pick<Parameters<typeof MaterialsTree>[0], 'at' | 'lists'>) {
   const t = files.tree(org, repo);
   if (t.kind === 'loading') return <div class="r-files"><Loading what="Reading the repo" /></div>;
   if (t.kind === 'absent' && at === 'cohort') return <p class="footnote">No such repo in the semester yet: the first release into it creates it.</p>;
@@ -124,7 +125,7 @@ export function RepoFiles({ files, org, repo, focus, current, at }: { files: Fil
   return (
     <div class="r-files">
       {t.truncated ? <p class="footnote">GitHub returned only part of this repo’s file list.</p> : null}
-      <MaterialsTree org={org} repo={repo} paths={t.paths} focus={focus} current={current} at={at} />
+      <MaterialsTree org={org} repo={repo} paths={t.paths} focus={focus} current={current} at={at} lists={lists} />
     </div>
   );
 }
@@ -140,13 +141,14 @@ export function fileIn(file: string | undefined, repos: string[]): { repo: strin
 /** A materials file open in the viewer, its repo's tree beside it (decision 0040 rule 6: the student All materials split). */
 function MaterialsFile({ p, at }: { p: CourseProps; at: { repo: string; path: string } }) {
   const org = p.course.org;
+  const lists = namedLists(p.cohortStates, at.repo);
   return (
     <>
       <div class="page-head">
         <div><h2 class="h1">Course materials</h2><p class="lede"><a class="textlink" href={`?course=${org}#materials`}>All course materials</a></p></div>
       </div>
-      <Split label={at.repo} side={<section class="panel section" aria-label={at.repo}><h2>{at.repo}</h2><RepoFiles files={p.files} org={org} repo={at.repo} current={at.path} /></section>}>
-        <RepoFile org={org} at={at} />
+      <Split label={at.repo} side={<section class="panel section" aria-label={at.repo}><h2>{at.repo}</h2><RepoFiles files={p.files} org={org} repo={at.repo} current={at.path} lists={lists} /></section>}>
+        <CourseFile org={org} at={at} files={p.files} named={lists} write={p.course.write} />
       </Split>
     </>
   );
@@ -186,7 +188,7 @@ export function MaterialsIndexScreen(p: CourseProps) {
                     <RepoWhy r={r} />
                     {gh?.pushed_at ? <span class="r-sub">Last change {fmtDay(gh.pushed_at)} ({ago(gh.pushed_at, p.now)}).</span> : null}
                     <span class="r-side"><OpenButton org={course.org} repo={m.repo} small quiet /><a class="btn small quiet" href={`#materials-${m.repo}`}>Settings</a></span>
-                    <RepoFiles files={files} org={course.org} repo={m.repo} focus={focusIn(p.folder, m.repo)} />
+                    <RepoFiles files={files} org={course.org} repo={m.repo} focus={focusIn(p.folder, m.repo)} lists={namedLists(p.cohortStates, m.repo)} />
                   </li>
                 );
               })}

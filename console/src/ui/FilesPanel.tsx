@@ -56,6 +56,7 @@ import { RepoPickerModal } from './RepoPickerModal';
 import { SplitPanes } from './Splitter';
 import { ChipMeanings, NEVER_RELEASED_TITLE, StateChip, type ChipKind } from './StateChip';
 import { RepoFile } from './Viewer';
+import { CourseFile, isReadingList } from './ReadingList';
 
 export type FilesView = 'browse' | 'withhold' | 'release';
 
@@ -96,6 +97,8 @@ export interface FilesPanelProps {
   ignoreOut?: (draft: string) => string;
   /** Withhold: drawn under the summary (the "Withheld patterns reviewed" suggestion). */
   withholdExtra?: ComponentChildren;
+  /** Course mode: the paths readings entries name as reading lists (decision 0044): marked in Browse, edited in its pane. */
+  readingLists?: readonly string[];
 }
 
 const ADD = '__add';
@@ -347,6 +350,7 @@ function Panel(p: FilesPanelProps) {
     const words = release && dir && r.chip === null ? countsWords(r.row.states) : '';
     return (
       <>
+        {view === 'browse' && course && !dir && isReadingList(path, p.readingLists) ? <span class="chip muted">reading list</span> : null}
         {r.chip ? <StateChip kind={r.chip} tree onTick={r.chip === 'behind' && !isPicked(path, false) && !inPicked(path) ? () => togglePick(path, false) : undefined} onKeep={keep} prUrl={r.chip === 'diverged' ? prOf(runRepo, path) : undefined} /> : null}
         {/* A folder's roll-up, about its contents: shown only while it is closed (`.ft-rollup`); its own chip above shows either way. */}
         {dir && r.chip === null && (r.row.withheld || words) ? (
@@ -441,7 +445,7 @@ function Panel(p: FilesPanelProps) {
     );
 
   const right = view === 'browse'
-    ? (file ? <RepoFile org={p.courseOrg} at={{ repo, path: file }} /> : <p class="empty-note">Choose a file to view it here.</p>)
+    ? (file ? (course ? <CourseFile org={p.courseOrg} at={{ repo, path: file }} files={p.files} named={p.readingLists ?? []} write={p.write} /> : <RepoFile org={p.courseOrg} at={{ repo, path: file }} />) : <p class="empty-note">Choose a file to view it here.</p>)
     : view === 'withhold' ? (
       <>
         <InstitutionDefaults onAdd={addLine} />

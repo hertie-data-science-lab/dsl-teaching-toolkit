@@ -245,7 +245,7 @@ describe('the session date after a TBC release', () => {
 
   it('dates the first slot only and clears TBC', () => {
     const slot = { date: '', time: '', location: 'B1', details: '' };
-    const d = withSessionDate({ kind: 'entry', type: 'lab', id: 'lab-8', session: 8, number: '', title: '', details: '', slots: [slot], files: [], guide: '', show: true, provisional: false, tbc: true }, '2026-11-12', '');
+    const d = withSessionDate({ kind: 'entry', type: 'lab', id: 'lab-8', session: 8, number: '', title: '', details: '', slots: [slot], files: [], list: null, show: true, provisional: false, tbc: true }, '2026-11-12', '');
     expect(d.tbc).toBe(false);
     expect(d.slots).toEqual([{ ...slot, date: '2026-11-12' }]);
   });

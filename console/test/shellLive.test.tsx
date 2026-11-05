@@ -320,8 +320,8 @@ describe('the side nav’s handle (materials-release decision 9)', () => {
       style.remove();
     }
     // Every z-index in the console's sheets: only the overlays (menus, popovers, the run's and the
-    // marks' drawers, modals, the full-screen marking view) stack above the handle.
-    const OVER = new Set(['.topbar', '.popmenu', '.hint-pop', '.modal-scrim', '.drawer', '.opbar', '.marking.full', '.drawer.marks-drawer']);
+    // marks' drawers, modals, the full-screen marking view and entry sheet) stack above the handle.
+    const OVER = new Set(['.topbar', '.popmenu', '.hint-pop', '.modal-scrim', '.drawer', '.opbar', '.marking.full', '.drawer.marks-drawer', '.entry.entry-full']);
     const stacks = [...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{[^{}]*z-index:\s*(\d+)/g)].map((m) => [m[1].trim().replace(/^@media[^{]*\{\s*/, ''), Number(m[2])] as const);
     expect(stacks.length).toBeGreaterThan(10);
     expect(stacks.filter(([sel, z]) => !OVER.has(sel) && sel !== '.nav-handle' && z >= 19)).toEqual([]);

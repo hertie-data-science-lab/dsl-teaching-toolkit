@@ -118,6 +118,8 @@ export interface Todo {
   set_aside?: boolean;
   /** The check it is the to-do of: a materials check's id, or `brief`, `starter`, `description`, `home`, `archive_date`, `email`. */
   check?: string;
+  /** Where it is fixed, as a problem's (`schedule:reading_list:<key>` and its siblings). */
+  fix?: Fix;
 }
 
 /** A semester's to-do (decision 0034): a suggested item such as the site's home page (`site:home`). */
@@ -166,6 +168,8 @@ export interface Release {
   dest: { repo: string; path: string } | null;
   show_on_site: boolean;
   tbc: boolean;
+  /** A readings entry's reading list (decision 0044): its course file and where it is released, `{inline: true}` for text in the schedule, or null. Absent in an older status. */
+  reading_list?: { repo: string; path: string; released_repo: string; released_path: string } | { inline: true } | null;
 }
 
 export interface Assignment {
