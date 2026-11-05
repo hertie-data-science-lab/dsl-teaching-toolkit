@@ -7,7 +7,8 @@
 // `current`, the file open beside the tree, is marked and its folders opened. `at` names whose
 // page the links open: the course's materials index, or a semester's Released materials
 // (`?cohort=`). `lists`, on the course's trees: the paths readings entries name, marked with
-// every `READINGS.md` as a `reading list` (decision 0044).
+// every `READINGS.md` as a `reading list` (decision 0044); a readings folder with files and no
+// list carries `no reading list`, a link that opens the editor on it (decision 0046 rule 5).
 
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { readJson, safeStorage, writeJson } from '../auth/types';
@@ -19,6 +20,7 @@ import { FileRow, useYourSetup } from './FileRow';
 import { FileHead, FolderHead } from './FileTree';
 import { Ext } from './icons';
 import { isReadingList } from '../model/scheduleEdit';
+import { foldersWithoutList, readingListHref } from '../model/readingFolders';
 
 const storeKey = (org: string, repo: string) => `dsl.materialsTree.${org}/${repo}`;
 
@@ -67,6 +69,8 @@ export function MaterialsTree({ org, repo, paths, focus, current, at = 'course',
   });
   const list = useRef<HTMLUListElement>(null);
   const { tree, counts } = useMemo(() => treeOf(paths), [paths]);
+  // Decision 0046 rule 5: on the course's trees only, never a semester's.
+  const bare = useMemo(() => (at === 'course' ? foldersWithoutList(paths) : new Set<string>()), [paths, at]);
   useEffect(() => {
     if (!focus) return;
     setOpen((o) => (withParents(focus).every((x) => o.has(x)) ? o : new Set([...o, ...withParents(focus)])));
@@ -102,6 +106,7 @@ export function MaterialsTree({ org, repo, paths, focus, current, at = 'course',
         <details open={isOpen} onToggle={(e) => toggle(n.path, (e.currentTarget as HTMLDetailsElement).open)}>
           <summary>
             <FolderHead name={n.name} />
+            {bare.has(n.path) ? <a class="chip muted" href={readingListHref(org, repo, n.path)}>no reading list</a> : null}
             <span class="ft-rollup"><span class="ft-count">{plural(counts.get(n.path) ?? 0, 'file')}</span></span>
             <a class="ft-gh" href={ghUrl(org, repo, n.path, 'HEAD', 'tree')} target="_blank" rel="noopener" aria-label={`${n.path}/ on GitHub`}>GitHub <Ext /></a>
           </summary>

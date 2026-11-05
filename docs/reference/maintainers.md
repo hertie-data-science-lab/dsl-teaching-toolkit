@@ -506,7 +506,9 @@ Decision 0034 (need, time, verdict), all computed by the engine so the console h
   and K1-K6 are needed; C4-C6 suggested (there is no K7: the archive date is a to-do only).
   A materials repo needs nothing once it exists (decision 0038: folders carry no kind); the
   syllabus and its weekly plan are ONE suggested check, `syllabus`, and the reviewed
-  `.releaseignore` (`withheld`, confirmed by `materials.confirm_withheld`) another. An entry
+  `.releaseignore` (`withheld`, confirmed by `materials.confirm_withheld`) another; each
+  `readings/<name>/` folder with files and no `READINGS.md` is a suggested
+  `reading_list:<folder>` (decision 0046; its to-do's `check` is `reading_list`). An entry
   written with `files: []` is the suggested to-do `schedule:files:<key>` (`check` `files`),
   dated by the entry. A template's brief and starter are
   needed. The semester's suggested to-dos (`semester.todo[]`) are `site:home`,
@@ -874,6 +876,13 @@ entry that names the list, else the PDFs beside it). The Schedule row's *no read
 reads the Suggested to-do (`check: reading_list`), never the schedule. A path a status
 readings row names (`reading_list.path`) is marked in the course trees, and its released copy
 (`released_repo` / `released_path`) links to the entry.
+
+The course side knows no schedule (decision 0046 rules 5-8): a `readings/<name>/` folder with
+files and no `READINGS.md` gets the course tree's *no reading list* chip
+(`model/readingFolders.ts` `readingFolderState`, the same rule as `status_json.reading_folders`:
+change both together) and the suggested check `reading_list:<folder>`; both link to the course
+file view on `<folder>/READINGS.md`, where `CourseFile` opens a list not in the tree straight in
+the editor as a New file.
 
 Generate draft (0044 point 6) sits under the editor in both mounts: `ui/ReadingDraft.tsx` fetches
 the entry's PDF bytes four at a time through `client.fetchBytes` (uncached, so the viewer's kept

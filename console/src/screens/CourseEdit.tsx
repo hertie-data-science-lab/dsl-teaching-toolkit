@@ -578,7 +578,7 @@ export function MaterialsScreen(p: CourseProps) {
       <div class="stack">
         {m?.checks?.length ? (
           <section class="panel section">
-            <MaterialsChecklist checks={m.checks} />
+            <MaterialsChecklist checks={m.checks} at={{ org: course.org, repo }} />
           </section>
         ) : r ? <RepoWhy r={r} /> : null}
         <section class="panel section">

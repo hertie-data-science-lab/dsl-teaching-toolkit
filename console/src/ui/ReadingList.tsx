@@ -11,6 +11,7 @@ import { useEffect, useMemo, useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import { useSave } from '../edit/save';
 import { fileInTree, parentOf, type Files } from '../model/files';
+import { folderHref } from './MaterialsTree';
 import type { Loaded } from '../model/status';
 import type { Release } from '../model/types';
 import { plural } from '../model/format';
@@ -40,6 +41,7 @@ export const LIST_TEXT = {
   creates: (repo: string, path: string) => `Creates ${repo} / ${path}.`,
   move: 'Move to a file',
   footNew: (repo: string) => `In ${repo}. Saving creates this file next to the reading files; edit the path to put it elsewhere (a lecture folder, say).`,
+  footNewFixed: 'Saving creates this file.',
   footExisting: 'Saving writes your changes to this file.',
   preview: 'As students will see it',
   empty: 'No reading list: students see the reading files only. That is fine.',
@@ -175,7 +177,7 @@ export function ReadingList({ id, list, defaultRepo, defaultPath, org, repos, fi
         )}
       </div>
       {f?.kind === 'error' ? <CheckLine cls="bad">Could not read {cur.path}: {f.message} <button class="textlink" type="button" onClick={retry}>Retry</button></CheckLine> : null}
-      {cur.inline || f?.kind === 'error' ? null : <p class="footnote">{isNew ? LIST_TEXT.footNew(cur.repo) : LIST_TEXT.footExisting}</p>}
+      {cur.inline || f?.kind === 'error' ? null : <p class="footnote">{!isNew ? LIST_TEXT.footExisting : fixedPath ? LIST_TEXT.footNewFixed : LIST_TEXT.footNew(cur.repo)}</p>}
       {picker}
     </div>
   );
@@ -187,22 +189,29 @@ export const listMessage = (path: string) => `readings: edit ${path}, from the D
 /**
  * A course materials file in the viewer (the materials index's `?file=`, the Files panel's
  * Browse pane). A reading list gets `Edit reading list` in its header, which swaps the pane to
- * the editor on that file, saved on its own, and `Back to the file`.
+ * the editor on that file, saved on its own, and `Back to the file`. A reading-list path not in
+ * the repo yet opens straight in the editor as a New file, `Back to the files` returning to its
+ * folder on the index (decision 0046 rule 7: the `no reading list` chip's link).
  */
 export function CourseFile({ org, at, files, named, write }: { org: string; at: { repo: string; path: string }; files: Files; named: readonly NamedList[]; write: boolean }) {
   const [editing, setEditing] = useState<string | null>(null);
   const here = `${at.repo}/${at.path}`;
   const entry = named.find((l) => l.path === at.path);
   const list = write && (!!entry || isReadingList(at.path));
+  const tree = files.tree(org, at.repo);
+  if (list && tree.kind === 'ready' && !fileInTree(files, org, at.repo, at.path)) {
+    return <ListFileEditor org={org} at={at} files={files} entryFiles={entry?.files ?? null} back={folderHref(org, at.repo, parentOf(at.path))} />;
+  }
   if (list && editing === here) return <ListFileEditor org={org} at={at} files={files} entryFiles={entry?.files ?? null} onBack={() => setEditing(null)} />;
   return <RepoFile org={org} at={at} actions={list ? <button class="btn small" type="button" onClick={() => setEditing(here)}>Edit reading list</button> : undefined} />;
 }
 
 /**
  * The reading-list editor on one course file, its path fixed. Its reading files are those of the
- * entry that names it (`entryFiles`), else the PDFs beside it.
+ * entry that names it (`entryFiles`), else the PDFs beside it. `back`: a link to the folder
+ * (a list not there yet), in place of `onBack`'s return to the file.
  */
-function ListFileEditor({ org, at, files, entryFiles, onBack }: { org: string; at: { repo: string; path: string }; files: Files; entryFiles: { repo: string; path: string }[] | null; onBack: () => void }) {
+function ListFileEditor({ org, at, files, entryFiles, onBack, back }: { org: string; at: { repo: string; path: string }; files: Files; entryFiles: { repo: string; path: string }[] | null; onBack?: () => void; back?: string }) {
   const env = useEnv();
   const [save, run] = useSave(env);
   const [text, setText] = useState<string | null>(null);
@@ -222,7 +231,7 @@ function ListFileEditor({ org, at, files, entryFiles, onBack }: { org: string; a
     <section class="panel section" aria-label={at.path}>
       <div class="a-head">
         <h2 class="mono">{at.path}</h2>
-        <span class="actions"><button class="btn small quiet" type="button" onClick={onBack}>Back to the file</button></span>
+        <span class="actions">{back ? <a class="btn small quiet" href={back}>Back to the files</a> : <button class="btn small quiet" type="button" onClick={onBack}>Back to the file</button>}</span>
       </div>
       <ReadingList id="mf" list={list} defaultRepo={at.repo} defaultPath={at.path} org={org} repos={[at.repo]} files={files} readingFiles={readingFiles} onChange={(l) => setText(l.text)} fixedPath />
       <SaveBar state={save} small onSave={() => void doSave()} disabled={text === null} file={{ org, repo: at.repo, path: at.path, exists: f.kind !== 'absent' }} />
