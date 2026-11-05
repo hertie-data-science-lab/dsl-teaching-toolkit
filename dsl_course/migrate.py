@@ -1309,16 +1309,12 @@ def _semester_block(old: dict) -> dict:
     return block
 
 
-# A reading list's 0.11.0 name (`reading_guide:`), renamed back to `reading_list:`.
-_OLD_READING_LIST = legacy.old_name(schedule.READING_LIST, legacy.SCHEDULE_ENTRY)
-
-
-def _guide(entry: dict) -> dict:
+def _renamed_list(entry: dict) -> dict:
     """A readings entry with its 0.11.0 `reading_guide:` renamed `reading_list:`."""
-    if _OLD_READING_LIST not in entry:
+    if schedule.OLD_READING_LIST not in entry:
         return entry
     return {
-        (schedule.READING_LIST if k == _OLD_READING_LIST else k): v
+        (schedule.READING_LIST if k == schedule.OLD_READING_LIST else k): v
         for k, v in entry.items()
     }
 
@@ -1394,6 +1390,7 @@ def _readings_twin(
     new: dict,
     aliases: Aliases,
     reading_list: ReadingList,
+    stops: list[str],
 ) -> tuple[str, dict] | None:
     """A lecture's or lab's copies that land in a readings section, moved off `new` into a
     readings entry of the same session (`<key>-readings`): under 0.11 the block says what
@@ -1415,8 +1412,9 @@ def _readings_twin(
     if "tbc" in new:
         twin["tbc"] = new["tbc"]
     twin["files"] = moved
-    if (listed := _list_of(moved, reading_list)) is not None:
-        twin[schedule.READING_LIST] = listed
+    twin[schedule.READING_LIST] = _list_of(
+        f"{key}-readings", moved, reading_list, stops
+    )
     return f"{key}-readings", {k: v for k, v in twin.items() if v not in (None, "")}
 
 
@@ -1441,32 +1439,31 @@ Aliases = Callable[[str], Mapping[str, str] | None]
 ReadingList = Callable[[str, str], list[tuple[str, str]]]
 
 
-def _list_of(copies: list[dict], reading_list: ReadingList) -> dict | str | None:
-    """A readings entry's `reading_list:` from the overlays its copies carry (decision
-    0044 point 1): the course file itself, left where it is, when they sit in one
-    folder (`READINGS.md` before `.txt` / `.bib`); their text when they sit in several
-    (an entry names one file); None for none. An empty overlay is none: the entry is
-    then the "no reading list" to-do, not a list naming an empty file."""
+def _list_of(
+    key: str, copies: list[dict], reading_list: ReadingList, stops: list[str]
+) -> dict | None:
+    """Readings entry `key`'s `reading_list:` from the overlays its copies carry
+    (decision 0044 point 1): the one course file itself, left where it is; None for
+    none. An empty overlay is none: the entry is then the "no reading list" to-do, not a
+    list naming an empty file. An entry names one file, so several (in one folder or in
+    several) are a stop naming them: a person keeps one."""
     found = [
-        (repo, path, text)
+        (repo, path)
         for f in copies
         for repo in [str(f.get("from_course_repo"))]
         for path, text in reading_list(repo, str(f.get("from_path")))
         if text.strip()
     ]
-    if not found:
+    if len(found) > 1:
+        names = ", ".join(f"{repo}/{path}" for repo, path in found)
+        stops.append(
+            f"{key}: its files hold {len(found)} reading lists ({names}) - an entry "
+            f"names one: keep one and migrate again"
+        )
         return None
-    if len({(repo, path.rpartition("/")[0]) for repo, path, _ in found}) == 1:
-        repo, path, _ = min(found, key=lambda o: _OVERLAY_ORDER.index(_suffix(o[1])))
-        return {"from_course_repo": repo, "from_path": path}
-    return "\n\n".join(text.strip() for *_, text in found) + "\n"
-
-
-_OVERLAY_ORDER = ("md", "markdown", "txt", "bib")
-
-
-def _suffix(path: str) -> str:
-    return path.rsplit(".", 1)[-1].lower()
+    return (
+        {"from_course_repo": found[0][0], "from_path": found[0][1]} if found else None
+    )
 
 
 def schedule_shape(
@@ -1479,7 +1476,8 @@ def schedule_shape(
     notes, stops)` for a 0.10 `text` (and the `assignments.yml` beside it): the 0.11 shape
     (decision 0038), rows unchanged but for what 0038 drops. `aliases(repo)` are a source
     repo's `materials.yml` folder aliases (today's kind inference); `reading_list(repo,
-    path)` the READINGS.md overlays a copy of `path` from `repo` carries (`_list_of`).
+    path)` the READINGS.md overlays a copy of `path` from `repo` carries (`_list_of`:
+    one is the entry's `reading_list:`, several a stop).
     `stops` are what a person must settle first; `notes` what changes for them to check."""
     notes: list[str] = []
     stops: list[str] = []
@@ -1492,7 +1490,10 @@ def schedule_shape(
         # Already one block per kind (a file shaped before amendment 2): only the term's
         # dates and the reading list take their new names.
         shaped = {
-            b: {k: _guide(e) if isinstance(e, dict) else e for k, e in old[b].items()}
+            b: {
+                k: _renamed_list(e) if isinstance(e, dict) else e
+                for k, e in old[b].items()
+            }
             for b in schedule.BLOCKS
             if isinstance(old.get(b), dict)
         }
@@ -1554,11 +1555,11 @@ def schedule_shape(
         }
         if "deploy" in entry or kind in schedule.DISPLAY_KINDS:
             new["files"] = _copies(entry)
-        twin = _readings_twin(key, kind, entry, new, aliases, reading_list)
+        twin = _readings_twin(key, kind, entry, new, aliases, reading_list, stops)
         if twin:
             twins.append(twin)
         if kind == "readings" and (
-            listed := _list_of(new.get("files", []), reading_list)
+            listed := _list_of(key, new.get("files", []), reading_list, stops)
         ):
             new[schedule.READING_LIST] = listed
         blocks[policy.plural_of(kind)][key] = new

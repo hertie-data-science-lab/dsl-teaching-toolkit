@@ -144,15 +144,13 @@ def _readings_for(course_org: str, row: PlannedRow, trees: dict) -> str:
     file it names, read from the COURSE org - then the names of the other files its
     copies take out of the COURSE org (a file, a folder, or a whole repo). A repo that
     cannot be read raises, naming it."""
-    named = row.reading_list_file
-    text = row.reading_list
-    if named is not None:
-        text = (
-            get_file_content(
-                course_org, named.course_source_repo, named.course_source_path
-            )
-            or ""
-        )
+    named = row.reading_list
+    skip = None
+    if isinstance(named, schedule.Deploy):
+        skip = (named.course_source_repo, named.course_source_path.strip("/"))
+        text = get_file_content(course_org, *skip) or ""
+    else:
+        text = named or ""
     parts = [text.strip()] if text.strip() else []
     names: list[str] = []
     for d in row.deploys:
@@ -170,12 +168,7 @@ def _readings_for(course_org: str, row: PlannedRow, trees: dict) -> str:
         names += [
             p
             for p in trees[repo]
-            if (p == src or p.startswith(prefix))
-            and not (
-                named
-                and repo == named.course_source_repo
-                and p == named.course_source_path.strip("/")
-            )
+            if (p == src or p.startswith(prefix)) and (repo, p) != skip
         ]
     if names:
         # Raw filenames: deriving a citation from `blitzstein-ch1.pdf` would be inventing

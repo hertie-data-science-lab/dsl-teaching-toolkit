@@ -79,18 +79,18 @@ from .grading_spec import load_grading_spec, total_points
 from .log import CLIParser, log, log_err, log_step, log_withheld
 from .materials import semester_syllabus
 from .public_site import publish as publish_public_site
-from .readings import demote_headings
+from .readings import join_lists
 from .repos import (
     default_branch,
 )
 from .schedule_plan import (
     READINGS_KIND,
+    Landing,
     PlannedRow,
     declared_syllabus,
     deploy_dest,
     dest_section,
-    inline_list_opens,
-    list_dests,
+    landings,
     planned_rows,
     shown_list,
     site_rows,
@@ -409,19 +409,26 @@ def _landed(
     deploy: schedule.Deploy,
     allow: frozenset[str],
     hosted: Hosted,
-    hidden: frozenset[str] = frozenset(),
-    own: str | None = None,
+    marks: Mapping[str, tuple[Landing, ...]],
+    key: str,
 ) -> _Landed | None:
-    """What `deploy` has landed, or None while nothing has (`site_repo.landed_links`),
-    read off the destination repo's memoised tree (`_repo_tree`), so a released folder
-    whose name carries no ordinal is as linked as one that does. A file the site hosts a
-    copy of (`hosted`) links that copy too; `hidden` (the reading-list files in its repo,
-    `schedule_plan.list_dests`) are never linked, and count as landed only when `own`
-    (the asking row's list)."""
+    """What `deploy` (row `key`'s) has landed, or None while nothing has
+    (`site_repo.landed_links` over `marks`, `schedule_plan.landings`), read off the
+    destination repo's memoised tree (`_repo_tree`), so a released folder whose name
+    carries no ordinal is as linked as one that does. A file the site hosts a copy of
+    (`hosted`) links that copy too."""
     repo, path = deploy.semester_dest_repo, deploy_dest(deploy)
     branch, blobs = _repo_tree(semester_org, repo)
     links = landed_links(
-        semester_org, repo, branch, blobs, path, allow, hidden, hosted, own
+        semester_org,
+        repo,
+        branch,
+        blobs,
+        path,
+        allow,
+        marks.get(repo, ()),
+        key,
+        hosted,
     )
     if links is None:
         return None
@@ -442,15 +449,14 @@ def _row_landed(
     allow: frozenset[str],
     live_repos: frozenset[str],
     hosted: Hosted,
-    hidden: Mapping[str, frozenset[str]],
+    marks: Mapping[str, tuple[Landing, ...]],
 ) -> list[_Landed]:
     """Everything `row`'s copies have landed, in plan order, no reading-list file linked
-    (`hidden`, per repo: `schedule_plan.list_dests`). A copy into a repo the semester does
-    not have yet has landed nothing, and a copy that lands INSIDE another copy of the
-    same row (a lab's `solutions/`) is already listed by that one."""
+    (`marks`: `schedule_plan.landings`). A copy into a repo the semester does not have
+    yet has landed nothing, and a copy that lands INSIDE another copy of the same row (a
+    lab's `solutions/`) is already listed by that one."""
     deploys = row.deploys
     dests = [(d.semester_dest_repo, deploy_dest(d)) for d in deploys]
-    named = row.reading_list_dest
 
     def inside(repo: str, path: str) -> bool:
         return any(
@@ -462,34 +468,25 @@ def _row_landed(
     for deploy, (repo, path) in zip(deploys, dests, strict=True):
         if repo not in live_repos or inside(repo, path):
             continue
-        own = named[1] if named and named[0] == repo else None
-        landed = _landed(
-            semester_org, deploy, allow, hosted, hidden.get(repo, frozenset()), own
-        )
+        landed = _landed(semester_org, deploy, allow, hosted, marks, row.key)
         if landed is not None:
             out.append(landed)
     return out
 
 
-def _reading_list(texts: list[str]) -> str:
-    """The reading list a row inlines: the list of each readings entry it shows (its
-    own, or those attached to it), headings demoted to nest under the row's."""
-    return "\n\n".join(demote_headings(t.strip()) for t in texts if t.strip())
-
-
 def _shown_list(
     semester_org: str,
     r: PlannedRow,
+    host: PlannedRow | None,
     landed: bool,
-    opens: datetime | None,
     now: datetime,
     live_repos: frozenset[str],
 ) -> str:
     """`schedule_plan.shown_list`, read off the semester's memoised trees."""
     return shown_list(
         r,
+        host,
         landed,
-        opens,
         now,
         lambda repo, path: (
             repo in live_repos and path in _repo_tree(semester_org, repo)[1]
@@ -909,7 +906,6 @@ def _site_rows(
     allow: frozenset[str],
     live_repos: frozenset[str],
     hosted: Hosted,
-    tz: ZoneInfo,
     now: datetime | None = None,
 ) -> tuple[dict[str, str], list[str]]:
     """The `_lectures` collection - one file per site row (`schedule_plan.site_rows`) -
@@ -918,21 +914,19 @@ def _site_rows(
     Every row the schedule shows is written, released or not, so the whole term reads as
     a syllabus from the day it is written. A silent readings row is written only once
     something has landed, and never when all it landed is root files. Each readings
-    entry's reading list shows once released (`_shown_list`, at `now`; a whole-day
-    entry's in the semester's `tz`)."""
+    entry's reading list shows once released (`_shown_list`, at `now`)."""
     now = now or datetime.now(UTC)
-    hidden = list_dests(rows)
+    marks = landings(rows)
     built: list[tuple[str, int, _Row]] = []
     for sr in site_rows(rows):
         r = sr.row
-        landed = _row_landed(semester_org, r, allow, live_repos, hosted, hidden)
+        landed = _row_landed(semester_org, r, allow, live_repos, hosted, marks)
         if not r.shown and all(item.root_file for item in landed):
             continue
         lists = []
         if r.kind == READINGS_KIND:
-            opens = inline_list_opens(r, None, tz)
             lists.append(
-                _shown_list(semester_org, r, bool(landed), opens, now, live_repos)
+                _shown_list(semester_org, r, None, bool(landed), now, live_repos)
             )
         readings = []
         pending = False
@@ -940,10 +934,9 @@ def _site_rows(
         # sentence names them beside the row's own copies.
         pending_dests: list[str] = []
         for attached in sr.readings:
-            got = _row_landed(semester_org, attached, allow, live_repos, hosted, hidden)
-            opens = inline_list_opens(attached, r, tz)
+            got = _row_landed(semester_org, attached, allow, live_repos, hosted, marks)
             lists.append(
-                _shown_list(semester_org, attached, bool(got), opens, now, live_repos)
+                _shown_list(semester_org, attached, r, bool(got), now, live_repos)
             )
             if not attached.deploys:
                 continue
@@ -966,7 +959,7 @@ def _site_rows(
             readings_pending=pending,
             dests=list(dict.fromkeys([*r.dests, *pending_dests])),
             location=r.location,
-            reading_list=_reading_list(lists),
+            reading_list=join_lists(lists),
             chip=sr.chip,
             repeat=r.slot > 0,
         )
@@ -1575,9 +1568,7 @@ def sync_site(course_org: str, semester_org: str) -> int:
             host_selection(semester_org),
             _landings(sched),
         )
-        rows, present = _site_rows(
-            semester_org, planned, allow, live, hosted, ZoneInfo(sched.timezone)
-        )
+        rows, present = _site_rows(semester_org, planned, allow, live, hosted)
         # ONE read of the team cells for every self-select group assignment (`_formed_teams`).
         formed_teams = _formed_teams(semester_org, sched)
         log_step(

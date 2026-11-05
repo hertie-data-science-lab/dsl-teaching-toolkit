@@ -1012,26 +1012,28 @@ def landed_links(
     blobs: Sequence[str],
     path: str,
     allow: frozenset[str],
-    hidden: Collection[str] = frozenset(),
+    landings: Collection[tuple[str, str]],
+    key: str,
     hosted: Hosted | None = None,
-    own: str | None = None,
 ) -> list[Link] | None:
-    """The links for what a copy into `repo/path` has landed, or None while nothing has:
-    a file is one link, a folder its files as GitHub shows them (`shape_links`), the repo
-    root the whole repo. `blobs` is every file of the repo, sorted. `hidden` are paths in
-    `repo` never linked though landed - the reading-list files readings entries name
-    (`schedule_plan.list_dests`), whose text a row inlines - and a copy that landed
-    nothing else has not landed (None), so a list kept in a lecture folder does not
-    release the lecture. `own`, the asking row's own list, is the exception: having
-    landed it, the copy has landed (no link). `hosted` (the semester site's alone) adds
-    each hosted copy's `view_url`. The ONE listing rule: the semester site and the
-    student file both read it."""
+    """The links for what a copy of row `key` into `repo/path` has landed, or None while
+    nothing has: a file is one link, a folder its files as GitHub shows them
+    (`shape_links`), the repo root the whole repo. `blobs` is every file of the repo,
+    sorted. `hosted` (the semester site's alone) adds each hosted copy's `view_url`. The
+    ONE listing rule: the semester site and the student file both read it.
+
+    `landings` are the reading-list files in `repo`, `(path, row key)`
+    (`schedule_plan.landings`): never linked - their row inlines the text - and landed
+    for their own row only. A copy that landed nothing else has not landed, so a list
+    kept in a lecture folder does not release the lecture, unless the list is row
+    `key`'s own (landed, no link)."""
     path = "" if is_repo_root(path) else path.strip("/")
     prefix = f"{path}/" if path else ""
     landed = [b for b in blobs if b == path or b.startswith(prefix)] if path else blobs
-    shown = [b for b in landed if b not in hidden]
+    lists = {p for p, _k in landings}
+    shown = [b for b in landed if b not in lists]
     if not shown:
-        return [] if own is not None and own in landed else None
+        return [] if any((b, key) in landings for b in landed) else None
     if path in shown:
         return [file_link(org, repo, branch, path, path.rsplit("/", 1)[-1], hosted)]
     files = [file_link(org, repo, branch, b, b[len(prefix) :], hosted) for b in shown]

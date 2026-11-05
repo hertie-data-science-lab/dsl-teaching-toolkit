@@ -2971,7 +2971,15 @@ def _mirror(
 def _landed_link(path: str, hosted) -> Link:
     """The one link a released file lands as on a row, through the shared listing rule."""
     links = site_repo.landed_links(
-        "Semester-f2026", "materials", "main", (path,), path, frozenset(), (), hosted
+        "Semester-f2026",
+        "materials",
+        "main",
+        (path,),
+        path,
+        frozenset(),
+        (),
+        "",
+        hosted,
     )
     return links[0]
 

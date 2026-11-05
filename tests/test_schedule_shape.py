@@ -303,7 +303,9 @@ def test_the_term_s_dates_become_the_semester_block():
     assert sched.dropped == [] and sched.archive.when.isoformat() == "2027-02-16"
 
 
-def _readings_shaped(overlays: dict[str, list[tuple[str, str]]]) -> dict:
+def _readings_shaped(
+    overlays: dict[str, list[tuple[str, str]]], stopped: list[str] | None = None
+) -> dict:
     old = (
         "releases:\n"
         "  readings-1:\n"
@@ -318,23 +320,15 @@ def _readings_shaped(overlays: dict[str, list[tuple[str, str]]]) -> dict:
     text, _after, _notes, stops = migrate.schedule_shape(
         old, reading_list=lambda repo, path: overlays.get(path, [])
     )
-    assert stops == []
+    assert stops == (stopped or [])
     sched = schedule.parse(load_yaml_lines(text))
     assert sched.dropped == [] and sched.faults == []
     return yaml.safe_load(text)["readings"]["readings-1"]
 
 
 def test_the_migration_names_a_readings_folder_s_overlay_as_the_reading_list():
-    # Decision 0044 point 1: the file stays where it is and the entry names it,
-    # READINGS.md before a .bib beside it.
-    entry = _readings_shaped(
-        {
-            "readings/01": [
-                ("readings/01/READINGS.bib", "@book{a}"),
-                ("readings/01/READINGS.md", "- A."),
-            ]
-        }
-    )
+    # Decision 0044 point 1: the file stays where it is and the entry names it.
+    entry = _readings_shaped({"readings/01": [("readings/01/READINGS.md", "- A.")]})
     assert entry["reading_list"] == {
         "from_course_repo": "cm",
         "from_path": "readings/01/READINGS.md",
@@ -345,15 +339,28 @@ def test_the_migration_names_a_readings_folder_s_overlay_as_the_reading_list():
     assert "reading_list" not in _readings_shaped(empty)
 
 
-def test_overlays_in_two_folders_become_inline_text():
-    # One entry names one file: overlays in two copied folders keep their text inline.
+def test_several_overlays_stop_the_migration_naming_them():
+    # One entry names one file: overlays in two copied folders, or two in one folder,
+    # are for a person to settle; the entry is written without a list.
+    stop = (
+        "readings-1: its files hold 2 reading lists (cm/{}, cm/{}) - an entry names "
+        "one: keep one and migrate again"
+    )
+    two = ("readings/01/READINGS.md", "extra/01/READINGS.md")
     entry = _readings_shaped(
         {
-            "readings/01": [("readings/01/READINGS.md", "- A.\n")],
-            "extra/01": [("extra/01/READINGS.md", "- B.")],
-        }
+            "readings/01": [(two[0], "- A.\n")],
+            "extra/01": [(two[1], "- B.")],
+        },
+        [stop.format(*two)],
     )
-    assert entry["reading_list"] == "- A.\n\n- B."
+    assert "reading_list" not in entry
+    one = ("readings/01/READINGS.bib", "readings/01/READINGS.md")
+    entry = _readings_shaped(
+        {"readings/01": [(one[0], "@book{a}"), (one[1], "- A.")]},
+        [stop.format(*one)],
+    )
+    assert "reading_list" not in entry
 
 
 def test_a_file_already_one_block_per_kind_takes_only_the_amendment_s_renames():
