@@ -9,7 +9,7 @@ import { Invalid } from '../forms/Form';
 import { RELEASE_WORD, TYPE_CLASS, siteRowWord, fmtDay, fmtTime, fmtWhen, heldSentence, markWord, releaseIdent, repoWords, sortKey } from '../model/format';
 import { needsANumber, parseSchedule, scheduleRows, type Block, type Row } from '../model/schedule';
 import {
-  READINGS_KIND, SESSION_KINDS, applyChanges, blockOf, changesOf, defaultListPath, defaultReleaseAt, draftErrors, emptyTwin, hiddenKind, listFile, listWrites, newDraft, newlyManual, nextNumber, nextSession, numberedField, pendingAdoption, readDraft, readingFilesOf, releaseAt, twinUsed, writeDraft,
+  READINGS_KIND, SESSION_KINDS, applyChanges, blockOf, changesOf, defaultListPath, defaultReleaseAt, draftErrors, emptyTwin, hiddenKind, listFile, listWrites, newDraft, newlyManual, nextNumber, nextSession, numberedField, readDraft, readingFilesOf, releaseAt, twinUsed, writeDraft,
   type AssignmentDraft, type Draft, type EntryDraft, type FileDraft, type ListDraft, type SemesterDraft, type SemesterEntryDraft, type SemesterType, type Slot,
 } from '../model/scheduleEdit';
 import type { Assignment, Release, SemesterTodo } from '../model/types';
@@ -363,7 +363,7 @@ function UnitForm({ p, d, set, errors, consoleOn, sources }: FormProps<EntryDraf
   );
 }
 
-/** A readings entry's Reading list (decision 0044): the shared editor, at the entry's default path while it has none. */
+/** A readings entry's Reading list (decisions 0044, 0046): the shared editor; with none, the offer of one at the entry's default path. */
 function ListField({ p, id, d, set, sources, title }: { p: ReadyProps; id: string; d: EntryDraft; set: Set_<EntryDraft>; sources: { materials: string[] }; title?: string }) {
   const listPath = d.list && !d.list.inline ? d.list.path : '';
   const trees = [...new Set(d.files.map((f) => f.repo))].map((repo) => p.files.tree(p.course.org, repo));
@@ -373,7 +373,7 @@ function ListField({ p, id, d, set, sources, title }: { p: ReadyProps; id: strin
   if (!repo && !d.list?.inline) return <div class="field"><span class="lbl-row"><b>{LIST_TEXT.label}</b></span><p class="footnote">{LIST_TEXT.noRepo}</p></div>;
   return (
     <ReadingList id={id} list={d.list} defaultRepo={repo ?? ''} noRepo={!repo} defaultPath={defaultListPath(d, d.title || title)}
-      org={p.course.org} repos={sources.materials} files={p.files} readingFiles={reading} onChange={(list) => set({ list })} />
+      org={p.course.org} repos={sources.materials} files={p.files} readingFiles={reading} onChange={(list) => set({ list })} onDetach={() => set({ list: null })} />
   );
 }
 
@@ -694,8 +694,6 @@ function View(p: ReadyProps) {
   const [filters, setFilters] = useState<Record<Block, boolean>>({ releases: true, assignments: true, events: true });
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [removed, setRemoved] = useState<string[]>([]);
-  // Reading lists Discard turned down (`repo/path`): not taken unasked again until the page reloads.
-  const [declined, setDeclined] = useState<Set<string>>(new Set());
   const [save, setSave] = useState<SaveState>({ kind: 'idle' });
   // The Save that would leave an assignment with no hand out date waits on this question.
   const [askManual, setAskManual] = useState(false);
@@ -729,14 +727,9 @@ function View(p: ReadyProps) {
   // Reading lists (decision 0044): a list file's text and sha are the files cache's, read here and at save.
   const readList = (l: ListDraft) => listFile(p.files, p.course.org, l);
   const inTree = (repo: string, path: string) => fileInTree(p.files, p.course.org, repo, path);
-  // A readings entry (or a unit's twin) whose default READINGS.md is already there takes it: the open entry is then dirty.
-  // Only for someone who can write the course, and never again this session for a list Discard turned down.
-  const adopt = (repo: string, path: string) => p.course.write && !declined.has(`${repo}/${path}`) && inTree(repo, path);
-  const adoptions = (d: Draft | null) => (d?.kind === 'entry' ? [pendingAdoption(d, adopt), d.twin ? pendingAdoption(d.twin, adopt) : null].filter((l) => l !== null) : []);
-  const adopts = (d: Draft | null) => adoptions(d).length > 0;
   // Every draft this render, once: the edited ones and the open entry.
   const drafted = new Map([...Object.keys(drafts), ...(key && key !== 'new' && key !== 'semester' && sf ? [key] : [])].map((k) => [k, draftOf(k)]));
-  const dirtyKeys = [...drafted.keys()].filter((k) => { const d = drafted.get(k)!; return k === 'new' || (d !== null && (!deepEqual(d, baseOf(k)) || adopts(d))); });
+  const dirtyKeys = [...drafted.keys()].filter((k) => { const d = drafted.get(k)!; return k === 'new' || (d !== null && !deepEqual(d, baseOf(k))); });
   const dirty = dirtyKeys.length + removed.length;
   const setDraft = (k: string, d: Draft) => {
     setDrafts({ ...drafts, [k]: d });
@@ -775,10 +768,10 @@ function View(p: ReadyProps) {
     const dates = dirtyKeys.map(at).find((d) => d.kind === 'semester');
     if (dates) writeDraft(y, dates, doc);
     const entryKeys = dirtyKeys.filter((k) => at(k).kind !== 'semester');
-    const out = applyChanges(y.text, (y.toJS() ?? {}) as Record<string, unknown>, changesOf(entryKeys.map(at), entryKeys.map(baseOf), adopt), removed, { handedOut, exists: inTree, adopt });
+    const out = applyChanges(y.text, (y.toJS() ?? {}) as Record<string, unknown>, changesOf(entryKeys.map(at), entryKeys.map(baseOf)), removed, { handedOut, exists: inTree });
     if (!validSchedule(parse(out.text) ?? {})) return setSave({ kind: 'bad', text: invalidText('the schedule', validSchedule) });
     // The key a draft was written under: a new entry's is generated, a renumbered one's renamed.
-    const writtenKey = (k: string) => out.keys[changesOf(entryKeys.slice(0, entryKeys.indexOf(k)).map(at), entryKeys.slice(0, entryKeys.indexOf(k)).map(baseOf), adopt).length];
+    const writtenKey = (k: string) => out.keys[changesOf(entryKeys.slice(0, entryKeys.indexOf(k)).map(at), entryKeys.slice(0, entryKeys.indexOf(k)).map(baseOf)).length];
     const newId = entryKeys.includes('new') ? writtenKey('new') : null;
     const what = dirty === 1 && dirtyKeys.length === 1 ? (dirtyKeys[0] === 'new' ? `add ${newId}` : `edit ${dirtyKeys[0]}`) : dirtyKeys.length === 0 ? `remove ${removed.join(', ')}` : `${dirty} changes`;
     const first: Step = { target: { owner: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }, text: out.text, sha: sf.sha, opts: { message: `schedule: ${what}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] } };
@@ -971,7 +964,7 @@ function View(p: ReadyProps) {
         {sheet}
       </div>
       {!key ? <SaveLine state={save} /> : null}
-      <UnsavedBar count={dirty} busy={save.kind === 'busy'} onDiscard={() => { setDeclined(new Set([...declined, ...[...drafted.values()].flatMap(adoptions).map((l) => `${l.repo}/${l.path}`)])); setDrafts({}); setRemoved([]); setSave({ kind: 'idle' }); }} onSave={requestSave} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml', exists: schedExists }} />
+      <UnsavedBar count={dirty} busy={save.kind === 'busy'} onDiscard={() => { setDrafts({}); setRemoved([]); setSave({ kind: 'idle' }); }} onSave={requestSave} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml', exists: schedExists }} />
       {askManual ? <HandOutDialog one={manualKeys.length === 1} onSave={(h) => void doSave(h ? manualKeys[0] : undefined)} onClose={() => setAskManual(false)} /> : null}
     </>
   );

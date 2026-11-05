@@ -20,6 +20,7 @@ import { MaterialsScreen } from '../src/screens/CourseEdit';
 import { StudentsScreen } from '../src/screens/People';
 import { ScheduleScreen, noListRows } from '../src/screens/Schedule';
 import { DRAFT_TEXT } from '../src/ui/ReadingDraft';
+import { LIST_TEXT } from '../src/ui/ReadingList';
 import type { CohortProps } from '../src/screens/types';
 import { parseSearch, scheduleNewHref } from '../src/router';
 import example from './fixtures/status.example.json';
@@ -192,6 +193,7 @@ describe('the schedule editor’s forms, clicked through (forms mock-up v3)', ()
     await type('#e-title', 'Trees');
     await type('#e-date0', '2026-09-15');
     await type('#e-time0', '10:00');
+    await click(button(LIST_TEXT.writeOne));
     await type('#r-rl', '- Breiman (2001).');
     await click(button('Add lecture'));
     const out = await saved(gh);
@@ -711,7 +713,7 @@ describe('Save on a materials repo’s settings starts Refresh', () => {
   });
 });
 
-describe('the reading list in the schedule entry sheet (decision 0044)', () => {
+describe('the reading list in the schedule entry sheet (decisions 0044, 0046)', () => {
   const LIST = 'readings/04_week/READINGS.md';
   const sched = `readings:\n  readings-4:\n    session: 4\n    event_datetime: 2026-10-06T09:00\n    files:\n      - from_course_repo: course-materials-f2026\n        from_path: readings/04_week\n    reading_list:\n      from_course_repo: course-materials-f2026\n      from_path: ${LIST}\n  readings-5:\n    session: 5\n    event_datetime: 2026-10-13T09:00\n    reading_list: "- Old text."\n  readings-6:\n    session: 6\n    event_datetime: 2026-10-20T09:00\n    files:\n      - from_course_repo: course-materials-f2026\n        from_path: readings/06/paper.pdf\n`;
   const withList = (over: Record<string, string> = {}) => new StaticFiles(
@@ -772,10 +774,22 @@ describe('the reading list in the schedule entry sheet (decision 0044)', () => {
     expect(out.readings['readings-5'].reading_list).toEqual({ from_course_repo: 'course-materials-f2026', from_path: 'lectures/05/READINGS.md' });
   });
 
-  it('shows a new list at the reading file’s folder, and writes no file while it is empty', async () => {
+  it('offers Write one when no list file is beside the reading files: a New file at their folder, no file and no key while it is empty', async () => {
     const gh = github(), f = withList();
     await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'readings-6' })} />);
+    // The none state: the offer alone, the sheet clean.
+    expect(root!.textContent).toContain(LIST_TEXT.creates('course-materials-f2026', 'readings/06/READINGS.md'));
+    expect(root!.textContent).not.toContain(LIST_TEXT.none);
+    expect(button(LIST_TEXT.useIt)).toBeUndefined();
+    expect(button(LIST_TEXT.chooseFile)).toBeDefined();
+    expect(root!.querySelector('#e-rl')).toBeNull();
+    expect(root!.textContent).not.toContain('File: ');
+    expect(buttons(DRAFT_TEXT.button)).toEqual([]);
+    expect(root!.querySelector('.unsaved')).toBeNull();
+    await click(button(LIST_TEXT.writeOne));
+    expect(root!.textContent).toContain('New file');
     expect(q<HTMLInputElement>('#e-rl-path').value).toBe('readings/06/READINGS.md');
+    expect(q<HTMLTextAreaElement>('#e-rl').value).toBe('');
     expect(root!.textContent).toContain('No reading list: students see the reading files only. That is fine.');
     expect(root!.textContent).toContain('In course-materials-f2026. Saving creates this file next to the reading files; edit the path to put it elsewhere (a lecture folder, say).');
     await type('#e-title', 'Week six');
@@ -802,6 +816,7 @@ describe('the reading list in the schedule entry sheet (decision 0044)', () => {
   it('loads a typed path that is already in the repo as that Existing file, and saves over its sha', async () => {
     const gh = github(), f = withList();
     await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'readings-6' })} />);
+    await click(button(LIST_TEXT.writeOne));
     expect(root!.textContent).toContain('New file');
     await type('#e-rl-path', LIST);
     expect(root!.textContent).toContain('Existing file');
@@ -830,35 +845,62 @@ describe('the reading list in the schedule entry sheet (decision 0044)', () => {
     expect((puts(gh, 'readings/05/READINGS.md')[0].body as { sha?: string }).sha).toBe('static');
   });
 
-  it('adopts a READINGS.md already at the default path: the sheet is dirty and Save names it, with no file written', async () => {
+  it('offers a READINGS.md already at the default path, never takes it on open; Use it loads it and Save names it, with no file written', async () => {
     const gh = github(), f = withList({ [`${COURSE_ORG}/course-materials-f2026/readings/06/READINGS.md`]: '- Already here.\n' });
     (f as unknown as { treeMap: Record<string, string[]> }).treeMap[`${COURSE_ORG}/course-materials-f2026`].push('readings/06/READINGS.md');
     await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'readings-6' })} />);
+    expect(root!.textContent).toContain(LIST_TEXT.none);
+    expect(button(LIST_TEXT.writeOne)).toBeUndefined();
+    expect(root!.querySelector('#e-rl')).toBeNull();
+    expect(root!.querySelector('.unsaved')).toBeNull();
+    await click(button(LIST_TEXT.useIt));
     expect(root!.textContent).toContain('Existing file');
+    expect(root!.textContent).toContain('File: course-materials-f2026 / readings/06/READINGS.md');
     expect(q<HTMLTextAreaElement>('#e-rl').value).toBe('- Already here.\n');
     expect(root!.querySelector('.unsaved')!.textContent).toContain('1 unsaved change');
-    expect(buttons('Save')[0].disabled).toBe(false);
     await click(buttons('Save')[0]);
     await settle(() => puts(gh, 'schedule.yml').length > 0);
     expect(listPuts(gh)).toEqual(['schedule.yml']);
     expect(parse(body(puts(gh, 'schedule.yml')[0])).readings['readings-6'].reading_list).toEqual({ from_course_repo: 'course-materials-f2026', from_path: 'readings/06/READINGS.md' });
   });
 
-  it('adopts nothing for someone who cannot write the course, and nothing again after Discard', async () => {
-    const at6 = { [`${COURSE_ORG}/course-materials-f2026/readings/06/READINGS.md`]: '- Already here.\n' };
-    const there = (f: StaticFiles) => (f as unknown as { treeMap: Record<string, string[]> }).treeMap[`${COURSE_ORG}/course-materials-f2026`].push('readings/06/READINGS.md');
-    let gh = github(), f = withList(at6);
-    there(f);
-    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'readings-6', course: { ...course, write: false } })} />);
+  it('Detach takes the list off at once and Save drops the key only: the file is not written', async () => {
+    const gh = github(), f = withList();
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'readings-4' })} />);
+    await click(button(LIST_TEXT.detach));
+    // The list was the default path's file, so the offer is to use it again.
+    expect(root!.textContent).toContain(LIST_TEXT.none);
+    expect(root!.querySelector('#e-rl')).toBeNull();
+    expect(root!.querySelector('.unsaved')!.textContent).toContain('1 unsaved change');
+    await click(buttons('Save')[0]);
+    await settle(() => puts(gh, 'schedule.yml').length > 0);
+    expect(listPuts(gh)).toEqual(['schedule.yml']);
+    const out = parse(body(puts(gh, 'schedule.yml')[0])).readings['readings-4'];
+    expect('reading_list' in out).toBe(false);
+    expect(out.files).toEqual([{ from_course_repo: 'course-materials-f2026', from_path: 'readings/04_week' }]);
+  });
+
+  it('offers the list the same way in a lecture’s Readings for this session, and takes nothing on open', async () => {
+    const lec = `lectures:\n  lecture-6:\n    session: 6\n    event_datetime: 2026-10-20T09:00\n${sched}`;
+    let gh = github(), f = withList({ [`${COHORT_ORG}/semester-config/schedule.yml`]: lec });
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'lecture-6' })} />);
+    expect(root!.textContent).toContain(LIST_TEXT.creates('course-materials-f2026', 'readings/06/READINGS.md'));
+    expect(button(LIST_TEXT.writeOne)).toBeDefined();
     expect(root!.querySelector('.unsaved')).toBeNull();
     if (root) render(null, root);
-    gh = github(); f = withList(at6);
-    there(f);
-    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'readings-6' })} />);
-    expect(root!.querySelector('.unsaved')!.textContent).toContain('1 unsaved change');
-    await click(button('Discard'));
+    gh = github();
+    f = withList({ [`${COHORT_ORG}/semester-config/schedule.yml`]: lec, [`${COURSE_ORG}/course-materials-f2026/readings/06/READINGS.md`]: '- Already here.\n' });
+    (f as unknown as { treeMap: Record<string, string[]> }).treeMap[`${COURSE_ORG}/course-materials-f2026`].push('readings/06/READINGS.md');
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'lecture-6' })} />);
+    expect(root!.textContent).toContain(LIST_TEXT.none);
     expect(root!.querySelector('.unsaved')).toBeNull();
-    expect(gh.seen.filter((x) => x.method === 'PUT')).toEqual([]);
+    await click(button(LIST_TEXT.useIt));
+    expect(q<HTMLTextAreaElement>('#r-rl').value).toBe('- Already here.\n');
+    expect(button(LIST_TEXT.detach)).toBeDefined();
+    await click(buttons('Save')[0]);
+    await settle(() => puts(gh, 'schedule.yml').length > 0);
+    expect(listPuts(gh)).toEqual(['schedule.yml']);
+    expect(parse(body(puts(gh, 'schedule.yml')[0])).readings['readings-6'].reading_list).toEqual({ from_course_repo: 'course-materials-f2026', from_path: 'readings/06/READINGS.md' });
   });
 
   it('reads no file for a default path the repo tree does not hold', async () => {
@@ -866,7 +908,7 @@ describe('the reading list in the schedule entry sheet (decision 0044)', () => {
     const asked: string[] = [];
     const spy = Object.assign(Object.create(f), { file: (o: string, r: string, path: string) => { asked.push(path); return f.file(o, r, path); } });
     await mount(envOf(gh, spy), <ScheduleScreen {...props(spy, { entry: 'readings-6' })} />);
-    expect(root!.textContent).toContain('New file');
+    expect(button(LIST_TEXT.writeOne)).toBeDefined();
     expect(asked).not.toContain('readings/06/READINGS.md');
   });
 
@@ -888,13 +930,6 @@ describe('the reading list in the schedule entry sheet (decision 0044)', () => {
     expect(root!.textContent).toContain('Add a course materials repo first');
     expect(button('Move to a file')).toBeUndefined();
     expect(button('Choose another…')).toBeUndefined();
-  });
-
-  it('adopts nothing when no file is at the default path: the sheet stays clean', async () => {
-    const gh = github(), f = withList();
-    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'readings-6' })} />);
-    expect(root!.textContent).toContain('New file');
-    expect(root!.querySelector('.unsaved')).toBeNull();
   });
 
   it('says why a list file could not be read, with Retry, never a stuck Reading…', async () => {

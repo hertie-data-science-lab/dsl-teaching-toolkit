@@ -4,7 +4,8 @@
 // layout and words and save the same course file through the shared save helper; a change
 // here changes both. The list is a markdown file in a course materials repo (default
 // `READINGS.md` beside the reading files); text written in the schedule is the legacy form,
-// shown and kept, with `Move to a file`.
+// shown and kept, with `Move to a file`. A list is offered, never taken unasked (decision 0046):
+// with none, the entry shows Use it / Write one / Choose a file, and Detach takes it off again.
 
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { useEnv } from '../env';
@@ -31,6 +32,12 @@ export const LIST_TEXT = {
   existingFile: 'Existing file',
   inline: 'Written in the schedule',
   choose: 'Choose another…',
+  none: 'There is a READINGS.md beside these files.',
+  useIt: 'Use it',
+  writeOne: 'Write one',
+  chooseFile: 'Choose a file…',
+  detach: 'Detach',
+  creates: (repo: string, path: string) => `Creates ${repo} / ${path}.`,
   move: 'Move to a file',
   footNew: (repo: string) => `In ${repo}. Saving creates this file next to the reading files; edit the path to put it elsewhere (a lecture folder, say).`,
   footExisting: 'Saving writes your changes to this file.',
@@ -72,9 +79,9 @@ function useSettled(v: string, ms: number): string {
 /** The reading files whose names the list does not mention. */
 export const notCited = (text: string, names: string[]) => (text.trim() ? names.filter((n) => !text.includes(n)) : []);
 
-export function ReadingList({ id, list, defaultRepo, defaultPath, org, repos, files, readingFiles, onChange, fixedPath = false, noRepo = false }: {
+export function ReadingList({ id, list, defaultRepo, defaultPath, org, repos, files, readingFiles, onChange, onDetach, fixedPath = false, noRepo = false }: {
   id: string;
-  /** The list as the draft holds it; null: none yet (shown at the default path: a New file, or the file already there). */
+  /** The list as the draft holds it; null: none, and the offer of one at the default path (the file already there, or a new one). */
   list: ListDraft | null;
   defaultRepo: string;
   defaultPath: string;
@@ -85,6 +92,8 @@ export function ReadingList({ id, list, defaultRepo, defaultPath, org, repos, fi
   /** The entry's reading files (`readingFilesOf`): their names for the not-cited notice, their PDFs for Generate draft. */
   readingFiles: ReadingFile[];
   onChange: (l: ListDraft) => void;
+  /** Takes the list off the entry (none again); the file stays. Absent: no Detach. */
+  onDetach?: () => void;
   /** The Materials file view: the file is the one opened; nothing to choose or move. */
   fixedPath?: boolean;
   /** No course materials repo to put a file in: text in the schedule stays editable, nothing to choose or move. */
@@ -110,6 +119,34 @@ export function ReadingList({ id, list, defaultRepo, defaultPath, org, repos, fi
   const missing = notCited(text, names);
   const rows = Math.max(6, text.split('\n').length + 1);
   const shown = useSettled(text, 400);
+  const picker = picking ? <FilePicker files={files} org={org} repos={repos} only={(path) => viewKind(path) === 'markdown'} onClose={() => setPicking(false)}
+    onPick={(got) => { const g = got[got.length - 1]; if (g) onChange({ repo: g.repo, path: g.path, inline: false, text: null }); }} /> : null;
+  if (!list && !fixedPath) {
+    const there = fileInTree(files, org, defaultRepo, defaultPath);
+    const choose = <button class="btn small quiet" type="button" onClick={() => setPicking(true)}>{LIST_TEXT.chooseFile}</button>;
+    return (
+      <div class="field reading-list-editor">
+        <span class="lbl-row"><b>{LIST_TEXT.label}</b></span>
+        <span class="hint">{LIST_TEXT.hint}</span>
+        {there ? (
+          <div class="rl-offer">
+            <span>{LIST_TEXT.none}</span>
+            <button class="btn small" type="button" onClick={() => onChange({ repo: defaultRepo, path: defaultPath, inline: false, text: null })}>{LIST_TEXT.useIt}</button>
+            {choose}
+          </div>
+        ) : (
+          <>
+            <div class="rl-offer">
+              <button class="btn small" type="button" onClick={() => onChange({ repo: defaultRepo, path: defaultPath, inline: false, text: '' })}>{LIST_TEXT.writeOne}</button>
+              {choose}
+            </div>
+            <p class="footnote">{LIST_TEXT.creates(defaultRepo, defaultPath)}</p>
+          </>
+        )}
+        {picker}
+      </div>
+    );
+  }
   return (
     <div class="field reading-list-editor">
       <span class="lbl-row"><label for={`${id}-rl`}><b>{LIST_TEXT.label}</b></label></span>
@@ -133,13 +170,13 @@ export function ReadingList({ id, list, defaultRepo, defaultPath, org, repos, fi
           <span class="actions">
             {cur.inline ? <button class="btn small quiet" type="button" onClick={() => onChange({ repo: defaultRepo, path: defaultPath, inline: false, text: cur.text ?? '' })}>{LIST_TEXT.move}</button> : null}
             <button class="btn small quiet" type="button" onClick={() => setPicking(true)}>{LIST_TEXT.choose}</button>
+            {onDetach && !cur.inline ? <button class="btn small quiet" type="button" onClick={onDetach}>{LIST_TEXT.detach}</button> : null}
           </span>
         )}
       </div>
       {f?.kind === 'error' ? <CheckLine cls="bad">Could not read {cur.path}: {f.message} <button class="textlink" type="button" onClick={retry}>Retry</button></CheckLine> : null}
       {cur.inline || f?.kind === 'error' ? null : <p class="footnote">{isNew ? LIST_TEXT.footNew(cur.repo) : LIST_TEXT.footExisting}</p>}
-      {picking ? <FilePicker files={files} org={org} repos={repos} only={(path) => viewKind(path) === 'markdown'} onClose={() => setPicking(false)}
-        onPick={(got) => { const g = got[got.length - 1]; if (g) onChange({ repo: g.repo, path: g.path, inline: false, text: null }); }} /> : null}
+      {picker}
     </div>
   );
 }
