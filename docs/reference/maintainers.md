@@ -855,15 +855,23 @@ or null), so the console never re-derives the placement; `no_reading_list_todo` 
 Suggested to-do.
 
 The console edits the course file only (decision 0044): `ui/ReadingList.tsx` is ONE component,
-mounted in the schedule entry sheet (`Schedule.tsx` `ListField`, the list a `ListDraft` in
-`scheduleEdit.ts`, written before `schedule.yml` by `doSave`) and in the course Materials file
-view (`CourseFile`, saved alone). Keep one set of words (`LIST_TEXT`) for both. A path a
-status readings row names (`reading_list.path`) is marked in the course trees, and its
-released copy (`released_repo` / `released_path`) links to the entry.
+mounted in the schedule entry sheet (`Schedule.tsx` `ListField`) and in the course Materials file
+view (`CourseFile`, saved alone). Keep one set of words (`LIST_TEXT`) for both. In the sheet the
+list is a `ListDraft` (`scheduleEdit.ts`) holding only the instructor's edit (`text`, null when
+untouched): the file's saved text and sha are the files cache's (`listFile`), read at render and
+at save, and `doSave` writes each changed file (`listWrites`) before `schedule.yml`. A
+`READINGS.md` already at an entry's default path is taken by one rule, `pendingAdoption`: the
+open entry is dirty and `entryValue` names it; the draft never changes, so Discard leaves it so.
+Both mounts take the entry's reading files from `readingFilesOf` (in Materials: the files of the
+entry that names the list, else the PDFs beside it). The Schedule row's *no reading list* chip
+reads the Suggested to-do (`check: reading_list`), never the schedule. A path a status
+readings row names (`reading_list.path`) is marked in the course trees, and its released copy
+(`released_repo` / `released_path`) links to the entry.
 
-Generate draft (0044 point 6) fills the editor's `draft` slot in both mounts: `ui/ReadingDraft.tsx`
-reads each PDF's bytes through `client.getBytes` (contents API, blob API over 1 MB: tree paths
-carry `size`), parses it in `model/pdfText.ts`, and drafts the lines in `model/readingDraft.ts`
+Generate draft (0044 point 6) sits under the editor in both mounts: `ui/ReadingDraft.tsx` fetches
+the entry's PDF bytes four at a time through `client.fetchBytes` (uncached, so the viewer's kept
+files stay; contents API, blob API over 1 MB: tree paths carry `size`), parses them in order in
+`model/pdfText.ts` (pdf.js takes the bytes without a copy and empties them), and drafts the lines in `model/readingDraft.ts`
 (pure, tested on fixture text; heuristics from the 5 Nov trial). `pdfText.ts` is the only module
 that imports `pdfjs-dist`, and only by dynamic `import()`, so pdf.js stays out of the main chunk
 and its worker is a same-origin asset (the CSP allows no other script source). Keep it lazy.
