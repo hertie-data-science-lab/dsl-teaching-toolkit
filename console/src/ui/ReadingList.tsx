@@ -72,7 +72,7 @@ export const notCited = (text: string, names: string[]) => (text.trim() ? names.
 
 export function ReadingList({ id, list, defaultRepo, defaultPath, org, repos, files, readingFiles, onChange, fixedPath = false, draft }: {
   id: string;
-  /** The list as the draft holds it; null: none yet (shown at the default path, a New file). */
+  /** The list as the draft holds it; null: none yet (shown at the default path, a New file; an existing one the model adopts, `adoptDefaultList`). */
   list: ListDraft | null;
   defaultRepo: string;
   defaultPath: string;
@@ -96,9 +96,8 @@ export function ReadingList({ id, list, defaultRepo, defaultPath, org, repos, fi
     const f = files.file(org, repo, path);
     return { repo, path, text: f.kind === 'ready' ? f.text : '', sha: f.kind === 'ready' ? f.sha : null, inline: false, loaded: f.kind === 'ready' || f.kind === 'absent' };
   };
-  const at = (repo: string, path: string): ListDraft => (inTree(repo, path) ? asFile(repo, path) : { repo, path, text: '', sha: null, inline: false, loaded: true });
   // A file still unread in the draft is read here too: a Retry re-reads it in this component alone.
-  const cur: ListDraft = list && !list.inline && !list.loaded ? asFile(list.repo, list.path) : list ?? at(defaultRepo, defaultPath);
+  const cur: ListDraft = list && !list.inline && !list.loaded ? asFile(list.repo, list.path) : list ?? { repo: defaultRepo, path: defaultPath, text: '', sha: null, inline: false, loaded: true };
   const set = (x: Partial<ListDraft>) => onChange({ ...cur, ...x });
   // A file that could not be read (not one that is absent: that is a New file).
   const read = !cur.inline && !cur.loaded ? files.file(org, cur.repo, cur.path) : null;

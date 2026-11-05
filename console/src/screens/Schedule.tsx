@@ -9,7 +9,7 @@ import { Invalid } from '../forms/Form';
 import { RELEASE_WORD, TYPE_CLASS, siteRowWord, fmtDay, fmtTime, fmtWhen, heldSentence, markWord, releaseIdent, repoWords, sortKey } from '../model/format';
 import { needsANumber, parseSchedule, scheduleRows, type Block, type Row } from '../model/schedule';
 import {
-  READINGS_KIND, SESSION_KINDS, applyChanges, blockOf, changesOf, defaultListPath, defaultReleaseAt, draftErrors, emptyTwin, fillLists, hiddenKind, lacksReadingList, listWrites, newDraft, newlyManual, nextNumber, nextSession, numberedField, readDraft, releaseAt, relisted, twinOf, writeDraft,
+  READINGS_KIND, SESSION_KINDS, applyChanges, blockOf, changesOf, defaultListPath, adoptDefaultList, defaultReleaseAt, draftErrors, emptyTwin, fillLists, hiddenKind, lacksReadingList, listWrites, newDraft, newlyManual, nextNumber, nextSession, numberedField, readDraft, releaseAt, relisted, twinOf, writeDraft,
   type AssignmentDraft, type Draft, type EntryDraft, type FileDraft, type ListFile, type SemesterDraft, type SemesterEntryDraft, type SemesterType, type Slot,
 } from '../model/scheduleEdit';
 import type { Assignment, Release } from '../model/types';
@@ -728,8 +728,13 @@ function View(p: ReadyProps) {
     if (p.prefill?.kind === 'template') return { ...(newDraft('assignment', doc) as AssignmentDraft), template: p.prefill.repo };
     return p.prefill?.kind === 'files' ? releasePrefilled(newDraft('assets', doc) as EntryDraft, p.prefill.rows, effectiveDestRepo(p.loaded)) : null;
   };
-  const draftOf = (k: string): Draft | null => (k in drafts ? fillLists(drafts[k], readList) : k === 'new' ? prefilled() : baseOf(k));
-  const dirtyKeys = Object.keys(drafts).filter((k) => k === 'new' || !deepEqual(draftOf(k), baseOf(k)));
+  // A readings entry with no list whose default READINGS.md is already in the course repo takes it (decision 0044).
+  const inTree = (repo: string, path: string) => { const t = p.files.tree(p.course.org, repo); return t.kind === 'ready' && t.paths.some((x) => !x.dir && x.path === path); };
+  const adopt = (d: Draft | null) => fillLists(adoptDefaultList(d, (e) => e.files[0]?.repo || repos[0] || '', inTree), readList);
+  const draftOf = (k: string): Draft | null => adopt(k in drafts ? drafts[k] : k === 'new' ? prefilled() : baseOf(k));
+  // The open entry counts too: an adopted list makes it dirty before anything is typed.
+  const dirtyKeys = [...new Set([...Object.keys(drafts), ...(key && key !== 'new' && key !== 'semester' && sf ? [key] : [])])]
+    .filter((k) => k === 'new' || (draftOf(k) !== null && !deepEqual(draftOf(k), baseOf(k))));
   const dirty = dirtyKeys.length + removed.length;
   const setDraft = (k: string, d: Draft) => {
     setDrafts({ ...drafts, [k]: d });
@@ -798,9 +803,9 @@ function View(p: ReadyProps) {
   };
 
   // An assignment newly handed out by hand asks first: until Hand out now, nothing reaches students.
-  const manualKeys = dirtyKeys.filter((k) => newlyManual(drafts[k], baseOf(k), assignmentOf.get(k)?.state));
+  const manualKeys = dirtyKeys.filter((k) => newlyManual(draftOf(k)!, baseOf(k), assignmentOf.get(k)?.state));
   const requestSave = () => {
-    if (manualKeys.length && !dirtyKeys.some((k) => Object.keys(errorsOf(drafts[k])).length)) setAskManual(true);
+    if (manualKeys.length && !dirtyKeys.some((k) => Object.keys(errorsOf(draftOf(k)!)).length)) setAskManual(true);
     else void doSave();
   };
 

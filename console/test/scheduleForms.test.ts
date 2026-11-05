@@ -16,7 +16,7 @@ import G_SEMESTER from './fixtures/schedule-forms/semester.yml?raw';
 import { YamlText } from '../src/edit/yamlText';
 import { cutoffOf } from '../src/screens/RunSettings';
 import {
-  applyChanges, changesOf, defaultListPath, defaultReleaseAt, draftErrors, emptyTwin, fillLists, listWrites, newDraft, newlyManual, nextNumber, nextSession, readDraft, releaseAt, writeDraft,
+  adoptDefaultList, applyChanges, changesOf, defaultListPath, defaultReleaseAt, draftErrors, emptyTwin, fillLists, listWrites, newDraft, newlyManual, nextNumber, nextSession, readDraft, releaseAt, writeDraft,
   type AssignmentDraft, type EntryDraft, type ListDraft, type SemesterDraft, type SemesterEntryDraft,
 } from '../src/model/scheduleEdit';
 
@@ -477,6 +477,20 @@ describe('the reading list as a course file (decision 0044)', () => {
     const t2 = `${BASE}readings:\n  readings-6:\n    session: 6\n    reading_list: "- New."\n`;
     const d2 = readDraft(doc(t2), 'readings-6') as EntryDraft;
     expect(parse(save(t2, { ...d2, title: 'Week 6' }, d2).text).readings['readings-6']).toEqual({ session: 6, title: 'Week 6', reading_list: '- New.' });
+  });
+
+  it('adopts an existing default file for an entry with no list, its twin included; never over a list it has', () => {
+    const file = (path: string) => ({ repo: REPO, path, toRepo: '', toPath: '', atDate: '', atTime: '', public: false });
+    const r = { ...(newDraft('readings', doc(BASE)) as EntryDraft), files: [file('readings/06/a.pdf')] };
+    const there = (_: string, path: string) => path === 'readings/06/READINGS.md' || path === 'readings/03_trees/READINGS.md';
+    const repoOf = () => REPO;
+    expect(adoptDefaultList(r, repoOf, there).list).toEqual({ repo: REPO, path: 'readings/06/READINGS.md', text: '', sha: null, inline: false, loaded: false });
+    expect(adoptDefaultList(r, repoOf, () => false)).toBe(r);
+    const own = { ...r, list: inlineList('- Mine.') };
+    expect(adoptDefaultList(own, repoOf, there)).toBe(own);
+    const unit = { ...(newDraft('lecture', doc(BASE)) as EntryDraft), session: 3 as const, title: 'Trees' };
+    const withTwin = { ...unit, twin: { ...emptyTwin(unit), session: 3 as const } };
+    expect(adoptDefaultList(withTwin, repoOf, there).twin!.list).toMatchObject({ path: 'readings/03_trees/READINGS.md', loaded: false });
   });
 
   it('defaults the path beside the first reading file, else readings/<NN>_<slug>/READINGS.md', () => {

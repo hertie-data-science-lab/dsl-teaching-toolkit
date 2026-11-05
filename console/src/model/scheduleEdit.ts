@@ -738,6 +738,24 @@ export function fillLists<D extends Draft | null>(d: D, read: (repo: string, pat
   return list === d.list && twin === d.twin ? d : { ...d, list, ...(d.twin !== undefined ? { twin } : {}) };
 }
 
+/**
+ * A readings entry (or a unit's twin) with no list whose default path is already a file in the
+ * course repo takes that file as its list (decision 0044): the sheet is then dirty and Save
+ * names it in `reading_list:`. `repoOf` is the entry's default repo; `exists`, the repo tree's
+ * answer. The file's text is read by `fillLists`.
+ */
+export function adoptDefaultList<D extends Draft | null>(d: D, repoOf: (e: EntryDraft) => string, exists: (repo: string, path: string) => boolean, unitTitle?: string): D {
+  if (!d || d.kind !== 'entry') return d;
+  if (d.twin) {
+    const twin = adoptDefaultList(d.twin, repoOf, exists, d.title);
+    return (twin === d.twin ? d : { ...d, twin }) as D;
+  }
+  if (d.type !== READINGS_KIND || d.list) return d;
+  const repo = repoOf(d), path = defaultListPath(d, d.title || unitTitle);
+  if (!repo || !exists(repo, path)) return d;
+  return { ...d, list: { repo, path, text: '', sha: null, inline: false, loaded: false } };
+}
+
 /** A reading-list file a Save writes before schedule.yml. */
 export interface ListWrite {
   repo: string;

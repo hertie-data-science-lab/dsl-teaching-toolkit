@@ -813,6 +813,27 @@ describe('the reading list in the schedule entry sheet (decision 0044)', () => {
     expect(q<HTMLTextAreaElement>('#e-rl').value).toBe('- Already here.\n');
   });
 
+  it('adopts a READINGS.md already at the default path: the sheet is dirty and Save names it, with no file written', async () => {
+    const gh = github(), f = withList({ [`${COURSE_ORG}/course-materials-f2026/readings/06/READINGS.md`]: '- Already here.\n' });
+    (f as unknown as { treeMap: Record<string, string[]> }).treeMap[`${COURSE_ORG}/course-materials-f2026`].push('readings/06/READINGS.md');
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'readings-6' })} />);
+    expect(root!.textContent).toContain('Existing file');
+    expect(q<HTMLTextAreaElement>('#e-rl').value).toBe('- Already here.\n');
+    expect(root!.querySelector('.unsaved')!.textContent).toContain('1 unsaved change');
+    expect(buttons('Save')[0].disabled).toBe(false);
+    await click(buttons('Save')[0]);
+    await settle(() => puts(gh, 'schedule.yml').length > 0);
+    expect(listPuts(gh)).toEqual(['schedule.yml']);
+    expect(parse(body(puts(gh, 'schedule.yml')[0])).readings['readings-6'].reading_list).toEqual({ from_course_repo: 'course-materials-f2026', from_path: 'readings/06/READINGS.md' });
+  });
+
+  it('adopts nothing when no file is at the default path: the sheet stays clean', async () => {
+    const gh = github(), f = withList();
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'readings-6' })} />);
+    expect(root!.textContent).toContain('New file');
+    expect(root!.querySelector('.unsaved')).toBeNull();
+  });
+
   it('says why a list file could not be read, with Retry, never a stuck Reading…', async () => {
     const gh = github(), f = withList();
     let failing = true;
