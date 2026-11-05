@@ -1032,9 +1032,11 @@ def landed_links(
     path = "" if is_repo_root(path) else path.strip("/")
     prefix = f"{path}/" if path else ""
     landed = [b for b in blobs if b == path or b.startswith(prefix)] if path else blobs
+    # Only a landing at or under this copy's own can be deeper than it.
+    inner = [h for h in landings if within(path, h[0]) is not None]
     shown, listed = [], False
     for b in landed:
-        holders = [h for h in landings if within(h[0], b) is not None]
+        holders = [h for h in inner if within(h[0], b) is not None]
         deepest = max((len(h[0]) for h in holders), default=-1)
         top = [h for h in holders if len(h[0]) == deepest]
         if any(inline for _p, _k, inline in top):
