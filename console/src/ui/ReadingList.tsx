@@ -134,7 +134,7 @@ export function ReadingList({ id, list, defaultRepo, defaultPath, org, repos, fi
         </div>
       </div>
       {missing.length ? <CheckLine cls="warn">{LIST_TEXT.missing(missing)}</CheckLine> : null}
-      <DraftButton org={org} pdfs={pdfs} disabled={!loaded} onAdd={(adds) => setText(insertLines(text, cur.path, adds))} />
+      <DraftButton org={org} pdfs={pdfs} disabled={!loaded} onAdd={(adds) => setText(insertLines(text, cur.path, adds, cur.repo))} />
       {picking ? <FilePicker files={files} org={org} repos={repos} only={(path) => viewKind(path) === 'markdown'} onClose={() => setPicking(false)}
         onPick={(got) => { const g = got[got.length - 1]; if (g) onChange({ repo: g.repo, path: g.path, inline: false, text: null }); }} /> : null}
     </div>

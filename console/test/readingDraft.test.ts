@@ -64,6 +64,9 @@ describe('the PDF details', () => {
     expect(apaAuthors(parseNames('Raschka, Sebastian; Liu, Yuxi (Hayden); Mirjalili, Vahid'))).toBe('Raschka, S., Liu, Y. H., & Mirjalili, V.');
     expect(apaAuthors(parseNames('Raschka, Sebastian'))).toBe('Raschka, S.');
     expect(apaAuthors(parseNames('Jean-Paul Sartre'))).toBe('Sartre, J.-P.');
+    // An empty piece of a given name (a stray hyphen) is skipped, never a throw.
+    expect(apaAuthors([{ family: 'Dupont', given: ['Jean-'] }])).toBe('Dupont, J.');
+    expect(apaAuthors([{ family: 'Dupont', given: ['-'] }])).toBe('Dupont, ?');
     expect(parseNames('SEBASTIAN LIU YUXI (HAYDEN) MIRJALILI VAHID RASCHKA')).toBeNull();
     expect(apaAuthors(null)).toBe('?');
   });
@@ -185,6 +188,11 @@ describe('pdf.js text as lines', () => {
 
 describe('adding lines to the list', () => {
   const add = (section: 'required' | 'additional', name: string) => ({ section, line: `L ${name}`, path: `readings/04/${name}` });
+
+  it('links no file in another repo than the list: the line goes in without [PDF]', () => {
+    const adds = [{ ...add('required', 'a.pdf'), repo: 'other-materials' }, { ...add('required', 'b.pdf'), repo: 'materials' }];
+    expect(insertLines('', 'readings/04/READINGS.md', adds, 'materials')).toBe('## Required readings\n\n- L a.pdf\n- L b.pdf [PDF](b.pdf)\n');
+  });
 
   it('creates the headings when absent, Required first', () => {
     expect(insertLines('', 'readings/04/READINGS.md', [add('additional', 'b.pdf'), add('required', 'a.pdf')]))
