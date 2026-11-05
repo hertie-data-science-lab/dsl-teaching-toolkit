@@ -15,7 +15,7 @@ import type { Release, Status } from '../src/model/types';
 import { MaterialsIndexScreen } from '../src/screens/CourseIndex';
 import { SemesterMaterialsScreen } from '../src/screens/SemesterMaterials';
 import type { CourseProps } from '../src/screens/types';
-import { LIST_TEXT, isReadingList, notCited } from '../src/ui/ReadingList';
+import { LIST_TEXT, isReadingList, notCited, releasedList } from '../src/ui/ReadingList';
 import { FakeGitHub, fileBody, json, type Seen } from './fake';
 import example from './fixtures/status.example.json';
 import { StaticFiles } from './staticFiles';
@@ -30,7 +30,7 @@ const course: Course = { org: ORG, name: 'Machine Learning', code: 'E1234', desc
 const readings5: Release = {
   id: 'readings-5', when: '2026-10-13T09:00:00+02:00', kind: 'readings', number: 5, title: 'Readings 5', state: 'released', tbc: false, show_on_site: true,
   source: { repo: MAT, path: 'lectures/05' }, dest: { repo: 'materials', path: 'lectures/05' },
-  reading_list: { source: { repo: MAT, path: NAMED }, dest: { repo: 'materials', path: NAMED } },
+  reading_list: { repo: MAT, path: NAMED },
 };
 const ready: Loaded = { kind: 'ready', status: { ...(example as unknown as Status), releases: [readings5] }, sha: 's', stale: [] };
 const TEXT: Record<string, string> = { 'readings/04/READINGS.md': '- Bishop (2006): bishop.pdf\n', [NAMED]: '- Week five.\n', 'lectures/05/notes.md': '# Notes' };
@@ -74,6 +74,17 @@ describe('which files are reading lists', () => {
     expect(isReadingList(NAMED, [NAMED])).toBe(true);
     expect(notCited('- bishop.pdf', ['bishop.pdf', 'murphy.pdf'])).toEqual(['murphy.pdf']);
     expect(notCited('  ', ['bishop.pdf'])).toEqual([]);
+  });
+});
+
+describe('where a reading list is released', () => {
+  const r = (over: Partial<Release>): Release => ({ ...readings5, ...over });
+  it('inside the copy whose folder holds it, at its own course path otherwise, nowhere for text', () => {
+    expect(releasedList(r({ dest: { repo: 'materials', path: 'week5' } }), 'materials')).toEqual({ repo: 'materials', path: 'week5/week5-reading.md' });
+    expect(releasedList(r({ source: { repo: MAT, path: 'readings/05' } }), 'materials')).toEqual({ repo: 'materials', path: NAMED });
+    expect(releasedList(r({ source: { repo: MAT, path: NAMED }, dest: { repo: 'readings', path: 'r5.md' } }), 'materials')).toEqual({ repo: 'readings', path: 'r5.md' });
+    expect(releasedList(r({ reading_list: { inline: true } }), 'materials')).toBeNull();
+    expect(releasedList(r({ reading_list: null }), 'materials')).toBeNull();
   });
 });
 

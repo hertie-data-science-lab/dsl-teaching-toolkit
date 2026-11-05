@@ -141,7 +141,7 @@ export function fileIn(file: string | undefined, repos: string[]): { repo: strin
 /** A materials file open in the viewer, its repo's tree beside it (decision 0040 rule 6: the student All materials split). */
 function MaterialsFile({ p, at }: { p: CourseProps; at: { repo: string; path: string } }) {
   const org = p.course.org;
-  const lists = namedLists(p.cohortStates, at.repo, 'source');
+  const lists = namedLists(p.cohortStates, at.repo);
   return (
     <>
       <div class="page-head">
@@ -188,7 +188,7 @@ export function MaterialsIndexScreen(p: CourseProps) {
                     <RepoWhy r={r} />
                     {gh?.pushed_at ? <span class="r-sub">Last change {fmtDay(gh.pushed_at)} ({ago(gh.pushed_at, p.now)}).</span> : null}
                     <span class="r-side"><OpenButton org={course.org} repo={m.repo} small quiet /><a class="btn small quiet" href={`#materials-${m.repo}`}>Settings</a></span>
-                    <RepoFiles files={files} org={course.org} repo={m.repo} focus={focusIn(p.folder, m.repo)} lists={namedLists(p.cohortStates, m.repo, 'source')} />
+                    <RepoFiles files={files} org={course.org} repo={m.repo} focus={focusIn(p.folder, m.repo)} lists={namedLists(p.cohortStates, m.repo)} />
                   </li>
                 );
               })}

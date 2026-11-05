@@ -166,8 +166,8 @@ export interface Release {
   dest: { repo: string; path: string } | null;
   show_on_site: boolean;
   tbc: boolean;
-  /** A readings entry's reading-list file, course side and released side (decision 0044). Absent in an older status. */
-  reading_list?: { source: { repo: string; path: string }; dest: { repo: string; path: string } };
+  /** A readings entry's reading list (decision 0044): its course file, `{inline: true}` for text in the schedule, or null. Absent in an older status. */
+  reading_list?: { repo: string; path: string } | { inline: true } | null;
 }
 
 export interface Assignment {

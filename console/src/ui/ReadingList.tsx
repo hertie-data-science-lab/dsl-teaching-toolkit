@@ -12,6 +12,7 @@ import { useEnv } from '../env';
 import { useSave } from '../edit/save';
 import type { Files } from '../model/files';
 import type { Loaded } from '../model/status';
+import type { Release } from '../model/types';
 import { plural } from '../model/format';
 import { READINGS_FILE, type ListDraft } from '../model/scheduleEdit';
 import { CheckLine } from './bits';
@@ -41,10 +42,34 @@ export function isReadingList(path: string, named: readonly string[] = []): bool
   return (path.split('/').pop() ?? '').toLowerCase() === READINGS_FILE.toLowerCase() || named.includes(path);
 }
 
-/** The paths in `repo` that loaded semesters' readings entries name as reading lists, on the course side (`source`) or the released side (`dest`). */
-export function namedLists(states: Record<string, Loaded>, repo: string, side: 'source' | 'dest'): string[] {
+/** A readings entry's reading-list course file, or null (none, or text in the schedule). */
+const listFileOf = (r: Release) => (r.reading_list && 'path' in r.reading_list ? r.reading_list : null);
+
+/** The paths in course repo `repo` that loaded semesters' readings entries name as reading lists. */
+export function namedLists(states: Record<string, Loaded>, repo: string): string[] {
   return Object.values(states).flatMap((l) => (l?.kind === 'ready' ? l.status.releases ?? [] : []))
-    .flatMap((r) => (r.reading_list && r.reading_list[side].repo === repo ? [r.reading_list[side].path] : []));
+    .flatMap((r) => { const f = listFileOf(r); return f && f.repo === repo ? [f.path] : []; });
+}
+
+const trim = (p: string) => p.replace(/^\/+|\/+$/g, '');
+
+/**
+ * Where a release lands its reading-list file in the semester, as the engine's `_carried_by`
+ * does: inside the entry's first copy when that copy's folder holds it (or it is that copy),
+ * else as its own copy at its course path in the default repo (`defaultDest`). Null: no file.
+ */
+export function releasedList(r: Release, defaultDest: string): { repo: string; path: string } | null {
+  const f = listFileOf(r);
+  if (!f) return null;
+  const at = trim(f.path);
+  if (r.source && r.dest && r.source.repo === f.repo) {
+    const base = trim(r.source.path ?? '');
+    if (!base || at === base || at.startsWith(`${base}/`)) {
+      const rest = base ? trim(at.slice(base.length)) : at;
+      return { repo: r.dest.repo, path: [trim(r.dest.path ?? ''), rest].filter(Boolean).join('/') };
+    }
+  }
+  return { repo: defaultDest, path: at };
 }
 
 const isMarkdown = (path: string) => /\.(md|markdown)$/i.test(path);
