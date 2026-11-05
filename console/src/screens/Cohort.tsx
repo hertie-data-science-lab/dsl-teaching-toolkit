@@ -301,12 +301,14 @@ const SCREEN_LINK: Record<string, Link> = {
 };
 const K_SCREEN: Record<string, string> = { K3: 'instructors', K4: 'schedule', K5: 'students', K6: 'site' };
 
-/** Where a to-do is done: its `fix`, else its entry on its screen (`#schedule-<key>`), and only then the screen itself. */
+/**
+ * Where a to-do is done: its `fix` (the engine's, to the entry), else its screen's link, else its
+ * screen and entry (`schedule:released_tbc` opens `#release-<key>`: it carries no fix).
+ */
 export function todoLink(t: SemesterTodo): Link | undefined {
   const fixed = fixHref(t);
   if (fixed) return { href: fixed, label: 'Open' };
-  if (t.screen && t.entry) return { href: `#${t.screen}-${t.entry}`, label: 'Open' };
-  return t.screen ? SCREEN_LINK[t.screen] ?? { href: `#${t.screen}`, label: 'Open' } : undefined;
+  return t.screen ? SCREEN_LINK[t.screen] ?? { href: `#${t.screen}${t.entry ? `-${t.entry}` : ''}`, label: 'Open' } : undefined;
 }
 
 /** A semester to-do's line, by its check; its sentence goes under it. */
