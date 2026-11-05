@@ -41,6 +41,7 @@ export const LIST_TEXT = {
   creates: (repo: string, path: string) => `Creates ${repo} / ${path}.`,
   move: 'Move to a file',
   footNew: (repo: string) => `In ${repo}. Saving creates this file next to the reading files; edit the path to put it elsewhere (a lecture folder, say).`,
+  footNewFixed: 'Saving creates this file.',
   footExisting: 'Saving writes your changes to this file.',
   preview: 'As students will see it',
   empty: 'No reading list: students see the reading files only. That is fine.',
@@ -176,7 +177,7 @@ export function ReadingList({ id, list, defaultRepo, defaultPath, org, repos, fi
         )}
       </div>
       {f?.kind === 'error' ? <CheckLine cls="bad">Could not read {cur.path}: {f.message} <button class="textlink" type="button" onClick={retry}>Retry</button></CheckLine> : null}
-      {cur.inline || f?.kind === 'error' ? null : <p class="footnote">{isNew ? LIST_TEXT.footNew(cur.repo) : LIST_TEXT.footExisting}</p>}
+      {cur.inline || f?.kind === 'error' ? null : <p class="footnote">{!isNew ? LIST_TEXT.footExisting : fixedPath ? LIST_TEXT.footNewFixed : LIST_TEXT.footNew(cur.repo)}</p>}
       {picker}
     </div>
   );

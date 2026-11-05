@@ -105,6 +105,10 @@ describe('a reading list not written yet, opened from the course side', () => {
     expect(root!.querySelector('h2.mono')!.textContent).toBe(LIST);
     expect(root!.textContent).toContain(`File: ${MAT} / ${LIST}`);
     expect(root!.textContent).toContain(LIST_TEXT.newFile);
+    // The path is fixed here: the sheet's footnote about editing it is not shown.
+    expect(root!.textContent).toContain(LIST_TEXT.footNewFixed);
+    expect(root!.textContent).not.toContain(LIST_TEXT.footNew(MAT));
+    expect(button(LIST_TEXT.detach)).toBeUndefined();
     expect(button('Edit reading list')).toBeUndefined();
     const back = [...root!.querySelectorAll<HTMLAnchorElement>('a.btn')].find((a) => a.textContent === 'Back to the files')!;
     expect(back.className).toBe('btn small quiet');
