@@ -85,7 +85,7 @@
       "fault_code": "NOT_MIGRATED",
       "new": "reading_list",
       "old": "reading_guide",
-      "since": "0.12.0",
+      "since": "0.11.1",
       "where": "schedule.yml <block>.<key>"
     },
     {

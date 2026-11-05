@@ -1217,7 +1217,7 @@ marks (`course.py`), the archive notice prefixes (`teardown.py`) and the digest 
 | `deploy:` `course_source_repo`, `course_source_path`, `semester_dest_repo`, `semester_dest_path`, `deploy_datetime` (0.11.0) | `files:` `from_course_repo`, `from_path`, `to_semester_repo`, `to_path`, `release_datetime` | the same |
 | assignment `course_source_repo`; `assignments.yml` `assignments.<k>` blocks and `semester_dest_repo` (0.11.0) | `template`; the run settings on the entry, `repo_name` | the same |
 | a readings folder's `READINGS.md`; `materials.yml` `kinds:` (0.11.0) | the entry's `reading_list:`; the block | the same names the file in `reading_list:` (several overlays are a stop naming them); `kinds:` is ignored |
-| `schedule.yml` top-level `semester_start`, `semester_end`, `archive:` (0.11.0); a readings entry's `reading_guide` (0.12.0, the 0.11.0 name) | `semester:` entries of `type: start`, `end`, `archive`; `reading_list` | the same; a file already one block per kind takes only these renames |
+| `schedule.yml` top-level `semester_start`, `semester_end`, `archive:` (0.11.0); a readings entry's `reading_guide` (0.11.1, the 0.11.0 name) | `semester:` entries of `type: start`, `end`, `archive`; `reading_list` | the same; a file already one block per kind takes only these renames |
 | site front matter `type:` | `kind:`, written beside `type:` until the pinned theme's next release reads `kind` | the semester and course websites (rewritten on every sync) |
 | `status.json` release and this-week rows `type` | `kind` | `dsl.status/1` |
 | CLI `--master-org` (assign, collect), `--source-org` (deploy); env `MASTER_ORG`, `SRC_ORG` | `--course-org`; `COURSE_ORG` | every CLI; rendered workflows |
