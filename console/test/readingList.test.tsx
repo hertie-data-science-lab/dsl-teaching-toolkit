@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 // The reading list in the course Materials file view and the Released materials viewer
 // (decision 0044): a READINGS.md, or a path a readings entry names, is marked in the course
-// tree and edited in place (the same editor as the schedule entry sheet, saved on its own).
+// tree and edited in place (the same editor as the schedule entry sheet, saved on its own);
+// on the semester side it only links to its schedule entry.
 
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
@@ -12,6 +13,7 @@ import type { Course } from '../src/model/discovery';
 import type { Loaded } from '../src/model/status';
 import type { Release, Status } from '../src/model/types';
 import { MaterialsIndexScreen } from '../src/screens/CourseIndex';
+import { SemesterMaterialsScreen } from '../src/screens/SemesterMaterials';
 import type { CourseProps } from '../src/screens/types';
 import { LIST_TEXT, isReadingList, notCited } from '../src/ui/ReadingList';
 import { FakeGitHub, fileBody, json, type Seen } from './fake';
@@ -118,5 +120,15 @@ describe('the course Materials file view (decision 0044)', () => {
   it('offers no editor to someone who cannot change the course', async () => {
     await mount(<MaterialsIndexScreen {...cp(`${MAT}/readings/04/READINGS.md`, false)} />);
     expect(button('Edit reading list')).toBeUndefined();
+  });
+});
+
+describe('the released reading list', () => {
+  it('links to its schedule entry, with no editor', async () => {
+    await mount(<SemesterMaterialsScreen course={course} cohort={course.cohorts[0]} loaded={ready} files={staticFiles()} now={Date.parse('2026-10-14T10:00:00Z')} file={`materials/${NAMED}`} />);
+    const link = [...root!.querySelectorAll('a')].find((a) => a.textContent === 'Edit this in the schedule entry')!;
+    expect(link.getAttribute('href')).toBe(`?cohort=${COHORT}#schedule-readings-5`);
+    expect(button('Edit reading list')).toBeUndefined();
+    expect(root!.querySelector('textarea')).toBeNull();
   });
 });

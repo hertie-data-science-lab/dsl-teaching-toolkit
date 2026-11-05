@@ -88,7 +88,7 @@ export function ScheduleView({ facts, mine, now, org }: { facts: SemesterFacts; 
                     {r.details ? <Md class="t-details" src={r.details} /> : null}
                     {r.kind === 'due' && a ? <span class="t-details"><DueSubmit shape={a.shape} slug={a.slug} group={a.group} url={a.submitUrl || undefined} /></span> : null}
                     {r.readings.length || r.readingList ? (
-                      <span class="t-readings">Readings: <FileChips org={org} repos={facts.materialsRepos} links={r.readings} />{r.readingList ? <a class="st-chip" href={studentHref(org, 'materials')}>reading list</a> : null}</span>
+                      <span class="t-readings">Readings: <FileChips org={org} repos={facts.materialsRepos} links={r.readings} />{r.readingList ? <a class="st-chip" href={studentHref(org, 'materials')}>Reading list</a> : null}</span>
                     ) : r.readingsPending ? <span class="t-readings footnote">Readings to come.</span> : null}
                   </span>
                   <span class="st">
