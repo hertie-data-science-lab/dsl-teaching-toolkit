@@ -61,7 +61,7 @@ readings:
   readings-5:
     session: 5
     event_datetime: 2026-10-05T09:00
-    reading_guide: |
+    reading_list: |
       - Goodfellow et al. (2016), ch. 7.
     files:
       - from_course_repo: course-materials-f2026
@@ -94,7 +94,7 @@ readings:
   readings-background:
     title: Background reading
     event_datetime: 2026-08-25T09:00
-    reading_guide: "- Any linear algebra refresher."
+    reading_list: "- Any linear algebra refresher."
 `);
   });
 
@@ -103,6 +103,14 @@ readings:
       files: [{ repo: 'course-materials-f2026', path: 'readings/05/goodfellow-ch6.pdf', toRepo: '', toPath: '', atDate: '', atTime: '', public: false }, { repo: 'course-materials-f2026', path: 'readings/05/lecture-notes.pdf', toRepo: '', toPath: '', atDate: '', atTime: '', public: true }] };
     const out = parse(save(BASE, d).text).readings['readings-5'];
     expect(out.files).toEqual([{ from_course_repo: 'course-materials-f2026', from_path: 'readings/05/goodfellow-ch6.pdf' }, { from_course_repo: 'course-materials-f2026', from_path: 'readings/05/lecture-notes.pdf', public: true }]);
+  });
+
+  it('Readings: a reading list naming a course file is kept as the file has it', () => {
+    const t = `${BASE}readings:\n  readings-4:\n    session: 4\n    reading_list:\n      from_course_repo: course-materials-f2026\n      from_path: readings/04/READINGS.md\n`;
+    const d = readDraft(doc(t), 'readings-4') as EntryDraft;
+    expect(d.guide).toBe('');
+    const out = parse(save(t, { ...d, title: 'Week 4' }, d).text).readings['readings-4'];
+    expect(out.reading_list).toEqual({ from_course_repo: 'course-materials-f2026', from_path: 'readings/04/READINGS.md' });
   });
 
   it('Exam: title, date and time, location, details; the key from the title', () => {

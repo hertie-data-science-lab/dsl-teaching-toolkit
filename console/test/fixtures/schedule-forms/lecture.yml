@@ -15,7 +15,7 @@ readings:
   readings-5:
     session: 5
     event_datetime: 2026-10-05T09:00
-    reading_guide: |
+    reading_list: |
       - Goodfellow, Bengio & Courville (2016), ch. 7.
     files:
       - from_course_repo: course-materials-f2026

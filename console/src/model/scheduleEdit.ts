@@ -91,7 +91,7 @@ export interface EntryDraft {
   /** At least one. With one slot its location is the entry's `location:`; with more, each slot carries its own. */
   slots: Slot[];
   files: FileDraft[];
-  /** `reading_guide:` (readings only). */
+  /** `reading_list:` written inline (readings only); a course-file list is kept as the file has it. */
   guide: string;
   show: boolean;
   /** Date provisional: `tbc: true` beside a real date. */
@@ -241,7 +241,7 @@ export function readEntry(type: string, id: string, raw: unknown): EntryDraft {
   const e = obj(raw);
   return {
     kind: 'entry', type, id, session: int(e.session), number: int(e.number) === int(e.session) && SESSION_KINDS.includes(type) ? '' : int(e.number),
-    title: s(e.title), details: s(e.details), slots: readSlots(e), files: readFiles(e.files), guide: s(e.reading_guide),
+    title: s(e.title), details: s(e.details), slots: readSlots(e), files: readFiles(e.files), guide: typeof e.reading_list === 'string' ? e.reading_list : '',
     show: e.show_on_site === undefined || e.show_on_site === null ? !hiddenKind(type) : e.show_on_site !== false,
     provisional: e.tbc === true, tbc: isTbc(e.event_datetime),
   };
@@ -419,6 +419,8 @@ function keep<T>(raw: unknown, v: T, dflt: T): T | undefined {
   return raw === dflt ? v : undefined;
 }
 const text = (v: string) => (v.trim() ? v : undefined);
+/** A `reading_list:` naming a course file (`{from_course_repo, from_path}`), which this form leaves as it is. */
+const isFileList = (v: unknown): boolean => v != null && typeof v === 'object';
 
 /** The inline run settings: the cascade's name and the schedule entry's key. */
 export const RUN_FILE_KEYS: [string, string][] = [
@@ -475,7 +477,7 @@ export function entryValue(d: EntryDraft, rawEntry: unknown): Raw {
     event_datetime: when.event_datetime,
     location: when.location,
     details: text(d.details),
-    reading_guide: d.type === READINGS_KIND ? text(d.guide) : raw.reading_guide,
+    reading_list: d.type === READINGS_KIND && !isFileList(raw.reading_list) ? text(d.guide) : raw.reading_list,
     files: d.files.length ? d.files.map((f) => fileValue(f, f.src === undefined ? undefined : rawFiles[f.src])) : undefined,
     show_on_site: keep(raw.show_on_site, d.show, !hiddenKind(d.type)),
     tbc: d.tbc ? (raw.tbc === undefined ? undefined : raw.tbc) : keep(raw.tbc, d.provisional, false),
