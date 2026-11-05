@@ -463,6 +463,22 @@ describe('the reading list as a course file (decision 0044)', () => {
     expect(parse(save(inline, moved, legacy).text).readings['readings-5'].reading_list).toEqual({ from_course_repo: REPO, from_path: 'readings/05/READINGS.md' });
   });
 
+  it('reads an unmigrated reading_guide: as legacy text, and writes it back as reading_list: alone', () => {
+    const old = `${BASE}readings:\n  readings-5:\n    session: 5\n    reading_guide: "- Old."\n`;
+    const d = readDraft(doc(old), 'readings-5') as EntryDraft;
+    expect(d.list).toEqual({ repo: '', path: '', text: '- Old.', sha: null, inline: true, loaded: true });
+    const kept = parse(save(old, { ...d, title: 'Week 5' }, d).text).readings['readings-5'];
+    expect(kept).toEqual({ session: 5, title: 'Week 5', reading_list: '- Old.' });
+    const moved = { ...d, list: { ...d.list!, inline: false, repo: REPO, path: 'readings/05/READINGS.md' } };
+    const out = parse(save(old, moved, d).text).readings['readings-5'];
+    expect(out.reading_list).toEqual({ from_course_repo: REPO, from_path: 'readings/05/READINGS.md' });
+    expect('reading_guide' in out).toBe(false);
+    // An entry already on reading_list: keeps it; reading_guide: is never written.
+    const t2 = `${BASE}readings:\n  readings-6:\n    session: 6\n    reading_list: "- New."\n`;
+    const d2 = readDraft(doc(t2), 'readings-6') as EntryDraft;
+    expect(parse(save(t2, { ...d2, title: 'Week 6' }, d2).text).readings['readings-6']).toEqual({ session: 6, title: 'Week 6', reading_list: '- New.' });
+  });
+
   it('defaults the path beside the first reading file, else readings/<NN>_<slug>/READINGS.md', () => {
     const d = newDraft('readings', doc(BASE)) as EntryDraft;
     const file = (path: string) => ({ repo: REPO, path, toRepo: '', toPath: '', atDate: '', atTime: '', public: false });

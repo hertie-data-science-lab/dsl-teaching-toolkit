@@ -258,7 +258,7 @@ export function readEntry(type: string, id: string, raw: unknown): EntryDraft {
   const e = obj(raw);
   return {
     kind: 'entry', type, id, session: int(e.session), number: int(e.number) === int(e.session) && SESSION_KINDS.includes(type) ? '' : int(e.number),
-    title: s(e.title), details: s(e.details), slots: readSlots(e), files: readFiles(e.files), list: type === READINGS_KIND ? readList(e.reading_list) : null,
+    title: s(e.title), details: s(e.details), slots: readSlots(e), files: readFiles(e.files), list: type === READINGS_KIND ? readList(e.reading_list ?? e.reading_guide) : null,
     show: e.show_on_site === undefined || e.show_on_site === null ? !hiddenKind(type) : e.show_on_site !== false,
     provisional: e.tbc === true, tbc: isTbc(e.event_datetime),
   };
@@ -512,7 +512,9 @@ export function entryValue(d: EntryDraft, rawEntry: unknown): Raw {
     event_datetime: when.event_datetime,
     location: when.location,
     details: text(d.details),
-    reading_list: d.type === READINGS_KIND ? listValue(d.list, raw.reading_list) : raw.reading_list,
+    // `reading_guide:` is the 0.11.0 name (an org not migrated yet): read as the list, written back as `reading_list:` only.
+    reading_list: d.type === READINGS_KIND ? listValue(d.list, raw.reading_list ?? raw.reading_guide) : raw.reading_list,
+    reading_guide: d.type === READINGS_KIND ? undefined : raw.reading_guide,
     files: d.files.length ? d.files.map((f) => fileValue(f, f.src === undefined ? undefined : rawFiles[f.src])) : undefined,
     show_on_site: keep(raw.show_on_site, d.show, !hiddenKind(d.type)),
     tbc: d.tbc ? (raw.tbc === undefined ? undefined : raw.tbc) : keep(raw.tbc, d.provisional, false),
