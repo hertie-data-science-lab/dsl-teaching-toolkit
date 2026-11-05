@@ -3613,6 +3613,19 @@ def test_a_reading_list_file_inside_a_copied_folder_ships_with_that_folder():
         }
     )
     assert len(own.deploy) == 2
+    # Written blank, those keys are the defaults: the folder still carries it.
+    blank = _readings(
+        {
+            "files": [{"from_course_repo": "cm", "from_path": "readings/09"}],
+            "reading_list": {
+                "from_course_repo": "cm",
+                "from_path": "readings/09/READINGS.md",
+                "to_path": None,
+                "release_datetime": None,
+            },
+        }
+    )
+    assert len(blank.deploy) == 1
     assert schedule_plan.list_dest(own.reading_list, own.deploy) == (
         "materials",
         "lists/09.md",
@@ -3639,6 +3652,28 @@ def test_a_bad_reading_list_is_a_fault_on_the_entry(value, field):
     assert (r.reading_list, r.deploy) == (None, [])
     (fault,) = sched.faults
     assert fault.where.startswith("readings.r1") and fault.field == field
+
+
+def test_another_kinds_reading_list_is_flagged_and_never_shipped():
+    sched = parse(
+        {
+            "lectures": {
+                "lec4": {
+                    "session": 4,
+                    "event_datetime": "2026-09-08T10:00",
+                    "files": [{"from_course_repo": "cm", "from_path": "lectures/04"}],
+                    "reading_list": {
+                        "from_course_repo": "cm",
+                        "from_path": "other/READINGS.md",
+                    },
+                }
+            }
+        }
+    )
+    (r,) = sched.releases
+    assert r.reading_list is None
+    assert [d.course_source_path for d in r.deploy] == ["lectures/04"]
+    assert any("reading_list" in d for d in sched.dropped)
 
 
 def test_a_carried_reading_list_file_is_checked_by_name(monkeypatch):
