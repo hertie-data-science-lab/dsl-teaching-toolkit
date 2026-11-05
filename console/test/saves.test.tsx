@@ -786,6 +786,50 @@ describe('the reading list in the schedule entry sheet (decision 0044)', () => {
     for (const [type, entry] of [['readings', 'readings-4'], ['readings', 'readings-5'], ['lecture', 'lecture-4'], ['lecture', 'lecture-7'], ['exam', 'readings-6']]) expect(noReadingList(d, { type, entry })).toBe(false);
   });
 
+  it('loads a typed path that is already in the repo as that Existing file, and saves over its sha', async () => {
+    const gh = github(), f = withList();
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'readings-6' })} />);
+    expect(root!.textContent).toContain('New file');
+    await type('#e-rl-path', LIST);
+    expect(root!.textContent).toContain('Existing file');
+    expect(root!.querySelector('#e-rl-path')).toBeNull();
+    expect(q<HTMLTextAreaElement>('#e-rl').value).toBe('- Bishop (2006), ch. 5.\n');
+    await type('#e-rl', '- Bishop (2006), ch. 5.\n- Murphy (2012).\n');
+    await click(buttons('Save')[0]);
+    await settle(() => puts(gh, 'schedule.yml').length > 0);
+    expect(listPuts(gh)).toEqual([LIST, 'schedule.yml']);
+    expect((puts(gh, LIST)[0].body as { sha?: string }).sha).toBe('static');
+    expect(parse(body(puts(gh, 'schedule.yml')[0])).readings['readings-6'].reading_list).toEqual({ from_course_repo: 'course-materials-f2026', from_path: LIST });
+  });
+
+  it('moves legacy text onto a default path that exists by loading that file, as Choose another does', async () => {
+    const gh = github(), f = withList({ [`${COURSE_ORG}/course-materials-f2026/readings/05/READINGS.md`]: '- Already here.\n' });
+    const tree = (f as unknown as { treeMap: Record<string, string[]> }).treeMap[`${COURSE_ORG}/course-materials-f2026`];
+    tree.push('readings/05/READINGS.md');
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'readings-5' })} />);
+    await click(button('Move to a file'));
+    expect(root!.textContent).toContain('Existing file');
+    expect(root!.textContent).not.toContain('This file changed on GitHub');
+    expect(q<HTMLTextAreaElement>('#e-rl').value).toBe('- Already here.\n');
+  });
+
+  it('says why a list file could not be read, with Retry, never a stuck Reading…', async () => {
+    const gh = github(), f = withList();
+    let failing = true;
+    const flaky = Object.assign(Object.create(f), {
+      file: (o: string, r: string, path: string) => (failing && path === LIST ? { kind: 'error', message: 'Server Error' } : f.file(o, r, path)),
+      refresh: () => { failing = false; },
+    });
+    await mount(envOf(gh, flaky), <ScheduleScreen {...props(flaky, { entry: 'readings-4' })} />);
+    expect(root!.textContent).toContain(`Could not read ${LIST}: Server Error`);
+    expect(root!.textContent).not.toContain('Reading readings/');
+    expect(q<HTMLTextAreaElement>('#e-rl').disabled).toBe(true);
+    await click(button('Retry'));
+    expect(root!.textContent).not.toContain('Could not read');
+    expect(root!.textContent).toContain('Existing file');
+    expect(q<HTMLTextAreaElement>('#e-rl').value).toBe('- Bishop (2006), ch. 5.\n');
+  });
+
   it('widens the sheet with Full screen, the file viewer’s control', async () => {
     const gh = github(), f = withList();
     await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'readings-6' })} />);

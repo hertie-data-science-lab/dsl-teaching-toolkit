@@ -53,7 +53,11 @@ export function namedLists(states: Record<string, Loaded>, repo: string): string
 
 const isMarkdown = (path: string) => /\.(md|markdown)$/i.test(path);
 
-/** `v`, once it has stood still for `ms`: the preview renders through GitHub, not on every key. */
+/**
+ * `v`, once it has stood still for `ms`: the preview renders through GitHub's markdown API (as the
+ * file viewer does, `materials.showFile`), not on every key. A text back where it was sets nothing,
+ * and `GhMd` keeps each rendering, so an unchanged text never asks again.
+ */
 function useSettled(v: string, ms: number): string {
   const [settled, setSettled] = useState(v);
   useEffect(() => {
@@ -85,8 +89,20 @@ export function ReadingList({ id, list, defaultRepo, defaultPath, org, repos, fi
   draft?: ComponentChildren;
 }) {
   const [picking, setPicking] = useState(false);
-  const cur: ListDraft = list ?? { repo: defaultRepo, path: defaultPath, text: '', sha: null, inline: false, loaded: true };
+  const [, reread] = useState(0);
+  // A path already in the repo is that file, read as Choose another reads it: never a New file over it.
+  const inTree = (repo: string, path: string) => { const t = files.tree(org, repo); return t.kind === 'ready' && t.paths.some((x) => !x.dir && x.path === path); };
+  const asFile = (repo: string, path: string): ListDraft => {
+    const f = files.file(org, repo, path);
+    return { repo, path, text: f.kind === 'ready' ? f.text : '', sha: f.kind === 'ready' ? f.sha : null, inline: false, loaded: f.kind === 'ready' || f.kind === 'absent' };
+  };
+  const at = (repo: string, path: string): ListDraft => (inTree(repo, path) ? asFile(repo, path) : { repo, path, text: '', sha: null, inline: false, loaded: true });
+  // A file still unread in the draft is read here too: a Retry re-reads it in this component alone.
+  const cur: ListDraft = list && !list.inline && !list.loaded ? asFile(list.repo, list.path) : list ?? at(defaultRepo, defaultPath);
   const set = (x: Partial<ListDraft>) => onChange({ ...cur, ...x });
+  // A file that could not be read (not one that is absent: that is a New file).
+  const read = !cur.inline && !cur.loaded ? files.file(org, cur.repo, cur.path) : null;
+  const retry = () => { files.refresh(org, cur.repo, cur.path); reread((n) => n + 1); };
   const badge = cur.inline ? LIST_TEXT.inline : !cur.loaded ? null : cur.sha ? LIST_TEXT.existingFile : LIST_TEXT.newFile;
   const isNew = !cur.inline && cur.loaded && !cur.sha;
   const missing = notCited(cur.text, readingFiles);
@@ -99,22 +115,23 @@ export function ReadingList({ id, list, defaultRepo, defaultPath, org, repos, fi
       <div class="rl-file">
         <span>File: </span>
         {cur.inline ? <span class="footnote">none</span>
-          : isNew && !fixedPath ? <><span class="mono">{cur.repo} / </span><input id={`${id}-rl-path`} class="mono" type="text" aria-label="Reading list path" value={cur.path} onInput={(e) => set({ path: (e.target as HTMLInputElement).value.replace(/^\/+/, '') })} /></>
+          : isNew && !fixedPath ? <><span class="mono">{cur.repo} / </span><input id={`${id}-rl-path`} class="mono" type="text" aria-label="Reading list path" value={cur.path} onInput={(e) => { const path = (e.target as HTMLInputElement).value.replace(/^\/+/, ''); if (inTree(cur.repo, path)) onChange(asFile(cur.repo, path)); else set({ path }); }} /></>
           : <span class="mono">{cur.repo} / {cur.path}</span>}
-        {badge ? <span class={`chip${cur.inline ? ' amber' : ' muted'}`}>{badge}</span> : <span class="footnote">Reading {cur.path}…</span>}
+        {badge ? <span class={`chip${cur.inline ? ' amber' : ' muted'}`}>{badge}</span> : read?.kind === 'error' ? null : <span class="footnote">Reading {cur.path}…</span>}
         {fixedPath ? null : (
           <span class="actions">
-            {cur.inline ? <button class="btn small" type="button" onClick={() => set({ inline: false, repo: defaultRepo, path: defaultPath, sha: null, loaded: true })}>{LIST_TEXT.move}</button> : null}
+            {cur.inline ? <button class="btn small" type="button" onClick={() => onChange(inTree(defaultRepo, defaultPath) ? asFile(defaultRepo, defaultPath) : { ...cur, inline: false, repo: defaultRepo, path: defaultPath, sha: null, loaded: true })}>{LIST_TEXT.move}</button> : null}
             <button class="btn small quiet" type="button" onClick={() => setPicking(true)}>{LIST_TEXT.choose}</button>
           </span>
         )}
       </div>
-      {cur.inline ? null : <p class="footnote">{isNew ? LIST_TEXT.footNew(cur.repo) : LIST_TEXT.footExisting}</p>}
+      {read?.kind === 'error' ? <CheckLine cls="bad">Could not read {cur.path}: {read.message} <button class="textlink" type="button" onClick={retry}>Retry</button></CheckLine> : null}
+      {cur.inline || read?.kind === 'error' ? null : <p class="footnote">{isNew ? LIST_TEXT.footNew(cur.repo) : LIST_TEXT.footExisting}</p>}
       <div class="rl-edit">
         <textarea id={`${id}-rl`} class="mono" rows={rows} value={cur.text} disabled={!cur.loaded} onInput={(e) => set({ text: (e.target as HTMLTextAreaElement).value })} />
         <div class="rl-preview" aria-label={LIST_TEXT.preview}>
           <span class="hint">{LIST_TEXT.preview}</span>
-          {shown.trim() ? <GhMd src={shown} class="reading-list" /> : <p class="footnote">{LIST_TEXT.empty}</p>}
+          {shown.trim() ? <GhMd src={shown} context={cur.repo ? `${org}/${cur.repo}` : undefined} class="reading-list" /> : <p class="footnote">{LIST_TEXT.empty}</p>}
         </div>
       </div>
       {missing.length ? <CheckLine cls="warn">{LIST_TEXT.missing(missing)}</CheckLine> : null}

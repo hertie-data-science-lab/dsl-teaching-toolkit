@@ -16,6 +16,7 @@ import { MaterialsIndexScreen } from '../src/screens/CourseIndex';
 import { SemesterMaterialsScreen } from '../src/screens/SemesterMaterials';
 import type { CourseProps } from '../src/screens/types';
 import { LIST_TEXT, isReadingList, notCited } from '../src/ui/ReadingList';
+import { forgetRendered } from '../src/ui/rendered';
 import { FakeGitHub, fileBody, json, type Seen } from './fake';
 import example from './fixtures/status.example.json';
 import { StaticFiles } from './staticFiles';
@@ -41,7 +42,10 @@ const cp = (file: string, write = true): CourseProps => ({ course: { ...course, 
 
 let root: HTMLElement | null = null;
 let gh: FakeGitHub;
-beforeEach(() => sessionStorage.clear());
+beforeEach(() => {
+  sessionStorage.clear();
+  forgetRendered(); // each test counts its own markdown renders
+});
 afterEach(() => {
   if (root) render(null, root);
   root?.remove();
@@ -57,7 +61,8 @@ async function mount(view: preact.VNode) {
     .on('GET', `/repos/${COHORT}/materials/git/trees/HEAD?recursive=1`, { sha: 't', truncated: false, tree: [blob(RELEASED)] });
   for (const [path, text] of Object.entries(TEXT)) gh.on('GET', `/repos/${ORG}/${MAT}/contents/${path}`, fileBody(path, text));
   gh.on('GET', `/repos/${COHORT}/materials/contents/${RELEASED}`, fileBody(RELEASED, TEXT[NAMED]))
-    .on('PUT', /\/contents\//, () => json({ content: { sha: 'b1' }, commit: { sha: 'c1' } }));
+    .on('PUT', /\/contents\//, () => json({ content: { sha: 'b1' }, commit: { sha: 'c1' } }))
+    .on('POST', '/markdown', (req: Seen) => new Response(`<p>${(req.body as { text: string }).text}</p>`, { status: 200 }));
   const env = { user: { login: 'prof', id: 1, name: 'P', email: null, avatar_url: '' }, client: new GitHubClient({ token: () => 't', fetch: gh.fetch }), files: staticFiles() } as unknown as Env;
   root = document.createElement('div');
   document.body.appendChild(root);
@@ -108,6 +113,30 @@ describe('the course Materials file view (decision 0044)', () => {
     await act(() => button('Back to the file')!.click());
     await settle();
     expect(button('Edit reading list')).toBeDefined();
+  });
+
+  it('previews through GitHub’s markdown API with the file’s repo as context, once per settled text', async () => {
+    await mount(<MaterialsIndexScreen {...cp(`${MAT}/readings/04/READINGS.md`)} />);
+    const renders = () => gh.seen.filter((s: Seen) => s.method === 'POST' && s.url.endsWith('/markdown')).map((s) => s.body as { text: string; context?: string });
+    // The file viewer's own rendering of the file, then the editor's preview: the same call, the same context.
+    const viewer = renders();
+    expect(viewer).toEqual([{ text: TEXT['readings/04/READINGS.md'], mode: 'gfm', context: `${ORG}/${MAT}` }]);
+    await act(() => button('Edit reading list')!.click());
+    await settle();
+    expect(renders().slice(viewer.length)).toEqual(viewer);
+    const area = root!.querySelector<HTMLTextAreaElement>('#mf-rl')!;
+    const typeText = (v: string) => act(() => { area.value = v; area.dispatchEvent(new Event('input', { bubbles: true })); });
+    const n = renders().length;
+    // Typed and put back within the pause: the settled text never changed, so nothing is asked.
+    await typeText('- Bishop (2006): bishop.pdf\nx');
+    await typeText(TEXT['readings/04/READINGS.md']);
+    await act(() => new Promise((r) => setTimeout(r, 500)));
+    await settle();
+    expect(renders().length).toBe(n);
+    await typeText('- New.\n');
+    await act(() => new Promise((r) => setTimeout(r, 500)));
+    await settle();
+    expect(renders().slice(n).map((b) => b.text)).toEqual(['- New.\n']);
   });
 
   it('offers Edit reading list on a file a semester’s readings entry names, not on other files', async () => {
