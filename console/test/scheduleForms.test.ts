@@ -493,12 +493,12 @@ describe('the reading list as a course file (decision 0044)', () => {
     expect(parse(save(tw, { ...unit, title: 'Trees' }, unit, [], false, there).text).readings['readings-3'].reading_list).toBeUndefined();
   });
 
-  it('Detach drops the key and nothing else; Write one with nothing typed keeps the key out', () => {
+  it('Detach drops the key and nothing else; Generate one with nothing typed keeps the key out', () => {
     const d = readDraft(doc(t), 'readings-4') as EntryDraft;
     const out = parse(save(t, { ...d, list: null }, d).text).readings['readings-4'];
     expect(out).toEqual({ session: 4 });
     expect(listWrites([{ ...d, list: null }], ready('- A.\n'))).toEqual([]);
-    // Write one, then nothing typed: no file, no key (a twin too).
+    // Generate one, then nothing typed: no file, no key (a twin too).
     const fresh = { ...d, list: { repo: REPO, path: 'readings/04/READINGS.md', inline: false, text: '' } };
     expect(listWrites([fresh], () => ({ kind: 'absent' }))).toEqual([]);
     expect(parse(save(t, fresh, d).text).readings['readings-4'].reading_list).toBeUndefined();
@@ -513,7 +513,7 @@ describe('the reading list as a course file (decision 0044)', () => {
     expect(Object.values(out.readings)).toEqual([expect.objectContaining({ session: 3, reading_list: { from_course_repo: REPO, from_path: 'lectures/03/list.md' } })]);
   });
 
-  it('counts a twin with Write one left empty as unused: no date asked, no entry; one typed line makes it used', () => {
+  it('counts a twin with Generate one left empty as unused: no date asked, no entry; one typed line makes it used', () => {
     const tw = `lectures:\n  lecture-3:\n    session: 3\n`;
     const unit = readDraft(doc(tw), 'lecture-3') as EntryDraft;
     const written = (text: string) => ({ ...unit, twin: { ...emptyTwin(unit), list: { repo: REPO, path: 'readings/03/READINGS.md', inline: false, text } } });

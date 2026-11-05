@@ -296,6 +296,7 @@ button.wk { font: inherit; text-align: left; cursor: pointer; align-content: sta
 @media (max-width: 760px) { .ptab-coming li { grid-template-columns: 80px minmax(0, 1fr); } .ptab-coming li .row-acts { grid-column: 2; display: flex; gap: 12px; } }
 /* Repo chips: not ready is grey in a row, red on a settings page's head; suggestions dotted, never coloured. */
 .chip.suggest { background: transparent; border: 1.5px dotted var(--idle); color: var(--ink-2); font-weight: 500; }
+a.chip.suggest { text-decoration: none; cursor: pointer; }
 .chip.notready { background: var(--sunk); color: var(--ink-2); }
 .page-head .actions > .chip.notready { background: var(--bad-soft); color: var(--bad-ink); }
 .page-note { color: var(--ink-2); font-size: 14px; margin: -6px 0 18px; max-width: 80ch; }

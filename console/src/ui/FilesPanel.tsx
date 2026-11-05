@@ -58,6 +58,7 @@ import { ChipMeanings, NEVER_RELEASED_TITLE, StateChip, type ChipKind } from './
 import { RepoFile } from './Viewer';
 import { CourseFile, type NamedList } from './ReadingList';
 import { isReadingList } from '../model/scheduleEdit';
+import { foldersWithoutList, READINGS_DIR, readingListHref } from '../model/readingFolders';
 
 export type FilesView = 'browse' | 'withhold' | 'release';
 
@@ -347,12 +348,17 @@ function Panel(p: FilesPanelProps) {
   const dests = into ? destsOf(p, into, defaultDest, chosen) : null;
   const prOf = (destRepo: string, path: string) => (into ? (p.prUrl?.(into.org, destRepo, path) ?? `${ghUrl(into.org, destRepo)}/pulls`) : undefined);
   const keep = into && p.onKeep ? () => p.onKeep!(into) : undefined;
+  // Decision 0046 rules 5 and 9, course Browse only: a readings folder with files and no list, and their roll-up on `readings/` while it is closed.
+  const browseCourse = view === 'browse' && course;
+  const bare = useMemo(() => (browseCourse ? foldersWithoutList(here.paths.map((path) => ({ path, dir: false }))) : NO_FOLDERS), [browseCourse, here.paths]);
   const chip = (path: string, dir: boolean): ComponentChildren => {
     const r = rowState(path, dir);
     const words = release && dir && r.chip === null ? countsWords(r.row.states) : '';
     return (
       <>
-        {view === 'browse' && course && !dir && isReadingList(path, listPaths) ? <span class="chip muted">reading list</span> : null}
+        {browseCourse && !dir && isReadingList(path, listPaths) ? <span class="chip muted">reading list</span> : null}
+        {dir && bare.has(path) ? <a class="chip muted" href={readingListHref(p.courseOrg, repo, path)}>no reading list</a> : null}
+        {dir && path === READINGS_DIR && bare.size ? <span class="ft-rollup"><span class="chip muted">{plural(bare.size, 'folder')} without a reading list</span></span> : null}
         {r.chip ? <StateChip kind={r.chip} tree onTick={r.chip === 'behind' && !isPicked(path, false) && !inPicked(path) ? () => togglePick(path, false) : undefined} onKeep={keep} prUrl={r.chip === 'diverged' ? prOf(runRepo, path) : undefined} /> : null}
         {/* A folder's roll-up, about its contents: shown only while it is closed (`.ft-rollup`); its own chip above shows either way. */}
         {dir && r.chip === null && (r.row.withheld || words) ? (

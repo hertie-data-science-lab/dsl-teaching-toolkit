@@ -163,12 +163,16 @@ export function Verdict({ v, onOpen }: { v: VerdictT | null; onOpen?: () => void
 
 const CHIP_CLASS: Record<RepoReadiness['state'], string> = { problem: 'bad', ready: 'ok', not_ready: 'notready' };
 
-/** A repo's state as chips (decision 0034): Has a problem, Not ready or Ready; on its settings head also a dotted "n suggestions" (a `row` shows the state alone). */
-export function RepoChip({ r, row = false }: { r: RepoReadiness; row?: boolean }) {
+/**
+ * A repo's state as chips (decision 0034): Has a problem, Not ready or Ready; on its settings head also a dotted "n suggestions" (a `row` shows the state alone).
+ * With `link`, the suggestions chip links to where they are listed (the course materials index, decision 0046 rule 10).
+ */
+export function RepoChip({ r, row = false, link }: { r: RepoReadiness; row?: boolean; link?: { href: string; label: string } }) {
+  const n = plural(r.suggestions, 'suggestion');
   return (
     <>
       <span class={`chip ${CHIP_CLASS[r.state]}`}>{REPO_CHIP[r.state]}</span>
-      {r.suggestions && !row ? <span class="chip suggest">{plural(r.suggestions, 'suggestion')}</span> : null}
+      {r.suggestions && !row ? (link ? <a class="chip suggest" href={link.href} aria-label={link.label}>{n}</a> : <span class="chip suggest">{n}</span>) : null}
     </>
   );
 }

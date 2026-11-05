@@ -774,7 +774,7 @@ describe('the reading list in the schedule entry sheet (decisions 0044, 0046)', 
     expect(out.readings['readings-5'].reading_list).toEqual({ from_course_repo: 'course-materials-f2026', from_path: 'lectures/05/READINGS.md' });
   });
 
-  it('offers Write one when no list file is beside the reading files: a New file at their folder, no file and no key while it is empty', async () => {
+  it('offers Generate one when no list file is beside the reading files: a New file at their folder, no file and no key while it is empty', async () => {
     const gh = github(), f = withList();
     await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'readings-6' })} />);
     // The none state: the offer alone, the sheet clean.

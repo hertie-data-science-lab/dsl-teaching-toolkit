@@ -380,7 +380,7 @@ export function emptyTwin(d: EntryDraft): EntryDraft {
 }
 
 /** Whether a new twin holds anything worth writing. */
-// A list counts when chosen (a file, untouched) or with text; Write one left empty is nothing yet.
+// A list counts when chosen (a file, untouched) or with text; Generate one left empty is nothing yet.
 export const twinUsed = (t: EntryDraft) => !!(t.id || t.files.length || (t.list && !t.list.inline && t.list.text === null) || t.list?.text?.trim() || t.title.trim());
 
 // ------------------------------------------------------------------ keys
@@ -455,7 +455,7 @@ function listValue(l: ListDraft | null, raw: unknown, exists: Exists): unknown {
   if (!l) return undefined;
   if (l.inline) return text(l.text ?? '');
   const was = raw !== null && typeof raw === 'object' ? obj(raw) : null;
-  // A new file with nothing typed (Write one, left empty) is not written, so neither is its key.
+  // A new file with nothing typed (Generate one, left empty) is not written, so neither is its key.
   if ((!was || l.text !== null) && !l.text?.trim() && !exists(l.repo, l.path)) return undefined;
   return { ...was, from_course_repo: l.repo, from_path: l.path };
 }

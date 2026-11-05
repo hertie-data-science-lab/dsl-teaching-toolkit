@@ -55,22 +55,17 @@ describe('the readings folders (the engine’s rule)', () => {
   });
 });
 
-describe('the no reading list chip', () => {
+describe('the course materials index tree (decision 0046 amendment 1 rule 9)', () => {
   let root: HTMLElement;
   beforeEach(() => { sessionStorage.clear(); root = document.createElement('div'); document.body.appendChild(root); });
   afterEach(() => { render(null, root); root.remove(); });
 
-  const chips = () => [...root.querySelectorAll<HTMLAnchorElement>('li[data-folder] > details > summary a.chip')].map((a) => [a.closest('li')!.dataset.folder, a.textContent, a.getAttribute('href')]);
-
-  it('marks a readings folder with files and no list on the course tree, linking to its list', async () => {
-    await act(() => render(<MaterialsTree org={ORG} repo={MAT} paths={files(PATHS)} focus="readings" />, root));
-    expect(chips()).toEqual([['readings/02_trees', 'no reading list', readingListHref(ORG, MAT, 'readings/02_trees')]]);
-    expect(root.querySelector('li[data-folder="readings/02_trees"] summary a.chip')!.className).toBe('chip muted');
-  });
-
-  it('marks nothing on a semester’s tree', async () => {
-    await act(() => render(<MaterialsTree org={ORG} repo="materials" paths={files(PATHS)} focus="readings" at="cohort" />, root));
-    expect(chips()).toEqual([]);
+  it('is a pure browser: no reading-list chip on any folder or file, open or closed (the repo page’s Files panel carries them)', async () => {
+    await act(() => render(<MaterialsTree org={ORG} repo={MAT} paths={files(PATHS)} />, root));
+    expect(root.textContent).not.toContain('reading list');
+    await act(() => render(<MaterialsTree org={ORG} repo={MAT} paths={files(PATHS)} focus="readings/02_trees" />, root));
+    expect(root.querySelector('li[data-folder="readings/02_trees"]')).not.toBeNull();
+    expect(root.textContent).not.toContain('reading list');
   });
 });
 
@@ -84,12 +79,12 @@ describe('a reading list not written yet, opened from the course side', () => {
   let root: HTMLElement | null = null;
   let gh: FakeGitHub;
   afterEach(() => { if (root) render(null, root); root?.remove(); root = null; });
-  async function mount(p: CourseProps) {
+  async function mount(p: CourseProps, checks: MaterialsCheck[] = []) {
     gh = new FakeGitHub().on('PUT', /\/contents\//, () => json({ content: { sha: 'b1' }, commit: { sha: 'c1' } }))
       .on('POST', '/markdown', (req: Seen) => new Response(`<p>${(req.body as { text: string }).text}</p>`, { status: 200 }));
     const env = { user: { login: 'prof', id: 1, name: 'P', email: null, avatar_url: '' }, client: new GitHubClient({ token: () => 't', fetch: gh.fetch }), files: p.files } as unknown as Env;
     // The course block names the repo, so `?file=` opens in it.
-    const status = { course: { org: ORG, materials: [{ repo: MAT, state: 'ready', checks: [] }] } };
+    const status = { course: { org: ORG, materials: [{ repo: MAT, state: 'ready', checks }] } };
     root = document.createElement('div');
     document.body.appendChild(root);
     await act(() => render(<EnvCtx.Provider value={env}><MaterialsIndexScreen {...p} loaded={{ kind: 'ready', status, sha: 's', stale: [] } as never} /></EnvCtx.Provider>, root!));
@@ -125,6 +120,13 @@ describe('a reading list not written yet, opened from the course side', () => {
   it('offers no editor to someone who cannot change the course', async () => {
     await mount(cp(`${MAT}/${LIST}`, false));
     expect(root!.querySelector('#mf-rl')).toBeNull();
+  });
+
+  it('links the repo row’s suggestions chip to the repo’s settings, where they are listed (rule 10)', async () => {
+    const open = (id: string): MaterialsCheck => ({ id, label: id, done: false, why: WHY, need: 'suggested' });
+    await mount(cp(''), [open('reading_list:readings/02_trees'), open('syllabus')]);
+    const chip = root!.querySelector<HTMLAnchorElement>('.r-title .chip.suggest')!;
+    expect([chip.tagName, chip.textContent, chip.getAttribute('href'), chip.getAttribute('aria-label')]).toEqual(['A', '2 suggestions', `#materials-${MAT}`, `Open ${MAT} settings`]);
   });
 });
 

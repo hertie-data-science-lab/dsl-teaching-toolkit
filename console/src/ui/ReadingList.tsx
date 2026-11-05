@@ -5,7 +5,7 @@
 // here changes both. The list is a markdown file in a course materials repo (default
 // `READINGS.md` beside the reading files); text written in the schedule is the legacy form,
 // shown and kept, with `Move to a file`. A list is offered, never taken unasked (decision 0046):
-// with none, the entry shows Use it / Write one / Choose a file, and Detach takes it off again.
+// with none, the entry shows Use it / Generate one / Choose a file, and Detach takes it off again.
 
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { useEnv } from '../env';
@@ -35,7 +35,7 @@ export const LIST_TEXT = {
   choose: 'Choose another…',
   none: 'There is a READINGS.md beside these files.',
   useIt: 'Use it',
-  writeOne: 'Write one',
+  writeOne: 'Generate one',
   chooseFile: 'Choose a file…',
   detach: 'Detach',
   creates: (repo: string, path: string) => `Creates ${repo} / ${path}.`,

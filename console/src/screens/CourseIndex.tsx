@@ -117,7 +117,7 @@ export function OtherRepoRow({ org, repo, write }: { org: string; repo: GhRepo; 
 export const focusIn = (folder: string | undefined, repo: string) => (folder?.startsWith(`${repo}/`) ? folder.slice(repo.length + 1).replace(/\/+$/, '') || undefined : undefined);
 
 /** A materials repo's files under its row, as a folder tree; `current`, a file open beside it; `at` as `MaterialsTree` takes it. */
-export function RepoFiles({ files, org, repo, focus, current, at, lists }: { files: Files; org: string; repo: string; focus?: string; current?: string } & Pick<Parameters<typeof MaterialsTree>[0], 'at' | 'lists'>) {
+export function RepoFiles({ files, org, repo, focus, current, at }: { files: Files; org: string; repo: string; focus?: string; current?: string } & Pick<Parameters<typeof MaterialsTree>[0], 'at'>) {
   const t = files.tree(org, repo);
   if (t.kind === 'loading') return <div class="r-files"><Loading what="Reading the repo" /></div>;
   if (t.kind === 'absent' && at === 'cohort') return <p class="footnote">No such repo in the semester yet: the first release into it creates it.</p>;
@@ -125,7 +125,7 @@ export function RepoFiles({ files, org, repo, focus, current, at, lists }: { fil
   return (
     <div class="r-files">
       {t.truncated ? <p class="footnote">GitHub returned only part of this repo’s file list.</p> : null}
-      <MaterialsTree org={org} repo={repo} paths={t.paths} focus={focus} current={current} at={at} lists={lists} />
+      <MaterialsTree org={org} repo={repo} paths={t.paths} focus={focus} current={current} at={at} />
     </div>
   );
 }
@@ -147,7 +147,7 @@ function MaterialsFile({ p, at }: { p: CourseProps; at: { repo: string; path: st
       <div class="page-head">
         <div><h2 class="h1">Course materials</h2><p class="lede"><a class="textlink" href={`?course=${org}#materials`}>All course materials</a></p></div>
       </div>
-      <Split label={at.repo} side={<section class="panel section" aria-label={at.repo}><h2>{at.repo}</h2><RepoFiles files={p.files} org={org} repo={at.repo} current={at.path} lists={lists.map((l) => l.path)} /></section>}>
+      <Split label={at.repo} side={<section class="panel section" aria-label={at.repo}><h2>{at.repo}</h2><RepoFiles files={p.files} org={org} repo={at.repo} current={at.path} /></section>}>
         <CourseFile org={org} at={at} files={p.files} named={lists} write={p.course.write} />
       </Split>
     </>
@@ -183,12 +183,12 @@ export function MaterialsIndexScreen(p: CourseProps) {
                 const edits = live ? editedIn(files, course.org, m.repo, live.org, p.cohortStates[live.org]!) : null;
                 return (
                   <li>
-                    <span class="r-title"><a class="textlink" href={`#materials-${m.repo}`}>{m.repo}</a> <RepoChip r={r} />{term ? <span class="chip term">{term}</span> : null}
+                    <span class="r-title"><a class="textlink" href={`#materials-${m.repo}`}>{m.repo}</a> <RepoChip r={r} link={{ href: `#materials-${m.repo}`, label: `Open ${m.repo} settings` }} />{term ? <span class="chip term">{term}</span> : null}
                       {edits ? <> <a class="chip muted" href={`#materials-${m.repo}`}>{plural(edits, 'file')} edited in {live!.termLabel}</a></> : null}</span>
                     <RepoWhy r={r} />
                     {gh?.pushed_at ? <span class="r-sub">Last change {fmtDay(gh.pushed_at)} ({ago(gh.pushed_at, p.now)}).</span> : null}
                     <span class="r-side"><OpenButton org={course.org} repo={m.repo} small quiet /><a class="btn small quiet" href={`#materials-${m.repo}`}>Settings</a></span>
-                    <RepoFiles files={files} org={course.org} repo={m.repo} focus={focusIn(p.folder, m.repo)} lists={namedLists(p.cohortStates, m.repo).map((l) => l.path)} />
+                    <RepoFiles files={files} org={course.org} repo={m.repo} focus={focusIn(p.folder, m.repo)} />
                   </li>
                 );
               })}
