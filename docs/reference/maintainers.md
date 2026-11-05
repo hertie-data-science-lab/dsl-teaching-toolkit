@@ -861,6 +861,13 @@ view (`CourseFile`, saved alone). Keep one set of words (`LIST_TEXT`) for both. 
 status readings row names (`reading_list.path`) is marked in the course trees, and its
 released copy (`released_repo` / `released_path`) links to the entry.
 
+Generate draft (0044 point 6) fills the editor's `draft` slot in both mounts: `ui/ReadingDraft.tsx`
+reads each PDF's bytes through `client.getBytes` (contents API, blob API over 1 MB: tree paths
+carry `size`), parses it in `model/pdfText.ts`, and drafts the lines in `model/readingDraft.ts`
+(pure, tested on fixture text; heuristics from the 5 Nov trial). `pdfText.ts` is the only module
+that imports `pdfjs-dist`, and only by dynamic `import()`, so pdf.js stays out of the main chunk
+and its worker is a same-origin asset (the CSP allows no other script source). Keep it lazy.
+
 ## Config faults
 
 Every file faculty edit by hand can be wrong in a way the toolkit detects and only a human

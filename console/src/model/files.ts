@@ -20,6 +20,8 @@ export interface TreePath {
   path: string;
   dir: boolean;
   sha: string;
+  /** Bytes, for a file (GitHub's tree listing gives it): the client reads a file over 1 MB by blob. */
+  size?: number;
 }
 
 /** A repo's whole tree at a ref: every path, with `dir` for folders. */
@@ -125,7 +127,7 @@ export class LiveFiles implements Files {
 
   private async readTree(owner: string, repo: string, ref: string): Promise<TreeState> {
     const t = await this.client.listTree(owner, repo, ref, true);
-    return t ? { kind: 'ready', paths: t.tree.filter((e) => e.type !== 'commit').map((e) => ({ path: e.path, dir: e.type === 'tree', sha: e.sha })), truncated: t.truncated === true } : { kind: 'absent' };
+    return t ? { kind: 'ready', paths: t.tree.filter((e) => e.type !== 'commit').map((e) => ({ path: e.path, dir: e.type === 'tree', sha: e.sha, size: e.size })), truncated: t.truncated === true } : { kind: 'absent' };
   }
 
   tree(owner: string, repo: string, ref = 'HEAD'): TreeState {

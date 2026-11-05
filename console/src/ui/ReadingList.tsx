@@ -14,10 +14,12 @@ import type { Files } from '../model/files';
 import type { Loaded } from '../model/status';
 import type { Release } from '../model/types';
 import { plural } from '../model/format';
+import { insertLines } from '../model/readingDraft';
 import { READINGS_FILE, type ListDraft } from '../model/scheduleEdit';
 import { CheckLine } from './bits';
 import { SaveBar } from './edit';
 import { FilePicker } from './FilePicker';
+import { DraftButton, type DraftAdd, type PdfRef } from './ReadingDraft';
 import { GhMd } from './rendered';
 import { RepoFile } from './Viewer';
 
@@ -85,8 +87,8 @@ export function ReadingList({ id, list, defaultRepo, defaultPath, org, repos, fi
   onChange: (l: ListDraft) => void;
   /** The Materials file view: the file is the one opened; nothing to choose or move. */
   fixedPath?: boolean;
-  /** RL-C's Generate draft button. */
-  draft?: ComponentChildren;
+  /** The draft slot (Generate draft): given `add`, which puts drafted lines into the list, and whether the list can take them yet. */
+  draft?: (add: (adds: DraftAdd[]) => void, disabled: boolean) => ComponentChildren;
 }) {
   const [picking, setPicking] = useState(false);
   const [, reread] = useState(0);
@@ -134,7 +136,7 @@ export function ReadingList({ id, list, defaultRepo, defaultPath, org, repos, fi
         </div>
       </div>
       {missing.length ? <CheckLine cls="warn">{LIST_TEXT.missing(missing)}</CheckLine> : null}
-      {draft}
+      {draft?.((adds) => set({ text: insertLines(cur.text, cur.path, adds) }), !cur.loaded)}
       {picking ? <FilePicker files={files} org={org} repos={repos} only={isMarkdown} onClose={() => setPicking(false)}
         onPick={(got) => { const g = got[got.length - 1]; if (g) set({ repo: g.repo, path: g.path, text: '', sha: null, inline: false, loaded: false }); }} /> : null}
     </div>
@@ -166,7 +168,7 @@ function ListFileEditor({ org, at, files, onBack }: { org: string; at: { repo: s
   const saved = f.kind === 'ready' ? f.text : '';
   const tree = files.tree(org, at.repo);
   const dir = at.path.includes('/') ? `${at.path.slice(0, at.path.lastIndexOf('/'))}/` : '';
-  const pdfs = tree.kind === 'ready' ? tree.paths.filter((x) => !x.dir && x.path.startsWith(dir) && !x.path.slice(dir.length).includes('/') && /\.pdf$/i.test(x.path)).map((x) => x.path.slice(dir.length)) : [];
+  const pdfs: PdfRef[] = tree.kind === 'ready' ? tree.paths.filter((x) => !x.dir && x.path.startsWith(dir) && !x.path.slice(dir.length).includes('/') && /\.pdf$/i.test(x.path)).map((x) => ({ repo: at.repo, path: x.path, sha: x.sha, size: x.size })) : [];
   const list: ListDraft = { repo: at.repo, path: at.path, text: text ?? saved, sha: f.kind === 'ready' ? f.sha : null, inline: false, loaded: f.kind === 'ready' || f.kind === 'absent' };
   const doSave = async () => {
     if (text !== null && (await run({ owner: org, repo: at.repo, path: at.path }, text, list.sha, { message: listMessage(at.path), checks: false }))) setText(null);
@@ -177,7 +179,8 @@ function ListFileEditor({ org, at, files, onBack }: { org: string; at: { repo: s
         <h2 class="mono">{at.path}</h2>
         <span class="actions"><button class="btn small quiet" type="button" onClick={onBack}>Back to the file</button></span>
       </div>
-      <ReadingList id="mf" list={list} defaultRepo={at.repo} defaultPath={at.path} org={org} repos={[at.repo]} files={files} readingFiles={pdfs} onChange={(l) => setText(l.text)} fixedPath />
+      <ReadingList id="mf" list={list} defaultRepo={at.repo} defaultPath={at.path} org={org} repos={[at.repo]} files={files} readingFiles={pdfs.map((x) => x.path.slice(dir.length))} onChange={(l) => setText(l.text)} fixedPath
+        draft={(add, disabled) => <DraftButton org={org} pdfs={pdfs} disabled={disabled} onAdd={add} />} />
       <SaveBar state={save} small onSave={() => void doSave()} disabled={text === null || text === saved} file={{ org, repo: at.repo, path: at.path, exists: f.kind !== 'absent' }} />
     </section>
   );
