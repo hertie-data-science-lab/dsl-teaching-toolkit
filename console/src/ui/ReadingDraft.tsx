@@ -25,7 +25,7 @@ export const DRAFT_TEXT = {
   showFewer: 'Show fewer',
 };
 
-/** How many notes a file shows before its list scrolls. */
+/** How many notes a file shows until Show all. */
 const NOTES_SHOWN = 5;
 
 /** A PDF reading file in a course repo: `sha` and `size` from the repo tree (the client reads a file over 1 MB by blob). */
@@ -108,14 +108,14 @@ interface Row {
   ticked: boolean;
 }
 
-/** A file's notes: five shown, the rest a scroll away, `Show all N` lifting the cap. */
+/** A file's notes: the first five (least sure first), `Show all N` showing the rest. */
 function Notes({ notes }: { notes: Note[] }) {
   const [all, setAll] = useState(false);
   const many = notes.length > NOTES_SHOWN;
   return (
     <>
-      <ul class={`rd-notes${many && !all ? ' capped' : ''}`}>
-        {notes.map((n) => <li><span class={`chip ${LEVEL_CLS[n.level]}`}>{n.level}</span> <b>{n.part}</b>: {n.text}</li>)}
+      <ul class="rd-notes">
+        {(all ? notes : notes.slice(0, NOTES_SHOWN)).map((n) => <li><span class={`chip ${LEVEL_CLS[n.level]}`}>{n.level}</span> <b>{n.part}</b>: {n.text}</li>)}
       </ul>
       {many ? <button class="textlink rd-more" type="button" aria-expanded={all} onClick={() => setAll(!all)}>{all ? DRAFT_TEXT.showFewer : DRAFT_TEXT.showAll(notes.length)}</button> : null}
     </>

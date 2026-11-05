@@ -82,19 +82,24 @@ describe('the draft dialog', () => {
     expect(closed).toBe(2);
   });
 
-  it('shows five notes a file, the rest a scroll away; Show all / Show fewer per file', async () => {
+  it('shows the first five notes a file; Show all / Show fewer per file', async () => {
     const notes = ['Book', 'Authors', 'Year', 'Publisher', 'Chapter', 'Pages', 'Section'].map((part) => ({ part, level: 'check' as const, text: 't' }));
     await mount(<DraftDialog drafts={[{ ...DRAFTS[0], notes }, { ...DRAFTS[1], notes }, { ...DRAFTS[0], path: 'r/few.pdf', notes: notes.slice(0, 5) }]} onAdd={() => {}} onClose={() => {}} />);
-    const lists = () => [...root!.querySelectorAll('.rd-notes')].map((u) => [u.children.length, u.classList.contains('capped')]);
+    const lists = () => [...root!.querySelectorAll('.rd-notes')].map((u) => u.children.length);
+    const sixth = (i: number) => [...root!.querySelectorAll('.rd-notes')[i].querySelectorAll('b')].some((b) => b.textContent === 'Pages');
     const toggles = () => [...root!.querySelectorAll<HTMLButtonElement>('.rd-more')];
-    // Every note is in the list (scrolled to); only a list of more than five is capped and has the toggle.
-    expect(lists()).toEqual([[7, true], [7, true], [5, false]]);
+    // Collapsed: the first five only, the sixth not in the DOM; only a file with more than five has the toggle.
+    expect(lists()).toEqual([5, 5, 5]);
+    expect(sixth(0)).toBe(false);
     expect(toggles().map((b) => b.textContent)).toEqual([DRAFT_TEXT.showAll(7), DRAFT_TEXT.showAll(7)]);
     await act(() => toggles()[0].click());
-    expect(lists()).toEqual([[7, false], [7, true], [5, false]]);
+    expect(lists()).toEqual([7, 5, 5]);
+    expect(sixth(0)).toBe(true);
+    expect(sixth(1)).toBe(false);
     expect(toggles().map((b) => [b.textContent, b.getAttribute('aria-expanded')])).toEqual([[DRAFT_TEXT.showFewer, 'true'], [DRAFT_TEXT.showAll(7), 'false']]);
     await act(() => toggles()[0].click());
-    expect(lists()).toEqual([[7, true], [7, true], [5, false]]);
+    expect(lists()).toEqual([5, 5, 5]);
+    expect(sixth(0)).toBe(false);
   });
 
   it('names a file it could not read, with no line to tick', async () => {
