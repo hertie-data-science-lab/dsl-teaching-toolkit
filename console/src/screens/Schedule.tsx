@@ -370,10 +370,10 @@ function ListField({ p, id, d, set, sources, title }: { p: ReadyProps; id: strin
   const trees = [...new Set(d.files.map((f) => f.repo))].map((repo) => p.files.tree(p.course.org, repo));
   const reading = useMemo(() => readingFilesOf(p.files, p.course.org, d.files, listPath), [d.files, listPath, ...trees]);
   const repo = (d.list && !d.list.inline ? d.list.repo : '') || d.files[0]?.repo || sources.materials[0];
-  // A list is a file in a course materials repo: with none, there is nowhere to write it.
-  if (!repo) return <div class="field"><span class="lbl-row"><b>{LIST_TEXT.label}</b></span><p class="footnote">{LIST_TEXT.noRepo}</p></div>;
+  // A list is a file in a course materials repo: with none, there is nowhere to write it (text in the schedule still shows and edits).
+  if (!repo && !d.list?.inline) return <div class="field"><span class="lbl-row"><b>{LIST_TEXT.label}</b></span><p class="footnote">{LIST_TEXT.noRepo}</p></div>;
   return (
-    <ReadingList id={id} list={d.list} defaultRepo={repo} defaultPath={defaultListPath(d, d.title || title)}
+    <ReadingList id={id} list={d.list} defaultRepo={repo ?? ''} noRepo={!repo} defaultPath={defaultListPath(d, d.title || title)}
       org={p.course.org} repos={sources.materials} files={p.files} readingFiles={reading} onChange={(list) => set({ list })} />
   );
 }

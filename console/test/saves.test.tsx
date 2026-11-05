@@ -870,13 +870,24 @@ describe('the reading list in the schedule entry sheet (decision 0044)', () => {
     expect(asked).not.toContain('readings/06/READINGS.md');
   });
 
-  it('asks for a course materials repo first when the entry has no repo to write the list in', async () => {
+  it('asks for a course materials repo first when there is none to write a list file in; text in the schedule still edits', async () => {
     const gh = github(), f = withList();
     const bare: Loaded = { ...ready, status: { ...ready.status!, course: { ...ready.status!.course!, materials: [] } } } as Loaded;
-    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'readings-5', loaded: bare })} />);
+    // Nothing yet: the footnote alone.
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'new', loaded: bare })} />);
+    await click(button('Readings'));
     expect(root!.textContent).toContain('Add a course materials repo first');
     expect(root!.querySelector('#e-rl')).toBeNull();
     expect(root!.textContent).not.toContain('File: ');
+    if (root) render(null, root);
+    // Legacy text: shown and editable as written in the schedule; Move and Choose give way to the footnote.
+    await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'readings-5', loaded: bare })} />);
+    expect(root!.textContent).toContain('Written in the schedule');
+    expect(q<HTMLTextAreaElement>('#e-rl').value).toBe('- Old text.');
+    expect(q<HTMLTextAreaElement>('#e-rl').disabled).toBe(false);
+    expect(root!.textContent).toContain('Add a course materials repo first');
+    expect(button('Move to a file')).toBeUndefined();
+    expect(button('Choose another…')).toBeUndefined();
   });
 
   it('adopts nothing when no file is at the default path: the sheet stays clean', async () => {

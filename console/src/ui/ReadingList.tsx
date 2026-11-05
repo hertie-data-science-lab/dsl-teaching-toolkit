@@ -72,7 +72,7 @@ function useSettled(v: string, ms: number): string {
 /** The reading files whose names the list does not mention. */
 export const notCited = (text: string, names: string[]) => (text.trim() ? names.filter((n) => !text.includes(n)) : []);
 
-export function ReadingList({ id, list, defaultRepo, defaultPath, org, repos, files, readingFiles, onChange, fixedPath = false }: {
+export function ReadingList({ id, list, defaultRepo, defaultPath, org, repos, files, readingFiles, onChange, fixedPath = false, noRepo = false }: {
   id: string;
   /** The list as the draft holds it; null: none yet (shown at the default path: a New file, or the file already there). */
   list: ListDraft | null;
@@ -87,6 +87,8 @@ export function ReadingList({ id, list, defaultRepo, defaultPath, org, repos, fi
   onChange: (l: ListDraft) => void;
   /** The Materials file view: the file is the one opened; nothing to choose or move. */
   fixedPath?: boolean;
+  /** No course materials repo to put a file in: text in the schedule stays editable, nothing to choose or move. */
+  noRepo?: boolean;
 }) {
   const [picking, setPicking] = useState(false);
   const [, reread] = useState(0);
@@ -118,7 +120,7 @@ export function ReadingList({ id, list, defaultRepo, defaultPath, org, repos, fi
           : isNew && !fixedPath ? <><span class="mono">{cur.repo} / </span><input id={`${id}-rl-path`} class="mono" type="text" aria-label="Reading list path" value={cur.path} onInput={(e) => onChange(toFile(cur.repo, (e.target as HTMLInputElement).value.replace(/^\/+/, ''), cur.text))} /></>
           : <span class="mono">{cur.repo} / {cur.path}</span>}
         {badge ? <span class={`chip${cur.inline ? ' amber' : ' muted'}`}>{badge}</span> : f?.kind === 'error' ? null : <span class="footnote">Reading {cur.path}…</span>}
-        {fixedPath ? null : (
+        {fixedPath ? null : noRepo ? <span class="footnote">{LIST_TEXT.noRepo}</span> : (
           <span class="actions">
             {cur.inline ? <button class="btn small" type="button" onClick={() => onChange({ repo: defaultRepo, path: defaultPath, inline: false, text: cur.text ?? '' })}>{LIST_TEXT.move}</button> : null}
             <button class="btn small quiet" type="button" onClick={() => setPicking(true)}>{LIST_TEXT.choose}</button>
