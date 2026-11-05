@@ -3641,6 +3641,28 @@ def test_a_bad_reading_list_is_a_fault_on_the_entry(value, field):
     assert fault.where.startswith("readings.r1") and fault.field == field
 
 
+def test_another_kinds_reading_list_is_flagged_and_never_shipped():
+    sched = parse(
+        {
+            "lectures": {
+                "lec4": {
+                    "session": 4,
+                    "event_datetime": "2026-09-08T10:00",
+                    "files": [{"from_course_repo": "cm", "from_path": "lectures/04"}],
+                    "reading_list": {
+                        "from_course_repo": "cm",
+                        "from_path": "other/READINGS.md",
+                    },
+                }
+            }
+        }
+    )
+    (r,) = sched.releases
+    assert r.reading_list is None
+    assert [d.course_source_path for d in r.deploy] == ["lectures/04"]
+    assert any("reading_list" in d for d in sched.dropped)
+
+
 def test_a_carried_reading_list_file_is_checked_by_name(monkeypatch):
     # Its folder is there; the file it names is not: the existing missing-source fault.
     _org(monkeypatch, {"cm": ["readings", "readings/09", "readings/09/a.pdf"]})

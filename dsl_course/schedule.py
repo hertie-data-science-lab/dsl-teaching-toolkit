@@ -1324,16 +1324,21 @@ def _parse_block(
         first = min(dated, key=lambda p: p[0].when) if dated else None
         deploys = _parse_files(entry.get("files"), tz, drops, where, dest, stems)
         _default_ship_times(deploys, first[1] if first else None)
-        reading_list = _parse_reading_list(
-            entry,
-            tz,
-            drops,
-            where,
-            lines,
-            deploys,
-            first[1] if first else None,
-            dest,
-            stems,
+        # Another kind's `reading_list:` is flagged as ignored above, and is.
+        reading_list = (
+            _parse_reading_list(
+                entry,
+                tz,
+                drops,
+                where,
+                lines,
+                deploys,
+                first[1] if first else None,
+                dest,
+                stems,
+            )
+            if kind == READINGS_KIND
+            else None
         )
         releases.append(
             Release(
