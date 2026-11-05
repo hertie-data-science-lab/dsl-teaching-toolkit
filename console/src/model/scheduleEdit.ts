@@ -743,7 +743,8 @@ export function defaultListPath(d: EntryDraft, title = d.title): string {
  * The reading list a readings entry (or a unit's twin) takes without a word: it has reading
  * files and no list, and its default path is already a file in the course repo. The sheet is
  * then dirty and Save names the file in `reading_list:` (`entryValue`); nothing in the draft
- * changes, so Discard leaves it so.
+ * changes. The caller's `exists` decides who may adopt: the sheet allows it only to someone
+ * who can write the course, and not for a list Discard turned down (until the page reloads).
  */
 export function pendingAdoption(e: EntryDraft, exists: Exists): ListDraft | null {
   if (e.type !== READINGS_KIND || e.list || !e.files.length) return null;
