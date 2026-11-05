@@ -35,18 +35,18 @@ export function Split({ label, side, children, bar, box }: { label: string; side
 }
 
 /** The file `at` from its repo's tree, or a note when the tree has no such file. */
-export function OpenFile({ org, at, tree }: { org: string; at: { repo: string; path: string }; tree: TreeEntry[] }) {
+export function OpenFile({ org, at, tree, actions }: { org: string; at: { repo: string; path: string }; tree: TreeEntry[]; actions?: preact.ComponentChildren }) {
   const e = tree.find((t) => t.path === at.path && t.type === 'blob');
-  return e ? <FileView org={org} repo={at.repo} entry={e} tree={tree} /> : <p class="footnote">{at.path} is not in {at.repo}.</p>;
+  return e ? <FileView org={org} repo={at.repo} entry={e} tree={tree} actions={actions} /> : <p class="footnote">{at.path} is not in {at.repo}.</p>;
 }
 
-/** The file `at`, its repo's tree read for it (one recursive read, ETag-cached). */
-export function RepoFile({ org, at }: { org: string; at: { repo: string; path: string } }) {
+/** The file `at`, its repo's tree read for it (one recursive read, ETag-cached); `actions` join its header's. */
+export function RepoFile({ org, at, actions }: { org: string; at: { repo: string; path: string }; actions?: preact.ComponentChildren }) {
   const env = useEnv();
   const tree = useLoad(env ? () => env.client.listTree(org, at.repo, 'HEAD', true) : null, [org, at.repo, at.path]);
   return tree.kind === 'loading' ? <Loading what="Reading the materials" />
     : tree.kind === 'failed' ? <CheckLine cls="bad">The materials could not be read: {tree.error}</CheckLine>
-    : <OpenFile org={org} at={at} tree={tree.value?.tree ?? []} />;
+    : <OpenFile org={org} at={at} tree={tree.value?.tree ?? []} actions={actions} />;
 }
 
 /** An object URL for bytes, revoked when the view goes. */
@@ -90,7 +90,7 @@ export function FullScreenButton({ full, toggle }: { full: boolean; toggle: () =
   return <button class="btn small quiet" type="button" aria-pressed={full} onClick={toggle}>{full ? 'Leave full screen' : 'Full screen'}</button>;
 }
 
-export function FileView({ org, repo, entry, tree }: { org: string; repo: string; entry: TreeEntry; tree: TreeEntry[] }) {
+export function FileView({ org, repo, entry, tree, actions }: { org: string; repo: string; entry: TreeEntry; tree: TreeEntry[]; actions?: preact.ComponentChildren }) {
   const env = useEnv();
   const shown = useLoad(env ? () => showFile(env.client, org, repo, entry, tree) : null, [org, repo, entry.sha]);
   const panel = useRef<HTMLElement>(null);
@@ -101,6 +101,7 @@ export function FileView({ org, repo, entry, tree }: { org: string; repo: string
       <div class="a-head">
         <h2 class="mono">{entry.path}</h2>
         <span class="actions">
+          {actions}
           <a class="textlink" href={ghUrl(org, repo, entry.path, 'HEAD')} target="_blank" rel="noopener">On GitHub <Ext /></a>
           <FullScreenButton full={full} toggle={toggleFull} />
         </span>

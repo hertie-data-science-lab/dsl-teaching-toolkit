@@ -8,12 +8,17 @@
 
 import type { ComponentChildren } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
+import { useEnv } from '../env';
+import { useSave } from '../edit/save';
 import type { Files } from '../model/files';
+import type { Loaded } from '../model/status';
 import { plural } from '../model/format';
 import { READINGS_FILE, type ListDraft } from '../model/scheduleEdit';
 import { CheckLine } from './bits';
+import { SaveBar } from './edit';
 import { FilePicker } from './FilePicker';
 import { GhMd } from './rendered';
+import { RepoFile } from './Viewer';
 
 /** Every word the editor shows, the same in both mounts. */
 export const LIST_TEXT = {
@@ -34,6 +39,12 @@ export const LIST_TEXT = {
 /** Whether `path` is a reading list by its name (`READINGS.md`, any case) or because a readings entry names it. */
 export function isReadingList(path: string, named: readonly string[] = []): boolean {
   return (path.split('/').pop() ?? '').toLowerCase() === READINGS_FILE.toLowerCase() || named.includes(path);
+}
+
+/** The paths in `repo` that loaded semesters' readings entries name as reading lists, on the course side (`source`) or the released side (`dest`). */
+export function namedLists(states: Record<string, Loaded>, repo: string, side: 'source' | 'dest'): string[] {
+  return Object.values(states).flatMap((l) => (l?.kind === 'ready' ? l.status.releases ?? [] : []))
+    .flatMap((r) => (r.reading_list && r.reading_list[side].repo === repo ? [r.reading_list[side].path] : []));
 }
 
 const isMarkdown = (path: string) => /\.(md|markdown)$/i.test(path);
@@ -107,5 +118,47 @@ export function ReadingList({ id, list, defaultRepo, defaultPath, org, repos, fi
       {picking ? <FilePicker files={files} org={org} repos={repos} only={isMarkdown} onClose={() => setPicking(false)}
         onPick={(got) => { const g = got[got.length - 1]; if (g) set({ repo: g.repo, path: g.path, text: '', sha: null, inline: false, loaded: false }); }} /> : null}
     </div>
+  );
+}
+
+/** The commit message of a reading-list save, from either mount. */
+export const listMessage = (path: string) => `readings: edit ${path}, from the DSL Teaching Console`;
+
+/**
+ * A course materials file in the viewer (the materials index's `?file=`, the Files panel's
+ * Browse pane). A reading list gets `Edit reading list` in its header, which swaps the pane to
+ * the editor on that file, saved on its own, and `Back to the file`.
+ */
+export function CourseFile({ org, at, files, named, write }: { org: string; at: { repo: string; path: string }; files: Files; named: readonly string[]; write: boolean }) {
+  const [editing, setEditing] = useState<string | null>(null);
+  const here = `${at.repo}/${at.path}`;
+  const list = write && isReadingList(at.path, named);
+  if (list && editing === here) return <ListFileEditor org={org} at={at} files={files} onBack={() => setEditing(null)} />;
+  return <RepoFile org={org} at={at} actions={list ? <button class="btn small" type="button" onClick={() => setEditing(here)}>Edit reading list</button> : undefined} />;
+}
+
+/** The reading-list editor on one course file, its path fixed; the reading files are the folder's PDFs. */
+function ListFileEditor({ org, at, files, onBack }: { org: string; at: { repo: string; path: string }; files: Files; onBack: () => void }) {
+  const env = useEnv();
+  const [save, run] = useSave(env);
+  const [text, setText] = useState<string | null>(null);
+  const f = files.file(org, at.repo, at.path);
+  const saved = f.kind === 'ready' ? f.text : '';
+  const tree = files.tree(org, at.repo);
+  const dir = at.path.includes('/') ? `${at.path.slice(0, at.path.lastIndexOf('/'))}/` : '';
+  const pdfs = tree.kind === 'ready' ? tree.paths.filter((x) => !x.dir && x.path.startsWith(dir) && !x.path.slice(dir.length).includes('/') && /\.pdf$/i.test(x.path)).map((x) => x.path.slice(dir.length)) : [];
+  const list: ListDraft = { repo: at.repo, path: at.path, text: text ?? saved, sha: f.kind === 'ready' ? f.sha : null, inline: false, loaded: f.kind === 'ready' || f.kind === 'absent' };
+  const doSave = async () => {
+    if (text !== null && (await run({ owner: org, repo: at.repo, path: at.path }, text, list.sha, { message: listMessage(at.path), checks: false }))) setText(null);
+  };
+  return (
+    <section class="panel section" aria-label={at.path}>
+      <div class="a-head">
+        <h2 class="mono">{at.path}</h2>
+        <span class="actions"><button class="btn small quiet" type="button" onClick={onBack}>Back to the file</button></span>
+      </div>
+      <ReadingList id="mf" list={list} defaultRepo={at.repo} defaultPath={at.path} org={org} repos={[at.repo]} files={files} readingFiles={pdfs} onChange={(l) => setText(l.text)} fixedPath />
+      <SaveBar state={save} small onSave={() => void doSave()} disabled={text === null || text === saved} file={{ org, repo: at.repo, path: at.path, exists: f.kind !== 'absent' }} />
+    </section>
   );
 }

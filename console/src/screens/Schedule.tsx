@@ -20,7 +20,7 @@ import { RUN_REASON } from '../tiers/runSettings';
 import { CheckLine, DueSubmit, EditFile, Md, ProblemCards, ReleaseMarks, ghUrl } from '../ui/bits';
 import { FilePicker, pathVerdict } from '../ui/FilePicker';
 import { Hint } from '../ui/Hint';
-import { ReadingList, isReadingList } from '../ui/ReadingList';
+import { ReadingList, isReadingList, listMessage } from '../ui/ReadingList';
 import { FullScreenButton, useFullScreen } from '../ui/Viewer';
 import { SaveLine, UnsavedBar, lineOf } from '../ui/edit';
 import { releaseMarks, releaseProblems, templateReadinessIn, tier, type ReleaseMark, type Tiered } from '../model/readiness';
@@ -787,7 +787,7 @@ function View(p: ReadyProps) {
     const lists = env ? listWrites(Object.values(drafts), readList) : [];
     for (const w of lists) {
       const target = { owner: p.course.org, repo: w.repo, path: w.path };
-      if (!(await saveText(env!, target, w.text, w.sha, { message: `readings: edit ${w.path}, from the DSL Teaching Console`, checks: false }, setSave))) return;
+      if (!(await saveText(env!, target, w.text, w.sha, { message: listMessage(w.path), checks: false }, setSave))) return;
       setDrafts((cur) => Object.fromEntries(Object.entries(cur).map(([k, d]) => [k, relisted(d, w)])));
     }
     // Only the list changed: schedule.yml is as it was, so there is nothing more to commit.
