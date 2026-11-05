@@ -876,3 +876,30 @@ def test_a_reminder_counts_only_the_entries_that_have_no_deadline(gh):
     assert out.reminder == "2 days"
     assert set(out.mail) == {dropped.key}
     assert "**Escalated** (unfixed for 2 days)" in fake.body_of("issue", "comment")
+
+
+def test_an_unparseable_file_mails_its_fault_and_clears_nothing_else(gh):
+    # 4 Nov 2026: a schedule.yml that stopped parsing read as an empty plan, and the tick
+    # posted Cleared for every standing fault. Out of sight is not fixed - the rest stand
+    # as recorded, and the unreadable fault itself is mailed on first sight.
+    standing = _f("releases.a", timedelta(hours=3))
+    unreadable = schedule._unreadable_fault("this file is not valid YAML", lineno=481)
+    fake = gh(_open(standing))
+    out = sd.sync("Semester", "Course", [unreadable], NOW, partial=True)
+    assert out.mail == {unreadable.key: Severity.WARNING}
+    (comment,) = fake.did("issue", "comment")
+    assert "**Cleared**" not in comment[comment.index("--body") + 1]
+    assert fake.did("issue", "close") == []
+    body = fake.body_of("issue", "edit")
+    assert _state(body) == {
+        standing.key: str(standing.severity(NOW)),
+        unreadable.key: "warning",
+    }
+    # Once the file parses again the standing fault is neither news nor cleared...
+    fake = gh([issue_row(7, sd.TITLE, body)])
+    out = sd.sync("Semester", "Course", [standing], NOW)
+    assert out.mail == {}
+    (comment,) = fake.did("issue", "comment")
+    text = comment[comment.index("--body") + 1]
+    # ...and only the unreadable fault clears.
+    assert unreadable.key in text and standing.key not in text

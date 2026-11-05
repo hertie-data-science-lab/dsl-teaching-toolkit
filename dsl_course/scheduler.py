@@ -1082,8 +1082,13 @@ def _preflight_sources(
     the run itself - it broke, or it did not - and a missing source used to spend it on
     every tick, up to eight red runs an hour mailing a bot account about a folder only
     faculty can write. The signature keeps its int so the caller's `errors +=` reads the
-    same as every other phase."""
-    if extra is None:
+    same as every other phase.
+
+    A schedule.yml that does not parse is reported ALONE: the empty plan it reads as has no
+    sources, windows or archive date to find faults in, and syncing that said Cleared to
+    every standing fault. The digest holds the rest as recorded until the file parses
+    (`partial`), whatever `extra` is."""
+    if extra is None and not sched.unparseable:
         log(
             f"  [skip] {semester_org}'s {schedule.SCHEDULE_PATH} digest - part of it "
             "could not be worked out this tick"
@@ -1103,7 +1108,11 @@ def _preflight_sources(
     # on its own clock (`ConfigFault.fires`).
     # NOT short-circuited when empty: an empty list is what CLOSES the issue, and the
     # tick after the last fault is fixed is the one that has to say so.
-    faults = sources + list(sched.faults) + _no_archive_date(sched) + list(extra)
+    faults = (
+        list(sched.faults)
+        if sched.unparseable
+        else sources + list(sched.faults) + _no_archive_date(sched) + list(extra)
+    )
     if sources:
         log_step(
             f"{len(sources)} source(s) in {semester_org}'s plan not staged in "
@@ -1142,6 +1151,7 @@ def _preflight_sources(
             local,
             dry_run=dry_run,
             resolve_mention=whom,
+            partial=sched.unparseable,
         )
     except Exception as exc:
         log_err(f"could not update {semester_org}'s source digest: {exc}")
@@ -1231,6 +1241,15 @@ def _config_faults(
         config_digest.PEOPLE,
         lambda found: sync_faculty.read_semester_people(semester_org, found),
     )
+    if sched.unparseable:
+        # Every check below reads the plan (the roster's team columns are its assignments),
+        # and an empty one makes them find faults that are not there and clear ones that
+        # are. Their issues stay as they are until schedule.yml parses.
+        log(
+            f"  {semester_org}'s schedule.yml does not parse - the roster, grading sheet "
+            f"and assignment digests are left as they are this tick"
+        )
+        return out
     students: list[roster.Student] | None = None
 
     def read_roster(found: list) -> None:

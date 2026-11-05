@@ -1470,6 +1470,16 @@ def sync_site(course_org: str, semester_org: str) -> int:
         # from its own semester-config/semester.yml below, NOT the course org (whose
         # course.yml carries only the multi-year instructor cards).
         sched = schedule.load(semester_org)
+        # A plan that does not parse comes back EMPTY (`schedule.load`), and built from
+        # it the site loses every lecture, assignment and event page on a green run. So it
+        # stops the sync and reports, as an unreadable `host:` does (`host_selection`):
+        # the last published site stands until the file is fixed. semester.yml needs no
+        # check of its own here - `host_selection` already refuses it.
+        if sched.unparseable:
+            raise RuntimeError(
+                f"{semester_org}/{CONFIG_REPO}/{schedule.SCHEDULE_PATH} could not be "
+                f"read - the site is not synced and keeps what it last published"
+            )
         # Every datetime on `sched` is already the semester's wall clock (the parser converts
         # a written offset into the semester timezone), so the renderers below just print it.
         start = sched.semester_start or _semester_start(semester_org)

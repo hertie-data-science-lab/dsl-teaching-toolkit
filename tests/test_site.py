@@ -1365,6 +1365,29 @@ def _plan(
     return captured["plan"]
 
 
+def test_an_unparseable_schedule_stops_the_sync_and_keeps_the_published_site(
+    monkeypatch, tmp_path
+):
+    # 4 Nov 2026: `schedule.load` reads a file that does not parse as an EMPTY plan, and
+    # the site built from it was pushed with every lecture, assignment and event page
+    # deleted - on a green run. It stops, in the one line every caller reports.
+    built: list = []
+    monkeypatch.setattr(
+        site,
+        "sync_site_repo",
+        lambda org, build: built.append(build(tmp_path)) or 0,
+    )
+    monkeypatch.setattr(site, "list_org_repos", lambda org: [])
+    monkeypatch.setattr(site, "yaml_file", lambda *a: {}, raising=False)
+    fake_config(monkeypatch, site.yaml_file)
+    monkeypatch.setattr(site.schedule, "load", lambda org: Schedule(unparseable=True))
+    with pytest.raises(
+        RuntimeError, match="Semester-f2026/semester-config/schedule.yml"
+    ):
+        site.sync_site("Course-Org", "Semester-f2026")
+    assert built == [], "a site plan was built from the empty schedule"
+
+
 def test_the_build_lists_the_semester_once_for_both_of_its_questions(
     monkeypatch, tmp_path
 ):
@@ -1510,47 +1533,6 @@ def test_replacing_a_config_scalar_writes_one_line_over_a_block_scalar():
         "course_description": "line one line two",
         "course_code": "y",
     }
-
-
-def test_site_still_builds_when_schedule_yml_does_not_parse(
-    monkeypatch, tmp_path, capsys
-):
-    # The incident: unparseable schedule.yml crashed schedule.load, which crashed BOTH the
-    # hourly Scheduled release AND Sync site - so the site kept the template's "Fall 2025"
-    # placeholders. schedule.load now degrades to an empty Schedule, and the sync must
-    # complete: course identity + inferred semester land, dates are synthesised.
-    from tests.test_schedule import MALFORMED_SCHEDULE
-
-    captured = {}
-    monkeypatch.setattr(
-        site,
-        "sync_site_repo",
-        lambda org, build: captured.update(plan=build(tmp_path)) or 0,
-    )
-    monkeypatch.setattr(site, "list_org_repos", lambda org: [])
-    monkeypatch.setattr(
-        site,
-        "yaml_file",
-        lambda *a: {"course": {"name": "Deep Learning"}},
-        raising=False,
-    )
-    fake_config(monkeypatch, site.yaml_file)
-    monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
-    # the REAL schedule.load, fed the malformed file
-    monkeypatch.setattr(
-        site.schedule,
-        "get_file_content",
-        lambda org, repo, path, **_kw: MALFORMED_SCHEDULE,
-    )
-
-    assert site.sync_site("Course-Org", "Semester-f2026") == 0
-
-    plan = captured["plan"]
-    assert plan.config["course_name"] == "Deep Learning"
-    assert plan.config["course_semester"] == "Fall 2026"
-    # No schedule data, and no exam made up for it (plan 0.11.0 9b ruling 3).
-    assert plan.collections["_events"] == {}
-    assert "is NOT valid YAML" in capsys.readouterr().err
 
 
 def test_an_undated_release_is_a_tbc_row(monkeypatch, tmp_path):

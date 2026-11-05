@@ -2342,11 +2342,13 @@ def load(semester_org: str) -> Schedule:
     optional everywhere it's read).
 
     A file that does not PARSE (faculty-editable YAML - an unclosed brace, a bad indent)
-    is treated exactly as an absent one: the error is logged loudly, with the parser's own
-    line/column, and an empty Schedule is returned. It must never raise: `load` sits under
-    the hourly scheduler AND the site sync, and one semester's typo froze both. It is also
-    a FAULT on the file - the one that costs the semester everything - so the digest issue
-    and the mail carry it like any other (see `Schedule.faults`).
+    reads as an empty plan, like an absent one: the error is logged loudly, with the
+    parser's own line/column, and an empty Schedule is returned with `unparseable` set.
+    It must never raise: `load` sits under the hourly scheduler AND the site sync, and one
+    semester's typo froze both. Each caller checks `unparseable` instead: the site sync
+    stops and keeps the last published site, and the digest leaves every other fault as
+    it stood. It is also a FAULT on the file - the one that costs the semester everything - so the
+    digest issue and the mail carry it like any other (see `Schedule.faults`).
 
     Parsed ONCE per run (`_parsed`, forgotten when this run writes the semester's config):
     `grades`, `assign` and `collect` each ask again. Every caller still gets its own copy
@@ -2376,7 +2378,7 @@ def _parsed(semester_org: str) -> tuple[Schedule, tuple[str, ...]]:
         said.append(
             f"fix {CONFIG_REPO}/{SCHEDULE_PATH} on main in {semester_org} - until then "
             f"NOTHING is scheduled for this semester (no releases, no handouts, no deadline "
-            f"snapshots, no autograding) and the site builds without schedule data."
+            f"snapshots, no autograding) and the site is not synced."
         )
         meta = {}
         unparseable.append(

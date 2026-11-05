@@ -914,6 +914,7 @@ def sync(
     dry_run: bool = False,
     resolve_mention: Callable[[], list[str]] | None = None,
     absorb: str | None = None,
+    partial: bool = False,
 ) -> DigestResult:
     """Bring this semester's digest issue for one FILE in line with `faults`. Reports what
     it did - the error count, and what a notifier owes an email for on top of the
@@ -931,6 +932,10 @@ def sync(
     finds it. One-off, for schedule.yml - whose unreadable entries used to have an issue of
     their own, opened by a block of shell in the semester's validate-schedule workflow.
 
+    `partial` says `faults` is only what could be SEEN: the file did not parse, so every
+    other fault is out of sight rather than fixed. Each recorded key missing from `faults`
+    is carried over exactly as recorded - never Cleared - until a tick sees the whole file.
+
     Never raises past the caller's isolation and never fails a run: a notification that
     could not be delivered must not take a release cron down with it."""
     repo = f"{semester_org}/{digest.repo}"
@@ -942,7 +947,7 @@ def sync(
         return DigestResult(errors=1, faults_by_key=by_key)
     url = issue_url(repo, open_issue.number) if open_issue else None
 
-    if not faults:
+    if not faults and not partial:
         if open_issue:
             if dry_run:
                 log_step(f"[preview] would close the {digest.file} digest in {repo}")
@@ -991,12 +996,15 @@ def sync(
             **recorded,
         }
     previous = _rungs(recorded)
+    # Out of sight, not fixed: held at the rung it was recorded at, so it neither clears
+    # now nor reappears once the file parses again.
+    carried = {k: v for k, v in previous.items() if k not in by_key} if partial else {}
     # When each standing fault was first seen. A key with nothing recorded is seen NOW -
     # which is right for one that has just appeared, and one deploy's delay for one whose
     # issue predates this marker.
     was_seen = _first_seen(recorded)
-    since = {key: was_seen.get(key) or now.isoformat() for key in by_key}
-    current = current_state(faults, now)
+    since = {key: was_seen.get(key) or now.isoformat() for key in [*by_key, *carried]}
+    current = {**carried, **current_state(faults, now)}
     state, changed = _announce(
         by_key, transitions(previous, current), previous, current, now
     )
