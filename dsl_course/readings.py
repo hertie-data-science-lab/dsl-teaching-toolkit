@@ -20,9 +20,9 @@ from collections.abc import Callable, Iterable
 # `lecture-notes.md` or `refs.bib` - a reading in its own right - get swallowed into the page
 # as prose instead of listed as a file a student can download.
 READING_OVERLAY_FILE = "READINGS.md"
-READING_OVERLAY_NAMES = frozenset(
-    {"readings.md", "readings.markdown", "readings.txt", "readings.bib"}
-)
+# Its spellings' suffixes, the one list: `.md` first, the order `migrate` prefers them in.
+READING_OVERLAY_SUFFIXES = ("md", "markdown", "txt", "bib")
+READING_OVERLAY_NAMES = frozenset(f"readings.{s}" for s in READING_OVERLAY_SUFFIXES)
 
 
 # The overlay is OPTIONAL - a session with only PDFs needs nothing written - and additive:

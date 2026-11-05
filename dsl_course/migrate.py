@@ -138,7 +138,7 @@ from .materials import (
 from .opencourse import READING_LISTS, OpenCourse
 from .opencourse import seed_text as opencourse_text
 from .profile_readme import profile_files, update_profile_readme
-from .readings import is_reading_overlay
+from .readings import READING_OVERLAY_SUFFIXES, is_reading_overlay
 from .repos import (
     current_description,
     default_branch,
@@ -1453,16 +1453,14 @@ def _list_of(copies: list[dict], reading_list: ReadingList) -> dict | str | None
     if not found:
         return None
     if len({(repo, path.rpartition("/")[0]) for repo, path, _ in found}) == 1:
-        repo, path, _ = min(found, key=lambda o: _OVERLAY_ORDER.index(_suffix(o[1])))
+        repo, path, _ = min(
+            found,
+            key=lambda o: READING_OVERLAY_SUFFIXES.index(
+                o[1].rsplit(".", 1)[-1].lower()
+            ),
+        )
         return {"from_course_repo": repo, "from_path": path}
     return "\n\n".join(text.strip() for *_, text in found) + "\n"
-
-
-_OVERLAY_ORDER = ("md", "markdown", "txt", "bib")
-
-
-def _suffix(path: str) -> str:
-    return path.rsplit(".", 1)[-1].lower()
 
 
 def schedule_shape(
