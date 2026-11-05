@@ -64,6 +64,8 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
 
    *NB: to withhold a file from every release, name it in `.releaseignore` - `.gitignore` syntax, in any folder ([08](08-release-materials-to-cohort.md#withholding-files-with-releaseignore)). A folder release leaves `solutions/`, `tests/`, grading files and `.env*` inside it behind; name a solution's own path to release it.*
 
+   *NB: a folder under `readings/` with files and no `READINGS.md` is flagged **no reading list** on the console's Course materials page; click it to write the list there.*
+
    *NB: a session folder is released whole, subfolders included ([11](11-configure-cohort-site.md)).*
 
    *NB: material no schedule entry names (a manual release, a flat `datasets/`) appears in the semester site's **All Materials** (or the student console's, for a course with `student_console: true`).*

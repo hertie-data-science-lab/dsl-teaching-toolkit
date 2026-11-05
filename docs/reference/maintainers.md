@@ -877,6 +877,13 @@ reads the Suggested to-do (`check: reading_list`), never the schedule. A path a 
 readings row names (`reading_list.path`) is marked in the course trees, and its released copy
 (`released_repo` / `released_path`) links to the entry.
 
+The course side knows no schedule (decision 0046 rules 5-8): a `readings/<name>/` folder with
+files and no `READINGS.md` gets the course tree's *no reading list* chip
+(`model/readingFolders.ts` `readingFolderState`, the same rule as `status_json.reading_folders`:
+change both together) and the suggested check `reading_list:<folder>`; both link to the course
+file view on `<folder>/READINGS.md`, where `CourseFile` opens a list not in the tree straight in
+the editor as a New file.
+
 Generate draft (0044 point 6) sits under the editor in both mounts: `ui/ReadingDraft.tsx` fetches
 the entry's PDF bytes four at a time through `client.fetchBytes` (uncached, so the viewer's kept
 files stay; contents API, blob API over 1 MB: tree paths carry `size`), parses them in order in
