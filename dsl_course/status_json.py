@@ -52,7 +52,6 @@ from . import (
     gradebook,
     grading_sheet,
     grading_spec,
-    legacy,
     policy,
     records,
     release_record,
@@ -1288,8 +1287,6 @@ def no_files_todo(
 # to-do (decision 0034 tiers), dated at its session when it has one.
 NO_READING_LIST = "reading_list"
 NO_READING_LIST_TODO = "has reading files but no reading list."
-# Its 0.11.0 name: written, it is the entry's NOT_MIGRATED fault, not a missing list.
-_OLD_READING_LIST = legacy.old_name(schedule.READING_LIST, legacy.SCHEDULE_ENTRY)
 
 
 def no_reading_list_todo(
@@ -1301,7 +1298,7 @@ def no_reading_list_todo(
     faulted = {
         f.where
         for f in facts.sched.faults
-        if f.field in (schedule.READING_LIST, _OLD_READING_LIST)
+        if f.field in (schedule.READING_LIST, schedule.OLD_READING_LIST)
         or f.where.endswith(f".{schedule.READING_LIST}")
     }
     out = []

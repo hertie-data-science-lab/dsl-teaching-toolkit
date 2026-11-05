@@ -1309,16 +1309,12 @@ def _semester_block(old: dict) -> dict:
     return block
 
 
-# A reading list's 0.11.0 name (`reading_guide:`), renamed back to `reading_list:`.
-_OLD_READING_LIST = legacy.old_name(schedule.READING_LIST, legacy.SCHEDULE_ENTRY)
-
-
-def _guide(entry: dict) -> dict:
+def _renamed_list(entry: dict) -> dict:
     """A readings entry with its 0.11.0 `reading_guide:` renamed `reading_list:`."""
-    if _OLD_READING_LIST not in entry:
+    if schedule.OLD_READING_LIST not in entry:
         return entry
     return {
-        (schedule.READING_LIST if k == _OLD_READING_LIST else k): v
+        (schedule.READING_LIST if k == schedule.OLD_READING_LIST else k): v
         for k, v in entry.items()
     }
 
@@ -1492,7 +1488,10 @@ def schedule_shape(
         # Already one block per kind (a file shaped before amendment 2): only the term's
         # dates and the reading list take their new names.
         shaped = {
-            b: {k: _guide(e) if isinstance(e, dict) else e for k, e in old[b].items()}
+            b: {
+                k: _renamed_list(e) if isinstance(e, dict) else e
+                for k, e in old[b].items()
+            }
             for b in schedule.BLOCKS
             if isinstance(old.get(b), dict)
         }

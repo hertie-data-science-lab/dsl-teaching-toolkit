@@ -786,6 +786,8 @@ KNOWN_ENTRY = frozenset(
     }
 )
 READING_LIST = "reading_list"
+# Its 0.11.0 name (`reading_guide:`): a NOT_MIGRATED fault the migration renames.
+OLD_READING_LIST = legacy.old_name(READING_LIST, legacy.SCHEDULE_ENTRY)
 KNOWN_READINGS = KNOWN_ENTRY | {READING_LIST}
 KNOWN_SLOT = frozenset({"at", "location", "details"})
 KNOWN_FILE = frozenset(
