@@ -864,10 +864,11 @@ mounted in the schedule entry sheet (`Schedule.tsx` `ListField`) and in the cour
 view (`CourseFile`, saved alone). Keep one set of words (`LIST_TEXT`) for both. In the sheet the
 list is a `ListDraft` (`scheduleEdit.ts`) holding only the instructor's edit (`text`, null when
 untouched): the file's saved text and sha are the files cache's (`listFile`), read at render and
-at save, and `doSave` writes each changed file (`listWrites`) before `schedule.yml`. A
-`READINGS.md` already at an entry's default path is taken by one rule, `pendingAdoption`: the
-open entry is dirty and `entryValue` names it; the draft never changes. Only someone who can write
-the course adopts, and Discard turns the file down until the page reloads (`declined` in `View`).
+at save, and `doSave` writes each changed file (`listWrites`) before `schedule.yml`. A list is
+offered, never adopted (decision 0046): a null list renders the none state (Use it on a
+`READINGS.md` at the default path, else Write one; Choose a file… either way), and only a click
+sets one. A null list writes no `reading_list:` key, so Detach (`onDetach`) drops it; a new file
+with nothing typed writes neither the file nor the key (`listValue`).
 Both mounts take the entry's reading files from `readingFilesOf` (in Materials: the files of the
 entry that names the list, else the PDFs beside it). The Schedule row's *no reading list* chip
 reads the Suggested to-do (`check: reading_list`), never the schedule. A path a status

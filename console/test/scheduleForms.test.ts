@@ -16,7 +16,7 @@ import G_SEMESTER from './fixtures/schedule-forms/semester.yml?raw';
 import { YamlText } from '../src/edit/yamlText';
 import { cutoffOf } from '../src/screens/RunSettings';
 import {
-  applyChanges, changesOf, defaultListPath, defaultReleaseAt, draftErrors, emptyTwin, listWrites, newDraft, pendingAdoption, newlyManual, nextNumber, nextSession, readDraft, releaseAt, writeDraft,
+  applyChanges, changesOf, defaultListPath, defaultReleaseAt, draftErrors, emptyTwin, listWrites, newDraft, newlyManual, nextNumber, nextSession, readDraft, releaseAt, twinUsed, writeDraft,
   type AssignmentDraft, type EntryDraft, type ListDraft, type SemesterDraft, type SemesterEntryDraft,
 } from '../src/model/scheduleEdit';
 
@@ -25,7 +25,7 @@ const doc = (t: string) => (parse(t) ?? {}) as Record<string, unknown>;
 const inlineList = (text: string): ListDraft => ({ repo: '', path: '', inline: true, text });
 type Exists = (repo: string, path: string) => boolean;
 const save = (t: string, d: EntryDraft | AssignmentDraft | SemesterEntryDraft, base: EntryDraft | AssignmentDraft | SemesterEntryDraft | null = null, removed: string[] = [], handedOut = false, exists?: Exists) =>
-  applyChanges(t, doc(t), changesOf([d], [base], exists), removed, { handedOut: () => handedOut, exists });
+  applyChanges(t, doc(t), changesOf([d], [base]), removed, { handedOut: () => handedOut, exists });
 
 const BASE = `timezone: Europe/Berlin
 lectures:
@@ -481,23 +481,27 @@ describe('the reading list as a course file (decision 0044)', () => {
     expect(parse(save(t2, { ...d2, title: 'Week 6' }, d2).text).readings['readings-6']).toEqual({ session: 6, title: 'Week 6', reading_list: '- New.' });
   });
 
-  it('adopts an existing default file for an entry with files and no list, its twin included; Save names it', () => {
-    const r = { ...(newDraft('readings', doc(BASE)) as EntryDraft), files: [file('readings/06/a.pdf')] };
+  it('never takes a READINGS.md at the default path unasked (decision 0046): no list writes no key, its twin included', () => {
     const there = (_: string, path: string) => path === 'readings/06/READINGS.md' || path === 'readings/03/READINGS.md';
-    expect(pendingAdoption(r, there)).toEqual({ repo: REPO, path: 'readings/06/READINGS.md', inline: false, text: null });
-    expect(pendingAdoption(r, () => false)).toBeNull();
-    expect(pendingAdoption({ ...r, list: inlineList('- Mine.') }, there)).toBeNull();
-    expect(pendingAdoption({ ...r, files: [] }, () => true)).toBeNull();
     const at = `${BASE}readings:\n  readings-6:\n    session: 6\n    files:\n      - from_course_repo: ${REPO}\n        from_path: readings/06/a.pdf\n`;
     const base = readDraft(doc(at), 'readings-6') as EntryDraft;
-    expect(parse(save(at, base, base, [], false, there).text).readings['readings-6'].reading_list).toEqual({ from_course_repo: REPO, from_path: 'readings/06/READINGS.md' });
-    expect(parse(save(at, base, base).text).readings['readings-6'].reading_list).toBeUndefined();
-    // A unit's twin, unchanged, is written for its adopted list.
+    expect(base.list).toBeNull();
+    expect(parse(save(at, { ...base, title: 'Week 6' }, base, [], false, there).text).readings['readings-6'].reading_list).toBeUndefined();
     const tw = `lectures:\n  lecture-3:\n    session: 3\nreadings:\n  readings-3:\n    session: 3\n    files:\n      - from_course_repo: ${REPO}\n        from_path: readings/03\n`;
     const unit = readDraft(doc(tw), 'lecture-3') as EntryDraft;
-    expect(changesOf([unit], [unit], there).map((c) => c.from)).toEqual(['lecture-3', 'readings-3']);
     expect(changesOf([unit], [unit]).map((c) => c.from)).toEqual(['lecture-3']);
-    expect(parse(save(tw, unit, unit, [], false, there).text).readings['readings-3'].reading_list).toEqual({ from_course_repo: REPO, from_path: 'readings/03/READINGS.md' });
+    expect(parse(save(tw, { ...unit, title: 'Trees' }, unit, [], false, there).text).readings['readings-3'].reading_list).toBeUndefined();
+  });
+
+  it('Detach drops the key and nothing else; Write one with nothing typed keeps the key out', () => {
+    const d = readDraft(doc(t), 'readings-4') as EntryDraft;
+    const out = parse(save(t, { ...d, list: null }, d).text).readings['readings-4'];
+    expect(out).toEqual({ session: 4 });
+    expect(listWrites([{ ...d, list: null }], ready('- A.\n'))).toEqual([]);
+    // Write one, then nothing typed: no file, no key (a twin too).
+    const fresh = { ...d, list: { repo: REPO, path: 'readings/04/READINGS.md', inline: false, text: '' } };
+    expect(listWrites([fresh], () => ({ kind: 'absent' }))).toEqual([]);
+    expect(parse(save(t, fresh, d).text).readings['readings-4'].reading_list).toBeUndefined();
   });
 
   it('writes a new twin whose only content is a chosen list file', () => {
@@ -507,6 +511,22 @@ describe('the reading list as a course file (decision 0044)', () => {
     expect(changesOf([chosen], [unit]).map((c) => c.from)).toEqual(['lecture-3', '']);
     const out = parse(save(tw, chosen, unit, [], false, (_, path) => path === 'lectures/03/list.md').text);
     expect(Object.values(out.readings)).toEqual([expect.objectContaining({ session: 3, reading_list: { from_course_repo: REPO, from_path: 'lectures/03/list.md' } })]);
+  });
+
+  it('counts a twin with Write one left empty as unused: no date asked, no entry; one typed line makes it used', () => {
+    const tw = `lectures:\n  lecture-3:\n    session: 3\n`;
+    const unit = readDraft(doc(tw), 'lecture-3') as EntryDraft;
+    const written = (text: string) => ({ ...unit, twin: { ...emptyTwin(unit), list: { repo: REPO, path: 'readings/03/READINGS.md', inline: false, text } } });
+    for (const text of ['', '  \n']) {
+      expect(twinUsed(written(text).twin)).toBe(false);
+      expect(changesOf([written(text)], [unit]).map((c) => c.from)).toEqual(['lecture-3']);
+      expect(Object.keys(draftErrors(written(text))).filter((k) => k.startsWith('twin.'))).toEqual([]);
+      expect(parse(save(tw, written(text), unit).text).readings).toBeUndefined();
+    }
+    const typed = written('- Breiman (2001).');
+    expect(twinUsed(typed.twin)).toBe(true);
+    expect(changesOf([typed], [unit]).map((c) => c.from)).toEqual(['lecture-3', '']);
+    expect(draftErrors(typed)['twin.date']).toBe('Give the date, or turn on Date TBC.');
   });
 
   it('defaults the path beside the first reading file, else readings/<NN>_<slug>/READINGS.md', () => {
