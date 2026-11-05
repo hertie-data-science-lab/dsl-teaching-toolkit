@@ -363,6 +363,34 @@ def test_several_overlays_stop_the_migration_naming_them():
     assert "reading_list" not in entry
 
 
+def test_a_shaped_file_renames_its_reading_guides_in_place():
+    # Its term dates already a `semester:` block: only the two `reading_guide:` lines
+    # change; faculty's comments, order and blank lines stay byte for byte.
+    old = (
+        "# Our plan - Jan's notes below.\n"
+        "semester:\n  start: {type: start, event_datetime: 2026-09-07}\n"
+        "\n"
+        "readings:\n"
+        "  r1:  # week one\n    session: 1\n    event_datetime: 2026-09-01\n"
+        "    reading_guide: '- A.'  # short\n"
+        "  r2:\n    event_datetime: 2026-09-08\n"
+        "    reading_guide: |\n      # Week 2\n      - B.\n"
+        "# lectures follow\n"
+        "lectures:\n  l1:\n    session: 1\n    event_datetime: 2026-09-01\n"
+    )
+    text, after, notes, stops = migrate.schedule_shape(old)
+    assert (after, notes, stops) == (None, [], [])
+    changed = [
+        (a, b) for a, b in zip(old.split("\n"), text.split("\n"), strict=True) if a != b
+    ]
+    assert changed == [
+        ("    reading_guide: '- A.'  # short", "    reading_list: '- A.'  # short"),
+        ("    reading_guide: |", "    reading_list: |"),
+    ]
+    sched = schedule.parse(load_yaml_lines(text))
+    assert sched.dropped == [] and sched.faults == []
+
+
 def test_a_file_already_one_block_per_kind_takes_only_the_amendment_s_renames():
     # Shaped before amendment 2: the blocks stay as they are, the term's dates move into
     # `semester:` and 0.11.0's `reading_guide` becomes `reading_list`.

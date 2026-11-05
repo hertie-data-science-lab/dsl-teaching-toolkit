@@ -1309,6 +1309,40 @@ def _semester_block(old: dict) -> dict:
     return block
 
 
+def _shaped(old: dict) -> bool:
+    """A schedule already one block per kind (shaped before amendment 2)."""
+    return "releases" not in old and any(
+        isinstance(old.get(b), dict) for b in schedule.BLOCKS if b not in ("events",)
+    )
+
+
+def _renamed_in_place(text: str, old: dict) -> str | None:
+    """A shaped schedule (`_shaped`, `old` its parse) with every `reading_guide:` key
+    of its blocks renamed `reading_list:` on its own line, all else byte for byte (the
+    keys step's own line rewrites, `schedule_keys` and `schedule_timing`, applied as
+    ever). None when a whole rewrite is still needed: top-level term dates to move into
+    `semester:`, or no `reading_guide:` to rename."""
+    if any(top in old for top in _SEMESTER_KEYS):
+        return None
+    out, section, renamed = [], "", False
+    scalar: int | None = None  # the column of the key whose block scalar this is in
+    old_key = re.compile(rf"^(\s+){schedule.OLD_READING_LIST}:")
+    for line in schedule_timing(schedule_keys(text)).split("\n"):
+        if scalar is not None and (not line.strip() or _indent(line) > scalar):
+            out.append(line)
+            continue
+        scalar = None
+        if top := _TOP_KEY.match(line):
+            section = top.group(1)
+        if section in schedule.BLOCKS and (key := old_key.match(line)):
+            line = f"{key.group(1)}{schedule.READING_LIST}:{line[key.end() :]}"
+            renamed = True
+        if block := _BLOCK_SCALAR.match(line):
+            scalar = len(block.group(1))
+        out.append(line)
+    return "\n".join(out) if renamed else None
+
+
 def _renamed_list(entry: dict) -> dict:
     """A readings entry with its 0.11.0 `reading_guide:` renamed `reading_list:`."""
     if schedule.OLD_READING_LIST not in entry:
@@ -1484,11 +1518,13 @@ def schedule_shape(
     old = yaml.load(schedule_timing(schedule_keys(text)), _Verbatim) or {}
     if not isinstance(old, dict):
         return text, instance_text, notes, ["schedule.yml is not a mapping"]
-    if "releases" not in old and any(
-        isinstance(old.get(b), dict) for b in schedule.BLOCKS if b not in ("events",)
-    ):
+    if _shaped(old):
         # Already one block per kind (a file shaped before amendment 2): only the term's
-        # dates and the reading list take their new names.
+        # dates and the reading list take their new names. With the dates already a
+        # `semester:` block, the reading list's rename is a line rewrite: faculty's
+        # comments and layout stay as they are.
+        if (renamed := _renamed_in_place(text, old)) is not None:
+            return renamed, None, notes, stops
         shaped = {
             b: {
                 k: _renamed_list(e) if isinstance(e, dict) else e
@@ -3750,6 +3786,21 @@ class Semester:
                 f"{CONFIG_REPO}/{schedule.SCHEDULE_PATH}: one block per kind - {when}"
             ]
         text, new, after, notes, _ = self.shape_work()
+        old = yaml.load(schedule_timing(schedule_keys(text or "")), _Verbatim)
+        if (
+            new is not None
+            and isinstance(old, dict)
+            and _shaped(old)
+            and _renamed_in_place(text or "", old) == new
+        ):
+            return [
+                (
+                    f"{CONFIG_REPO}/{schedule.SCHEDULE_PATH}: "
+                    f"`{schedule.OLD_READING_LIST}:` renamed `{schedule.READING_LIST}:` "
+                    "in place, comments and layout kept"
+                ),
+                *_diff(schedule.SCHEDULE_PATH, text or "", new),
+            ]
         out = [
             (
                 f"{CONFIG_REPO}/{schedule.SCHEDULE_PATH}: one block per kind (decision "
