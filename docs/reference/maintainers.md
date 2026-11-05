@@ -854,6 +854,13 @@ syllabus reads the course file (it is written before anything ships).
 or null), so the console never re-derives the placement; `no_reading_list_todo` is the
 Suggested to-do.
 
+The console edits the course file only (decision 0044): `ui/ReadingList.tsx` is ONE component,
+mounted in the schedule entry sheet (`Schedule.tsx` `ListField`, the list a `ListDraft` in
+`scheduleEdit.ts`, written before `schedule.yml` by `doSave`) and in the course Materials file
+view (`CourseFile`, saved alone). Keep one set of words (`LIST_TEXT`) for both. A path a
+status readings row names (`reading_list.path`) is marked in the course trees, and its
+released copy (`releasedList`, where `_carried_by` lands it) links to the entry.
+
 ## Config faults
 
 Every file faculty edit by hand can be wrong in a way the toolkit detects and only a human
