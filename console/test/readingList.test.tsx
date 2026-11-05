@@ -87,9 +87,9 @@ describe('which files are reading lists', () => {
 });
 
 describe('the course Materials file view (decision 0044)', () => {
-  it('marks READINGS.md and the entry-named file in the tree, and edits READINGS.md in place', async () => {
+  it('edits READINGS.md in place; the index tree beside it marks nothing (the chips are the repo page’s)', async () => {
     await mount(<MaterialsIndexScreen {...cp(`${MAT}/readings/04/READINGS.md`)} />);
-    expect(chipped().sort()).toEqual(['READINGS.md']); // the open folder only; lectures/05 stays closed
+    expect(chipped()).toEqual([]);
     const edit = button('Edit reading list')!;
     expect(edit).toBeDefined();
     await act(() => edit.click());
@@ -146,7 +146,6 @@ describe('the course Materials file view (decision 0044)', () => {
 
   it('offers Edit reading list on a file a semester’s readings entry names, not on other files', async () => {
     await mount(<MaterialsIndexScreen {...cp(`${MAT}/${NAMED}`)} />);
-    expect(chipped()).toEqual(['week5-reading.md']);
     expect(button('Edit reading list')).toBeDefined();
     if (root) render(null, root);
     await mount(<MaterialsIndexScreen {...cp(`${MAT}/lectures/05/notes.md`)} />);

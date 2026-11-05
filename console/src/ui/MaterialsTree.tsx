@@ -6,9 +6,8 @@
 // (`?folder=<repo>/<path>`) opens that folder and its parents, and scrolls it into view;
 // `current`, the file open beside the tree, is marked and its folders opened. `at` names whose
 // page the links open: the course's materials index, or a semester's Released materials
-// (`?cohort=`). `lists`, on the course's trees: the paths readings entries name, marked with
-// every `READINGS.md` as a `reading list` (decision 0044); a readings folder with files and no
-// list carries `no reading list`, a link that opens the editor on it (decision 0046 rule 5).
+// (`?cohort=`). A pure browser: the reading-list chips live on the repo page's Files panel
+// (decision 0046 amendment 1).
 
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { readJson, safeStorage, writeJson } from '../auth/types';
@@ -19,8 +18,6 @@ import { ghUrl } from './bits';
 import { FileRow, useYourSetup } from './FileRow';
 import { FileHead, FolderHead } from './FileTree';
 import { Ext } from './icons';
-import { isReadingList } from '../model/scheduleEdit';
-import { foldersWithoutList, readingListHref } from '../model/readingFolders';
 
 const storeKey = (org: string, repo: string) => `dsl.materialsTree.${org}/${repo}`;
 
@@ -53,14 +50,13 @@ export const fileViewHref = (org: string, repo: string, path: string, at: TreeAt
 /** The folders above `path`. */
 const parentsOf = (path: string) => withParents(path).slice(0, -1);
 
-export function MaterialsTree({ org, repo, paths, focus, current, at = 'course', lists }: {
+export function MaterialsTree({ org, repo, paths, focus, current, at = 'course' }: {
   org: string;
   repo: string;
   paths: { path: string; dir: boolean }[];
   focus?: string;
   current?: string;
   at?: TreeAt;
-  lists?: readonly string[];
 }) {
   const setup = useYourSetup();
   const [open, setOpen] = useState<Set<string>>(() => {
@@ -69,8 +65,6 @@ export function MaterialsTree({ org, repo, paths, focus, current, at = 'course',
   });
   const list = useRef<HTMLUListElement>(null);
   const { tree, counts } = useMemo(() => treeOf(paths), [paths]);
-  // Decision 0046 rule 5: on the course's trees only, never a semester's.
-  const bare = useMemo(() => (at === 'course' ? foldersWithoutList(paths) : new Set<string>()), [paths, at]);
   useEffect(() => {
     if (!focus) return;
     setOpen((o) => (withParents(focus).every((x) => o.has(x)) ? o : new Set([...o, ...withParents(focus)])));
@@ -95,7 +89,6 @@ export function MaterialsTree({ org, repo, paths, focus, current, at = 'course',
         <li class={`ft-file${current === n.path ? ' current' : ''}`}>
           <FileHead name={n.name}>
             <FileRow org={org} link={{ name: n.name, repo, path: n.path, url: ghUrl(org, repo, n.path, 'HEAD') }} here={fileViewHref(org, repo, n.path, at)} setup={setup} profile={profileHref(org)} cls="ft-name" current={current === n.path} />
-            {lists && isReadingList(n.path, lists) ? <span class="chip muted">reading list</span> : null}
           </FileHead>
         </li>
       );
@@ -106,7 +99,6 @@ export function MaterialsTree({ org, repo, paths, focus, current, at = 'course',
         <details open={isOpen} onToggle={(e) => toggle(n.path, (e.currentTarget as HTMLDetailsElement).open)}>
           <summary>
             <FolderHead name={n.name} />
-            {bare.has(n.path) ? <a class="chip muted" href={readingListHref(org, repo, n.path)}>no reading list</a> : null}
             <span class="ft-rollup"><span class="ft-count">{plural(counts.get(n.path) ?? 0, 'file')}</span></span>
             <a class="ft-gh" href={ghUrl(org, repo, n.path, 'HEAD', 'tree')} target="_blank" rel="noopener" aria-label={`${n.path}/ on GitHub`}>GitHub <Ext /></a>
           </summary>
