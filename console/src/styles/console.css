@@ -1382,3 +1382,14 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 /* A file row's chevron opens the Open split button's menu (ui/OpenSplit.tsx `caretOnly`): from the chevron, rightwards. */
 .file-menu .open-menu { left: 0; right: auto; top: calc(100% + 6px); width: 300px; max-width: calc(100vw - 32px); }
 .open-menu .pm-off { cursor: default; }
+/* The reading-list editor (ui/ReadingList.tsx, decision 0044): editor and preview side by side where the sheet or pane is wide. */
+.reading-list-editor { container-type: inline-size; }
+.rl-file { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.rl-file input { flex: 1 1 220px; min-width: 0; }
+.rl-file .actions { margin-left: auto; }
+.rl-edit { display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr); }
+.rl-edit textarea { width: 100%; resize: vertical; font-family: var(--font-code); font-size: 13px; }
+.rl-preview { border: 1px solid var(--rule); border-radius: 6px; padding: 8px 10px; min-width: 0; }
+@container (min-width: 720px) { .rl-edit { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+/* The entry sheet's Full screen: the sheet over the whole view. */
+.entry.entry-full { position: fixed; inset: 0; z-index: 40; max-width: none; max-height: none; margin: 0; border-radius: 0; }

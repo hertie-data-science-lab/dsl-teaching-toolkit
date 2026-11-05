@@ -1,16 +1,16 @@
 // S6 Schedule with its editor (one form per kind, decision 0038 and the forms mock-up v3) and S11 Release detail.
 
-import { useMemo, useState } from 'preact/hooks';
+import { useMemo, useRef, useState } from 'preact/hooks';
 import { parse } from 'yaml';
 import { useEnv } from '../env';
-import { invalidText, saveSteps, type SaveState, type Step } from '../edit/save';
+import { invalidText, saveSteps, saveText, type SaveState, type Step } from '../edit/save';
 import { YamlText, deepEqual, obj } from '../edit/yamlText';
 import { Invalid } from '../forms/Form';
 import { RELEASE_WORD, TYPE_CLASS, siteRowWord, fmtDay, fmtTime, fmtWhen, heldSentence, markWord, releaseIdent, repoWords, sortKey } from '../model/format';
 import { needsANumber, parseSchedule, scheduleRows, type Block, type Row } from '../model/schedule';
 import {
-  READINGS_KIND, SESSION_KINDS, applyChanges, blockOf, changesOf, defaultReleaseAt, draftErrors, emptyTwin, hiddenKind, newDraft, newlyManual, nextNumber, nextSession, numberedField, readDraft, releaseAt, writeDraft,
-  type AssignmentDraft, type Draft, type EntryDraft, type FileDraft, type SemesterDraft, type SemesterEntryDraft, type SemesterType, type Slot,
+  READINGS_KIND, SESSION_KINDS, applyChanges, blockOf, changesOf, defaultListPath, defaultReleaseAt, draftErrors, emptyTwin, fillLists, hiddenKind, lacksReadingList, listWrites, newDraft, newlyManual, nextNumber, nextSession, numberedField, readDraft, releaseAt, relisted, twinOf, writeDraft,
+  type AssignmentDraft, type Draft, type EntryDraft, type FileDraft, type ListFile, type SemesterDraft, type SemesterEntryDraft, type SemesterType, type Slot,
 } from '../model/scheduleEdit';
 import type { Assignment, Release } from '../model/types';
 import { archive, keepFuture, releaseAdhoc, releaseAgain, releaseEarly, releaseNow, scheduledPreview } from '../ops/defs';
@@ -20,6 +20,8 @@ import { RUN_REASON } from '../tiers/runSettings';
 import { CheckLine, DueSubmit, EditFile, Md, ProblemCards, ReleaseMarks, ghUrl } from '../ui/bits';
 import { FilePicker, pathVerdict } from '../ui/FilePicker';
 import { Hint } from '../ui/Hint';
+import { ReadingList, isReadingList } from '../ui/ReadingList';
+import { FullScreenButton, useFullScreen } from '../ui/Viewer';
 import { SaveLine, UnsavedBar, lineOf } from '../ui/edit';
 import { releaseMarks, releaseProblems, templateReadinessIn, tier, type ReleaseMark, type Tiered } from '../model/readiness';
 import { NOTHING_TO_RELEASE, markClass, releaseRef, rowMark } from './Cohort';
@@ -123,8 +125,7 @@ export const FORM_TEXT = {
   tbc: 'Date TBC clears and disables the date: the row reads TBC and nothing runs.',
   showConsole: '"Show on student site" reads "Show in student console" for a course with the console on.',
   perFile: 'Per-file release time: click a file chip to set its own time (default: an hour before the first slot).',
-  readingsSub: 'Writes a second entry under Readings, attached to this session. The reading materials go in Files (private to students); the Reading guide is what every student sees (and the only readings content on the public site).',
-  guide: '(markdown: any URL links, guidance as to what to read, chapters or pages, how to approach it, etc. This is publicly visible even when the hosted readings files are private)',
+  readingsSub: 'Writes a second entry under Readings, attached to this session. The reading materials go in Files (private to students); the Reading list is a course file every student sees once these readings release (and the only readings content on the public site).',
   readingsFilesSub: 'the reading materials; private unless a file is made public here',
   readingsFiles: 'private unless a file is made public (per-file toggle on its chip)',
   attach: 'Attached readings show on that session’s row and under its heading on the Readings tab; None gives them a dated row of their own.',
@@ -313,7 +314,7 @@ interface FormProps<T> {
 function UnitForm({ p, d, set, errors, consoleOn, sources }: FormProps<EntryDraft>) {
   const tw = d.twin ?? emptyTwin(d);
   const setTwin: Set_<EntryDraft> = (x) => set({ twin: { ...tw, ...x } });
-  const used = !!d.twin && (!!d.twin.id || !!d.twin.files.length || !!d.twin.guide.trim() || !!d.twin.title.trim());
+  const used = !!d.twin && (!!d.twin.id || !!d.twin.files.length || !!d.twin.list?.text.trim() || !!d.twin.title.trim());
   const twinErr = sub(errors, 'twin.');
   return (
     <>
@@ -345,7 +346,7 @@ function UnitForm({ p, d, set, errors, consoleOn, sources }: FormProps<EntryDraf
           <div class="field"><Lbl for="r-time" strong>Time</Lbl><input id="r-time" type="time" value={tw.tbc ? '' : tw.slots[0].time} disabled={tw.tbc} onInput={(e) => setTwin({ slots: [{ ...tw.slots[0], time: val(e) }] })} /></div>
           <div class="field"><Lbl for="r-title">Title</Lbl><input id="r-title" type="text" placeholder={`Readings for session ${d.session || 'N'}`} value={tw.title} onInput={(e) => setTwin({ title: val(e) })} /></div>
         </div>
-        <Guide id="r" d={tw} set={setTwin} />
+        <ListField p={p} id="r" d={tw} set={setTwin} sources={sources} title={d.title} />
         <div class="field">
           <span class="lbl-row"><b>Files</b><span class="hint"> {FORM_TEXT.readingsFilesSub}</span></span>
           <FilesField p={p} id="r-file" files={tw.files} set={(files) => setTwin({ files })} first={tw.slots[0]} readings showTime={false} sources={sources} />
@@ -362,13 +363,23 @@ function UnitForm({ p, d, set, errors, consoleOn, sources }: FormProps<EntryDraf
   );
 }
 
-function Guide({ id, d, set }: { id: string; d: EntryDraft; set: Set_<EntryDraft> }) {
+/** The names of an entry's reading files (a folder's files from its repo tree), the list file left out. */
+function readingNames(p: ReadyProps, d: EntryDraft): string[] {
+  const listPath = d.list && !d.list.inline ? d.list.path : '';
+  const names = d.files.flatMap((f) => {
+    const at = f.path.replace(/^\/+|\/+$/g, '');
+    const tree = p.files.tree(p.course.org, f.repo);
+    const under = tree.kind === 'ready' ? tree.paths.filter((x) => !x.dir && x.path.startsWith(`${at}/`)).map((x) => x.path) : [];
+    return under.length ? under : /\.[^/.]+$/.test(at) ? [at] : [];
+  });
+  return [...new Set(names.filter((x) => !isReadingList(x, [listPath])).map((x) => x.split('/').pop()!))];
+}
+
+/** A readings entry's Reading list (decision 0044): the shared editor, at the entry's default path while it has none. */
+function ListField({ p, id, d, set, sources, title }: { p: ReadyProps; id: string; d: EntryDraft; set: Set_<EntryDraft>; sources: { materials: string[] }; title?: string }) {
   return (
-    <div class="field">
-      <Lbl for={`${id}-guide`} strong hint={FORM_TEXT.guide}>Reading guide</Lbl>
-      <span class="hint">{FORM_TEXT.guide}</span>
-      <textarea id={`${id}-guide`} rows={3} value={d.guide} onInput={(e) => set({ guide: val(e) })} />
-    </div>
+    <ReadingList id={id} list={d.list} defaultRepo={d.files[0]?.repo || sources.materials[0] || ''} defaultPath={defaultListPath(d, d.title || title)}
+      org={p.course.org} repos={sources.materials} files={p.files} readingFiles={readingNames(p, d)} onChange={(list) => set({ list })} />
   );
 }
 
@@ -391,7 +402,7 @@ function ReadingsForm({ p, d, set, errors, consoleOn, sources, doc }: FormProps<
         <div class="field"><Lbl for="e-date0" strong>Date</Lbl><input id="e-date0" type="date" value={d.tbc ? '' : d.slots[0].date} disabled={d.tbc} onInput={(e) => set({ slots: [{ ...d.slots[0], date: val(e) }] })} /><Err e={errors.date} /></div>
         <div class="field"><Lbl for="e-time0" strong>Time</Lbl><input id="e-time0" type="time" value={d.tbc ? '' : d.slots[0].time} disabled={d.tbc} onInput={(e) => set({ slots: [{ ...d.slots[0], time: val(e) }] })} /></div>
       </div>
-      <Guide id="e" d={d} set={set} />
+      <ListField p={p} id="e" d={d} set={set} sources={sources} />
       <div class="field">
         <span class="lbl-row"><b>Files</b><span class="hint"> {FORM_TEXT.readingsFiles}</span></span>
         <FilesField p={p} id="e-file" files={d.files} set={(files) => set({ files })} first={d.slots[0]} readings showTime={false} sources={sources} />
@@ -659,6 +670,15 @@ function addWord(d: Draft): string {
 
 // ------------------------------------------------------------------ the page
 
+/** A readings row, or a unit row with readings attached, whose entry ships reading files and no reading list (decision 0044). */
+export function noReadingList(doc: Record<string, unknown>, r: Pick<Row, 'type' | 'entry'>): boolean {
+  if (r.type !== READINGS_KIND && !SESSION_KINDS.includes(r.type)) return false;
+  const e = obj(obj(doc[pluralOf(r.type)])[r.entry]);
+  if (r.type === READINGS_KIND) return lacksReadingList(e);
+  const twin = Number.isInteger(e.session) ? twinOf(doc, e.session as number) : null;
+  return !!twin && lacksReadingList(twin[1]);
+}
+
 function View(p: ReadyProps) {
   const { status, now } = p;
   const env = useEnv();
@@ -695,7 +715,12 @@ function View(p: ReadyProps) {
   const consoleOn = consoleOnOf(p);
   const handedOut = (k: string) => { const a = assignmentOf.get(k); return !!a?.handout && Date.parse(a.handout) <= now; };
 
-  const baseOf = (k: string): Draft | null => (k === 'new' ? null : readDraft(doc, k));
+  // A reading list's course file, read for the sheet (decision 0044): its text and sha fill the draft once here.
+  const readList = (repo: string, path: string): ListFile => {
+    const f = p.files.file(p.course.org, repo, path);
+    return f.kind === 'ready' ? { kind: 'ready', text: f.text, sha: f.sha } : f.kind === 'absent' ? { kind: 'absent' } : { kind: 'loading' };
+  };
+  const baseOf = (k: string): Draft | null => (k === 'new' ? null : fillLists(readDraft(doc, k), readList));
   // `?template=` opens a new assignment entry for that template (New assignment's last step);
   // `?from=&paths=` a new supporting-files release with those files (the Files panel's "Schedule on the calendar").
   const prefilled = (): Draft | null => {
@@ -703,8 +728,8 @@ function View(p: ReadyProps) {
     if (p.prefill?.kind === 'template') return { ...(newDraft('assignment', doc) as AssignmentDraft), template: p.prefill.repo };
     return p.prefill?.kind === 'files' ? releasePrefilled(newDraft('assets', doc) as EntryDraft, p.prefill.rows, effectiveDestRepo(p.loaded)) : null;
   };
-  const draftOf = (k: string): Draft | null => drafts[k] ?? (k === 'new' ? prefilled() : baseOf(k));
-  const dirtyKeys = Object.keys(drafts).filter((k) => k === 'new' || !deepEqual(drafts[k], baseOf(k)));
+  const draftOf = (k: string): Draft | null => (k in drafts ? fillLists(drafts[k], readList) : k === 'new' ? prefilled() : baseOf(k));
+  const dirtyKeys = Object.keys(drafts).filter((k) => k === 'new' || !deepEqual(draftOf(k), baseOf(k)));
   const dirty = dirtyKeys.length + removed.length;
   const setDraft = (k: string, d: Draft) => {
     setDrafts({ ...drafts, [k]: d });
@@ -729,10 +754,13 @@ function View(p: ReadyProps) {
     return e;
   };
   const errorsOf = (d: Draft) => ({ ...draftErrors(d, { doc, removed }, cutoffFor(d)), ...runErrorsOf(d) });
+  const sheetBox = useRef<HTMLDivElement>(null);
+  const [full, toggleFull] = useFullScreen(sheetBox, false);
 
   /** Save every change; `handOutKey`, an entry newly handed out by hand, then opens Hand out on it once the save lands. */
   const doSave = async (handOutKey?: string) => {
     if (!sf || sf.error) return;
+    const drafts = Object.fromEntries(dirtyKeys.map((k) => [k, draftOf(k)!]));
     const firstBad = dirtyKeys.map((k) => Object.values(errorsOf(drafts[k]))[0]).find(Boolean);
     if (firstBad) return setSave({ kind: 'bad', text: firstBad });
     // The dates sheet first, then every entry: new keys generated, renumbered ones renamed, blocks re-sorted.
@@ -749,11 +777,22 @@ function View(p: ReadyProps) {
     const first: Step = { target: { owner: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }, text: out.text, sha: sf.sha, opts: { message: `schedule: ${what}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] } };
     const hoDraft = handOutKey && entryKeys.includes(handOutKey) ? drafts[handOutKey] : undefined;
     const ho = hoDraft?.kind === 'assignments' ? { ...hoDraft, id: writtenKey(handOutKey!) } : undefined;
-    const saved = await saveSteps(env, setSave, first, null, '', () => {
+    const done = () => {
       setDrafts({});
       setRemoved([]);
       if (newId && typeof location !== 'undefined') location.hash = `#schedule-${newId}`;
-    });
+    };
+    // Each reading-list file first (decision 0044), then schedule.yml: a list that fails stops the save.
+    // A written file is read back into its draft (the cache holds its new sha), so a retry never writes it twice.
+    const lists = env ? listWrites(Object.values(drafts), readList) : [];
+    for (const w of lists) {
+      const target = { owner: p.course.org, repo: w.repo, path: w.path };
+      if (!(await saveText(env!, target, w.text, w.sha, { message: `readings: edit ${w.path}, from the DSL Teaching Console`, checks: false }, setSave))) return;
+      setDrafts((cur) => Object.fromEntries(Object.entries(cur).map(([k, d]) => [k, relisted(d, w)])));
+    }
+    // Only the list changed: schedule.yml is as it was, so there is nothing more to commit.
+    if (lists.length && out.text === sf.text) return done();
+    const saved = await saveSteps(env, setSave, first, null, '', done);
     // The op's own panel, as Hand out now opens it: its preview and confirmation; it never runs by itself.
     if (saved && ho) env?.ops.open(draftHandout(p, ho));
   };
@@ -797,7 +836,7 @@ function View(p: ReadyProps) {
       <li class={`trow ${TYPE_CLASS[r.type] ?? 'evt'}${markClass(m)}${key === rk ? ' current' : ''}${gone ? ' removed' : ''}${r.show ? '' : ' off-site'}`} data-entry={r.entry}>
         <span class="k">{siteRowWord(r.type)}</span>
         <span class="d">{r.when ? fmtDay(r.when, tz, year) : 'No date yet'}{r.when && fmtTime(r.when, tz) ? <span>{fmtTime(r.when, tz)}{r.tbc ? ' (TBC)' : ''}</span> : r.tbc && r.when ? <span>(TBC)</span> : null}</span>
-        <span class="ttl"><a href={`#schedule-${rk}`}><b>{r.ident}</b>: {r.name}</a></span>
+        <span class="ttl"><a href={`#schedule-${rk}`}><b>{r.ident}</b>: {r.name}</a>{noReadingList(doc, r) ? <> <span class="chip muted">no reading list</span></> : null}</span>
         <Details r={r} a={r.block === 'assignments' ? assignmentOf.get(r.entry) : undefined} now={now} />
         <span class="st">{st}</span>
       </li>,
@@ -827,7 +866,7 @@ function View(p: ReadyProps) {
       const firstProblem = Object.values(errors)[0];
       const fp = { p, errors, consoleOn, sources };
       sheet = (
-        <div class="entry" role="dialog" aria-labelledby="entry-title">
+        <div class={`entry${full ? ' entry-full' : ''}`} role="dialog" aria-labelledby="entry-title" ref={sheetBox}>
           <div class="entry-head">
             <div>
               <div class="eyebrow"><span class="kind-dot" style={head.colour ? `background:${head.colour}` : undefined} />{head.eyebrow}</div>
@@ -836,7 +875,7 @@ function View(p: ReadyProps) {
               {d.kind === 'assignments' && d.number ? <div class="hint">Number {d.number} <Hint small label="About the number">{FORM_TEXT.number.replace('Lecture 3', 'Assignment 3')}</Hint></div> : null}
               {rel ? <div style="margin-top:6px"><StateChip state={rel.state} m={marks.get(rel.id) ?? null} /></div> : null}
             </div>
-            {close}
+            <span class="actions"><FullScreenButton full={full} toggle={toggleFull} />{close}</span>
           </div>
           <div class="entry-body">
             {probs.length && rel?.state !== 'will_be_skipped' ? <ProblemCards list={probs} /> : null}

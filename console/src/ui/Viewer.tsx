@@ -63,10 +63,10 @@ function useObjectUrl(bytes: Uint8Array | string | null, mime: string): string |
 
 /**
  * Full screen for `el`: the panel covers the window (`.viewer-full`) and, where the browser
- * allows, the screen itself. Escape leaves (the browser's own Escape ends its full screen, which
- * this follows), as does the button.
+ * allows and `screen` is on, the screen itself. Escape leaves (the browser's own Escape ends its
+ * full screen, which this follows), as does the button (`FullScreenButton`).
  */
-function useFullScreen(el: { current: HTMLElement | null }): [boolean, () => void] {
+export function useFullScreen(el: { current: HTMLElement | null }, screen = true): [boolean, () => void] {
   const [full, setFull] = useState(false);
   useEffect(() => {
     if (!full) return;
@@ -75,7 +75,7 @@ function useFullScreen(el: { current: HTMLElement | null }): [boolean, () => voi
     const change = () => !document.fullscreenElement && setFull(false);
     document.addEventListener('keydown', key);
     document.addEventListener('fullscreenchange', change);
-    if (node?.requestFullscreen && !document.fullscreenElement) node.requestFullscreen().catch(() => undefined);
+    if (screen && node?.requestFullscreen && !document.fullscreenElement) node.requestFullscreen().catch(() => undefined);
     return () => {
       document.removeEventListener('keydown', key);
       document.removeEventListener('fullscreenchange', change);
@@ -83,6 +83,11 @@ function useFullScreen(el: { current: HTMLElement | null }): [boolean, () => voi
     };
   }, [full]);
   return [full, () => setFull((f) => !f)];
+}
+
+/** The Full screen toggle of the file viewer's header, and of the schedule entry sheet's. */
+export function FullScreenButton({ full, toggle }: { full: boolean; toggle: () => void }) {
+  return <button class="btn small quiet" type="button" aria-pressed={full} onClick={toggle}>{full ? 'Leave full screen' : 'Full screen'}</button>;
 }
 
 export function FileView({ org, repo, entry, tree }: { org: string; repo: string; entry: TreeEntry; tree: TreeEntry[] }) {
@@ -97,7 +102,7 @@ export function FileView({ org, repo, entry, tree }: { org: string; repo: string
         <h2 class="mono">{entry.path}</h2>
         <span class="actions">
           <a class="textlink" href={ghUrl(org, repo, entry.path, 'HEAD')} target="_blank" rel="noopener">On GitHub <Ext /></a>
-          <button class="btn small quiet" type="button" aria-pressed={full} onClick={toggleFull}>{full ? 'Leave full screen' : 'Full screen'}</button>
+          <FullScreenButton full={full} toggle={toggleFull} />
         </span>
       </div>
       {shown.kind === 'loading' ? <Loading what={`Reading ${name}`} /> : shown.kind === 'failed' ? <CheckLine cls="bad">{name} could not be read: {shown.error}</CheckLine> : <ShownView shown={shown.value} name={name} />}
