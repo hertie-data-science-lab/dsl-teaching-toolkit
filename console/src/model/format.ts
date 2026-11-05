@@ -373,32 +373,50 @@ function inline(s: string): string {
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
     .replace(/\*([^*]+)\*/g, '<i>$1</i>')
-    .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+    // An autolink, `<https://...>`, arrives escaped.
+    .replace(/&lt;(https?:\/\/[^\s]+?)&gt;/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
 }
 
-/** Escaped HTML for a small markdown subset: paragraphs, hard breaks, `- ` lists, code, bold, italic, links. */
+/** An ATX heading: 1-6 `#`, then whitespace or the line's end; closing `#`s dropped. */
+const HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/;
+/** A bullet item: `-` or `*` and a space. */
+const ITEM = /^\s*[-*][ \t]+/;
+
+/**
+ * Escaped HTML for a small markdown subset, as GitHub renders it: paragraphs, hard breaks, ATX
+ * headings, `-` / `*` lists (a following plain line continues the item), code, bold, italic,
+ * links and `<https://...>` autolinks.
+ */
 export function md(src: string | null | undefined): string {
   if (!src || !String(src).trim()) return '';
-  return esc(String(src).trim())
-    .split(/\n{2,}/)
-    .map((b) => {
-      const lines = b.split('\n');
-      // A paragraph may run straight into a list ("Intro:\n- a\n- b"): split at the first item.
-      const first = lines.findIndex((l) => ITEM.test(l));
-      if (first > 0 && lines.slice(first).every((l) => ITEM.test(l))) return para(lines.slice(0, first)) + list(lines.slice(first));
-      return first === 0 && lines.every((l) => ITEM.test(l)) ? list(lines) : para(lines);
-    })
-    .join('');
-}
-
-const ITEM = /^\s*- /;
-
-function list(lines: string[]): string {
-  return `<ul>${lines.map((l) => `<li>${inline(l.replace(ITEM, ''))}</li>`).join('')}</ul>`;
+  const out: string[] = [];
+  let para: string[] = [];
+  let items: string[] = [];
+  const flush = () => {
+    if (para.length) out.push(paragraph(para));
+    if (items.length) out.push(`<ul>${items.map((l) => `<li>${inline(l)}</li>`).join('')}</ul>`);
+    para = [];
+    items = [];
+  };
+  for (const line of esc(String(src).trim()).split('\n')) {
+    const h = HEADING.exec(line);
+    if (!line.trim()) flush();
+    else if (h) {
+      flush();
+      out.push(`<h${h[1].length}>${inline(h[2] ?? '')}</h${h[1].length}>`);
+    } else if (ITEM.test(line)) {
+      if (para.length) flush();
+      items.push(line.replace(ITEM, ''));
+    } else if (items.length) items[items.length - 1] += ` ${line.trim()}`;
+    else para.push(line);
+  }
+  flush();
+  return out.join('');
 }
 
 /** As markdown does: a single newline is a space; a line ending in two spaces breaks. */
-function para(lines: string[]): string {
+function paragraph(lines: string[]): string {
   return `<p>${inline(lines.map((l, i) => (i === lines.length - 1 ? l : / {2,}$/.test(l) ? `${l.trimEnd()}<br>` : `${l.trimEnd()} `)).join(''))}</p>`;
 }
 
