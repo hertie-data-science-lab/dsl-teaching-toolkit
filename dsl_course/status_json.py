@@ -1218,6 +1218,11 @@ def no_due_date_todo(
     ]
 
 
+def _entry_name(kind: str, number: int | None, key: str) -> str:
+    """What a schedule to-do calls an entry: "Lab 8" when it is numbered, else its key."""
+    return policy.numbered_title(kind, number) if number else key
+
+
 # Decision 0043 rule 5: a TBC entry released (by hand, from Actions or the CLI, or early
 # from the console) still has no session date: a quiet to-do on its release screen.
 RELEASED_STILL_TBC = "released_tbc"
@@ -1238,8 +1243,8 @@ def released_tbc_todo(
             kind="schedule",
             check=RELEASED_STILL_TBC,
             repo=schedule.CONFIG_REPO,
-            text=f"{policy.numbered_title(r['kind'], r['number']) if r['number'] else r['id']}"
-            " is released; its session date is still TBC.",
+            text=f"{_entry_name(r['kind'], r['number'], r['id'])} is released; its "
+            "session date is still TBC.",
             screen="release",
             entry=r["id"],
         )
@@ -1264,7 +1269,7 @@ def no_files_todo(
             for w in faulted
         ):
             continue
-        name = policy.numbered_title(r.kind, r.number) if r.number else r.label
+        name = _entry_name(r.kind, r.number, r.label)
         out.append(
             _todo(
                 SUGGESTED,
@@ -1294,22 +1299,17 @@ def no_reading_list_todo(
 ) -> list[dict]:
     """`schedule:reading_list:<label>` for each readings entry still to come (or
     undated) that ships files but has no reading list. One whose `reading_list:` is
-    written but unusable is not: its fault is the problem."""
-    faulted = {
-        f.where
-        for f in facts.sched.faults
-        if f.field in (schedule.READING_LIST, schedule.OLD_READING_LIST)
-        or f.where.endswith(f".{schedule.READING_LIST}")
-    }
+    written but unusable is not (`Release.reading_list_written`): its fault is the
+    problem."""
     out = []
     for r in facts.sched.releases:
         if r.kind != schedule.READINGS_KIND or not r.deploy:
             continue
-        if r.reading_list or (r.when and r.when <= now):
+        if r.reading_list is not None or r.reading_list_written:
             continue
-        if r.where in faulted or f"{r.where}.{schedule.READING_LIST}" in faulted:
+        if r.when and r.when <= now:
             continue
-        name = policy.numbered_title(r.kind, r.number) if r.number else r.label
+        name = _entry_name(r.kind, r.number, r.label)
         out.append(
             _todo(
                 SUGGESTED,

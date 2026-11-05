@@ -375,6 +375,9 @@ class Release:
     # copy. That file ships with the entry: inside a `files:` copy that holds it, else as
     # one of `deploy` (this very copy); `schedule_plan.list_dest` says where it lands.
     reading_list: str | Deploy | None = None
+    # A non-blank `reading_list:` (or its old name) was written, usable or not: one
+    # that is not is a fault, never the "no reading list" to-do.
+    reading_list_written: bool = False
     # When the entry opens: when its copies ship by default (`_opens`). A reading list
     # shows from then (`schedule_plan.shown_list`); None when it has no date.
     opens: datetime | None = None
@@ -1348,6 +1351,10 @@ def _parse_block(
                 location=location,
                 slots=[slot for slot, _written in slots],
                 reading_list=reading_list,
+                reading_list_written=any(
+                    entry.get(k) is not None and str(entry[k]).strip()
+                    for k in (READING_LIST, OLD_READING_LIST)
+                ),
                 opens=_opens(deploys, first[1] if first else None, tz),
                 files_written="files" in entry,
                 block=block,
