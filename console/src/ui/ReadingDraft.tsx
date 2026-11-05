@@ -36,6 +36,8 @@ export interface DraftAdd {
   section: Section;
   line: string;
   path: string;
+  /** The file's repo (a file in another repo than the list gets no link). */
+  repo?: string;
 }
 
 
@@ -79,14 +81,18 @@ export function DraftButton({ org, pdfs: files, disabled = false, onAdd }: { org
         failed.push({ path: f.path, message: why(e) });
       }
     }
-    setState({ kind: 'ready', drafts: draftReadings(got), failed });
+    try {
+      setState({ kind: 'ready', drafts: draftReadings(got), failed });
+    } catch (e) {
+      setState({ kind: 'ready', drafts: [], failed: [...failed, ...got.map((g) => ({ path: g.path, message: why(e) }))] });
+    }
   };
   return (
     <div class="rd-slot">
       <span class="actions"><button class="btn small" type="button" disabled={disabled || !env || !files.length || state?.kind === 'reading'} onClick={() => void run()}>{DRAFT_TEXT.button}</button></span>
       <span class="hint">{files.length ? DRAFT_TEXT.hint : DRAFT_TEXT.noPdfs}</span>
       {state?.kind === 'reading' ? <CheckLine cls="busy">{DRAFT_TEXT.reading(state.at, files.length)}</CheckLine> : null}
-      {state?.kind === 'ready' ? <DraftDialog drafts={state.drafts} failed={state.failed} onAdd={onAdd} onClose={() => setState(null)} /> : null}
+      {state?.kind === 'ready' ? <DraftDialog drafts={state.drafts} failed={state.failed} onAdd={(adds) => onAdd(adds.map((a) => ({ ...a, repo: files.find((f) => f.path === a.path)?.repo })))} onClose={() => setState(null)} /> : null}
     </div>
   );
 }

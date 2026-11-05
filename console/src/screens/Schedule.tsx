@@ -20,7 +20,7 @@ import { RUN_REASON } from '../tiers/runSettings';
 import { CheckLine, DueSubmit, EditFile, Md, ProblemCards, ReleaseMarks, ghUrl } from '../ui/bits';
 import { FilePicker, pathVerdict } from '../ui/FilePicker';
 import { Hint } from '../ui/Hint';
-import { ReadingList, listMessage } from '../ui/ReadingList';
+import { LIST_TEXT, ReadingList, listMessage } from '../ui/ReadingList';
 import { fileInTree } from '../model/files';
 import { FullScreenButton, useFullScreen } from '../ui/Viewer';
 import { SaveLine, UnsavedBar, lineOf } from '../ui/edit';
@@ -369,8 +369,11 @@ function ListField({ p, id, d, set, sources, title }: { p: ReadyProps; id: strin
   const listPath = d.list && !d.list.inline ? d.list.path : '';
   const trees = [...new Set(d.files.map((f) => f.repo))].map((repo) => p.files.tree(p.course.org, repo));
   const reading = useMemo(() => readingFilesOf(p.files, p.course.org, d.files, listPath), [d.files, listPath, ...trees]);
+  const repo = (d.list && !d.list.inline ? d.list.repo : '') || d.files[0]?.repo || sources.materials[0];
+  // A list is a file in a course materials repo: with none, there is nowhere to write it (text in the schedule still shows and edits).
+  if (!repo && !d.list?.inline) return <div class="field"><span class="lbl-row"><b>{LIST_TEXT.label}</b></span><p class="footnote">{LIST_TEXT.noRepo}</p></div>;
   return (
-    <ReadingList id={id} list={d.list} defaultRepo={d.files[0]?.repo || sources.materials[0] || ''} defaultPath={defaultListPath(d, d.title || title)}
+    <ReadingList id={id} list={d.list} defaultRepo={repo ?? ''} noRepo={!repo} defaultPath={defaultListPath(d, d.title || title)}
       org={p.course.org} repos={sources.materials} files={p.files} readingFiles={reading} onChange={(list) => set({ list })} />
   );
 }
@@ -692,6 +695,8 @@ function View(p: ReadyProps) {
   const [filters, setFilters] = useState<Record<Block, boolean>>({ releases: true, assignments: true, events: true });
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [removed, setRemoved] = useState<string[]>([]);
+  // Reading lists Discard turned down (`repo/path`): not taken unasked again until the page reloads.
+  const [declined, setDeclined] = useState<Set<string>>(new Set());
   const [save, setSave] = useState<SaveState>({ kind: 'idle' });
   // The Save that would leave an assignment with no hand out date waits on this question.
   const [askManual, setAskManual] = useState(false);
@@ -726,7 +731,10 @@ function View(p: ReadyProps) {
   const readList = (l: ListDraft) => listFile(p.files, p.course.org, l);
   const inTree = (repo: string, path: string) => fileInTree(p.files, p.course.org, repo, path);
   // A readings entry (or a unit's twin) whose default READINGS.md is already there takes it: the open entry is then dirty.
-  const adopts = (d: Draft | null) => d?.kind === 'entry' && !!(pendingAdoption(d, inTree) || (d.twin && pendingAdoption(d.twin, inTree)));
+  // Only for someone who can write the course, and never again this session for a list Discard turned down.
+  const adopt = (repo: string, path: string) => p.course.write && !declined.has(`${repo}/${path}`) && inTree(repo, path);
+  const adoptions = (d: Draft | null) => (d?.kind === 'entry' ? [pendingAdoption(d, adopt), d.twin ? pendingAdoption(d.twin, adopt) : null].filter((l) => l !== null) : []);
+  const adopts = (d: Draft | null) => adoptions(d).length > 0;
   // Every draft this render, once: the edited ones and the open entry.
   const drafted = new Map([...Object.keys(drafts), ...(key && key !== 'new' && key !== 'semester' && sf ? [key] : [])].map((k) => [k, draftOf(k)]));
   const dirtyKeys = [...drafted.keys()].filter((k) => { const d = drafted.get(k)!; return k === 'new' || (d !== null && (!deepEqual(d, baseOf(k)) || adopts(d))); });
@@ -768,10 +776,10 @@ function View(p: ReadyProps) {
     const dates = dirtyKeys.map(at).find((d) => d.kind === 'semester');
     if (dates) writeDraft(y, dates, doc);
     const entryKeys = dirtyKeys.filter((k) => at(k).kind !== 'semester');
-    const out = applyChanges(y.text, (y.toJS() ?? {}) as Record<string, unknown>, changesOf(entryKeys.map(at), entryKeys.map(baseOf), inTree), removed, { handedOut, exists: inTree });
+    const out = applyChanges(y.text, (y.toJS() ?? {}) as Record<string, unknown>, changesOf(entryKeys.map(at), entryKeys.map(baseOf), adopt), removed, { handedOut, exists: inTree, adopt });
     if (!validSchedule(parse(out.text) ?? {})) return setSave({ kind: 'bad', text: invalidText('the schedule', validSchedule) });
     // The key a draft was written under: a new entry's is generated, a renumbered one's renamed.
-    const writtenKey = (k: string) => out.keys[changesOf(entryKeys.slice(0, entryKeys.indexOf(k)).map(at), entryKeys.slice(0, entryKeys.indexOf(k)).map(baseOf), inTree).length];
+    const writtenKey = (k: string) => out.keys[changesOf(entryKeys.slice(0, entryKeys.indexOf(k)).map(at), entryKeys.slice(0, entryKeys.indexOf(k)).map(baseOf), adopt).length];
     const newId = entryKeys.includes('new') ? writtenKey('new') : null;
     const what = dirty === 1 && dirtyKeys.length === 1 ? (dirtyKeys[0] === 'new' ? `add ${newId}` : `edit ${dirtyKeys[0]}`) : dirtyKeys.length === 0 ? `remove ${removed.join(', ')}` : `${dirty} changes`;
     const first: Step = { target: { owner: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }, text: out.text, sha: sf.sha, opts: { message: `schedule: ${what}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] } };
@@ -964,7 +972,7 @@ function View(p: ReadyProps) {
         {sheet}
       </div>
       {!key ? <SaveLine state={save} /> : null}
-      <UnsavedBar count={dirty} busy={save.kind === 'busy'} onDiscard={() => { setDrafts({}); setRemoved([]); setSave({ kind: 'idle' }); }} onSave={requestSave} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml', exists: schedExists }} />
+      <UnsavedBar count={dirty} busy={save.kind === 'busy'} onDiscard={() => { setDeclined(new Set([...declined, ...[...drafted.values()].flatMap(adoptions).map((l) => `${l.repo}/${l.path}`)])); setDrafts({}); setRemoved([]); setSave({ kind: 'idle' }); }} onSave={requestSave} file={{ org: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml', exists: schedExists }} />
       {askManual ? <HandOutDialog one={manualKeys.length === 1} onSave={(h) => void doSave(h ? manualKeys[0] : undefined)} onClose={() => setAskManual(false)} /> : null}
     </>
   );

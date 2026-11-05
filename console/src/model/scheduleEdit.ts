@@ -10,7 +10,7 @@ import { kebab } from './format';
 import { solutionBeforeCutoff } from './labels';
 import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO, EVENT_KIND, KINDS, pluralOf } from './policy';
 import type { AssignmentState } from './types';
-import { parentOf, type FileState, type Files } from './files';
+import { fileInTree, parentOf, type FileState, type Files } from './files';
 import { baseName } from './readingDraft';
 
 type Raw = Record<string, unknown>;
@@ -380,7 +380,7 @@ export function emptyTwin(d: EntryDraft): EntryDraft {
 }
 
 /** Whether a new twin holds anything worth writing. */
-export const twinUsed = (t: EntryDraft) => !!(t.id || t.files.length || t.list?.text?.trim() || t.title.trim());
+export const twinUsed = (t: EntryDraft) => !!(t.id || t.files.length || (t.list && !t.list.inline) || t.list?.text?.trim() || t.title.trim());
 
 // ------------------------------------------------------------------ keys
 
@@ -499,10 +499,10 @@ function numberValue(d: EntryDraft, raw: Raw, unit: boolean): number | undefined
 
 /**
  * A content entry as it goes into the file, merged over what the file has (none: a new entry).
- * `exists`, the course repos' trees: a readings entry with no list names the file waiting at
+ * `exists`, the course repos' trees; `adopt`, the files an entry may take unasked: a readings entry with no list names the file waiting at
  * its default path (`pendingAdoption`).
  */
-export function entryValue(d: EntryDraft, rawEntry: unknown, exists: Exists = noFile): Raw {
+export function entryValue(d: EntryDraft, rawEntry: unknown, exists: Exists = noFile, adopt: Exists = exists): Raw {
   const raw = obj(rawEntry);
   const rawFiles = Array.isArray(raw.files) ? raw.files : [];
   const unit = SESSION_KINDS.includes(d.type);
@@ -517,7 +517,7 @@ export function entryValue(d: EntryDraft, rawEntry: unknown, exists: Exists = no
     location: when.location,
     details: text(d.details),
     // `reading_guide:` is the 0.11.0 name (an org not migrated yet): read as the list, written back as `reading_list:` only.
-    reading_list: d.type === READINGS_KIND ? listValue(d.list ?? pendingAdoption(d, exists), raw.reading_list ?? raw.reading_guide, exists) : raw.reading_list,
+    reading_list: d.type === READINGS_KIND ? listValue(d.list ?? pendingAdoption(d, adopt), raw.reading_list ?? raw.reading_guide, exists) : raw.reading_list,
     reading_guide: d.type === READINGS_KIND ? undefined : raw.reading_guide,
     files: d.files.length ? d.files.map((f) => fileValue(f, f.src === undefined ? undefined : rawFiles[f.src])) : undefined,
     show_on_site: keep(raw.show_on_site, d.show, !hiddenKind(d.type)),
@@ -617,6 +617,8 @@ export interface SaveContext {
   handedOut?: (key: string) => boolean;
   /** Whether a course repo's tree has this file (a reading list's, decision 0044). */
   exists?: Exists;
+  /** The files an entry with no list may take unasked (`pendingAdoption`); default `exists`. */
+  adopt?: Exists;
 }
 
 /** One entry to write: its draft, the key it was read under ('' for a new one) and the draft it was read as. */
@@ -686,7 +688,7 @@ export function applyChanges(textIn: string, doc: Raw, changes: Change[], remove
     const d = { ...c.d, id: keys[i] };
     if (d.kind === 'entry') {
       dropRemovedFiles(y, [block, keys[i]], d, raw);
-      y.assign([block, keys[i]], entryValue(d, raw, ctx.exists));
+      y.assign([block, keys[i]], entryValue(d, raw, ctx.exists, ctx.adopt ?? ctx.exists));
     } else if (d.kind === 'assignments') y.assign([block, keys[i]], assignmentValue(d, raw));
     else y.assign([block, keys[i]], semesterEntryValue(d, raw));
     const numbered = block === ASSIGNMENTS_BLOCK || KINDS.some((k) => k.plural === block && k.numbered && !k.system);
@@ -741,7 +743,8 @@ export function defaultListPath(d: EntryDraft, title = d.title): string {
  * The reading list a readings entry (or a unit's twin) takes without a word: it has reading
  * files and no list, and its default path is already a file in the course repo. The sheet is
  * then dirty and Save names the file in `reading_list:` (`entryValue`); nothing in the draft
- * changes, so Discard leaves it so.
+ * changes. The caller's `exists` decides who may adopt: the sheet allows it only to someone
+ * who can write the course, and not for a list Discard turned down (until the page reloads).
  */
 export function pendingAdoption(e: EntryDraft, exists: Exists): ListDraft | null {
   if (e.type !== READINGS_KIND || e.list || !e.files.length) return null;
@@ -764,7 +767,7 @@ export interface ListWrite {
  */
 export function listFile(files: Files, org: string, l: ListDraft): FileState {
   const t = files.tree(org, l.repo);
-  if (l.text !== null && t.kind === 'ready' && !t.paths.some((x) => !x.dir && x.path === l.path)) return { kind: 'absent' };
+  if (t.kind === 'ready' && !t.truncated && !fileInTree(files, org, l.repo, l.path)) return { kind: 'absent' };
   return files.file(org, l.repo, l.path);
 }
 

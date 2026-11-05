@@ -500,6 +500,15 @@ describe('the reading list as a course file (decision 0044)', () => {
     expect(parse(save(tw, unit, unit, [], false, there).text).readings['readings-3'].reading_list).toEqual({ from_course_repo: REPO, from_path: 'readings/03/READINGS.md' });
   });
 
+  it('writes a new twin whose only content is a chosen list file', () => {
+    const tw = `lectures:\n  lecture-3:\n    session: 3\n`;
+    const unit = readDraft(doc(tw), 'lecture-3') as EntryDraft;
+    const chosen = { ...unit, twin: { ...emptyTwin(unit), list: { repo: REPO, path: 'lectures/03/list.md', inline: false, text: null } } };
+    expect(changesOf([chosen], [unit]).map((c) => c.from)).toEqual(['lecture-3', '']);
+    const out = parse(save(tw, chosen, unit, [], false, (_, path) => path === 'lectures/03/list.md').text);
+    expect(Object.values(out.readings)).toEqual([expect.objectContaining({ session: 3, reading_list: { from_course_repo: REPO, from_path: 'lectures/03/list.md' } })]);
+  });
+
   it('defaults the path beside the first reading file, else readings/<NN>_<slug>/READINGS.md', () => {
     const d = newDraft('readings', doc(BASE)) as EntryDraft;
     expect(defaultListPath({ ...d, files: [file('readings/04/a.pdf')] })).toBe('readings/04/READINGS.md');

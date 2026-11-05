@@ -36,6 +36,7 @@ export const LIST_TEXT = {
   footExisting: 'Saving writes your changes to this file.',
   preview: 'As students will see it',
   empty: 'No reading list: students see the reading files only. That is fine.',
+  noRepo: 'Add a course materials repo first: the reading list is a file in one.',
   missing: (names: string[]) => `${plural(names.length, 'reading file')} not in the reading list: ${names.join(', ')}. Students still get the file; it just isn’t cited here.`,
 };
 
@@ -71,7 +72,7 @@ function useSettled(v: string, ms: number): string {
 /** The reading files whose names the list does not mention. */
 export const notCited = (text: string, names: string[]) => (text.trim() ? names.filter((n) => !text.includes(n)) : []);
 
-export function ReadingList({ id, list, defaultRepo, defaultPath, org, repos, files, readingFiles, onChange, fixedPath = false }: {
+export function ReadingList({ id, list, defaultRepo, defaultPath, org, repos, files, readingFiles, onChange, fixedPath = false, noRepo = false }: {
   id: string;
   /** The list as the draft holds it; null: none yet (shown at the default path: a New file, or the file already there). */
   list: ListDraft | null;
@@ -86,6 +87,8 @@ export function ReadingList({ id, list, defaultRepo, defaultPath, org, repos, fi
   onChange: (l: ListDraft) => void;
   /** The Materials file view: the file is the one opened; nothing to choose or move. */
   fixedPath?: boolean;
+  /** No course materials repo to put a file in: text in the schedule stays editable, nothing to choose or move. */
+  noRepo?: boolean;
 }) {
   const [picking, setPicking] = useState(false);
   const [, reread] = useState(0);
@@ -117,9 +120,9 @@ export function ReadingList({ id, list, defaultRepo, defaultPath, org, repos, fi
           : isNew && !fixedPath ? <><span class="mono">{cur.repo} / </span><input id={`${id}-rl-path`} class="mono" type="text" aria-label="Reading list path" value={cur.path} onInput={(e) => onChange(toFile(cur.repo, (e.target as HTMLInputElement).value.replace(/^\/+/, ''), cur.text))} /></>
           : <span class="mono">{cur.repo} / {cur.path}</span>}
         {badge ? <span class={`chip${cur.inline ? ' amber' : ' muted'}`}>{badge}</span> : f?.kind === 'error' ? null : <span class="footnote">Reading {cur.path}…</span>}
-        {fixedPath ? null : (
+        {fixedPath ? null : noRepo ? <span class="footnote">{LIST_TEXT.noRepo}</span> : (
           <span class="actions">
-            {cur.inline ? <button class="btn small" type="button" onClick={() => onChange(toFile(defaultRepo, defaultPath, cur.text))}>{LIST_TEXT.move}</button> : null}
+            {cur.inline ? <button class="btn small" type="button" onClick={() => onChange({ repo: defaultRepo, path: defaultPath, inline: false, text: cur.text ?? '' })}>{LIST_TEXT.move}</button> : null}
             <button class="btn small quiet" type="button" onClick={() => setPicking(true)}>{LIST_TEXT.choose}</button>
           </span>
         )}
@@ -134,7 +137,7 @@ export function ReadingList({ id, list, defaultRepo, defaultPath, org, repos, fi
         </div>
       </div>
       {missing.length ? <CheckLine cls="warn">{LIST_TEXT.missing(missing)}</CheckLine> : null}
-      <DraftButton org={org} pdfs={pdfs} disabled={!loaded} onAdd={(adds) => setText(insertLines(text, cur.path, adds))} />
+      <DraftButton org={org} pdfs={pdfs} disabled={!loaded} onAdd={(adds) => setText(insertLines(text, cur.path, adds, cur.repo))} />
       {picking ? <FilePicker files={files} org={org} repos={repos} only={(path) => viewKind(path) === 'markdown'} onClose={() => setPicking(false)}
         onPick={(got) => { const g = got[got.length - 1]; if (g) onChange({ repo: g.repo, path: g.path, inline: false, text: null }); }} /> : null}
     </div>

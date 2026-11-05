@@ -126,7 +126,7 @@ export function parseNames(raw: string): Person[] | null {
 }
 
 const initials = (given: string[]) =>
-  given.length ? given.map((g) => g.split('-').map((x) => `${x.replace(/\.$/, '')[0].toUpperCase()}.`).join('-')).join(' ') : '?';
+  given.some((g) => g.replace(/[-.]/g, '')) ? given.map((g) => g.split('-').map((x) => x.replace(/\.$/, '')).filter(Boolean).map((x) => `${x[0].toUpperCase()}.`).join('-')).filter(Boolean).join(' ') : '?';
 
 /** APA 7 author list: "Family, G. G., Family, G., & Family, G."; a surname without given names gets a `?`. */
 export function apaAuthors(people: Person[] | null): string {
@@ -416,14 +416,16 @@ export function relPath(from: string, to: string): string {
 /**
  * The list with `- <line> [PDF](<file>)` added under `## Required readings` / `## Additional
  * readings`: after the section's last line when the heading is there, else under a new heading
- * (Required before an existing Additional, otherwise at the end). `listPath` places the links.
+ * (Required before an existing Additional, otherwise at the end). `listPath` places the links; a
+ * file in another repo than the list (`listRepo`) gets no link, a relative one would not reach it.
  */
-export function insertLines(text: string, listPath: string, adds: { section: Section; line: string; path: string }[]): string {
+export function insertLines(text: string, listPath: string, adds: { section: Section; line: string; path: string; repo?: string }[], listRepo?: string): string {
   const lines = text.replace(/\s+$/, '').split('\n');
   if (lines.length === 1 && lines[0] === '') lines.pop();
   const heading = (s: Section) => lines.findIndex((l) => new RegExp(`^##\\s+${SECTION_HEADING[s]}\\s*$`, 'i').test(l.trim()));
   for (const s of ['required', 'additional'] as Section[]) {
     const items = adds.filter((a) => a.section === s).map((a) => {
+      if (listRepo && a.repo && a.repo !== listRepo) return `- ${a.line}`;
       const rel = relPath(listPath, a.path);
       return `- ${a.line} [PDF](${/[\s()<>]/.test(rel) ? `<${rel}>` : rel})`;
     });
