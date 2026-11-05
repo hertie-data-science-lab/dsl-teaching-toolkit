@@ -20,6 +20,7 @@ from .faults import ConfigFault
 from .gh_contents import line_of
 from .log import Summary, log_err
 from .materials import ASSETS_KIND, DEFAULT_SYLLABUS
+from .readings import absolute_links
 
 # The kind whose entries attach to a unit's first row (decision 0038 rule 5).
 READINGS_KIND = "readings"
@@ -215,15 +216,22 @@ def shown_list(
     now: datetime,
     present: Callable[[str, str], bool],
     read: Callable[[str, str], str | None],
+    url: Callable[[str, str], str],
 ) -> str:
     """The reading list readings entry `row` shows now, or "" - the ONE rule the semester
     site and the student file both apply (decision 0044 point 2: students see the RELEASED
     copy). A course file's is the text of its copy in the semester (`read(repo, path)`),
-    once that is there (`present`). Inline text shows once the entry has released: one of
+    once that is there (`present`), its relative links made the released copies' URLs
+    (`url(repo, path)`, `readings.absolute_links`). Inline text (no folder) is left as
+    written; it shows once the entry has released: one of
     its copies landed (`landed`), or, for an entry that ships none, at its `opens` (an
     undated one attached to a unit: its `host` row's)."""
     if (named := row.reading_list_dest) is not None:
-        return (read(*named) or "") if present(*named) else ""
+        if not present(*named):
+            return ""
+        repo, path = named
+        folder = path.rpartition("/")[0]
+        return absolute_links(read(repo, path) or "", folder, lambda p: url(repo, p))
     opens = row.opens if row.opens is not None or host is None else host.opens
     released = landed if row.deploys else opens is not None and opens <= now
     return (row.reading_list or "") if released else ""

@@ -494,6 +494,9 @@ def _shown_list(
         lambda repo, path: get_file_content(
             semester_org, repo, path, confirm_absent=True
         ),
+        lambda repo, path: gh_url(
+            semester_org, repo, _repo_tree(semester_org, repo)[0], "blob", path
+        ),
     )
 
 

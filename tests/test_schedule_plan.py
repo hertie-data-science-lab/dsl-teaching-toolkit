@@ -7,6 +7,7 @@ off a folder name.
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -400,7 +401,13 @@ def test_a_reading_list_shows_once_the_entry_has_released():
 
     def shown(r, now, landed=False, host=None, there=tree):
         return schedule_plan.shown_list(
-            r, host, landed, now, lambda *rp: rp in there, lambda *rp: "/".join(rp)
+            r,
+            host,
+            landed,
+            now,
+            lambda *rp: rp in there,
+            lambda *rp: "/".join(rp),
+            lambda *rp: "url:" + "/".join(rp),
         )
 
     opens = _at(10, 11) + timedelta(minutes=30)
@@ -422,3 +429,31 @@ def test_a_reading_list_shows_once_the_entry_has_released():
     # Undated: its unit's first row's moment, else never.
     assert shown(row["undated"], opens) == ""
     assert shown(row["undated"], opens, host=row["bare"]) == "- E."
+
+
+def test_a_reading_list_files_relative_links_point_at_the_released_copies():
+    # Inline text has no folder: its links are left as written.
+    named = Deploy("cm", "readings/01/READINGS.md")
+    row = schedule_plan.PlannedRow(
+        "r1", "readings", None, date(2026, 9, 1), deploys=(named,), reading_list=named
+    )
+    text = "[PDF](s1.pdf) [up](../x.pdf)"
+
+    def shown(r):
+        return schedule_plan.shown_list(
+            r,
+            None,
+            True,
+            _at(10),
+            lambda *rp: True,
+            lambda *rp: text,
+            lambda repo, path: f"https://gh/{repo}/{path}",
+        )
+
+    assert shown(row) == (
+        "[PDF](https://gh/materials/readings/01/s1.pdf) "
+        "[up](https://gh/materials/readings/x.pdf)"
+    )
+    inline = dataclasses.replace(row, reading_list=text, deploys=())
+    inline = dataclasses.replace(inline, opens=_at(1))
+    assert shown(inline) == text
