@@ -108,7 +108,7 @@ describe('Generate draft in the editor', () => {
     let list: ListDraft = { repo: 'm', path: 'readings/04/READINGS.md', inline: false, text: '# Week 4\n\n## Required readings\n\n- Bishop.\n' };
     const files = new StaticFiles({}, {}, {});
     const read: string[] = [];
-    const env = { client: { renderMarkdown: () => new Promise(() => {}), getBytes: async (_o: string, _r: string, path: string) => { read.push(path); return new Uint8Array(); } } } as unknown as Env;
+    const env = { client: { renderMarkdown: () => new Promise(() => {}), fetchBytes: async (_o: string, _r: string, path: string) => { read.push(path); return new Uint8Array(); } } } as unknown as Env;
     const readingFiles = [{ repo: 'm', path: 'readings/04/a.pdf', sha: 's1' }, { repo: 'm', path: 'readings/04/notes.md', sha: 's2' }, { repo: 'm', path: 'readings/04/b.pdf' }];
     const view = () => <ReadingList id="t" list={list} defaultRepo="m" defaultPath="readings/04/READINGS.md" org="o" repos={['m']} files={files} readingFiles={readingFiles} onChange={(l) => (list = l)} />;
     await mount(view(), env);
@@ -120,5 +120,26 @@ describe('Generate draft in the editor', () => {
     await act(() => tick(0).click());
     await act(() => button(DRAFT_TEXT.add(1))!.click());
     expect(list.text).toMatch(/^# Week 4\n\n## Required readings\n\n- Bishop\.\n- Goodfellow, I\. .*\[PDF\]\(a\.pdf\)\n$/);
+  });
+
+  it('fetches at most four files at once, uncached, and lists them in order', async () => {
+    let flying = 0, most = 0;
+    const asked: string[] = [];
+    const env = { client: { fetchBytes: async (_o: string, _r: string, path: string) => {
+      asked.push(path);
+      most = Math.max(most, ++flying);
+      await new Promise((r) => setTimeout(r, 0));
+      flying--;
+      if (path.endsWith('c.pdf')) throw new Error('Not Found');
+      return new Uint8Array();
+    } } } as unknown as Env;
+    const pdfs = ['a', 'b', 'c', 'd', 'e', 'f'].map((n) => ({ repo: 'm', path: `r/${n}.pdf`, sha: `cap-${n}` }));
+    await mount(<DraftButton org="o" pdfs={pdfs} onAdd={() => {}} />, env);
+    await act(() => button(DRAFT_TEXT.button)!.click());
+    for (let i = 0; i < 12; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(asked).toEqual(pdfs.map((x) => x.path));
+    expect(most).toBe(4);
+    expect([...root!.querySelectorAll('.rd-file .rd-head .mono')].map((x) => x.textContent)).toEqual(['a.pdf', 'b.pdf', 'd.pdf', 'e.pdf', 'f.pdf', 'c.pdf']);
+    expect(root!.textContent).toContain(DRAFT_TEXT.failed('Not Found'));
   });
 });

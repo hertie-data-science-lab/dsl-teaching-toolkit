@@ -42,6 +42,16 @@ export interface DraftAdd {
 /** What each PDF yielded, by blob sha: reopening the dialog reads nothing again. */
 const read = new Map<string, PdfFacts>();
 
+/** How many files' bytes are fetched at once. */
+const FETCHING = 4;
+
+/** `jobs` at most `n` at a time (each starts once the one `n` before it is done); their results, in order. A job must not throw. */
+function capped<T>(n: number, jobs: (() => Promise<T>)[]): Promise<T>[] {
+  const out: Promise<T>[] = [];
+  jobs.forEach((job, i) => out.push(i < n ? job() : out[i - n].then(() => job())));
+  return out;
+}
+
 /** The tick-chip colour of a provenance tag. */
 const LEVEL_CLS: Record<Level, string> = { found: 'ok', check: 'amber', guess: 'amber', '?': 'bad' };
 
@@ -53,18 +63,20 @@ export function DraftButton({ org, pdfs: files, disabled = false, onAdd }: { org
     if (!env) return;
     const got: { path: string; facts: PdfFacts }[] = [];
     const failed: { path: string; message: string }[] = [];
+    const why = (e: unknown) => (e instanceof Error ? e.message : String(e));
+    // The bytes a few at a time, never kept by the client (the viewer's kept files stay); each
+    // parsed in order once it is here, the progress counting the files done.
+    const bytes = capped(FETCHING, files.map((f) => () => (read.has(f.sha) ? Promise.resolve(null) : env.client.fetchBytes(org, f.repo, f.path, f.sha, f.size ?? 0).catch((e: unknown) => new Error(why(e))))));
     for (const [i, f] of files.entries()) {
       setState({ kind: 'reading', at: i + 1 });
       try {
-        let facts = read.get(f.sha);
-        if (!facts) {
-          const bytes = await env.client.getBytes(org, f.repo, f.path, f.sha, f.size ?? 0);
-          facts = await (await import('../model/pdfText')).readPdf(bytes);
-          read.set(f.sha, facts);
-        }
+        const b = await bytes[i];
+        if (b instanceof Error) throw b;
+        const facts = read.get(f.sha) ?? (await (await import('../model/pdfText')).readPdf(b!));
+        read.set(f.sha, facts);
         got.push({ path: f.path, facts });
       } catch (e) {
-        failed.push({ path: f.path, message: e instanceof Error ? e.message : String(e) });
+        failed.push({ path: f.path, message: why(e) });
       }
     }
     setState({ kind: 'ready', drafts: draftReadings(got), failed });
