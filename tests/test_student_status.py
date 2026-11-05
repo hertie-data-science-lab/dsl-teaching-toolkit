@@ -494,9 +494,13 @@ def test_a_reading_list_shows_its_landed_copy_as_on_the_site():
         r for r in student_status.planned_rows(facts.sched) if r.key == "readings_01"
     ]
     shown = student_status._shown_list(
-        facts, row, None, False, NOW, lambda *rp: "/".join(rp)
+        facts, row, None, False, NOW, lambda *rp: f"[A]({rp[0]}.pdf)"
     )
-    assert shown == "materials/readings/01_intro/READINGS.md"
+    # Its relative links point at the released copies.
+    assert shown == (
+        f"[A](https://github.com/{SEMESTER}/materials/blob/main/readings/01_intro/"
+        "materials.pdf)"
+    )
 
 
 def test_a_reading_list_kept_in_a_lecture_folder_does_not_release_the_lecture():

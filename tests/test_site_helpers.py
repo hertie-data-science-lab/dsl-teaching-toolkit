@@ -497,7 +497,7 @@ def test_a_course_file_reading_list_shows_its_landed_copy_only(monkeypatch):
     monkeypatch.setattr(
         site,
         "get_file_content",
-        lambda org, repo, path, confirm_absent: reads.append(path) or "- A.",
+        lambda org, repo, path, confirm_absent: reads.append(path) or "- [A](a.pdf)",
     )
     named = Deploy(
         "cm", "lectures/01/READINGS.md", "materials", "readings/01/READINGS.md"
@@ -510,7 +510,10 @@ def test_a_course_file_reading_list_shows_its_landed_copy_only(monkeypatch):
         deploys=(named,),
         reading_list=named,
     )
-    assert site._shown_list("C", row, None, True, _NOW, _LIVE) == "- A."
+    # Its relative links point at the released copies.
+    assert site._shown_list("C", row, None, True, _NOW, _LIVE) == (
+        "- [A](https://github.com/C/materials/blob/main/readings/01/a.pdf)"
+    )
     assert reads == ["readings/01/READINGS.md"]
     # Not landed yet: no list, and nothing read.
     tree = ()

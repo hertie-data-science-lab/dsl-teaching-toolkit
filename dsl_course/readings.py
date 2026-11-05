@@ -9,7 +9,10 @@ instead; `migrate` reads the overlay to write it.
 
 from __future__ import annotations
 
+import posixpath
+import re
 from collections.abc import Callable, Iterable
+from urllib.parse import unquote
 
 # A session's OPTIONAL prose reading list, the one file in a `readings/NN_.../` folder that
 # is inlined as text rather than listed as a download. Named once here because `scaffold`
@@ -109,5 +112,40 @@ def demote_headings(text: str, shift: int = HEADING_SHIFT) -> str:
             rest = stripped[hashes:]
             if rest[:1] in (" ", "\t", ""):
                 line = "#" * min(hashes + shift, 6) + rest
+        out.append(line)
+    return "\n".join(out)
+
+
+# A markdown link or image's target (`[text](target "title")`), and a reference
+# definition's (`[id]: target`).
+_LINK = re.compile(r"(!?\[[^\]]*\]\(\s*)([^)\s]+)")
+_REF_DEF = re.compile(r"^(\s{0,3}\[[^\]]+\]:\s*)(\S+)")
+_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
+
+
+def absolute_links(text: str, folder: str, url: Callable[[str], str]) -> str:
+    """A reading-list file's markdown with each RELATIVE link target (`s1.pdf`,
+    `../other.pdf`: no scheme, no leading `/`, not `#anchor`, not a `<...>` autolink)
+    made `url(path)` of where it sits beside the file, which lives in `folder` - so a
+    link the file's own folder resolves still resolves on a page that is not there.
+    A target that climbs out of the repo, and anything in a fenced code block, is left
+    as written."""
+
+    def fix(target: str) -> str:
+        if target.startswith(("/", "#", "<")) or _SCHEME.match(target):
+            return target
+        path, sep, anchor = target.partition("#")
+        joined = posixpath.normpath(posixpath.join(folder, unquote(path)))
+        if joined == ".." or joined.startswith("../"):
+            return target
+        return url(joined.removeprefix("./")) + sep + anchor
+
+    out, fenced = [], False
+    for line in text.split("\n"):
+        if line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+        elif not fenced:
+            line = _REF_DEF.sub(lambda m: m.group(1) + fix(m.group(2)), line)
+            line = _LINK.sub(lambda m: m.group(1) + fix(m.group(2)), line)
         out.append(line)
     return "\n".join(out)

@@ -79,6 +79,7 @@ from .schedule_plan import (
 )
 from .selection import publishable
 from .site_repo import (
+    gh_url,
     landed_links,
     people_cards,
     row_tabs,
@@ -375,6 +376,9 @@ def _shown_list(
         now,
         lambda repo, path: path in facts.dest_paths.get(repo, set()),
         read,
+        lambda repo, path: gh_url(
+            facts.org, repo, facts.dest_branches.get(repo, "main"), "blob", path
+        ),
     )
 
 
