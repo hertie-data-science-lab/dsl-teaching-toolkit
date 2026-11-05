@@ -861,12 +861,52 @@
                   "email",
                   "due",
                   "files",
-                  "released_tbc"
+                  "released_tbc",
+                  "reading_list"
                 ],
                 "type": "string"
               },
               "entry": {
                 "type": "string"
+              },
+              "fix": {
+                "properties": {
+                  "entry": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "line": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "ref": {
+                    "type": "string"
+                  },
+                  "repo": {
+                    "type": "string"
+                  },
+                  "screen": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "url": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "repo",
+                  "path"
+                ],
+                "type": "object"
               },
               "id": {
                 "type": "string"
@@ -1214,6 +1254,47 @@
             "type": [
               "integer",
               "null"
+            ]
+          },
+          "reading_list": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "released_path": {
+                    "type": "string"
+                  },
+                  "released_repo": {
+                    "type": "string"
+                  },
+                  "repo": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "repo",
+                  "path",
+                  "released_repo",
+                  "released_path"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "inline": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "inline"
+                ],
+                "type": "object"
+              }
             ]
           },
           "show_on_site": {
@@ -1729,12 +1810,52 @@
                   "email",
                   "due",
                   "files",
-                  "released_tbc"
+                  "released_tbc",
+                  "reading_list"
                 ],
                 "type": "string"
               },
               "entry": {
                 "type": "string"
+              },
+              "fix": {
+                "properties": {
+                  "entry": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "line": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "ref": {
+                    "type": "string"
+                  },
+                  "repo": {
+                    "type": "string"
+                  },
+                  "screen": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "url": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "repo",
+                  "path"
+                ],
+                "type": "object"
               },
               "id": {
                 "type": "string"

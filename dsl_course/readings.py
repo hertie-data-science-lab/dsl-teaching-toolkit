@@ -1,9 +1,10 @@
 """A reading list: how its prose nests under the heading above it (`demote_headings`,
 for a schedule entry's `reading_list:`, decision 0038 rule 5).
 
-WP-P removes the rest: the `READINGS.md` overlay - a file in a readings folder inlined as
-prose - is read only by the open site (`public_site`) and the parked student console
-(`student_status`). The semester site and the syllabus read `reading_list:` instead.
+The `READINGS.md` overlay - a file in a readings folder inlined as prose by its NAME - is
+read only by the open site (`public_site`), which has no schedule. The semester site, the
+student file and the syllabus read `reading_list:` (text, or the course file it names)
+instead; `migrate` reads the overlay to write it.
 """
 
 from __future__ import annotations

@@ -115,7 +115,7 @@ def test_fresh_materials_repo_gets_the_full_skeleton(fake):
         # up on the next Refresh.
         ".system/SYLLABUS.md.sample",
         # Empty folders named for nothing the toolkit reads (decision 0038): no `NN_`
-        # session folder, no READINGS.md stub (a reading list is `reading_guide:`).
+        # session folder, no READINGS.md stub (a reading list is `reading_list:`).
         "lectures/.gitkeep",
         "labs/.gitkeep",
         "readings/.gitkeep",

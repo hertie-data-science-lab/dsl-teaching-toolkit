@@ -65,15 +65,30 @@ class PlannedRow:
     unit: str = ""
     location: str = ""
     reading_list: str = ""
+    # Where its course-file reading list lands (`Release.reading_list_file`), or None.
+    reading_list_file: schedule.Deploy | None = None
     slot: int = 0
+    # The entry's first moment (`Release.when`): every slot's inline reading list opens
+    # by it (`inline_list_opens`). None: the slot's own `when`.
+    entry_when: date | datetime | None = None
+
+    @property
+    def reading_list_dest(self) -> tuple[str, str] | None:
+        """`(repo, path)` its named reading-list file lands at in the semester, or None."""
+        d = self.reading_list_file
+        return (d.semester_dest_repo, deploy_dest(d)) if d else None
 
     @property
     def dests(self) -> list[str]:
         """The semester-side `repo/path`s its copies land in, deduped, in plan order. A
         path under another one listed (`labs/03_lab/solutions` beside `labs/03_lab`) is
-        dropped: the pending-row sentence would otherwise link the same tree twice."""
+        dropped: the pending-row sentence would otherwise link the same tree twice. Its
+        reading-list file is no place a student opens, so it is not named."""
+        named = self.reading_list_dest
         return outermost(
-            f"{d.semester_dest_repo}/{deploy_dest(d)}" for d in self.deploys
+            f"{d.semester_dest_repo}/{deploy_dest(d)}"
+            for d in self.deploys
+            if (d.semester_dest_repo, deploy_dest(d)) != named
         )
 
 
@@ -99,7 +114,9 @@ def planned_rows(sched: schedule.Schedule) -> list[PlannedRow]:
             unit=r.session,
             location=slot.location or r.location,
             reading_list=r.reading_list,
+            reading_list_file=r.reading_list_file,
             slot=i,
+            entry_when=r.when,
         )
 
     slots = [(r, i, slot) for r in sched.releases for i, slot in enumerate(r.row_slots)]
@@ -173,6 +190,58 @@ def unit_hosts(rows: list[PlannedRow]) -> dict[str, PlannedRow]:
         if r.unit and r.shown and r.kind not in (READINGS_KIND, ASSETS_KIND):
             hosts.setdefault(r.unit, r)
     return hosts
+
+
+def inline_list_opens(
+    row: PlannedRow, host: PlannedRow | None, tz: ZoneInfo
+) -> datetime | None:
+    """When an inline reading list on an entry that ships NO files shows: the moment its
+    copies would have shipped - an hour before the entry's FIRST slot (every slot of a
+    multi-slot entry opens then), a whole-day entry at the day's start in `tz` - or by its
+    unit's first row when it has no date of its own. None when it has no date at all. An
+    entry with files shows its list once one of them has landed instead."""
+
+    def first(r: PlannedRow) -> date | datetime | None:
+        return r.entry_when if r.entry_when is not None else r.when
+
+    when = first(row)
+    if when is None and host is not None:
+        when = first(host)
+    if isinstance(when, datetime):
+        return when - schedule.DEFAULT_DEPLOY_LEAD
+    return datetime.combine(when, time(), tz) if when is not None else None
+
+
+def shown_list(
+    row: PlannedRow,
+    landed: bool,
+    opens: datetime | None,
+    now: datetime,
+    present: Callable[[str, str], bool],
+    read: Callable[[str, str], str | None],
+) -> str:
+    """The reading list readings entry `row` shows now, or "" - the ONE rule the semester
+    site and the student file both apply (decision 0044 point 2: students see the RELEASED
+    copy). A course file's is the text of its copy in the semester (`read(repo, path)`),
+    once that is there (`present`). Inline text shows once the entry has released: one of
+    its copies landed (`landed`), or, for an entry that ships none, at `opens`
+    (`inline_list_opens`)."""
+    if (named := row.reading_list_dest) is not None:
+        return (read(*named) or "") if present(*named) else ""
+    released = landed if row.deploys else opens is not None and opens <= now
+    return row.reading_list if released else ""
+
+
+def list_dests(rows: Iterable) -> dict[str, frozenset[str]]:
+    """Where every readings entry's named reading-list file lands, per semester repo
+    (`reading_list_file` of each of `rows`, releases or planned rows). No row links these,
+    and a copy that has landed nothing else has not landed (`site_repo.landed_links`): a
+    list kept in a lecture folder ships with its readings, never as that lecture."""
+    out: dict[str, set[str]] = {}
+    for r in rows:
+        if (d := r.reading_list_file) is not None:
+            out.setdefault(d.semester_dest_repo, set()).add(deploy_dest(d))
+    return {repo: frozenset(paths) for repo, paths in out.items()}
 
 
 def site_rows(rows: list[PlannedRow]) -> list[SiteRow]:

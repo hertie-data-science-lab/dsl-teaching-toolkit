@@ -428,8 +428,7 @@ _READINGS_TREE = (
 
 
 def test_a_readings_folder_lists_every_file_it_holds(monkeypatch):
-    # Decision 0038 rule 5: the reading list is the schedule's `reading_guide:`, so a
-    # READINGS.md in the folder is a file like any other.
+    # A READINGS.md the entry does not name is a file like any other.
     monkeypatch.setattr(site, "_repo_tree", lambda org, repo: ("main", _READINGS_TREE))
     landed = site._landed("C", _deploy("readings/01_week-1"), frozenset(), {})
     assert sorted(x.name for x in landed.links) == [
@@ -440,16 +439,107 @@ def test_a_readings_folder_lists_every_file_it_holds(monkeypatch):
     ]
 
 
-def test_a_reading_list_is_the_entries_text_nested_under_the_row():
+def test_the_named_reading_list_file_is_never_a_link(monkeypatch):
+    monkeypatch.setattr(site, "_repo_tree", lambda org, repo: ("main", _READINGS_TREE))
+    named = Deploy("cm", "readings/01_week-1/READINGS.md", "materials")
     row = schedule_plan.PlannedRow(
-        "readings.week-1",
+        "readings-1",
         "readings",
         None,
         date(2026, 9, 1),
-        reading_list="# Week 1\n\n- Blitzstein.\n",
+        deploys=(_deploy("readings/01_week-1"),),
+        reading_list_file=named,
     )
-    assert site._reading_list([row]) == "### Week 1\n\n- Blitzstein."
-    assert site._reading_list([dataclasses.replace(row, reading_list="  ")]) == ""
+    hidden = schedule_plan.list_dests([row])
+    live = frozenset({"materials"})
+    (landed,) = site._row_landed("C", row, frozenset(), live, {}, hidden)
+    assert sorted(x.name for x in landed.links) == ["ch1.pdf", "notes.md", "refs.bib"]
+    # The file alone, landed: the copy has landed, and links nothing.
+    alone = dataclasses.replace(row, deploys=(named,))
+    (landed,) = site._row_landed("C", alone, frozenset(), live, {}, hidden)
+    assert landed.links == []
+
+
+def test_a_reading_list_is_the_entries_text_nested_under_the_row():
+    assert site._reading_list(["# Week 1\n\n- Blitzstein.\n", "  "]) == (
+        "### Week 1\n\n- Blitzstein."
+    )
+    assert site._reading_list(["  "]) == ""
+
+
+_NOW = datetime(2026, 9, 10, 12, 0, tzinfo=ZoneInfo("Europe/Berlin"))
+_LIVE = frozenset({"materials"})
+
+
+def test_a_course_file_reading_list_shows_its_landed_copy_only(monkeypatch):
+    # Decision 0044: students see the RELEASED copy, read from the semester repo.
+    reads = []
+    tree = ("readings/01/READINGS.md",)
+    monkeypatch.setattr(site, "_repo_tree", lambda org, repo: ("main", tree))
+    monkeypatch.setattr(
+        site,
+        "get_file_content",
+        lambda org, repo, path, confirm_absent: reads.append(path) or "- A.",
+    )
+    named = Deploy(
+        "cm", "lectures/01/READINGS.md", "materials", "readings/01/READINGS.md"
+    )
+    row = schedule_plan.PlannedRow(
+        "readings-1",
+        "readings",
+        None,
+        date(2026, 9, 1),
+        deploys=(named,),
+        reading_list_file=named,
+    )
+    assert site._shown_list("C", row, True, None, _NOW, _LIVE) == "- A."
+    assert reads == ["readings/01/READINGS.md"]
+    # Not landed yet: no list, and nothing read.
+    tree = ()
+    assert site._shown_list("C", row, False, None, _NOW, _LIVE) == ""
+    assert reads == ["readings/01/READINGS.md"]
+
+
+def test_inline_text_shows_once_the_entry_has_released():
+    row = schedule_plan.PlannedRow(
+        "readings-1",
+        "readings",
+        datetime(2026, 9, 10, 12, 30, tzinfo=ZoneInfo("Europe/Berlin")),
+        date(2026, 9, 1),
+        deploys=(_deploy("readings/01"),),
+        reading_list="- B.",
+    )
+    # With files: once one of them has landed.
+    assert site._shown_list("C", row, False, None, _NOW, _LIVE) == ""
+    assert site._shown_list("C", row, True, None, _NOW, _LIVE) == "- B."
+    # With none: an hour before its session.
+    bare = dataclasses.replace(row, deploys=())
+    tz = ZoneInfo("Europe/Berlin")
+    opens = schedule_plan.inline_list_opens(bare, None, tz)
+    assert opens == datetime(2026, 9, 10, 11, 30, tzinfo=tz)
+    assert site._shown_list("C", bare, False, opens, _NOW, _LIVE) == "- B."
+    later = schedule_plan.inline_list_opens(
+        dataclasses.replace(bare, when=datetime(2026, 9, 11, 9, 0, tzinfo=tz)), None, tz
+    )
+    assert site._shown_list("C", bare, False, later, _NOW, _LIVE) == ""
+    # Undated, on a unit: its host row's date.
+    host = dataclasses.replace(bare, key="lecture-1", kind="lecture")
+    undated = dataclasses.replace(bare, when=None, undated=True)
+    assert schedule_plan.inline_list_opens(undated, host, tz) == opens
+    assert schedule_plan.inline_list_opens(undated, None, tz) is None
+    # A second slot opens with the entry's first: an hour before it.
+    second = dataclasses.replace(
+        bare,
+        when=datetime(2026, 9, 17, 12, 30, tzinfo=tz),
+        slot=1,
+        entry_when=bare.when,
+    )
+    assert schedule_plan.inline_list_opens(second, None, tz) == opens
+    # A whole-day entry: the day's start.
+    day = dataclasses.replace(bare, when=date(2026, 9, 10))
+    assert schedule_plan.inline_list_opens(day, None, tz) == datetime(
+        2026, 9, 10, tzinfo=tz
+    )
 
 
 def _syllabus(monkeypatch, releases, tree, declared=""):

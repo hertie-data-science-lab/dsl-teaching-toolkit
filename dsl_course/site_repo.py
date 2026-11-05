@@ -13,7 +13,7 @@ import re
 import shutil
 import tempfile
 import time
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from functools import cache
@@ -33,7 +33,6 @@ from .discovery import course_org_for_semester, list_org_repos
 from .gh_teams import acting_login
 from .ghcli import GIT_ENV, clone, gh, git, is_missing_resource
 from .log import Summary, log, log_err, log_ok, log_step, plural
-from .readings import is_reading_overlay
 from .repos import repo_exists, repo_is_archived
 from .selection import listable
 
@@ -1013,38 +1012,35 @@ def landed_links(
     blobs: Sequence[str],
     path: str,
     allow: frozenset[str],
-    readings: bool,
+    hidden: Collection[str] = frozenset(),
     hosted: Hosted | None = None,
-) -> tuple[list[Link], list[str]] | None:
-    """(links, reading-list overlays) for what a copy into `repo/path` has landed, or None
-    while nothing has: a file is one link, a folder its files as GitHub shows them
-    (`shape_links`), the repo root the whole repo. `blobs` is every file of the repo,
-    sorted. `readings` takes the reading-list overlay (`READINGS.md`) out of the links:
-    the row inlines its text. `hosted` (the semester site's alone) adds each hosted
-    copy's `view_url`. The ONE listing rule: the semester site and the student file both
-    read it."""
+    own: str | None = None,
+) -> list[Link] | None:
+    """The links for what a copy into `repo/path` has landed, or None while nothing has:
+    a file is one link, a folder its files as GitHub shows them (`shape_links`), the repo
+    root the whole repo. `blobs` is every file of the repo, sorted. `hidden` are paths in
+    `repo` never linked though landed - the reading-list files readings entries name
+    (`schedule_plan.list_dests`), whose text a row inlines - and a copy that landed
+    nothing else has not landed (None), so a list kept in a lecture folder does not
+    release the lecture. `own`, the asking row's own list, is the exception: having
+    landed it, the copy has landed (no link). `hosted` (the semester site's alone) adds
+    each hosted copy's `view_url`. The ONE listing rule: the semester site and the
+    student file both read it."""
     path = "" if is_repo_root(path) else path.strip("/")
-    if path and path in blobs:
-        name = path.rsplit("/", 1)[-1]
-        if readings and is_reading_overlay(name):
-            return [], [path]
-        return [file_link(org, repo, branch, path, name, hosted)], []
     prefix = f"{path}/" if path else ""
-    inside = [b for b in blobs if b.startswith(prefix)]
-    if not inside:
-        return None
-    overlays = [b for b in inside if readings and is_reading_overlay(b)]
-    files = [
-        file_link(org, repo, branch, b, b[len(prefix) :], hosted)
-        for b in inside
-        if b not in overlays
-    ]
+    landed = [b for b in blobs if b == path or b.startswith(prefix)] if path else blobs
+    shown = [b for b in landed if b not in hidden]
+    if not shown:
+        return [] if own is not None and own in landed else None
+    if path in shown:
+        return [file_link(org, repo, branch, path, path.rsplit("/", 1)[-1], hosted)]
+    files = [file_link(org, repo, branch, b, b[len(prefix) :], hosted) for b in shown]
     tree = (
         gh_url(org, repo, branch, "tree", path)
         if path
         else f"https://github.com/{org}/{repo}/tree/{branch}"
     )
-    return shape_links(files, tree, allow, path), overlays
+    return shape_links(files, tree, allow, path)
 
 
 def iso_when(when: date | datetime, fallback_time: str = "09:00:00") -> str:

@@ -86,6 +86,7 @@ from .schedule import (
     KNOWN_SEMESTER_DATE,
     KNOWN_SLOT,
     KNOWN_TOP_LEVEL,
+    READING_LIST,
     READINGS_KIND,
     SEMESTER_BLOCK,
     SEMESTER_TYPES,
@@ -272,6 +273,8 @@ TODO_CHECKS = (
     "files",
     # Decision 0043 rule 5: a released entry whose session date is still TBC.
     status_json.RELEASED_STILL_TBC,
+    # A readings entry with reading files and no reading list.
+    status_json.NO_READING_LIST,
 )
 
 
@@ -378,6 +381,8 @@ def status_schema(*, closed: bool = True) -> dict:
             "set_aside": {"type": "boolean"},
             # The moment it is about (an entry with no files yet: its date).
             "when": _str(),
+            # Where it is fixed: a schedule to-do's entry (`#schedule-<key>`).
+            "fix": fix,
         },
         ("id", "kind", "repo", "text", "need"),
     )
@@ -525,6 +530,24 @@ def status_schema(*, closed: bool = True) -> dict:
             "dest": place,
             "show_on_site": {"type": "boolean"},
             "tbc": {"type": "boolean"},
+            # A readings entry's alone (decision 0044 point 5): the course file its
+            # reading list is and where it lands in the semester, `{"inline": true}`
+            # for legacy text, or null for none.
+            "reading_list": {
+                "oneOf": [
+                    {"type": "null"},
+                    obj(
+                        {
+                            "repo": _str(),
+                            "path": _str(),
+                            "released_repo": _str(),
+                            "released_path": _str(),
+                        },
+                        ("repo", "path", "released_repo", "released_path"),
+                    ),
+                    obj({"inline": {"const": True}}, ("inline",)),
+                ]
+            },
         },
         # `when` always present (null while TBC): the console derives `late` from it.
         ("id", "state", "when"),
@@ -639,7 +662,9 @@ def schedule_schema() -> dict:
         "files": {"type": "array", "items": copy},
     }
     entry = _obj(_keys(KNOWN_ENTRY, shared))
-    readings = _obj(_keys(KNOWN_READINGS, shared))
+    # A reading list is markdown, or a course file named as a copy is.
+    reading_list = {"oneOf": [{"type": ["string", "null"]}, copy]}
+    readings = _obj(_keys(KNOWN_READINGS, {**shared, READING_LIST: reading_list}))
     marks_row = _obj({"event_datetime": _str(), "show_on_site": {"type": "boolean"}})
     run = {FILE_NAMES.get(k, k): v for k, v in _SPEC_TYPES.items() if k in RUN_KEYS}
     assignment = _obj(

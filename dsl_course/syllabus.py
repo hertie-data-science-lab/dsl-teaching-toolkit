@@ -22,9 +22,9 @@ to paste.
 
 A session is a teaching unit (decision 0038): every entry sharing a `session:` id, headed
 by its first row by date, as the website's rows (`schedule_plan.site_rows`) have it. The
-readings under each are the unit's readings entries: their `reading_guide:`, then the names
-of the files they copy, read from the COURSE org's source repos (a syllabus is written
-before the term starts, when nothing has shipped yet). Any other readings entry closes the
+readings under each are the unit's readings entries: their `reading_list:` (inline, or the
+course file it names), then the names of the files they copy, read from the COURSE org's
+source repos (a syllabus is written before the term starts, when nothing has shipped yet). Any other readings entry closes the
 list under "Further readings".
 
 `--course-source-repo` names the materials repo holding the syllabus; `--syllabus` the file
@@ -49,6 +49,7 @@ from .config import read_semester
 from .faults import Unusable
 from .gh_contents import (
     blob_sha,
+    get_file_content,
     get_file_with_sha,
     put_file,
     repo_tree,
@@ -139,10 +140,20 @@ def place(text: str, body: str) -> str | None:
 
 
 def _readings_for(course_org: str, row: PlannedRow, trees: dict) -> str:
-    """A readings entry's reading list: its `reading_guide:` text, then the names of the
-    files its copies take out of the COURSE org (a file, a folder, or a whole repo). A
-    repo that cannot be read raises, naming it."""
-    parts = [row.reading_list.strip()] if row.reading_list.strip() else []
+    """A readings entry's reading list: its `reading_list:` - the text, or the course
+    file it names, read from the COURSE org - then the names of the other files its
+    copies take out of the COURSE org (a file, a folder, or a whole repo). A repo that
+    cannot be read raises, naming it."""
+    named = row.reading_list_file
+    text = row.reading_list
+    if named is not None:
+        text = (
+            get_file_content(
+                course_org, named.course_source_repo, named.course_source_path
+            )
+            or ""
+        )
+    parts = [text.strip()] if text.strip() else []
     names: list[str] = []
     for d in row.deploys:
         repo, src = d.course_source_repo, d.course_source_path.strip("/")
@@ -156,10 +167,19 @@ def _readings_for(course_org: str, row: PlannedRow, trees: dict) -> str:
                     f"could not read {course_org}/{repo}: {exc}"
                 ) from exc
         prefix = f"{src}/" if src else ""
-        names += [p for p in trees[repo] if p == src or p.startswith(prefix)]
+        names += [
+            p
+            for p in trees[repo]
+            if (p == src or p.startswith(prefix))
+            and not (
+                named
+                and repo == named.course_source_repo
+                and p == named.course_source_path.strip("/")
+            )
+        ]
     if names:
         # Raw filenames: deriving a citation from `blitzstein-ch1.pdf` would be inventing
-        # one. Faculty who want that write it in `reading_guide:`.
+        # one. Faculty who want that write it in `reading_list:`.
         parts.append("\n".join(f"- {n.rsplit('/', 1)[-1]}" for n in sorted(names)))
     return "\n\n".join(parts)
 

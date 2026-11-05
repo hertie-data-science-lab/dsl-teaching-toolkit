@@ -3525,23 +3525,147 @@ def test_the_term_s_old_top_level_keys_are_not_migrated():
     assert all(f.code == "NOT_MIGRATED" for f in sched.faults)
 
 
-def test_a_reading_guide_is_read_and_the_old_reading_list_is_not_migrated():
+def test_a_reading_list_is_read_and_the_old_reading_guide_is_not_migrated():
     sched = parse(
         {
             "readings": {
-                "r1": {"event_datetime": "2026-09-01", "reading_guide": "- A."},
-                "r2": {"event_datetime": "2026-09-08", "reading_list": "- B."},
+                "r1": {"event_datetime": "2026-09-01", "reading_list": "- A."},
+                "r2": {"event_datetime": "2026-09-08", "reading_guide": "- B."},
             }
         }
     )
-    guides = {r.label: r.reading_list for r in sched.releases}
-    assert guides == {"r1": "- A.", "r2": ""}
+    lists = {r.label: r.reading_list for r in sched.releases}
+    assert lists == {"r1": "- A.", "r2": ""}
     (fault,) = sched.faults
     assert (fault.where, fault.field, fault.code) == (
         "readings.r2",
-        "reading_list",
+        "reading_guide",
         "NOT_MIGRATED",
     )
+
+
+def _readings(entry: dict) -> Release:
+    (r,) = parse(
+        {"readings": {"r1": {"event_datetime": "2026-09-08T10:00", **entry}}}
+    ).releases
+    return r
+
+
+def test_a_reading_list_in_a_course_file_ships_with_the_entry():
+    ref = {"from_course_repo": "cm", "from_path": "lectures/09/READINGS.md"}
+    r = _readings(
+        {
+            "files": [
+                {
+                    "from_course_repo": "cm",
+                    "from_path": "readings/09",
+                    "release_datetime": "2026-09-01T08:00",
+                }
+            ],
+            "reading_list": ref,
+        }
+    )
+    assert r.reading_list == ""
+    # One more copy, mirrored into the default repo, at the entry's first file's time.
+    assert r.reading_list_file is r.deploy[-1]
+    assert (
+        r.reading_list_file.semester_dest_repo,
+        r.reading_list_file.semester_dest_path,
+    ) == (
+        "materials",
+        None,
+    )
+    assert r.reading_list_file.deploy_datetime == datetime(
+        2026, 9, 1, 8, 0, tzinfo=BERLIN
+    )
+    # No files: an hour before the session, like any copy.
+    alone = _readings({"reading_list": ref})
+    assert alone.deploy == [alone.reading_list_file]
+    assert alone.reading_list_file.deploy_datetime == datetime(
+        2026, 9, 8, 9, 0, tzinfo=BERLIN
+    )
+
+
+def test_a_reading_list_file_inside_a_copied_folder_ships_with_that_folder():
+    r = _readings(
+        {
+            "files": [
+                {
+                    "from_course_repo": "cm",
+                    "from_path": "readings/09",
+                    "to_path": "readings/09_week-9",
+                }
+            ],
+            "reading_list": {
+                "from_course_repo": "cm",
+                "from_path": "readings/09/READINGS.md",
+            },
+        }
+    )
+    assert len(r.deploy) == 1
+    assert (
+        r.reading_list_file.semester_dest_repo,
+        r.reading_list_file.semester_dest_path,
+    ) == (
+        "materials",
+        "readings/09_week-9/READINGS.md",
+    )
+    # Its own destination makes it a copy of its own.
+    own = _readings(
+        {
+            "files": [{"from_course_repo": "cm", "from_path": "readings/09"}],
+            "reading_list": {
+                "from_course_repo": "cm",
+                "from_path": "readings/09/READINGS.md",
+                "to_path": "lists/09.md",
+            },
+        }
+    )
+    assert (
+        len(own.deploy) == 2
+        and own.reading_list_file.semester_dest_path == "lists/09.md"
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "field"),
+    [
+        (["- A."], "reading_list"),
+        (3, "reading_list"),
+        ({"from_course_repo": "cm"}, "from_path"),
+    ],
+)
+def test_a_bad_reading_list_is_a_fault_on_the_entry(value, field):
+    sched = parse(
+        {
+            "readings": {
+                "r1": {"event_datetime": "2026-09-08T10:00", "reading_list": value}
+            }
+        }
+    )
+    (r,) = sched.releases
+    assert (r.reading_list, r.reading_list_file, r.deploy) == ("", None, [])
+    (fault,) = sched.faults
+    assert fault.where.startswith("readings.r1") and fault.field == field
+
+
+def test_a_carried_reading_list_file_is_checked_by_name(monkeypatch):
+    # Its folder is there; the file it names is not: the existing missing-source fault.
+    _org(monkeypatch, {"cm": ["readings", "readings/09", "readings/09/a.pdf"]})
+    r = _readings(
+        {
+            "files": [{"from_course_repo": "cm", "from_path": "readings/09"}],
+            "reading_list": {
+                "from_course_repo": "cm",
+                "from_path": "readings/09/READINGS.md",
+            },
+        }
+    )
+    out = [
+        f.line() for f in schedule.source_faults(Schedule(releases=[r]), "Course-Org")
+    ]
+    assert len(out) == 1
+    assert "Course-Org/cm/readings/09/READINGS.md does not exist" in out[0]
 
 
 def test_supporting_files_default_off_the_site():
