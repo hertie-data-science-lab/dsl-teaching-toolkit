@@ -859,7 +859,7 @@ mounted in the schedule entry sheet (`Schedule.tsx` `ListField`, the list a `Lis
 `scheduleEdit.ts`, written before `schedule.yml` by `doSave`) and in the course Materials file
 view (`CourseFile`, saved alone). Keep one set of words (`LIST_TEXT`) for both. A path a
 status readings row names (`reading_list.path`) is marked in the course trees, and its
-released copy (`releasedList`, where `_carried_by` lands it) links to the entry.
+released copy (`released_repo` / `released_path`) links to the entry.
 
 ## Config faults
 

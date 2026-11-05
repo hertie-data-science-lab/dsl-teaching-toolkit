@@ -36,7 +36,7 @@ import { StateChip, type ChipKind } from '../ui/StateChip';
 import { Hint } from '../ui/Hint';
 import { OpenButton } from '../ui/OpenButton';
 import { RepoFile, Split } from '../ui/Viewer';
-import { releasedList } from '../ui/ReadingList';
+import { listFileOf } from '../ui/ReadingList';
 import { RepoFiles, addMaterialsTopic, fileIn, focusIn, repoOf } from './CourseIndex';
 import { newestRepo } from './CourseEdit';
 import { sourceRepos } from './Schedule';
@@ -100,7 +100,7 @@ function Released(p: ReadyProps) {
   const open = fileIn(p.file, repos);
   if (open) {
     // A released reading list is edited in its schedule entry, never here (decision 0044).
-    const entry = (p.status.releases ?? []).find((r) => { const at = releasedList(r, def); return at?.repo === open.repo && at.path === open.path; });
+    const entry = (p.status.releases ?? []).find((r) => { const f = listFileOf(r); return f?.released_repo === open.repo && f.released_path === open.path; });
     return (
       <>
         <Head org={org} back />
