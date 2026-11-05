@@ -36,6 +36,7 @@ export const LIST_TEXT = {
   footExisting: 'Saving writes your changes to this file.',
   preview: 'As students will see it',
   empty: 'No reading list: students see the reading files only. That is fine.',
+  noRepo: 'Add a course materials repo first: the reading list is a file in one.',
   missing: (names: string[]) => `${plural(names.length, 'reading file')} not in the reading list: ${names.join(', ')}. Students still get the file; it just isn’t cited here.`,
 };
 
@@ -119,7 +120,7 @@ export function ReadingList({ id, list, defaultRepo, defaultPath, org, repos, fi
         {badge ? <span class={`chip${cur.inline ? ' amber' : ' muted'}`}>{badge}</span> : f?.kind === 'error' ? null : <span class="footnote">Reading {cur.path}…</span>}
         {fixedPath ? null : (
           <span class="actions">
-            {cur.inline ? <button class="btn small" type="button" onClick={() => onChange(toFile(defaultRepo, defaultPath, cur.text))}>{LIST_TEXT.move}</button> : null}
+            {cur.inline ? <button class="btn small" type="button" onClick={() => onChange({ repo: defaultRepo, path: defaultPath, inline: false, text: cur.text ?? '' })}>{LIST_TEXT.move}</button> : null}
             <button class="btn small quiet" type="button" onClick={() => setPicking(true)}>{LIST_TEXT.choose}</button>
           </span>
         )}
