@@ -77,7 +77,7 @@ describe('the PDF details', () => {
   it('read a shadow-library title as authors, title, edition, year and publisher', () => {
     const [d] = draftReadings([{ path: 'readings/s3-hobson-dyshel-2024-opt.pdf', facts: hobson }]);
     expect(d.line).toBe('Lane, H., & Dyshel, M. (2024). *Natural language processing in action* (2nd ed., Ch. 3, pp. ?). Manning Publications.');
-    expect(d.notes.filter((n) => n.part === 'Book').map((n) => [n.tag, n.text])).toEqual([
+    expect(d.notes.filter((n) => n.part === 'Book').map((n) => [n.level, n.text])).toEqual([
       ['found', 'From the PDF\'s details: "Hobson Lane and Maria Dyshel - Natural Language Processing in Action, Second Edition (MEAP V12) (2024, Manning Publications Co.)"'],
       ['check', 'Took "- libgen.li" off the end of the title'],
       ['check', 'Left out of the title: (MEAP V12)'],
@@ -88,14 +88,14 @@ describe('the PDF details', () => {
   it('fall back to the filename for authors and year when the details have no title, each part tagged', () => {
     const [d] = draftReadings([{ path: 'readings/02_session-2__s2-jurafsky-martin-2024.pdf', facts: jurafsky }]);
     expect(d.line).toBe('Jurafsky, ?, & Martin, ? (2024). *?* (Ch. 2, pp. 5–13). ?.');
-    expect(d.notes.map((n) => [n.part, n.tag])).toEqual([['Book', '?'], ['Authors', 'guess'], ['Year', 'guess'], ['Publisher', '?'], ['Chapter', 'check'], ['Pages', 'found'], ['Section', 'found']]);
+    expect(d.notes.map((n) => [n.part, n.level])).toEqual([['Book', '?'], ['Authors', 'guess'], ['Year', 'guess'], ['Publisher', '?'], ['Chapter', 'check'], ['Pages', 'found'], ['Section', 'found']]);
     expect(d.notes[1].text).toBe('Surnames from the filename (the PDF\'s details name "Sascha Göbel", not in the filename)');
   });
 
   it('take a year from an arXiv stamp on the pages', () => {
     const [d] = draftReadings([{ path: 'readings/s6-bertopic-opt.pdf', facts: bertopic }]);
     expect(d.line).toBe('Bertopic, ? (2022). *?*. ?.');
-    expect(d.notes.find((n) => n.part === 'Year')).toEqual({ part: 'Year', tag: 'check', text: 'From the pages read: "arXiv:2203.05794v1 [cs.CL] 11 Mar 2022"' });
+    expect(d.notes.find((n) => n.part === 'Year')).toEqual({ part: 'Year', level: 'check', text: 'From the pages read: "arXiv:2203.05794v1 [cs.CL] 11 Mar 2022"' });
   });
 });
 
@@ -107,31 +107,31 @@ describe('the printed page range', () => {
   });
 
   it('is the first page’s number to the last page’s when they fit the page count', () => {
-    expect(pageRange(vajjala)).toMatchObject({ range: [3, 36], note: { tag: 'found', text: '3 printed on page 1 and 36 on page 34: 34 pages' } });
+    expect(pageRange(vajjala)).toMatchObject({ range: [3, 36], note: { level: 'found', text: '3 printed on page 1 and 36 on page 34: 34 pages' } });
   });
 
   it('counts back from page 2 when a chapter opener has no number (`check`)', () => {
-    expect(pageRange(raschka)).toMatchObject({ range: [499, 538], note: { tag: 'check', text: '538 printed on page 40; page 1 has no number, 499 counted back from 500 on page 2' } });
+    expect(pageRange(raschka)).toMatchObject({ range: [499, 538], note: { level: 'check', text: '538 printed on page 40; page 1 has no number, 499 counted back from 500 on page 2' } });
   });
 
   it('is `?` with the reason when the numbers do not fit, and left out when there are none', () => {
-    expect(pageRange(hobson)).toMatchObject({ range: null, unknown: true, note: { tag: '?', text: 'Read 3 at the start and 2017 on page 57, which does not fit the file\'s 57 pages' } });
-    expect(pageRange(bertopic)).toMatchObject({ range: null, unknown: false, note: { tag: '?', text: 'No printed page numbers on pages 1, 2 or 10: none given' } });
+    expect(pageRange(hobson)).toMatchObject({ range: null, unknown: true, note: { level: '?', text: 'Read 3 at the start and 2017 on page 57, which does not fit the file\'s 57 pages' } });
+    expect(pageRange(bertopic)).toMatchObject({ range: null, unknown: false, note: { level: '?', text: 'No printed page numbers on pages 1, 2 or 10: none given' } });
     expect(apaLine({ authors: null, year: null, title: 'T', edition: null, publisher: 'P' }, null, { range: null, unknown: true })).toBe('? (?). *T* (pp. ?). P.');
   });
 
   it('takes numeric page labels that fit the page count', () => {
-    expect(pageRange(facts({ pages: 12, labels: ['81', '92'] }))).toMatchObject({ range: [81, 92], note: { tag: 'found' } });
+    expect(pageRange(facts({ pages: 12, labels: ['81', '92'] }))).toMatchObject({ range: [81, 92], note: { level: 'found' } });
   });
 });
 
 describe('the chapter', () => {
   it('reads a CHAPTER N opener, running heads, and a number that opens page 1', () => {
-    expect(chapterOf(vajjala)).toMatchObject({ n: 1, note: { tag: 'found', text: '"CHAPTER 1" opens page 1' } });
-    expect(chapterOf(jurafsky)).toMatchObject({ n: 2, note: { tag: 'check', text: '"Chapter 2" in the running heads' } });
-    expect(chapterOf(raschka)).toMatchObject({ n: 15, note: { tag: 'check', text: 'Page 1 opens with "15", likely the chapter number' } });
-    expect(chapterOf(hobson)).toMatchObject({ n: 3, note: { tag: 'check' } });
-    expect(chapterOf(facts({ first: ['In Chapter 2, we saw what it takes'] }))).toMatchObject({ n: null, note: { tag: '?' } });
+    expect(chapterOf(vajjala)).toMatchObject({ n: 1, note: { level: 'found', text: '"CHAPTER 1" opens page 1' } });
+    expect(chapterOf(jurafsky)).toMatchObject({ n: 2, note: { level: 'check', text: '"Chapter 2" in the running heads' } });
+    expect(chapterOf(raschka)).toMatchObject({ n: 15, note: { level: 'check', text: 'Page 1 opens with "15", likely the chapter number' } });
+    expect(chapterOf(hobson)).toMatchObject({ n: 3, note: { level: 'check' } });
+    expect(chapterOf(facts({ first: ['In Chapter 2, we saw what it takes'] }))).toMatchObject({ n: null, note: { level: '?' } });
   });
 });
 
@@ -151,7 +151,7 @@ describe('the drafted line', () => {
       { path: 'r/02_session-2__s2-hobson-dyshel-2024-opt.pdf', facts: noTitle },
     ]);
     expect(out[1].line).toBe('Lane, H., & Dyshel, M. (2024). *Natural language processing in action* (2nd ed.). Manning Publications.');
-    expect(out[1].notes[0]).toEqual({ part: 'Book', tag: 'check', text: 'No book in this PDF\'s details: the same as 01_session-1__s1-hobson-dyshel-2024-opt.pdf, by its filename' });
+    expect(out[1].notes[0]).toEqual({ part: 'Book', level: 'check', text: 'No book in this PDF\'s details: the same as 01_session-1__s1-hobson-dyshel-2024-opt.pdf, by its filename' });
   });
 
   it('is the brief’s APA 7 shape', () => {

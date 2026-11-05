@@ -6,10 +6,10 @@
 // The heuristics are the 5 Nov trial's (det.py, scored on NLP's 24 PDFs), ported.
 
 /** How sure a part is: read off the file / read but worth a look / inferred / unknown. */
-export type Tag = 'found' | 'check' | 'guess' | '?';
+export type Level = 'found' | 'check' | 'guess' | '?';
 export interface Note {
   part: string;
-  tag: Tag;
+  level: Level;
   text: string;
 }
 
@@ -66,8 +66,8 @@ const alnum = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
 /** Required, unless the filename carries `opt`. */
 export function sectionOf(path: string): { section: Section; note: Note } {
   return words(path).includes('opt')
-    ? { section: 'additional', note: { part: 'Section', tag: 'found', text: '"opt" in the filename: Additional' } }
-    : { section: 'required', note: { part: 'Section', tag: 'found', text: 'No "opt" in the filename: Required' } };
+    ? { section: 'additional', note: { part: 'Section', level: 'found', text: '"opt" in the filename: Additional' } }
+    : { section: 'required', note: { part: 'Section', level: 'found', text: 'No "opt" in the filename: Required' } };
 }
 
 /**
@@ -200,38 +200,38 @@ function bookOf(f: PdfFacts, path: string, text: string): Book {
     b.year = shelf[3];
     b.publisher = shelf[4] ? apaPublisher(shelf[4]) : null;
     setTitle(b, shelf[2].replace(/_ /g, ': '));
-    notes.unshift({ part: 'Book', tag: 'found', text: `From the PDF's details: "${raw}"` });
+    notes.unshift({ part: 'Book', level: 'found', text: `From the PDF's details: "${raw}"` });
   } else if (raw && !junkTitle(raw, path)) {
     setTitle(b, raw);
-    notes.unshift({ part: 'Book', tag: 'found', text: `Title from the PDF's details: "${raw}"` });
+    notes.unshift({ part: 'Book', level: 'found', text: `Title from the PDF's details: "${raw}"` });
   } else {
-    notes.unshift({ part: 'Book', tag: '?', text: raw ? `The PDF's details give "${raw}", which is no title` : "No title in the PDF's details" });
+    notes.unshift({ part: 'Book', level: '?', text: raw ? `The PDF's details give "${raw}", which is no title` : "No title in the PDF's details" });
   }
-  if (cut) notes.splice(1, 0, { part: 'Book', tag: 'check', text: `Took "${cut}" off the end of the title` });
+  if (cut) notes.splice(1, 0, { part: 'Book', level: 'check', text: `Took "${cut}" off the end of the title` });
   if (!b.authors && !shelf && f.author.trim()) {
     // The details' author is often whoever made the PDF: trusted when the filename agrees.
     const people = parseNames(f.author);
     const fn = words(path);
     if (people && people.some((p) => fn.includes(p.family.toLowerCase().split(' ').pop()!))) {
       b.authors = people;
-      notes.push({ part: 'Authors', tag: 'check', text: `From the PDF's details: "${f.author.trim()}"` });
+      notes.push({ part: 'Authors', level: 'check', text: `From the PDF's details: "${f.author.trim()}"` });
     } else if (people && !filenameNames(path)) {
       b.authors = people;
-      notes.push({ part: 'Authors', tag: 'check', text: `From the PDF's details: "${f.author.trim()}" (may be whoever made the PDF)` });
+      notes.push({ part: 'Authors', level: 'check', text: `From the PDF's details: "${f.author.trim()}" (may be whoever made the PDF)` });
     }
   }
   if (!b.authors) {
     b.authors = filenameNames(path);
     notes.push(b.authors
-      ? { part: 'Authors', tag: 'guess', text: `Surnames from the filename${shelf ? ` (the PDF's details name "${shelf[1].trim()}", which does not split into people)` : f.author.trim() ? ` (the PDF's details name "${f.author.trim()}", not in the filename)` : ''}` }
-      : { part: 'Authors', tag: '?', text: 'No authors in the PDF\'s details or the filename' });
+      ? { part: 'Authors', level: 'guess', text: `Surnames from the filename${shelf ? ` (the PDF's details name "${shelf[1].trim()}", which does not split into people)` : f.author.trim() ? ` (the PDF's details name "${f.author.trim()}", not in the filename)` : ''}` }
+      : { part: 'Authors', level: '?', text: 'No authors in the PDF\'s details or the filename' });
   }
   if (!b.year) {
     const y = yearOf(text, path);
     b.year = y.year;
     notes.push(y.note);
   }
-  if (!b.publisher) notes.push({ part: 'Publisher', tag: '?', text: "No publisher in the PDF's details" });
+  if (!b.publisher) notes.push({ part: 'Publisher', level: '?', text: "No publisher in the PDF's details" });
   return b;
 }
 
@@ -242,18 +242,18 @@ function setTitle(b: Book, t: string) {
   b.title = sentenceCase(main);
   b.edition = s.edition;
   const left = [...(trunc ? ['a cut-off subtitle'] : []), ...s.dropped];
-  if (left.length) b.notes.push({ part: 'Book', tag: 'check', text: `Left out of the title: ${left.join(', ')}` });
-  b.notes.push({ part: 'Book', tag: 'check', text: 'Title set in sentence case: check names and acronyms' });
+  if (left.length) b.notes.push({ part: 'Book', level: 'check', text: `Left out of the title: ${left.join(', ')}` });
+  b.notes.push({ part: 'Book', level: 'check', text: 'Title set in sentence case: check names and acronyms' });
 }
 
 /** A year the pages print (a © line, an arXiv stamp), else one in the filename. */
 function yearOf(text: string, path: string): { year: string | null; note: Note } {
   const c = text.match(/(?:©|\(c\)|copyright)\s*(?:©\s*)?((?:19|20)\d{2})\b/i) ?? text.match(/arXiv:\S+\s+\[[^\]]+\]\s+\d{1,2}\s+\w{3}\s+((?:19|20)\d{2})/);
-  if (c) return { year: c[1], note: { part: 'Year', tag: 'check', text: `From the pages read: "${c[0]}"` } };
+  if (c) return { year: c[1], note: { part: 'Year', level: 'check', text: `From the pages read: "${c[0]}"` } };
   const y = words(path).find((w) => /^(19|20)\d{2}$/.test(w));
   return y
-    ? { year: y, note: { part: 'Year', tag: 'guess', text: 'From the filename: a filename year is often the file\'s, not the edition\'s' } }
-    : { year: null, note: { part: 'Year', tag: '?', text: "No year in the PDF's details, the pages read or the filename" } };
+    ? { year: y, note: { part: 'Year', level: 'guess', text: 'From the filename: a filename year is often the file\'s, not the edition\'s' } }
+    : { year: null, note: { part: 'Year', level: '?', text: "No year in the PDF's details, the pages read or the filename" } };
 }
 
 /** A page's text as lines: a new line where pdf.js marks one or where the baseline moves. */
@@ -301,7 +301,7 @@ export function pageRange(f: PdfFacts): { range: [number, number] | null; unknow
   const part = 'Pages';
   if (f.labels && /^\d+$/.test(f.labels[0]) && /^\d+$/.test(f.labels[1]) && f.labels[0] !== '1') {
     const [s, e] = f.labels.map(Number);
-    if (e - s + 1 === n) return { range: [s, e], unknown: false, note: { part, tag: 'found', text: "From the PDF's page labels" } };
+    if (e - s + 1 === n) return { range: [s, e], unknown: false, note: { part, level: 'found', text: "From the PDF's page labels" } };
   }
   const c1 = folios(f.first), c2 = n > 1 ? folios(f.second) : [], cl = folios(f.last);
   let best: { s: number; e: number; on1: boolean; on2: boolean } | null = null;
@@ -314,14 +314,14 @@ export function pageRange(f: PdfFacts): { range: [number, number] | null; unknow
     const text = best.on1
       ? `${best.s} printed on page 1 and ${best.e} on page ${n}: ${n} pages`
       : `${best.e} printed on page ${n}; page 1 has no number, ${best.s} counted back from ${best.s + 1} on page 2`;
-    return { range: [best.s, best.e], unknown: false, note: { part, tag: best.on1 ? 'found' : 'check', text } };
+    return { range: [best.s, best.e], unknown: false, note: { part, level: best.on1 ? 'found' : 'check', text } };
   }
   const start = c1[0] ?? (c2.length ? c2[0] - 1 : undefined);
   if (start !== undefined && cl.length) {
     const e = cl[cl.length - 1];
-    return { range: null, unknown: true, note: { part, tag: '?', text: `Read ${start} at the start and ${e} on page ${n}, which does not fit the file's ${n} pages` } };
+    return { range: null, unknown: true, note: { part, level: '?', text: `Read ${start} at the start and ${e} on page ${n}, which does not fit the file's ${n} pages` } };
   }
-  return { range: null, unknown: false, note: { part, tag: '?', text: `No printed page numbers on pages 1, 2 or ${n}: none given` } };
+  return { range: null, unknown: false, note: { part, level: '?', text: `No printed page numbers on pages 1, 2 or ${n}: none given` } };
 }
 
 /**
@@ -333,7 +333,7 @@ export function chapterOf(f: PdfFacts): { n: number | null; note: Note } {
   const part = 'Chapter';
   const first = f.first.find((l) => l.trim()) ?? '';
   const opener = first.match(/^chapter\s+(\d+)\s*$/i);
-  if (opener) return { n: Number(opener[1]), note: { part, tag: 'found', text: `"${first.trim()}" opens page 1` } };
+  if (opener) return { n: Number(opener[1]), note: { part, level: 'found', text: `"${first.trim()}" opens page 1` } };
   const seen: number[] = [];
   for (const l of [...ends(f.first), ...ends(f.second), ...ends(f.last)]) {
     const m = l.match(/^(?:\d+\s*\|?\s*)?chapter\s+(\d+)\b/i);
@@ -342,14 +342,14 @@ export function chapterOf(f: PdfFacts): { n: number | null; note: Note } {
   const lead = first.match(/^(\d{1,2})(?:\s+\S.*)?$/);
   const leadIsChapter = lead && (lead[0] === lead[1] || f.first.slice(0, 5).some((l) => /^this chapter covers/i.test(l.trim())));
   if (leadIsChapter) seen.push(Number(lead[1]));
-  if (!seen.length) return { n: null, note: { part, tag: '?', text: 'No "Chapter N" on the pages read: add one if this is part of a chapter' } };
+  if (!seen.length) return { n: null, note: { part, level: '?', text: 'No "Chapter N" on the pages read: add one if this is part of a chapter' } };
   const count = new Map<number, number>();
   for (const x of seen) count.set(x, (count.get(x) ?? 0) + 1);
   const [n, times] = [...count].sort((a, b) => b[1] - a[1])[0];
   const text = leadIsChapter && Number(lead[1]) === n && times === 1
     ? `Page 1 opens with "${lead[1]}", likely the chapter number`
     : `"Chapter ${n}" in the running heads${count.size > 1 ? ` (other numbers seen: ${[...count.keys()].filter((k) => k !== n).join(', ')})` : ''}`;
-  return { n, note: { part, tag: times > 1 && count.size === 1 ? 'found' : 'check', text } };
+  return { n, note: { part, level: times > 1 && count.size === 1 ? 'found' : 'check', text } };
 }
 
 /** The APA 7 line for a book part: `Authors (Year). *Title* (2nd ed., Ch. 15, pp. 499–538). Publisher.` */
@@ -390,7 +390,7 @@ export function draftReadings(files: { path: string; facts: PdfFacts }[]): Draft
     let b = book;
     if (!b.title) {
       const twin = own.find((o) => o.path !== path && o.book.title && workKey(o.path) === workKey(path));
-      if (twin) b = { ...twin.book, notes: [{ part: 'Book', tag: 'check', text: `No book in this PDF's details: the same as ${baseName(twin.path)}, by its filename` }] };
+      if (twin) b = { ...twin.book, notes: [{ part: 'Book', level: 'check', text: `No book in this PDF's details: the same as ${baseName(twin.path)}, by its filename` }] };
     }
     const pages = pageRange(facts);
     const ch = chapterOf(facts);
