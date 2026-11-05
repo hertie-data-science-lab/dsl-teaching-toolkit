@@ -391,6 +391,54 @@ def test_a_shaped_file_renames_its_reading_guides_in_place():
     assert sched.dropped == [] and sched.faults == []
 
 
+_INLINED = (
+    "# Our plan.\n"
+    "semester:\n  start: {type: start, event_datetime: 2026-09-07}\n"
+    "readings:\n"
+    "  same:  # week one\n"
+    "    event_datetime: 2026-09-01\n"
+    "    files:\n      - {from_course_repo: cm, from_path: readings/01}\n"
+    "    reading_list: |\n      # Week 1\n\n      - A.\n"
+    "    # kept\n"
+    "\n"
+    "  differs:\n"
+    "    event_datetime: 2026-09-08\n"
+    "    files: [{from_course_repo: cm, from_path: readings/02}]\n"
+    "    reading_list: '- B, edited.'\n"
+    "  none:\n"
+    "    event_datetime: 2026-09-15\n"
+    "    files: [{from_course_repo: cm, from_path: readings/03}]\n"
+    "    reading_list: '- C.'\n"
+)
+
+
+def test_an_inline_list_its_folders_readings_md_says_is_named_as_that_file():
+    # A 0.11.0 migration inlined each folder's READINGS.md; unnamed, the file is listed
+    # as a reading beside the list. Identical text (stripped) is named in place;
+    # different text, or no file, stays inline with a note naming the entry.
+    overlays = {
+        "readings/01": [("readings/01/READINGS.md", "# Week 1\n\n- A.\n\n")],
+        "readings/02": [("readings/02/READINGS.md", "- B.")],
+    }
+    text, after, notes, stops = migrate.schedule_shape(
+        _INLINED, reading_list=lambda repo, path: overlays.get(path, [])
+    )
+    assert (after, stops) == (None, [])
+    assert text == _INLINED.replace(
+        "    reading_list: |\n      # Week 1\n\n      - A.\n",
+        "    reading_list:\n      from_course_repo: cm\n"
+        "      from_path: readings/01/READINGS.md\n",
+    )
+    assert [n.split(":")[0] for n in notes] == ["differs", "none"]
+    entries = yaml.safe_load(text)["readings"]
+    assert entries["same"]["reading_list"] == {
+        "from_course_repo": "cm",
+        "from_path": "readings/01/READINGS.md",
+    }
+    assert entries["differs"]["reading_list"] == "- B, edited."
+    assert entries["none"]["reading_list"] == "- C."
+
+
 def test_a_file_already_one_block_per_kind_takes_only_the_amendment_s_renames():
     # Shaped before amendment 2: the blocks stay as they are, the term's dates move into
     # `semester:` and 0.11.0's `reading_guide` becomes `reading_list`.

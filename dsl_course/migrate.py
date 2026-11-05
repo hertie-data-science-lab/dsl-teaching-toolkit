@@ -138,7 +138,7 @@ from .materials import (
 from .opencourse import READING_LISTS, OpenCourse
 from .opencourse import seed_text as opencourse_text
 from .profile_readme import profile_files, update_profile_readme
-from .readings import is_reading_overlay
+from .readings import READING_OVERLAY_FILE, is_reading_overlay
 from .repos import (
     current_description,
     default_branch,
@@ -1316,18 +1316,23 @@ def _shaped(old: dict) -> bool:
     )
 
 
-def _renamed_in_place(text: str, old: dict) -> str | None:
-    """A shaped schedule (`_shaped`, `old` its parse) with every `reading_guide:` key
-    of its blocks renamed `reading_list:` on its own line, all else byte for byte (the
-    keys step's own line rewrites, `schedule_keys` and `schedule_timing`, applied as
-    ever). None when a whole rewrite is still needed: top-level term dates to move into
-    `semester:`, or no `reading_guide:` to rename."""
+def _in_place(
+    text: str, old: dict, reading_list: ReadingList, notes: list[str]
+) -> str | None:
+    """A shaped schedule (`_shaped`, `old` its parse) rewritten line by line, all else
+    byte for byte (the keys step's own line rewrites, `schedule_keys` and
+    `schedule_timing`, applied as ever): every `reading_guide:` key of its blocks
+    renamed `reading_list:`, and each readings entry's inline list that says what the
+    `READINGS.md` directly inside its first copy's folder says named as that file
+    (`_named_lists`). None when a whole rewrite is still needed (top-level term dates to
+    move into `semester:`) or nothing changes."""
     if any(top in old for top in _SEMESTER_KEYS):
         return None
-    out, section, renamed = [], "", False
+    base = schedule_timing(schedule_keys(text))
+    out, section = [], ""
     scalar: int | None = None  # the column of the key whose block scalar this is in
     old_key = re.compile(rf"^(\s+){schedule.OLD_READING_LIST}:")
-    for line in schedule_timing(schedule_keys(text)).split("\n"):
+    for line in base.split("\n"):
         if scalar is not None and (not line.strip() or _indent(line) > scalar):
             out.append(line)
             continue
@@ -1336,11 +1341,104 @@ def _renamed_in_place(text: str, old: dict) -> str | None:
             section = top.group(1)
         if section in schedule.BLOCKS and (key := old_key.match(line)):
             line = f"{key.group(1)}{schedule.READING_LIST}:{line[key.end() :]}"
-            renamed = True
         if block := _BLOCK_SCALAR.match(line):
             scalar = len(block.group(1))
         out.append(line)
-    return "\n".join(out) if renamed else None
+    new = _named_lists("\n".join(out), old, reading_list, notes)
+    return None if new == text else new
+
+
+# Why an inline list stays inline, after its entry's key.
+_UNNAMED = (
+    f"its reading list stays inline: no {READING_OVERLAY_FILE} beside its first "
+    "files says the same"
+)
+
+
+def _named_lists(
+    text: str, old: dict, reading_list: ReadingList, notes: list[str]
+) -> str:
+    """`text` with each readings entry's inline `reading_list:` replaced, on its own
+    lines, by `{from_course_repo, from_path}` naming the `READINGS.md` directly inside
+    its FIRST copy's folder, when that file says the same (both `strip()`ped): a 0.11.0
+    migration inlined it, and unnamed it is listed as a reading beside the list. An
+    inline list that differs, has no such file, or is not written as its own key line
+    stays as written, and `notes` names its entry (the key only)."""
+    block = next(b for b, k in schedule.BLOCKS.items() if k == schedule.READINGS_KIND)
+    entries = old.get(block)
+    if not isinstance(entries, dict):
+        return text
+    wanted: dict[str, dict[str, str]] = {}
+    for key, entry in entries.items():
+        if not isinstance(entry, dict):
+            continue
+        inline = entry.get(schedule.READING_LIST, entry.get(schedule.OLD_READING_LIST))
+        if not isinstance(inline, str) or not inline.strip():
+            continue
+        files = entry.get("files")
+        first = files[0] if isinstance(files, list) and files else None
+        if first is None:
+            continue  # nothing ships beside it: inline is its only form
+        if isinstance(first, dict) and first.get("from_course_repo"):
+            repo = str(first["from_course_repo"])
+            folder = str(first.get("from_path") or "").strip("/")
+            path = "/".join(p for p in (folder, READING_OVERLAY_FILE) if p)
+            texts = dict(reading_list(repo, folder))
+            if path in texts and texts[path].strip() == inline.strip():
+                wanted[str(key)] = {"from_course_repo": repo, "from_path": path}
+                continue
+        notes.append(f"{key}: {_UNNAMED}")
+    if not wanted:
+        return text
+    lines, out = text.split("\n"), []
+    section, entry_col, entry, i = "", None, "", 0
+    while i < len(lines):
+        line = lines[i]
+        if top := _TOP_KEY.match(line):
+            section, entry_col, entry = top.group(1), None, ""
+        elif section == block and line.strip() and not line.lstrip().startswith("#"):
+            col = _indent(line)
+            if entry_col is None or col <= entry_col:
+                entry_col, entry = col, line.strip().split(":", 1)[0].strip("'\"")
+            elif entry in wanted and line.lstrip().startswith(
+                f"{schedule.READING_LIST}:"
+            ):
+                end = i + 1  # its value: every line deeper than the key, blanks inside
+                while end < len(lines) and (
+                    not lines[end].strip() or _indent(lines[end]) > col
+                ):
+                    end += 1
+                while end > i + 1 and not lines[end - 1].strip():
+                    end -= 1  # trailing blank lines separate entries: kept
+                ref, pad = wanted[entry], " " * col
+                out += [
+                    f"{pad}{schedule.READING_LIST}:",
+                    f"{pad}  from_course_repo: {ref['from_course_repo']}",
+                    f"{pad}  from_path: {ref['from_path']}",
+                ]
+                i = end
+                continue
+        out.append(line)
+        i += 1
+    new = "\n".join(out)
+    # Only what reads back as the named file stands; else the file stays as written.
+    got = (yaml.load(new, _Verbatim) or {}).get(block) or {}
+    named = {
+        k
+        for k, ref in wanted.items()
+        if (got.get(k) or {}).get(schedule.READING_LIST) == ref
+    }
+    if any(
+        (got.get(k) or {}).get(schedule.READING_LIST)
+        != entries[k].get(
+            schedule.READING_LIST, entries[k].get(schedule.OLD_READING_LIST)
+        )
+        for k in wanted.keys() - named
+    ):
+        notes += [f"{k}: {_UNNAMED}" for k in wanted]
+        return text
+    notes += [f"{k}: {_UNNAMED}" for k in wanted.keys() - named]
+    return new
 
 
 def _renamed_list(entry: dict) -> dict:
@@ -1523,8 +1621,9 @@ def schedule_shape(
         # dates and the reading list take their new names. With the dates already a
         # `semester:` block, the reading list's rename is a line rewrite: faculty's
         # comments and layout stay as they are.
-        if (renamed := _renamed_in_place(text, old)) is not None:
+        if (renamed := _in_place(text, old, reading_list, notes)) is not None:
             return renamed, None, notes, stops
+        notes.clear()
         shaped = {
             b: {
                 k: _renamed_list(e) if isinstance(e, dict) else e
@@ -3769,8 +3868,19 @@ class Semester:
         stops)`; nothing to rewrite (None) once the schedule reads clean."""
         text = get_file_content(self.org, self.config(), schedule.SCHEDULE_PATH)
         instance = self.instance_text()
-        if text is None or _schedule_clean(text, instance, quiet=True, zone_ok=True):
+        if text is None:
             return text, None, None, [], []
+        if _schedule_clean(text, instance, quiet=True, zone_ok=True):
+            # Clean, but an inline list a 0.11.0 migration copied out of its folder's
+            # READINGS.md is still named as that file (`_named_lists`).
+            notes: list[str] = []
+            old = yaml.load(schedule_timing(schedule_keys(text)), _Verbatim)
+            new = (
+                _in_place(text, old, self._reading_list, notes)
+                if isinstance(old, dict) and _shaped(old)
+                else None
+            )
+            return text, new, None, notes if new else [], []
         new, after, notes, stops = schedule_shape(
             text, instance, self._aliases, self._reading_list
         )
@@ -3791,15 +3901,21 @@ class Semester:
             new is not None
             and isinstance(old, dict)
             and _shaped(old)
-            and _renamed_in_place(text or "", old) == new
+            and _in_place(text or "", old, self._reading_list, []) == new
         ):
             return [
                 (
-                    f"{CONFIG_REPO}/{schedule.SCHEDULE_PATH}: "
-                    f"`{schedule.OLD_READING_LIST}:` renamed `{schedule.READING_LIST}:` "
-                    "in place, comments and layout kept"
+                    f"{CONFIG_REPO}/{schedule.SCHEDULE_PATH}: reading lists renamed "
+                    f"`{schedule.READING_LIST}:` or named as their folder's "
+                    f"{READING_OVERLAY_FILE} in place, comments and layout kept"
                 ),
-                *_diff(schedule.SCHEDULE_PATH, text or "", new),
+                # The new lines only: the old lines are faculty's own words.
+                *(
+                    line
+                    for line in _diff(schedule.SCHEDULE_PATH, text or "", new)
+                    if not line.startswith("  -")
+                ),
+                *(f"  {note}" for note in notes),
             ]
         out = [
             (
