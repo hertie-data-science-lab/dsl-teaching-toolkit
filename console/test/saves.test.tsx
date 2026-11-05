@@ -5,7 +5,7 @@
 
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parse } from 'yaml';
 import { EnvCtx, type Env } from '../src/env';
 import { GitHubClient, decodeBase64 } from '../src/github/client';
@@ -757,6 +757,7 @@ describe('the reading list in the schedule entry sheet (decisions 0044, 0046)', 
 
   it('keeps legacy text written in the schedule, and Move to a file makes it a new file at the default path', async () => {
     const gh = github(), f = withList();
+    const put = vi.spyOn(f, 'put'), refreshTree = vi.spyOn(f, 'refreshTree');
     await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'readings-5' })} />);
     expect(root!.textContent).toContain('Written in the schedule');
     expect(q<HTMLTextAreaElement>('#e-rl').value).toBe('- Old text.');
@@ -772,6 +773,9 @@ describe('the reading list in the schedule entry sheet (decisions 0044, 0046)', 
     expect(listPuts(gh)).toEqual(['lectures/05/READINGS.md', 'schedule.yml']);
     expect(body(puts(gh, 'lectures/05/READINGS.md')[0])).toBe('- Old text.');
     expect(out.readings['readings-5'].reading_list).toEqual({ from_course_repo: 'course-materials-f2026', from_path: 'lectures/05/READINGS.md' });
+    // The new file's text and sha are in the cache, and it joins its repo's tree.
+    expect(put.mock.calls.filter((c) => c[2] === 'lectures/05/READINGS.md')).toEqual([[COURSE_ORG, 'course-materials-f2026', 'lectures/05/READINGS.md', undefined, '- Old text.', expect.any(String)]]);
+    expect(refreshTree.mock.calls).toEqual([[COURSE_ORG, 'course-materials-f2026']]);
   });
 
   it('offers Generate one when no list file is beside the reading files: a New file at their folder, no file and no key while it is empty', async () => {
@@ -815,6 +819,7 @@ describe('the reading list in the schedule entry sheet (decisions 0044, 0046)', 
 
   it('loads a typed path that is already in the repo as that Existing file, and saves over its sha', async () => {
     const gh = github(), f = withList();
+    const put = vi.spyOn(f, 'put'), refreshTree = vi.spyOn(f, 'refreshTree');
     await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'readings-6' })} />);
     await click(button(LIST_TEXT.writeOne));
     expect(root!.textContent).toContain('New file');
@@ -828,6 +833,9 @@ describe('the reading list in the schedule entry sheet (decisions 0044, 0046)', 
     expect(listPuts(gh)).toEqual([LIST, 'schedule.yml']);
     expect((puts(gh, LIST)[0].body as { sha?: string }).sha).toBe('static');
     expect(parse(body(puts(gh, 'schedule.yml')[0])).readings['readings-6'].reading_list).toEqual({ from_course_repo: 'course-materials-f2026', from_path: LIST });
+    // An existing file is already in the tree: only its cache entry changes.
+    expect(put.mock.calls.filter((c) => c[2] === LIST)).toEqual([[COURSE_ORG, 'course-materials-f2026', LIST, undefined, '- Bishop (2006), ch. 5.\n- Murphy (2012).\n', expect.any(String)]]);
+    expect(refreshTree).not.toHaveBeenCalled();
   });
 
   it('moves legacy text onto a default path that exists as the edit: the editor shows the schedule text, and Save writes it over the file', async () => {

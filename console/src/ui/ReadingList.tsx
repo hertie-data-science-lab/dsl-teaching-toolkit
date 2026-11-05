@@ -225,7 +225,13 @@ function ListFileEditor({ org, at, files, entryFiles, onBack, back }: { org: str
   }, [tree, dir, named]);
   const list: ListDraft = { repo: at.repo, path: at.path, inline: false, text };
   const doSave = async () => {
-    if (text !== null && (await run({ owner: org, repo: at.repo, path: at.path }, text, f.kind === 'ready' ? f.sha : null, { message: listMessage(at.path), checks: false }))) setText(null);
+    if (text === null) return;
+    const created = f.kind === 'absent';
+    if (!(await run({ owner: org, repo: at.repo, path: at.path }, text, f.kind === 'ready' ? f.sha : null, { message: listMessage(at.path), checks: false }))) return;
+    // The save put the file's new text and sha in the cache; a new file also joins its repo's
+    // tree, so the Files tree, the folder's chip and the file view read it as the file it now is.
+    if (created) files.refreshTree(org, at.repo);
+    setText(null);
   };
   return (
     <section class="panel section" aria-label={at.path}>
