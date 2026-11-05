@@ -3559,3 +3559,11 @@ def test_the_release_destinations_ride_beside_the_default_destination(monkeypatc
         ],
     }
     assert validate(doc, schemas.status_schema()) == []
+
+
+def test_a_schedule_to_do_names_an_entry_by_number_then_title_then_key():
+    assert status_json._entry_name("readings", 3, "Week 3", "r3") == "Readings 3"
+    assert status_json._entry_name("readings", None, "Validation", "r12") == (
+        "Validation"
+    )
+    assert status_json._entry_name("readings", None, "", "r12") == "r12"

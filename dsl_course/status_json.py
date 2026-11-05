@@ -1218,9 +1218,10 @@ def no_due_date_todo(
     ]
 
 
-def _entry_name(kind: str, number: int | None, key: str) -> str:
-    """What a schedule to-do calls an entry: "Lab 8" when it is numbered, else its key."""
-    return policy.numbered_title(kind, number) if number else key
+def _entry_name(kind: str, number: int | None, title: str, key: str) -> str:
+    """What a schedule to-do calls an entry: "Lab 8" when it is numbered, else its
+    `title`, else its key."""
+    return policy.numbered_title(kind, number) if number else (title or key)
 
 
 # Decision 0043 rule 5: a TBC entry released (by hand, from Actions or the CLI, or early
@@ -1243,7 +1244,7 @@ def released_tbc_todo(
             kind="schedule",
             check=RELEASED_STILL_TBC,
             repo=schedule.CONFIG_REPO,
-            text=f"{_entry_name(r['kind'], r['number'], r['id'])} is released; its "
+            text=f"{_entry_name(r['kind'], r['number'], r['title'], r['id'])} is released; its "
             "session date is still TBC.",
             screen="release",
             entry=r["id"],
@@ -1269,7 +1270,7 @@ def no_files_todo(
             for w in faulted
         ):
             continue
-        name = _entry_name(r.kind, r.number, r.label)
+        name = _entry_name(r.kind, r.number, r.title, r.label)
         out.append(
             _todo(
                 SUGGESTED,
@@ -1309,7 +1310,7 @@ def no_reading_list_todo(
             continue
         if r.when and r.when <= now:
             continue
-        name = _entry_name(r.kind, r.number, r.label)
+        name = _entry_name(r.kind, r.number, r.title, r.label)
         out.append(
             _todo(
                 SUGGESTED,
