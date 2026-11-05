@@ -16,7 +16,7 @@ import G_SEMESTER from './fixtures/schedule-forms/semester.yml?raw';
 import { YamlText } from '../src/edit/yamlText';
 import { cutoffOf } from '../src/screens/RunSettings';
 import {
-  applyChanges, changesOf, defaultListPath, defaultReleaseAt, draftErrors, emptyTwin, listWrites, newDraft, newlyManual, nextNumber, nextSession, readDraft, releaseAt, writeDraft,
+  applyChanges, changesOf, defaultListPath, defaultReleaseAt, draftErrors, emptyTwin, listWrites, newDraft, newlyManual, nextNumber, nextSession, readDraft, releaseAt, twinUsed, writeDraft,
   type AssignmentDraft, type EntryDraft, type ListDraft, type SemesterDraft, type SemesterEntryDraft,
 } from '../src/model/scheduleEdit';
 
@@ -511,6 +511,22 @@ describe('the reading list as a course file (decision 0044)', () => {
     expect(changesOf([chosen], [unit]).map((c) => c.from)).toEqual(['lecture-3', '']);
     const out = parse(save(tw, chosen, unit, [], false, (_, path) => path === 'lectures/03/list.md').text);
     expect(Object.values(out.readings)).toEqual([expect.objectContaining({ session: 3, reading_list: { from_course_repo: REPO, from_path: 'lectures/03/list.md' } })]);
+  });
+
+  it('counts a twin with Write one left empty as unused: no date asked, no entry; one typed line makes it used', () => {
+    const tw = `lectures:\n  lecture-3:\n    session: 3\n`;
+    const unit = readDraft(doc(tw), 'lecture-3') as EntryDraft;
+    const written = (text: string) => ({ ...unit, twin: { ...emptyTwin(unit), list: { repo: REPO, path: 'readings/03/READINGS.md', inline: false, text } } });
+    for (const text of ['', '  \n']) {
+      expect(twinUsed(written(text).twin)).toBe(false);
+      expect(changesOf([written(text)], [unit]).map((c) => c.from)).toEqual(['lecture-3']);
+      expect(Object.keys(draftErrors(written(text))).filter((k) => k.startsWith('twin.'))).toEqual([]);
+      expect(parse(save(tw, written(text), unit).text).readings).toBeUndefined();
+    }
+    const typed = written('- Breiman (2001).');
+    expect(twinUsed(typed.twin)).toBe(true);
+    expect(changesOf([typed], [unit]).map((c) => c.from)).toEqual(['lecture-3', '']);
+    expect(draftErrors(typed)['twin.date']).toBe('Give the date, or turn on Date TBC.');
   });
 
   it('defaults the path beside the first reading file, else readings/<NN>_<slug>/READINGS.md', () => {
