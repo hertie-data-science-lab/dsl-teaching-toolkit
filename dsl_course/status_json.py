@@ -52,6 +52,7 @@ from . import (
     gradebook,
     grading_sheet,
     grading_spec,
+    legacy,
     policy,
     records,
     release_record,
@@ -1210,6 +1211,7 @@ def no_due_date_todo(
             text=give_a_due_date(key),
             screen="schedule",
             entry=key,
+            fix=_schedule_fix(facts.org, key, line_of(entry.lines, "")),
         )
         for key, entry in facts.sched.assignments.items()
         if entry.due_datetime is None
@@ -1275,6 +1277,54 @@ def no_files_todo(
                 screen="schedule",
                 entry=r.label,
                 when=r.when.isoformat(),
+                fix=_schedule_fix(facts.org, r.label, line_of(r.lines, "")),
+            )
+        )
+    return out
+
+
+# A readings entry that ships reading files with no `reading_list:` beside them: a quiet
+# to-do (decision 0034 tiers), dated at its session when it has one.
+NO_READING_LIST = "reading_list"
+NO_READING_LIST_TODO = "has reading files but no reading list."
+# Its 0.11.0 name: written, it is the entry's NOT_MIGRATED fault, not a missing list.
+_OLD_READING_LIST = legacy.old_name(schedule.READING_LIST, legacy.SCHEDULE_ENTRY)
+
+
+def no_reading_list_todo(
+    facts: SemesterFacts, now: datetime, aside: frozenset[str] = frozenset()
+) -> list[dict]:
+    """`schedule:reading_list:<label>` for each readings entry still to come (or
+    undated) that ships files but has no reading list. One whose `reading_list:` is
+    written but unusable is not: its fault is the problem."""
+    faulted = {
+        f.where
+        for f in facts.sched.faults
+        if f.field in (schedule.READING_LIST, _OLD_READING_LIST)
+        or f.where.endswith(f".{schedule.READING_LIST}")
+    }
+    out = []
+    for r in facts.sched.releases:
+        if r.kind != schedule.READINGS_KIND or not r.deploy:
+            continue
+        if r.reading_list or r.reading_list_file or (r.when and r.when <= now):
+            continue
+        if r.where in faulted or f"{r.where}.{schedule.READING_LIST}" in faulted:
+            continue
+        name = policy.numbered_title(r.kind, r.number) if r.number else r.label
+        out.append(
+            _todo(
+                SUGGESTED,
+                aside,
+                id=f"schedule:{NO_READING_LIST}:{r.label}",
+                kind="schedule",
+                check=NO_READING_LIST,
+                repo=schedule.CONFIG_REPO,
+                text=f"{name} {NO_READING_LIST_TODO}",
+                screen="schedule",
+                entry=r.label,
+                fix=_schedule_fix(facts.org, r.label, line_of(r.lines, "")),
+                **({"when": r.when.isoformat()} if r.when else {}),
             )
         )
     return out
@@ -2078,9 +2128,28 @@ def render_releases(
                 else None,
                 "show_on_site": r.show_on_site,
                 "tbc": r.tbc,
+                **(
+                    {"reading_list": _reading_list_of(r)}
+                    if r.kind == schedule.READINGS_KIND
+                    else {}
+                ),
             }
         )
     return rows
+
+
+def _reading_list_of(r: schedule.Release) -> dict | None:
+    """A readings entry's reading list for the console (decision 0044 point 5): the
+    course file it names and where it lands in the semester (`released_*`, the copy that
+    ships it, landed or not), `{"inline": true}` for legacy text, or None."""
+    if (f := r.reading_list_file) is not None:
+        return {
+            "repo": f.course_source_repo,
+            "path": f.course_source_path,
+            "released_repo": f.semester_dest_repo,
+            "released_path": deploy_dest(f),
+        }
+    return {"inline": True} if r.reading_list else None
 
 
 def _local_midnight(now: datetime, tz: ZoneInfo) -> datetime:
@@ -2664,6 +2733,7 @@ def render_semester(course: CourseFacts, facts: SemesterFacts, now: datetime) ->
     todo = semester_todo(facts, today, set_aside_ids(course.meta))
     todo += no_files_todo(facts, now, set_aside_ids(course.meta))
     todo += no_due_date_todo(facts, set_aside_ids(course.meta))
+    todo += no_reading_list_todo(facts, now, set_aside_ids(course.meta))
     todo += released_tbc_todo(releases, set_aside_ids(course.meta))
     week, weeks = semester_weeks(sched.semester_start, sched.semester_end, today)
     tag = semester_of(facts.org)

@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
@@ -69,7 +70,10 @@ from .schedule_plan import (
     SiteRow,
     declared_syllabus,
     deploy_dest,
+    inline_list_opens,
+    list_dests,
     planned_rows,
+    shown_list,
     site_rows,
     term_end,
 )
@@ -278,8 +282,8 @@ class StudentFacts:
     readmes: dict[str, str] = field(default_factory=dict)
     # `{schedule key: the team cap}`, for self-select group assignments.
     caps: dict[str, int] = field(default_factory=dict)
-    # `{(repo, path): text}` of every reading-list overlay that landed.
-    overlays: dict[tuple[str, str], str] = field(default_factory=dict)
+    # `{readings entry key: the reading list it shows now}` (`gather`).
+    reading_lists: dict[str, str] = field(default_factory=dict)
     syllabus: tuple[str, str] | None = None
     # What a row lists beyond the folder-shaped default: nothing since decision 0039
     # dropped the course's `site_link_extensions`.
@@ -312,16 +316,19 @@ def _files(paths: set[str]) -> list[str]:
 
 
 def _landed(
-    facts: SemesterFacts, row: PlannedRow, readings: bool, allow: frozenset[str]
-) -> tuple[list[dict], list[tuple[str, str]], list[release_record.Key]]:
-    """(links, overlays, the copies that landed) for every copy of `row` that is in its
-    destination, listed as the semester site lists them (`site_repo.landed_links`). A
-    copy inside another copy of the same row (a lab's `solutions/`) is that one's."""
+    facts: SemesterFacts, row: PlannedRow, allow: frozenset[str]
+) -> tuple[list[dict], list[release_record.Key]]:
+    """(links, the copies that landed) for every copy of `row` that is in its
+    destination, listed as the semester site lists them (`site_repo.landed_links`), no
+    reading-list file linked (`schedule_plan.list_dests`). A copy inside another copy of
+    the same row (a lab's `solutions/`) is that one's."""
     dests = [
         (d.semester_dest_repo, "" if is_repo_root(deploy_dest(d)) else deploy_dest(d))
         for d in row.deploys
     ]
-    links, overlays, landed = [], [], []
+    hidden = list_dests(facts.sched.releases)
+    named = row.reading_list_dest
+    links, landed = [], []
     for d, (repo, dest) in zip(row.deploys, dests, strict=True):
         paths = facts.dest_paths.get(repo)
         if not paths:
@@ -332,28 +339,47 @@ def _landed(
         ):
             continue
         branch = facts.dest_branches.get(repo, "main")
-        found = landed_links(
-            facts.org, repo, branch, _files(paths), dest, allow, readings
+        got = landed_links(
+            facts.org,
+            repo,
+            branch,
+            _files(paths),
+            dest,
+            allow,
+            hidden.get(repo, frozenset()),
+            own=named[1] if named and named[0] == repo else None,
         )
-        if found is None:
+        if got is None:
             continue
-        got, prose = found
-        if got or prose:
-            landed.append(release_record.key_of(d))
+        landed.append(release_record.key_of(d))
         links += [
             {"name": k.name, "repo": repo, "path": k.path, "url": k.url} for k in got
         ]
-        overlays += [(repo, p) for p in prose]
-    return links, overlays, landed
+    return links, landed
 
 
-def _reading_list(extra: StudentFacts, overlays: list[tuple[str, str]]) -> str:
-    parts = [
-        demote_headings(extra.overlays[o].strip())
-        for o in overlays
-        if (extra.overlays.get(o) or "").strip()
-    ]
-    return "\n\n".join(parts)
+def _reading_list(extra: StudentFacts, rows: list[PlannedRow]) -> str:
+    """The reading lists `rows` show now (`gather`), headings nested under the row's."""
+    texts = [(extra.reading_lists.get(r.key) or "").strip() for r in rows]
+    return "\n\n".join(demote_headings(t) for t in texts if t)
+
+
+def _shown_list(
+    facts: SemesterFacts,
+    row: PlannedRow,
+    host: PlannedRow | None,
+    now: datetime,
+    read: Callable[[str, str], str | None],
+) -> str:
+    """`schedule_plan.shown_list`, read off the semester's listed paths."""
+    return shown_list(
+        row,
+        bool(_landed(facts, row, frozenset())[1]),
+        inline_list_opens(row, host, ZoneInfo(facts.sched.timezone)),
+        now,
+        lambda repo, path: path in facts.dest_paths.get(repo, set()),
+        read,
+    )
 
 
 def _row(
@@ -421,9 +447,9 @@ def _shipped_copies(
 ) -> list[release_record.Key]:
     """The copies a released row is dated by (the site's `_released_at`): its own that
     landed, else its attached readings' that did."""
-    own = _landed(facts, sr.row, sr.row.kind == "readings", allow)[2]
+    own = _landed(facts, sr.row, allow)[1]
     return own or [
-        k for attached in sr.readings for k in _landed(facts, attached, True, allow)[2]
+        k for attached in sr.readings for k in _landed(facts, attached, allow)[1]
     ]
 
 
@@ -438,14 +464,13 @@ def release_rows(facts: SemesterFacts, extra: StudentFacts) -> list[dict]:
     for sr in site_rows(planned_rows(facts.sched)):
         r = sr.row
         own = r.kind == "readings"
-        links, prose, landed = _landed(facts, r, own, extra.link_extensions)
+        links, landed = _landed(facts, r, extra.link_extensions)
         if not r.shown and not landed:
             continue
         readings, pending, attached_landed = [], False, []
         for attached in sr.readings:
-            got, more, done = _landed(facts, attached, True, extra.link_extensions)
+            got, done = _landed(facts, attached, extra.link_extensions)
             readings += got
-            prose += more
             attached_landed += done
             pending = pending or not done
         shipped = release_record.released_at(
@@ -472,7 +497,7 @@ def release_rows(facts: SemesterFacts, extra: StudentFacts) -> list[dict]:
                 off_schedule=not r.shown,
                 links=links + readings,
                 readings=links if own else readings,
-                reading_list=_reading_list(extra, prose),
+                reading_list=_reading_list(extra, ([r] if own else []) + sr.readings),
                 readings_pending=pending,
                 # Readings attached, landed or not: the site's own test.
                 tabs=row_tabs(r.kind, bool(sr.readings)),
@@ -902,19 +927,25 @@ def gather(course: CourseFacts, facts: SemesterFacts, now: datetime) -> StudentF
             )
         if spec.is_group and spec.team_formation_resolved == SELF_SELECT:
             extra.caps[key] = team_formation.team_cap(course.org, spec, org, key)
-    # The reading lists: the prose overlays of every readings copy that has landed. And
-    # when each copy of a released dateless row first landed, where the release record
-    # does not say - the only date such a row has.
+    # The reading lists each readings entry shows now. And when each copy of a released
+    # dateless row first landed, where the release record does not say - the only date
+    # such a row has.
     for sr in site_rows(planned_rows(sched)):
         if sr.row.undated:
             copies = _shipped_copies(facts, sr, extra.link_extensions)
             for k in release_record.undated(facts.recorded, copies):
                 extra.landed_at[k] = release_record.landed_at(org, k[2], k[3])
-        own = [sr.row] if sr.row.kind == "readings" else []
-        for row in [*own, *sr.readings]:
-            for repo, path in _landed(facts, row, True, frozenset())[1]:
-                text = get_file_content(org, repo, path, confirm_absent=True)
-                extra.overlays[(repo, path)] = text or ""
+        own = [(sr.row, None)] if sr.row.kind == "readings" else []
+        for row, host in [*own, *((a, sr.row) for a in sr.readings)]:
+            extra.reading_lists[row.key] = _shown_list(
+                facts,
+                row,
+                host,
+                now,
+                lambda repo, path: get_file_content(
+                    org, repo, path, confirm_absent=True
+                ),
+            )
     semester_meta = read_semester(org).semester.meta()
     extra.syllabus = declared_syllabus(
         sched,

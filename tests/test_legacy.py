@@ -52,3 +52,9 @@ def test_names_json_carries_the_rows_for_the_console():
     rows = schemas.names_json()["legacy"]
     assert [r["old"] for r in rows] == [r.old for r in legacy.ROWS]
     assert set(rows[0]) == {"old", "new", "where", "since", "fault_code", "cost"}
+
+
+def test_reading_guide_is_the_retired_name_of_the_reading_list():
+    row = legacy.flag("reading_guide", legacy.SCHEDULE_ENTRY)
+    assert row is not None and row.new == "reading_list"
+    assert legacy.flag("reading_list", legacy.SCHEDULE_ENTRY) is None

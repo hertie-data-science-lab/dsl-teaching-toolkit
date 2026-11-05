@@ -1260,8 +1260,8 @@ def fold_open_site(data: object) -> object:
 # ids), its kind is written by the block it lands in (today's inference, once), lectures
 # and labs get `session:` (their number today), a readings entry the site joins to a
 # lecture gets that lecture's `session:`, `number:` only where it differs, a lab's second
-# group becomes a slot of its lab, the copies' fields are renamed, a READINGS.md becomes
-# the entry's `reading_list:`, and each assignment's `assignments.yml` block moves onto
+# group becomes a slot of its lab, the copies' fields are renamed, a READINGS.md is named
+# by the entry's `reading_list:`, and each assignment's `assignments.yml` block moves onto
 # its entry. Rendered rows stay as they were, except what 0038 drops.
 SHAPE_COMMIT = "migrate: schedule shape"
 SHAPE_HEADER = """\
@@ -1309,12 +1309,17 @@ def _semester_block(old: dict) -> dict:
     return block
 
 
+# A reading list's 0.11.0 name (`reading_guide:`), renamed back to `reading_list:`.
+_OLD_READING_LIST = legacy.old_name(schedule.READING_LIST, legacy.SCHEDULE_ENTRY)
+
+
 def _guide(entry: dict) -> dict:
-    """A readings entry with `reading_list:` renamed `reading_guide:` (amendment 2)."""
-    if "reading_list" not in entry:
+    """A readings entry with its 0.11.0 `reading_guide:` renamed `reading_list:`."""
+    if _OLD_READING_LIST not in entry:
         return entry
     return {
-        ("reading_guide" if k == "reading_list" else k): v for k, v in entry.items()
+        (schedule.READING_LIST if k == _OLD_READING_LIST else k): v
+        for k, v in entry.items()
     }
 
 
@@ -1410,14 +1415,8 @@ def _readings_twin(
     if "tbc" in new:
         twin["tbc"] = new["tbc"]
     twin["files"] = moved
-    texts = [
-        t.strip()
-        for f in moved
-        if (t := reading_list(str(f.get("from_course_repo")), str(f.get("from_path"))))
-        and t.strip()
-    ]
-    if texts:
-        twin["reading_guide"] = "\n\n".join(texts) + "\n"
+    if (listed := _list_of(moved, reading_list)) is not None:
+        twin[schedule.READING_LIST] = listed
     return f"{key}-readings", {k: v for k, v in twin.items() if v not in (None, "")}
 
 
@@ -1438,20 +1437,49 @@ def _hour_before(text: str, tz) -> str | None:
 
 # A source repo's `materials.yml` folder aliases (None: it does not parse).
 Aliases = Callable[[str], Mapping[str, str] | None]
-ReadingList = Callable[[str, str], str]
+# `(path, text)` of each reading-list overlay a copy of `path` from `repo` carries.
+ReadingList = Callable[[str, str], list[tuple[str, str]]]
+
+
+def _list_of(copies: list[dict], reading_list: ReadingList) -> dict | str | None:
+    """A readings entry's `reading_list:` from the overlays its copies carry (decision
+    0044 point 1): the course file itself, left where it is, when they sit in one
+    folder (`READINGS.md` before `.txt` / `.bib`); their text when they sit in several
+    (an entry names one file); None for none. An empty overlay is none: the entry is
+    then the "no reading list" to-do, not a list naming an empty file."""
+    found = [
+        (repo, path, text)
+        for f in copies
+        for repo in [str(f.get("from_course_repo"))]
+        for path, text in reading_list(repo, str(f.get("from_path")))
+        if text.strip()
+    ]
+    if not found:
+        return None
+    if len({(repo, path.rpartition("/")[0]) for repo, path, _ in found}) == 1:
+        repo, path, _ = min(found, key=lambda o: _OVERLAY_ORDER.index(_suffix(o[1])))
+        return {"from_course_repo": repo, "from_path": path}
+    return "\n\n".join(text.strip() for *_, text in found) + "\n"
+
+
+_OVERLAY_ORDER = ("md", "markdown", "txt", "bib")
+
+
+def _suffix(path: str) -> str:
+    return path.rsplit(".", 1)[-1].lower()
 
 
 def schedule_shape(
     text: str,
     instance_text: str | None = None,
     aliases: Aliases = lambda repo: {},
-    reading_list: ReadingList = lambda repo, path: "",
+    reading_list: ReadingList = lambda repo, path: [],
 ) -> tuple[str, str | None, list[str], list[str]]:
     """`(schedule.yml, assignments.yml or None when it has no `assignments:` block,
     notes, stops)` for a 0.10 `text` (and the `assignments.yml` beside it): the 0.11 shape
     (decision 0038), rows unchanged but for what 0038 drops. `aliases(repo)` are a source
     repo's `materials.yml` folder aliases (today's kind inference); `reading_list(repo,
-    path)` the READINGS.md text a copy of `path` from `repo` carries ("" for none).
+    path)` the READINGS.md overlays a copy of `path` from `repo` carries (`_list_of`).
     `stops` are what a person must settle first; `notes` what changes for them to check."""
     notes: list[str] = []
     stops: list[str] = []
@@ -1462,7 +1490,7 @@ def schedule_shape(
         isinstance(old.get(b), dict) for b in schedule.BLOCKS if b not in ("events",)
     ):
         # Already one block per kind (a file shaped before amendment 2): only the term's
-        # dates and the readings guide take their new names.
+        # dates and the reading list take their new names.
         shaped = {
             b: {k: _guide(e) if isinstance(e, dict) else e for k, e in old[b].items()}
             for b in schedule.BLOCKS
@@ -1529,19 +1557,10 @@ def schedule_shape(
         twin = _readings_twin(key, kind, entry, new, aliases, reading_list)
         if twin:
             twins.append(twin)
-        if kind == "readings":
-            texts = [
-                t.strip()
-                for f in new.get("files", [])
-                if (
-                    t := reading_list(
-                        str(f.get("from_course_repo")), str(f.get("from_path"))
-                    )
-                )
-                and t.strip()
-            ]
-            if texts:
-                new["reading_guide"] = "\n\n".join(texts) + "\n"
+        if kind == "readings" and (
+            listed := _list_of(new.get("files", []), reading_list)
+        ):
+            new[schedule.READING_LIST] = listed
         blocks[policy.plural_of(kind)][key] = new
         if n and entry.get("show_on_site") is not False:
             hosts.setdefault((kind, n), key)
@@ -3692,9 +3711,9 @@ class Semester:
         """A source repo's `materials.yml` folder aliases, as 0.10 inferred kinds by."""
         return old_materials(self.course, repo)[1]
 
-    def _reading_list(self, repo: str, path: str) -> str:
-        """The READINGS.md (or .txt/.bib) text a copy of `path` from the course's `repo`
-        carries: the file itself, or each one directly inside the folder."""
+    def _reading_list(self, repo: str, path: str) -> list[tuple[str, str]]:
+        """`(path, text)` of each READINGS.md (or .txt/.bib) a copy of `path` from the
+        course's `repo` carries: the file itself, or each one directly inside the folder."""
         path = path.strip("/")
         found = [
             p
@@ -3704,8 +3723,7 @@ class Semester:
                 p == path or p.rsplit("/", 1)[0] == path or (not path and "/" not in p)
             )
         ]
-        texts = [(get_file_content(self.course, repo, p) or "").strip() for p in found]
-        return "\n\n".join(t for t in texts if t)
+        return [(p, get_file_content(self.course, repo, p) or "") for p in found]
 
     def shape_work(
         self,

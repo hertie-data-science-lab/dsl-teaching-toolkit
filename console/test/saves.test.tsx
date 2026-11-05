@@ -195,7 +195,7 @@ describe('the schedule editor’s forms, clicked through (forms mock-up v3)', ()
     await click(button('Add lecture'));
     const out = await saved(gh);
     expect(out.lectures).toEqual({ 'lecture-1': { session: 1, event_datetime: '2026-09-08T10:00' }, 'lecture-2': { session: 2, title: 'Trees', event_datetime: '2026-09-15T10:00' } });
-    expect(out.readings).toEqual({ 'readings-2': { session: 2, event_datetime: '2026-09-15T10:00', reading_guide: '- Breiman (2001).' } });
+    expect(out.readings).toEqual({ 'readings-2': { session: 2, event_datetime: '2026-09-15T10:00', reading_list: '- Breiman (2001).' } });
   });
 
   it('renumbers a saved lab: the key follows the session', async () => {

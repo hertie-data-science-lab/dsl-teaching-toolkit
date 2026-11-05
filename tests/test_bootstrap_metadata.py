@@ -84,7 +84,7 @@ def test_schedule_yml_seed_is_commented_and_covers_every_field():
         "to_semester_repo",
         "to_path",
         "release_datetime",
-        "reading_guide",
+        "reading_list",
         "type: start",
         "type: end",
         "type: break",
@@ -111,7 +111,7 @@ def test_schedule_yml_seed_is_commented_and_covers_every_field():
         "deploy:",
         "course_source_repo",
         "kind:",
-        "reading_list",
+        "reading_guide",
         "semester_start",
         "semester_end",
     ):
