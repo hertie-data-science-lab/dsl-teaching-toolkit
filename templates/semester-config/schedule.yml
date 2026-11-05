@@ -66,7 +66,7 @@
 #     session: 1                    # OPTIONAL - shown on unit 1's first row and under it on the Readings tab; absent = a row of its own
 #     event_datetime:               # REQUIRED - when it appears; its files ship then unless a file says otherwise
 #     files: [{{from_course_repo: , from_path: readings/01}}]
-#     reading_guide: |              # OPTIONAL - markdown: what to read, chapters, links, pointers; every student sees it, and it is the only readings content the open site shows
+#     reading_list: |               # OPTIONAL - markdown: what to read, chapters, links; or a course file {{from_course_repo: , from_path: readings/01/READINGS.md}}; shown once the entry releases
 #       - Author, Title, ch. 1.
 
 # exams:

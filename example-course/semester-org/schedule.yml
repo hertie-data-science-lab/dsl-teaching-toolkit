@@ -130,7 +130,7 @@ readings:
     files:
       - from_course_repo: course-materials-f2026
         from_path: readings/01_week-1
-    reading_guide: |
+    reading_list: |
       # Week 1 readings - 
 
       - Goodfellow et al., *Deep Learning*, ch. 1 (citation only).
@@ -142,7 +142,7 @@ readings:
     files:
       - from_course_repo: course-materials-f2026
         from_path: readings/02_week-2
-    reading_guide: |
+    reading_list: |
       # Week 2 readings - Intro to deep learning
 
       - Goodfellow et al., *Deep Learning*, ch. 2 (citation only).
@@ -154,7 +154,7 @@ readings:
     files:
       - from_course_repo: course-materials-f2026
         from_path: readings/03_week-3
-    reading_guide: |
+    reading_list: |
       # Week 3 readings - Linear models & gradient descent
 
       - Goodfellow et al., *Deep Learning*, ch. 3 (citation only).
@@ -166,7 +166,7 @@ readings:
     files:
       - from_course_repo: course-materials-f2026
         from_path: readings/04_week-4
-    reading_guide: |
+    reading_list: |
       # Week 4 readings - Neural networks & backprop
 
       - Goodfellow et al., *Deep Learning*, ch. 4 (citation only).
@@ -178,7 +178,7 @@ readings:
     files:
       - from_course_repo: course-materials-f2026
         from_path: readings/05_week-5
-    reading_guide: |
+    reading_list: |
       # Week 5 readings - Convolutional networks
 
       - Goodfellow et al., *Deep Learning*, ch. 5 (citation only).

@@ -33,7 +33,7 @@ Each block is a map. The **key** of an entry (`lecture-3`, `lab-2b`) is its id: 
 | `tbc` | no | `false` | the date is provisional: the site marks it **(TBC)**; it still fires |
 | `show_on_site` | no | `true` | `false`: no row on the site; its files still ship (readings: see below) |
 | `files` | no | - | what ships (below) |
-| `reading_guide` | no | - | `readings:` only: markdown - what to read, chapters, links, pointers. Every student sees it, and it is the only readings content the open site shows |
+| `reading_list` | no | - | `readings:` only: markdown (what to read, chapters, links), or a course file `{from_course_repo, from_path}` (optional `to_semester_repo`, `to_path`, `release_datetime`, as a `files:` item). Shown once the entry releases (below) |
 
 Each kind gets its own tab on the site, and its rows are named by the kind and the number (`Lecture 3`). Two shown entries of one kind with the same number are a problem. A lecture or lab without `session:` is a problem too (*Give lecture-3 a session*), and its files wait until it has one.
 
@@ -110,9 +110,19 @@ readings:
     files:
       - from_course_repo: course-materials-f2026
         from_path: readings/04_week-4
-    reading_guide: |
+    reading_list: |
       - Goodfellow et al., *Deep Learning*, ch. 6.
 ```
+
+The reading list can live in a course file instead (default name `READINGS.md`, anywhere in the repo):
+
+```yaml
+    reading_list:
+      from_course_repo: course-materials-f2026
+      from_path: readings/04_week-4/READINGS.md
+```
+
+The file ships with the entry like one of its `files:` (inside a copied folder, with that folder; elsewhere, with the entry's first file), so a missing file is a problem like any missing source. Edit the course file; once released, an edit reaches students like any released file's ([fire-once](#changing-dates-mid-term): Release again, or `autosync_released_edits`). Students see the **released** copy. A reading list - file or text - shows once the entry has released: once one of its files has landed, or, for an entry with no files, an hour before its first session (a whole-day entry: at the day's start). A list kept in another entry's folder (a lecture's) does not release that entry. The file is never listed among the readings. A readings entry with files and no reading list is a to-do on the Dashboard. The open course site has no schedule: it shows a readings folder's file named `READINGS.md`. `reading_guide:` (0.11.0) is the old name; the migration renames it to `reading_list:`.
 
 ### Exams, drop-ins, events, assets
 

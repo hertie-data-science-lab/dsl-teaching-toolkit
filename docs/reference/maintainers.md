@@ -835,6 +835,25 @@ whose template does not exist yet locks to `none` and refuses every team - the c
 a2-a4 were in, and the reason the button that creates a template writes its
 `grading_config.yml` for you.
 
+## Reading lists
+
+A readings entry's `reading_list:` is markdown or a course file (`schedule._parse_reading_list`).
+The file is a copy of the entry (`Release.reading_list_file`): one of its `deploy` unless a
+`files:` folder carries it, so releases, source checks, divergence and PR into source cover it
+unchanged (`source_faults` checks a carried file by name). Students see the released copy
+only: the semester site (`site._shown_list`) and the student file (`student_status._shown_list`)
+read the file's landed copy in the semester; inline text shows once a copy of the entry has
+landed, or, with no copies, at `schedule_plan.inline_list_opens`; both apply
+`schedule_plan.shown_list`. `site_repo.landed_links` hides every NAMED path semester-wide
+(`schedule_plan.list_dests`), never `READINGS.md` by name, and a copy that landed only such
+paths has not landed (unless it is the row's own list). The open course site has no schedule, so
+it keeps inlining a readings folder's `READINGS.md` by name (`readings.readings_block`). The
+syllabus reads the course file (it is written before anything ships).
+`status.json` readings rows say where the list is (`reading_list`: the course file plus
+`released_repo` / `released_path`, where the engine ships it, landed or not; `{inline: true}`;
+or null), so the console never re-derives the placement; `no_reading_list_todo` is the
+Suggested to-do.
+
 ## Config faults
 
 Every file faculty edit by hand can be wrong in a way the toolkit detects and only a human
@@ -1155,8 +1174,8 @@ marks (`course.py`), the archive notice prefixes (`teardown.py`) and the digest 
 | `schedule.yml` `releases:` / `events:` entries and their `kind:` (0.11.0) | one block per kind (`lectures:`, `labs:`, ..., `events:` for `other`); a second group's event a slot of its entry (decision 0038) | rewritten by the schedule shape step |
 | `deploy:` `course_source_repo`, `course_source_path`, `semester_dest_repo`, `semester_dest_path`, `deploy_datetime` (0.11.0) | `files:` `from_course_repo`, `from_path`, `to_semester_repo`, `to_path`, `release_datetime` | the same |
 | assignment `course_source_repo`; `assignments.yml` `assignments.<k>` blocks and `semester_dest_repo` (0.11.0) | `template`; the run settings on the entry, `repo_name` | the same |
-| a readings folder's `READINGS.md`; `materials.yml` `kinds:` (0.11.0) | the entry's `reading_guide:`; the block | the same writes `reading_guide:`; `kinds:` is ignored |
-| `schedule.yml` top-level `semester_start`, `semester_end`, `archive:`; a readings entry's `reading_list` (0.11.0, 0038 amendment 2) | `semester:` entries of `type: start`, `end`, `archive`; `reading_guide` | the same; a file already one block per kind takes only these renames |
+| a readings folder's `READINGS.md`; `materials.yml` `kinds:` (0.11.0) | the entry's `reading_list:`; the block | the same names the file in `reading_list:` (its text inline only when overlays sit in two copied folders); `kinds:` is ignored |
+| `schedule.yml` top-level `semester_start`, `semester_end`, `archive:` (0.11.0); a readings entry's `reading_guide` (0.12.0, the 0.11.0 name) | `semester:` entries of `type: start`, `end`, `archive`; `reading_list` | the same; a file already one block per kind takes only these renames |
 | site front matter `type:` | `kind:`, written beside `type:` until the pinned theme's next release reads `kind` | the semester and course websites (rewritten on every sync) |
 | `status.json` release and this-week rows `type` | `kind` | `dsl.status/1` |
 | CLI `--master-org` (assign, collect), `--source-org` (deploy); env `MASTER_ORG`, `SRC_ORG` | `--course-org`; `COURSE_ORG` | every CLI; rendered workflows |
@@ -1273,8 +1292,8 @@ the new one, the pointer moved in, samples deleted - one `migrate: layout` commi
 templates said, in one commit, both re-read with this engine: zero `NOT_MIGRATED`), schedule
 shape (decision 0038, `migrate.schedule_shape`: one block per kind, keys unchanged, `session:`
 from the number each lecture and lab showed, `number:` only where it differs, a second
-group's event a slot of its entry, `deploy:` fields renamed into `files:`, a READINGS.md's
-text into `reading_guide:`, the term's dates into the `semester:` block, `template:` / `repo_name:` and `assignments.yml`'s blocks onto each
+group's event a slot of its entry, `deploy:` fields renamed into `files:`, a READINGS.md
+named by `reading_list:` (decision 0044), the term's dates into the `semester:` block, `template:` / `repo_name:` and `assignments.yml`'s blocks onto each
 assignment; comments are not carried, and the preview prints only the new lines - one
 `migrate: schedule shape` commit), config layers (decision 0039: `instructors.yml` and
 `assignments.yml` `defaults:` folded into `semester.yml` - faculty's `people:` lines kept as

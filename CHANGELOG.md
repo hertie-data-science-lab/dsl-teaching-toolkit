@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- A readings entry's `reading_guide:` is renamed back to **`reading_list:`**, and it may name
+  a course file (`{from_course_repo, from_path}`, the optional keys of a `files:` item)
+  instead of holding the text. The file ships with the entry (with its folder when a `files:`
+  copy carries it), so a missing file is a missing source and an edit after release reaches
+  students by Release again (or `autosync_released_edits`). The site and the student console
+  show the released copy and never list it as a reading; a list kept in another entry's
+  folder does not release that entry. **Behaviour change:** a reading list, file or text, now
+  shows only once the entry has released: a file of it landed; with no files, an hour before
+  its first slot (a whole-day entry: at the day's start). `reading_guide:` is a NOT_MIGRATED
+  fault until the migration's schedule shape step renames it (Maths and NLP). The shape step
+  now names a readings folder's `READINGS.md` in `reading_list:` instead of copying its text
+  (an empty one is no list).
+- A readings entry with reading files and no reading list is a suggested to-do. `status.json`
+  readings rows carry `reading_list`: the course file (`repo`, `path`) and where it lands
+  (`released_repo`, `released_path`), `{inline: true}`, or null. The schedule to-dos (no
+  files, no due date, no reading list) carry a `fix` naming their entry.
 - A course materials repo's settings page has a **Files** panel in place of the Withheld panel:
   the repo's tree with **Browse** (a name opens the file beside the tree), **Withhold** (untick
   what never reaches students; the pattern box and Save as before) and **Release** (tick files
