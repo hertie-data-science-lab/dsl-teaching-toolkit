@@ -6,7 +6,7 @@
 
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EnvCtx, type Env } from '../src/env';
 import { GitHubClient, decodeBase64 } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
@@ -88,7 +88,9 @@ describe('which files are reading lists', () => {
 
 describe('the course Materials file view (decision 0044)', () => {
   it('edits READINGS.md in place; the index tree beside it marks nothing (the chips are the repo page’s)', async () => {
-    await mount(<MaterialsIndexScreen {...cp(`${MAT}/readings/04/READINGS.md`)} />);
+    const p = cp(`${MAT}/readings/04/READINGS.md`);
+    const refreshTree = vi.spyOn(p.files, 'refreshTree');
+    await mount(<MaterialsIndexScreen {...p} />);
     expect(chipped()).toEqual([]);
     const edit = button('Edit reading list')!;
     expect(edit).toBeDefined();
@@ -115,6 +117,8 @@ describe('the course Materials file view (decision 0044)', () => {
     expect(put.map((s) => s.url.split('/repos/')[1])).toEqual([`${ORG}/${MAT}/contents/readings/04/READINGS.md`]);
     const b = put[0].body as { content: string; sha: string; message: string };
     expect([decodeBase64(b.content), b.sha, b.message]).toEqual(['- Bishop: bishop.pdf\n- Murphy: murphy.pdf\n', 'static', 'readings: edit readings/04/READINGS.md, from the DSL Teaching Console']);
+    // An existing file is already in the tree: only its cache entry changes (the save's own put).
+    expect(refreshTree).not.toHaveBeenCalled();
     await act(() => button('Back to the file')!.click());
     await settle();
     expect(button('Edit reading list')).toBeDefined();

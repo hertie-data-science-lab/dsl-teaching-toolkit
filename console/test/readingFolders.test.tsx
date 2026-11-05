@@ -5,7 +5,7 @@
 import { render } from 'preact';
 import { renderToString } from 'preact-render-to-string';
 import { act } from 'preact/test-utils';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EnvCtx, type Env } from '../src/env';
 import { GitHubClient, decodeBase64 } from '../src/github/client';
 import type { Course } from '../src/model/discovery';
@@ -94,7 +94,9 @@ describe('a reading list not written yet, opened from the course side', () => {
   const button = (text: string) => [...root!.querySelectorAll('button')].find((b) => b.textContent?.trim() === text);
 
   it('opens straight in the editor as a New file, Back to the files going to the folder, and Save creates it', async () => {
-    await mount(cp(`${MAT}/${LIST}`));
+    const p = cp(`${MAT}/${LIST}`);
+    const put = vi.spyOn(p.files, 'put'), refreshTree = vi.spyOn(p.files, 'refreshTree');
+    await mount(p);
     const area = root!.querySelector<HTMLTextAreaElement>('#mf-rl')!;
     expect(area.value).toBe('');
     expect(root!.querySelector('h2.mono')!.textContent).toBe(LIST);
@@ -111,10 +113,13 @@ describe('a reading list not written yet, opened from the course side', () => {
     await act(() => { area.value = '- Breiman (2001): Breiman.pdf\n'; area.dispatchEvent(new Event('input', { bubbles: true })); });
     await act(() => button('Save')!.click());
     for (let i = 0; i < 8; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
-    const put = gh.seen.filter((s: Seen) => s.method === 'PUT');
-    expect(put.map((s) => s.url.split('/repos/')[1])).toEqual([`${ORG}/${MAT}/contents/${LIST}`]);
-    const b = put[0]!.body as { content: string; sha?: string; message: string };
+    const puts = gh.seen.filter((s: Seen) => s.method === 'PUT');
+    expect(puts.map((s) => s.url.split('/repos/')[1])).toEqual([`${ORG}/${MAT}/contents/${LIST}`]);
+    const b = puts[0]!.body as { content: string; sha?: string; message: string };
     expect([decodeBase64(b.content), b.sha, b.message]).toEqual(['- Breiman (2001): Breiman.pdf\n', undefined, `readings: edit ${LIST}, from the DSL Teaching Console`]);
+    // The file's new text and sha are in the cache, and the new file joins its repo's tree.
+    expect(put.mock.calls).toEqual([[ORG, MAT, LIST, undefined, '- Breiman (2001): Breiman.pdf\n', 'b1']]);
+    expect(refreshTree.mock.calls).toEqual([[ORG, MAT]]);
   });
 
   it('offers no editor to someone who cannot change the course', async () => {
