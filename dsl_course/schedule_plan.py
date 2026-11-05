@@ -14,7 +14,7 @@ from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from . import policy, schedule
-from .course import is_repo_root
+from .course import is_repo_root, within
 from .faults import ConfigFault
 from .gh_contents import line_of
 from .log import Summary, log_err
@@ -64,9 +64,8 @@ class PlannedRow:
     deploys: tuple[schedule.Deploy, ...] = ()
     unit: str = ""
     location: str = ""
-    reading_list: str = ""
-    # Where its course-file reading list lands (`Release.reading_list_file`), or None.
-    reading_list_file: schedule.Deploy | None = None
+    # The entry's `Release.reading_list`: inline text, the course file, or None.
+    reading_list: str | schedule.Deploy | None = None
     slot: int = 0
     # The entry's first moment (`Release.when`): every slot's inline reading list opens
     # by it (`inline_list_opens`). None: the slot's own `when`.
@@ -75,8 +74,8 @@ class PlannedRow:
     @property
     def reading_list_dest(self) -> tuple[str, str] | None:
         """`(repo, path)` its named reading-list file lands at in the semester, or None."""
-        d = self.reading_list_file
-        return (d.semester_dest_repo, deploy_dest(d)) if d else None
+        f = self.reading_list
+        return list_dest(f, self.deploys) if isinstance(f, schedule.Deploy) else None
 
     @property
     def dests(self) -> list[str]:
@@ -90,6 +89,24 @@ class PlannedRow:
             for d in self.deploys
             if (d.semester_dest_repo, deploy_dest(d)) != named
         )
+
+
+def list_dest(
+    listed: schedule.Deploy, deploys: Collection[schedule.Deploy]
+) -> tuple[str, str]:
+    """`(repo, path)` where a readings entry's course-file reading list
+    (`Release.reading_list`) lands in the semester. Shipped as one of the entry's
+    `deploys` itself, its own destination; else inside the copy whose source holds it
+    (its folder): that copy's destination plus the rest of its path."""
+    if not any(d is listed for d in deploys):
+        for d in deploys:
+            if d.course_source_repo != listed.course_source_repo:
+                continue
+            rest = within(d.course_source_path, listed.course_source_path)
+            if rest is not None:
+                to = "" if is_repo_root(deploy_dest(d)) else deploy_dest(d)
+                return d.semester_dest_repo, "/".join(p for p in (to, rest) if p)
+    return listed.semester_dest_repo, deploy_dest(listed)
 
 
 def planned_rows(sched: schedule.Schedule) -> list[PlannedRow]:
@@ -114,7 +131,6 @@ def planned_rows(sched: schedule.Schedule) -> list[PlannedRow]:
             unit=r.session,
             location=slot.location or r.location,
             reading_list=r.reading_list,
-            reading_list_file=r.reading_list_file,
             slot=i,
             entry_when=r.when,
         )
@@ -229,18 +245,18 @@ def shown_list(
     if (named := row.reading_list_dest) is not None:
         return (read(*named) or "") if present(*named) else ""
     released = landed if row.deploys else opens is not None and opens <= now
-    return row.reading_list if released else ""
+    return (row.reading_list or "") if released else ""
 
 
-def list_dests(rows: Iterable) -> dict[str, frozenset[str]]:
+def list_dests(rows: Iterable[PlannedRow]) -> dict[str, frozenset[str]]:
     """Where every readings entry's named reading-list file lands, per semester repo
-    (`reading_list_file` of each of `rows`, releases or planned rows). No row links these,
+    (`PlannedRow.reading_list_dest` of each of `rows`). No row links these,
     and a copy that has landed nothing else has not landed (`site_repo.landed_links`): a
     list kept in a lecture folder ships with its readings, never as that lecture."""
     out: dict[str, set[str]] = {}
     for r in rows:
-        if (d := r.reading_list_file) is not None:
-            out.setdefault(d.semester_dest_repo, set()).add(deploy_dest(d))
+        if (named := r.reading_list_dest) is not None:
+            out.setdefault(named[0], set()).add(named[1])
     return {repo: frozenset(paths) for repo, paths in out.items()}
 
 
@@ -451,18 +467,6 @@ def unnumbered_assignment(
         if entry.number is None:
             return give_a_number(key)
     return None
-
-
-def within(wanted: str, path: str) -> str | None:
-    """Where `path` sits inside a release of `wanted` (both source paths): "" for the path
-    itself, its relative path when it is inside the folder (the whole repo holds
-    everything), None when the release does not copy it."""
-    wanted, path = wanted.strip("/"), path.strip("/")
-    if is_repo_root(wanted):
-        return "" if is_repo_root(path) else path
-    if path == wanted:
-        return ""
-    return path[len(wanted) + 1 :] if path.startswith(f"{wanted}/") else None
 
 
 def outermost(paths: Iterable[str]) -> list[str]:

@@ -131,6 +131,7 @@ from .schedule_plan import (
     duplicate_numbers,
     duplicate_text,
     give_a_due_date,
+    list_dest,
     planned_rows,
     site_rows,
     unnumbered,
@@ -1307,7 +1308,7 @@ def no_reading_list_todo(
     for r in facts.sched.releases:
         if r.kind != schedule.READINGS_KIND or not r.deploy:
             continue
-        if r.reading_list or r.reading_list_file or (r.when and r.when <= now):
+        if r.reading_list or (r.when and r.when <= now):
             continue
         if r.where in faulted or f"{r.where}.{schedule.READING_LIST}" in faulted:
             continue
@@ -2142,14 +2143,16 @@ def _reading_list_of(r: schedule.Release) -> dict | None:
     """A readings entry's reading list for the console (decision 0044 point 5): the
     course file it names and where it lands in the semester (`released_*`, the copy that
     ships it, landed or not), `{"inline": true}` for legacy text, or None."""
-    if (f := r.reading_list_file) is not None:
+    f = r.reading_list
+    if isinstance(f, schedule.Deploy):
+        repo, path = list_dest(f, r.deploy)
         return {
             "repo": f.course_source_repo,
             "path": f.course_source_path,
-            "released_repo": f.semester_dest_repo,
-            "released_path": deploy_dest(f),
+            "released_repo": repo,
+            "released_path": path,
         }
-    return {"inline": True} if r.reading_list else None
+    return {"inline": True} if f else None
 
 
 def _local_midnight(now: datetime, tz: ZoneInfo) -> datetime:

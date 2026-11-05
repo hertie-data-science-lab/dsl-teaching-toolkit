@@ -448,7 +448,7 @@ def test_the_named_reading_list_file_is_never_a_link(monkeypatch):
         None,
         date(2026, 9, 1),
         deploys=(_deploy("readings/01_week-1"),),
-        reading_list_file=named,
+        reading_list=named,
     )
     hidden = schedule_plan.list_dests([row])
     live = frozenset({"materials"})
@@ -490,7 +490,7 @@ def test_a_course_file_reading_list_shows_its_landed_copy_only(monkeypatch):
         None,
         date(2026, 9, 1),
         deploys=(named,),
-        reading_list_file=named,
+        reading_list=named,
     )
     assert site._shown_list("C", row, True, None, _NOW, _LIVE) == "- A."
     assert reads == ["readings/01/READINGS.md"]

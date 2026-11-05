@@ -17,7 +17,7 @@ import pytest
 import yaml
 from conftest import source_fault
 
-from dsl_course import course, gh_contents, policy, schedule, settings
+from dsl_course import course, gh_contents, policy, schedule, schedule_plan, settings
 from dsl_course import faults as faults_module
 from dsl_course.schedule import (
     AssignmentEntry,
@@ -3535,7 +3535,7 @@ def test_a_reading_list_is_read_and_the_old_reading_guide_is_not_migrated():
         }
     )
     lists = {r.label: r.reading_list for r in sched.releases}
-    assert lists == {"r1": "- A.", "r2": ""}
+    assert lists == {"r1": "- A.", "r2": None}
     (fault,) = sched.faults
     assert (fault.where, fault.field, fault.code) == (
         "readings.r2",
@@ -3565,23 +3565,17 @@ def test_a_reading_list_in_a_course_file_ships_with_the_entry():
             "reading_list": ref,
         }
     )
-    assert r.reading_list == ""
     # One more copy, mirrored into the default repo, at the entry's first file's time.
-    assert r.reading_list_file is r.deploy[-1]
-    assert (
-        r.reading_list_file.semester_dest_repo,
-        r.reading_list_file.semester_dest_path,
-    ) == (
+    assert r.reading_list is r.deploy[-1]
+    assert schedule_plan.list_dest(r.reading_list, r.deploy) == (
         "materials",
-        None,
+        "lectures/09/READINGS.md",
     )
-    assert r.reading_list_file.deploy_datetime == datetime(
-        2026, 9, 1, 8, 0, tzinfo=BERLIN
-    )
+    assert r.reading_list.deploy_datetime == datetime(2026, 9, 1, 8, 0, tzinfo=BERLIN)
     # No files: an hour before the session, like any copy.
     alone = _readings({"reading_list": ref})
-    assert alone.deploy == [alone.reading_list_file]
-    assert alone.reading_list_file.deploy_datetime == datetime(
+    assert alone.deploy == [alone.reading_list]
+    assert alone.reading_list.deploy_datetime == datetime(
         2026, 9, 8, 9, 0, tzinfo=BERLIN
     )
 
@@ -3603,10 +3597,7 @@ def test_a_reading_list_file_inside_a_copied_folder_ships_with_that_folder():
         }
     )
     assert len(r.deploy) == 1
-    assert (
-        r.reading_list_file.semester_dest_repo,
-        r.reading_list_file.semester_dest_path,
-    ) == (
+    assert schedule_plan.list_dest(r.reading_list, r.deploy) == (
         "materials",
         "readings/09_week-9/READINGS.md",
     )
@@ -3621,9 +3612,10 @@ def test_a_reading_list_file_inside_a_copied_folder_ships_with_that_folder():
             },
         }
     )
-    assert (
-        len(own.deploy) == 2
-        and own.reading_list_file.semester_dest_path == "lists/09.md"
+    assert len(own.deploy) == 2
+    assert schedule_plan.list_dest(own.reading_list, own.deploy) == (
+        "materials",
+        "lists/09.md",
     )
 
 
@@ -3644,7 +3636,7 @@ def test_a_bad_reading_list_is_a_fault_on_the_entry(value, field):
         }
     )
     (r,) = sched.releases
-    assert (r.reading_list, r.reading_list_file, r.deploy) == ("", None, [])
+    assert (r.reading_list, r.deploy) == (None, [])
     (fault,) = sched.faults
     assert fault.where.startswith("readings.r1") and fault.field == field
 

@@ -176,8 +176,7 @@ def test_a_reading_list_in_a_course_file_is_read_from_the_course(monkeypatch, wi
         lambda org, repo, path: reads.append((org, repo, path)) or READING,
     )
     entry = syllabus.schedule.load("Semester-f2026").releases[0]
-    entry.reading_list = ""
-    entry.reading_list_file = Deploy(
+    entry.reading_list = Deploy(
         "cm", "readings/01_week-1/READINGS.md", "materials", None
     )
     out = wired()

@@ -326,7 +326,7 @@ def _landed(
         (d.semester_dest_repo, "" if is_repo_root(deploy_dest(d)) else deploy_dest(d))
         for d in row.deploys
     ]
-    hidden = list_dests(facts.sched.releases)
+    hidden = list_dests(planned_rows(facts.sched))
     named = row.reading_list_dest
     links, landed = [], []
     for d, (repo, dest) in zip(row.deploys, dests, strict=True):

@@ -499,7 +499,7 @@ def test_a_reading_list_shows_once_released_as_on_the_site():
         return student_status._shown_list(facts, r, None, now, lambda *rp: "/".join(rp))
 
     assert shown(row) == "materials/readings/01_intro/READINGS.md"
-    inline = dataclasses.replace(row, reading_list="- A.", reading_list_file=None)
+    inline = dataclasses.replace(row, reading_list="- A.")
     assert shown(inline) == "- A."
     facts.dest_paths["materials"] -= {
         "readings/01_intro/READINGS.md",

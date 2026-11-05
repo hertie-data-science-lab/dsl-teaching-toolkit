@@ -101,6 +101,7 @@ from .course import (
     collects_commits,
     is_repo_root,
     pages_repo,
+    within,
 )
 from .discovery import reserved_destination
 from .faults import (
@@ -369,13 +370,11 @@ class Release:
     location: str = ""
     # Each time it happens, one row each (decision 0038 rule 3); empty = one row at `when`.
     slots: list[Slot] = field(default_factory=list)
-    # A readings entry's reading list written inline, markdown (decision 0038 rule 5).
-    reading_list: str = ""
-    # A readings entry's reading list kept in a course file (`reading_list:
-    # {from_course_repo, from_path}`): the copy that lands it, so readers show the
-    # LANDED text. It ships with the entry - one of `deploy`, unless a `files:` copy of
-    # the entry already carries it (its folder), when this says where that one lands it.
-    reading_list_file: Deploy | None = None
+    # A readings entry's reading list: inline markdown (decision 0038 rule 5), or the
+    # course file it names (`{from_course_repo, from_path}`, decision 0044) as its SOURCE
+    # copy. That file ships with the entry: inside a `files:` copy that holds it, else as
+    # one of `deploy` (this very copy); `schedule_plan.list_dest` says where it lands.
+    reading_list: str | Deploy | None = None
     # `files:` was written, even empty: an entry with `files: []` is a to-do, "no files
     # yet"; one with no `files:` key is a plain session (plan 9b ruling 5).
     files_written: bool = False
@@ -1302,7 +1301,7 @@ def _parse_block(
         first = min(dated, key=lambda p: p[0].when) if dated else None
         deploys = _parse_files(entry.get("files"), tz, drops, where, dest, stems)
         _default_ship_times(deploys, first[1] if first else None)
-        text, list_file = _parse_reading_list(
+        reading_list = _parse_reading_list(
             entry,
             tz,
             drops,
@@ -1328,8 +1327,7 @@ def _parse_block(
                 session=str(session) if session else "",
                 location=location,
                 slots=[slot for slot, _written in slots],
-                reading_list=text,
-                reading_list_file=list_file,
+                reading_list=reading_list,
                 files_written="files" in entry,
                 block=block,
             )
@@ -1350,63 +1348,46 @@ def _parse_reading_list(
     first: date | datetime | None,
     dest: str,
     stems: tuple[str, ...],
-) -> tuple[str, Deploy | None]:
-    """A readings entry's `reading_list:` as `(inline text, file copy)`: markdown text,
-    or a course file named as a `files:` item is (`{from_course_repo, from_path}`, the
-    same optional keys). The file ships with the entry: a `files:` copy of the entry
-    whose source holds it carries it (its folder), unless the reference names its own
+) -> str | Deploy | None:
+    """A readings entry's `reading_list:` (`Release.reading_list`): markdown text, or a
+    course file named as a `files:` item is (`{from_course_repo, from_path}`, the same
+    optional keys). The file ships with the entry: a `files:` copy of the entry whose
+    source holds it carries it (its folder), unless the reference names its own
     destination or time; else it is one more copy, appended to `deploys`, shipping with
     the entry's first copy (else at the entry's default time). Anything else is flagged
     and the row shows no list."""
     raw = entry.get(READING_LIST)
     if raw is None:
-        return "", None
+        return None
     if isinstance(raw, str):
-        return raw.strip(), None
+        return raw.strip() or None
     if not isinstance(raw, dict):
         _flag_bad_value(drops, where, READING_LIST, raw, READING_LIST_COST, lines)
-        return "", None
+        return None
     ref = _parse_copy(raw, tz, drops, f"{where}.{READING_LIST}", dest, stems)
     if ref is None:
-        return "", None
+        return None
     own = {"to_semester_repo", "to_path", "release_datetime"} & set(raw)
-    if not own and (carried := _carried_by(ref, deploys)) is not None:
-        return "", carried
+    carrier = next(
+        (
+            d
+            for d in deploys
+            if d.course_source_repo == ref.course_source_repo
+            and within(d.course_source_path, ref.course_source_path) is not None
+        ),
+        None,
+    )
+    if not own and carrier is not None:
+        # Shipped by its folder: when that ships is when the file is wanted.
+        ref.deploy_datetime = carrier.deploy_datetime
+        return ref
     if ref.deploy_datetime is None:
         ref.deploy_datetime = min(
             (d.deploy_datetime for d in deploys if d.deploy_datetime), default=None
         )
         _default_ship_times([ref], first)
     deploys.append(ref)
-    return "", ref
-
-
-def _carried_by(ref: Deploy, deploys: list[Deploy]) -> Deploy | None:
-    """Where a `files:` copy whose source holds `ref`'s file lands it, or None: `ref`
-    redirected to that copy's destination."""
-    src = ref.course_source_path.strip("/")
-    for d in deploys:
-        base = d.course_source_path.strip("/")
-        if d.course_source_repo != ref.course_source_repo:
-            continue
-        if is_repo_root(base):
-            rest = src
-        elif src == base or src.startswith(f"{base}/"):
-            rest = src[len(base) :].strip("/")
-        else:
-            continue
-        to = (d.semester_dest_path or d.course_source_path).strip("/")
-        to = "" if is_repo_root(to) else to
-        return Deploy(
-            course_source_repo=ref.course_source_repo,
-            course_source_path=src,
-            semester_dest_repo=d.semester_dest_repo,
-            semester_dest_path="/".join(p for p in (to, rest) if p),
-            deploy_datetime=d.deploy_datetime,
-            public=ref.public,
-            lines=ref.lines,
-        )
-    return None
+    return ref
 
 
 def _shared_sources(mapping: dict) -> set[str]:
@@ -2444,8 +2425,8 @@ def load(semester_org: str) -> Schedule:
     digest issue and the mail carry it like any other (see `Schedule.faults`).
 
     A readings entry's `reading_list:` is markdown, or a course file named as a `files:`
-    item is (default name `READINGS.md`, any path; decision 0044). The file is a copy of
-    the entry (`Release.reading_list_file`), and readers show its landed copy only; inline
+    item is (default name `READINGS.md`, any path; decision 0044). The file ships with
+    the entry (`Release.reading_list`), and readers show its landed copy only; inline
     text shows once the entry has released (`schedule_plan.inline_list_opens`). Its 0.11.0
     name `reading_guide:` is a NOT_MIGRATED fault the migration's shape step renames.
 
@@ -2735,12 +2716,9 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
     for release in sched.releases:
         # A reading-list file a `files:` copy carries is named on its own: its folder
         # being there does not make it there.
-        carried = (
-            []
-            if release.reading_list_file in (None, *release.deploy)
-            else [release.reading_list_file]
-        )
-        for d in [*release.deploy, *carried]:
+        f = release.reading_list
+        extra = [f] if isinstance(f, Deploy) and f not in release.deploy else []
+        for d in [*release.deploy, *extra]:
             wanted.setdefault(d.course_source_repo, []).append(
                 _Wanted(
                     d.course_source_path,
