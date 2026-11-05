@@ -667,10 +667,10 @@ const NO_READING_LIST = 'reading_list';
 
 /**
  * The rows that carry the `no reading list` chip (decision 0044): the readings entries the
- * Suggested to-do names, and the units they attach to (by session).
+ * Suggested to-do names, and the units they attach to (by session); a set-aside one marks nothing.
  */
 export function noListRows(todo: SemesterTodo[], doc: Record<string, unknown>): (r: Pick<Row, 'type' | 'entry'>) => boolean {
-  const keys = new Set(todo.flatMap((t) => (t.check === NO_READING_LIST && t.entry ? [t.entry] : [])));
+  const keys = new Set(todo.flatMap((t) => (t.check === NO_READING_LIST && t.entry && !t.set_aside ? [t.entry] : [])));
   const sessionOf = (type: string, k: string) => obj(obj(doc[pluralOf(type)])[k]).session;
   const sessions = new Set([...keys].map((k) => sessionOf(READINGS_KIND, k)).filter(Number.isInteger));
   return (r) => (r.type === READINGS_KIND ? keys.has(r.entry) : SESSION_KINDS.includes(r.type) && sessions.has(sessionOf(r.type, r.entry)));

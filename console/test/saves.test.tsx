@@ -793,6 +793,10 @@ describe('the reading list in the schedule entry sheet (decision 0044)', () => {
     expect(noList({ type: 'lecture', entry: 'lecture-6' })).toBe(true);
     for (const [type, entry] of [['readings', 'readings-4'], ['readings', 'readings-5'], ['lecture', 'lecture-4'], ['lecture', 'lecture-7'], ['exam', 'readings-6']]) expect(noList({ type, entry })).toBe(false);
     expect(noListRows([], d)({ type: 'readings', entry: 'readings-6' })).toBe(false);
+    // Set aside: no chip, on either row.
+    const aside = noListRows([{ ...todo, set_aside: true }], d);
+    expect(aside({ type: 'readings', entry: 'readings-6' })).toBe(false);
+    expect(aside({ type: 'lecture', entry: 'lecture-6' })).toBe(false);
   });
 
   it('loads a typed path that is already in the repo as that Existing file, and saves over its sha', async () => {
