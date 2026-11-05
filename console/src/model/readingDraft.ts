@@ -246,14 +246,18 @@ function setTitle(b: Book, t: string) {
   b.notes.push({ part: 'Book', level: 'check', text: 'Title set in sentence case: check names and acronyms' });
 }
 
-/** A year the pages print (a © line, an arXiv stamp), else one in the filename. */
+/**
+ * A year the pages print (a © line, an arXiv stamp). A year in the filename alone is not taken
+ * (the trial found 7 of 24 wrong): the line keeps a `?`, and the note says what the filename says.
+ */
 function yearOf(text: string, path: string): { year: string | null; note: Note } {
   const c = text.match(/(?:©|\(c\)|copyright)\s*(?:©\s*)?((?:19|20)\d{2})\b/i) ?? text.match(/arXiv:\S+\s+\[[^\]]+\]\s+\d{1,2}\s+\w{3}\s+((?:19|20)\d{2})/);
   if (c) return { year: c[1], note: { part: 'Year', level: 'check', text: `From the pages read: "${c[0]}"` } };
   const y = words(path).find((w) => /^(19|20)\d{2}$/.test(w));
-  return y
-    ? { year: y, note: { part: 'Year', level: 'guess', text: 'From the filename: a filename year is often the file\'s, not the edition\'s' } }
-    : { year: null, note: { part: 'Year', level: '?', text: "No year in the PDF's details, the pages read or the filename" } };
+  return {
+    year: null,
+    note: { part: 'Year', level: '?', text: y ? `No year in the PDF's details or pages; the filename says ${y}, which is often the file's year, not the edition's` : "No year in the PDF's details, the pages read or the filename" },
+  };
 }
 
 /** A page's text as lines: a new line where pdf.js marks one or where the baseline moves. */

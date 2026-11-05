@@ -85,10 +85,13 @@ describe('the PDF details', () => {
     ]);
   });
 
-  it('fall back to the filename for authors and year when the details have no title, each part tagged', () => {
+  it('fall back to the filename for authors, never for the year, when the details have no title, each part tagged', () => {
     const [d] = draftReadings([{ path: 'readings/02_session-2__s2-jurafsky-martin-2024.pdf', facts: jurafsky }]);
-    expect(d.line).toBe('Jurafsky, ?, & Martin, ? (2024). *?* (Ch. 2, pp. 5–13). ?.');
-    expect(d.notes.map((n) => [n.part, n.level])).toEqual([['Book', '?'], ['Authors', 'guess'], ['Year', 'guess'], ['Publisher', '?'], ['Chapter', 'check'], ['Pages', 'found'], ['Section', 'found']]);
+    expect(d.line).toBe('Jurafsky, ?, & Martin, ? (?). *?* (Ch. 2, pp. 5–13). ?.');
+    expect(d.notes.map((n) => [n.part, n.level])).toEqual([['Book', '?'], ['Authors', 'guess'], ['Year', '?'], ['Publisher', '?'], ['Chapter', 'check'], ['Pages', 'found'], ['Section', 'found']]);
+    // A filename year is not taken (7 of 24 were wrong in the trial): the note says what it says.
+    expect(d.notes.find((n) => n.part === 'Year')!.text).toBe("No year in the PDF's details or pages; the filename says 2024, which is often the file's year, not the edition's");
+    expect(draftReadings([{ path: 'r/s2-jurafsky-martin.pdf', facts: jurafsky }])[0].notes.find((n) => n.part === 'Year')!.text).toBe("No year in the PDF's details, the pages read or the filename");
     expect(d.notes[1].text).toBe('Surnames from the filename (the PDF\'s details name "Sascha Göbel", not in the filename)');
   });
 
