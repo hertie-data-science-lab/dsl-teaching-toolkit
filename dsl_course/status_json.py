@@ -39,7 +39,7 @@ import copy
 import json
 import re
 from collections import Counter
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -102,6 +102,7 @@ from .faults import ConfigFault, FaultKind, Unusable
 from .gh_commits import last_commit_at
 from .gh_contents import (
     WITHHELD_ROOT_STUBS,
+    folder_files,
     get_file_content,
     is_untouched_stub,
     line_of,
@@ -121,6 +122,7 @@ from .opencourse import load as load_opencourse
 from .opencourse import parse as parse_opencourse
 from .ops.outcome import OUTCOMES_DIR
 from .ops.registry import STATUS_SCHEMA
+from .readings import READING_OVERLAY_FILE
 from .releaseignore import RELEASEIGNORE, Tree, reviewed
 from .repos import default_branch
 from .schedule_plan import (
@@ -208,6 +210,43 @@ class TemplateFacts:
     main_edited: str | None = None
 
 
+# Decision 0046 rule 5: the folder whose subfolders each hold one session's readings.
+READINGS_DIR = "readings"
+
+
+@dataclass(frozen=True)
+class ReadingFolder:
+    """A folder directly under `readings/`: its files directly inside (dot files and
+    folders not counted) and whether one of them is a `READINGS.md` (any case)."""
+
+    path: str
+    files: int
+    has_list: bool
+
+
+def reading_folders(paths: Iterable[str]) -> list[ReadingFolder]:
+    """Decision 0046 rules 5-6: every `readings/<name>/` folder among the repo file
+    `paths`, sorted. The console's `readingFolderState` (model/readingFolders.ts) is the
+    same rule for its tree's chip; change both together."""
+    found: dict[str, list[str]] = {}
+    for path in paths:
+        top, _, rest = path.partition("/")
+        name, _, below = rest.partition("/")
+        if top != READINGS_DIR or not name or not below:
+            continue
+        names = found.setdefault(f"{READINGS_DIR}/{name}", [])
+        if "/" not in below and not below.startswith("."):
+            names.append(below)
+    return [
+        ReadingFolder(
+            folder,
+            len(names),
+            any(n.lower() == READING_OVERLAY_FILE.lower() for n in names),
+        )
+        for folder, names in sorted(found.items())
+    ]
+
+
 @dataclass
 class MaterialsFacts:
     """One materials repo (topic `dsl-materials`), as far as C4 asks about it.
@@ -219,6 +258,8 @@ class MaterialsFacts:
     syllabus_path: str = DEFAULT_SYLLABUS
     # The top-level `.releaseignore`'s text; None when there is none.
     releaseignore: str | None = None
+    # Decision 0046 rule 6: the folders directly under `readings/`.
+    reading_folders: list[ReadingFolder] = field(default_factory=list)
 
 
 @dataclass
@@ -884,12 +925,22 @@ def _syllabus_why(m: MaterialsFacts) -> str:
     return f"{file}, and the weekly plan (written from the schedule) is not in it yet."
 
 
+# Decision 0046 rule 6: a readings folder's check id is `reading_list:<folder>`; its
+# to-do's `check` is the part before the colon, the schedule's `NO_READING_LIST`.
+READING_LIST_CHECK = "reading_list"
+READING_FOLDER_WHY = (
+    "The folder has reading files but no READINGS.md. Students see the files only; "
+    "a list says what to read and how."
+)
+
+
 def materials_checks(m: MaterialsFacts) -> list[dict]:
     """Decision 0022 rule 5: a materials repo's checklist - the syllabus with the weekly
     plan it carries (one check, decision 0034), and the withheld patterns, both suggested
     (decision 0034: releases run without either). Folders carry no kind (decision 0038:
-    the schedule says what each entry is), so there is no folder check. `why` names what
-    is missing, None once the check is done."""
+    the schedule says what each entry is), so there is no folder check - save one
+    suggested `reading_list:<folder>` per readings folder with files and no READINGS.md
+    (decision 0046 rule 6). `why` names what is missing, None once the check is done."""
     rows = (
         (
             "syllabus",
@@ -905,6 +956,19 @@ def materials_checks(m: MaterialsFacts) -> list[dict]:
             reviewed(m.releaseignore),
             "Check that what is withheld from students is right.",
         ),
+    )
+    # Decision 0046 rule 6: one suggestion per readings folder with files and no list;
+    # a folder with its list is not listed (only the two above show done).
+    rows += tuple(
+        (
+            f"{READING_LIST_CHECK}:{f.path}",
+            f"{f.path}: reading list",
+            SUGGESTED,
+            False,
+            READING_FOLDER_WHY,
+        )
+        for f in m.reading_folders
+        if f.files and not f.has_list
     )
     return [
         {
@@ -2810,8 +2874,10 @@ def _syllabus_path(top: Collection[str]) -> str:
 
 def _materials_facts(course_org: str, repo: str) -> MaterialsFacts:
     """A materials repo's C4 facts: its syllabus (markdown read, anything else only looked
-    for) and its `.releaseignore`. The top is listed, never the whole tree: a repo too
-    large for one recursive listing must not fail the course's status."""
+    for), its `.releaseignore` and its readings folders. The top is listed, never the whole
+    tree: a repo too large for one recursive listing must not fail the course's status.
+    The readings folders are `readings/`'s own tree, read only when the top has it, and
+    an unreadable one is no folders (`folder_files`: a suggestion, never a fault)."""
     top = top_level(course_org, repo)
     path = _syllabus_path(top)
     if path not in top:
@@ -2825,7 +2891,15 @@ def _materials_facts(course_org: str, repo: str) -> MaterialsFacts:
         if RELEASEIGNORE in top
         else None
     )
-    return MaterialsFacts(repo, syllabus, path, releaseignore=releaseignore)
+    # Decision 0046 rule 6: one read of `readings/`'s own tree, only when there is one.
+    folders = (
+        reading_folders(folder_files(course_org, repo, READINGS_DIR))
+        if top.get(READINGS_DIR) == "dir"
+        else []
+    )
+    return MaterialsFacts(
+        repo, syllabus, path, releaseignore=releaseignore, reading_folders=folders
+    )
 
 
 def gather_course(course_org: str) -> CourseFacts:

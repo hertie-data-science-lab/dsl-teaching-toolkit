@@ -506,7 +506,9 @@ Decision 0034 (need, time, verdict), all computed by the engine so the console h
   and K1-K6 are needed; C4-C6 suggested (there is no K7: the archive date is a to-do only).
   A materials repo needs nothing once it exists (decision 0038: folders carry no kind); the
   syllabus and its weekly plan are ONE suggested check, `syllabus`, and the reviewed
-  `.releaseignore` (`withheld`, confirmed by `materials.confirm_withheld`) another. An entry
+  `.releaseignore` (`withheld`, confirmed by `materials.confirm_withheld`) another; each
+  `readings/<name>/` folder with files and no `READINGS.md` is a suggested
+  `reading_list:<folder>` (decision 0046; its to-do's `check` is `reading_list`). An entry
   written with `files: []` is the suggested to-do `schedule:files:<key>` (`check` `files`),
   dated by the entry. A template's brief and starter are
   needed. The semester's suggested to-dos (`semester.todo[]`) are `site:home`,

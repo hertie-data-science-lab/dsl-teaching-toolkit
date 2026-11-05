@@ -604,6 +604,28 @@ def _tree(org: str, repo: str, branch: str, jq: str) -> list[str]:
     return _untruncated(out, org, repo)
 
 
+def folder_files(org: str, repo: str, folder: str) -> list[str]:
+    """Every file under `folder` on `org/repo`'s default branch, as repo paths - ONE
+    recursive read of that folder's own tree (`HEAD:<folder>`), so the rest of the repo
+    costs nothing and is never too large for it.
+
+    For a reader that only SUGGESTS (the status's reading-list check): unlike `_tree` it
+    never raises - any failure is `[]`, as `repo_exists` is optimistic - and a truncated
+    listing is used as it came, a missed suggestion being harmless."""
+    folder = folder.strip("/")
+    code, out = _read(
+        org,
+        repo,
+        "api",
+        f"repos/{org}/{repo}/git/trees/HEAD:{folder}?recursive=1",
+        "--jq",
+        '.tree[] | select(.type=="blob") | .path',
+    )
+    if code != 0:
+        return []
+    return [f"{folder}/{line}" for line in out.splitlines() if line]
+
+
 def repo_blob_shas(org: str, repo: str, branch: str) -> dict[str, str]:
     """`{path: blob sha}` for every file in `org/repo`'s `branch` - ONE recursive fetch.
 
