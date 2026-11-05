@@ -118,6 +118,8 @@ export interface Todo {
   set_aside?: boolean;
   /** The check it is the to-do of: a materials check's id, or `brief`, `starter`, `description`, `home`, `archive_date`, `email`. */
   check?: string;
+  /** Where it is fixed, as a problem's (`schedule:reading_list:<key>` and its siblings). */
+  fix?: Fix;
 }
 
 /** A semester's to-do (decision 0034): a suggested item such as the site's home page (`site:home`). */
