@@ -892,7 +892,9 @@ code: Sync membership skips the semester it cannot read (`sync_membership._CONTE
 `faults.Unusable` plus a YAML error), skips a semester with no `semester.yml` and no
 `students.csv`; a course
 file it cannot read reconciles nothing at all and still exits 0; a `schedule.yml` that does
-not parse is one fault on the file, not a red scheduler tick; Send enrolment codes is green
+not parse is one fault on the file, not a red scheduler tick (Sync site alone goes red on it,
+as on an unreadable `student_site.host`: built from the empty plan it deleted every page, so
+`sync_site` raises and the last published site stands); Send enrolment codes is green
 for a roster nobody can parse and for one with nothing in it yet (`enrol_codes._GREEN`). A
 red X means the RUN broke - a `gh` read or write refused, a token that lost its scope, an
 unset mail transport - and the maintainer is emailed its log tail. `faults.Unusable` is the

@@ -318,6 +318,8 @@ Don't close it by hand: closing changes nothing in the file, and the next tick r
 
 A source that cannot be *read* (a rate limit, a permissions blip) is never reported as missing.
 
+**A `schedule.yml` that does not parse** stops everything for the semester: nothing is released, handed out, snapshotted or graded, and **Sync site** goes red and leaves the published site as it was. The issue lists that one fault and leaves the rest as they stood - nothing reads as cleared until the file parses again.
+
 This is one of eight such issues, one per file you edit by hand, all of them working the same way: [Why did I get this email?](reference/actions-reference.md#why-did-i-get-this-email).
 
 By hand: add `--check-sources <course-org>` to either `--validate` form above. Every line names the field to go and edit, not just the entry it sits in:
