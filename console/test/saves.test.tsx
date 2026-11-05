@@ -919,9 +919,9 @@ describe('the reading list in the schedule entry sheet (decision 0044)', () => {
     await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'readings-6' })} />);
     const sheet = q('.entry');
     expect(sheet.classList.contains('entry-full')).toBe(false);
-    await click(button('Full screen'));
+    await click(q<HTMLButtonElement>('.entry button[aria-label="Full screen"]'));
     expect(q('.entry').classList.contains('entry-full')).toBe(true);
-    await click(button('Leave full screen'));
+    await click(q<HTMLButtonElement>('.entry button[aria-label="Exit full screen"]'));
     expect(q('.entry').classList.contains('entry-full')).toBe(false);
   });
 });

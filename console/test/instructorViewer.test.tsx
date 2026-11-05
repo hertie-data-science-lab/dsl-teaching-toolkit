@@ -111,13 +111,12 @@ describe('the viewer’s full screen', () => {
   it('toggles from the header, and Escape leaves it', async () => {
     const el = await mount(<MaterialsIndexScreen {...cp(`${MAT}/lectures/01/notes.md`)} />);
     const panel = () => el.querySelector('.materials-file > section')!;
-    const button = () => [...panel().querySelectorAll('button')].find((b) => /full screen/i.test(b.textContent!))!;
-    expect(button().textContent).toBe('Full screen');
+    const button = () => panel().querySelector<HTMLButtonElement>('button.full-toggle')!;
+    expect(button().getAttribute('aria-label')).toBe('Full screen');
     expect(panel().classList.contains('viewer-full')).toBe(false);
     await act(() => button().click());
     expect(panel().classList.contains('viewer-full')).toBe(true);
-    expect(button().getAttribute('aria-pressed')).toBe('true');
-    expect(button().textContent).toBe('Leave full screen');
+    expect(button().getAttribute('aria-label')).toBe('Exit full screen');
     await act(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); });
     expect(panel().classList.contains('viewer-full')).toBe(false);
     await act(() => button().click());

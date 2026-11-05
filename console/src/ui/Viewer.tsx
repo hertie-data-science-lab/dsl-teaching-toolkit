@@ -8,6 +8,7 @@
 // file fills the screen; Escape or the button leaves). `Split` keeps a list beside the open
 // file: in a left column on wide screens, above the file on narrow ones.
 
+import type { Ref } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import type { TreeEntry } from '../github/client';
@@ -85,9 +86,9 @@ export function useFullScreen(el: { current: HTMLElement | null }, screen = true
   return [full, () => setFull((f) => !f)];
 }
 
-/** The Full screen toggle of the file viewer's header, and of the schedule entry sheet's. */
-export function FullScreenButton({ full, toggle }: { full: boolean; toggle: () => void }) {
-  return <button class="btn small quiet" type="button" aria-pressed={full} onClick={toggle}>{full ? 'Leave full screen' : 'Full screen'}</button>;
+/** The Full screen icon of the file viewer's header, the schedule entry sheet's and the marks sheet's. */
+export function FullScreenButton({ full, toggle, btnRef }: { full: boolean; toggle: () => void; btnRef?: Ref<HTMLButtonElement> }) {
+  return <button class="icon-btn full-toggle" type="button" ref={btnRef} aria-label={full ? 'Exit full screen' : 'Full screen'} title={full ? 'Exit full screen (Esc)' : 'Full screen'} onClick={toggle}>{full ? '⤡' : '⤢'}</button>;
 }
 
 export function FileView({ org, repo, entry, tree, actions }: { org: string; repo: string; entry: TreeEntry; tree: TreeEntry[]; actions?: preact.ComponentChildren }) {
