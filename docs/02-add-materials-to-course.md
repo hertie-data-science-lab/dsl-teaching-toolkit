@@ -6,7 +6,7 @@ by default. What makes a repo a materials repo is its `dsl-materials` topic, whi
 add the topic to a repo you made by hand to have it listed as one (the console's **Handout
 materials** page does it: **Treat as course materials** on the repo's row). The same page shows each materials repo's
 files as a folder tree: open a folder to see inside it; a folder links to GitHub, and a file opens in
-the console (its GitHub link and a **Full screen** button in its header, for presenting).
+the console (its GitHub link and a **Full screen** icon (⤢) in its header, for presenting).
 
 Each repo's own settings page (its name under **Course materials** in the course nav) has a
 **Files** panel: the repo's tree, and three views of it.
