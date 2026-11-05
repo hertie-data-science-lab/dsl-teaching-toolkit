@@ -3613,6 +3613,19 @@ def test_a_reading_list_file_inside_a_copied_folder_ships_with_that_folder():
         }
     )
     assert len(own.deploy) == 2
+    # Written blank, those keys are the defaults: the folder still carries it.
+    blank = _readings(
+        {
+            "files": [{"from_course_repo": "cm", "from_path": "readings/09"}],
+            "reading_list": {
+                "from_course_repo": "cm",
+                "from_path": "readings/09/READINGS.md",
+                "to_path": None,
+                "release_datetime": None,
+            },
+        }
+    )
+    assert len(blank.deploy) == 1
     assert schedule_plan.list_dest(own.reading_list, own.deploy) == (
         "materials",
         "lists/09.md",

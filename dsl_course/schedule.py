@@ -1400,7 +1400,12 @@ def _parse_reading_list(
     ref = _parse_copy(raw, tz, drops, f"{where}.{READING_LIST}", dest, stems)
     if ref is None:
         return None
-    own = {"to_semester_repo", "to_path", "release_datetime"} & set(raw)
+    # A key written blank (`to_path:`) is the default, as `_parse_copy` reads it.
+    own = [
+        k
+        for k in ("to_semester_repo", "to_path", "release_datetime")
+        if raw.get(k) not in (None, "")
+    ]
     carrier = next(
         (
             d
