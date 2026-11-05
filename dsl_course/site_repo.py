@@ -28,6 +28,7 @@ from .course import (
     is_repo_root,
     pages_repo,
     people_by_role,
+    within,
 )
 from .discovery import course_org_for_semester, list_org_repos
 from .gh_teams import acting_login
@@ -1012,26 +1013,36 @@ def landed_links(
     blobs: Sequence[str],
     path: str,
     allow: frozenset[str],
-    hidden: Collection[str] = frozenset(),
+    landings: Collection[tuple[str, str, bool]],
+    key: str,
     hosted: Hosted | None = None,
-    own: str | None = None,
 ) -> list[Link] | None:
-    """The links for what a copy into `repo/path` has landed, or None while nothing has:
-    a file is one link, a folder its files as GitHub shows them (`shape_links`), the repo
-    root the whole repo. `blobs` is every file of the repo, sorted. `hidden` are paths in
-    `repo` never linked though landed - the reading-list files readings entries name
-    (`schedule_plan.list_dests`), whose text a row inlines - and a copy that landed
-    nothing else has not landed (None), so a list kept in a lecture folder does not
-    release the lecture. `own`, the asking row's own list, is the exception: having
-    landed it, the copy has landed (no link). `hosted` (the semester site's alone) adds
-    each hosted copy's `view_url`. The ONE listing rule: the semester site and the
-    student file both read it."""
+    """The links for what a copy of row `key` into `repo/path` has landed, or None while
+    nothing has: a file is one link, a folder its files as GitHub shows them
+    (`shape_links`), the repo root the whole repo. `blobs` is every file of the repo,
+    sorted. `hosted` (the semester site's alone) adds each hosted copy's `view_url`. The
+    ONE listing rule: the semester site and the student file both read it.
+
+    A landed path is the row's whose copy lands it DEEPEST (`landings`, every row's copy
+    into `repo`: `schedule_plan.landings`), so another row's copy inside this one keeps
+    its own files. A reading-list file (`inline`) is never linked - its row inlines the
+    text - and counts as landed for its own row only: a list kept in a lecture folder
+    does not release the lecture, and a readings copy that landed only its list has
+    landed (no link)."""
     path = "" if is_repo_root(path) else path.strip("/")
     prefix = f"{path}/" if path else ""
     landed = [b for b in blobs if b == path or b.startswith(prefix)] if path else blobs
-    shown = [b for b in landed if b not in hidden]
+    shown, listed = [], False
+    for b in landed:
+        holders = [h for h in landings if within(h[0], b) is not None]
+        deepest = max((len(h[0]) for h in holders), default=-1)
+        top = [h for h in holders if len(h[0]) == deepest]
+        if any(inline for _p, _k, inline in top):
+            listed = listed or any(k == key and inline for _p, k, inline in top)
+        elif not top or any(k == key for _p, k, _i in top):
+            shown.append(b)
     if not shown:
-        return [] if own is not None and own in landed else None
+        return [] if listed else None
     if path in shown:
         return [file_link(org, repo, branch, path, path.rsplit("/", 1)[-1], hosted)]
     files = [file_link(org, repo, branch, b, b[len(prefix) :], hosted) for b in shown]

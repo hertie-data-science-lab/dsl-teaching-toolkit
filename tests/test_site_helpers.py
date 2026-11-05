@@ -354,7 +354,7 @@ def _deploy(path, repo="materials", dest=None):
 def _landed(monkeypatch, deploy, gh=_tree_gh):
     monkeypatch.setattr(site, "default_branch", lambda org, repo, **k: "main")
     monkeypatch.setattr(gh_contents, "gh", gh)
-    return site._landed("Semester-f2026", deploy, frozenset(), {})
+    return site._landed("Semester-f2026", deploy, frozenset(), {}, {}, "")
 
 
 def test_a_landed_folder_links_its_files_and_folds_its_subfolders(monkeypatch):
@@ -430,7 +430,7 @@ _READINGS_TREE = (
 def test_a_readings_folder_lists_every_file_it_holds(monkeypatch):
     # A READINGS.md the entry does not name is a file like any other.
     monkeypatch.setattr(site, "_repo_tree", lambda org, repo: ("main", _READINGS_TREE))
-    landed = site._landed("C", _deploy("readings/01_week-1"), frozenset(), {})
+    landed = site._landed("C", _deploy("readings/01_week-1"), frozenset(), {}, {}, "")
     assert sorted(x.name for x in landed.links) == [
         "READINGS.md",
         "ch1.pdf",
@@ -450,14 +450,41 @@ def test_the_named_reading_list_file_is_never_a_link(monkeypatch):
         deploys=(_deploy("readings/01_week-1"),),
         reading_list=named,
     )
-    hidden = schedule_plan.list_dests([row])
+    marks = schedule_plan.landings([row])
     live = frozenset({"materials"})
-    (landed,) = site._row_landed("C", row, frozenset(), live, {}, hidden)
+    (landed,) = site._row_landed("C", row, frozenset(), live, {}, marks)
     assert sorted(x.name for x in landed.links) == ["ch1.pdf", "notes.md", "refs.bib"]
     # The file alone, landed: the copy has landed, and links nothing.
     alone = dataclasses.replace(row, deploys=(named,))
-    (landed,) = site._row_landed("C", alone, frozenset(), live, {}, hidden)
+    marks = schedule_plan.landings([alone])
+    (landed,) = site._row_landed("C", alone, frozenset(), live, {}, marks)
     assert landed.links == []
+
+
+def test_a_path_is_listed_under_the_row_whose_copy_lands_it_deepest():
+    # Another row's copy inside this one keeps its files; a reading list is never a link
+    # and releases only its own row.
+    blobs = (
+        "lectures/01/READINGS.md",
+        "lectures/01/lab/a.ipynb",
+        "lectures/01/slides.pdf",
+    )
+    marks = (
+        schedule_plan.Landing("lectures/01", "lecture-1", False),
+        schedule_plan.Landing("lectures/01/lab", "lab-1", False),
+        schedule_plan.Landing("lectures/01/READINGS.md", "readings-1", True),
+    )
+
+    def names(path: str, key: str, there=blobs) -> list[str] | None:
+        links = site_repo.landed_links(
+            "C", "materials", "main", there, path, frozenset(), marks, key
+        )
+        return None if links is None else [k.name for k in links]
+
+    assert names("lectures/01", "lecture-1") == ["slides.pdf"]
+    assert names("lectures/01/lab", "lab-1") == ["a.ipynb"]
+    assert names("lectures/01/READINGS.md", "readings-1") == []
+    assert names("lectures/01", "lecture-1", blobs[:1]) is None
 
 
 def test_a_reading_list_is_the_entries_text_nested_under_the_row():

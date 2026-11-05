@@ -493,7 +493,9 @@ def test_a_reading_list_shows_its_landed_copy_as_on_the_site():
     (row,) = [
         r for r in student_status.planned_rows(facts.sched) if r.key == "readings_01"
     ]
-    shown = student_status._shown_list(facts, row, None, NOW, lambda *rp: "/".join(rp))
+    shown = student_status._shown_list(
+        facts, row, None, False, NOW, lambda *rp: "/".join(rp)
+    )
     assert shown == "materials/readings/01_intro/READINGS.md"
 
 

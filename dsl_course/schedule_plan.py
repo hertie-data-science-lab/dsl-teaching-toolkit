@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
+from typing import NamedTuple
 from zoneinfo import ZoneInfo
 
 from . import policy, schedule
@@ -228,16 +229,31 @@ def shown_list(
     return (row.reading_list or "") if released else ""
 
 
-def list_dests(rows: Iterable[PlannedRow]) -> dict[str, frozenset[str]]:
-    """Where every readings entry's named reading-list file lands, per semester repo
-    (`PlannedRow.reading_list_dest` of each of `rows`). No row links these,
-    and a copy that has landed nothing else has not landed (`site_repo.landed_links`): a
-    list kept in a lecture folder ships with its readings, never as that lecture."""
-    out: dict[str, set[str]] = {}
+class Landing(NamedTuple):
+    """Where one copy of a row lands in its semester repo ("" for the root), the row's
+    key, and whether it is the row's reading-list file (`inline`: shown as text on the
+    row, never linked)."""
+
+    path: str
+    key: str
+    inline: bool
+
+
+def landings(rows: Iterable[PlannedRow]) -> dict[str, tuple[Landing, ...]]:
+    """Every copy `rows` land, per semester repo, each readings entry's reading-list
+    file (`PlannedRow.reading_list_dest`) flagged `inline`: what `site_repo.landed_links`
+    gives each landed path its row by (the deepest landing holding it)."""
+    out: dict[str, dict[Landing, None]] = {}
     for r in rows:
-        if (named := r.reading_list_dest) is not None:
-            out.setdefault(named[0], set()).add(named[1])
-    return {repo: frozenset(paths) for repo, paths in out.items()}
+        named = r.reading_list_dest
+        for d in r.deploys:
+            to = (d.semester_dest_repo, deploy_dest(d))
+            if to != named:
+                path = "" if is_repo_root(to[1]) else to[1]
+                out.setdefault(to[0], {})[Landing(path, r.key, False)] = None
+        if named is not None:
+            out.setdefault(named[0], {})[Landing(named[1], r.key, True)] = None
+    return {repo: tuple(found) for repo, found in out.items()}
 
 
 def site_rows(rows: list[PlannedRow]) -> list[SiteRow]:
