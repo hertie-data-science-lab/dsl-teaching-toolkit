@@ -380,7 +380,7 @@ export function emptyTwin(d: EntryDraft): EntryDraft {
 }
 
 /** Whether a new twin holds anything worth writing. */
-export const twinUsed = (t: EntryDraft) => !!(t.id || t.files.length || t.list?.text?.trim() || t.title.trim());
+export const twinUsed = (t: EntryDraft) => !!(t.id || t.files.length || (t.list && !t.list.inline) || t.list?.text?.trim() || t.title.trim());
 
 // ------------------------------------------------------------------ keys
 
