@@ -52,6 +52,15 @@ export interface Files {
   refreshTree(owner: string, repo: string): void;
 }
 
+/** The folder a repo path is in ('' at the top). */
+export const parentOf = (path: string) => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '');
+
+/** Whether `repo`'s tree, as read so far, has a file at `path` (false while it is read). */
+export function fileInTree(files: Files, org: string, repo: string, path: string): boolean {
+  const t = files.tree(org, repo);
+  return t.kind === 'ready' && t.paths.some((x) => !x.dir && x.path === path);
+}
+
 /** Files read live through the client, each on first ask. */
 export class LiveFiles implements Files {
   private files = new Map<string, Signal<FileState>>();

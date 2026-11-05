@@ -10,6 +10,8 @@ import { kebab } from './format';
 import { solutionBeforeCutoff } from './labels';
 import { ARCHIVE_GRACE_DAYS, DEFAULT_DEST_REPO, EVENT_KIND, KINDS, pluralOf } from './policy';
 import type { AssignmentState } from './types';
+import { parentOf, type FileState, type Files } from './files';
+import { baseName } from './readingDraft';
 
 type Raw = Record<string, unknown>;
 
@@ -78,19 +80,17 @@ export interface Slot {
 
 /**
  * A readings entry's reading list as the sheet edits it (decision 0044): a markdown file in a
- * course materials repo, or the legacy text written in the schedule (`inline`). A file's text
- * and sha are read after the entry (`loaded` false until then); a file not there yet has a
- * null sha (New file).
+ * course materials repo, or the legacy text written in the schedule (`inline`). A file's saved
+ * text and sha are never held here: they are the files cache's (`Files.file`), read at render
+ * and at save.
  */
 export interface ListDraft {
   /** The course repo and path of the file; blank for inline text. */
   repo: string;
   path: string;
-  text: string;
-  /** The file's blob sha; null for a file not there yet, and for inline text. */
-  sha: string | null;
   inline: boolean;
-  loaded: boolean;
+  /** The instructor's text: a file's edit (null: untouched, the file's own text), or the inline text. */
+  text: string | null;
 }
 
 /** One entry of a content block (lecture, lab, readings, exam, event, supporting files, ...). */
@@ -258,18 +258,18 @@ export function readEntry(type: string, id: string, raw: unknown): EntryDraft {
   const e = obj(raw);
   return {
     kind: 'entry', type, id, session: int(e.session), number: int(e.number) === int(e.session) && SESSION_KINDS.includes(type) ? '' : int(e.number),
-    title: s(e.title), details: s(e.details), slots: readSlots(e), files: readFiles(e.files), list: type === READINGS_KIND ? readList(e.reading_list ?? e.reading_guide) : null,
+    title: s(e.title), details: s(e.details), slots: readSlots(e), files: readFiles(e.files), list: type === READINGS_KIND ? listOf(e.reading_list ?? e.reading_guide) : null,
     show: e.show_on_site === undefined || e.show_on_site === null ? !hiddenKind(type) : e.show_on_site !== false,
     provisional: e.tbc === true, tbc: isTbc(e.event_datetime),
   };
 }
 
-/** A `reading_list:` as the sheet holds it: text is inline, a `{from_course_repo, from_path}` a file still to read. */
-export function readList(v: unknown): ListDraft | null {
-  if (typeof v === 'string') return { repo: '', path: '', text: v, sha: null, inline: true, loaded: true };
+/** A `reading_list:` as the sheet holds it: text is inline, a `{from_course_repo, from_path}` the file, untouched. */
+function listOf(v: unknown): ListDraft | null {
+  if (typeof v === 'string') return { repo: '', path: '', inline: true, text: v };
   const r = obj(v);
   if (typeof r.from_course_repo !== 'string' || typeof r.from_path !== 'string') return null;
-  return { repo: r.from_course_repo, path: r.from_path.replace(/^\/+/, ''), text: '', sha: null, inline: false, loaded: false };
+  return { repo: r.from_course_repo, path: r.from_path.replace(/^\/+/, ''), inline: false, text: null };
 }
 
 /** The readings entry attached to `session` (the first in the file), or null. */
@@ -380,7 +380,7 @@ export function emptyTwin(d: EntryDraft): EntryDraft {
 }
 
 /** Whether a new twin holds anything worth writing. */
-const twinUsed = (t: EntryDraft) => !!(t.id || t.files.length || t.list?.text.trim() || t.title.trim());
+export const twinUsed = (t: EntryDraft) => !!(t.id || t.files.length || t.list?.text?.trim() || t.title.trim());
 
 // ------------------------------------------------------------------ keys
 
@@ -446,14 +446,14 @@ function keep<T>(raw: unknown, v: T, dflt: T): T | undefined {
 const text = (v: string) => (v.trim() ? v : undefined);
 /**
  * The `reading_list:` to write: inline text as text; a file as `{from_course_repo, from_path}`
- * over the keys the file already had (`to_path`, ...). A new file with nothing typed is not
- * written; the entry's `files:` never carries the list file.
+ * over the keys the file already had (`to_path`, ...). A file not in the repo with nothing typed
+ * is not written; the entry's `files:` never carries the list file.
  */
-function listValue(l: ListDraft | null, raw: unknown): unknown {
+function listValue(l: ListDraft | null, raw: unknown, exists: Exists): unknown {
   if (!l) return raw;
-  if (l.inline) return text(l.text);
+  if (l.inline) return text(l.text ?? '');
   const was = raw !== null && typeof raw === 'object' ? obj(raw) : null;
-  if (!was && !l.sha && !l.text.trim()) return undefined;
+  if (!was && !l.text?.trim() && !exists(l.repo, l.path)) return undefined;
   return { ...was, from_course_repo: l.repo, from_path: l.path };
 }
 
@@ -497,8 +497,12 @@ function numberValue(d: EntryDraft, raw: Raw, unit: boolean): number | undefined
   return unit && n === d.session && raw.number !== n ? undefined : n;
 }
 
-/** A content entry as it goes into the file, merged over what the file has (none: a new entry). */
-export function entryValue(d: EntryDraft, rawEntry: unknown): Raw {
+/**
+ * A content entry as it goes into the file, merged over what the file has (none: a new entry).
+ * `exists`, the course repos' trees: a readings entry with no list names the file waiting at
+ * its default path (`pendingAdoption`).
+ */
+export function entryValue(d: EntryDraft, rawEntry: unknown, exists: Exists = noFile): Raw {
   const raw = obj(rawEntry);
   const rawFiles = Array.isArray(raw.files) ? raw.files : [];
   const unit = SESSION_KINDS.includes(d.type);
@@ -513,7 +517,7 @@ export function entryValue(d: EntryDraft, rawEntry: unknown): Raw {
     location: when.location,
     details: text(d.details),
     // `reading_guide:` is the 0.11.0 name (an org not migrated yet): read as the list, written back as `reading_list:` only.
-    reading_list: d.type === READINGS_KIND ? listValue(d.list, raw.reading_list ?? raw.reading_guide) : raw.reading_list,
+    reading_list: d.type === READINGS_KIND ? listValue(d.list ?? pendingAdoption(d, exists), raw.reading_list ?? raw.reading_guide, exists) : raw.reading_list,
     reading_guide: d.type === READINGS_KIND ? undefined : raw.reading_guide,
     files: d.files.length ? d.files.map((f) => fileValue(f, f.src === undefined ? undefined : rawFiles[f.src])) : undefined,
     show_on_site: keep(raw.show_on_site, d.show, !hiddenKind(d.type)),
@@ -611,6 +615,8 @@ export function writeDraft(y: YamlText, d: Draft, doc: Raw): void {
 export interface SaveContext {
   /** Whether the assignment with this key has been handed out (its key then stays). */
   handedOut?: (key: string) => boolean;
+  /** Whether a course repo's tree has this file (a reading list's, decision 0044). */
+  exists?: Exists;
 }
 
 /** One entry to write: its draft, the key it was read under ('' for a new one) and the draft it was read as. */
@@ -620,8 +626,11 @@ export interface Change {
   base: EntryDraft | AssignmentDraft | SemesterEntryDraft | null;
 }
 
-/** Every entry a sheet's drafts write: each draft, and a lecture's or lab's readings twin beside it. */
-export function changesOf(drafts: Draft[], bases: (Draft | null)[]): Change[] {
+/**
+ * Every entry a sheet's drafts write: each draft, and a lecture's or lab's readings twin beside
+ * it (changed, or taking the reading list at its default path, `pendingAdoption` over `exists`).
+ */
+export function changesOf(drafts: Draft[], bases: (Draft | null)[], exists: Exists = noFile): Change[] {
   const out: Change[] = [];
   drafts.forEach((d, i) => {
     if (d.kind === 'semester') return;
@@ -631,7 +640,7 @@ export function changesOf(drafts: Draft[], bases: (Draft | null)[]): Change[] {
       const bt = base?.kind === 'entry' ? base.twin ?? null : null;
       // The twin follows its session's unit.
       const twin = { ...d.twin, session: d.session };
-      if (!deepEqual(twin, bt)) out.push({ from: twin.id, d: twin, base: bt });
+      if (!deepEqual(twin, bt) || pendingAdoption(twin, exists)) out.push({ from: twin.id, d: twin, base: bt });
     }
   });
   return out;
@@ -677,7 +686,7 @@ export function applyChanges(textIn: string, doc: Raw, changes: Change[], remove
     const d = { ...c.d, id: keys[i] };
     if (d.kind === 'entry') {
       dropRemovedFiles(y, [block, keys[i]], d, raw);
-      y.assign([block, keys[i]], entryValue(d, raw));
+      y.assign([block, keys[i]], entryValue(d, raw, ctx.exists));
     } else if (d.kind === 'assignments') y.assign([block, keys[i]], assignmentValue(d, raw));
     else y.assign([block, keys[i]], semesterEntryValue(d, raw));
     const numbered = block === ASSIGNMENTS_BLOCK || KINDS.some((k) => k.plural === block && k.numbered && !k.system);
@@ -704,6 +713,15 @@ export const READINGS_FILE = 'READINGS.md';
 /** Whether a path's last part names a file (it has an extension) rather than a folder. */
 const looksLikeFile = (path: string) => /\.[^/.]+$/.test(path);
 
+/** Whether a course repo's tree has a file at a path. */
+export type Exists = (repo: string, path: string) => boolean;
+const noFile: Exists = () => false;
+
+/** Whether `path` is a reading list by its name (`READINGS.md`, any case) or because a readings entry names it. */
+export function isReadingList(path: string, named: readonly string[] = []): boolean {
+  return baseName(path).toLowerCase() === READINGS_FILE.toLowerCase() || named.includes(path);
+}
+
 /**
  * Where a new reading list goes: beside the entry's first reading file (in the folder a
  * folder entry names), else `readings/<NN>_<slug>/READINGS.md` as the scaffold names
@@ -712,48 +730,23 @@ const looksLikeFile = (path: string) => /\.[^/.]+$/.test(path);
 export function defaultListPath(d: EntryDraft, title = d.title): string {
   const first = d.files[0]?.path.replace(/^\/+|\/+$/g, '');
   if (first !== undefined) {
-    const dir = looksLikeFile(first) ? first.split('/').slice(0, -1).join('/') : first;
+    const dir = looksLikeFile(first) ? parentOf(first) : first;
     return dir ? `${dir}/${READINGS_FILE}` : READINGS_FILE;
   }
   const folder = [d.session === '' ? '' : String(d.session).padStart(2, '0'), kebab(title)].filter(Boolean).join('_');
   return `readings/${folder || 'readings'}/${READINGS_FILE}`;
 }
 
-/** A course file as the list reads it: ready (text, sha), absent, or not known yet. */
-export type ListFile = { kind: 'ready'; text: string; sha: string } | { kind: 'absent' } | { kind: 'loading' };
-
-/** `l` with its file's text and sha once read; a missing file is a New file at that path. */
-export function fillList(l: ListDraft | null, read: (repo: string, path: string) => ListFile): ListDraft | null {
-  if (!l || l.inline || l.loaded) return l;
-  const f = read(l.repo, l.path);
-  if (f.kind === 'loading') return l;
-  return { ...l, text: f.kind === 'ready' ? f.text : '', sha: f.kind === 'ready' ? f.sha : null, loaded: true };
-}
-
-/** A draft whose reading lists (its own, its twin's) are filled from their files. */
-export function fillLists<D extends Draft | null>(d: D, read: (repo: string, path: string) => ListFile): D {
-  if (!d || d.kind !== 'entry') return d;
-  const list = fillList(d.list, read);
-  const twin = d.twin ? fillLists(d.twin, read) : d.twin;
-  return list === d.list && twin === d.twin ? d : { ...d, list, ...(d.twin !== undefined ? { twin } : {}) };
-}
-
 /**
- * A readings entry (or a unit's twin) with no list whose default path is already a file in the
- * course repo takes that file as its list (decision 0044): the sheet is then dirty and Save
- * names it in `reading_list:`. `repoOf` is the entry's default repo; `exists`, the repo tree's
- * answer. The file's text is read by `fillLists`.
+ * The reading list a readings entry (or a unit's twin) takes without a word: it has reading
+ * files and no list, and its default path is already a file in the course repo. The sheet is
+ * then dirty and Save names the file in `reading_list:` (`entryValue`); nothing in the draft
+ * changes, so Discard leaves it so.
  */
-export function adoptDefaultList<D extends Draft | null>(d: D, repoOf: (e: EntryDraft) => string, exists: (repo: string, path: string) => boolean, unitTitle?: string): D {
-  if (!d || d.kind !== 'entry') return d;
-  if (d.twin) {
-    const twin = adoptDefaultList(d.twin, repoOf, exists, d.title);
-    return (twin === d.twin ? d : { ...d, twin }) as D;
-  }
-  if (d.type !== READINGS_KIND || d.list) return d;
-  const repo = repoOf(d), path = defaultListPath(d, d.title || unitTitle);
-  if (!repo || !exists(repo, path)) return d;
-  return { ...d, list: { repo, path, text: '', sha: null, inline: false, loaded: false } };
+export function pendingAdoption(e: EntryDraft, exists: Exists): ListDraft | null {
+  if (e.type !== READINGS_KIND || e.list || !e.files.length) return null;
+  const l: ListDraft = { repo: e.files[0].repo, path: defaultListPath(e), inline: false, text: null };
+  return exists(l.repo, l.path) ? l : null;
 }
 
 /** A reading-list file a Save writes before schedule.yml. */
@@ -765,38 +758,60 @@ export interface ListWrite {
 }
 
 /**
- * The list files `drafts` change: a file whose text differs from the file's, or a new file
- * with something typed. Read before the file is, a list writes nothing.
+ * A list file as the editor and the save read it, from the files cache: read when the repo tree
+ * has it or the draft holds no text of its own; a path typed for a new file is absent without a
+ * read (no read per key).
  */
-export function listWrites(drafts: Draft[], read: (repo: string, path: string) => ListFile): ListWrite[] {
+export function listFile(files: Files, org: string, l: ListDraft): FileState {
+  const t = files.tree(org, l.repo);
+  if (l.text !== null && t.kind === 'ready' && !t.paths.some((x) => !x.dir && x.path === l.path)) return { kind: 'absent' };
+  return files.file(org, l.repo, l.path);
+}
+
+/**
+ * The list files `drafts` change: an edit that differs from the file's text in the cache (over
+ * the cache's sha, so a retry after a write writes nothing again), or a new file with something
+ * typed. A file the cache has not read writes nothing.
+ */
+export function listWrites(drafts: Draft[], read: (l: ListDraft) => FileState): ListWrite[] {
   const out: ListWrite[] = [];
-  const add = (l: ListDraft | null) => {
-    if (!l || l.inline || !l.loaded || !l.repo || !l.path) return;
-    const f = read(l.repo, l.path);
-    const was = f.kind === 'ready' ? f.text : '';
-    if (l.sha ? l.text !== was : l.text.trim()) out.push({ repo: l.repo, path: l.path, text: l.text, sha: l.sha });
+  const add = (l: ListDraft | null | undefined) => {
+    if (!l || l.inline || l.text === null || !l.repo || !l.path) return;
+    const f = read(l);
+    if (f.kind === 'ready' ? l.text !== f.text : f.kind === 'absent' && l.text.trim()) out.push({ repo: l.repo, path: l.path, text: l.text, sha: f.kind === 'ready' ? f.sha : null });
   };
   for (const d of drafts) {
     if (d.kind !== 'entry') continue;
     add(d.list);
-    if (d.twin) add(d.twin.list);
+    add(d.twin?.list);
   }
   return out;
 }
 
-/** `d` with the list file `w` read again (its new text and sha, once written). */
-export function relisted<D extends Draft>(d: D, w: ListWrite): D {
-  if (d.kind !== 'entry') return d;
-  const again = (l: ListDraft | null) => (l && !l.inline && l.repo === w.repo && l.path === w.path ? { ...l, loaded: false } : l);
-  return { ...d, list: again(d.list), ...(d.twin ? { twin: { ...d.twin, list: again(d.twin.list) } } : {}) };
+/** A reading file of an entry: `sha` and `size` once its repo tree has read. */
+export interface ReadingFile {
+  repo: string;
+  path: string;
+  sha?: string;
+  size?: number;
 }
 
-/** Whether a readings entry ships files with no `reading_list:` beside them (the Schedule's `no reading list` chip). */
-export function lacksReadingList(entry: unknown): boolean {
-  const e = obj(entry);
-  const l = e.reading_list;
-  return Array.isArray(e.files) && e.files.length > 0 && (l === undefined || l === null || (typeof l === 'string' && !l.trim()));
+/**
+ * An entry's reading files, for both editor mounts: a folder's files from its repo tree, a file
+ * named outright (from the tree when it is there); the list file and any `READINGS.md` left out.
+ */
+export function readingFilesOf(files: Files, org: string, entryFiles: { repo: string; path: string }[], listPath: string): ReadingFile[] {
+  return entryFiles.flatMap((f) => {
+    const at = f.path.replace(/^\/+|\/+$/g, '');
+    const tree = files.tree(org, f.repo);
+    const paths = tree.kind === 'ready' ? tree.paths.filter((x) => !x.dir) : [];
+    const under = paths.filter((x) => x.path.startsWith(`${at}/`));
+    const hit = paths.find((x) => x.path === at);
+    const got = under.length ? under : hit ? [hit] : looksLikeFile(at) ? [{ path: at, sha: undefined, size: undefined }] : [];
+    return got.filter((x) => !isReadingList(x.path, [listPath])).map((x) => ({ repo: f.repo, path: x.path, sha: x.sha, size: x.size }));
+  });
 }
+
 
 // ------------------------------------------------------------------ validation
 

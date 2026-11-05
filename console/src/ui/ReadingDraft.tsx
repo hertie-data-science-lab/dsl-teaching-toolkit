@@ -6,7 +6,7 @@
 import { useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import { plural } from '../model/format';
-import { draftReadings, hasUnknown, type Draft, type PdfFacts, type Section, type Level } from '../model/readingDraft';
+import { baseName, draftReadings, hasUnknown, type Draft, type PdfFacts, type Section, type Level } from '../model/readingDraft';
 import { CheckLine } from './bits';
 import { Modal } from './Modal';
 
@@ -38,8 +38,6 @@ export interface DraftAdd {
   path: string;
 }
 
-const isPdf = (path: string) => /\.pdf$/i.test(path);
-const nameOf = (path: string) => path.split('/').pop() ?? path;
 
 /** What each PDF yielded, by blob sha: reopening the dialog reads nothing again. */
 const read = new Map<string, PdfFacts>();
@@ -47,14 +45,12 @@ const read = new Map<string, PdfFacts>();
 /** The tick-chip colour of a provenance tag. */
 const LEVEL_CLS: Record<Level, string> = { found: 'ok', check: 'amber', guess: 'amber', '?': 'bad' };
 
-/** The draft slot: the button, its hint, and the dialog once clicked. */
-export function DraftButton({ org, pdfs, disabled = false, onAdd }: { org: string; pdfs: PdfRef[]; disabled?: boolean; onAdd: (adds: DraftAdd[]) => void }) {
+/** Under the reading-list editor: the button, its hint, and the dialog once clicked. `pdfs`, the entry's PDF reading files. */
+export function DraftButton({ org, pdfs: files, disabled = false, onAdd }: { org: string; pdfs: PdfRef[]; disabled?: boolean; onAdd: (adds: DraftAdd[]) => void }) {
   const env = useEnv();
-  const files = pdfs.filter((p) => isPdf(p.path));
   const [state, setState] = useState<null | { kind: 'reading'; at: number } | { kind: 'ready'; drafts: Draft[]; failed: { path: string; message: string }[] }>(null);
   const run = async () => {
     if (!env) return;
-    setState({ kind: 'reading', at: 1 });
     const got: { path: string; facts: PdfFacts }[] = [];
     const failed: { path: string; message: string }[] = [];
     for (const [i, f] of files.entries()) {
@@ -104,7 +100,7 @@ export function DraftDialog({ drafts, failed = [], onAdd, onClose }: { drafts: D
       <p class="hint">{DRAFT_TEXT.lede}</p>
       {drafts.map((d, i) => {
         const r = rows[i];
-        const name = nameOf(d.path);
+        const name = baseName(d.path);
         return (
           <div class="rd-file" key={d.path}>
             <div class="rd-head">
@@ -129,7 +125,7 @@ export function DraftDialog({ drafts, failed = [], onAdd, onClose }: { drafts: D
       })}
       {failed.map((f) => (
         <div class="rd-file" key={f.path}>
-          <div class="rd-head"><span class="mono">{nameOf(f.path)}</span></div>
+          <div class="rd-head"><span class="mono">{baseName(f.path)}</span></div>
           <CheckLine cls="bad">{DRAFT_TEXT.failed(f.message)}</CheckLine>
         </div>
       ))}

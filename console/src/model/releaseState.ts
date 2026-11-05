@@ -17,7 +17,7 @@
 import selectionRules from '../../schemas/selection.json';
 import { buildTree, hardDenied, neverMaterial, type TreeNode } from '../edit/badges';
 import { compileAll, withheldBy, type Rule } from '../edit/glob';
-import type { Files, TreeState } from './files';
+import { parentOf, type Files, type TreeState } from './files';
 import type { Loaded } from './status';
 import type { Release, Status } from './types';
 import { fnmatch } from './selection';
@@ -154,7 +154,6 @@ export interface Group {
 
 export const TOP_LEVEL = '(top level)';
 
-export const parentOf = (path: string) => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '');
 const under = (path: string, folder: string) => !folder || path.startsWith(`${folder}/`);
 const join = (folder: string, name: string) => (folder && name ? `${folder}/${name}` : folder || name);
 const trim = (p: string) => p.replace(/^\/+|\/+$/g, '');

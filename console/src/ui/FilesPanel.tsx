@@ -56,7 +56,8 @@ import { RepoPickerModal } from './RepoPickerModal';
 import { SplitPanes } from './Splitter';
 import { ChipMeanings, NEVER_RELEASED_TITLE, StateChip, type ChipKind } from './StateChip';
 import { RepoFile } from './Viewer';
-import { CourseFile, isReadingList } from './ReadingList';
+import { CourseFile, type NamedList } from './ReadingList';
+import { isReadingList } from '../model/scheduleEdit';
 
 export type FilesView = 'browse' | 'withhold' | 'release';
 
@@ -98,7 +99,7 @@ export interface FilesPanelProps {
   /** Withhold: drawn under the summary (the "Withheld patterns reviewed" suggestion). */
   withholdExtra?: ComponentChildren;
   /** Course mode: the paths readings entries name as reading lists (decision 0044): marked in Browse, edited in its pane. */
-  readingLists?: readonly string[];
+  readingLists?: readonly NamedList[];
 }
 
 const ADD = '__add';
@@ -246,6 +247,7 @@ export function FilesPanel(p: FilesPanelProps) {
 
 function Panel(p: FilesPanelProps) {
   const course = p.mode === 'course';
+  const listPaths = (p.readingLists ?? []).map((l) => l.path);
   const [picked, setView] = useState<FilesView>(course ? 'browse' : 'release');
   const [file, setFile] = useState<string | null>(null);
   const [draft, setDraft] = useState<string | null>(null);
@@ -350,7 +352,7 @@ function Panel(p: FilesPanelProps) {
     const words = release && dir && r.chip === null ? countsWords(r.row.states) : '';
     return (
       <>
-        {view === 'browse' && course && !dir && isReadingList(path, p.readingLists) ? <span class="chip muted">reading list</span> : null}
+        {view === 'browse' && course && !dir && isReadingList(path, listPaths) ? <span class="chip muted">reading list</span> : null}
         {r.chip ? <StateChip kind={r.chip} tree onTick={r.chip === 'behind' && !isPicked(path, false) && !inPicked(path) ? () => togglePick(path, false) : undefined} onKeep={keep} prUrl={r.chip === 'diverged' ? prOf(runRepo, path) : undefined} /> : null}
         {/* A folder's roll-up, about its contents: shown only while it is closed (`.ft-rollup`); its own chip above shows either way. */}
         {dir && r.chip === null && (r.row.withheld || words) ? (

@@ -57,7 +57,7 @@ interface Book {
 const UNKNOWN = /(?<![\p{L}\p{N}])\?+(?![\p{L}\p{N}])/u;
 export const hasUnknown = (line: string) => UNKNOWN.test(line);
 
-const baseName = (path: string) => path.split('/').pop() ?? path;
+export const baseName = (path: string) => path.split('/').pop() ?? path;
 const stem = (path: string) => baseName(path).replace(/\.[^.]+$/, '');
 /** The filename's words: `07_session-7__s7-raschka-2022-opt-1.pdf` -> s7, raschka, 2022, opt, 1 (the folder prefix before `__` dropped). */
 const words = (path: string) => stem(path).split('__').pop()!.toLowerCase().split(/[-_ .]+/).filter(Boolean);
