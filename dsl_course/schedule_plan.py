@@ -67,9 +67,8 @@ class PlannedRow:
     # The entry's `Release.reading_list`: inline text, the course file, or None.
     reading_list: str | schedule.Deploy | None = None
     slot: int = 0
-    # The entry's first moment (`Release.when`): every slot's inline reading list opens
-    # by it (`inline_list_opens`). None: the slot's own `when`.
-    entry_when: date | datetime | None = None
+    # The entry's `Release.opens`: every slot's inline reading list shows from then.
+    opens: datetime | None = None
 
     @property
     def reading_list_dest(self) -> tuple[str, str] | None:
@@ -132,7 +131,7 @@ def planned_rows(sched: schedule.Schedule) -> list[PlannedRow]:
             location=slot.location or r.location,
             reading_list=r.reading_list,
             slot=i,
-            entry_when=r.when,
+            opens=r.opens,
         )
 
     slots = [(r, i, slot) for r in sched.releases for i, slot in enumerate(r.row_slots)]
@@ -208,30 +207,10 @@ def unit_hosts(rows: list[PlannedRow]) -> dict[str, PlannedRow]:
     return hosts
 
 
-def inline_list_opens(
-    row: PlannedRow, host: PlannedRow | None, tz: ZoneInfo
-) -> datetime | None:
-    """When an inline reading list on an entry that ships NO files shows: the moment its
-    copies would have shipped - an hour before the entry's FIRST slot (every slot of a
-    multi-slot entry opens then), a whole-day entry at the day's start in `tz` - or by its
-    unit's first row when it has no date of its own. None when it has no date at all. An
-    entry with files shows its list once one of them has landed instead."""
-
-    def first(r: PlannedRow) -> date | datetime | None:
-        return r.entry_when if r.entry_when is not None else r.when
-
-    when = first(row)
-    if when is None and host is not None:
-        when = first(host)
-    if isinstance(when, datetime):
-        return when - schedule.DEFAULT_DEPLOY_LEAD
-    return datetime.combine(when, time(), tz) if when is not None else None
-
-
 def shown_list(
     row: PlannedRow,
+    host: PlannedRow | None,
     landed: bool,
-    opens: datetime | None,
     now: datetime,
     present: Callable[[str, str], bool],
     read: Callable[[str, str], str | None],
@@ -240,10 +219,11 @@ def shown_list(
     site and the student file both apply (decision 0044 point 2: students see the RELEASED
     copy). A course file's is the text of its copy in the semester (`read(repo, path)`),
     once that is there (`present`). Inline text shows once the entry has released: one of
-    its copies landed (`landed`), or, for an entry that ships none, at `opens`
-    (`inline_list_opens`)."""
+    its copies landed (`landed`), or, for an entry that ships none, at its `opens` (an
+    undated one attached to a unit: its `host` row's)."""
     if (named := row.reading_list_dest) is not None:
         return (read(*named) or "") if present(*named) else ""
+    opens = row.opens if row.opens is not None or host is None else host.opens
     released = landed if row.deploys else opens is not None and opens <= now
     return (row.reading_list or "") if released else ""
 

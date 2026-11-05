@@ -375,6 +375,9 @@ class Release:
     # copy. That file ships with the entry: inside a `files:` copy that holds it, else as
     # one of `deploy` (this very copy); `schedule_plan.list_dest` says where it lands.
     reading_list: str | Deploy | None = None
+    # When the entry opens: when its copies ship by default (`_opens`). A reading list
+    # shows from then (`schedule_plan.shown_list`); None when it has no date.
+    opens: datetime | None = None
     # `files:` was written, even empty: an entry with `files: []` is a to-do, "no files
     # yet"; one with no `files:` key is a plain session (plan 9b ruling 5).
     files_written: bool = False
@@ -1115,6 +1118,21 @@ def _default_ship_times(deploys: list[Deploy], first: date | datetime | None) ->
             d.deploy_datetime = first - DEFAULT_DEPLOY_LEAD
 
 
+def _opens(
+    deploys: list[Deploy], first: date | datetime | None, tz: ZoneInfo
+) -> datetime | None:
+    """When an entry opens, as `_default_ship_times` would ship it: its first copy's
+    time, else an hour before its first slot (a whole-day slot: the day's start in `tz`).
+    None for an entry with neither: an undated one (an attached readings entry's reader
+    falls back to its unit's first row)."""
+    shipped = [d.deploy_datetime for d in deploys if d.deploy_datetime]
+    if shipped:
+        return min(shipped)
+    if isinstance(first, datetime):
+        return first - DEFAULT_DEPLOY_LEAD
+    return datetime.combine(first, time(), tz) if first is not None else None
+
+
 def _is_tbc(value: object) -> bool:
     return isinstance(value, str) and value.strip().lower() == "tbc"
 
@@ -1328,6 +1346,7 @@ def _parse_block(
                 location=location,
                 slots=[slot for slot, _written in slots],
                 reading_list=reading_list,
+                opens=_opens(deploys, first[1] if first else None, tz),
                 files_written="files" in entry,
                 block=block,
             )
@@ -2427,8 +2446,9 @@ def load(semester_org: str) -> Schedule:
     A readings entry's `reading_list:` is markdown, or a course file named as a `files:`
     item is (default name `READINGS.md`, any path; decision 0044). The file ships with
     the entry (`Release.reading_list`), and readers show its landed copy only; inline
-    text shows once the entry has released (`schedule_plan.inline_list_opens`). Its 0.11.0
-    name `reading_guide:` is a NOT_MIGRATED fault the migration's shape step renames.
+    text shows once the entry has released (`Release.opens`, `schedule_plan.shown_list`).
+    Its 0.11.0 name `reading_guide:` is a NOT_MIGRATED fault the migration's shape step
+    renames.
 
     Parsed ONCE per run (`_parsed`, forgotten when this run writes the semester's config):
     `grades`, `assign` and `collect` each ask again. Every caller still gets its own copy

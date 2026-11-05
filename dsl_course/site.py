@@ -89,7 +89,6 @@ from .schedule_plan import (
     declared_syllabus,
     deploy_dest,
     dest_section,
-    inline_list_opens,
     list_dests,
     planned_rows,
     shown_list,
@@ -480,16 +479,16 @@ def _reading_list(texts: list[str]) -> str:
 def _shown_list(
     semester_org: str,
     r: PlannedRow,
+    host: PlannedRow | None,
     landed: bool,
-    opens: datetime | None,
     now: datetime,
     live_repos: frozenset[str],
 ) -> str:
     """`schedule_plan.shown_list`, read off the semester's memoised trees."""
     return shown_list(
         r,
+        host,
         landed,
-        opens,
         now,
         lambda repo, path: (
             repo in live_repos and path in _repo_tree(semester_org, repo)[1]
@@ -909,7 +908,6 @@ def _site_rows(
     allow: frozenset[str],
     live_repos: frozenset[str],
     hosted: Hosted,
-    tz: ZoneInfo,
     now: datetime | None = None,
 ) -> tuple[dict[str, str], list[str]]:
     """The `_lectures` collection - one file per site row (`schedule_plan.site_rows`) -
@@ -918,8 +916,7 @@ def _site_rows(
     Every row the schedule shows is written, released or not, so the whole term reads as
     a syllabus from the day it is written. A silent readings row is written only once
     something has landed, and never when all it landed is root files. Each readings
-    entry's reading list shows once released (`_shown_list`, at `now`; a whole-day
-    entry's in the semester's `tz`)."""
+    entry's reading list shows once released (`_shown_list`, at `now`)."""
     now = now or datetime.now(UTC)
     hidden = list_dests(rows)
     built: list[tuple[str, int, _Row]] = []
@@ -930,9 +927,8 @@ def _site_rows(
             continue
         lists = []
         if r.kind == READINGS_KIND:
-            opens = inline_list_opens(r, None, tz)
             lists.append(
-                _shown_list(semester_org, r, bool(landed), opens, now, live_repos)
+                _shown_list(semester_org, r, None, bool(landed), now, live_repos)
             )
         readings = []
         pending = False
@@ -941,9 +937,8 @@ def _site_rows(
         pending_dests: list[str] = []
         for attached in sr.readings:
             got = _row_landed(semester_org, attached, allow, live_repos, hosted, hidden)
-            opens = inline_list_opens(attached, r, tz)
             lists.append(
-                _shown_list(semester_org, attached, bool(got), opens, now, live_repos)
+                _shown_list(semester_org, attached, r, bool(got), now, live_repos)
             )
             if not attached.deploys:
                 continue
@@ -1575,9 +1570,7 @@ def sync_site(course_org: str, semester_org: str) -> int:
             host_selection(semester_org),
             _landings(sched),
         )
-        rows, present = _site_rows(
-            semester_org, planned, allow, live, hosted, ZoneInfo(sched.timezone)
-        )
+        rows, present = _site_rows(semester_org, planned, allow, live, hosted)
         # ONE read of the team cells for every self-select group assignment (`_formed_teams`).
         formed_teams = _formed_teams(semester_org, sched)
         log_step(

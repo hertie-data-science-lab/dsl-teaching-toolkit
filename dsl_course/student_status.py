@@ -70,7 +70,6 @@ from .schedule_plan import (
     SiteRow,
     declared_syllabus,
     deploy_dest,
-    inline_list_opens,
     list_dests,
     planned_rows,
     shown_list,
@@ -374,8 +373,8 @@ def _shown_list(
     """`schedule_plan.shown_list`, read off the semester's listed paths."""
     return shown_list(
         row,
+        host,
         bool(_landed(facts, row, frozenset())[1]),
-        inline_list_opens(row, host, ZoneInfo(facts.sched.timezone)),
         now,
         lambda repo, path: path in facts.dest_paths.get(repo, set()),
         read,

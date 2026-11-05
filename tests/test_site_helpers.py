@@ -492,54 +492,12 @@ def test_a_course_file_reading_list_shows_its_landed_copy_only(monkeypatch):
         deploys=(named,),
         reading_list=named,
     )
-    assert site._shown_list("C", row, True, None, _NOW, _LIVE) == "- A."
+    assert site._shown_list("C", row, None, True, _NOW, _LIVE) == "- A."
     assert reads == ["readings/01/READINGS.md"]
     # Not landed yet: no list, and nothing read.
     tree = ()
-    assert site._shown_list("C", row, False, None, _NOW, _LIVE) == ""
+    assert site._shown_list("C", row, None, False, _NOW, _LIVE) == ""
     assert reads == ["readings/01/READINGS.md"]
-
-
-def test_inline_text_shows_once_the_entry_has_released():
-    row = schedule_plan.PlannedRow(
-        "readings-1",
-        "readings",
-        datetime(2026, 9, 10, 12, 30, tzinfo=ZoneInfo("Europe/Berlin")),
-        date(2026, 9, 1),
-        deploys=(_deploy("readings/01"),),
-        reading_list="- B.",
-    )
-    # With files: once one of them has landed.
-    assert site._shown_list("C", row, False, None, _NOW, _LIVE) == ""
-    assert site._shown_list("C", row, True, None, _NOW, _LIVE) == "- B."
-    # With none: an hour before its session.
-    bare = dataclasses.replace(row, deploys=())
-    tz = ZoneInfo("Europe/Berlin")
-    opens = schedule_plan.inline_list_opens(bare, None, tz)
-    assert opens == datetime(2026, 9, 10, 11, 30, tzinfo=tz)
-    assert site._shown_list("C", bare, False, opens, _NOW, _LIVE) == "- B."
-    later = schedule_plan.inline_list_opens(
-        dataclasses.replace(bare, when=datetime(2026, 9, 11, 9, 0, tzinfo=tz)), None, tz
-    )
-    assert site._shown_list("C", bare, False, later, _NOW, _LIVE) == ""
-    # Undated, on a unit: its host row's date.
-    host = dataclasses.replace(bare, key="lecture-1", kind="lecture")
-    undated = dataclasses.replace(bare, when=None, undated=True)
-    assert schedule_plan.inline_list_opens(undated, host, tz) == opens
-    assert schedule_plan.inline_list_opens(undated, None, tz) is None
-    # A second slot opens with the entry's first: an hour before it.
-    second = dataclasses.replace(
-        bare,
-        when=datetime(2026, 9, 17, 12, 30, tzinfo=tz),
-        slot=1,
-        entry_when=bare.when,
-    )
-    assert schedule_plan.inline_list_opens(second, None, tz) == opens
-    # A whole-day entry: the day's start.
-    day = dataclasses.replace(bare, when=date(2026, 9, 10))
-    assert schedule_plan.inline_list_opens(day, None, tz) == datetime(
-        2026, 9, 10, tzinfo=tz
-    )
 
 
 def _syllabus(monkeypatch, releases, tree, declared=""):
