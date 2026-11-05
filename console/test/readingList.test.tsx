@@ -16,6 +16,7 @@ import { MaterialsIndexScreen } from '../src/screens/CourseIndex';
 import { SemesterMaterialsScreen } from '../src/screens/SemesterMaterials';
 import type { CourseProps } from '../src/screens/types';
 import { LIST_TEXT, isReadingList, notCited } from '../src/ui/ReadingList';
+import { DRAFT_TEXT } from '../src/ui/ReadingDraft';
 import { forgetRendered } from '../src/ui/rendered';
 import { FakeGitHub, fileBody, json, type Seen } from './fake';
 import example from './fixtures/status.example.json';
@@ -100,6 +101,9 @@ describe('the course Materials file view (decision 0044)', () => {
     expect(root!.textContent).toContain(LIST_TEXT.footExisting);
     expect(root!.textContent).toContain(LIST_TEXT.missing(['murphy.pdf']));
     expect(button(LIST_TEXT.choose)).toBeUndefined();
+    // Generate draft reads the folder's PDFs (decision 0044 point 6).
+    expect(button(DRAFT_TEXT.button)!.disabled).toBe(false);
+    expect(root!.textContent).toContain(DRAFT_TEXT.hint);
     const area = root!.querySelector<HTMLTextAreaElement>('#mf-rl')!;
     expect(area.value).toBe(TEXT['readings/04/READINGS.md']);
     await act(() => { area.value = '- Bishop: bishop.pdf\n- Murphy: murphy.pdf\n'; area.dispatchEvent(new Event('input', { bubbles: true })); });

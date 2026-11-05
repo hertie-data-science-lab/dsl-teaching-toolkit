@@ -21,6 +21,7 @@ import { CheckLine, DueSubmit, EditFile, Md, ProblemCards, ReleaseMarks, ghUrl }
 import { FilePicker, pathVerdict } from '../ui/FilePicker';
 import { Hint } from '../ui/Hint';
 import { ReadingList, isReadingList, listMessage } from '../ui/ReadingList';
+import { DraftButton, type PdfRef } from '../ui/ReadingDraft';
 import { FullScreenButton, useFullScreen } from '../ui/Viewer';
 import { SaveLine, UnsavedBar, lineOf } from '../ui/edit';
 import { releaseMarks, releaseProblems, templateReadinessIn, tier, type ReleaseMark, type Tiered } from '../model/readiness';
@@ -363,23 +364,34 @@ function UnitForm({ p, d, set, errors, consoleOn, sources }: FormProps<EntryDraf
   );
 }
 
-/** The names of an entry's reading files (a folder's files from its repo tree), the list file left out. */
-function readingNames(p: ReadyProps, d: EntryDraft): string[] {
+/** An entry's reading files (a folder's files from its repo tree, a file named outright), the list file left out; `sha` only when the tree has read. */
+function readingFiles(p: ReadyProps, d: EntryDraft): { repo: string; path: string; sha?: string; size?: number }[] {
   const listPath = d.list && !d.list.inline ? d.list.path : '';
-  const names = d.files.flatMap((f) => {
+  return d.files.flatMap((f) => {
     const at = f.path.replace(/^\/+|\/+$/g, '');
     const tree = p.files.tree(p.course.org, f.repo);
-    const under = tree.kind === 'ready' ? tree.paths.filter((x) => !x.dir && x.path.startsWith(`${at}/`)).map((x) => x.path) : [];
-    return under.length ? under : /\.[^/.]+$/.test(at) ? [at] : [];
+    const paths = tree.kind === 'ready' ? tree.paths.filter((x) => !x.dir) : [];
+    const under = paths.filter((x) => x.path.startsWith(`${at}/`));
+    const hit = paths.find((x) => x.path === at);
+    const got = under.length ? under : hit ? [hit] : /\.[^/.]+$/.test(at) ? [{ path: at, sha: undefined, size: undefined }] : [];
+    return got.filter((x) => !isReadingList(x.path, [listPath])).map((x) => ({ repo: f.repo, path: x.path, sha: x.sha, size: x.size }));
   });
-  return [...new Set(names.filter((x) => !isReadingList(x, [listPath])).map((x) => x.split('/').pop()!))];
 }
+
+/** The names of an entry's reading files, for the not-cited notice. */
+const readingNames = (files: { path: string }[]) => [...new Set(files.map((x) => x.path.split('/').pop()!))];
+
+/** An entry's PDF reading files the tree has read: what Generate draft reads. */
+const readingPdfs = (files: { repo: string; path: string; sha?: string; size?: number }[]): PdfRef[] =>
+  files.flatMap((x) => (x.sha && /\.pdf$/i.test(x.path) ? [{ repo: x.repo, path: x.path, sha: x.sha, size: x.size }] : []));
 
 /** A readings entry's Reading list (decision 0044): the shared editor, at the entry's default path while it has none. */
 function ListField({ p, id, d, set, sources, title }: { p: ReadyProps; id: string; d: EntryDraft; set: Set_<EntryDraft>; sources: { materials: string[] }; title?: string }) {
+  const files = readingFiles(p, d);
   return (
     <ReadingList id={id} list={d.list} defaultRepo={d.files[0]?.repo || sources.materials[0] || ''} defaultPath={defaultListPath(d, d.title || title)}
-      org={p.course.org} repos={sources.materials} files={p.files} readingFiles={readingNames(p, d)} onChange={(list) => set({ list })} />
+      org={p.course.org} repos={sources.materials} files={p.files} readingFiles={readingNames(files)} onChange={(list) => set({ list })}
+      draft={(add, disabled) => <DraftButton org={p.course.org} pdfs={readingPdfs(files)} disabled={disabled} onAdd={add} />} />
   );
 }
 

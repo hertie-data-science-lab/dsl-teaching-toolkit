@@ -19,6 +19,7 @@ import { AssignmentScreen } from '../src/screens/Assignments';
 import { MaterialsScreen } from '../src/screens/CourseEdit';
 import { StudentsScreen } from '../src/screens/People';
 import { ScheduleScreen, noReadingList } from '../src/screens/Schedule';
+import { DRAFT_TEXT } from '../src/ui/ReadingDraft';
 import type { CohortProps } from '../src/screens/types';
 import { parseSearch, scheduleNewHref } from '../src/router';
 import example from './fixtures/status.example.json';
@@ -725,6 +726,8 @@ describe('the reading list in the schedule entry sheet (decision 0044)', () => {
     expect(root!.textContent).toContain('File: course-materials-f2026 / readings/04_week/READINGS.md');
     expect(root!.textContent).toContain('Existing file');
     expect(q<HTMLTextAreaElement>('#e-rl').value).toBe('- Bishop (2006), ch. 5.\n');
+    // Generate draft reads the entry's PDF reading files (decision 0044 point 6).
+    expect(buttons(DRAFT_TEXT.button)[0].disabled).toBe(false);
     // The files the text does not cite get the notice.
     expect(root!.textContent).toContain('2 reading files not in the reading list: bishop.pdf, murphy.pdf. Students still get the file; it just isn’t cited here.');
     expect(root!.querySelector('.unsaved')).toBeNull();
@@ -755,6 +758,9 @@ describe('the reading list in the schedule entry sheet (decision 0044)', () => {
     await mount(envOf(gh, f), <ScheduleScreen {...props(f, { entry: 'readings-5' })} />);
     expect(root!.textContent).toContain('Written in the schedule');
     expect(q<HTMLTextAreaElement>('#e-rl').value).toBe('- Old text.');
+    // No reading files: nothing to draft from, and the slot says so.
+    expect(buttons(DRAFT_TEXT.button)[0].disabled).toBe(true);
+    expect(root!.textContent).toContain(DRAFT_TEXT.noPdfs);
     await click(button('Move to a file'));
     expect(root!.textContent).toContain('New file');
     expect(q<HTMLInputElement>('#e-rl-path').value).toBe('readings/05/READINGS.md');
