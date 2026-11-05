@@ -82,6 +82,21 @@ describe('the draft dialog', () => {
     expect(closed).toBe(2);
   });
 
+  it('shows five notes a file, the rest a scroll away; Show all / Show fewer per file', async () => {
+    const notes = ['Book', 'Authors', 'Year', 'Publisher', 'Chapter', 'Pages', 'Section'].map((part) => ({ part, level: 'check' as const, text: 't' }));
+    await mount(<DraftDialog drafts={[{ ...DRAFTS[0], notes }, { ...DRAFTS[1], notes }, { ...DRAFTS[0], path: 'r/few.pdf', notes: notes.slice(0, 5) }]} onAdd={() => {}} onClose={() => {}} />);
+    const lists = () => [...root!.querySelectorAll('.rd-notes')].map((u) => [u.children.length, u.classList.contains('capped')]);
+    const toggles = () => [...root!.querySelectorAll<HTMLButtonElement>('.rd-more')];
+    // Every note is in the list (scrolled to); only a list of more than five is capped and has the toggle.
+    expect(lists()).toEqual([[7, true], [7, true], [5, false]]);
+    expect(toggles().map((b) => b.textContent)).toEqual([DRAFT_TEXT.showAll(7), DRAFT_TEXT.showAll(7)]);
+    await act(() => toggles()[0].click());
+    expect(lists()).toEqual([[7, false], [7, true], [5, false]]);
+    expect(toggles().map((b) => [b.textContent, b.getAttribute('aria-expanded')])).toEqual([[DRAFT_TEXT.showFewer, 'true'], [DRAFT_TEXT.showAll(7), 'false']]);
+    await act(() => toggles()[0].click());
+    expect(lists()).toEqual([[7, true], [7, true], [5, false]]);
+  });
+
   it('names a file it could not read, with no line to tick', async () => {
     await mount(<DraftDialog drafts={[]} failed={[{ path: 'readings/04/broken.pdf', message: 'Invalid PDF structure.' }]} onAdd={() => {}} onClose={() => {}} />);
     expect(root!.textContent).toContain('broken.pdf');

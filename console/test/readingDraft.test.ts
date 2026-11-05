@@ -4,7 +4,7 @@
 
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
-  apaAuthors, apaLine, chapterOf, cleanTitle, draftReadings, folios, forgetBooks, hasUnknown, insertLines, pageRange, parseNames, relPath, sectionOf, sentenceCase, textLines, type PdfFacts,
+  apaAuthors, apaLine, authorsNote, byLevel, chapterOf, cleanTitle, draftReadings, folios, forgetBooks, hasUnknown, insertLines, pageRange, parseNames, relPath, sectionOf, sentenceCase, textLines, type PdfFacts,
 } from '../src/model/readingDraft';
 
 const facts = (over: Partial<PdfFacts>): PdfFacts => ({ pages: 1, title: '', author: '', first: [], second: [], last: [], labels: null, ...over });
@@ -81,21 +81,21 @@ describe('the PDF details', () => {
     const [d] = draftReadings([{ path: 'readings/s3-hobson-dyshel-2024-opt.pdf', facts: hobson }]);
     expect(d.line).toBe('Lane, H., & Dyshel, M. (2024). *Natural language processing in action* (2nd ed., Ch. 3, pp. ?). Manning Publications.');
     expect(d.notes.filter((n) => n.part === 'Book').map((n) => [n.level, n.text])).toEqual([
-      ['found', 'From the PDF\'s details: "Hobson Lane and Maria Dyshel - Natural Language Processing in Action, Second Edition (MEAP V12) (2024, Manning Publications Co.)"'],
       ['check', 'Took "- libgen.li" off the end of the title'],
       ['check', 'Left out of the title: (MEAP V12)'],
       ['check', 'Title set in sentence case: check names and acronyms'],
+      ['found', 'From the PDF\'s details: "Hobson Lane and Maria Dyshel - Natural Language Processing in Action, Second Edition (MEAP V12) (2024, Manning Publications Co.)"'],
     ]);
   });
 
   it('fall back to the filename for authors, never for the year, when the details have no title, each part tagged', () => {
     const [d] = draftReadings([{ path: 'readings/02_session-2__s2-jurafsky-martin-2024.pdf', facts: jurafsky }]);
     expect(d.line).toBe('Jurafsky, ?, & Martin, ? (?). *?* (Ch. 2, pp. 5–13). ?.');
-    expect(d.notes.map((n) => [n.part, n.level])).toEqual([['Book', '?'], ['Authors', 'guess'], ['Year', '?'], ['Publisher', '?'], ['Chapter', 'check'], ['Pages', 'found'], ['Section', 'found']]);
+    expect(d.notes.map((n) => [n.part, n.level])).toEqual([['Book', '?'], ['Authors', '?'], ['Year', '?'], ['Publisher', '?'], ['Chapter', 'check'], ['Pages', 'found'], ['Section', 'found']]);
     // A filename year is not taken (7 of 24 were wrong in the trial): the note says what it says.
     expect(d.notes.find((n) => n.part === 'Year')!.text).toBe("No year in the PDF's details or pages; the filename says 2024, which is often the file's year, not the edition's");
     expect(draftReadings([{ path: 'r/s2-jurafsky-martin.pdf', facts: jurafsky }])[0].notes.find((n) => n.part === 'Year')!.text).toBe("No year in the PDF's details, the pages read or the filename");
-    expect(d.notes[1].text).toBe('Surnames from the filename (the PDF\'s details name "Sascha Göbel", not in the filename)');
+    expect(d.notes[1].text).toBe('Surnames from the filename (the PDF\'s details name "Sascha Göbel", not in the filename); no given names, so the initials are ?');
   });
 
   it('take a year from an arXiv stamp on the pages', () => {
@@ -157,13 +157,13 @@ describe('the drafted line', () => {
       { path: 'r/02_session-2__s2-hobson-dyshel-2024-opt.pdf', facts: noTitle },
     ]);
     expect(out[1].line).toBe('Lane, H., & Dyshel, M. (2024). *Natural language processing in action* (2nd ed.). Manning Publications.');
-    expect(out[1].notes[0]).toEqual({ part: 'Book', level: 'check', text: 'No book in this PDF\'s details: the same as 01_session-1__s1-hobson-dyshel-2024-opt.pdf, by its filename' });
+    expect(out[1].notes.find((n) => n.part === 'Book')).toEqual({ part: 'Book', level: 'check', text: 'No book in this PDF\'s details: the same as 01_session-1__s1-hobson-dyshel-2024-opt.pdf, by its filename' });
   });
 
   it('is the brief’s APA 7 shape', () => {
     const [d] = draftReadings([{ path: 'r/s8-raschka-2024.pdf', facts: raschka }]);
     expect(d.line).toBe('Raschka, ? (2022). *Machine learning with pytorch and scikit-learn* (Ch. 15, pp. 499–538). Packt Publishing.');
-    expect(d.notes.find((n) => n.part === 'Authors')!.text).toBe('Surnames from the filename (the PDF\'s details name "SEBASTIAN LIU YUXI (HAYDEN) MIRJALILI VAHID RASCHKA", which does not split into people)');
+    expect(d.notes.find((n) => n.part === 'Authors')!.text).toBe('Surnames from the filename (the PDF\'s details name "SEBASTIAN LIU YUXI (HAYDEN) MIRJALILI VAHID RASCHKA", which does not split into people); no given names, so the initials are ?');
   });
 
   it('marks a free-standing ? as unknown, never one attached to a word', () => {
@@ -172,6 +172,77 @@ describe('the drafted line', () => {
     expect(hasUnknown('pp. ??–12')).toBe(true);
     expect(hasUnknown('*Tired of topic models?* (2020).')).toBe(false);
     expect(hasUnknown('What?! (2020).')).toBe(false);
+  });
+});
+
+// Decision 0046 rule 14: a part that leaves a free-standing ? in the line has a `?` note, each
+// where the part is decided; rule 15: the notes run least sure first.
+describe('a ? in the line is a ? note', () => {
+  const level = (d: { notes: { part: string; level: string }[] }, part: string) => d.notes.filter((n) => n.part === part).map((n) => n.level);
+
+  it('authors: a surname without given names, the note says the initials are ?', () => {
+    const people = parseNames('Hobson Lane and Raschka')!;
+    expect(apaAuthors(people)).toBe('Lane, H., & Raschka, ?');
+    expect(authorsNote(people, 'check', 'From the PDF\'s details: "x"')).toEqual({ part: 'Authors', level: '?', text: 'From the PDF\'s details: "x"; no given names for Raschka, so the initials are ?' });
+    expect(authorsNote(parseNames('Hobson Lane')!, 'check', 't')).toEqual({ part: 'Authors', level: 'check', text: 't' });
+    // From the filename (the reported Raschka line), from the details' author, from a shadow-library title.
+    expect(level(draftReadings([{ path: 'r/s8-raschka-2024.pdf', facts: raschka }])[0], 'Authors')).toEqual(['?']);
+    forgetBooks();
+    expect(draftReadings([{ path: 'r/s1-goodfellow.pdf', facts: facts({ title: 'Deep Learning', author: 'Goodfellow' }) }])[0]).toMatchObject({ line: expect.stringMatching(/^Goodfellow, \? /), notes: expect.arrayContaining([{ part: 'Authors', level: '?', text: 'From the PDF\'s details: "Goodfellow"; no given names, so the initials are ?' }]) });
+    forgetBooks();
+    const [shelf] = draftReadings([{ path: 'r/s1-book.pdf', facts: facts({ title: 'Goodfellow - Deep Learning (2016, MIT Press)' }) }]);
+    expect(shelf.line).toBe('Goodfellow, ? (2016). *Deep learning*. MIT Press.');
+    expect(level(shelf, 'Authors')).toEqual(['?']);
+  });
+
+  it('year, publisher, pages and title', () => {
+    const [d] = draftReadings([{ path: 'r/s2-jurafsky-martin.pdf', facts: facts({ ...hobson, title: '' }) }]);
+    expect(d.line).toBe('Jurafsky, ?, & Martin, ? (?). *?* (Ch. 3, pp. ?). ?.');
+    expect([level(d, 'Year'), level(d, 'Publisher'), level(d, 'Pages')]).toEqual([['?'], ['?'], ['?']]);
+    expect(level(d, 'Book')).toEqual(['?']);
+    // A title that is all edition and brackets leaves none.
+    forgetBooks();
+    const [e] = draftReadings([{ path: 'r/s1-book.pdf', facts: facts({ title: 'Lane - Second Edition (MEAP V12) (2024, Manning)' }) }]);
+    expect(e.line).toMatch(/\*\?\* \(2nd ed\.\)/);
+    expect(e.notes).toContainEqual({ part: 'Book', level: '?', text: 'No title left once "Second Edition (MEAP V12)" loses its edition and brackets' });
+  });
+
+  it('a book lent by a twin file brings the notes of its unknown parts', () => {
+    const shelfless = facts({ title: 'Lane - Natural Language Processing in Action (2024)' });
+    const out = draftReadings([
+      { path: 'r/s1-lane-2024.pdf', facts: shelfless },
+      { path: 'r/s2-lane-2024.pdf', facts: facts({ title: 's2-lane-2024' }) },
+    ]);
+    expect(out[1].line).toBe('Lane, ? (2024). *Natural language processing in action*. ?.');
+    expect(out[1].notes.filter((n) => n.level === '?').map((n) => [n.part, n.text])).toEqual([
+      ['Authors', 'As for s1-lane-2024.pdf: From the PDF\'s details: "Lane"; no given names, so the initials are ?'],
+      ['Publisher', 'As for s1-lane-2024.pdf: No publisher in the PDF\'s details'],
+      ['Chapter', 'No "Chapter N" on the pages read: add one if this is part of a chapter'],
+      ['Pages', 'No printed page numbers on pages 1, 2 or 1: none given'],
+    ]);
+  });
+
+  it('holds for every fixture: a line with a free-standing ? has a ? note', () => {
+    const all = draftReadings([
+      { path: 'readings/04/s4-vajjala-2020.pdf', facts: vajjala },
+      { path: 'readings/07_session-7__s7-raschka-2022-opt-1.pdf', facts: raschka },
+      { path: 'readings/s3-hobson-dyshel-2024-opt.pdf', facts: hobson },
+      { path: 'readings/02_session-2__s2-jurafsky-martin-2024.pdf', facts: jurafsky },
+      { path: 'readings/s6-bertopic-opt.pdf', facts: bertopic },
+      { path: 'readings/s6-grootendorst.pdf', facts: facts({ ...bertopic, author: 'Grootendorst' }) },
+    ]);
+    expect(all.filter((d) => hasUnknown(d.line)).length).toBeGreaterThanOrEqual(4);
+    for (const d of all) if (hasUnknown(d.line)) expect(d.notes.some((n) => n.level === '?'), d.line).toBe(true);
+  });
+
+  it('sorts ?, guess, check, found, keeping their order within a level', () => {
+    const n = (part: string, level: '?' | 'guess' | 'check' | 'found') => ({ part, level, text: '' });
+    expect(byLevel([n('Book', 'found'), n('Authors', 'guess'), n('Year', 'check'), n('Publisher', '?'), n('Chapter', 'check'), n('Pages', '?'), n('Section', 'found')]).map((x) => x.part))
+      .toEqual(['Publisher', 'Pages', 'Authors', 'Year', 'Chapter', 'Book', 'Section']);
+    const [d] = draftReadings([{ path: 'r/s8-raschka-2024.pdf', facts: raschka }]);
+    const ranks = d.notes.map((x) => ['?', 'guess', 'check', 'found'].indexOf(x.level));
+    expect(ranks).toEqual([...ranks].sort((a, b) => a - b));
+    expect(d.notes.at(-1)).toMatchObject({ part: 'Section', level: 'found' });
   });
 });
 
