@@ -230,29 +230,21 @@ def shown_list(
 
 
 class Landing(NamedTuple):
-    """Where one copy of a row lands in its semester repo ("" for the root), the row's
-    key, and whether it is the row's reading-list file (`inline`: shown as text on the
-    row, never linked)."""
+    """Where a readings entry's reading-list file lands in its semester repo, and the
+    entry's key: shown as text on that row, never linked."""
 
     path: str
     key: str
-    inline: bool
 
 
 def landings(rows: Iterable[PlannedRow]) -> dict[str, tuple[Landing, ...]]:
-    """Every copy `rows` land, per semester repo, each readings entry's reading-list
-    file (`PlannedRow.reading_list_dest`) flagged `inline`: what `site_repo.landed_links`
-    gives each landed path its row by (the deepest landing holding it)."""
+    """Every reading-list file `rows` land (`PlannedRow.reading_list_dest`), per
+    semester repo: the paths `site_repo.landed_links` never links, and counts as landed
+    only for the row whose list it is."""
     out: dict[str, dict[Landing, None]] = {}
     for r in rows:
-        named = r.reading_list_dest
-        for d in r.deploys:
-            to = (d.semester_dest_repo, deploy_dest(d))
-            if to != named:
-                path = "" if is_repo_root(to[1]) else to[1]
-                out.setdefault(to[0], {})[Landing(path, r.key, False)] = None
-        if named is not None:
-            out.setdefault(named[0], {})[Landing(named[1], r.key, True)] = None
+        if (named := r.reading_list_dest) is not None:
+            out.setdefault(named[0], {})[Landing(named[1], r.key)] = None
     return {repo: tuple(found) for repo, found in out.items()}
 
 

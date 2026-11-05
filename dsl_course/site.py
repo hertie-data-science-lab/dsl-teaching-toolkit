@@ -451,11 +451,10 @@ def _row_landed(
     hosted: Hosted,
     marks: Mapping[str, tuple[Landing, ...]],
 ) -> list[_Landed]:
-    """Everything `row`'s copies have landed, in plan order, each path under the row
-    whose copy lands it deepest and no reading-list file linked (`marks`:
-    `schedule_plan.landings`). A copy into a repo the semester does not have yet has
-    landed nothing, and a copy that lands INSIDE another copy of the same row (a lab's
-    `solutions/`) is already listed by that one."""
+    """Everything `row`'s copies have landed, in plan order, no reading-list file linked
+    (`marks`: `schedule_plan.landings`). A copy into a repo the semester does not have
+    yet has landed nothing, and a copy that lands INSIDE another copy of the same row (a
+    lab's `solutions/`) is already listed by that one."""
     deploys = row.deploys
     dests = [(d.semester_dest_repo, deploy_dest(d)) for d in deploys]
 

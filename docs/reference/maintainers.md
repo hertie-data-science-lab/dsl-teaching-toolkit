@@ -846,11 +846,10 @@ Students see the released copy only: the semester site (`site._shown_list`) and 
 file (`student_status._shown_list`) read the file's landed copy in the semester; inline text
 shows once a copy of the entry has landed, or, with no copies, at `Release.opens` (when its
 copies would ship; an undated attached entry takes its host row's); both apply
-`schedule_plan.shown_list`. `site_repo.landed_links` lists each landed path under the row
-whose copy lands it DEEPEST (`schedule_plan.landings`, built once per build), so another
-row's copy inside a folder keeps its own files; a reading-list file is flagged `inline`:
-never linked, never `READINGS.md` by name, and landed for its own row only (a list kept in a
-lecture folder does not release the lecture). The open course site has no schedule, so
+`schedule_plan.shown_list`. `site_repo.landed_links` never links a reading-list file
+(`schedule_plan.landings`, every row's, built once per build), never `READINGS.md` by name,
+and a copy that landed only such files has landed for the row whose list it is only (a list
+kept in a lecture folder does not release the lecture). The open course site has no schedule, so
 it keeps inlining a readings folder's `READINGS.md` by name (`readings.readings_block`). The
 syllabus reads the course file (it is written before anything ships).
 `status.json` readings rows say where the list is (`reading_list`: the course file plus

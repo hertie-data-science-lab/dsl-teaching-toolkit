@@ -323,9 +323,8 @@ def _landed(
 ) -> tuple[list[dict], list[release_record.Key]]:
     """(links, the copies that landed) for every copy of `row` that is in its
     destination, listed as the semester site lists them (`site_repo.landed_links` over
-    `marks`, `schedule_plan.landings`: each path under the row whose copy lands it
-    deepest, no reading-list file linked). A copy inside another copy of the same row (a
-    lab's `solutions/`) is that one's."""
+    `marks`, `schedule_plan.landings`: no reading-list file linked). A copy inside
+    another copy of the same row (a lab's `solutions/`) is that one's."""
     dests = [
         (d.semester_dest_repo, "" if is_repo_root(deploy_dest(d)) else deploy_dest(d))
         for d in row.deploys

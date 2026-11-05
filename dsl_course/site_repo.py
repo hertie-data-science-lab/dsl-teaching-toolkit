@@ -28,7 +28,6 @@ from .course import (
     is_repo_root,
     pages_repo,
     people_by_role,
-    within,
 )
 from .discovery import course_org_for_semester, list_org_repos
 from .gh_teams import acting_login
@@ -1013,7 +1012,7 @@ def landed_links(
     blobs: Sequence[str],
     path: str,
     allow: frozenset[str],
-    landings: Collection[tuple[str, str, bool]],
+    landings: Collection[tuple[str, str]],
     key: str,
     hosted: Hosted | None = None,
 ) -> list[Link] | None:
@@ -1023,28 +1022,18 @@ def landed_links(
     sorted. `hosted` (the semester site's alone) adds each hosted copy's `view_url`. The
     ONE listing rule: the semester site and the student file both read it.
 
-    A landed path is the row's whose copy lands it DEEPEST (`landings`, every row's copy
-    into `repo`: `schedule_plan.landings`), so another row's copy inside this one keeps
-    its own files. A reading-list file (`inline`) is never linked - its row inlines the
-    text - and counts as landed for its own row only: a list kept in a lecture folder
-    does not release the lecture, and a readings copy that landed only its list has
-    landed (no link)."""
+    `landings` are the reading-list files in `repo`, `(path, row key)`
+    (`schedule_plan.landings`): never linked - their row inlines the text - and landed
+    for their own row only. A copy that landed nothing else has not landed, so a list
+    kept in a lecture folder does not release the lecture, unless the list is row
+    `key`'s own (landed, no link)."""
     path = "" if is_repo_root(path) else path.strip("/")
     prefix = f"{path}/" if path else ""
     landed = [b for b in blobs if b == path or b.startswith(prefix)] if path else blobs
-    # Only a landing at or under this copy's own can be deeper than it.
-    inner = [h for h in landings if within(path, h[0]) is not None]
-    shown, listed = [], False
-    for b in landed:
-        holders = [h for h in inner if within(h[0], b) is not None]
-        deepest = max((len(h[0]) for h in holders), default=-1)
-        top = [h for h in holders if len(h[0]) == deepest]
-        if any(inline for _p, _k, inline in top):
-            listed = listed or any(k == key and inline for _p, k, inline in top)
-        elif not top or any(k == key for _p, k, _i in top):
-            shown.append(b)
+    lists = {p for p, _k in landings}
+    shown = [b for b in landed if b not in lists]
     if not shown:
-        return [] if listed else None
+        return [] if any((b, key) in landings for b in landed) else None
     if path in shown:
         return [file_link(org, repo, branch, path, path.rsplit("/", 1)[-1], hosted)]
     files = [file_link(org, repo, branch, b, b[len(prefix) :], hosted) for b in shown]

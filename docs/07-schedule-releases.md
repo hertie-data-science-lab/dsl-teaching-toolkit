@@ -37,7 +37,7 @@ Each block is a map. The **key** of an entry (`lecture-3`, `lab-2b`) is its id: 
 
 Each kind gets its own tab on the site, and its rows are named by the kind and the number (`Lecture 3`). Two shown entries of one kind with the same number are a problem. A lecture or lab without `session:` is a problem too (*Give lecture-3 a session*), and its files wait until it has one.
 
-**A row appears as soon as you write it, not when it ships.** Until its files land the row says so (*"Materials for lecture 3 are not yet released"*), then links what landed: a file as itself, a folder as GitHub shows it. A folder another entry releases into (a lab's `solutions/` written as its own entry) is linked on that entry's row, not this one's. An entry with `event_datetime: tbc` is a **TBC** row after the dated rows of its kind, and nothing ships until it has a date. If you ship its files by hand, Updates announces it at the moment they shipped (the release record's time, else when they first landed), and the console's release page asks for the session date.
+**A row appears as soon as you write it, not when it ships.** Until its files land the row says so (*"Materials for lecture 3 are not yet released"*), then links what landed: a file as itself, a folder as GitHub shows it. An entry with `event_datetime: tbc` is a **TBC** row after the dated rows of its kind, and nothing ships until it has a date. If you ship its files by hand, Updates announces it at the moment they shipped (the release record's time, else when they first landed), and the console's release page asks for the session date.
 
 ### Slots: one entry, several times
 

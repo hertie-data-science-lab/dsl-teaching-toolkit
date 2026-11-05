@@ -461,30 +461,28 @@ def test_the_named_reading_list_file_is_never_a_link(monkeypatch):
     assert landed.links == []
 
 
-def test_a_path_is_listed_under_the_row_whose_copy_lands_it_deepest():
-    # Another row's copy inside this one keeps its files; a reading list is never a link
-    # and releases only its own row.
-    blobs = (
-        "lectures/01/READINGS.md",
-        "lectures/01/lab/a.ipynb",
-        "lectures/01/slides.pdf",
+def test_a_separate_entrys_copy_inside_a_lab_folder_still_lists_on_the_lab(
+    monkeypatch,
+):
+    # Only a reading-list file is attributed elsewhere: a hidden entry releasing
+    # `labs/03/solutions/` leaves those files on lab-3's row, as on main.
+    tree = ("labs/03/lab.ipynb", "labs/03/solutions/a.ipynb")
+    monkeypatch.setattr(site, "_repo_tree", lambda org, repo: ("main", tree))
+    lab = schedule_plan.PlannedRow(
+        "lab-3", "lab", None, date(2026, 9, 1), deploys=(_deploy("labs/03"),)
     )
-    marks = (
-        schedule_plan.Landing("lectures/01", "lecture-1", False),
-        schedule_plan.Landing("lectures/01/lab", "lab-1", False),
-        schedule_plan.Landing("lectures/01/READINGS.md", "readings-1", True),
+    solutions = schedule_plan.PlannedRow(
+        "solutions-3",
+        "lab",
+        None,
+        date(2026, 9, 8),
+        shown=False,
+        deploys=(_deploy("labs/03/solutions"),),
     )
-
-    def names(path: str, key: str, there=blobs) -> list[str] | None:
-        links = site_repo.landed_links(
-            "C", "materials", "main", there, path, frozenset(), marks, key
-        )
-        return None if links is None else [k.name for k in links]
-
-    assert names("lectures/01", "lecture-1") == ["slides.pdf"]
-    assert names("lectures/01/lab", "lab-1") == ["a.ipynb"]
-    assert names("lectures/01/READINGS.md", "readings-1") == []
-    assert names("lectures/01", "lecture-1", blobs[:1]) is None
+    marks = schedule_plan.landings([lab, solutions])
+    live = frozenset({"materials"})
+    (landed,) = site._row_landed("C", lab, frozenset(), live, {}, marks)
+    assert [x.name for x in landed.links] == ["lab.ipynb", "solutions/ (1 file)"]
 
 
 _NOW = datetime(2026, 9, 10, 12, 0, tzinfo=ZoneInfo("Europe/Berlin"))
