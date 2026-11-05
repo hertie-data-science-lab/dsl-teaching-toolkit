@@ -110,6 +110,7 @@ main { min-width: 0; }
 .hint-pop::before { content: ""; position: absolute; left: 0; right: 0; top: -9px; height: 9px; }
 .hint-pop.flip-y::before { top: auto; bottom: -9px; }
 .lbl-row { display: flex; align-items: center; gap: 0; flex-wrap: wrap; }
+.lbl-row > .lbl-note { margin-left: 6px; }
 .fold > summary::before, .a-card > summary.a-sum::before { content: ""; width: 7px; height: 7px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform 0.15s; margin-right: 2px; flex: none; }
 .fold[open] > summary::before, .a-card[open] > summary.a-sum::before { transform: rotate(45deg); }
 .lives { font-size: 12.5px; color: var(--muted); }
@@ -1243,9 +1244,9 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .file-chip.bad { box-shadow: inset 0 0 0 1.5px var(--amber-ink); }
 .file-chip.current { box-shadow: inset 0 0 0 1.5px var(--ink-2); }
 .file-chip .chip-open { font: inherit; color: inherit; background: none; border: 0; padding: 2px 4px; cursor: pointer; text-align: left; }
-.file-chip .pub { font-family: var(--font-display); font-weight: 600; font-size: 11px; border: 1px solid var(--rule-strong); border-radius: 999px; background: var(--surface); color: var(--muted); padding: 0 7px; cursor: pointer; }
+.file-chip .pub { flex-shrink: 0; white-space: nowrap; font-family: var(--font-display); font-weight: 600; font-size: 11px; border: 1px solid var(--rule-strong); border-radius: 999px; background: var(--surface); color: var(--muted); padding: 0 7px; cursor: pointer; }
 .file-chip .pub.on { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
-.file-chip .x { font-size: 16px; min-width: 24px; min-height: 24px; }
+.file-chip .x { flex-shrink: 0; font-size: 16px; min-width: 24px; min-height: 24px; }
 /* The Releases settings' chip lists (plan 2026-11-04, decision 7): an inherited repo grey, not removable. */
 .rel-chips { align-items: center; }
 .rel-chips .chip.fixed { background: var(--sunk); color: var(--muted); padding: 2px 9px; }
@@ -1384,8 +1385,10 @@ a.pill-ghost { text-decoration: none; display: inline-flex; align-items: center;
 .open-menu .pm-off { cursor: default; }
 /* The reading-list editor (ui/ReadingList.tsx, decision 0044): editor and preview side by side where the sheet or pane is wide. */
 .reading-list-editor { container-type: inline-size; }
-.rl-file { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.rl-file input { flex: 1 1 220px; min-width: 0; }
+/* The list's file, under Generate draft: footnote-sized and muted. */
+.rl-file { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12.5px; color: var(--muted); }
+.rl-file .mono { font-size: 12px; }
+.rl-file input { flex: 1 1 220px; min-width: 0; font-size: 12px; }
 .rl-file .actions { margin-left: auto; }
 .rl-edit { display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr); }
 .rl-edit textarea { width: 100%; resize: vertical; font-family: var(--font-code); font-size: 13px; }

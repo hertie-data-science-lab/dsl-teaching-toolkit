@@ -114,21 +114,6 @@ export function ReadingList({ id, list, defaultRepo, defaultPath, org, repos, fi
     <div class="field reading-list-editor">
       <span class="lbl-row"><label for={`${id}-rl`}><b>{LIST_TEXT.label}</b></label></span>
       <span class="hint">{LIST_TEXT.hint}</span>
-      <div class="rl-file">
-        <span>File: </span>
-        {cur.inline ? <span class="footnote">none</span>
-          : isNew && !fixedPath ? <><span class="mono">{cur.repo} / </span><input id={`${id}-rl-path`} class="mono" type="text" aria-label="Reading list path" value={cur.path} onInput={(e) => onChange(toFile(cur.repo, (e.target as HTMLInputElement).value.replace(/^\/+/, ''), cur.text))} /></>
-          : <span class="mono">{cur.repo} / {cur.path}</span>}
-        {badge ? <span class={`chip${cur.inline ? ' amber' : ' muted'}`}>{badge}</span> : f?.kind === 'error' ? null : <span class="footnote">Reading {cur.path}…</span>}
-        {fixedPath ? null : noRepo ? <span class="footnote">{LIST_TEXT.noRepo}</span> : (
-          <span class="actions">
-            {cur.inline ? <button class="btn small" type="button" onClick={() => onChange({ repo: defaultRepo, path: defaultPath, inline: false, text: cur.text ?? '' })}>{LIST_TEXT.move}</button> : null}
-            <button class="btn small quiet" type="button" onClick={() => setPicking(true)}>{LIST_TEXT.choose}</button>
-          </span>
-        )}
-      </div>
-      {f?.kind === 'error' ? <CheckLine cls="bad">Could not read {cur.path}: {f.message} <button class="textlink" type="button" onClick={retry}>Retry</button></CheckLine> : null}
-      {cur.inline || f?.kind === 'error' ? null : <p class="footnote">{isNew ? LIST_TEXT.footNew(cur.repo) : LIST_TEXT.footExisting}</p>}
       <div class="rl-edit">
         <textarea id={`${id}-rl`} class="mono" rows={rows} value={text} disabled={!loaded} onInput={(e) => setText((e.target as HTMLTextAreaElement).value)} />
         <div class="rl-preview" aria-label={LIST_TEXT.preview}>
@@ -138,6 +123,21 @@ export function ReadingList({ id, list, defaultRepo, defaultPath, org, repos, fi
       </div>
       {missing.length ? <CheckLine cls="warn">{LIST_TEXT.missing(missing)}</CheckLine> : null}
       <DraftButton org={org} pdfs={pdfs} disabled={!loaded} onAdd={(adds) => setText(insertLines(text, cur.path, adds, cur.repo))} />
+      <div class="rl-file">
+        <span>File: </span>
+        {cur.inline ? <span class="footnote">none</span>
+          : isNew && !fixedPath ? <><span class="mono">{cur.repo} / </span><input id={`${id}-rl-path`} class="mono" type="text" aria-label="Reading list path" value={cur.path} onInput={(e) => onChange(toFile(cur.repo, (e.target as HTMLInputElement).value.replace(/^\/+/, ''), cur.text))} /></>
+          : <span class="mono">{cur.repo} / {cur.path}</span>}
+        {badge ? <span class={`chip${cur.inline ? ' amber' : ' muted'}`}>{badge}</span> : f?.kind === 'error' ? null : <span class="footnote">Reading {cur.path}…</span>}
+        {fixedPath ? null : noRepo ? <span class="footnote">{LIST_TEXT.noRepo}</span> : (
+          <span class="actions">
+            {cur.inline ? <button class="btn small quiet" type="button" onClick={() => onChange({ repo: defaultRepo, path: defaultPath, inline: false, text: cur.text ?? '' })}>{LIST_TEXT.move}</button> : null}
+            <button class="btn small quiet" type="button" onClick={() => setPicking(true)}>{LIST_TEXT.choose}</button>
+          </span>
+        )}
+      </div>
+      {f?.kind === 'error' ? <CheckLine cls="bad">Could not read {cur.path}: {f.message} <button class="textlink" type="button" onClick={retry}>Retry</button></CheckLine> : null}
+      {cur.inline || f?.kind === 'error' ? null : <p class="footnote">{isNew ? LIST_TEXT.footNew(cur.repo) : LIST_TEXT.footExisting}</p>}
       {picking ? <FilePicker files={files} org={org} repos={repos} only={(path) => viewKind(path) === 'markdown'} onClose={() => setPicking(false)}
         onPick={(got) => { const g = got[got.length - 1]; if (g) onChange({ repo: g.repo, path: g.path, inline: false, text: null }); }} /> : null}
     </div>

@@ -127,8 +127,7 @@ export const FORM_TEXT = {
   showConsole: '"Show on student site" reads "Show in student console" for a course with the console on.',
   perFile: 'Per-file release time: click a file chip to set its own time (default: an hour before the first slot).',
   readingsSub: 'Writes a second entry under Readings, attached to this session. The reading materials go in Files (private to students); the Reading list is a course file every student sees once these readings release (and the only readings content on the public site).',
-  readingsFilesSub: 'the reading materials; private unless a file is made public here',
-  readingsFiles: 'private unless a file is made public (per-file toggle on its chip)',
+  readingsFiles: 'private unless toggled to public',
   attach: 'Attached readings show on that session’s row and under its heading on the Readings tab; None gives them a dated row of their own.',
   examFiles: 'Files to release (rare for an exam: a past paper, a formula sheet):',
   assetsName: '(for you; never a row)',
@@ -231,7 +230,7 @@ function FilesField({ p, id, files, set, first, readings = false, showTime = tru
       ) : null}
       {picking ? <FilePicker files={p.files} org={p.course.org} repos={sources.materials} others={sources.others} onClose={() => setPicking(false)}
         onPick={(got) => set([...files, ...got.filter((g) => !files.some((x) => x.repo === g.repo && x.path === g.path)).map((g) => ({ repo: g.repo, path: g.path, toRepo: '', toPath: '', atDate: '', atTime: '', public: false }))])} /> : null}
-      <PickButton onClick={() => setPicking(true)} short={false} />
+      <div class="actions"><PickButton onClick={() => setPicking(true)} short={false} /></div>
     </>
   );
 }
@@ -347,11 +346,11 @@ function UnitForm({ p, d, set, errors, consoleOn, sources }: FormProps<EntryDraf
           <div class="field"><Lbl for="r-time" strong>Time</Lbl><input id="r-time" type="time" value={tw.tbc ? '' : tw.slots[0].time} disabled={tw.tbc} onInput={(e) => setTwin({ slots: [{ ...tw.slots[0], time: val(e) }] })} /></div>
           <div class="field"><Lbl for="r-title">Title</Lbl><input id="r-title" type="text" placeholder={`Readings for session ${d.session || 'N'}`} value={tw.title} onInput={(e) => setTwin({ title: val(e) })} /></div>
         </div>
-        <ListField p={p} id="r" d={tw} set={setTwin} sources={sources} title={d.title} />
         <div class="field">
-          <span class="lbl-row"><b>Files</b><span class="hint"> {FORM_TEXT.readingsFilesSub}</span></span>
+          <span class="lbl-row"><b>Files</b><span class="hint lbl-note">{FORM_TEXT.readingsFiles}</span></span>
           <FilesField p={p} id="r-file" files={tw.files} set={(files) => setTwin({ files })} first={tw.slots[0]} readings showTime={false} sources={sources} />
         </div>
+        <ListField p={p} id="r" d={tw} set={setTwin} sources={sources} title={d.title} />
         <Fold summary="Advanced (readings)">
           <div class="row-adv">
             <NumberInput id="r" d={tw} set={setTwin} errors={twinErr} />
@@ -397,11 +396,11 @@ function ReadingsForm({ p, d, set, errors, consoleOn, sources, doc }: FormProps<
         <div class="field"><Lbl for="e-date0" strong>Date</Lbl><input id="e-date0" type="date" value={d.tbc ? '' : d.slots[0].date} disabled={d.tbc} onInput={(e) => set({ slots: [{ ...d.slots[0], date: val(e) }] })} /><Err e={errors.date} /></div>
         <div class="field"><Lbl for="e-time0" strong>Time</Lbl><input id="e-time0" type="time" value={d.tbc ? '' : d.slots[0].time} disabled={d.tbc} onInput={(e) => set({ slots: [{ ...d.slots[0], time: val(e) }] })} /></div>
       </div>
-      <ListField p={p} id="e" d={d} set={set} sources={sources} />
       <div class="field">
-        <span class="lbl-row"><b>Files</b><span class="hint"> {FORM_TEXT.readingsFiles}</span></span>
+        <span class="lbl-row"><b>Files</b><span class="hint lbl-note">{FORM_TEXT.readingsFiles}</span></span>
         <FilesField p={p} id="e-file" files={d.files} set={(files) => set({ files })} first={d.slots[0]} readings showTime={false} sources={sources} />
       </div>
+      <ListField p={p} id="e" d={d} set={set} sources={sources} />
       <Fold summary="Advanced" open={d.number !== ''}>
         <div class="row-adv">
           <NumberInput id="e" d={d} set={set} errors={errors} />
