@@ -6,7 +6,7 @@
 import { useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import { plural } from '../model/format';
-import { baseName, draftReadings, hasUnknown, type Draft, type PdfFacts, type Section, type Level } from '../model/readingDraft';
+import { baseName, draftReadings, hasUnknown, type Draft, type PdfFacts, type Section, type Level, type Note } from '../model/readingDraft';
 import { CheckLine } from './bits';
 import { Modal } from './Modal';
 
@@ -21,7 +21,12 @@ export const DRAFT_TEXT = {
   unknown: 'Still has a ? where a detail is unknown. It will show as written on the site.',
   footer: (k: number, n: number, m: number) => `${k} of ${n} ticked · ${m} with a ? go in as written. Unticked lines are left out.`,
   add: (k: number) => `Add ${plural(k, 'line')} to the reading list`,
+  showAll: (n: number) => `Show all ${n}`,
+  showFewer: 'Show fewer',
 };
+
+/** How many notes a file shows until Show all. */
+const NOTES_SHOWN = 5;
 
 /** A PDF reading file in a course repo: `sha` and `size` from the repo tree (the client reads a file over 1 MB by blob). */
 export interface PdfRef {
@@ -103,6 +108,20 @@ interface Row {
   ticked: boolean;
 }
 
+/** A file's notes: the first five (least sure first), `Show all N` showing the rest. */
+function Notes({ notes }: { notes: Note[] }) {
+  const [all, setAll] = useState(false);
+  const many = notes.length > NOTES_SHOWN;
+  return (
+    <>
+      <ul class="rd-notes">
+        {(all ? notes : notes.slice(0, NOTES_SHOWN)).map((n) => <li><span class={`chip ${LEVEL_CLS[n.level]}`}>{n.level}</span> <b>{n.part}</b>: {n.text}</li>)}
+      </ul>
+      {many ? <button class="textlink rd-more" type="button" aria-expanded={all} onClick={() => setAll(!all)}>{all ? DRAFT_TEXT.showFewer : DRAFT_TEXT.showAll(notes.length)}</button> : null}
+    </>
+  );
+}
+
 /** The dialog: per file its name, a Section select, the line to edit, a tick, and where each part came from. */
 export function DraftDialog({ drafts, failed = [], onAdd, onClose }: { drafts: Draft[]; failed?: { path: string; message: string }[]; onAdd: (adds: DraftAdd[]) => void; onClose: () => void }) {
   const [rows, setRows] = useState<Row[]>(() => drafts.map((d) => ({ section: d.section, line: d.line, ticked: false })));
@@ -135,9 +154,7 @@ export function DraftDialog({ drafts, failed = [], onAdd, onClose }: { drafts: D
               <button class={`rd-tick${r.ticked ? ' on' : ''}`} type="button" aria-pressed={r.ticked} aria-label={`Tick ${name}`} onClick={() => set(i, { ticked: !r.ticked })}>✓</button>
             </div>
             {r.ticked && hasUnknown(r.line) ? <p class="rd-unknown"><span class="rd-bang" aria-hidden="true">!</span>{DRAFT_TEXT.unknown}</p> : null}
-            <ul class="rd-notes">
-              {d.notes.map((n) => <li><span class={`chip ${LEVEL_CLS[n.level]}`}>{n.level}</span> <b>{n.part}</b>: {n.text}</li>)}
-            </ul>
+            <Notes notes={d.notes} />
           </div>
         );
       })}

@@ -128,6 +128,16 @@ export function parseNames(raw: string): Person[] | null {
 const initials = (given: string[]) =>
   given.some((g) => g.replace(/[-.]/g, '')) ? given.map((g) => g.split('-').map((x) => x.replace(/\.$/, '')).filter(Boolean).map((x) => `${x[0].toUpperCase()}.`).join('-')).filter(Boolean).join(' ') : '?';
 
+/** The surnames among `people` without given names: their initials are a `?` in the line. */
+const bare = (people: Person[]) => people.filter((p) => initials(p.given) === '?').map((p) => p.family);
+
+/** The Authors note, `?` when a surname has no given names (its initials are a `?` in the line). */
+export function authorsNote(people: Person[], level: Level, text: string): Note {
+  const b = bare(people);
+  if (!b.length) return { part: 'Authors', level, text };
+  return { part: 'Authors', level: '?', text: `${text}; no given names${b.length < people.length ? ` for ${b.join(', ')}` : ''}, so the initials are ?` };
+}
+
 /** APA 7 author list: "Family, G. G., Family, G., & Family, G."; a surname without given names gets a `?`. */
 export function apaAuthors(people: Person[] | null): string {
   if (!people?.length) return '?';
@@ -197,6 +207,7 @@ function bookOf(f: PdfFacts, path: string, text: string): Book {
   const shelf = raw.match(SHELF);
   if (shelf) {
     b.authors = parseNames(shelf[1]);
+    if (b.authors && bare(b.authors).length) notes.push(authorsNote(b.authors, 'found', `From the PDF's details: "${shelf[1].trim()}"`));
     b.year = shelf[3];
     b.publisher = shelf[4] ? apaPublisher(shelf[4]) : null;
     setTitle(b, shelf[2].replace(/_ /g, ': '));
@@ -214,16 +225,16 @@ function bookOf(f: PdfFacts, path: string, text: string): Book {
     const fn = words(path);
     if (people && people.some((p) => fn.includes(p.family.toLowerCase().split(' ').pop()!))) {
       b.authors = people;
-      notes.push({ part: 'Authors', level: 'check', text: `From the PDF's details: "${f.author.trim()}"` });
+      notes.push(authorsNote(people, 'check', `From the PDF's details: "${f.author.trim()}"`));
     } else if (people && !filenameNames(path)) {
       b.authors = people;
-      notes.push({ part: 'Authors', level: 'check', text: `From the PDF's details: "${f.author.trim()}" (may be whoever made the PDF)` });
+      notes.push(authorsNote(people, 'check', `From the PDF's details: "${f.author.trim()}" (may be whoever made the PDF)`));
     }
   }
   if (!b.authors) {
     b.authors = filenameNames(path);
     notes.push(b.authors
-      ? { part: 'Authors', level: 'guess', text: `Surnames from the filename${shelf ? ` (the PDF's details name "${shelf[1].trim()}", which does not split into people)` : f.author.trim() ? ` (the PDF's details name "${f.author.trim()}", not in the filename)` : ''}` }
+      ? authorsNote(b.authors, 'guess', `Surnames from the filename${shelf ? ` (the PDF's details name "${shelf[1].trim()}", which does not split into people)` : f.author.trim() ? ` (the PDF's details name "${f.author.trim()}", not in the filename)` : ''}`)
       : { part: 'Authors', level: '?', text: 'No authors in the PDF\'s details or the filename' });
   }
   if (!b.year) {
@@ -239,8 +250,13 @@ function setTitle(b: Book, t: string) {
   const s = splitTitle(t);
   const trunc = s.title.match(/^(.+?):\s.*(\.\.\.|…)/);
   const main = (trunc ? trunc[1] : s.title).trim();
-  b.title = sentenceCase(main);
   b.edition = s.edition;
+  if (!main) {
+    b.title = null;
+    b.notes.push({ part: 'Book', level: '?', text: `No title left once "${t.trim()}" loses its edition and brackets` });
+    return;
+  }
+  b.title = sentenceCase(main);
   const left = [...(trunc ? ['a cut-off subtitle'] : []), ...s.dropped];
   if (left.length) b.notes.push({ part: 'Book', level: 'check', text: `Left out of the title: ${left.join(', ')}` });
   b.notes.push({ part: 'Book', level: 'check', text: 'Title set in sentence case: check names and acronyms' });
@@ -371,6 +387,10 @@ export function apaLine(b: Pick<Book, 'authors' | 'year' | 'title' | 'edition' |
 /** The filename less its session mark, `opt` and a trailing part number: files of one book share it (`s1-hobson-dyshel-2024-opt` ~ `s2-hobson-dyshel-2024-2`). */
 const workKey = (path: string) => words(path).filter((w, i, all) => !(i === 0 && /^s\d+$/.test(w)) && w !== 'opt' && !(i === all.length - 1 && /^\d$/.test(w))).join('-');
 
+const RANK: Record<Level, number> = { '?': 0, guess: 1, check: 2, found: 3 };
+/** Notes least sure first (`?`, `guess`, `check`, `found`), in their order within a level. */
+export const byLevel = (notes: Note[]) => [...notes].sort((a, b) => RANK[a.level] - RANK[b.level]);
+
 /** Books drafted this session, by their metadata title: the same book across files (and dialogs) is drafted once. */
 const books = new Map<string, Book>();
 export const forgetBooks = () => books.clear();
@@ -394,12 +414,16 @@ export function draftReadings(files: { path: string; facts: PdfFacts }[]): Draft
     let b = book;
     if (!b.title) {
       const twin = own.find((o) => o.path !== path && o.book.title && workKey(o.path) === workKey(path));
-      if (twin) b = { ...twin.book, notes: [{ part: 'Book', level: 'check', text: `No book in this PDF's details: the same as ${baseName(twin.path)}, by its filename` }] };
+      if (twin) {
+        // The twin's authors, year and publisher come with the notes that say how sure they are.
+        const lent = twin.book.notes.filter((n) => n.part !== 'Book').map((n) => ({ ...n, text: `As for ${baseName(twin.path)}: ${n.text}` }));
+        b = { ...twin.book, notes: [{ part: 'Book', level: 'check', text: `No book in this PDF's details: the same as ${baseName(twin.path)}, by its filename` }, ...lent] };
+      }
     }
     const pages = pageRange(facts);
     const ch = chapterOf(facts);
     const sec = sectionOf(path);
-    return { path, section: sec.section, line: apaLine(b, ch.n, pages), notes: [...b.notes, ch.note, pages.note, sec.note] };
+    return { path, section: sec.section, line: apaLine(b, ch.n, pages), notes: byLevel([...b.notes, ch.note, pages.note, sec.note]) };
   });
 }
 

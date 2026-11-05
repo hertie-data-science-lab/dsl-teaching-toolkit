@@ -890,7 +890,9 @@ Generate draft (0044 point 6) sits under the editor in both mounts: `ui/ReadingD
 the entry's PDF bytes four at a time through `client.fetchBytes` (uncached, so the viewer's kept
 files stay; contents API, blob API over 1 MB: tree paths carry `size`), parses them in order in
 `model/pdfText.ts` (pdf.js takes the bytes without a copy and empties them), and drafts the lines in `model/readingDraft.ts`
-(pure, tested on fixture text; heuristics from the 5 Nov trial). `pdfText.ts` is the only module
+(pure, tested on fixture text; heuristics from the 5 Nov trial). A part that leaves a free-standing `?` in the line
+gets a `?` note where the part is decided (0046 rule 14; `authorsNote` for initials), and `byLevel` sorts
+the notes `?`, guess, check, found (rule 15). `pdfText.ts` is the only module
 that imports `pdfjs-dist`, and only by dynamic `import()`, so pdf.js stays out of the main chunk
 and its worker is a same-origin asset (the CSP allows no other script source). Keep it lazy.
 
