@@ -147,7 +147,7 @@ function MaterialsFile({ p, at }: { p: CourseProps; at: { repo: string; path: st
       <div class="page-head">
         <div><h2 class="h1">Course materials</h2><p class="lede"><a class="textlink" href={`?course=${org}#materials`}>All course materials</a></p></div>
       </div>
-      <Split label={at.repo} side={<section class="panel section" aria-label={at.repo}><h2>{at.repo}</h2><RepoFiles files={p.files} org={org} repo={at.repo} current={at.path} lists={lists} /></section>}>
+      <Split label={at.repo} side={<section class="panel section" aria-label={at.repo}><h2>{at.repo}</h2><RepoFiles files={p.files} org={org} repo={at.repo} current={at.path} lists={lists.map((l) => l.path)} /></section>}>
         <CourseFile org={org} at={at} files={p.files} named={lists} write={p.course.write} />
       </Split>
     </>
@@ -188,7 +188,7 @@ export function MaterialsIndexScreen(p: CourseProps) {
                     <RepoWhy r={r} />
                     {gh?.pushed_at ? <span class="r-sub">Last change {fmtDay(gh.pushed_at)} ({ago(gh.pushed_at, p.now)}).</span> : null}
                     <span class="r-side"><OpenButton org={course.org} repo={m.repo} small quiet /><a class="btn small quiet" href={`#materials-${m.repo}`}>Settings</a></span>
-                    <RepoFiles files={files} org={course.org} repo={m.repo} focus={focusIn(p.folder, m.repo)} lists={namedLists(p.cohortStates, m.repo)} />
+                    <RepoFiles files={files} org={course.org} repo={m.repo} focus={focusIn(p.folder, m.repo)} lists={namedLists(p.cohortStates, m.repo).map((l) => l.path)} />
                   </li>
                 );
               })}

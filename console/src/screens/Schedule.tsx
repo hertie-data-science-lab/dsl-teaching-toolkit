@@ -9,10 +9,10 @@ import { Invalid } from '../forms/Form';
 import { RELEASE_WORD, TYPE_CLASS, siteRowWord, fmtDay, fmtTime, fmtWhen, heldSentence, markWord, releaseIdent, repoWords, sortKey } from '../model/format';
 import { needsANumber, parseSchedule, scheduleRows, type Block, type Row } from '../model/schedule';
 import {
-  READINGS_KIND, SESSION_KINDS, applyChanges, blockOf, changesOf, defaultListPath, adoptDefaultList, defaultReleaseAt, draftErrors, emptyTwin, fillLists, hiddenKind, lacksReadingList, listWrites, newDraft, newlyManual, nextNumber, nextSession, numberedField, readDraft, releaseAt, relisted, twinOf, writeDraft,
-  type AssignmentDraft, type Draft, type EntryDraft, type FileDraft, type ListFile, type SemesterDraft, type SemesterEntryDraft, type SemesterType, type Slot,
+  READINGS_KIND, SESSION_KINDS, applyChanges, blockOf, changesOf, defaultListPath, defaultReleaseAt, draftErrors, emptyTwin, hiddenKind, listFile, listWrites, newDraft, newlyManual, nextNumber, nextSession, numberedField, pendingAdoption, readDraft, readingFilesOf, releaseAt, twinUsed, writeDraft,
+  type AssignmentDraft, type Draft, type EntryDraft, type FileDraft, type ListDraft, type SemesterDraft, type SemesterEntryDraft, type SemesterType, type Slot,
 } from '../model/scheduleEdit';
-import type { Assignment, Release } from '../model/types';
+import type { Assignment, Release, SemesterTodo } from '../model/types';
 import { archive, keepFuture, releaseAdhoc, releaseAgain, releaseEarly, releaseNow, scheduledPreview } from '../ops/defs';
 import { OpOpen } from '../ops/Panel';
 import type { OpDef } from '../ops/session';
@@ -20,8 +20,8 @@ import { RUN_REASON } from '../tiers/runSettings';
 import { CheckLine, DueSubmit, EditFile, Md, ProblemCards, ReleaseMarks, ghUrl } from '../ui/bits';
 import { FilePicker, pathVerdict } from '../ui/FilePicker';
 import { Hint } from '../ui/Hint';
-import { ReadingList, isReadingList, listMessage } from '../ui/ReadingList';
-import { DraftButton, type PdfRef } from '../ui/ReadingDraft';
+import { ReadingList, listMessage } from '../ui/ReadingList';
+import { fileInTree } from '../model/files';
 import { FullScreenButton, useFullScreen } from '../ui/Viewer';
 import { SaveLine, UnsavedBar, lineOf } from '../ui/edit';
 import { releaseMarks, releaseProblems, templateReadinessIn, tier, type ReleaseMark, type Tiered } from '../model/readiness';
@@ -315,7 +315,7 @@ interface FormProps<T> {
 function UnitForm({ p, d, set, errors, consoleOn, sources }: FormProps<EntryDraft>) {
   const tw = d.twin ?? emptyTwin(d);
   const setTwin: Set_<EntryDraft> = (x) => set({ twin: { ...tw, ...x } });
-  const used = !!d.twin && (!!d.twin.id || !!d.twin.files.length || !!d.twin.list?.text.trim() || !!d.twin.title.trim());
+  const used = !!d.twin && twinUsed(d.twin);
   const twinErr = sub(errors, 'twin.');
   return (
     <>
@@ -364,34 +364,14 @@ function UnitForm({ p, d, set, errors, consoleOn, sources }: FormProps<EntryDraf
   );
 }
 
-/** An entry's reading files (a folder's files from its repo tree, a file named outright), the list file left out; `sha` only when the tree has read. */
-function readingFiles(p: ReadyProps, d: EntryDraft): { repo: string; path: string; sha?: string; size?: number }[] {
-  const listPath = d.list && !d.list.inline ? d.list.path : '';
-  return d.files.flatMap((f) => {
-    const at = f.path.replace(/^\/+|\/+$/g, '');
-    const tree = p.files.tree(p.course.org, f.repo);
-    const paths = tree.kind === 'ready' ? tree.paths.filter((x) => !x.dir) : [];
-    const under = paths.filter((x) => x.path.startsWith(`${at}/`));
-    const hit = paths.find((x) => x.path === at);
-    const got = under.length ? under : hit ? [hit] : /\.[^/.]+$/.test(at) ? [{ path: at, sha: undefined, size: undefined }] : [];
-    return got.filter((x) => !isReadingList(x.path, [listPath])).map((x) => ({ repo: f.repo, path: x.path, sha: x.sha, size: x.size }));
-  });
-}
-
-/** The names of an entry's reading files, for the not-cited notice. */
-const readingNames = (files: { path: string }[]) => [...new Set(files.map((x) => x.path.split('/').pop()!))];
-
-/** An entry's PDF reading files the tree has read: what Generate draft reads. */
-const readingPdfs = (files: { repo: string; path: string; sha?: string; size?: number }[]): PdfRef[] =>
-  files.flatMap((x) => (x.sha && /\.pdf$/i.test(x.path) ? [{ repo: x.repo, path: x.path, sha: x.sha, size: x.size }] : []));
-
 /** A readings entry's Reading list (decision 0044): the shared editor, at the entry's default path while it has none. */
 function ListField({ p, id, d, set, sources, title }: { p: ReadyProps; id: string; d: EntryDraft; set: Set_<EntryDraft>; sources: { materials: string[] }; title?: string }) {
-  const files = readingFiles(p, d);
+  const listPath = d.list && !d.list.inline ? d.list.path : '';
+  const trees = [...new Set(d.files.map((f) => f.repo))].map((repo) => p.files.tree(p.course.org, repo));
+  const reading = useMemo(() => readingFilesOf(p.files, p.course.org, d.files, listPath), [d.files, listPath, ...trees]);
   return (
     <ReadingList id={id} list={d.list} defaultRepo={d.files[0]?.repo || sources.materials[0] || ''} defaultPath={defaultListPath(d, d.title || title)}
-      org={p.course.org} repos={sources.materials} files={p.files} readingFiles={readingNames(files)} onChange={(list) => set({ list })}
-      draft={(add, disabled) => <DraftButton org={p.course.org} pdfs={readingPdfs(files)} disabled={disabled} onAdd={add} />} />
+      org={p.course.org} repos={sources.materials} files={p.files} readingFiles={reading} onChange={(list) => set({ list })} />
   );
 }
 
@@ -682,13 +662,18 @@ function addWord(d: Draft): string {
 
 // ------------------------------------------------------------------ the page
 
-/** A readings row, or a unit row with readings attached, whose entry ships reading files and no reading list (decision 0044). */
-export function noReadingList(doc: Record<string, unknown>, r: Pick<Row, 'type' | 'entry'>): boolean {
-  if (r.type !== READINGS_KIND && !SESSION_KINDS.includes(r.type)) return false;
-  const e = obj(obj(doc[pluralOf(r.type)])[r.entry]);
-  if (r.type === READINGS_KIND) return lacksReadingList(e);
-  const twin = Number.isInteger(e.session) ? twinOf(doc, e.session as number) : null;
-  return !!twin && lacksReadingList(twin[1]);
+/** The Suggested to-do of a readings entry with files and no list (`status_json.NO_READING_LIST`). */
+const NO_READING_LIST = 'reading_list';
+
+/**
+ * The rows that carry the `no reading list` chip (decision 0044): the readings entries the
+ * Suggested to-do names, and the units they attach to (by session); a set-aside one marks nothing.
+ */
+export function noListRows(todo: SemesterTodo[], doc: Record<string, unknown>): (r: Pick<Row, 'type' | 'entry'>) => boolean {
+  const keys = new Set(todo.flatMap((t) => (t.check === NO_READING_LIST && t.entry && !t.set_aside ? [t.entry] : [])));
+  const sessionOf = (type: string, k: string) => obj(obj(doc[pluralOf(type)])[k]).session;
+  const sessions = new Set([...keys].map((k) => sessionOf(READINGS_KIND, k)).filter(Number.isInteger));
+  return (r) => (r.type === READINGS_KIND ? keys.has(r.entry) : SESSION_KINDS.includes(r.type) && sessions.has(sessionOf(r.type, r.entry)));
 }
 
 function View(p: ReadyProps) {
@@ -716,6 +701,7 @@ function View(p: ReadyProps) {
   const doc = sf?.doc ?? {};
   const sched = useMemo(() => (sf && !sf.error ? parseSchedule(sf.text) : null), [sf?.text]);
   const rows = scheduleRows(status, sched, now, tz);
+  const noList = noListRows(status.semester?.todo ?? [], doc);
   const assignmentOf = new Map((status.assignments ?? []).map((a) => [a.slug, a]));
   // An assignment set to hand out by hand that has not gone out: its rows carry the tag.
   const waiting = (slug: string) => { const a = assignmentOf.get(slug); return a !== undefined && waitsByHand(a); };
@@ -727,12 +713,7 @@ function View(p: ReadyProps) {
   const consoleOn = consoleOnOf(p);
   const handedOut = (k: string) => { const a = assignmentOf.get(k); return !!a?.handout && Date.parse(a.handout) <= now; };
 
-  // A reading list's course file, read for the sheet (decision 0044): its text and sha fill the draft once here.
-  const readList = (repo: string, path: string): ListFile => {
-    const f = p.files.file(p.course.org, repo, path);
-    return f.kind === 'ready' ? { kind: 'ready', text: f.text, sha: f.sha } : f.kind === 'absent' ? { kind: 'absent' } : { kind: 'loading' };
-  };
-  const baseOf = (k: string): Draft | null => (k === 'new' ? null : fillLists(readDraft(doc, k), readList));
+  const baseOf = (k: string): Draft | null => (k === 'new' ? null : readDraft(doc, k));
   // `?template=` opens a new assignment entry for that template (New assignment's last step);
   // `?from=&paths=` a new supporting-files release with those files (the Files panel's "Schedule on the calendar").
   const prefilled = (): Draft | null => {
@@ -740,13 +721,15 @@ function View(p: ReadyProps) {
     if (p.prefill?.kind === 'template') return { ...(newDraft('assignment', doc) as AssignmentDraft), template: p.prefill.repo };
     return p.prefill?.kind === 'files' ? releasePrefilled(newDraft('assets', doc) as EntryDraft, p.prefill.rows, effectiveDestRepo(p.loaded)) : null;
   };
-  // A readings entry with no list whose default READINGS.md is already in the course repo takes it (decision 0044).
-  const inTree = (repo: string, path: string) => { const t = p.files.tree(p.course.org, repo); return t.kind === 'ready' && t.paths.some((x) => !x.dir && x.path === path); };
-  const adopt = (d: Draft | null) => fillLists(adoptDefaultList(d, (e) => e.files[0]?.repo || repos[0] || '', inTree), readList);
-  const draftOf = (k: string): Draft | null => adopt(k in drafts ? drafts[k] : k === 'new' ? prefilled() : baseOf(k));
-  // The open entry counts too: an adopted list makes it dirty before anything is typed.
-  const dirtyKeys = [...new Set([...Object.keys(drafts), ...(key && key !== 'new' && key !== 'semester' && sf ? [key] : [])])]
-    .filter((k) => k === 'new' || (draftOf(k) !== null && !deepEqual(draftOf(k), baseOf(k))));
+  const draftOf = (k: string): Draft | null => (k in drafts ? drafts[k] : k === 'new' ? prefilled() : baseOf(k));
+  // Reading lists (decision 0044): a list file's text and sha are the files cache's, read here and at save.
+  const readList = (l: ListDraft) => listFile(p.files, p.course.org, l);
+  const inTree = (repo: string, path: string) => fileInTree(p.files, p.course.org, repo, path);
+  // A readings entry (or a unit's twin) whose default READINGS.md is already there takes it: the open entry is then dirty.
+  const adopts = (d: Draft | null) => d?.kind === 'entry' && !!(pendingAdoption(d, inTree) || (d.twin && pendingAdoption(d.twin, inTree)));
+  // Every draft this render, once: the edited ones and the open entry.
+  const drafted = new Map([...Object.keys(drafts), ...(key && key !== 'new' && key !== 'semester' && sf ? [key] : [])].map((k) => [k, draftOf(k)]));
+  const dirtyKeys = [...drafted.keys()].filter((k) => { const d = drafted.get(k)!; return k === 'new' || (d !== null && (!deepEqual(d, baseOf(k)) || adopts(d))); });
   const dirty = dirtyKeys.length + removed.length;
   const setDraft = (k: string, d: Draft) => {
     setDrafts({ ...drafts, [k]: d });
@@ -777,22 +760,22 @@ function View(p: ReadyProps) {
   /** Save every change; `handOutKey`, an entry newly handed out by hand, then opens Hand out on it once the save lands. */
   const doSave = async (handOutKey?: string) => {
     if (!sf || sf.error) return;
-    const drafts = Object.fromEntries(dirtyKeys.map((k) => [k, draftOf(k)!]));
-    const firstBad = dirtyKeys.map((k) => Object.values(errorsOf(drafts[k]))[0]).find(Boolean);
+    const at = (k: string) => drafted.get(k)!;
+    const firstBad = dirtyKeys.map((k) => Object.values(errorsOf(at(k)))[0]).find(Boolean);
     if (firstBad) return setSave({ kind: 'bad', text: firstBad });
     // The dates sheet first, then every entry: new keys generated, renumbered ones renamed, blocks re-sorted.
     const y = new YamlText(sf.text);
-    const dates = dirtyKeys.map((k) => drafts[k]).find((d) => d.kind === 'semester');
+    const dates = dirtyKeys.map(at).find((d) => d.kind === 'semester');
     if (dates) writeDraft(y, dates, doc);
-    const entryKeys = dirtyKeys.filter((k) => drafts[k].kind !== 'semester');
-    const out = applyChanges(y.text, (y.toJS() ?? {}) as Record<string, unknown>, changesOf(entryKeys.map((k) => drafts[k]), entryKeys.map((k) => baseOf(k))), removed, { handedOut });
+    const entryKeys = dirtyKeys.filter((k) => at(k).kind !== 'semester');
+    const out = applyChanges(y.text, (y.toJS() ?? {}) as Record<string, unknown>, changesOf(entryKeys.map(at), entryKeys.map(baseOf), inTree), removed, { handedOut, exists: inTree });
     if (!validSchedule(parse(out.text) ?? {})) return setSave({ kind: 'bad', text: invalidText('the schedule', validSchedule) });
     // The key a draft was written under: a new entry's is generated, a renumbered one's renamed.
-    const writtenKey = (k: string) => out.keys[changesOf(entryKeys.slice(0, entryKeys.indexOf(k)).map((x) => drafts[x]), entryKeys.slice(0, entryKeys.indexOf(k)).map((x) => baseOf(x))).length];
+    const writtenKey = (k: string) => out.keys[changesOf(entryKeys.slice(0, entryKeys.indexOf(k)).map(at), entryKeys.slice(0, entryKeys.indexOf(k)).map(baseOf), inTree).length];
     const newId = entryKeys.includes('new') ? writtenKey('new') : null;
     const what = dirty === 1 && dirtyKeys.length === 1 ? (dirtyKeys[0] === 'new' ? `add ${newId}` : `edit ${dirtyKeys[0]}`) : dirtyKeys.length === 0 ? `remove ${removed.join(', ')}` : `${dirty} changes`;
     const first: Step = { target: { owner: p.cohort.org, repo: CONFIG_REPO, path: 'schedule.yml' }, text: out.text, sha: sf.sha, opts: { message: `schedule: ${what}, from the DSL Teaching Console`, statusRepo: [p.cohort.org, CONFIG_REPO] } };
-    const hoDraft = handOutKey && entryKeys.includes(handOutKey) ? drafts[handOutKey] : undefined;
+    const hoDraft = handOutKey && entryKeys.includes(handOutKey) ? at(handOutKey) : undefined;
     const ho = hoDraft?.kind === 'assignments' ? { ...hoDraft, id: writtenKey(handOutKey!) } : undefined;
     const done = () => {
       setDrafts({});
@@ -800,12 +783,12 @@ function View(p: ReadyProps) {
       if (newId && typeof location !== 'undefined') location.hash = `#schedule-${newId}`;
     };
     // Each reading-list file first (decision 0044), then schedule.yml: a list that fails stops the save.
-    // A written file is read back into its draft (the cache holds its new sha), so a retry never writes it twice.
-    const lists = env ? listWrites(Object.values(drafts), readList) : [];
+    // A written file is in the cache with its new text and sha, so a retry never writes it twice.
+    const lists = env ? listWrites(dirtyKeys.map(at), readList) : [];
     for (const w of lists) {
-      const target = { owner: p.course.org, repo: w.repo, path: w.path };
-      if (!(await saveText(env!, target, w.text, w.sha, { message: listMessage(w.path), checks: false }, setSave))) return;
-      setDrafts((cur) => Object.fromEntries(Object.entries(cur).map(([k, d]) => [k, relisted(d, w)])));
+      if (!(await saveText(env!, { owner: p.course.org, repo: w.repo, path: w.path }, w.text, w.sha, { message: listMessage(w.path), checks: false }, setSave))) return;
+      // A new file joins its repo's tree, so the sheet reads it as the file it now is.
+      if (!w.sha) p.files.refreshTree(p.course.org, w.repo);
     }
     // Only the list changed: schedule.yml is as it was, so there is nothing more to commit.
     if (lists.length && out.text === sf.text) return done();
@@ -815,9 +798,9 @@ function View(p: ReadyProps) {
   };
 
   // An assignment newly handed out by hand asks first: until Hand out now, nothing reaches students.
-  const manualKeys = dirtyKeys.filter((k) => newlyManual(draftOf(k)!, baseOf(k), assignmentOf.get(k)?.state));
+  const manualKeys = dirtyKeys.filter((k) => newlyManual(drafted.get(k)!, baseOf(k), assignmentOf.get(k)?.state));
   const requestSave = () => {
-    if (manualKeys.length && !dirtyKeys.some((k) => Object.keys(errorsOf(draftOf(k)!)).length)) setAskManual(true);
+    if (manualKeys.length && !dirtyKeys.some((k) => Object.keys(errorsOf(drafted.get(k)!)).length)) setAskManual(true);
     else void doSave();
   };
 
@@ -853,7 +836,7 @@ function View(p: ReadyProps) {
       <li class={`trow ${TYPE_CLASS[r.type] ?? 'evt'}${markClass(m)}${key === rk ? ' current' : ''}${gone ? ' removed' : ''}${r.show ? '' : ' off-site'}`} data-entry={r.entry}>
         <span class="k">{siteRowWord(r.type)}</span>
         <span class="d">{r.when ? fmtDay(r.when, tz, year) : 'No date yet'}{r.when && fmtTime(r.when, tz) ? <span>{fmtTime(r.when, tz)}{r.tbc ? ' (TBC)' : ''}</span> : r.tbc && r.when ? <span>(TBC)</span> : null}</span>
-        <span class="ttl"><a href={`#schedule-${rk}`}><b>{r.ident}</b>: {r.name}</a>{noReadingList(doc, r) ? <> <span class="chip muted">no reading list</span></> : null}</span>
+        <span class="ttl"><a href={`#schedule-${rk}`}><b>{r.ident}</b>: {r.name}</a>{noList(r) ? <> <span class="chip muted">no reading list</span></> : null}</span>
         <Details r={r} a={r.block === 'assignments' ? assignmentOf.get(r.entry) : undefined} now={now} />
         <span class="st">{st}</span>
       </li>,

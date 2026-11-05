@@ -15,9 +15,10 @@ import type { Release, Status } from '../src/model/types';
 import { MaterialsIndexScreen } from '../src/screens/CourseIndex';
 import { SemesterMaterialsScreen } from '../src/screens/SemesterMaterials';
 import type { CourseProps } from '../src/screens/types';
-import { LIST_TEXT, isReadingList, notCited } from '../src/ui/ReadingList';
+import { LIST_TEXT, notCited } from '../src/ui/ReadingList';
+import { isReadingList } from '../src/model/scheduleEdit';
 import { DRAFT_TEXT } from '../src/ui/ReadingDraft';
-import { forgetRendered } from '../src/ui/rendered';
+import { GhMd, forgetRendered } from '../src/ui/rendered';
 import { FakeGitHub, fileBody, json, type Seen } from './fake';
 import example from './fixtures/status.example.json';
 import { StaticFiles } from './staticFiles';
@@ -165,5 +166,21 @@ describe('the released reading list', () => {
     expect(link.getAttribute('href')).toBe(`?cohort=${COHORT}#schedule-readings-5`);
     expect(button('Edit reading list')).toBeUndefined();
     expect(root!.querySelector('textarea')).toBeNull();
+  });
+});
+
+describe('the kept markdown renderings', () => {
+  it('keeps the 20 most recently shown: an older one is asked for again', async () => {
+    const asked: string[] = [];
+    const env = { client: { renderMarkdown: async (text: string) => { asked.push(text); return `<p>${text}</p>`; } } } as unknown as Env;
+    root = document.createElement('div');
+    document.body.appendChild(root);
+    const show = async (src: string) => { await act(() => render(<EnvCtx.Provider value={env}><GhMd src={src} /></EnvCtx.Provider>, root!)); await settle(); };
+    for (let i = 0; i < 21; i++) await show(`t${i}`);
+    await show('t20');
+    await show('t1');
+    expect(asked.length).toBe(21);
+    await show('t0');
+    expect(asked.length).toBe(22);
   });
 });

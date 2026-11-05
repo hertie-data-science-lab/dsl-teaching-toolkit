@@ -5,13 +5,16 @@
 
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EnvCtx, type Env } from '../src/env';
 import type { Draft } from '../src/model/readingDraft';
 import { DRAFT_TEXT, DraftButton, DraftDialog, type DraftAdd } from '../src/ui/ReadingDraft';
 import { ReadingList } from '../src/ui/ReadingList';
 import type { ListDraft } from '../src/model/scheduleEdit';
 import { StaticFiles } from './staticFiles';
+
+// pdf.js does not run here: each file "reads" as these facts.
+vi.mock('../src/model/pdfText', () => ({ readPdf: async () => ({ pages: 10, title: 'Deep learning', author: 'Ian Goodfellow', first: [], second: [], last: [], labels: null }) }));
 
 const DRAFTS: Draft[] = [
   { path: 'readings/04/s4-vajjala-2024.pdf', section: 'required', line: 'Vajjala, S. (2020). *Practical natural language processing* (Ch. 3, pp. 92–106). O\'Reilly Media.', notes: [{ part: 'Pages', level: 'found', text: '92 printed on page 1 and 106 on page 15: 15 pages' }] },
@@ -90,26 +93,53 @@ describe('the draft dialog', () => {
 describe('the Generate draft button', () => {
   const env = { client: {} } as unknown as Env;
   it('is on with PDF reading files, with the hint; off with none, saying why', async () => {
-    await mount(<DraftButton org="o" pdfs={[{ repo: 'm', path: 'r/a.pdf', sha: 's' }, { repo: 'm', path: 'r/notes.md', sha: 't' }]} onAdd={() => {}} />, env);
+    await mount(<DraftButton org="o" pdfs={[{ repo: 'm', path: 'r/a.pdf', sha: 's' }]} onAdd={() => {}} />, env);
     expect(button(DRAFT_TEXT.button)!.disabled).toBe(false);
     expect(root!.textContent).toContain(DRAFT_TEXT.hint);
     if (root) render(null, root);
-    await mount(<DraftButton org="o" pdfs={[{ repo: 'm', path: 'r/notes.md', sha: 't' }]} onAdd={() => {}} />, env);
+    await mount(<DraftButton org="o" pdfs={[]} onAdd={() => {}} />, env);
     expect(button(DRAFT_TEXT.button)!.disabled).toBe(true);
     expect(root!.textContent).toContain(DRAFT_TEXT.noPdfs);
   });
 });
 
-describe('the editor’s draft slot', () => {
-  it('puts added lines into the list under their headings, linked relative to the list file', async () => {
-    let list: ListDraft = { repo: 'm', path: 'readings/04/READINGS.md', text: '# Week 4\n\n## Required readings\n\n- Bishop.\n', sha: 's', inline: false, loaded: true };
+describe('Generate draft in the editor', () => {
+  it('drafts from the PDF reading files only, and puts the added lines under their headings, linked relative to the list file', async () => {
+    let list: ListDraft = { repo: 'm', path: 'readings/04/READINGS.md', inline: false, text: '# Week 4\n\n## Required readings\n\n- Bishop.\n' };
     const files = new StaticFiles({}, {}, {});
-    const view = () => (
-      <ReadingList id="t" list={list} defaultRepo="m" defaultPath="readings/04/READINGS.md" org="o" repos={['m']} files={files} readingFiles={[]} onChange={(l) => (list = l)}
-        draft={(add, disabled) => <button type="button" disabled={disabled} onClick={() => add([{ section: 'required', line: 'A (2020).', path: 'readings/04/a.pdf' }, { section: 'additional', line: 'B (2021).', path: 'readings/04/b.pdf' }])}>slot</button>} />
-    );
-    await mount(view());
-    await act(() => button('slot')!.click());
-    expect(list.text).toBe('# Week 4\n\n## Required readings\n\n- Bishop.\n- A (2020). [PDF](a.pdf)\n\n## Additional readings\n\n- B (2021). [PDF](b.pdf)\n');
+    const read: string[] = [];
+    const env = { client: { renderMarkdown: () => new Promise(() => {}), fetchBytes: async (_o: string, _r: string, path: string) => { read.push(path); return new Uint8Array(); } } } as unknown as Env;
+    const readingFiles = [{ repo: 'm', path: 'readings/04/a.pdf', sha: 's1' }, { repo: 'm', path: 'readings/04/notes.md', sha: 's2' }, { repo: 'm', path: 'readings/04/b.pdf' }];
+    const view = () => <ReadingList id="t" list={list} defaultRepo="m" defaultPath="readings/04/READINGS.md" org="o" repos={['m']} files={files} readingFiles={readingFiles} onChange={(l) => (list = l)} />;
+    await mount(view(), env);
+    await act(() => button(DRAFT_TEXT.button)!.click());
+    for (let i = 0; i < 5; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    // b.pdf is not in the tree yet (no sha), notes.md is no PDF: only a.pdf is read.
+    expect(read).toEqual(['readings/04/a.pdf']);
+    expect(root!.textContent).toContain(DRAFT_TEXT.title(1));
+    await act(() => tick(0).click());
+    await act(() => button(DRAFT_TEXT.add(1))!.click());
+    expect(list.text).toMatch(/^# Week 4\n\n## Required readings\n\n- Bishop\.\n- Goodfellow, I\. .*\[PDF\]\(a\.pdf\)\n$/);
+  });
+
+  it('fetches at most four files at once, uncached, and lists them in order', async () => {
+    let flying = 0, most = 0;
+    const asked: string[] = [];
+    const env = { client: { fetchBytes: async (_o: string, _r: string, path: string) => {
+      asked.push(path);
+      most = Math.max(most, ++flying);
+      await new Promise((r) => setTimeout(r, 0));
+      flying--;
+      if (path.endsWith('c.pdf')) throw new Error('Not Found');
+      return new Uint8Array();
+    } } } as unknown as Env;
+    const pdfs = ['a', 'b', 'c', 'd', 'e', 'f'].map((n) => ({ repo: 'm', path: `r/${n}.pdf`, sha: `cap-${n}` }));
+    await mount(<DraftButton org="o" pdfs={pdfs} onAdd={() => {}} />, env);
+    await act(() => button(DRAFT_TEXT.button)!.click());
+    for (let i = 0; i < 12; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(asked).toEqual(pdfs.map((x) => x.path));
+    expect(most).toBe(4);
+    expect([...root!.querySelectorAll('.rd-file .rd-head .mono')].map((x) => x.textContent)).toEqual(['a.pdf', 'b.pdf', 'd.pdf', 'e.pdf', 'f.pdf', 'c.pdf']);
+    expect(root!.textContent).toContain(DRAFT_TEXT.failed('Not Found'));
   });
 });

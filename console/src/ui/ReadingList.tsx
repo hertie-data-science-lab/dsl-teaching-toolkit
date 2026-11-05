@@ -6,20 +6,20 @@
 // `READINGS.md` beside the reading files); text written in the schedule is the legacy form,
 // shown and kept, with `Move to a file`.
 
-import type { ComponentChildren } from 'preact';
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useMemo, useState } from 'preact/hooks';
 import { useEnv } from '../env';
 import { useSave } from '../edit/save';
-import type { Files } from '../model/files';
+import { fileInTree, parentOf, type Files } from '../model/files';
 import type { Loaded } from '../model/status';
 import type { Release } from '../model/types';
 import { plural } from '../model/format';
-import { insertLines } from '../model/readingDraft';
-import { READINGS_FILE, type ListDraft } from '../model/scheduleEdit';
+import { baseName, insertLines } from '../model/readingDraft';
+import { isReadingList, listFile, readingFilesOf, type ListDraft, type ReadingFile } from '../model/scheduleEdit';
+import { viewKind } from '../model/viewer';
 import { CheckLine } from './bits';
 import { SaveBar } from './edit';
 import { FilePicker } from './FilePicker';
-import { DraftButton, type DraftAdd, type PdfRef } from './ReadingDraft';
+import { DraftButton, type PdfRef } from './ReadingDraft';
 import { GhMd } from './rendered';
 import { RepoFile } from './Viewer';
 
@@ -39,21 +39,20 @@ export const LIST_TEXT = {
   missing: (names: string[]) => `${plural(names.length, 'reading file')} not in the reading list: ${names.join(', ')}. Students still get the file; it just isn’t cited here.`,
 };
 
-/** Whether `path` is a reading list by its name (`READINGS.md`, any case) or because a readings entry names it. */
-export function isReadingList(path: string, named: readonly string[] = []): boolean {
-  return (path.split('/').pop() ?? '').toLowerCase() === READINGS_FILE.toLowerCase() || named.includes(path);
-}
-
 /** A readings entry's reading-list course file, or null (none, or text in the schedule). */
 export const listFileOf = (r: Release) => (r.reading_list && 'path' in r.reading_list ? r.reading_list : null);
 
-/** The paths in course repo `repo` that loaded semesters' readings entries name as reading lists. */
-export function namedLists(states: Record<string, Loaded>, repo: string): string[] {
-  return Object.values(states).flatMap((l) => (l?.kind === 'ready' ? l.status.releases ?? [] : []))
-    .flatMap((r) => { const f = listFileOf(r); return f && f.repo === repo ? [f.path] : []; });
+/** A course file a semester's readings entry names as its reading list, and that entry's first reading file (`source`). */
+export interface NamedList {
+  path: string;
+  files: { repo: string; path: string }[];
 }
 
-const isMarkdown = (path: string) => /\.(md|markdown)$/i.test(path);
+/** The reading lists in course repo `repo` that loaded semesters' readings entries name. */
+export function namedLists(states: Record<string, Loaded>, repo: string): NamedList[] {
+  return Object.values(states).flatMap((l) => (l?.kind === 'ready' ? l.status.releases ?? [] : []))
+    .flatMap((r) => { const f = listFileOf(r); return f && f.repo === repo ? [{ path: f.path, files: r.source ? [r.source] : [] }] : []; });
+}
 
 /**
  * `v`, once it has stood still for `ms`: the preview renders through GitHub's markdown API (as the
@@ -72,9 +71,9 @@ function useSettled(v: string, ms: number): string {
 /** The reading files whose names the list does not mention. */
 export const notCited = (text: string, names: string[]) => (text.trim() ? names.filter((n) => !text.includes(n)) : []);
 
-export function ReadingList({ id, list, defaultRepo, defaultPath, org, repos, files, readingFiles, onChange, fixedPath = false, draft }: {
+export function ReadingList({ id, list, defaultRepo, defaultPath, org, repos, files, readingFiles, onChange, fixedPath = false }: {
   id: string;
-  /** The list as the draft holds it; null: none yet (shown at the default path, a New file; an existing one the model adopts, `adoptDefaultList`). */
+  /** The list as the draft holds it; null: none yet (shown at the default path: a New file, or the file already there). */
   list: ListDraft | null;
   defaultRepo: string;
   defaultPath: string;
@@ -82,33 +81,32 @@ export function ReadingList({ id, list, defaultRepo, defaultPath, org, repos, fi
   org: string;
   repos: string[];
   files: Files;
-  /** The entry's reading files, by name, for the not-cited notice. */
-  readingFiles: string[];
+  /** The entry's reading files (`readingFilesOf`): their names for the not-cited notice, their PDFs for Generate draft. */
+  readingFiles: ReadingFile[];
   onChange: (l: ListDraft) => void;
   /** The Materials file view: the file is the one opened; nothing to choose or move. */
   fixedPath?: boolean;
-  /** The draft slot (Generate draft): given `add`, which puts drafted lines into the list, and whether the list can take them yet. */
-  draft?: (add: (adds: DraftAdd[]) => void, disabled: boolean) => ComponentChildren;
 }) {
   const [picking, setPicking] = useState(false);
   const [, reread] = useState(0);
+  const cur: ListDraft = list ?? { repo: defaultRepo, path: defaultPath, inline: false, text: null };
+  // A file's saved text and sha are the cache's: an absent file is a New file at that path.
+  const f = cur.inline ? null : listFile(files, org, cur);
+  const saved = f?.kind === 'ready' ? f.text : '';
+  const text = cur.text ?? saved;
+  const loaded = !f || f.kind === 'ready' || f.kind === 'absent';
+  // A file's text back where the file has it is untouched again (null): the sheet is clean.
+  const setText = (t: string) => onChange({ ...cur, text: f && t === saved ? null : t });
   // A path already in the repo is that file, read as Choose another reads it: never a New file over it.
-  const inTree = (repo: string, path: string) => { const t = files.tree(org, repo); return t.kind === 'ready' && t.paths.some((x) => !x.dir && x.path === path); };
-  const asFile = (repo: string, path: string): ListDraft => {
-    const f = files.file(org, repo, path);
-    return { repo, path, text: f.kind === 'ready' ? f.text : '', sha: f.kind === 'ready' ? f.sha : null, inline: false, loaded: f.kind === 'ready' || f.kind === 'absent' };
-  };
-  // A file still unread in the draft is read here too: a Retry re-reads it in this component alone.
-  const cur: ListDraft = list && !list.inline && !list.loaded ? asFile(list.repo, list.path) : list ?? { repo: defaultRepo, path: defaultPath, text: '', sha: null, inline: false, loaded: true };
-  const set = (x: Partial<ListDraft>) => onChange({ ...cur, ...x });
-  // A file that could not be read (not one that is absent: that is a New file).
-  const read = !cur.inline && !cur.loaded ? files.file(org, cur.repo, cur.path) : null;
+  const toFile = (repo: string, path: string, keep: string | null): ListDraft => ({ repo, path, inline: false, text: fileInTree(files, org, repo, path) ? null : keep ?? '' });
   const retry = () => { files.refresh(org, cur.repo, cur.path); reread((n) => n + 1); };
-  const badge = cur.inline ? LIST_TEXT.inline : !cur.loaded ? null : cur.sha ? LIST_TEXT.existingFile : LIST_TEXT.newFile;
-  const isNew = !cur.inline && cur.loaded && !cur.sha;
-  const missing = notCited(cur.text, readingFiles);
-  const rows = Math.max(6, cur.text.split('\n').length + 1);
-  const shown = useSettled(cur.text, 400);
+  const badge = cur.inline ? LIST_TEXT.inline : !loaded ? null : f?.kind === 'ready' ? LIST_TEXT.existingFile : LIST_TEXT.newFile;
+  const isNew = f?.kind === 'absent';
+  const names = useMemo(() => [...new Set(readingFiles.map((x) => baseName(x.path)))], [readingFiles]);
+  const pdfs = useMemo(() => readingFiles.flatMap((x): PdfRef[] => (x.sha && viewKind(x.path) === 'pdf' ? [{ repo: x.repo, path: x.path, sha: x.sha, size: x.size }] : [])), [readingFiles]);
+  const missing = notCited(text, names);
+  const rows = Math.max(6, text.split('\n').length + 1);
+  const shown = useSettled(text, 400);
   return (
     <div class="field reading-list-editor">
       <span class="lbl-row"><label for={`${id}-rl`}><b>{LIST_TEXT.label}</b></label></span>
@@ -116,29 +114,29 @@ export function ReadingList({ id, list, defaultRepo, defaultPath, org, repos, fi
       <div class="rl-file">
         <span>File: </span>
         {cur.inline ? <span class="footnote">none</span>
-          : isNew && !fixedPath ? <><span class="mono">{cur.repo} / </span><input id={`${id}-rl-path`} class="mono" type="text" aria-label="Reading list path" value={cur.path} onInput={(e) => { const path = (e.target as HTMLInputElement).value.replace(/^\/+/, ''); if (inTree(cur.repo, path)) onChange(asFile(cur.repo, path)); else set({ path }); }} /></>
+          : isNew && !fixedPath ? <><span class="mono">{cur.repo} / </span><input id={`${id}-rl-path`} class="mono" type="text" aria-label="Reading list path" value={cur.path} onInput={(e) => onChange(toFile(cur.repo, (e.target as HTMLInputElement).value.replace(/^\/+/, ''), cur.text))} /></>
           : <span class="mono">{cur.repo} / {cur.path}</span>}
-        {badge ? <span class={`chip${cur.inline ? ' amber' : ' muted'}`}>{badge}</span> : read?.kind === 'error' ? null : <span class="footnote">Reading {cur.path}…</span>}
+        {badge ? <span class={`chip${cur.inline ? ' amber' : ' muted'}`}>{badge}</span> : f?.kind === 'error' ? null : <span class="footnote">Reading {cur.path}…</span>}
         {fixedPath ? null : (
           <span class="actions">
-            {cur.inline ? <button class="btn small" type="button" onClick={() => onChange(inTree(defaultRepo, defaultPath) ? asFile(defaultRepo, defaultPath) : { ...cur, inline: false, repo: defaultRepo, path: defaultPath, sha: null, loaded: true })}>{LIST_TEXT.move}</button> : null}
+            {cur.inline ? <button class="btn small" type="button" onClick={() => onChange(toFile(defaultRepo, defaultPath, cur.text))}>{LIST_TEXT.move}</button> : null}
             <button class="btn small quiet" type="button" onClick={() => setPicking(true)}>{LIST_TEXT.choose}</button>
           </span>
         )}
       </div>
-      {read?.kind === 'error' ? <CheckLine cls="bad">Could not read {cur.path}: {read.message} <button class="textlink" type="button" onClick={retry}>Retry</button></CheckLine> : null}
-      {cur.inline || read?.kind === 'error' ? null : <p class="footnote">{isNew ? LIST_TEXT.footNew(cur.repo) : LIST_TEXT.footExisting}</p>}
+      {f?.kind === 'error' ? <CheckLine cls="bad">Could not read {cur.path}: {f.message} <button class="textlink" type="button" onClick={retry}>Retry</button></CheckLine> : null}
+      {cur.inline || f?.kind === 'error' ? null : <p class="footnote">{isNew ? LIST_TEXT.footNew(cur.repo) : LIST_TEXT.footExisting}</p>}
       <div class="rl-edit">
-        <textarea id={`${id}-rl`} class="mono" rows={rows} value={cur.text} disabled={!cur.loaded} onInput={(e) => set({ text: (e.target as HTMLTextAreaElement).value })} />
+        <textarea id={`${id}-rl`} class="mono" rows={rows} value={text} disabled={!loaded} onInput={(e) => setText((e.target as HTMLTextAreaElement).value)} />
         <div class="rl-preview" aria-label={LIST_TEXT.preview}>
           <span class="hint">{LIST_TEXT.preview}</span>
           {shown.trim() ? <GhMd src={shown} context={cur.repo ? `${org}/${cur.repo}` : undefined} class="reading-list" /> : <p class="footnote">{LIST_TEXT.empty}</p>}
         </div>
       </div>
       {missing.length ? <CheckLine cls="warn">{LIST_TEXT.missing(missing)}</CheckLine> : null}
-      {draft?.((adds) => set({ text: insertLines(cur.text, cur.path, adds) }), !cur.loaded)}
-      {picking ? <FilePicker files={files} org={org} repos={repos} only={isMarkdown} onClose={() => setPicking(false)}
-        onPick={(got) => { const g = got[got.length - 1]; if (g) set({ repo: g.repo, path: g.path, text: '', sha: null, inline: false, loaded: false }); }} /> : null}
+      <DraftButton org={org} pdfs={pdfs} disabled={!loaded} onAdd={(adds) => setText(insertLines(text, cur.path, adds))} />
+      {picking ? <FilePicker files={files} org={org} repos={repos} only={(path) => viewKind(path) === 'markdown'} onClose={() => setPicking(false)}
+        onPick={(got) => { const g = got[got.length - 1]; if (g) onChange({ repo: g.repo, path: g.path, inline: false, text: null }); }} /> : null}
     </div>
   );
 }
@@ -151,27 +149,34 @@ export const listMessage = (path: string) => `readings: edit ${path}, from the D
  * Browse pane). A reading list gets `Edit reading list` in its header, which swaps the pane to
  * the editor on that file, saved on its own, and `Back to the file`.
  */
-export function CourseFile({ org, at, files, named, write }: { org: string; at: { repo: string; path: string }; files: Files; named: readonly string[]; write: boolean }) {
+export function CourseFile({ org, at, files, named, write }: { org: string; at: { repo: string; path: string }; files: Files; named: readonly NamedList[]; write: boolean }) {
   const [editing, setEditing] = useState<string | null>(null);
   const here = `${at.repo}/${at.path}`;
-  const list = write && isReadingList(at.path, named);
-  if (list && editing === here) return <ListFileEditor org={org} at={at} files={files} onBack={() => setEditing(null)} />;
+  const entry = named.find((l) => l.path === at.path);
+  const list = write && (!!entry || isReadingList(at.path));
+  if (list && editing === here) return <ListFileEditor org={org} at={at} files={files} entryFiles={entry?.files ?? null} onBack={() => setEditing(null)} />;
   return <RepoFile org={org} at={at} actions={list ? <button class="btn small" type="button" onClick={() => setEditing(here)}>Edit reading list</button> : undefined} />;
 }
 
-/** The reading-list editor on one course file, its path fixed; the reading files are the folder's PDFs. */
-function ListFileEditor({ org, at, files, onBack }: { org: string; at: { repo: string; path: string }; files: Files; onBack: () => void }) {
+/**
+ * The reading-list editor on one course file, its path fixed. Its reading files are those of the
+ * entry that names it (`entryFiles`), else the PDFs beside it.
+ */
+function ListFileEditor({ org, at, files, entryFiles, onBack }: { org: string; at: { repo: string; path: string }; files: Files; entryFiles: { repo: string; path: string }[] | null; onBack: () => void }) {
   const env = useEnv();
   const [save, run] = useSave(env);
   const [text, setText] = useState<string | null>(null);
   const f = files.file(org, at.repo, at.path);
-  const saved = f.kind === 'ready' ? f.text : '';
   const tree = files.tree(org, at.repo);
-  const dir = at.path.includes('/') ? `${at.path.slice(0, at.path.lastIndexOf('/'))}/` : '';
-  const pdfs: PdfRef[] = tree.kind === 'ready' ? tree.paths.filter((x) => !x.dir && x.path.startsWith(dir) && !x.path.slice(dir.length).includes('/') && /\.pdf$/i.test(x.path)).map((x) => ({ repo: at.repo, path: x.path, sha: x.sha, size: x.size })) : [];
-  const list: ListDraft = { repo: at.repo, path: at.path, text: text ?? saved, sha: f.kind === 'ready' ? f.sha : null, inline: false, loaded: f.kind === 'ready' || f.kind === 'absent' };
+  const dir = parentOf(at.path);
+  const named = entryFiles?.map((x) => `${x.repo}/${x.path}`).join('\n');
+  const readingFiles = useMemo(() => {
+    const beside = tree.kind === 'ready' ? tree.paths.filter((x) => !x.dir && parentOf(x.path) === dir && viewKind(x.path) === 'pdf').map((x) => ({ repo: at.repo, path: x.path })) : [];
+    return readingFilesOf(files, org, entryFiles ?? beside, at.path);
+  }, [tree, dir, named]);
+  const list: ListDraft = { repo: at.repo, path: at.path, inline: false, text };
   const doSave = async () => {
-    if (text !== null && (await run({ owner: org, repo: at.repo, path: at.path }, text, list.sha, { message: listMessage(at.path), checks: false }))) setText(null);
+    if (text !== null && (await run({ owner: org, repo: at.repo, path: at.path }, text, f.kind === 'ready' ? f.sha : null, { message: listMessage(at.path), checks: false }))) setText(null);
   };
   return (
     <section class="panel section" aria-label={at.path}>
@@ -179,9 +184,8 @@ function ListFileEditor({ org, at, files, onBack }: { org: string; at: { repo: s
         <h2 class="mono">{at.path}</h2>
         <span class="actions"><button class="btn small quiet" type="button" onClick={onBack}>Back to the file</button></span>
       </div>
-      <ReadingList id="mf" list={list} defaultRepo={at.repo} defaultPath={at.path} org={org} repos={[at.repo]} files={files} readingFiles={pdfs.map((x) => x.path.slice(dir.length))} onChange={(l) => setText(l.text)} fixedPath
-        draft={(add, disabled) => <DraftButton org={org} pdfs={pdfs} disabled={disabled} onAdd={add} />} />
-      <SaveBar state={save} small onSave={() => void doSave()} disabled={text === null || text === saved} file={{ org, repo: at.repo, path: at.path, exists: f.kind !== 'absent' }} />
+      <ReadingList id="mf" list={list} defaultRepo={at.repo} defaultPath={at.path} org={org} repos={[at.repo]} files={files} readingFiles={readingFiles} onChange={(l) => setText(l.text)} fixedPath />
+      <SaveBar state={save} small onSave={() => void doSave()} disabled={text === null} file={{ org, repo: at.repo, path: at.path, exists: f.kind !== 'absent' }} />
     </section>
   );
 }

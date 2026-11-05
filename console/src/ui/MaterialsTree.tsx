@@ -18,7 +18,7 @@ import { ghUrl } from './bits';
 import { FileRow, useYourSetup } from './FileRow';
 import { FileHead, FolderHead } from './FileTree';
 import { Ext } from './icons';
-import { isReadingList } from './ReadingList';
+import { isReadingList } from '../model/scheduleEdit';
 
 const storeKey = (org: string, repo: string) => `dsl.materialsTree.${org}/${repo}`;
 

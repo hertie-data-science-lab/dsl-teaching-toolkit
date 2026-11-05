@@ -18,7 +18,7 @@ import { OpsSession } from '../src/ops/session';
 import { AssignmentScreen } from '../src/screens/Assignments';
 import { MaterialsScreen } from '../src/screens/CourseEdit';
 import { StudentsScreen } from '../src/screens/People';
-import { ScheduleScreen, noReadingList } from '../src/screens/Schedule';
+import { ScheduleScreen, noListRows } from '../src/screens/Schedule';
 import { DRAFT_TEXT } from '../src/ui/ReadingDraft';
 import type { CohortProps } from '../src/screens/types';
 import { parseSearch, scheduleNewHref } from '../src/router';
@@ -785,11 +785,18 @@ describe('the reading list in the schedule entry sheet (decision 0044)', () => {
     expect(out.readings['readings-6'].reading_list).toBeUndefined();
   });
 
-  it('marks a row whose readings have files and no list: the readings row, and its unit’s row', () => {
+  it('marks the rows the Suggested to-do names: the readings row, and its unit’s row', () => {
     const d = parse(`${sched}lectures:\n  lecture-6:\n    session: 6\n  lecture-4:\n    session: 4\n  lecture-7:\n    session: 7\n`) as Record<string, unknown>;
-    expect(noReadingList(d, { type: 'readings', entry: 'readings-6' })).toBe(true);
-    expect(noReadingList(d, { type: 'lecture', entry: 'lecture-6' })).toBe(true);
-    for (const [type, entry] of [['readings', 'readings-4'], ['readings', 'readings-5'], ['lecture', 'lecture-4'], ['lecture', 'lecture-7'], ['exam', 'readings-6']]) expect(noReadingList(d, { type, entry })).toBe(false);
+    const todo = { id: 'schedule:reading_list:readings-6', kind: 'schedule' as const, repo: 'semester-config', text: 'Readings 6 has reading files but no reading list.', need: 'suggested' as const, check: 'reading_list', screen: 'schedule', entry: 'readings-6' };
+    const noList = noListRows([todo, { ...todo, id: 'site:home', check: 'home', entry: 'readings-4' }], d);
+    expect(noList({ type: 'readings', entry: 'readings-6' })).toBe(true);
+    expect(noList({ type: 'lecture', entry: 'lecture-6' })).toBe(true);
+    for (const [type, entry] of [['readings', 'readings-4'], ['readings', 'readings-5'], ['lecture', 'lecture-4'], ['lecture', 'lecture-7'], ['exam', 'readings-6']]) expect(noList({ type, entry })).toBe(false);
+    expect(noListRows([], d)({ type: 'readings', entry: 'readings-6' })).toBe(false);
+    // Set aside: no chip, on either row.
+    const aside = noListRows([{ ...todo, set_aside: true }], d);
+    expect(aside({ type: 'readings', entry: 'readings-6' })).toBe(false);
+    expect(aside({ type: 'lecture', entry: 'lecture-6' })).toBe(false);
   });
 
   it('loads a typed path that is already in the repo as that Existing file, and saves over its sha', async () => {
