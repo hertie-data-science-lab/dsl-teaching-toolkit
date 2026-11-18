@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The semester site's home page leaves out the Instructors or Teaching Assistants heading
+  when nobody holds that role, instead of printing an empty one.
 - **Behaviour change:** `show_on_site: false` on a lecture or lab (or an exam or event with `files:`)
   is display-only, as it already was for readings: the entry stays off the Schedule and the
   Updates box (site and student console) and out of the syllabus's weekly plan, but once its

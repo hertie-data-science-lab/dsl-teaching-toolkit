@@ -2092,3 +2092,17 @@ def test_the_team_steps_come_first_and_number_the_submission_box(generated):
     scss = _templates()["_sass/_course.scss"]
     # Shared with Your Profile rather than copied: top level, not under `.profile-steps`.
     assert "\n.profile-step-num {" in scss
+
+
+def test_an_empty_teaching_role_prints_no_heading():
+    # A course with no TAs (a workshop) showed a bare "Teaching Assistants" heading: each
+    # people column, heading included, renders only when its role has someone in it.
+    home = _strip_comments(_templates()["_layouts/home.html"])
+    for role, heading in (
+        ("instructors", "<h2>Instructors</h2>"),
+        ("teaching_assistants", "<h2>Teaching Assistants</h2>"),
+    ):
+        guard = f"{{% if site.data.people.{role}.size > 0 %}}"
+        assert guard in home
+        assert home.index(guard) < home.index(heading)
+        assert home.index(heading) < home.index("{% endif %}", home.index(heading))
