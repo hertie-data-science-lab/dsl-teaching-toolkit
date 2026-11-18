@@ -219,14 +219,40 @@ def test_a_shown_row_is_numbered_by_its_entry_and_never_by_position():
     assert _shown(rows) == [("lecture-3", 3), ("lecture-1", 1)]
 
 
-def test_a_silent_entry_is_no_row_and_renumbers_nothing():
+def test_a_silent_entry_keeps_its_row_and_its_number():
+    # `show_on_site: false` is display-only: the row stays (for its kind's tab), numbered
+    # as any other, and flagged so the schedule and the Updates box leave it out.
     rows = _rows(
         [
-            _lecture(1, _at(7), Deploy("cm", "l/a"), show_on_site=False),
+            _lab(1, _at(7), Deploy("cm", "labs/01"), show_on_site=False),
             _lecture(2, _at(14), Deploy("cm", "l/b")),
         ]
     )
-    assert _shown(rows) == [("lecture-2", 2)]
+    assert _shown(rows) == [("lab-1", 1), ("lecture-2", 2)]
+    silent, shown = schedule_plan.site_rows(rows)
+    assert not silent.row.shown and shown.row.shown
+
+
+def test_a_silent_readings_row_is_still_unnumbered():
+    rows = _rows([_readings("w9", _at(2), Deploy("cm", "r/9"), session="9", number=9)])
+    assert _shown(rows) == [("readings-w9", 9)]
+    hidden = [dataclasses.replace(r, shown=False) for r in rows]
+    assert _shown(hidden) == [("readings-w9", None)]
+
+
+def test_a_silent_entry_hosts_no_readings():
+    # Readings attach to a unit's first SHOWN row; a silent lab is no host, so the
+    # unit's readings stay a row of their own.
+    rows = _rows(
+        [
+            _lab(1, _at(7), Deploy("cm", "labs/01"), show_on_site=False),
+            _readings("w1", _at(1), Deploy("cm", "r/1"), session="1"),
+        ]
+    )
+    got = {
+        sr.row.key: [r.key for r in sr.readings] for sr in schedule_plan.site_rows(rows)
+    }
+    assert got == {"readings-w1": [], "lab-1": []}
 
 
 def test_readings_attach_to_their_units_first_row_by_date_whatever_its_kind():
@@ -287,7 +313,7 @@ def test_readings_for_a_unit_with_no_shown_row_are_their_own_row():
             _readings("w9", _at(2), Deploy("cm", "r/9"), session="9"),
         ]
     )
-    assert [k for k, _ in _shown(rows)] == ["readings-w1", "readings-w9"]
+    assert [k for k, _ in _shown(rows)] == ["readings-w1", "readings-w9", "lecture-1"]
 
 
 def test_a_readings_entry_with_two_slots_is_attached_once():
@@ -311,6 +337,13 @@ def test_a_supporting_files_entry_is_no_row():
     rows = _rows(
         [
             Release("assets-data", _at(1), [Deploy("cm", "data")], kind="assets"),
+            Release(
+                "assets-hidden",
+                _at(2),
+                [Deploy("cm", "more")],
+                kind="assets",
+                show_on_site=False,
+            ),
             _lecture(1, _at(7), Deploy("cm", "l/1")),
         ]
     )
@@ -351,6 +384,18 @@ def test_two_entries_of_one_kind_sharing_a_number_are_named():
     assert schedule_plan.duplicate_numbers(sched) == [
         ("lecture", 2, ["lecture-2", "lecture-again"])
     ]
+
+
+def test_a_silent_entry_shares_no_number_with_a_shown_one():
+    # Only SHOWN entries of one kind collide: a hidden Lab 1 beside a shown Lab 1 (or
+    # beside no shown lab at all) is no problem.
+    sched = Schedule(
+        releases=[
+            _lab(1, _at(7), Deploy("cm", "labs/a"), show_on_site=False),
+            Release("lab-again", _at(8), [], kind="lab", number=1, session="1"),
+        ]
+    )
+    assert schedule_plan.duplicate_numbers(sched) == []
 
 
 def test_a_duplicate_number_names_the_kind_by_its_policy_plural():

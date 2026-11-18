@@ -56,7 +56,7 @@ function Details({ r, a, now }: { r: Row; a?: Assignment; now: number }) {
   if (!r.show) {
     return (
       <span class="det">
-        <span class="prop">Not shown</span> <Hint small label="About Not shown">This entry is not displayed on the student site or in the student console. The engine still acts on it (a hidden release still ships at its time). Edit the entry to show it.</Hint>
+        <span class="prop">Not shown</span> <Hint small label="About Not shown">{r.block === 'releases' ? 'This entry is left off the schedule and the Updates box. Once its files are released it is listed on its own tab (Labs, Lectures, ...), numbered as usual.' : 'This entry is not displayed on the student site or in the student console.'} The engine still acts on it (a hidden release still ships at its time). Edit the entry to show it.</Hint>
       </span>
     );
   }

@@ -2905,6 +2905,35 @@ def test_supporting_files_get_no_row_and_no_tab(monkeypatch, tmp_path):
     assert "/lectures/" in nav and "Supporting files" not in nav
 
 
+def test_a_silent_entry_keeps_its_kind_tab_and_stays_off_the_schedule(
+    monkeypatch, tmp_path
+):
+    # `show_on_site: false` is display-only: self-study labs with no class are listed on
+    # the Labs tab, numbered and linked, and flagged off the schedule and Updates box.
+    # One not landed yet, or that landed only a root file, has no row.
+    trees = {"materials": ("labs/01_intro/nb.ipynb", "lab-3.md")}
+    sched = Schedule(
+        releases=[
+            Release(
+                f"lab-{n}",
+                _at(9, n),
+                [_copy(path)],
+                kind="lab",
+                number=n,
+                session=str(n),
+                show_on_site=False,
+            )
+            for n, path in ((1, "labs/01_intro"), (2, "labs/02_more"), (3, "lab-3.md"))
+        ]
+    )
+    plan = _plan(monkeypatch, tmp_path, sched, trees=trees)
+    (row,) = _rows(plan).values()
+    assert row["title"] == "Lab 1" and row["number"] == 1
+    assert row["off_schedule"] is True and row["tabs"] == ["lab"]
+    assert [x["name"] for x in row["links"]] == ["nb.ipynb"]
+    assert "/labs/" in plan.files["_data/nav.yml"]
+
+
 # ---------------------------------------------------- public copies of hosted files
 # What a semester site hosts itself, so an HTML deck renders in a browser instead of
 # showing as source on GitHub (decision 0035 rule 1), as `student_site.host` selects it

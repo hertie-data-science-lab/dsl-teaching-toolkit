@@ -48,7 +48,7 @@ class PlannedRow:
     `key` is the entry's label (unique in the file), `slot` which of its slots this is;
     `deploys` are its copies in plan order, which is what the row links once they have
     landed. `shown` is the entry's `show_on_site`: a silent row stays off the schedule and
-    the Updates box. `unit` is the entry's `session` (the teaching unit), "" for none.
+    the Updates box, and is on its kind's tab as any other. `unit` is the entry's `session` (the teaching unit), "" for none.
 
     `when` is the slot's date, None when it is `tbc` (`undated`). `sort_at` is where the
     row sorts (`planned_rows`): its `when` when dated. It orders and nothing else."""
@@ -259,13 +259,15 @@ def landings(rows: Iterable[PlannedRow]) -> dict[str, tuple[Landing, ...]]:
 def site_rows(rows: list[PlannedRow]) -> list[SiteRow]:
     """The rows the site shows, in date order (decisions 0013, 0020, 0038).
 
-    - A shown row's number is its entry's; re-dating, hiding or adding an entry moves
+    - A row's number is its entry's; re-dating, hiding or adding an entry moves
       nobody's number. The syllabus reads the same numbers.
     - A readings entry whose `session` names a unit with a shown row is attached to that
       unit's first row by date (`unit_hosts`), silent or not, and every shown row of the
       unit carries the readings chip. Any other readings entry is its own row.
-    - A silent (`show_on_site: false`) entry is no row, unless it is readings: an
-      unattached one is a row of the Readings tab, unnumbered.
+    - A silent (`show_on_site: false`) entry is still a row, numbered as any other: it
+      is display-only, so it stays off the schedule and the Updates box and keeps its
+      kind's tab (`PlannedRow.shown` says which). A silent readings row alone is
+      unnumbered, as it always was.
     - A supporting-files (`assets`) entry is never a row: it is released, not shown
       (decision 0026 rule 3)."""
     hosts = unit_hosts(rows)
@@ -280,13 +282,13 @@ def site_rows(rows: list[PlannedRow]) -> list[SiteRow]:
             if r.key not in seen:
                 seen.add(r.key)
                 attached.setdefault((host.key, host.slot), []).append(r)
-        elif r.shown or r.kind == READINGS_KIND:
+        else:
             own.append(r)
     with_readings = {h.unit for h in hosts.values() if (h.key, h.slot) in attached}
     return [
         SiteRow(
             r,
-            r.number if r.shown else None,
+            r.number if r.shown or r.kind != READINGS_KIND else None,
             attached.get((r.key, r.slot), []),
             r.kind != READINGS_KIND and r.unit in with_readings,
         )

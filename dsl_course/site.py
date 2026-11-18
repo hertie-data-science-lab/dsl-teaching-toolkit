@@ -914,9 +914,9 @@ def _site_rows(
     """The `_lectures` collection - one file per site row (`schedule_plan.site_rows`) -
     and the kind tabs it needs.
 
-    Every row the schedule shows is written, released or not, so the whole term reads as
-    a syllabus from the day it is written. A silent readings row is written only once
-    something has landed, and never when all it landed is root files. Each readings
+    Every shown row is written, released or not, so the whole term reads as a syllabus
+    from the day it is written. A silent row (on its kind's tab, `off_schedule`) is
+    written only once something has landed, and never when all it landed is root files. Each readings
     entry's reading list shows once released (`_shown_list`, at `now`)."""
     now = now or datetime.now(UTC)
     marks = landings(rows)

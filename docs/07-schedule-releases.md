@@ -31,11 +31,11 @@ Each block is a map. The **key** of an entry (`lecture-3`, `lab-2b`) is its id: 
 | `details` | no | - | what it covers (the learning objectives); shown on the Schedule and under the row's heading on its kind's tab; a `>` or `\|` block for paragraphs |
 | `location` | no | - | the room, shown under the date |
 | `tbc` | no | `false` | the date is provisional: the site marks it **(TBC)**; it still fires |
-| `show_on_site` | no | `true` | `false`: no row on the site; its files still ship (readings: see below) |
+| `show_on_site` | no | `true` | `false`: kept off the Schedule and the Updates box; once its files land it is listed on its kind's tab, numbered as usual. Its files still ship |
 | `files` | no | - | what ships (below) |
 | `reading_list` | no | - | `readings:` only: markdown (what to read, chapters, links), or a course file `{from_course_repo, from_path}` (optional `to_semester_repo`, `to_path`, `release_datetime`, as a `files:` item). Shown once the entry releases (below) |
 
-Each kind gets its own tab on the site, and its rows are named by the kind and the number (`Lecture 3`). Two shown entries of one kind with the same number are a problem. A lecture or lab without `session:` is a problem too (*Give lecture-3 a session*), and its files wait until it has one.
+Each kind gets its own tab on the site, and its rows are named by the kind and the number (`Lecture 3`). Two shown entries of one kind with the same number are a problem (a hidden one clashes with nothing). A lecture or lab without `session:` is a problem too (*Give lecture-3 a session*), and its files wait until it has one.
 
 **A row appears as soon as you write it, not when it ships.** Until its files land the row says so (*"Materials for lecture 3 are not yet released"*), then links what landed: a file as itself, a folder as GitHub shows it. An entry with `event_datetime: tbc` is a **TBC** row after the dated rows of its kind, and nothing ships until it has a date. If you ship its files by hand, Updates announces it at the moment they shipped (the release record's time, else when they first landed), and the console's release page asks for the session date.
 
