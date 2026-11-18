@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Released materials that differ from their source files** lists a released file the course
+  has since deleted as **removed from the course** (edited in course), not "added in the
+  semester", and offers **Remove**: Release again of its schedule entry with "Also remove the
+  files deleted from the course copy" ticked. A folder released by hand has no Remove.
 - **Bootstrap Course Org** copies the four mail secrets (`GRAPH_TENANT_ID`, `GRAPH_CLIENT_ID`,
   `GRAPH_SENDER`, `GRAPH_CLIENT_CERT`) onto the new course org with `set_secret`, as it does
   `DSL_BOT_TOKEN`. They come from the `hertie-data-science-lab` org secrets of the same names;

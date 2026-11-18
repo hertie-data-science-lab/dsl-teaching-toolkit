@@ -237,14 +237,16 @@ files (its chip counts the differing files): each released folder
 the same path in the newest course materials repo that has it) whose files differ, worked out
 three-way in the page (`outOfStep`, worked out once per status and set of reads: every file on
 `upstream` mapped to its source through the deepest release covering it, and what a release's
-folder copy takes (`groupPicks`) that `upstream` lacks, then `fileStates`; a file only the semester has, added there or released and since dropped by the
-course, counts ahead, "added in the semester"; `folderStep` ahead / behind / diverged), its files filtered by step (`.seg`, counts of
+folder copy takes (`groupPicks`) that `upstream` lacks, then `fileStates`; a file the default branch adds counts ahead, "added in the semester"; a released file
+the course has since deleted, still on the default branch, is `deleted` ("removed from the course", behind); `folderStep` ahead / behind / diverged), its files filtered by step (`.seg`, counts of
 files; a file the course added is behind), beside one PR into source (all) (`keepFuture`, the
 full run, greyed when nothing is ahead or diverged). Each folder is a fold, open at first, headed by its path alone;
 under it each differing file is a row: its name, chip, a muted "+A −D" once its diff is read
 (`useDiff`; "binary" for a document or image), Re-release (`reRelease`: `releasePicked` of that one file onto
 its released copy, Options the advanced Overwrite, `replace`; greyed for ahead and for a file only the semester has),
 Overwrite beside it for a file removed, ahead or diverged (Re-release with `replace` set, and a confirm line),
+for a `deleted` file Remove in place of Re-release (`removeDeleted`: `releaseAgain` of the folder's entry with
+`remove_deleted` ticked, its count the entry's `DIVERGED_DELETED` files; a folder released by hand gets a note instead),
 PR into source (`keepFuturePaths`: `release.propagate_back` with `paths`, always `<repo>/<path>`,
 as the engine reads a leading repo name as the repo; greyed for behind), the Open split button
 (`ui/OpenSplit.tsx`: the semester copy on GitHub, its arrow `useMenu` with GitHub, github.dev and
