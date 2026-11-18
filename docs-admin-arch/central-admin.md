@@ -83,7 +83,8 @@ republishes it. Rotation is still a per-org Bootstrap run from central.
 ## Email
 
 Enrolment-code and grade emails go through `dsl_course.mailer` under a **tenant-level mail
-credential** - a one-time central setup, not per course. `dry_run` previews need nothing.
+credential** - set up once centrally, then copied onto each course org by Bootstrap. `dry_run`
+previews need nothing.
 
 The same mailbox sends two **fault** emails, which nobody presses a button for. A semester's
 teaching team is emailed about a planned release whose materials are not staged, addressed to
@@ -118,8 +119,12 @@ Because a GitHub secret can be written but never read back, and Entra only ever 
 half, **the private key needs a copy outside GitHub** - institutional password manager or a
 shared vault, never the repo. Without one, a lost laptop means a new keypair and an Entra ticket.
 
-Set the secrets once as **org** secrets on each course org (`--visibility all`); the send
-workflows run in that org's public `.github`, so no per-repo propagation is needed. A `dry_run`
+The four live as **org secrets on `hertie-data-science-lab`**, shared with the toolkit repo.
+Bootstrap (with `set_secret`) copies each onto the new course org as an org secret, the same
+way as `DSL_BOT_TOKEN`; the send workflows run in that org's public `.github`. A semester never
+gets them. An org bootstrapped before this gets them by re-running Bootstrap with `set_secret`,
+which overwrites with the central values. To rotate a value, update the central secret and
+re-run Bootstrap on each course org. A `dry_run`
 acquires a token after printing its preview, so a credential that is SET but wrong reds the
 run. An org with no secrets at all still previews green, saying the preview proves nothing.
 

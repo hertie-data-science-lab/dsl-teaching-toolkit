@@ -38,7 +38,7 @@ Set up once per course; it serves every future semester. Per-semester setup of t
    | `org` | the org you just made | e.g. `hertie-dsl-demo-course-e1234` |
    | `course_name` | the course's name | e.g. `Deep Learning` - `course.name` in `course.yml`, the title of every site |
    | `course_code` | short code | e.g. `E1234` |
-   | `set_secret` | `true` (default) | propagates `DSL_BOT_TOKEN` - **don't set the secret by hand** |
+   | `set_secret` | `true` (default) | propagates `DSL_BOT_TOKEN` and the mail secrets (`GRAPH_*`) - **don't set them by hand** |
    | `admin` | *your handle* | adds you to `course-admin` so you can run the course workflows |
    | `central_ref` | `release` (default) | which toolkit tier this course runs (`course.toolkit_version_ref`) - leave it unless you are setting up the demo course |
 
