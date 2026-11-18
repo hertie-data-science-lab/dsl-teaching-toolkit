@@ -391,7 +391,7 @@ spawned. What it guarantees, and what it does not:
 
 ## Secrets an org carries
 
-Two values are published onto an org by the toolkit itself, all through
+Six values are published onto an org by the toolkit itself, all through
 `bootstrap_course.set_org_secret` - which scopes the org secret to the infra repos that
 exist and then mirrors it as a repo secret onto the private ones, because on GitHub Free a
 `selected` org secret is never delivered to a private repo:
@@ -400,6 +400,7 @@ exist and then mirrors it as a repo secret onto the private ones, because on Git
 |---|---|---|
 | `DSL_BOT_TOKEN` | a secret on this repo | Bootstrap with `set_secret: true`; `seed refresh` also mirrors it onto each content repo and assignment template |
 | `DSL_MAINTAINER_EMAIL` | a repository **variable** on this repo | Bootstrap with `set_secret: true`, and the Console's New semester (`semester.bootstrap`) forwards it to a semester |
+| the four `GRAPH_*` mail secrets | `hertie-data-science-lab` org secrets shared with this repo | Bootstrap with `set_secret: true`, course org only |
 
 `DSL_MAINTAINER_EMAIL` is where fault mail goes. A variable centrally and a secret on the
 org: an address is not a credential (and a masked secret cannot be read back to check it),
@@ -436,8 +437,9 @@ that semester - every fault still opens its digest issue and still @mentions the
 team, and no email goes anywhere. the Check's C7 row counts the entries without
 one, and the run log names the handles.
 
-The four `GRAPH_*` transport secrets are a one-time central setup, set by hand per org and
-never propagated:
+The four `GRAPH_*` transport secrets are `hertie-data-science-lab` org secrets shared with the
+toolkit repo. Bootstrap (`--propagate-secret`) copies them onto a course org, never a
+semester; nothing else propagates them, so an older org gets them by re-running Bootstrap:
 [central-admin.md](../../docs-admin-arch/central-admin.md#email).
 
 ## File ownership

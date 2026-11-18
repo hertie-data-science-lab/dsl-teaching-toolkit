@@ -13,7 +13,7 @@ on:
         description: "Course code (e.g. GRAD-E1234)."
         required: true
       set_secret:
-        description: "Set the DSL_BOT_TOKEN org secret automatically (recommended; uncheck only to set it by hand)"
+        description: "Set the DSL_BOT_TOKEN and mail (GRAPH_*) org secrets automatically (recommended; uncheck only to set them by hand)"
         required: false
         default: "true"
         type: choice
@@ -101,6 +101,12 @@ jobs:
           # copies it onto the new org so its seeded workflows can mail a fault home.
           # Unset here just means the org falls back to the GRAPH_SENDER mailbox.
           DSL_MAINTAINER_EMAIL: ${{ vars.DSL_MAINTAINER_EMAIL }}
+          # The mail transport: hertie-data-science-lab org secrets shared with this repo.
+          # --propagate-secret copies each one present onto the new org over stdin.
+          GRAPH_TENANT_ID: ${{ secrets.GRAPH_TENANT_ID }}
+          GRAPH_CLIENT_ID: ${{ secrets.GRAPH_CLIENT_ID }}
+          GRAPH_SENDER: ${{ secrets.GRAPH_SENDER }}
+          GRAPH_CLIENT_CERT: ${{ secrets.GRAPH_CLIENT_CERT }}
         run: |
           # Recorded in the org's own dsl-course.yml, so the tier this run checked out is
           # the tier the org keeps running once the nightly refresh takes over.

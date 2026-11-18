@@ -1,8 +1,9 @@
 """bootstrap-course -- one-time setup for a new course org.
 
 Sets up org-level infrastructure that persists across semesters:
-- DSL_BOT_TOKEN secret (required for all workflows), and DSL_MAINTAINER_EMAIL where the
-  run's env carries it (where the seeded workflows mail a fault)
+- DSL_BOT_TOKEN secret (required for all workflows), and the four GRAPH_* mail secrets and
+  DSL_MAINTAINER_EMAIL where the run's env carries them (how and where the seeded
+  workflows send mail)
 - Faculty teams (instructors, course-admin); semester bootstrap adds students + auditors
 - Org settings (base permissions, member repo creation, 2FA where every member has it)
 - Profile README (.github repo with description)
@@ -205,6 +206,34 @@ def propagate_maintainer_email(org: str) -> int:
         )
         return 0
     return 0 if set_org_secret(org, mailer.MAINTAINER_ENV, address) else 1
+
+
+def propagate_mail_secrets(org: str) -> int:
+    """Copy the four `GRAPH_*` mail transport secrets from this run's env onto `org`.
+    Failure count.
+
+    Centrally they are `hertie-data-science-lab` org secrets shared with the toolkit repo;
+    `.github/workflows/bootstrap-org.yml` passes them in as env. They travel by
+    `set_org_secret`, like the bot token: over stdin, never argv, so the multi-line
+    `GRAPH_CLIENT_CERT` keeps its newlines and no value is visible in `ps`.
+
+    An absent one is skipped with one `[skip]` naming it and never fails a bootstrap: the
+    org just cannot send mail until it is set. A failed WRITE does count.
+
+    Never logs a value, only names: this runs in a public repo's Actions log."""
+    present = [n for n in mailer.GRAPH_ENV if (os.environ.get(n) or "").strip()]
+    if not present:
+        log(
+            f"  [skip] no GRAPH_* secret in this run's env - mail transport not propagated to {org}"
+        )
+        return 0
+    failures = 0
+    for name in mailer.GRAPH_ENV:
+        if name not in present:
+            log(f"  [skip] {name} not in this run's env - not propagated")
+        elif not set_org_secret(org, name, os.environ[name]):
+            failures += 1
+    return failures
 
 
 def create_default_teams(org: str) -> int:
@@ -738,7 +767,8 @@ def main() -> int:
         action="store_true",
         help="Set DSL_BOT_TOKEN on this org to the DSL_BOT_TOKEN env value "
         "(lets the central bootstrap auto-provision the token - no manual per-org step). "
-        "Also propagates DSL_MAINTAINER_EMAIL when this run's env carries it.",
+        "Also propagates the GRAPH_* mail secrets and DSL_MAINTAINER_EMAIL when this "
+        "run's env carries them.",
     )
     parser.add_argument(
         "--admins",
@@ -996,9 +1026,14 @@ def _run(args: argparse.Namespace) -> int:
             )
     steps.append((secret_failures, "DSL_BOT_TOKEN secret validated (or set)"))
 
-    # 4b. Where this org's fault mail goes. Propagated on the same flag as the token, and
-    # only there: a run given no --propagate-secret has no central env to copy from.
+    # 4b. The mail transport and where this org's fault mail goes. Propagated on the same
+    # flag as the token, and only there: a run given no --propagate-secret has no central
+    # env to copy from. The transport goes to a course org only: every send runs from the
+    # course org's `.github`, and the Console (whose env carries GRAPH_*) bootstraps
+    # semesters with --propagate-secret, which must not hand them the mail credential.
     if args.propagate_secret:
+        if not args.semester:
+            steps.append((propagate_mail_secrets(args.org), ""))
         steps.append((propagate_maintainer_email(args.org), ""))
 
     # 5. Generate the org-overview README now that all repos exist (clickable index).

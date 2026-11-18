@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Bootstrap Course Org** copies the four mail secrets (`GRAPH_TENANT_ID`, `GRAPH_CLIENT_ID`,
+  `GRAPH_SENDER`, `GRAPH_CLIENT_CERT`) onto the new course org with `set_secret`, as it does
+  `DSL_BOT_TOKEN`. They come from the `hertie-data-science-lab` org secrets of the same names;
+  one that is unset there is skipped by name. A semester never gets them. An org bootstrapped
+  earlier gets them by re-running Bootstrap.
 - The semester site's home page leaves out the Instructors or Teaching Assistants heading
   when nobody holds that role, instead of printing an empty one.
 - **Behaviour change:** `show_on_site: false` on a lecture or lab (or an exam or event with `files:`)
