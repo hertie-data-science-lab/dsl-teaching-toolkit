@@ -55,6 +55,11 @@
             "description": "Also remove the released files the course copy no longer has",
             "type": "boolean"
           },
+          "remove_paths": {
+            "description": "Instead of releasing, remove only these files the course deleted: <dest repo>/<path>, comma-separated",
+            "pattern": "^(?=[\\s\\S]{1,8192}$)(?=[^,\\x00-\\x1f])(?!\\s*-)[^,\\x00-\\x1f]*(?:,(?!\\s*-)[^,\\x00-\\x1f]*)*$",
+            "type": "string"
+          },
           "replace": {
             "description": "Take the course version of exactly these paths, discarding the semester's edits to them, instead of merging",
             "type": "boolean"

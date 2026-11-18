@@ -20,6 +20,8 @@ Who writes it:
 - Release materials (`deploy.main`): `--entry` (the console's Release early / now / again)
   for every copy of the entry, and a release of paths for each schedule copy those paths
   cover (`schedule_plan.covered_copies`).
+  `--entry` with `--remove` (the console's Remove) only takes the removed files out of
+  their copy's manifest.
 
 ONE read per tick and at most one write, sha-guarded (`put_file_as_read`): a scoped tick
 and a console run racing each other re-apply their own change on the fresh file rather
@@ -197,6 +199,18 @@ class Record:
         if old is not None and not refresh and old.get("files") == files:
             return
         self._change(False, k, _entry(label, k, commit, stamp(at), files))
+
+    def drop(self, d: schedule.Deploy, removed: Collection[str]) -> None:
+        """Take `removed` (removed from the destination by `--remove`, nothing shipped)
+        out of copy `d`'s manifest; its commit and ship times stay."""
+        k = key_of(d)
+        old = self.copies.get(k)
+        if old is None:
+            return
+        gone = set(removed)
+        files = {p: s for p, s in (old.get("files") or {}).items() if p not in gone}
+        if files != old.get("files"):
+            self._change(False, k, {**old, "files": files})
 
     def _rebuild(self, text: str | None) -> str | None:
         """This run's changes over a fresh read of the file (`put_file_as_read`)."""

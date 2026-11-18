@@ -67,8 +67,8 @@ release, a file added there included; a released file deleted there reads **remo
 pull request; its Options can **Overwrite the semester's copy** instead, discarding its edit),
 **PR into source** (that file's semester edit only), **Open**, and **Diff**, which shows what changed under the row (text files), with
 **Compare on GitHub** for an edited one. A file removed from the course has **Remove** instead:
-it releases the file's schedule entry again and takes every file the course deleted out of the
-released copy. A folder released by hand has no Remove; delete the file in the semester repo. While a re-release waits in its pull request, the
+it takes that one file out of the semester's copy and releases nothing else. A file released by
+hand, or by a release of that file alone, has no Remove; delete it in the semester repo. While a re-release waits in its pull request, the
 file says **Release pending in a pull request**, with **Open PR** to resolve it on GitHub and
 **Overwrite** to take the course version. Nothing changes until you choose.
 

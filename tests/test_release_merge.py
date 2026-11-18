@@ -466,3 +466,116 @@ def test_replace_with_remove_deleted_drops_what_the_course_no_longer_has(world):
     assert batch.errors == 0
     assert "lectures/01/old.md" not in world.files("main")
     assert world.pulls.calls == []
+
+
+# ------------------------------------------------------------------ Remove (remove-only)
+
+
+def _released_then_dropped(world) -> Deploy:
+    """lectures/01 released with three files; the course then deletes two and edits one."""
+    world.commit(
+        "cm",
+        {
+            "lectures/01/lab.md": "one\n",
+            "lectures/01/old.md": "o\n",
+            "lectures/01/gone.md": "g\n",
+        },
+    )
+    world.commit("materials", {"README.md": "the semester"})
+    world.release("lectures/01")
+    world.commit(
+        "cm",
+        {
+            "lectures/01/old.md": None,
+            "lectures/01/gone.md": None,
+            "lectures/01/lab.md": "two\n",
+        },
+        "drop two, edit one",
+    )
+    return Deploy("cm", "lectures/01", "materials", None)
+
+
+def test_remove_takes_out_only_the_named_file_and_ships_nothing_else(world):
+    d = _released_then_dropped(world)
+
+    batch = deploy.remove_released(
+        "Course-Org", "Semester-Org", [d], {release_record.key_of(d): ["old.md"]}
+    )
+
+    assert (batch.errors, batch.changed) == (0, True)
+    assert [(c.removed, c.outcome) for c in batch.copies] == [
+        (("old.md",), deploy.RELEASED)
+    ]
+    for branch in ("main", "upstream"):
+        files = world.files(branch)
+        assert "lectures/01/old.md" not in files
+        # The other deleted file stays, and the course's edit is not released.
+        assert "lectures/01/gone.md" in files
+        assert world.read(branch, "lectures/01/lab.md").strip() == "one"
+
+
+def test_remove_refuses_a_file_the_course_still_has_and_touches_nothing(world, capsys):
+    d = _released_then_dropped(world)
+    before = world.sha("main")
+
+    batch = deploy.remove_released(
+        "Course-Org",
+        "Semester-Org",
+        [d],
+        {release_record.key_of(d): ["old.md", "lab.md"]},
+    )
+
+    assert (batch.errors, batch.changed, batch.copies) == (1, False, [])
+    assert world.sha("main") == before
+    assert "cm/lectures/01/lab.md is still in the course" in capsys.readouterr().err
+
+
+def _plan(*deploys: Deploy):
+    from types import SimpleNamespace
+
+    entry = SimpleNamespace(label="lab-01", deploy=[deploys[0]])
+    return SimpleNamespace(
+        releases=[entry, SimpleNamespace(label="x", deploy=list(deploys[1:]))]
+    ), entry
+
+
+def test_removals_name_files_the_record_lists_outside_nested_landings():
+    d = Deploy("cm", "labs/01", "materials", None)
+    nested = Deploy("cm", "keys/01", "materials", "labs/01/solutions")
+    sched, entry = _plan(d, nested)
+    k = release_record.key_of(d)
+    record = release_record.Record(
+        {k: {"files": {"old.md": "s", "sub/a.md": "s", "solutions/key.md": "s"}}}
+    )
+
+    got = deploy.removals_of(
+        record, sched, entry, ["materials/labs/01/old.md", "materials/labs/01/sub/a.md"]
+    )
+    assert got == {k: ["old.md", "sub/a.md"]}
+    refused = {
+        "materials/labs/01/never.md": "not a file the release record lists",
+        "materials/labs/01/solutions/key.md": "belongs to another release",
+        "materials/labs/02/old.md": "is not in a folder lab-01 releases",
+        "extras/labs/01/old.md": "is not in a folder lab-01 releases",
+        "materials/labs/01/../01/old.md": "is not in a folder lab-01 releases",
+    }
+    for path, words in refused.items():
+        said = deploy.removals_of(record, sched, entry, [path])
+        assert isinstance(said, str)
+        assert words in said
+
+
+def test_dropping_removed_files_keeps_the_copys_commit_and_ship_times():
+    d = Deploy("cm", "labs/01", "materials", None)
+    k = release_record.key_of(d)
+    old = {
+        "entry": "lab-01",
+        "source": {"repo": "cm", "path": "labs/01", "commit": "c1"},
+        "dest": {"repo": "materials", "path": "labs/01"},
+        "first_shipped_at": "2026-09-01T10:00:00Z",
+        "last_shipped_at": "2026-09-02T10:00:00Z",
+        "files": {"a.md": "1", "old.md": "2"},
+    }
+    record = release_record.Record({k: dict(old)})
+    record.drop(d, ["old.md"])
+    assert record.copies[k] == {**old, "files": {"a.md": "1"}}

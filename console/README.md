@@ -245,8 +245,9 @@ under it each differing file is a row: its name, chip, a muted "+A −D" once it
 (`useDiff`; "binary" for a document or image), Re-release (`reRelease`: `releasePicked` of that one file onto
 its released copy, Options the advanced Overwrite, `replace`; greyed for ahead and for a file only the semester has),
 Overwrite beside it for a file removed, ahead or diverged (Re-release with `replace` set, and a confirm line),
-for a `deleted` file Remove in place of Re-release (`removeDeleted`: `releaseAgain` of the folder's entry with
-`remove_deleted` ticked, its count the entry's `DIVERGED_DELETED` files; a folder released by hand gets a note instead),
+for a `deleted` file Remove in place of Re-release (`removeReleased`: `release.entry` with `remove_paths`
+`<repo>/<path>`, that one file out and nothing released; a file released by hand, or by a release of that
+file alone, gets a note instead),
 PR into source (`keepFuturePaths`: `release.propagate_back` with `paths`, always `<repo>/<path>`,
 as the engine reads a leading repo name as the repo; greyed for behind), the Open split button
 (`ui/OpenSplit.tsx`: the semester copy on GitHub, its arrow `useMenu` with GitHub, github.dev and

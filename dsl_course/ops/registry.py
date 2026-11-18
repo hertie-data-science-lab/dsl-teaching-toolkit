@@ -238,6 +238,12 @@ def _deploy(request: Request) -> list[str]:
     # `remove_deleted`: Release again's "also remove the files deleted from the course
     # copy" (decision 0043 rule 6). Spelt on either branch: deploy refuses it with paths.
     flags = ["--remove-deleted"] if _a(request, "remove_deleted") else []
+    # `remove_paths`: Remove - exactly these semester files out, nothing released.
+    flags += [
+        f"--remove={p.strip()}"
+        for p in (_a(request, "remove_paths") or "").split(",")
+        if p.strip()
+    ]
     # `replace`: the hard overwrite - the course version of the copied paths, no merge.
     flags += ["--replace"] if _a(request, "replace") else []
     if _a(request, "entry") and not _a(request, "course_source_repo"):
@@ -430,6 +436,11 @@ _RELEASE_ENTRY_ARGS = _args(
         **_DEPLOY_FIELDS,
         "remove_deleted": _boolean(
             "Also remove the released files the course copy no longer has"
+        ),
+        "remove_paths": _string(
+            PATH_LIST_PATTERN,
+            "Instead of releasing, remove only these files the course deleted: "
+            "<dest repo>/<path>, comma-separated",
         ),
     },
     required=("entry",),

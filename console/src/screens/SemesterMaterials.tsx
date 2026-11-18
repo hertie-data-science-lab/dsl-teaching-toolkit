@@ -9,7 +9,7 @@
 // folder a fold of its own, its differing files listed beneath, each with its two ways to settle
 // it (Re-release, with Overwrite in its Options; PR into source), Open and an inline Diff, and
 // one PR into source (all) for the panel. A file the course deleted since its release offers
-// Remove instead: Release again of its schedule entry with `remove_deleted` ticked. A
+// Remove instead: that one file out of its schedule entry's copy, nothing released. A
 // re-release that conflicted waits in an open pull request from the semester repo's `upstream`
 // branch: its files then say so, with Open PR and Overwrite in place of Re-release. The engine's `DIVERGED_RELEASED` lines stay on the Dashboard.
 // Below, for those who can change the course, Release by hand: the Files panel's Release view
@@ -44,9 +44,7 @@ import { newestRepo } from './CourseEdit';
 import { sourceRepos } from './Schedule';
 import { WithStatus, cohortScope, tzOf, yearOf } from './common';
 import { releaseRef } from './Cohort';
-import { releaseAgainDrift } from './Divergence';
-import { divergenceOf } from '../model/divergence';
-import { keepFuture, keepFuturePaths, releaseAgain, releasePicked, type ReleaseRef, type Scope } from '../ops/defs';
+import { keepFuture, keepFuturePaths, releasePicked, removeReleased, type Scope } from '../ops/defs';
 import { useLoad } from '../ui/load';
 import type { GhPull } from '../github/client';
 import type { OpDef } from '../ops/session';
@@ -152,7 +150,7 @@ const STEP_HINT_ITEMS = [
   <><b>Edited in course</b> (behind): the course copy changed since the release, additions included; <b>removed from the course</b>: deleted there, still in the semester.</>,
   <><b>Both</b> (diverged): changed on both sides.</>,
   <><b>Re-release</b> copies one file’s course version over, merged onto the semester’s edit; a conflict opens a pull request for the instructors. Its Options can overwrite instead.</>,
-  <><b>Remove</b> releases the file’s schedule entry again and takes out every file the course deleted from it. A folder released by hand has no Remove: delete the file in the semester repo.</>,
+  <><b>Remove</b> takes a file the course deleted out of the semester’s copy; nothing else is released. A file released by hand, or as a release of its own, has no Remove: delete it in the semester repo.</>,
   <><b>PR into source</b> opens a pull request carrying the semester’s edit back into the course repo, so next semester starts from it.</>,
   <><b>Release pending in a pull request</b>: a re-release that conflicted waits there; Open PR to resolve it, or Overwrite to take the course version.</>,
 ];
@@ -176,6 +174,7 @@ export const REMOVED_RERELEASE = 'The semester removed it; Overwrite restores th
 export const NOTHING_TO_CARRY = 'Nothing to carry back: the file is gone on the semester side.';
 export const DELETED_NO_DIFF = 'Deleted from the course: nothing to compare. Open it to see the semester’s copy.';
 export const REMOVE_BY_HAND = 'Released by hand: delete it in the semester repo.';
+export const REMOVE_FILE_RELEASE = 'Released as a file of its own: delete it in the semester repo.';
 export const OVERWRITE_CONFIRM = 'Replaces the semester’s copy of this file with the course version; its edit is lost.';
 
 /** Re-release: `release.adhoc` of exactly one course file (`from` in `srcRepo`) onto its released copy (`to` in `destRepo`), with Overwrite (`replace`) in its Options as every release by hand has. */
@@ -187,20 +186,6 @@ export function reRelease(scope: Scope, srcRepo: string, from: string, destRepo:
 
 /** Overwrite: the Re-release of a file whose release waits in a pull request, `replace` set. */
 export const overwrite = (again: OpDef): OpDef => ({ ...again, args: { ...again.args, replace: true }, confirm: OVERWRITE_CONFIRM });
-
-/**
- * Remove: Release again of `r` (`release.entry`) with `remove_deleted` ticked. It removes every
- * file the course deleted from the entry's copies, `deleted` of them (the engine's
- * `DIVERGED_DELETED` count, or the panel's when larger), not only the one clicked.
- */
-export function removeDeleted(scope: Scope, r: ReleaseRef, drift: ReturnType<typeof releaseAgainDrift>): OpDef {
-  const def = releaseAgain(scope, r, drift);
-  return {
-    ...def, name: 'Remove',
-    intro: `Releases ${r.ident} again, the course’s current version, and removes from students’ copy every file deleted from the course copy: ${plural(drift.deleted, 'file')}, not only this one.`,
-    options: { ...def.options, remove_deleted: { ...def.options!.remove_deleted!, default: true } },
-  };
-}
 
 /** A file no line diff is drawn for, by its name: documents and archives (`editableFile`) and images but svg. */
 const binaryName = (path: string) => !editableFile(path) || (viewKind(path) === 'image' && extOf(path) !== 'svg');
@@ -242,12 +227,12 @@ function OutOfStepPanel(p: ReadyProps & { def: string }) {
   const count = (k: FolderStep | 'all') => (k === 'all' ? all.length : all.filter((f) => fileStep(f.state) === k).length);
   const shown = (f: OutOfStep['files'][number]) => show === 'all' || fileStep(f.state) === show;
   const tz = tzOf(p.status), year = yearOf(p.now, tz);
-  // Remove for a folder's files the course deleted: its schedule entry released again, none for a folder released by hand.
-  const removeOf = (x: OutOfStep): OpDef | null => {
+  // Remove for a file the course deleted: out of its schedule entry's folder copy; a note for one released by hand or as a file of its own.
+  const removeOf = (x: OutOfStep, f: OutOfStep['files'][number]): OpDef | string | null => {
+    if (f.state !== 'deleted') return null;
     const ref = x.r ? releaseRef(x.r, tz, year) : null;
-    if (!ref) return null;
-    const drift = releaseAgainDrift(divergenceOf(p.status, ref.id));
-    return removeDeleted(scope, ref, { ...drift, deleted: Math.max(drift.deleted, x.files.filter((f) => f.state === 'deleted').length) });
+    if (!ref) return REMOVE_BY_HAND;
+    return f.path === x.path ? REMOVE_FILE_RELEASE : removeReleased(scope, ref, x.repo, f.path);
   };
   return (
     <details class="panel section panel-fold out-of-step">
@@ -274,7 +259,6 @@ function OutOfStepPanel(p: ReadyProps & { def: string }) {
           const src = x.src;
           // Its file the pending release changes: edited in the semester, and in that pull request.
           const pendingOf = (f: OutOfStep['files'][number]) => (semesterEdited(f.state) ? pendingIn(x.repo, f.path)?.html_url : undefined);
-          const remove = x.files.some((f) => f.state === 'deleted') ? removeOf(x) : null;
           return (
             <li class="dif-folder"><details class="fold" open>
               <summary class="dif-fhead"><code class="dif-path">{x.repo === p.def ? '' : `${x.repo}: `}{x.path}/</code>{x.r ? null : <span class="footnote"> {BY_HAND}</span>}</summary>
@@ -282,7 +266,7 @@ function OutOfStepPanel(p: ReadyProps & { def: string }) {
                 {x.files.filter(shown).map((f) => (
                   <DiffFile key={f.path} files={p.files} org={org} repo={x.repo} folder={x.path} f={f} setup={setup} onKeep={keep} pulls={pulls} compare={compare}
                     course={f.from ? [p.course.org, src, f.from] : null} again={f.from ? reRelease(scope, src, f.from, x.repo, f.path) : null}
-                    keepFile={keepFuturePaths(scope, [`${x.repo}/${f.path}`])} pending={pendingOf(f)} remove={remove} />
+                    keepFile={keepFuturePaths(scope, [`${x.repo}/${f.path}`])} pending={pendingOf(f)} remove={removeOf(x, f)} />
                 ))}
               </ul>
             </details></li>
@@ -303,8 +287,8 @@ function DiffFile(p: {
   keepFile: OpDef;
   /** The open pull request its re-release waits in, if any: Open PR and Overwrite in place of Re-release. */
   pending?: string;
-  /** A file the course deleted: Remove in place of Re-release, or null for a folder released by hand. */
-  remove: OpDef | null;
+  /** A file the course deleted: Remove in place of Re-release, or the note saying why there is none. */
+  remove: OpDef | string | null;
 }) {
   const { f } = p;
   const [open, setOpen] = useState(false);
@@ -323,7 +307,7 @@ function DiffFile(p: {
         <StateChip kind={f.state as ChipKind} onKeep={p.onKeep} prUrl={f.state === 'diverged' ? p.pulls : undefined} />
         <span class="dif-sum">{sum}</span>
         <span class="dif-right">
-          {deleted ? (p.remove ? <OpOpen def={p.remove} cls="btn small quiet" label="Remove" /> : <span class="footnote">{REMOVE_BY_HAND}</span>)
+          {deleted ? (typeof p.remove === 'string' ? <span class="footnote">{p.remove}</span> : p.remove ? <OpOpen def={p.remove} cls="btn small quiet" label="Remove" /> : null)
             : p.pending ? null : p.again && (f.state === 'behind' || f.state === 'diverged' || f.state === 'not_released')
             ? <OpOpen def={p.again} cls="btn small quiet" label="Re-release" />
             : <button class="btn small quiet" type="button" disabled title={removed ? REMOVED_RERELEASE : p.again ? NOTHING_TO_RERELEASE : ONLY_IN_SEMESTER}>Re-release</button>}

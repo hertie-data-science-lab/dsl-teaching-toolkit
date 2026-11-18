@@ -309,7 +309,7 @@ describe('Released materials', () => {
     expect(editedIn(handFiles([old], [old, mine]), COURSE_ORG, 'course-materials-f2026', ORG, RELEASED)).toBe(3);
   });
 
-  it('lists a released file the course deleted as removed from the course, behind, with Remove: Release again of its entry, remove_deleted ticked', async () => {
+  it('lists a released file the course deleted as removed from the course, behind, with Remove: that one file out, nothing released', async () => {
     const st = (RELEASED as Extract<Loaded, { kind: 'ready' }>).status;
     // lab.ipynb deleted from the course; students still have it.
     const f = stepFiles({ 'labs/lab-1/lab.ipynb': undefined });
@@ -319,12 +319,7 @@ describe('Released materials', () => {
     root = document.createElement('div');
     document.body.appendChild(root);
     const env = { user: { login: 'prof', id: 1, name: 'P', email: null, avatar_url: '' }, client: new GitHubClient({ token: () => 't', fetch: new FakeGitHub().fetch }), ops: { open } } as unknown as Env;
-    // The engine counts two files deleted from the entry's copies: Remove takes out both.
-    const gone: Problem = {
-      id: 'schedule:lab-1:DIVERGED_DELETED:dddddddd', scope: 'semester', stage: 'K4', kind: 'DIVERGED_DELETED', release: 'lab-1', label: 'Deleted in course', text: '2 files deleted.', stops: '', bites: 'later',
-      diverged: [{ source: { repo: 'course-materials-f2026', path: 'labs/lab-1' }, dest: { repo: 'materials', path: 'labs/lab-1' }, added: [], changed: [], deleted: ['lab.ipynb', 'old.md'] }],
-    } as Problem;
-    const loaded = statusWith([rel('s5', 'lectures/05_trees'), rel('lab-1', 'labs/lab-1')], [gone]);
+    const loaded = statusWith([rel('s5', 'lectures/05_trees'), rel('lab-1', 'labs/lab-1')]);
     await act(() => render(<EnvCtx.Provider value={env}><SemesterMaterialsScreen {...props({ files: f, loaded })} /></EnvCtx.Provider>, root!));
     const row = [...root.querySelectorAll<HTMLElement>('details.out-of-step li.dif-file')].find((li) => li.querySelector('.dif-name')!.textContent === 'lab.ipynb')!;
     expect([row.querySelector('.chip')!.textContent, row.querySelector('.chip')!.classList.contains('amber')]).toEqual(['removed from the course', true]);
@@ -337,9 +332,10 @@ describe('Released materials', () => {
     expect(row.querySelector('.split')).not.toBeNull();
     await act(() => btn('Remove')!.click());
     const def = open.mock.calls[0][0];
-    expect(def).toMatchObject({ op: 'release.entry', name: 'Remove', args: { entry: 'lab-1' } });
-    expect(def.intro).toBe('Releases Lecture 5 again, the course’s current version, and removes from students’ copy every file deleted from the course copy: 2 files, not only this one.');
-    expect(def.options.remove_deleted).toMatchObject({ default: true, label: 'Also remove the 2 files deleted from the course copy' });
+    // Exactly that file, by its semester path; no options, so nothing else rides along.
+    expect(def).toMatchObject({ op: 'release.entry', name: 'Remove', args: { entry: 'lab-1', remove_paths: 'materials/labs/lab-1/lab.ipynb' } });
+    expect(def.options).toBeUndefined();
+    expect(def.intro).toBe('Removes labs/lab-1/lab.ipynb from students’ copy, as the course deleted it. Nothing is released: the rest of Lecture 5 stays as it is.');
     // Released by hand: no Remove, a note instead.
     root.remove();
     root = await mount(<SemesterMaterialsScreen {...props({ files: handFiles(['labs/12_tutorial-presentations/old.md'], ['labs/12_tutorial-presentations/old.md']) })} />);
