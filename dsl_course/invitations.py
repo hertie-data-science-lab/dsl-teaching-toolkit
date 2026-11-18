@@ -22,12 +22,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from . import org_registry
-from .ghcli import bot_login, gh
+from .ghcli import BOT_LOGIN, bot_login, gh
 from .log import log, log_err, log_ok
-
-# The lab's bot account. Accepting is ITS job: a maintainer's break-glass token running the
-# scheduler must never join orgs as that maintainer.
-BOT = "hertie-dsl-bot"
 
 
 def pending_orgs() -> list[str]:
@@ -56,8 +52,10 @@ def accept_pending(course_org: str = "", semesters: Iterable[str] = ()) -> list[
     org that cannot be accepted (the invitation withdrawn meanwhile) does not stop the rest."""
     accepted: list[str] = []
     login = bot_login()
-    if login.casefold() != BOT:
-        log(f"  [skip] org invitations: this token is {login or 'unknown'}, not {BOT}")
+    if login.casefold() != BOT_LOGIN:
+        log(
+            f"  [skip] org invitations: this token is {login or 'unknown'}, not {BOT_LOGIN}"
+        )
         return accepted
     registered = set(org_registry.course_orgs())
     if course_org.casefold() in registered:

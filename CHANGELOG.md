@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The bot no longer receives GitHub notifications (every Join course ticket mailed the
+  maintainer). Each repo the toolkit creates is muted for it (repository subscription set to
+  ignored), and the nightly Refresh actions mutes `.github`, `join` and `semester-config` in
+  every live org. Student repos created earlier are not swept.
 - **Bootstrap Course Org** copies the four mail secrets (`GRAPH_TENANT_ID`, `GRAPH_CLIENT_ID`,
   `GRAPH_SENDER`, `GRAPH_CLIENT_CERT`) onto the new course org with `set_secret`, as it does
   `DSL_BOT_TOKEN`. They come from the `hertie-data-science-lab` org secrets of the same names;

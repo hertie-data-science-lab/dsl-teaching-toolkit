@@ -55,7 +55,7 @@ from dsl_course import (
 )
 from dsl_course import bootstrap_course as bc
 from dsl_course.central import CENTRAL
-from dsl_course.course import SEMESTER_TOPIC
+from dsl_course.course import CONFIG_REPO, JOIN_REPO, SEMESTER_TOPIC
 from dsl_course.faults import NOT_MIGRATED
 from dsl_course.repos import Converged
 from dsl_course.selection import Selection
@@ -935,6 +935,7 @@ def _stub_refresh(
     # then reads the archived flag off its own listing (empty above = nothing archived),
     # so org_exists True + an unarchived semester-config = present and live, proceed.
     monkeypatch.setattr(seed, "gh", lambda *a, **k: (0, ""))
+    monkeypatch.setattr(seed, "mute_notifications", lambda org, name, **k: True)
     monkeypatch.setattr(seed, "org_exists", lambda org: True)
     monkeypatch.setattr(seed, "being_set_up", lambda org: False)
     monkeypatch.setattr(seed, "unregister_semester", lambda course, semester: True)
@@ -2074,3 +2075,39 @@ def test_refresh_skips_a_semester_the_wizard_listed_before_its_set_up(
     assert "Semester-s2027" not in refreshed
     assert pruned == []
     assert "[skip] Semester-s2027 (being set up" in capsys.readouterr().out
+
+
+def test_the_refresh_mutes_the_bot_on_infra_repos_not_yet_ignored(monkeypatch, capsys):
+    # GitHub mails the bot's (maintainer-owned) address for every Join course ticket in a
+    # repo it watches. The nightly sweep mutes the infra repos created before the mute
+    # existed, reading each subscription first so a muted repo costs one GET and no write.
+    answers = {
+        ".github": (0, "true"),  # already ignored: skipped
+        JOIN_REPO: (1, "gh: Not Found (HTTP 404)"),  # not watched at all
+        CONFIG_REPO: (0, "false"),  # watched
+        "broken": (1, "gh: HTTP 502"),
+    }
+    read: list[str] = []
+
+    def fake_gh(*args, **k):
+        name = args[1].split("/")[2]
+        read.append(name)
+        return answers.get(name, (1, "gh: HTTP 502"))
+
+    muted: list[str] = []
+    monkeypatch.setattr(seed, "gh", fake_gh)
+    monkeypatch.setattr(seed, "bot_login", lambda: "hertie-dsl-bot")
+    monkeypatch.setattr(
+        seed, "mute_notifications", lambda org, name, **k: muted.append(name) or True
+    )
+    listing = [
+        {"name": n} for n in (".github", JOIN_REPO, CONFIG_REPO, "broken", "materials")
+    ] + [{"name": "old", "archived": True}]
+    monkeypatch.setattr(seed, "INFRA_REPOS", {*seed.INFRA_REPOS, "broken", "old"})
+
+    seed._mute_bot("Semester-f2026", listing)
+
+    # Content repos and archived ones are never read; an unreadable one is not written.
+    assert read == [".github", JOIN_REPO, CONFIG_REPO, "broken"]
+    assert muted == [JOIN_REPO, CONFIG_REPO]
+    assert "[warn]" in capsys.readouterr().out

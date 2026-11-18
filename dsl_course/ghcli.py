@@ -681,6 +681,10 @@ def git(*args: str, cwd: str | None = None) -> tuple[int, str]:
 # commits from a student's.
 BOT_EMAIL = "bot@dsl.local"
 BOT_NAME = "dsl-bot"
+# The lab's bot account, the login `DSL_BOT_TOKEN` authenticates as. What only the bot
+# may do as itself - accept org invitations, mute its notifications - checks for it: a
+# maintainer's break-glass token must never join orgs, or go deaf, as that maintainer.
+BOT_LOGIN = "hertie-dsl-bot"
 GIT_ENV = [
     "-c",
     f"user.email={BOT_EMAIL}",

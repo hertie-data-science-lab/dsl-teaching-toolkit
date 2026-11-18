@@ -40,6 +40,7 @@ from dsl_course import (
     release_record,
     repos,
     scheduler,
+    seed,
     settings,
     status,
     sync_membership,
@@ -319,6 +320,8 @@ class FakeGitHub:
                     "size": 1,
                 }
             )
+        if rest == ["subscription"]:
+            return 0, "true"  # the bot's mute, as every night after the first
         if rest[0] == "contents":
             where = "/".join(rest[1:])
             code, out = self._contents(org, repo, where, jq)
@@ -483,6 +486,8 @@ _REAL = [
     (release_record, "get_file_with_sha", gh_contents.get_file_with_sha),
     (scheduler, "repo_blob_shas", gh_contents.repo_blob_shas),
     (release_record, "put_file_as_read", gh_contents.put_file_as_read),
+    (repos, "bot_login", ghcli.bot_login),
+    (seed, "bot_login", ghcli.bot_login),
 ]
 
 
@@ -665,7 +670,8 @@ OPERATIONS = {
     "status: check (preview)": (("status", *_C, *_S, "--preview"), 11, 0),
     "status: write status.json": (("status", *_C, *_S, "--no-preview"), 48, 0),
     "site: sync": (("site", "sync", *_C, *_S), 56, 0),
-    "seed: refresh": (("seed", "refresh", *_C), 102, 0),
+    # +4: one subscription read per infra repo, the bot's mute (`seed._mute_bot`).
+    "seed: refresh": (("seed", "refresh", *_C), 106, 0),
     "collect: refresh the sheet (preview)": (
         ("collect", *_C, "--course-source-repo", "assignment-1-f2026", *_S)
         + ("--refresh-only", "--preview"),

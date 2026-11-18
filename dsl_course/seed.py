@@ -43,6 +43,7 @@ from .course import (
     semester_of,
 )
 from .discovery import (
+    INFRA_REPOS,
     being_set_up,
     central_ref_for,
     discover_assignment_repos,
@@ -57,10 +58,10 @@ from .discovery import (
 )
 from .gh_contents import get_file_content, put_file, put_files
 from .gh_teams import converge_org_settings, create_role_teams
-from .ghcli import bot_token, gh
+from .ghcli import BOT_LOGIN, bot_login, bot_token, gh, is_missing_resource
 from .log import CLIParser, log, log_err, log_ok, log_step
 from .profile_readme import update_profile_readme
-from .repos import converge_descriptions, org_exists
+from .repos import converge_descriptions, mute_notifications, org_exists
 from .status import refresh as refresh_status
 from .team_formation import sync_team_lock
 from .welcome import (
@@ -392,6 +393,33 @@ def _converge_org_metadata(org: str, repos: list[dict]) -> int:
     return topics.failures
 
 
+def _mute_bot(org: str, listing: list[dict]) -> None:
+    """Mute the bot on the org's infra repos (`.github`, `join`, `semester-config`): the
+    nightly half of `repos.mute_notifications`, for repos created before it. One GET a
+    repo a night, and a PUT only where it is not already ignored (GitHub answers 404 for a
+    repo the token does not watch at all).
+
+    The infra repos only: they hold the issues others open and answer while the bot
+    writes in them, the Join course tickets first. A per-student repo is muted at its
+    create and not swept - that would be a read per student per night. Archived repos are
+    skipped. Never a failure: a miss warns and is tried again the next night. Nothing at
+    all unless the token is the bot's (a course migration runs from a laptop)."""
+    if bot_login().casefold() != BOT_LOGIN:
+        return
+    for row in listing:
+        name = row.get("name", "")
+        if name not in INFRA_REPOS or row.get("archived"):
+            continue
+        code, out = gh("api", f"repos/{org}/{name}/subscription", "--jq", ".ignored")
+        if code == 0 and out.strip() == "true":
+            continue
+        if code != 0 and not is_missing_resource(out):
+            log(f"  [warn] could not read the bot's subscription to {org}/{name}")
+            continue
+        if mute_notifications(org, name):
+            log_ok(f"{org}/{name}: bot notifications muted")
+
+
 def _converge_org(
     org: str,
     central_ref: str,
@@ -430,6 +458,7 @@ def _converge_org(
     create_team is what keeps that from being four writes."""
     if listing is None:
         listing = list_org_repos(org)
+    _mute_bot(org, listing)
     return (
         converge_org_settings(org, private_forks=is_semester)
         + (
@@ -448,8 +477,8 @@ def refresh(course_org: str, *, course_only: bool = False) -> int:
     org-level workflows in .github; converge each
     materials repo's SYSTEM-owned files (maintainer guide, syllabus example) and its
     seeded stubs; repopulate dropdowns; converge each org's repo descriptions, faculty-team
-    access and machinery topics (_converge_org_metadata) and rebuild its profile README
-    off the same listing; re-push every registered semester's join workflows, its
+    access and machinery topics (_converge_org_metadata), mute the bot on its infra repos
+    (_mute_bot), and rebuild its profile README off the same listing; re-push every registered semester's join workflows, its
     semester-config SYSTEM-owned files (README contract, dispatch.yml,
     validate-schedule.yml) (skipping semesters whose repos are archived) - never its own config, which stays create-if-missing; (Free-plan
     workaround) propagate the token as a repo secret so those private repos can
