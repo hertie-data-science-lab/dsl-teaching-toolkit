@@ -4,6 +4,7 @@
 # for it; the daily "Course orgs awaiting registration" issue lists the ones waiting.
 # Semester orgs are not listed: each course's semesters.yml registers its own.
 course_orgs:
+  - hertie-deep-learning-e1394
   - hertie-dsl-demo-course-e1234
   # hertie-intro-to-data-science-c11 is parked (no live cohort; its semester orgs were
   # deleted 2026-10-13 and Actions on its .github are off). Re-add it when it is picked up.
