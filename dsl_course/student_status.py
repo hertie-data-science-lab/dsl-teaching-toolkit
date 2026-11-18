@@ -461,7 +461,8 @@ def release_rows(facts: SemesterFacts, extra: StudentFacts) -> list[dict]:
     slot's id is `<key>-2`, as the site names its file), numbered as the site numbers
     it, with the files it has landed and the readings attached to it, and when it
     first reached students (`released_at`, as the site dates it). A row that ships
-    nothing is `no_materials`, and a later slot `repeat`, as on the site."""
+    nothing is `no_materials`, and a later slot `repeat`, as on the site. A silent row is
+    `off_schedule` (its kind's tab only), and is here once something of it has landed."""
     out = []
     tz = ZoneInfo(facts.sched.timezone)
     rows = planned_rows(facts.sched)

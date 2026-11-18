@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Behaviour change:** `show_on_site: false` on a lecture or lab (or an exam or event with `files:`)
+  is display-only, as it already was for readings: the entry stays off the Schedule and the
+  Updates box (site and student console) and out of the syllabus's weekly plan, but once its
+  files land it is listed on its kind's tab, numbered as usual. Before, it had no row at all.
+  A kind whose entries are all hidden still gets its tab. `assets:` entries are still never a
+  row; a hidden readings row is still unnumbered.
 - A readings entry's `reading_guide:` is renamed back to **`reading_list:`**, and it may name
   a course file (`{from_course_repo, from_path}`, the optional keys of a `files:` item)
   instead of holding the text. The file ships with the entry (with its folder when a `files:`

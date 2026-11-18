@@ -306,6 +306,14 @@ describe('S6 schedule and S11 release', () => {
     }
   });
 
+  it('says a hidden release keeps its own tab, off the schedule only', () => {
+    const hidden: Status = { ...STATUS, releases: (STATUS.releases ?? []).map((r) => ({ ...r, show_on_site: false })) };
+    const out = html(<ScheduleScreen {...props({ loaded: { ...ready, status: hidden } })} />);
+    const s5 = [...out.matchAll(/<li class="trow ([^"]+)" data-entry="([^"]+)">(.*?)<\/li>/g)].find((m) => m[2] === 's5')!;
+    expect(s5[3]).toContain('<span class="prop">Not shown</span>');
+    expect(s5[3]).toContain('This entry is left off the schedule and the Updates box. Once its files are released it is listed on its own tab (Labs, Lectures, ...), numbered as usual. The engine still acts on it');
+  });
+
   it('says every ? and hint verbatim from the forms review and mock-up v3', () => {
     const out = html(<ScheduleScreen {...props({ entry: 's5' })} />).replace(/&quot;/g, '"');
     for (const t of [FORM_TEXT.files, ...FORM_TEXT.filesBullets, FORM_TEXT.number, FORM_TEXT.provisional, FORM_TEXT.tbc, FORM_TEXT.readingsSub, FORM_TEXT.readingsFiles, FORM_TEXT.perFile]) expect(out).toContain(t);

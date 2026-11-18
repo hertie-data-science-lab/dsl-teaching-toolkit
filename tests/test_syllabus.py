@@ -132,6 +132,23 @@ def test_a_unit_is_one_session_whatever_its_entries(wired):
     ]
 
 
+def test_a_silent_entry_is_no_session(monkeypatch, wired):
+    # `show_on_site: false` keeps it off the schedule, so off the weekly plan too.
+    sched = syllabus.schedule.load("Semester-f2026")
+    sched.releases.append(
+        Release(
+            "lab-9",
+            datetime(2026, 9, 20, 10, 0, tzinfo=BERLIN),
+            kind="lab",
+            number=9,
+            session="9",
+            title="Self-study",
+            show_on_site=False,
+        )
+    )
+    assert "Self-study" not in wired() and "Session 9" not in wired()
+
+
 def test_uploaded_files_are_named_after_the_reading_list(wired):
     # The entry's `reading_list:` leads, and the files follow by NAME - never their
     # bytes. Listing them is what stops a session whose readings are PDFs coming out as a

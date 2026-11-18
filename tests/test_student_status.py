@@ -523,6 +523,30 @@ def test_a_reading_list_kept_in_a_lecture_folder_does_not_release_the_lecture():
     assert [k["name"] for k in later["links"]] == ["slides.pdf"]
 
 
+def test_a_silent_entry_is_a_numbered_row_of_its_kind_tab_only():
+    # `show_on_site: false` is display-only, as on the site: once its files land the row
+    # is there for the console's kind tab, numbered, and `off_schedule` keeps it off the
+    # schedule and the Updates box.
+    facts = _facts()
+    lab = schedule.Release(
+        "lab_01",
+        datetime(2026, 9, 10, 10, 0, tzinfo=UTC),
+        [schedule.Deploy("course-materials-f2026", "labs/01_intro", "materials")],
+        kind="lab",
+        number=1,
+        session="1",
+        show_on_site=False,
+    )
+    facts.sched.releases.append(lab)
+    rows = {r["id"]: r for r in student_status.release_rows(facts, _extra(facts))}
+    assert "lab_01" not in rows  # nothing landed yet
+    facts.dest_paths["materials"] |= {"labs/01_intro/nb.ipynb"}
+    rows = {r["id"]: r for r in student_status.release_rows(facts, _extra(facts))}
+    row = rows["lab_01"]
+    assert row["title"] == "Lab 1" and row["off_schedule"] is True
+    assert row["tabs"] == ["lab"]
+
+
 def test_a_row_lists_its_files_as_the_semester_site_does():
     # One listing rule (`site_repo.landed_links`): the tree's folders are not files, the
     # course's `site_link_extensions` narrows the list, and URLs carry the branch.
