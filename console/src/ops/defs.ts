@@ -126,6 +126,19 @@ export function releaseAgain(s: Scope, r: ReleaseRef, drift: { facts: string[]; 
   return def;
 }
 
+/**
+ * Remove: one released file the course has since deleted (`path` in the semester repo `repo`)
+ * out of entry `r`'s copy (`release.entry` `remove_paths`). Nothing is released: the entry's
+ * other files and the course's other changes stay as they are.
+ */
+export function removeReleased(s: Scope, r: ReleaseRef, repo: string, path: string): OpDef {
+  const def = releaseDef(s, r, {
+    name: 'Remove', where: `Released ${r.when}`, intro: `Removes ${path} from students’ copy, as the course deleted it. Nothing is released: the rest of ${r.ident} stays as it is.`,
+    verb: 'Remove the file', running: 'Removing the file', cancel: 'Stop before removing',
+  });
+  return { ...def, key: `${r.id}:remove:${repo}/${path}`, args: { entry: r.id, remove_paths: `${repo}/${path}` } };
+}
+
 export function releaseNow(s: Scope, r: ReleaseRef): OpDef {
   return releaseDef(s, r, {
     name: 'Release now', where: `Due ${r.when}`, intro: `${r.ident} is late: copies it to students now.`,

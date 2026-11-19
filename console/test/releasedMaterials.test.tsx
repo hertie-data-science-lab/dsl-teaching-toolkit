@@ -185,11 +185,11 @@ describe('Released materials', () => {
 
   it('counts a file only the semester copy has as ahead, added in the semester, and lists it with its Open menu', async () => {
     const st = (RELEASED as Extract<Loaded, { kind: 'ready' }>).status;
-    // slides.pdf as released, notes.md edited: in step but for the added files.
-    const f = stepFiles({ 'lectures/05_trees/notes.md': undefined }, ['lectures/05_trees/extra.md', 'lectures/05_trees/.DS_Store']);
+    // slides.pdf as released, notes.md edited, extra.md added in the semester.
+    const f = stepFiles({}, ['lectures/05_trees/extra.md', 'lectures/05_trees/.DS_Store']);
     const lec = outOfStep(st, f, COURSE_ORG, ORG, 'materials')[0];
     expect(lec.step).toBe('ahead');
-    expect(lec.files).toEqual([{ path: 'lectures/05_trees/notes.md', state: 'ahead', added: true }, { path: 'lectures/05_trees/extra.md', state: 'ahead', added: true }]);
+    expect(lec.files).toEqual([{ path: 'lectures/05_trees/notes.md', state: 'ahead', from: 'lectures/05_trees/notes.md' }, { path: 'lectures/05_trees/extra.md', state: 'ahead', added: true }]);
     // Course-changed plus semester-added: diverged.
     expect(outOfStep(st, stepFiles({}, ['labs/lab-1/mine.md']), COURSE_ORG, ORG, 'materials')[1].step).toBe('diverged');
     const el = await mount(<SemesterMaterialsScreen {...props({ files: f })} />);
@@ -298,15 +298,50 @@ describe('Released materials', () => {
     expect(rows[2].files).toEqual([{ path: HAND, state: 'removed', from: HAND }]);
   });
 
-  it('lists a hand-released file the course dropped, and one the semester added beside it, as only in the semester (R1b)', () => {
+  it('lists a hand-released file the course deleted as removed from the course, and one the semester added beside it as only in the semester (R1b)', () => {
     const st = (RELEASED as Extract<Loaded, { kind: 'ready' }>).status;
     const old = 'labs/12_tutorial-presentations/old.md', mine = 'labs/12_tutorial-presentations/mine.md';
     const rows = outOfStep(st, handFiles([old], [old, mine]), COURSE_ORG, ORG, 'materials');
-    expect(rows[2].files).toEqual([{ path: HAND, state: 'removed', from: HAND }, { path: old, state: 'ahead', added: true }, { path: mine, state: 'ahead', added: true }]);
+    expect(rows[2].files).toEqual([{ path: HAND, state: 'removed', from: HAND }, { path: old, state: 'deleted' }, { path: mine, state: 'ahead', added: true }]);
     // Gone on both sides: nothing to list.
     expect(outOfStep(st, handFiles([old]), COURSE_ORG, ORG, 'materials')[2].files.map((f) => f.path)).toEqual([HAND]);
-    // The course index chip counts them with the rest: notes.md edited, README.md removed, old.md and mine.md only in the semester.
-    expect(editedIn(handFiles([old], [old, mine]), COURSE_ORG, 'course-materials-f2026', ORG, RELEASED)).toBe(4);
+    // The course index chip counts the semester's changes: notes.md edited, README.md removed, mine.md only in the semester; not old.md, the course's deletion.
+    expect(editedIn(handFiles([old], [old, mine]), COURSE_ORG, 'course-materials-f2026', ORG, RELEASED)).toBe(3);
+  });
+
+  it('lists a released file the course deleted as removed from the course, behind, with Remove: that one file out, nothing released', async () => {
+    const st = (RELEASED as Extract<Loaded, { kind: 'ready' }>).status;
+    // lab.ipynb deleted from the course; students still have it.
+    const f = stepFiles({ 'labs/lab-1/lab.ipynb': undefined });
+    const lab = outOfStep(st, f, COURSE_ORG, ORG, 'materials')[1];
+    expect([lab.path, lab.step, lab.files]).toEqual(['labs/lab-1', 'behind', [{ path: 'labs/lab-1/new.md', state: 'not_released', from: 'labs/lab-1/new.md' }, { path: 'labs/lab-1/lab.ipynb', state: 'deleted' }]]);
+    const open = vi.fn();
+    root = document.createElement('div');
+    document.body.appendChild(root);
+    const env = { user: { login: 'prof', id: 1, name: 'P', email: null, avatar_url: '' }, client: new GitHubClient({ token: () => 't', fetch: new FakeGitHub().fetch }), ops: { open } } as unknown as Env;
+    const loaded = statusWith([rel('s5', 'lectures/05_trees'), rel('lab-1', 'labs/lab-1')]);
+    await act(() => render(<EnvCtx.Provider value={env}><SemesterMaterialsScreen {...props({ files: f, loaded })} /></EnvCtx.Provider>, root!));
+    const row = [...root.querySelectorAll<HTMLElement>('details.out-of-step li.dif-file')].find((li) => li.querySelector('.dif-name')!.textContent === 'lab.ipynb')!;
+    expect([row.querySelector('.chip')!.textContent, row.querySelector('.chip')!.classList.contains('amber')]).toEqual(['removed from the course', true]);
+    const btn = (label: string) => [...row.querySelectorAll<HTMLButtonElement>('.dif-right > button.btn')].find((b) => b.textContent === label);
+    expect(btn('Re-release')).toBeUndefined();
+    expect(btn('Overwrite')).toBeUndefined();
+    // A course-side change: nothing to carry back, nothing to diff; the semester's copy still opens.
+    expect(btn('PR into source')!.disabled).toBe(true);
+    expect([btn('Diff')!.disabled, btn('Diff')!.title]).toEqual([true, 'Deleted from the course: nothing to compare. Open it to see the semester’s copy.']);
+    expect(row.querySelector('.split')).not.toBeNull();
+    await act(() => btn('Remove')!.click());
+    const def = open.mock.calls[0][0];
+    // Exactly that file, by its semester path; no options, so nothing else rides along.
+    expect(def).toMatchObject({ op: 'release.entry', name: 'Remove', args: { entry: 'lab-1', remove_paths: 'materials/labs/lab-1/lab.ipynb' } });
+    expect(def.options).toBeUndefined();
+    expect(def.intro).toBe('Removes labs/lab-1/lab.ipynb from students’ copy, as the course deleted it. Nothing is released: the rest of Lecture 5 stays as it is.');
+    // Released by hand: no Remove, a note instead.
+    root.remove();
+    root = await mount(<SemesterMaterialsScreen {...props({ files: handFiles(['labs/12_tutorial-presentations/old.md'], ['labs/12_tutorial-presentations/old.md']) })} />);
+    const hand = [...root.querySelectorAll<HTMLElement>('details.out-of-step li.dif-file')].find((li) => li.querySelector('.dif-name')!.textContent === 'old.md')!;
+    expect(hand.querySelector('.dif-right .footnote')!.textContent).toBe('Released by hand: delete it in the semester repo.');
+    expect([...hand.querySelectorAll('.dif-right > button.btn')].map((b) => b.textContent)).not.toContain('Remove');
   });
 
   it('counts, for the course index chip, removed and semester-only files with the edited ones (R2)', () => {

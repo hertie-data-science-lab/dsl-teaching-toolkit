@@ -25,6 +25,8 @@ pair, one deploy_many call for the batch.
 
 `--entry KEY` releases one schedule.yml entry instead: every copy it lists, from every
 source repo it draws on, in ONE deploy_many call with one site sync.
+With `--remove <repo>/<path>` (repeatable) it releases nothing and only removes those
+files, ones the entry released and the course has since deleted (`remove_released`).
 
 A release is ONE copy at its time (decision 0043): `deploy_many` reports, per copy, what
 it copied and whether it landed, and the caller records each landed copy in the
@@ -97,6 +99,7 @@ from .schedule_plan import (
     outermost,
     refuse_unnumbered,
     unnumbered_release,
+    within,
 )
 from .selection import HARD, RELEASE, part_groups, release_ignore, release_use
 from .selection import deny as selection_deny
@@ -913,6 +916,148 @@ def deploy_many(
     return Batch(errors, changed, copies)
 
 
+def removals_of(
+    record: release_record.Record,
+    sched: schedule.Schedule,
+    entry: schedule.Release,
+    paths: Collection[str],
+) -> dict[release_record.Key, list[str]] | str:
+    """What `--remove` names, per copy of `entry` by its record key, relative to the copy;
+    or the refusal to say instead. Each path is `<dest repo>/<path in it>` and must be a
+    file the record lists for a folder copy of the entry (the deepest that holds it), not
+    under where another copy of the plan lands inside that one (`divergence.nested_in`).
+    Whether the course still has it is `remove_released`'s check, on the clone."""
+    landings = [
+        (d.semester_dest_repo, deploy_dest(d)) for r in sched.releases for d in r.deploy
+    ]
+    out: dict[release_record.Key, list[str]] = {}
+    for path in paths:
+        repo, _, at = path.strip("/").partition("/")
+        held = [
+            (k, rel)
+            for k in map(release_record.key_of, entry.deploy)
+            if k[2] == repo and (rel := within(k[3], at))
+        ]
+        if not held or ".." in at.split("/"):
+            return f"{path} is not in a folder {entry.label} releases."
+        k, rel = min(held, key=lambda x: len(x[1]))
+        if rel not in ((record.copies.get(k) or {}).get("files") or {}):
+            return f"{path} is not a file the release record lists for {entry.label}."
+        nested = divergence.nested_in((k[2], k[3]), landings)
+        if not divergence.outside({rel: ""}, nested):
+            return f"{path} belongs to another release that lands inside {entry.label}."
+        out.setdefault(k, []).append(rel)
+    return out
+
+
+def remove_released(
+    course_org: str,
+    semester_org: str,
+    deploys: list[Deploy],
+    removals: Mapping[release_record.Key, Collection[str]],
+) -> Batch:
+    """Remove exactly `removals` (`removals_of`) from their destinations and nothing else:
+    the console's Remove. Nothing is copied, so no other course change ships. Every path is
+    first checked against a fresh clone of its source: one the course still has refuses the
+    whole run before any dest is touched. Then, per dest, one commit on `UPSTREAM_BRANCH`
+    deleting the paths (the path itself, never a symlink's target), merged into the branch
+    students read as a release is (`_merge_and_push`: a semester edit to the file holds it
+    at a pull request). `copies` carries each copy's `removed`, its manifest empty."""
+    by_key = {release_record.key_of(d): d for d in deploys}
+    todo = {k: sorted(set(v)) for k, v in removals.items() if v and k in by_key}
+    if not todo:
+        return Batch(0, False, [])
+    errors = 0
+    changed = False
+    outcomes: dict[str, str] = {}
+    removed: dict[release_record.Key, list[str]] = {}
+    with tempfile.TemporaryDirectory() as work:
+        root = Path(work)
+        for src in sorted({k[0] for k in todo}):
+            sd = root / "src" / src
+            if not clone(course_org, src, sd):
+                log_err(f"could not clone source {course_org}/{src} - nothing removed")
+                return Batch(1, False, [])
+            for k in (k for k in todo if k[0] == src):
+                for rel in todo[k]:
+                    at = f"{k[1]}/{rel}".strip("/")
+                    if (sd / at).exists() or (sd / at).is_symlink():
+                        log_err(
+                            f"{src}/{at} is still in the course - nothing removed. "
+                            "Delete it there first, or release it again."
+                        )
+                        return Batch(1, False, [])
+        dests: dict[str, Dest] = {}
+        for repo in sorted({k[2] for k in todo}):
+            if repo_is_archived(semester_org, repo):
+                log(f"  [skip] {semester_org}/{repo} is archived")
+                continue
+            dest = _prepare_dest(semester_org, repo, root)
+            if dest is None:
+                errors += 1
+            else:
+                dests[repo] = dest
+        for k, rels in todo.items():
+            if k[2] not in dests:
+                continue
+            destp = _resolve_within(dests[k[2]].dir, k[3])
+            if destp is None:
+                continue
+            removed[k] = _remove_dropped(destp, {}, rels)
+            for rel in removed[k]:
+                log_ok(f"- {k[2]}/{k[3]}/{rel}".replace("//", "/"))
+        for repo in sorted(dests):
+            dd = dests[repo].dir
+            git("-C", str(dd), *GIT_ENV, "add", "-A")
+            committed = False
+            if git("-C", str(dd), "diff", "--cached", "--quiet")[0] != 0:
+                code, out = git(
+                    "-C",
+                    str(dd),
+                    *GIT_ENV,
+                    "commit",
+                    "-q",
+                    "--no-verify",
+                    "-m",
+                    f"release: remove files the course deleted from {repo}",
+                )
+                if code != 0:
+                    log_err(f"  {repo}: commit failed - {out[:200]}")
+                    errors += 1
+                    outcomes[repo] = FAILED
+                    continue
+                committed = True
+            merge_errors, outcomes[repo] = _merge_and_push(
+                semester_org, repo, dests[repo], set(dests), committed=committed
+            )
+            errors += merge_errors
+            changed = changed or outcomes[repo] == RELEASED
+    copies = [
+        Copied(by_key[k], "", {}, outcomes.get(k[2], FAILED), tuple(rels))
+        for k, rels in removed.items()
+    ]
+    return Batch(errors, changed, copies)
+
+
+def _record_removed(semester_org: str, copies: list[Copied]) -> int:
+    """Drop from the record what `remove_released` removed from a copy whose dest landed
+    it; the copy's other files, commit and ship times stay. Returns the error count."""
+    gone = [c for c in copies if c.removed and c.outcome in LANDED]
+    if not gone:
+        return 0
+    try:
+        record = release_record.load(semester_org)
+    except (RuntimeError, ValueError) as exc:
+        log_err(f"could not read {release_record.PATH} ({exc}) - not recorded")
+        return 1
+    for c in gone:
+        record.drop(c.deploy, c.removed)
+    if not record.save(semester_org):
+        log_err(f"could not write {release_record.PATH} - the removal is not recorded")
+        return 1
+    return 0
+
+
 def _sync_site(course_org: str, semester_org: str) -> int:
     """The website sync after a release, as an error count. site.sync_site RAISES on a
     genuine tree/team read failure - one semester's site-sync failure must be logged and
@@ -1088,6 +1233,15 @@ def main() -> int:
         "release record lists that the course copy no longer has",
     )
     parser.add_argument(
+        "--remove",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="With --entry, instead of releasing: remove only this file, "
+        "`<dest repo>/<path in it>`, which the entry released and the course has "
+        "since deleted (repeatable)",
+    )
+    parser.add_argument(
         "--replace",
         action="store_true",
         help="Take the course version of exactly the copied paths onto the branch "
@@ -1108,6 +1262,12 @@ def main() -> int:
         return 1
     if args.remove_deleted and not args.entry:
         log_err("--remove-deleted goes with --entry.")
+        return 1
+    if args.remove and not args.entry:
+        log_err("--remove goes with --entry.")
+        return 1
+    if args.remove and (args.remove_deleted or args.replace):
+        log_err("--remove removes only: not with --remove-deleted or --replace.")
         return 1
     if args.entry:
         entry = _entry_of(sched, args.entry)
@@ -1164,6 +1324,8 @@ def main() -> int:
     )
     route = f"from {from_words} -> {to_words}"
     what = plural(len(deploys), "item")
+    if args.remove:
+        return _remove_only(args, sched, entry, deploys)
     if args.preview:
         log_step(f"PREVIEW release {len(deploys)} path(s) {route}")
         # The cheap structural checks need no clone, so catch them here: a source path that
@@ -1258,6 +1420,55 @@ def main() -> int:
         f"{verb} {what} from {sources} {prep} {dests}{tail}.",
         {"items": len(deploys)},
     )
+
+
+def _remove_only(args, sched: schedule.Schedule, entry, deploys: list[Deploy]):
+    """`--remove`: exactly the named files out of `entry`'s copies, nothing released."""
+    log_step(f"Removing {plural(len(args.remove), 'file')} from {entry.label}")
+    try:
+        record = release_record.load(args.semester_org)
+    except (RuntimeError, ValueError) as exc:
+        log_err(f"could not read {release_record.PATH} ({exc}) - nothing removed")
+        return 1
+    removals = removals_of(record, sched, entry, args.remove)
+    if isinstance(removals, str):
+        log_err(removals)
+        return 1
+    n = sum(len(v) for v in removals.values())
+    if args.preview:
+        for k, rels in removals.items():
+            for rel in rels:
+                log(f"  PREVIEW  remove {k[2]}/{k[3]}/{rel}".replace("//", "/"))
+        return Summary(
+            f"Preview: {plural(n, 'file')} would be removed from {entry.label}.",
+            {"removed": n},
+        )
+    try:
+        errors, changed, copies = remove_released(
+            args.course_org, args.semester_org, deploys, removals
+        )
+    except RuntimeError as e:
+        log_err(str(e))
+        return 1
+    errors += _record_removed(args.semester_org, copies)
+    if changed:
+        errors += _sync_site(args.course_org, args.semester_org)
+    if errors:
+        return 1
+    n = sum(len(c.removed) for c in copies)
+    if any(c.outcome == HELD for c in copies):
+        return Summary(
+            f"The removal from {entry.label} waits in a pull request: the semester "
+            "edited what it removes.",
+            {"removed": n},
+        )
+    if not changed:
+        return Summary(
+            f"Nothing to remove from {entry.label}: students' copy no longer has it.",
+            {"removed": n},
+            conclusion="nothing_to_do",
+        )
+    return Summary(f"Removed {plural(n, 'file')} from {entry.label}.", {"removed": n})
 
 
 if __name__ == "__main__":

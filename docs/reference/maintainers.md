@@ -128,7 +128,12 @@ Things whose *literal spelling* is depended on from outside Python:
   (paths relative to the copy; `deploy --entry X --remove-deleted`, the console's
   `release.entry` `remove_deleted`) deletes, before the merge, only a path the copy's fresh
   manifest lacks - never one the course still releases, nor one under another plan copy's destination, and never a symlink's target - and the record drops it
-  (`Copied.removed`).
+  (`Copied.removed`). Remove-only (`deploy --entry X --remove <repo>/<path>`, repeatable; the
+  console's Remove, `release.entry` `remove_paths`) copies nothing: `removals_of` refuses a path
+  that is not a file the record lists for a folder copy of X or sits under a nested landing,
+  `remove_released` refuses the run if the course still has one, then deletes exactly those on
+  `upstream` and merges as a release does; the record drops them (`Record.drop`), its commit
+  and ship times kept. A copy released by hand off the plan is not in the record, so has no Remove.
 - **The engine's writes to `schedule.yml`** (faculty-owned; line surgery, never a re-dump, at
   the sha a fresh read gave). Two writers, both in `schedule.py`: `record_handout` fills a
   blank `handout_datetime` and moves one only to an EARLIER actual hand-out (once: a later
