@@ -1,5 +1,5 @@
 // The Files panel's chips (plan 2026-11-04, decision 3): where a course file stands against the
-// semester, in GitHub's fork words (and removed in semester: released, then deleted there), and the names a release leaves behind. Behind, ahead and
+// semester, in GitHub's fork words (and removed in semester or removed from the course: released, then deleted on that side), and the names a release leaves behind. Behind, ahead and
 // diverged are buttons with a popover (the `Hint` pattern): one sentence and one action, never a
 // Fix button. The words' meanings, for a panel's `?`, are `ChipMeanings`. Decision B splits the
 // institution's names in two: never released (no route ships one, its own chip) and the content
@@ -16,12 +16,16 @@ export const NEVER_RELEASED_TITLE = 'Never released: on the institution’s list
 /** The title on a removed-in-semester chip. */
 export const REMOVED_TITLE = 'Released before, then removed in the semester; a plain release changes nothing. Overwrite restores the course version.';
 
+/** The title on a removed-from-the-course chip (Released materials only). */
+export const DELETED_TITLE = 'Released before, then deleted from the course; students still have it.';
+
 const CHIPS: Record<ChipKind, { word: string; cls: string; title: string }> = {
   up_to_date: { word: STATE_WORDS.up_to_date, cls: 'muted', title: 'The semester has this version.' },
   behind: { word: STATE_WORDS.behind, cls: 'amber', title: 'The course copy changed since the release; a release updates the semester.' },
   ahead: { word: STATE_WORDS.ahead, cls: 'semester', title: 'Edited in the semester since the release; a release merges onto that edit.' },
   diverged: { word: STATE_WORDS.diverged, cls: 'bad', title: 'Changed in both the course and the semester; a release opens a pull request for the instructors.' },
   removed: { word: STATE_WORDS.removed, cls: 'semester', title: REMOVED_TITLE },
+  deleted: { word: STATE_WORDS.deleted, cls: 'amber', title: DELETED_TITLE },
   not_released: { word: STATE_WORDS.not_released, cls: '', title: 'Not in the semester yet; a release adds it.' },
   withheld: { word: 'withheld', cls: 'muted', title: 'A .releaseignore line, or the institution’s default, keeps it from students.' },
   never_copied: { word: 'never copied', cls: 'muted', title: 'Clutter such as .DS_Store: never course material.' },

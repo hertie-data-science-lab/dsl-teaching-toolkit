@@ -1184,3 +1184,53 @@ def test_the_console_ops_spell_replace(op, args):
 
     assert "--replace" not in argv()
     assert argv(replace=True)[-1] == "--replace"
+
+
+def test_the_console_spells_remove_paths_as_one_remove_flag_each():
+    argv = REGISTRY["release.entry"].argv(
+        Request(
+            "release.entry",
+            "prof",
+            "C",
+            "S",
+            {
+                "entry": "lab-08",
+                "remove_paths": "materials/labs/08/a.md, materials/labs/08/b.md",
+            },
+            False,
+        )
+    )
+    assert argv[-2:] == [
+        "--remove=materials/labs/08/a.md",
+        "--remove=materials/labs/08/b.md",
+    ]
+
+
+def test_remove_previews_and_refuses_before_anything_is_cloned(monkeypatch, capsys):
+    from types import SimpleNamespace
+
+    from dsl_course import release_record
+
+    d = Deploy("cm", "labs/08", "materials", None)
+    entry = SimpleNamespace(label="lab-08", deploy=[d])
+    sched = SimpleNamespace(
+        releases=[entry], assignments={}, materials_repo="materials"
+    )
+    record = release_record.Record({release_record.key_of(d): {"files": {"a.md": "s"}}})
+    monkeypatch.setattr(deploy.schedule, "load", lambda org: sched)
+    monkeypatch.setattr(deploy.release_record, "load", lambda org: record)
+    monkeypatch.setattr(deploy, "unnumbered_release", lambda *a: None)
+    monkeypatch.setattr(deploy, "remove_released", pytest.fail)
+    monkeypatch.setattr(deploy, "deploy_many", pytest.fail)
+    base = ["deploy", "--course-org", "C", "--semester-org", "S", "--entry", "lab-08"]
+
+    monkeypatch.setattr("sys.argv", [*base, "--remove", "materials/labs/08/a.md"])
+    out = deploy.main()
+    assert out.text == "Preview: 1 file would be removed from lab-08."
+    for extra, said in [
+        (["--remove", "materials/labs/08/b.md"], "not a file the release record lists"),
+        (["--remove", "materials/labs/08/a.md", "--replace"], "--remove removes only"),
+    ]:
+        monkeypatch.setattr("sys.argv", [*base, *extra, "--no-preview"])
+        assert deploy.main() == 1
+        assert said in capsys.readouterr().err
