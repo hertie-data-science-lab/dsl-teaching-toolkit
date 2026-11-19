@@ -653,3 +653,58 @@ def test_a_rename_succeeds_only_when_github_names_the_repo_anew(monkeypatch):
     assert not repos.rename_repo("Org", "grades-a", "grades-b")
     monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "gh: HTTP 422"))
     assert not repos.rename_repo("Org", "grades-a", "grades-b")
+
+
+def _creating(monkeypatch, mute: tuple[int, str] = (0, "")):
+    """Answer every write; the subscription PUT with `mute`. Returns the calls."""
+    calls: list[tuple[str, ...]] = []
+
+    def fake_gh(*args, **k):
+        calls.append(args)
+        return mute if any(a.endswith("/subscription") for a in args) else (0, "{}")
+
+    monkeypatch.setattr(repos, "gh", fake_gh)
+    monkeypatch.setattr(repos, "bot_login", lambda: ghcli.BOT_LOGIN)
+    return calls
+
+
+def _mutes(calls) -> list[str]:
+    return [a[3] for a in calls if a[3].endswith("/subscription")]
+
+
+def test_a_repo_the_bot_creates_is_muted_for_it(monkeypatch):
+    # The bot auto-watches every repo it creates, and its address is the maintainer's:
+    # every Join course ticket in `join` used to reach their inbox.
+    calls = _creating(monkeypatch)
+    assert repos.create_repo("Semester-f2026", "join") is True
+    assert _mutes(calls) == ["repos/Semester-f2026/join/subscription"]
+    put = calls[-1]
+    assert ("--method", "PUT") == put[1:3]
+    assert "ignored=true" in put and "subscribed=false" in put
+
+    calls.clear()
+    assert repos.generate_from_template("C", "tpl", "Semester-f2026", "a1-octo")
+    assert _mutes(calls) == ["repos/Semester-f2026/a1-octo/subscription"]
+
+
+def test_a_failed_mute_never_fails_the_create(monkeypatch, capsys):
+    calls = _creating(monkeypatch, mute=(1, "gh: HTTP 502"))
+    assert repos.create_repo("Semester-f2026", "join") is True
+    assert "[warn]" in capsys.readouterr().out
+    # A per-student repo's name stays out of the public log.
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
+    assert repos.create_repo("Semester-f2026", "grades-octo", person=True) is True
+    assert repos.generate_from_template(
+        "C", "tpl", "Semester-f2026", "a1-octo", person=True
+    )
+    out = capsys.readouterr().out
+    assert "[warn]" in out
+    assert "octo" not in out
+    assert len(_mutes(calls)) == 3
+
+
+def test_a_maintainers_token_never_mutes_the_maintainer(monkeypatch):
+    calls = _creating(monkeypatch)
+    monkeypatch.setattr(repos, "bot_login", lambda: "a-maintainer")
+    assert repos.create_repo("Semester-f2026", "join") is True
+    assert _mutes(calls) == []

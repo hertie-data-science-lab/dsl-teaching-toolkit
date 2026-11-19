@@ -11,8 +11,10 @@ from typing import NamedTuple
 from . import run
 from .ghcli import (
     ALL,
+    BOT_LOGIN,
     FILES,
     META,
+    bot_login,
     gh,
     is_already_exists,
     is_missing_resource,
@@ -617,11 +619,47 @@ def create_repo(
     code, out = gh(*args)
     if code == 0:
         (log_person if person else log_ok)(f"repo created: {org}/{name}")
+        mute_notifications(org, name, person=person)
         return True
     if is_already_exists(out):
         (log_person if person else log_skip)(f"repo {org}/{name}")
         return True
     log_err(f"failed to create repo {org}/{name}: {out[:200]}")
+    return False
+
+
+def mute_notifications(org: str, name: str, *, person: bool = False) -> bool:
+    """Set the token's own subscription to `org/name` to IGNORED: no notification of any
+    kind, participating ones included.
+
+    The token is the bot's, and GitHub mails its (maintainer-owned) address for every
+    issue in a repo it watches or a thread it has commented on or closed - every Join
+    course ticket, for one. The bot auto-watches each repo it creates, so a new repo is
+    muted here, right after its create; the nightly refresh brings an existing org's
+    infra repos round (`seed._mute_bot`). A failure is one warning line, never a failed create.
+
+    Only as the bot: a maintainer's own token would mute the maintainer."""
+    if bot_login().casefold() != BOT_LOGIN:
+        return False
+    code, out = gh(
+        "api",
+        "--method",
+        "PUT",
+        f"repos/{org}/{name}/subscription",
+        "--field",
+        "subscribed=false",
+        "--field",
+        "ignored=true",
+    )
+    if code == 0:
+        return True
+    if person:
+        log(f"  [warn] could not mute the bot's notifications on a repo in {org}")
+        log_person(f"  ! {org}/{name}: {out[:120]}")
+    else:
+        log(
+            f"  [warn] could not mute the bot's notifications on {org}/{name}: {out[:120]}"
+        )
     return False
 
 
@@ -994,6 +1032,7 @@ def generate_from_template(
         f"description={description}",
     )
     if code == 0:
+        mute_notifications(owner, name, person=person)
         return True
     if is_already_exists(out):
         (log_person if person else log_skip)(f"repo {owner}/{name}")

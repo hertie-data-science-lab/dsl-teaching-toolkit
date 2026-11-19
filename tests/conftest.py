@@ -30,10 +30,12 @@ from dsl_course import (
     log,
     pulls,
     release_record,
+    repos,
     roster,
     run,
     schedule,
     scheduler,
+    seed,
     settings,
 )
 
@@ -180,6 +182,15 @@ def _the_central_ref_is_present(monkeypatch):
     `identical` is what the SHA path reads off `compare/main...{sha}`; the branch path
     only looks at the exit code."""
     monkeypatch.setattr(central, "gh", lambda *a, **k: (0, "identical"))
+
+
+@pytest.fixture(autouse=True)
+def _the_token_is_not_the_bots(monkeypatch):
+    """Answer the bot-login check before a mute (`repos.mute_notifications`,
+    `seed._mute_bot`) with "not the bot", so nothing is muted by default. The tests about
+    the mute set their own after this fixture and win."""
+    monkeypatch.setattr(repos, "bot_login", lambda: "")
+    monkeypatch.setattr(seed, "bot_login", lambda: "")
 
 
 @pytest.fixture(autouse=True)

@@ -447,6 +447,19 @@ toolkit repo. Bootstrap (`--propagate-secret`) copies them onto a course org, ne
 semester; nothing else propagates them, so an older org gets them by re-running Bootstrap:
 [central-admin.md](../../docs-admin-arch/central-admin.md#email).
 
+## The bot's notifications
+
+The bot's GitHub address reaches the maintainer, and GitHub mails it for every issue in a repo
+it watches - it auto-watches each repo it creates - and every thread it has commented on or
+closed. So the bot is muted (`PUT repos/{o}/{r}/subscription`, `ignored: true`, which blocks
+participating notifications too; the classic PAT's `repo` scope covers it):
+`repos.create_repo` and `repos.generate_from_template` mute each new repo, and a failed mute
+only warns. The nightly refresh (`seed._mute_bot`) converges the infra repos (`.github`,
+`join`, `semester-config`) of the course org and every live semester: one GET each, a PUT only
+where the repo is not already ignored. Student repos are not swept (a read per student per
+night); one created before the mute existed still notifies. Both mute only when the token
+is `hertie-dsl-bot` (`ghcli.BOT_LOGIN`): a maintainer's own token would mute the maintainer.
+
 ## File ownership
 
 Seeded files carry their owner on the first line, and the write site enforces it:

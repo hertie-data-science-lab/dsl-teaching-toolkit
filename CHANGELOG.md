@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The bot no longer receives GitHub notifications (every Join course ticket mailed the
+  maintainer). Each repo the toolkit creates is muted for it (repository subscription set to
+  ignored), and the nightly Refresh actions mutes `.github`, `join` and `semester-config` in
+  every live org. Student repos created earlier are not swept.
 - **Released materials that differ from their source files** lists a released file the course
   has since deleted as **removed from the course** (edited in course), not "added in the
   semester", and offers **Remove**: that one file out of the semester's copy, nothing else
