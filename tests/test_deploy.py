@@ -972,6 +972,36 @@ def test_one_unusable_path_is_one_counted_error_and_the_rest_still_ship(monkeypa
     assert "bad/notes.md" not in snaps["materials"]
 
 
+def test_a_scheduled_copy_of_a_missing_source_is_a_warning_on_a_green_run(
+    monkeypatch, capsys
+):
+    # The scheduler's source digest already tells faculty (MISSING_PATH); counting it here
+    # too redded every 15-minute tick until the folder was written.
+    snaps = _stub_deploy_many(monkeypatch, _one_file)
+    errors, _changed, copies = deploy.deploy_many(
+        "COURSE",
+        "SEMESTER",
+        [_deploy("labs/12_lab"), _deploy("sec")],
+        sync=False,
+        missing_ok=True,
+    )
+    assert errors == 0
+    assert [c.deploy.course_source_path for c in copies] == ["sec"]
+    assert snaps["materials"]["sec/notes.md"] == "real\n"  # the rest still shipped
+    err = capsys.readouterr().err
+    assert "::warning::COURSE/materials/labs/12_lab was NOT released" in err
+    assert "[err]" not in err
+
+
+def test_a_hand_release_of_a_missing_source_is_still_an_error(monkeypatch, capsys):
+    _stub_deploy_many(monkeypatch, _one_file)
+    errors, _changed, copies = deploy.deploy_many(
+        "COURSE", "SEMESTER", [_deploy("labs/12_lab")], sync=False
+    )
+    assert (errors, copies) == (1, [])
+    assert "`labs/12_lab` not found in COURSE/materials" in capsys.readouterr().err
+
+
 def test_a_dest_that_cannot_reach_upstream_is_dropped_like_a_failed_clone(
     monkeypatch, capsys
 ):

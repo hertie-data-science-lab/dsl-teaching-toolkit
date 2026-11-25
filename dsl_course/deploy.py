@@ -152,6 +152,23 @@ def _warn_never_released(course_org: str, repo: str, path: str) -> None:
     )
 
 
+def _warn_missing_source(course_org: str, repo: str, path: str) -> None:
+    """Say that a scheduled copy's source path is not in its (cloned) source repo.
+
+    Faculty's fault, already delivered to faculty: the scheduler's source pre-flight files
+    it on the semester's schedule.yml digest and mails the same people
+    (`scheduler._preflight_sources`, `schedule.source_faults`' MISSING_PATH). Counting it
+    here as well redded every 15-minute tick until the folder was written, mailing a bot
+    account and the maintainer about a folder only faculty can write - the reason an
+    unparseable schedule.yml does not red the tick either (`scheduler.run`).
+    So it takes `_warn_withheld_stub`'s channel: a `::warning::` on a green run."""
+    log_withheld(
+        f"{course_org}/{repo}/{path} was NOT released - it is not in {repo}. "
+        "Everything else in this release shipped. Write it, or fix the entry's "
+        "from_path; the next tick releases it."
+    )
+
+
 def _resolve_within(base: Path, rel: str) -> Path | None:
     """Resolve `rel` under the clone `base`, or None if it escapes it.
 
@@ -644,6 +661,7 @@ def deploy_many(
     sync: bool = True,
     remove: Mapping[release_record.Key, Collection[str]] | None = None,
     replace: bool = False,
+    missing_ok: bool = False,
 ) -> Batch:
     """Apply a batch of Deploy copies, cloning each unique source and dest repo ONCE.
 
@@ -665,7 +683,11 @@ def deploy_many(
 
     `replace` (the hard overwrite): instead of merging the semester's edits to the copied
     paths with the release, take the released version of exactly those paths onto the
-    branch students read (`_replace_paths`); every other path is merged as usual."""
+    branch students read (`_replace_paths`); every other path is merged as usual.
+
+    `missing_ok` (the scheduler's): a source path absent from its cloned repo is a warning
+    and copies nothing, instead of a counted error (`_warn_missing_source`). A hand release
+    leaves it off - the press asked for that path, and its run is where faculty look."""
     deploys = [d for d in deploys if d]
     if not deploys:
         return Batch(0, False, [])
@@ -758,6 +780,11 @@ def deploy_many(
                 errors += 1
                 continue
             if not srcp.exists():
+                if missing_ok:
+                    _warn_missing_source(
+                        course_org, d.course_source_repo, d.course_source_path
+                    )
+                    continue
                 log_err(
                     f"`{d.course_source_path}` not found in "
                     f"{course_org}/{d.course_source_repo} - skipped."
