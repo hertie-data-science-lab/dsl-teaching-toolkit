@@ -389,8 +389,8 @@ def test_run_batches_all_deploys_through_deploy_many(monkeypatch):
     calls = []
     monkeypatch.setattr(
         "dsl_course.scheduler.deploy_many",
-        lambda course_org, semester_org, deploys, sync=True: (
-            calls.append((course_org, semester_org, list(deploys), sync))
+        lambda course_org, semester_org, deploys, sync=True, missing_ok=False: (
+            calls.append((course_org, semester_org, list(deploys), sync, missing_ok))
             or deploy.Batch(0, True, [])
         ),
     )
@@ -425,8 +425,10 @@ def test_run_batches_all_deploys_through_deploy_many(monkeypatch):
     assert scheduler.run("Course-Org", "Semester-Org", now) == 0
     # exactly ONE deploy_many call, carrying all 3 deploys across both releases, sync=False
     assert len(calls) == 1
-    course_org, semester_org, deploys, sync = calls[0]
+    course_org, semester_org, deploys, sync, missing_ok = calls[0]
     assert (course_org, semester_org, sync) == ("Course-Org", "Semester-Org", False)
+    # a source faculty have not written is the digest's to report, not this tick's to red
+    assert missing_ok is True
     assert len(deploys) == 3
     # the scheduler syncs the site exactly once, itself (deploy_many was told not to)
     assert synced == [("Course-Org", "Semester-Org")]

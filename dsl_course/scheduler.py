@@ -816,8 +816,14 @@ def _release_copies(
     if ship:
         entry = {release_record.key_of(d): r.label for r, d in ship}
         try:
+            # A source path faculty have not written yet is theirs, reported through the
+            # digest (`_preflight_sources`): a warning here, never a red tick.
             errors, changed, copies = deploy_many(
-                course_org, semester_org, [d for _r, d in ship], sync=False
+                course_org,
+                semester_org,
+                [d for _r, d in ship],
+                sync=False,
+                missing_ok=True,
             )
         except RuntimeError as exc:
             log_err(f"the release stopped ({exc})")

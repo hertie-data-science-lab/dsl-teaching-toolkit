@@ -82,7 +82,7 @@ def _shipping(monkeypatch, outcome=RELEASED, files=FILES):
     """deploy_many as seen from the scheduler: every copy applied, its dest `outcome`."""
     calls: list[list[Deploy]] = []
 
-    def fake(course_org, semester_org, deploys, sync=True, remove=None, replace=False):
+    def fake(course_org, semester_org, deploys, sync=True, missing_ok=False):
         calls.append(list(deploys))
         copies = [Copied(d, "c1", files, outcome) for d in deploys]
         return Batch(0, outcome == RELEASED, copies)
